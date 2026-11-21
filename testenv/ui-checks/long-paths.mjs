@@ -79,6 +79,8 @@ const SCREENS = [
   { id: "pr-open-in", route: "pr/mock%3Apayout-service%23142", press: "Open in…" },
   { id: "settings-checkouts", route: "settings/checkouts" },
   { id: "settings-remove-worktree", route: "settings/checkouts", press: "Remove…" },
+  // Settings › Appearance › Code colours (2026-11-21): the slots, the role list and the preview held to their boxes.
+  { id: "settings-code-colours", route: "settings/appearance/code-colours" },
   { id: "job", route: "job/PAY-231" },
   { id: "toast-cloned", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800 },
   { id: "toast-cloned-open", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800, toast: "Open in VS Code" },

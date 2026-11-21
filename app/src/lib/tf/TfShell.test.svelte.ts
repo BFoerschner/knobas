@@ -1151,6 +1151,16 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
   // A section of Settings has no parent: the place above it would be a sibling.
   expect(escHint()).toBeNull();
+  // A child of a section is a section of Settings too (the subtrees ruling, 2026-11-21): its crumbs name its parent,
+  // and Esc leaves Settings as from any section.
+  await reached("#/settings/appearance/code-colours");
+  crumbs = seen(".tf-crumbs")[0]!;
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Code colours");
+  expect([...crumbs.querySelectorAll("a.tf-crumb")].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Settings", "#/settings"],
+    ["Appearance", "#/settings/appearance"],
+  ]);
+  expect(escHint()).toBeNull();
 });
 
 test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {

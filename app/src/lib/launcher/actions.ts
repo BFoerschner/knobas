@@ -8,7 +8,7 @@
  * second is a list of addresses: every place the shell has one for (#1417).
  */
 import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
-import { SETTINGS_SECTIONS, type SettingsSection, settingsHash } from "../tf/settings/settings";
+import { SETTINGS_SECTIONS, type SettingsSection, settingsHash, settingsName, settingsParent } from "../tf/settings/settings";
 import { docsChoices } from "../tf/docs/docs-choices.svelte";
 
 /** One row of the `>` palette. */
@@ -49,6 +49,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
   appearance: "Theme, zoom and state colours",
+  "code-colours": "Themes for code and diffs, while light and while dark",
   fonts: "Each face the app draws in, and its size",
   performance: "How many pages stay open in the background",
   renderers: "Your own commands that draw files and Markdown fences",
@@ -84,7 +85,8 @@ export function navigationActions(): LauncherAction[] {
     })),
     ...SETTINGS_SECTIONS.map(([section, name]) => ({
       id: `settings-${section}`,
-      label: `${SECTION_NAME.settings} › ${name}`,
+      // A child carries its path: *Settings › Appearance › Fonts* (the subtrees ruling, 2026-11-21).
+      label: [SECTION_NAME.settings, ...(settingsParent(section) === null ? [] : [settingsName(settingsParent(section)!)]), name].join(" › "),
       detail: SETTINGS_DETAIL[section],
       hash: settingsHash(section),
     })),

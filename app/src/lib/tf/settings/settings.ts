@@ -29,31 +29,79 @@ export type SettingsSection =
   | "notes"
   | "backup"
   | "appearance"
+  | "code-colours"
   | "fonts"
   | "performance"
   | "renderers"
   | "keyboard"
   | "logs";
 
-/** The left-hand navigation, top to bottom, with prototype-6's names. */
-export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = [
-  ["sources", "Sources"],
-  ["checkouts", "Checkouts and Open in"],
-  ["time", "Time"],
-  ["notifications", "Desktop notifications"],
-  ["standup", "Standup"],
-  ["monitoring", "Monitoring"],
-  ["docs", "Docs"],
-  ["search", "Search"],
-  ["notes", "Notes and capture"],
-  ["backup", "Backup and export"],
-  ["appearance", "Appearance"],
-  ["fonts", "Fonts"],
-  ["performance", "Performance"],
-  ["renderers", "Renderers"],
-  ["keyboard", "Keyboard"],
-  ["logs", "Logs and database"],
+/** A row of the navigation: a section, and the sections under it. */
+export interface SettingsNode {
+  key: SettingsSection;
+  name: string;
+  children?: readonly SettingsNode[];
+}
+
+/**
+ * The left-hand navigation, top to bottom, with prototype-6's names, as a tree fixed in code (the subtrees ruling,
+ * 2026-11-21, `docs/decisions/2026-11-21-settings-has-subtrees.md`). A row is a section, and a parent is a section with a
+ * page of its own. What a person makes (a source, an application, a folder renderer, a theme) is never a row: its page
+ * lights its section's row and the crumbs carry its name. Child keys are unique across the tree.
+ */
+export const SETTINGS_TREE: readonly SettingsNode[] = [
+  { key: "sources", name: "Sources" },
+  { key: "checkouts", name: "Checkouts and Open in" },
+  { key: "time", name: "Time" },
+  { key: "notifications", name: "Desktop notifications" },
+  { key: "standup", name: "Standup" },
+  { key: "monitoring", name: "Monitoring" },
+  { key: "docs", name: "Docs" },
+  { key: "search", name: "Search" },
+  { key: "notes", name: "Notes and capture" },
+  { key: "backup", name: "Backup and export" },
+  {
+    key: "appearance",
+    name: "Appearance",
+    children: [
+      // Later: the app-wide theme page (Björn, 2026-11-21: "full on editor themes is something i'll want to add later"),
+      // the first child, key `theme`, at `#/settings/appearance/theme`. No row until it is built.
+      { key: "code-colours", name: "Code colours" },
+      { key: "fonts", name: "Fonts" },
+    ],
+  },
+  { key: "performance", name: "Performance" },
+  { key: "renderers", name: "Renderers" },
+  { key: "keyboard", name: "Keyboard" },
+  { key: "logs", name: "Logs and database" },
 ];
+
+/** Every section in the navigation's order, a parent before its children, with its name. */
+export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = SETTINGS_TREE.flatMap((node) => [
+  [node.key, node.name] as const,
+  ...(node.children ?? []).map((child) => [child.key, child.name] as const),
+]);
+
+/** The section a section sits under, or `null` for one at the top. */
+export function settingsParent(section: SettingsSection): SettingsSection | null {
+  return SETTINGS_TREE.find((node) => node.children?.some((child) => child.key === section))?.key ?? null;
+}
+
+/** A section's name. */
+export function settingsName(section: SettingsSection): string {
+  return SETTINGS_SECTIONS.find(([key]) => key === section)?.[1] ?? "Sources";
+}
+
+/** The child of `parent` that `key` names, or `null`. */
+function childOf(parent: string, key: string | undefined): SettingsSection | null {
+  return SETTINGS_TREE.find((node) => node.key === parent)?.children?.find((child) => child.key === key)?.key ?? null;
+}
+
+/** A section at the top of the tree that `key` names, or `null`. Fonts' address from before it had a parent still lands. */
+function topOf(key: string | undefined): SettingsSection | null {
+  if (key === "fonts") return "fonts";
+  return SETTINGS_TREE.find((node) => node.key === key)?.key ?? null;
+}
 
 /** Where in Settings the reader is: a section, or one source's page. */
 export type SettingsPlace =
@@ -80,8 +128,9 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   // The status bar's *Re-enter password*: the page with its prompt already open.
   if (head === "source" && arg && verb === "reenter") return { section: "sources", source: arg, reenter: true };
   if (head === "source" && arg) return { section: "sources", source: arg };
-  const known = SETTINGS_SECTIONS.find(([key]) => key === head);
-  return { section: known ? known[0] : "sources" };
+  const child = head === undefined ? null : childOf(head, arg);
+  if (child !== null) return { section: child };
+  return { section: topOf(head) ?? "sources" };
 }
 
 /** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
@@ -91,12 +140,17 @@ export function settingsKnows(rest: readonly string[]): boolean {
   if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
   // A folder renderer's page (ADR-0044); anything else under Renderers names nothing.
   if (head === "renderers" && rest.length > 1) return folderPagePlace(rest) !== null;
-  return head === undefined || (head === "source" && !!arg) || SETTINGS_SECTIONS.some(([key]) => key === head);
+  if (head === undefined) return true;
+  if (head === "source") return !!arg;
+  // A child's page (the subtrees ruling, 2026-11-21); anything else under a section names nothing.
+  if (rest.length > 1) return rest.length === 2 && childOf(head, arg) !== null;
+  return topOf(head) !== null;
 }
 
-/** The address of a section of Settings. */
+/** The address of a section of Settings: a child's under its parent's (`#/settings/appearance/fonts`). */
 export function settingsHash(section: SettingsSection): string {
-  return `#/settings/${section}`;
+  const parent = settingsParent(section);
+  return parent === null ? `#/settings/${section}` : `#/settings/${parent}/${section}`;
 }
 
 /** The address of a source's page; with `add`, the page with that value added to a list field (#879). */

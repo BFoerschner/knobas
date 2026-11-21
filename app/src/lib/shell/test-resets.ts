@@ -55,6 +55,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/fonts.svelte.ts#fonts": async () => (await import("../tf/fonts.svelte")).fonts.reset(),
   // The two slots' themes, a person's own, and how a diff's unchanged lines draw (ADR-0051), stored in `localStorage`
   // and written on <html>: each test starts on the knobas pair with nothing kept.
+  // Settings' folded parents (the subtrees ruling, 2026-11-21), stored in `localStorage`: each test starts with all open.
+  "tf/settings/settings-folds.svelte.ts#settingsFolds": async () => (await import("../tf/settings/settings-folds.svelte")).settingsFolds.reset(),
   "tf/syntax-theme.svelte.ts#syntaxThemes": async () => (await import("../tf/syntax-theme.svelte")).syntaxThemes.reset(),
   "tf/settings/TfFontRole.svelte#asked": async () => (await import("../tf/settings/TfFontRole.svelte")).forgetInstalledFonts(),
   // The menus standing (the stuck menu, ux27, 2026-11-21): a menu leaves as it is torn down; one a test left drawn is

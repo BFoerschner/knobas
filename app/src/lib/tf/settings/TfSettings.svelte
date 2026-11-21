@@ -36,13 +36,15 @@
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
   import { sourceDrafts } from "./source-drafts.svelte";
-  import { SETTINGS_SECTIONS, settingsHash, settingsKnows, settingsPlace, sourceState } from "./settings";
+  import { settingsHash, settingsKnows, settingsName, settingsParent, settingsPlace, sourceState } from "./settings";
   import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfFontsSection from "./TfFontsSection.svelte";
+  import TfThemesSection from "./TfThemesSection.svelte";
+  import TfSettingsNav from "./TfSettingsNav.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
   import { appPagePlace } from "../openin/app-page";
@@ -219,7 +221,9 @@
     (sources ?? []).some((source) => sourceState(source, health.get(source.id), null).failed),
   );
   const current = $derived(sourceId === null ? null : (sources?.find((row) => row.id === sourceId) ?? null));
-  const sectionName = $derived(SETTINGS_SECTIONS.find(([key]) => key === place.section)?.[1] ?? "Sources");
+  const sectionName = $derived(settingsName(place.section));
+  /** The section a child's page sits under: its crumb links to the parent's page. */
+  const parentSection = $derived(known && sourceId === null ? settingsParent(place.section) : null);
   /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
   const bareSettings = $derived(rest.length === 0);
   const crumbName = $derived(!known ? "Nothing here" : sourceId === null ? sectionName : (current?.display_name ?? sourceId));
@@ -245,7 +249,7 @@
       ...(appName !== null && known
         ? [{ name: sectionName, href: settingsHash("checkouts") }, { name: appName }]
         : sourceId === null
-          ? [{ name: crumbName }]
+          ? [...(parentSection === null ? [] : [{ name: settingsName(parentSection), href: settingsHash(parentSection) }]), { name: crumbName }]
           : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }]),
     ]}
     {back}
@@ -253,25 +257,16 @@
   <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
   <div class="tf-stg" class:tf-rail-shut={!railOpen} {@attach sideWidth("settings")}>
     <TfSideEdge side="settings" />
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <nav
-      id="tf-settings-rail"
-      class="tf-stg-nav tf-rail"
-      aria-label="Settings"
-      onclick={(event) => {
-        if ((event.target as Element).closest("a[href]")) railOpen = false;
-      }}
-    >
-      {#each SETTINGS_SECTIONS as [key, label] (key)}
-        <a href={settingsHash(key)} aria-current={known && key === place.section ? "page" : undefined}>
-          {label}
+    <nav id="tf-settings-rail" class="tf-stg-nav tf-rail" aria-label="Settings">
+      <TfSettingsNav current={known ? place.section : null} onpage={() => (railOpen = false)}>
+        {#snippet badge(key)}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
           {:else if key === "sources" && anyDraft}
             <span class="tf-dot tf-warn" role="img" aria-label="A source has changes not saved" title="A source has changes not saved"></span>
           {/if}
-        </a>
-      {/each}
+        {/snippet}
+      </TfSettingsNav>
     </nav>
     <TfScroller class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
@@ -303,6 +298,8 @@
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
+      {:else if place.section === "code-colours"}
+        <TfThemesSection mode={theme} />
       {:else if place.section === "fonts"}
         <TfFontsSection {...sectionPorts.installedFonts ? { installedFonts: sectionPorts.installedFonts } : {}} />
       {:else if place.section === "performance"}

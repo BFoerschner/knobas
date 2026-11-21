@@ -5,10 +5,19 @@
  * The stop follows focus while the tree has it. Once focus has left, it is the open page's row, so coming back lands
  * where the reader is reading, else the row last walked to, else the first. It is read off what is drawn, because a
  * fold can close under it by mouse and rows come and go with a read.
+ *
+ * Settings' nav is a tree of the same shape since 2026-11-21 (`TfSettingsNav.svelte`): {@link treeKeysOf} takes its
+ * rows' selector. The open page's row is the one whose `aria-current` is `true` (Docs) or `page` (Settings).
  */
 
 /** A leaf's link, and a folder's title. */
 const ROWS = "a.tf-dl-leaf, summary > a.tf-sl";
+
+/** Whether `row` is the open page's. */
+const isCurrent = (row: HTMLElement) => {
+  const current = row.getAttribute("aria-current");
+  return current === "true" || current === "page";
+};
 
 /** The fold a folder's row opens, or `null` for a leaf. */
 function foldOf(row: HTMLElement): HTMLDetailsElement | null {
@@ -23,8 +32,8 @@ function holderOf(row: HTMLElement, root: HTMLElement): HTMLDetailsElement | nul
 }
 
 /** Every row a reader can see: those whose folds up to `root` are all open, in the order drawn. */
-function shownRows(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(ROWS)].filter((row) => {
+function shownRows(root: HTMLElement, rowsOf: string): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(rowsOf)].filter((row) => {
     for (let fold = holderOf(row, root); fold !== null; fold = holderOf(fold.querySelector<HTMLElement>(":scope > summary > a") ?? fold, root)) {
       if (!fold.open) return false;
     }
@@ -34,14 +43,23 @@ function shownRows(root: HTMLElement): HTMLElement[] {
 
 /** Attach to the element around the top of the tree. */
 export function treeKeys(root: HTMLElement): () => void {
+  return treeKeysOf(ROWS)(root);
+}
+
+/** {@link treeKeys} for a tree whose rows `rowsOf` selects: a leaf's link, and a folder's title as `summary > a`. */
+export function treeKeysOf(rowsOf: string): (root: HTMLElement) => () => void {
+  return (root) => keysOn(root, rowsOf);
+}
+
+function keysOn(root: HTMLElement, selector: string): () => void {
   let stop: HTMLElement | null = null;
 
   function sync(): void {
-    const rows = shownRows(root);
+    const rows = shownRows(root, selector);
     const focused = rows.find((row) => row === document.activeElement);
-    const current = rows.find((row) => row.getAttribute("aria-current") === "true");
+    const current = rows.find(isCurrent);
     stop = focused ?? current ?? (stop !== null && rows.includes(stop) ? stop : (rows[0] ?? null));
-    for (const row of root.querySelectorAll<HTMLElement>(ROWS)) {
+    for (const row of root.querySelectorAll<HTMLElement>(selector)) {
       row.tabIndex = row === stop ? 0 : -1;
       const fold = foldOf(row);
       if (fold !== null) row.setAttribute("aria-expanded", String(fold.open));
@@ -51,9 +69,9 @@ export function treeKeys(root: HTMLElement): () => void {
 
   function onkeydown(event: KeyboardEvent): void {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !(event.target instanceof Element)) return;
-    const row = event.target.closest<HTMLElement>("summary")?.querySelector<HTMLElement>(":scope > a") ?? event.target.closest<HTMLElement>(ROWS);
+    const row = event.target.closest<HTMLElement>("summary")?.querySelector<HTMLElement>(":scope > a") ?? event.target.closest<HTMLElement>(selector);
     if (!row) return;
-    const rows = shownRows(root);
+    const rows = shownRows(root, selector);
     const at = rows.indexOf(row);
     if (at < 0) return;
     const fold = foldOf(row);

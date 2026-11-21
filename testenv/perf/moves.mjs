@@ -171,6 +171,8 @@ const PLACES = [
   { name: "asset-depends-links-late", fixture: true, scroll: `${shown} .pane`, late: "get_asset:0,depends_on_this:250", start: "#/asset/asset%3Awsl-docker", press: `${shown} ol.col button.row[data-asset="asset:knobas-teamcity"]`, hash: ["#/asset/asset%3Aknobas-teamcity", "#/asset/asset:knobas-teamcity"], ready: `${shown} .pane h2[title$="/ knobas-teamcity"]`, away: "#/asset/asset%3Awsl-docker" },
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
+  // Appearance's children (the subtrees ruling, 2026-11-21), pressed in the nav's tree.
+  ...["code-colours", "fonts"].map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/appearance/${s}"]`, hash: `#/settings/appearance/${s}`, away: "#/settings" })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },
   { name: "app-edit", start: "#/settings/checkouts", press: `${shown} .tf-stg-apps a`, text: "Edit", hash: "#/settings/checkouts/app/", away: "Escape" },
   // From the list rather than Open in…, so it opens on every corpus: on the saved scale database no repository is cloned,

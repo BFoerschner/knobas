@@ -166,6 +166,8 @@
 //                 by real pointer on `fold`'s title: the first click must open a page and the fold, the next two on the open page close and open it,
 //                 two on its chevron close and open it with no page. Fails if a press moves a row at or above the pressed one, if the fold is ever drawn
 //                 open with none of its pages for a frame, or if Enter on `keyFold`'s row opens its fold (the keys stay as they were).
+//                 Settings' nav is a tree of the same rule (2026-11-21): `rail`, `folds`, `rowsOf`, `under` and `chevronX` name its parts,
+//                 Docs' by default.
 //
 //   frame-scroll  2026-11-17 (Björn: "When I have an application render an html for code folders I can't scroll it even though it's longer than the page").
 //                 A renderer's long page in its sandboxed `frame` (a folder renderer's under `fake-folder-render=page <words>`, the *Cat* file renderer's
@@ -497,6 +499,12 @@ const PAGES = [
     { id: "folder-try-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Try it" } },
     { id: "folder-add-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" }, leaves: true },
     { id: "folder-add-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", once: true, prep: FOLDER_TYPED, press: { sel: ".tf-apppage button", text: "Add folder renderer" } },
+  ] },
+  // Settings' nav is a tree (2026-11-21): Appearance's row opens its page and its fold, a second click toggles, the chevron folds alone.
+  // Folded first by its chevron, since every fold starts open.
+  { page: "Settings, the nav's tree", route: "settings/time", trips: [
+    { id: "settings-tree-click", kind: "tree-click", strict: true, finding: "2026-11-21", size: [1440, 900], fold: "Appearance", rail: ".tf-stg-nav", folds: "details.tf-stg-fold", rowsOf: ".tf-stg-tree > a, .tf-stg-fold > summary, .tf-stg-fold > a", under: ":scope > a.tf-stg-child", chevronX: 5,
+      prep: [{ wait: 300 }, { eval: "document.querySelector('.tf-stg-fold > summary').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })), 1" }, { wait: 200 }] },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
@@ -2656,28 +2664,31 @@ async function startBrowser() {
   async function treeClick(t) {
     const reasons = [];
     const notes = [];
-    const RAIL = ".tf-kept:not([hidden]) .tf-rd-tree";
-    const fold = (words) => `[...document.querySelectorAll(${JSON.stringify(`${RAIL} .tf-dl-body details`)})].find((d) => d.querySelector(":scope > summary > a")?.textContent.trim() === ${JSON.stringify(words)})`;
+    const RAIL = t.rail ?? ".tf-kept:not([hidden]) .tf-rd-tree";
+    const FOLDS = t.folds ?? ".tf-dl-body details";
+    const ROWS_OF = t.rowsOf ?? ".tf-dl-body summary, .tf-dl-body a";
+    const UNDER = t.under ?? ":scope > .tf-fold-in a";
+    const fold = (words) => `[...document.querySelectorAll(${JSON.stringify(`${RAIL} ${FOLDS}`)})].find((d) => d.querySelector(":scope > summary > a")?.textContent.trim() === ${JSON.stringify(words)})`;
     // Every row of the rail shown, with where it stands, and the fold's own state.
     const read = async (words) => JSON.parse(await evaluate(`JSON.stringify((() => {
       const rail = document.querySelector(${JSON.stringify(RAIL)});
-      const rows = [...rail.querySelectorAll(".tf-dl-body summary, .tf-dl-body a")].filter((e) => e.getClientRects().length && !(e.tagName === "A" && e.parentElement.tagName === "SUMMARY"));
+      const rows = [...rail.querySelectorAll(${JSON.stringify(ROWS_OF)})].filter((e) => e.getClientRects().length && !(e.tagName === "A" && e.parentElement.tagName === "SUMMARY"));
       const d = ${fold(words)};
       const at = rows.indexOf(d.querySelector(":scope > summary"));
-      return { at, open: d.open, under: [...d.querySelectorAll(":scope > .tf-fold-in a")].filter((e) => e.getClientRects().length).length, rows: rows.map((e) => [e.textContent.trim().replace(/\\s+/g, " ").slice(0, 60), Math.round(e.getBoundingClientRect().top)]) };
+      return { at, open: d.open, under: [...d.querySelectorAll(${JSON.stringify(UNDER)})].filter((e) => e.getClientRects().length).length, rows: rows.map((e) => [e.textContent.trim().replace(/\\s+/g, " ").slice(0, 60), Math.round(e.getBoundingClientRect().top)]) };
     })())`));
     // Each frame from the press on: whether the fold is open, and how many of its rows show. Open with none is a frame drawn before its rows.
     const watch = (words) => evaluate(`(() => {
       const frames = (window.__tcFrames = []);
       const d = ${fold(words)};
       const end = performance.now() + 900;
-      const tick = () => { frames.push([d.open, [...d.querySelectorAll(":scope > .tf-fold-in a")].filter((e) => e.getClientRects().length).length]); if (performance.now() < end) requestAnimationFrame(tick); };
+      const tick = () => { frames.push([d.open, [...d.querySelectorAll(${JSON.stringify(UNDER)})].filter((e) => e.getClientRects().length).length]); if (performance.now() < end) requestAnimationFrame(tick); };
       requestAnimationFrame(tick);
       return true;
     })()`);
     const empty = async () => JSON.parse(await evaluate(`JSON.stringify(window.__tcFrames.filter(([open, n]) => open && n === 0).length)`));
     const titleAt = async (words) => JSON.parse(await evaluate(`(() => { const a = ${fold(words)}.querySelector(":scope > summary > a"); a.scrollIntoView({ block: "nearest" }); const r = a.getBoundingClientRect(); return JSON.stringify({ x: r.left + Math.min(r.width / 2, 40), y: r.top + r.height / 2 }); })()`));
-    const chevronAt = async (words) => JSON.parse(await evaluate(`(() => { const s = ${fold(words)}.querySelector(":scope > summary"); const r = s.getBoundingClientRect(); return JSON.stringify({ x: r.left + 10, y: r.top + r.height / 2 }); })()`));
+    const chevronAt = async (words) => JSON.parse(await evaluate(`(() => { const s = ${fold(words)}.querySelector(":scope > summary"); const r = s.getBoundingClientRect(); return JSON.stringify({ x: r.left + ${t.chevronX ?? 10}, y: r.top + r.height / 2 }); })()`));
     // Nothing above the pressed row, nor the row itself, moves: the fold opens below it.
     const still = (what, before, after) => {
       const upTo = before.rows.slice(0, before.at + 1);

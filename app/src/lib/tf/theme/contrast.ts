@@ -159,3 +159,17 @@ export function lowSentence(ratio: number, on: string): string {
   const where = on === "sheet" ? "the sheet" : on === "sheet-2" ? "a Docs code block" : on === "paper" ? "the paper" : `an ${on}`.replace("an removed", "a removed");
   return `${ratio.toFixed(1)}:1 on ${where}. Text needs 4.5:1.`;
 }
+
+/** knobas's own diff colours a side, what a theme that sets none draws (`tokens.css`'s `--ok-bg`, `--err-bg`, `--add-word`, `--del-word`). */
+export const DIFF_DEFAULT: Record<ThemeKind, { added: string; removed: string; addedWord: string; removedWord: string }> = {
+  light: { added: "#DDEFE4", removed: "#F7DEDD", addedWord: "#B4DEC3", removedWord: "#EFB9B6" },
+  dark: { added: "#1B3427", removed: "#3F1F1F", addedWord: "#2C6243", removedWord: "#6E3333" },
+};
+
+/** `role`'s colour in `theme`, fixed to 4.5:1 where it falls under, or `null` where it passes already. */
+export function fixedRole(kind: ThemeKind, role: Role, value: string | undefined, tints: { added?: string; removed?: string } = {}): string | null {
+  const now = value ?? INK[kind];
+  const surfaces = surfacesFor(kind, role, tints);
+  if (worst(now, surfaces).ratio >= TEXT_RATIO) return null;
+  return fix(now, surfaces, kind);
+}

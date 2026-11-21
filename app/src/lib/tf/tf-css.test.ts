@@ -734,3 +734,69 @@ test("a scroller that keeps its bar's gutter keeps its painted clip unpositioned
     expect(clips(scroller).some((rule) => /(^|;)\s*position:\s*static\s*(;|$)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
   }
 });
+
+/** A selector list split at its top-level commas, not those inside `:not(…)`. */
+function topLevel(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i] === "(") depth += 1;
+    else if (list[i] === ")") depth -= 1;
+    else if (list[i] === "," && depth === 0) {
+      out.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(list.slice(start));
+  return out;
+}
+
+/** Every rule of the sheet whose selector names `data-diff-unchanged`, as selector and body. */
+function quietRules(): { selector: string; body: string }[] {
+  const flat = code.replace(/@supports[^{]*\{([\s\S]*?\})\s*\}/g, "");
+  return [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectors]) => selectors!.includes("data-diff-unchanged"))
+    .flatMap(([, selectors, body]) => topLevel(selectors!).map((s) => ({ selector: s.trim(), body: body!.trim() })))
+    .filter(({ selector }) => selector !== "");
+}
+
+test("a diff's unchanged lines draw quiet, grey or in full; changed lines and word marks never change (ADR-0051)", () => {
+  const rules = quietRules();
+  expect(rules.length).toBeGreaterThan(0);
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML =
+    '<div class="tf-diff"><div class="tf-ln" id="ctx"><span class="tf-hl-kw" id="ctx-kw">if</span></div>' +
+    '<div class="tf-ln tf-add" id="add"><span class="tf-hl-kw" id="add-kw">if</span><span class="tf-wd"><span class="tf-hl-str" id="wd">x</span></span></div>' +
+    '<div class="tf-ln tf-del" id="del"><span class="tf-hl-kw" id="del-kw">if</span></div></div>';
+  const colourOf = (mode: string, id: string) => {
+    doc.documentElement.setAttribute("data-diff-unchanged", mode);
+    const el = doc.getElementById(id)!;
+    const hit = rules.filter(({ selector }) => el.matches(selector));
+    return hit.length === 0 ? "own" : /color:\s*([^;]+)/.exec(hit.at(-1)!.body)![1]!.trim();
+  };
+  expect(colourOf("quiet", "ctx-kw")).toBe("color-mix(in oklab, var(--hl) 40%, var(--ink-2))");
+  expect(colourOf("grey", "ctx-kw")).toBe("var(--ink-2)");
+  expect(colourOf("full", "ctx-kw")).toBe("own");
+  expect(colourOf("quiet", "ctx")).toBe("var(--ink-2)");
+  for (const mode of ["full", "quiet", "grey"])
+    for (const id of ["add", "add-kw", "del", "del-kw", "wd"]) expect(colourOf(mode, id), `${mode} ${id}`).toBe("own");
+  // The tints are the diff's own tokens, which a theme may set.
+  expect(block(code, ".tf-diff .tf-add")).toMatch(/background:\s*var\(--diff-add\)/);
+  expect(block(code, ".tf-diff .tf-del")).toMatch(/background:\s*var\(--diff-del\)/);
+});
+
+test("the preview's side classes re-declare the other side's surface and ink tokens as tokens.css writes them (ADR-0051)", () => {
+  const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
+  const decls = (body: string) => Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+  const light = decls(block(code, ":root"));
+  const dark = decls(block(media, ':root:not([data-theme="light"])'));
+  for (const [cls, side] of [[".tf-as-light", light], [".tf-as-dark", dark]] as const) {
+    const own = decls(block(code, cls));
+    for (const [name, value] of Object.entries(own)) {
+      if (name === "--diff-add" || name === "--diff-del" || name === "--add-word" || name === "--del-word") continue;
+      expect(value, `${cls} ${name}`).toBe(side[name]);
+    }
+    expect(Object.keys(own)).toEqual(expect.arrayContaining(["--paper", "--sheet", "--sheet-2", "--ink", "--ink-2", "--ok-bg", "--err-bg", "--diff-add", "--diff-del"]));
+  }
+});

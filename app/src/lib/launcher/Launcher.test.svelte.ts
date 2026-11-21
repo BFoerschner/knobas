@@ -2297,7 +2297,7 @@ test("> with nothing after it lists every section, then Settings and its section
   await settle();
   await search(">");
   const labels = paletteLabels();
-  expect(labels).toHaveLength(26);
+  expect(labels).toHaveLength(27);
   expect(labels.slice(0, 10)).toEqual([
     "Tickets",
     "Inbox",
@@ -2575,7 +2575,7 @@ test("a place's name is offered above the answer, on part of a word (F-603)", as
   expect(onnavigate).toHaveBeenCalledWith("#/settings");
 });
 
-test("a place stays on top of a search that found things, and a hit is one ↓ away (F-603)", async () => {
+test("a place stays on top of a search that found things, and a hit is right below the places (F-603)", async () => {
   const onnavigate = vi.fn();
   const words = "code";
   open({
@@ -2591,7 +2591,10 @@ test("a place stays on top of a search that found things, and a hit is one ↓ a
   await settle();
   await search(words);
   expect(optionNames()[0]).toBe("Code");
+  // *Code colours* is a place named `code` too, a child of Appearance since 2026-11-21.
+  expect(optionNames()[1]).toBe("Settings › Appearance › Code colours");
   expect(onRow()).toBe("Code");
+  press("ArrowDown");
   press("ArrowDown");
   await settle();
   press("Enter");

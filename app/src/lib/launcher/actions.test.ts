@@ -32,7 +32,8 @@ test("the palette lists every section the shell has an address for, in the top b
     "Settings › Notes and capture",
     "Settings › Backup and export",
     "Settings › Appearance",
-    "Settings › Fonts",
+    "Settings › Appearance › Code colours",
+    "Settings › Appearance › Fonts",
     "Settings › Performance",
     "Settings › Renderers",
     "Settings › Keyboard",
@@ -75,7 +76,8 @@ test("every row's address parses back to the section it names", () => {
     ["Settings › Notes and capture", "settings/notes"],
     ["Settings › Backup and export", "settings/backup"],
     ["Settings › Appearance", "settings/appearance"],
-    ["Settings › Fonts", "settings/fonts"],
+    ["Settings › Appearance › Code colours", "settings/code-colours"],
+    ["Settings › Appearance › Fonts", "settings/fonts"],
     ["Settings › Performance", "settings/performance"],
     ["Settings › Renderers", "settings/renderers"],
     ["Settings › Keyboard", "settings/keyboard"],
@@ -141,7 +143,10 @@ test("a place matches at the start of a word of its name, and a settings section
 
 test("where nothing else answered, what a place holds counts too, after the names", () => {
   expect(names("theme")).toEqual([]);
-  expect(names("theme", true)).toEqual(["Settings › Appearance"]);
+  expect(names("theme", true)).toEqual(["Settings › Appearance", "Settings › Appearance › Code colours"]);
+  // A child of a section is found by its own name (the subtrees ruling, 2026-11-21).
+  expect(names("fon")).toEqual(["Settings › Appearance › Fonts"]);
+  expect(names("code col")).toEqual(["Settings › Appearance › Code colours"]);
 });
 
 test("the Docs row opens where Docs opens: Docs' home when one is chosen (PR #2479, 2026-11-17)", async () => {

@@ -92,6 +92,10 @@ export function previewValues(theme: Theme): Record<string, string> {
   const out: Record<string, string> = {};
   for (const role of ROLES) out[`--hl-${role}`] = theme.syntax[role] ?? "var(--ink)";
   out["--hl-com-style"] = theme.italicComments === false ? "normal" : "italic";
+  for (const [key, property] of Object.entries(DIFF_PROPERTY) as [DiffKey, string][]) {
+    const value = theme.diff?.[key];
+    if (value) out[property] = value;
+  }
   return out;
 }
 

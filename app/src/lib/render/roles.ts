@@ -21,7 +21,7 @@ export type Shape = (typeof SHAPES)[number];
 /** A token's role or shape as the port carries it; `""` is plain ink. */
 export type TokenRole = Role | Shape | "";
 
-/** The names a person reads (Settings › Themes). */
+/** The names a person reads (Settings › Appearance › Code colours). */
 export const ROLE_NAMES: Record<Role, string> = {
   com: "Comment",
   kw: "Keyword",

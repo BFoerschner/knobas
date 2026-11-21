@@ -691,7 +691,7 @@ function sectionPorts() {
 }
 
 /** Settings opened on one of #831's sections, every read late. */
-function sectionCase(name: string, section: string): Case {
+function sectionCase(name: string, section: string | string[], exercise?: (target: HTMLElement) => void): Case {
   return {
     name,
     source: `lib/tf/settings/${name}.svelte`,
@@ -699,7 +699,7 @@ function sectionCase(name: string, section: string): Case {
       app: mount(TfSettings, {
         target,
         props: {
-          rest: [section],
+          rest: Array.isArray(section) ? section : [section],
           job: null,
           ready: true,
           ports: settingsPorts(),
@@ -717,7 +717,15 @@ function sectionCase(name: string, section: string): Case {
         },
       }),
     }),
+    ...(exercise ? { exercise } : {}),
   };
+}
+
+/** Settings › Appearance › Code colours with a copy of the theme drawn now in the editor (ADR-0051). */
+function ownThemeShown(target: HTMLElement): void {
+  flushSync();
+  [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Duplicate and edit")?.click();
+  flushSync();
 }
 
 function sourcePageProps() {
@@ -2694,6 +2702,18 @@ const CASES: Case[] = [
   sectionCase("TfStateColours", "appearance"),
   // Settings › Fonts (2026-11-18; Appearance's Code font from 2026-11-16): the installed fonts' read lands late.
   sectionCase("TfFontRole", "fonts"),
+  // Code colours' editor (ADR-0051): a rename's field is a panel on the layers until it ends.
+  sectionCase("TfThemeEditor", ["appearance", "code-colours"], (target) => {
+    ownThemeShown(target);
+    [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Rename…")?.click();
+    flushSync();
+  }),
+  // A swatch's panel: a panel on the layers and a press listener on the window while it is open.
+  sectionCase("TfThemeSwatch", ["appearance", "code-colours"], (target) => {
+    ownThemeShown(target);
+    target.querySelector<HTMLButtonElement>("button.tf-thm-sw")?.click();
+    flushSync();
+  }),
   {
     /** An opening's chip (ux21): the window's press listeners go with it; a chip shown and answered. */
     name: "TfAck",

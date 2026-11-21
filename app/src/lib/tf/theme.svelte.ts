@@ -1,6 +1,6 @@
 /**
  * The new shell's colour theme (R-1.7, R-13a.8): one setting, which the top
- * bar's toggle and Settings › Themes both write (#831).
+ * bar's toggle and Settings › Appearance both write (#831).
  *
  * `system` follows the OS through `prefers-color-scheme`; `light` and `dark`
  * override it. Kept since 2026-11-21 (ADR-0051, amending R-1.7's "for the
@@ -17,7 +17,7 @@ export const MODE_KEY = "knobas.theme.mode";
 
 export interface Theme {
   readonly choice: ThemeChoice;
-  /** Settings › Themes: pick one. */
+  /** Settings › Appearance: pick one. */
   set(choice: ThemeChoice): void;
   /**
    * The top bar's toggle: the opposite of what is drawn now, which under

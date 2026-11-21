@@ -9,6 +9,24 @@
 .tf-stg-nav a:hover { background: var(--sheet-2); }
 .tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--sheet); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
+/* The nav's subtrees (2026-11-21, `TfSettingsNav.svelte`): a parent is a fold whose title is its page's link. Its chevron
+   sits in the row's own left padding and the title where a leaf's stands, so no title moves; a child is indented. */
+.tf-stg-tree { display: contents; }
+.tf-stg-fold { display: flex; flex-direction: column; gap: 1px; }
+.tf-stg-fold > summary { list-style: none; position: relative; display: flex; padding-left: 10px; border-radius: 4px; cursor: pointer; }
+.tf-stg-fold > summary::-webkit-details-marker { display: none; }
+.tf-stg-fold > summary::before {
+  content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; border-right: 1.5px solid var(--ink-2); border-bottom: 1.5px solid var(--ink-2);
+  transform: translateY(-50%) rotate(-45deg);
+}
+.tf-stg-fold[open] > summary::before { transform: translateY(-75%) rotate(45deg); }
+.tf-stg-nav .tf-stg-fold > summary > a { flex: 1; min-width: 0; padding-left: 0; border-radius: 0 4px 4px 0; }
+.tf-stg-fold > summary:hover { background: var(--sheet-2); }
+.tf-stg-fold > summary:has(> a[aria-current="page"]) { background: var(--fill); }
+.tf-stg-fold > summary:has(> a[aria-current="page"])::before { border-color: var(--sheet); }
+.tf-stg-nav a.tf-stg-child { padding-left: 24px; }
+/* A closed fold holding the open page: the open row's fill as an edge, as Docs' tree marks it. */
+.tf-stg-fold > summary.tf-holds { box-shadow: inset 2px 0 0 var(--fill); }
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
@@ -348,3 +366,72 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-meter rect { fill: var(--ink-2); }
 .tf-stg-status { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink); }
 .tf-stg-status small { display: block; margin-top: 2px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+
+/* ---------- Settings › Appearance › Code colours (ADR-0051): `TfThemesSection.svelte` and its editor ---------- */
+.tf-stg-body:has(> .tf-thm-top) { max-width: 1120px; }
+.tf-stg-h.tf-thm-top { display: flex; align-items: start; gap: 16px; }
+.tf-stg-h.tf-thm-top > div:first-child { flex: 1; }
+.tf-thm-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+.tf-thm-slot { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+.tf-thm-slot.tf-cur { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.tf-thm-slot h3 { --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); grid-column: 1 / -1; margin: 0; }
+.tf-thm-sel { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); min-width: 0; width: 100%; }
+.tf-thm-chips { display: flex; gap: 3px; grid-column: 1 / -1; margin-top: 4px; }
+.tf-thm-chips i { width: 18px; height: 6px; border-radius: 2px; }
+.tf-thm-ed { margin-top: 18px; display: grid; grid-template-columns: 446px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-thm-edh { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); }
+.tf-thm-edh h2 { --fs: var(--size-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); margin: 0; }
+.tf-thm-edh .tf-thm-name { width: 260px; height: var(--control-h-sm); }
+.tf-thm-edh .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
+.tf-thm-roles { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink); }
+.tf-thm-grp { display: flex; justify-content: space-between; padding: 7px 12px 5px; --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); }
+.tf-thm-grp:first-child { border-radius: 6px 6px 0 0; }
+.tf-thm-grp small { font-weight: 400; }
+.tf-thm-role { display: grid; grid-template-columns: 22px 148px minmax(0, 1fr) 62px 46px; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-thm-role:last-child { border-bottom: 0; }
+.tf-thm-sw { display: block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--rule); padding: 0; background: var(--sheet); }
+button.tf-thm-sw { cursor: pointer; }
+.tf-thm-sw.tf-ink { background: linear-gradient(135deg, var(--ink) 0 50%, var(--sheet) 50% 100%); }
+.tf-thm-role code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+.tf-thm-cr { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-thm-role.tf-low { background: var(--warn-bg); padding-top: 5px; padding-bottom: 6px; row-gap: 3px; }
+.tf-thm-role.tf-low .tf-thm-cr { color: var(--warn); font-weight: 600; }
+.tf-thm-why { grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; color: var(--warn); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-thm-why .tf-btn { margin-left: auto; color: var(--ink); }
+/* A swatch's panel: under the swatch, over the rows below it. */
+.tf-thm-swp { position: relative; display: block; }
+.tf-thm-pop { position: absolute; top: calc(100% + 6px); left: -6px; z-index: 5; width: 236px; display: grid; gap: 8px; padding: 10px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--shadow); color: var(--ink); }
+.tf-thm-popf { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
+.tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+/* The preview stays in view while the role list scrolls. */
+.tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; }
+.tf-thm-pre { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
+.tf-thm-preh { display: flex; align-items: center; gap: 10px; }
+.tf-thm-preh .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); margin-left: auto; text-align: right; }
+.tf-thm-pre .tf-fileview > header { min-height: 34px; }
+.tf-thm-pre .tf-code, .tf-thm-pre .tf-diff .tf-dbody { overflow: hidden; }
+.tf-thm-pre .tf-diff .tf-fh { position: static; }
+.tf-thm-stat { font-weight: 400; }
+.tf-thm-doc { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 18px; }
+.tf-thm-doc p { margin: 0 0 10px; }
+.tf-thm-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-thm-italic { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+/* A theme of the side the window does not draw is shown on that side's surfaces: the tokens of `tokens.css`'s other
+   block, re-declared (`tf-css.test.ts` holds them equal), as `job.css` re-declares the light tones on the yellow card. */
+.tf-as-light {
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663; --fill: var(--ink); --rule: #CBD2D9;
+  --rule-2: #DDE2E7; --focus: #2F55D4; --mark: #F6E08F; --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC; --add-word: #B4DEC3; --del-word: #EFB9B6;
+  --diff-add: var(--ok-bg); --diff-del: var(--err-bg);
+  color-scheme: light;
+}
+.tf-as-dark {
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE; --rule: #323C47;
+  --rule-2: #28313A; --focus: #8AA6FF; --mark: #5C4E17; --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37; --add-word: #2C6243; --del-word: #6E3333;
+  --diff-add: var(--ok-bg); --diff-del: var(--err-bg);
+  color-scheme: dark;
+}

@@ -12,6 +12,10 @@ import {
   reenterWords,
   roleMissLines,
   runRow,
+  SETTINGS_SECTIONS,
+  settingsHash,
+  settingsKnows,
+  settingsParent,
   settingsPlace,
   sourceLine,
   sourceState,
@@ -50,6 +54,9 @@ test("a source's page lights Sources; an unknown section is Sources, as in the p
   expect(settingsPlace(["source", "jira"])).toEqual({ section: "sources", source: "jira" });
   expect(settingsPlace(["standup"])).toEqual({ section: "standup" });
   expect(settingsPlace(["nonsense"])).toEqual({ section: "sources" });
+  // A child's page sits under its parent's address (the subtrees ruling, 2026-11-21).
+  expect(settingsPlace(["appearance", "code-colours"])).toEqual({ section: "code-colours" });
+  expect(settingsPlace(["appearance", "fonts"])).toEqual({ section: "fonts" });
   // *Sync WEB too* on a Jira view (#879): the page with a value added to a list field.
   expect(settingsPlace(["source", "jira", "add", "projects", "WEB"])).toEqual({
     section: "sources",
@@ -262,4 +269,29 @@ test("the Backfill line says it forgets where the last sync stopped, and when to
   expect(BACKFILL_HINT).toBe(
     "Reads everything again and forgets where the last sync stopped: after a knobas update reads more fields, or when a sync stopped and names Backfill. Takes a few minutes; the app stays usable.",
   );
+});
+
+test("a child's page sits under its parent's address, Fonts' old address still lands, and nothing else nests (2026-11-21)", () => {
+  expect(settingsHash("code-colours")).toBe("#/settings/appearance/code-colours");
+  expect(settingsHash("fonts")).toBe("#/settings/appearance/fonts");
+  expect(settingsHash("appearance")).toBe("#/settings/appearance");
+  expect(settingsHash("sources")).toBe("#/settings/sources");
+  expect(settingsKnows(["appearance", "code-colours"])).toBe(true);
+  expect(settingsKnows(["appearance", "fonts"])).toBe(true);
+  // Fonts' address from before it had a parent is the same place, drawn in place.
+  expect(settingsKnows(["fonts"])).toBe(true);
+  expect(settingsPlace(["fonts"])).toEqual({ section: "fonts" });
+  // The page was planned as *Themes* and never shipped there: unknown.
+  expect(settingsKnows(["themes"])).toBe(false);
+  expect(settingsKnows(["code-colours"])).toBe(false);
+  expect(settingsKnows(["appearance", "theme"])).toBe(false);
+  expect(settingsKnows(["appearance", "nonsense"])).toBe(false);
+  expect(settingsKnows(["appearance", "fonts", "more"])).toBe(false);
+  expect(settingsKnows(["time", "fonts"])).toBe(false);
+  expect(settingsParent("fonts")).toBe("appearance");
+  expect(settingsParent("appearance")).toBeNull();
+  // The tree's order: a parent, then its children.
+  const keys = SETTINGS_SECTIONS.map(([key]) => key);
+  expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 3)).toEqual(["appearance", "code-colours", "fonts"]);
+  expect(new Set(keys).size).toBe(keys.length);
 });

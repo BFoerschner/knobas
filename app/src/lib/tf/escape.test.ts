@@ -144,6 +144,9 @@ test("a marked monitor with no opener goes to Monitors, with one to what opened 
 test("the window is named for the page, by what the page calls itself (F-015)", () => {
   expect(windowTitle(parseTfHash("#/code"), null)).toBe("Code · knobas");
   expect(windowTitle(parseTfHash("#/settings/appearance"), "Appearance")).toBe("Appearance · knobas");
+  // A child of a section is named by its own crumb (the subtrees ruling, 2026-11-21).
+  expect(windowTitle(parseTfHash("#/settings/appearance/code-colours"), "Code colours")).toBe("Code colours · knobas");
+  expect(windowTitle(parseTfHash("#/settings/appearance/fonts"), "Fonts")).toBe("Fonts · knobas");
   expect(windowTitle(parseTfHash("#/ticket/jira%3APAY-231"), "PAY-231")).toBe("PAY-231 · knobas");
 });
 

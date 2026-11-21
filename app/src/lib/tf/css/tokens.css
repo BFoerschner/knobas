@@ -46,7 +46,10 @@
   --hl-var: var(--hl-var-light, var(--ink)); --hl-op: var(--hl-op-light, var(--ink)); --hl-punct: var(--hl-punct-light, var(--ink)); --hl-head: var(--hl-head-light, #7A3EB1);
   --hl-link: var(--hl-link-light, var(--info));
   --hl-com-style: var(--hl-com-style-light, italic);
-  --add-word: #B4DEC3; --del-word: #EFB9B6;
+  /* A diff's colours (ADR-0051): its added and removed lines' tints and its changed words' marks, which a theme may set
+     (`--diff-add-light` and its siblings), else the state tones' tints. */
+  --diff-add: var(--diff-add-light, var(--ok-bg)); --diff-del: var(--diff-del-light, var(--err-bg));
+  --add-word: var(--add-word-light, #B4DEC3); --del-word: var(--del-word-light, #EFB9B6);
   /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
   --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
   /* A form's one label column (`.tf-formgrid`). A dialog of long names widens it with this token. */
@@ -70,7 +73,8 @@
     --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
     --hl-link: var(--hl-link-dark, var(--info));
     --hl-com-style: var(--hl-com-style-dark, italic);
-    --add-word: #2C6243; --del-word: #6E3333;
+    --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
+    --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
     color-scheme: dark;
   }
 }
@@ -90,7 +94,8 @@
   --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
   --hl-link: var(--hl-link-dark, var(--info));
   --hl-com-style: var(--hl-com-style-dark, italic);
-  --add-word: #2C6243; --del-word: #6E3333;
+  --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
+  --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
   color-scheme: dark;
 }
 

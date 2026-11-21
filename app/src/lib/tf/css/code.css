@@ -280,8 +280,19 @@
 /* Half a row has no room to scroll in, and cutting a line hides code, so a long line wraps. */
 .tf-diff.tf-split .tf-ln { grid-template-columns: calc(46px * var(--size-code)) minmax(0, 1fr) auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-diff .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
-.tf-diff .tf-add { background: var(--ok-bg); }
-.tf-diff .tf-del { background: var(--err-bg); }
+.tf-diff .tf-add { background: var(--diff-add); }
+.tf-diff .tf-del { background: var(--diff-del); }
+/* A diff's unchanged lines go quiet (ADR-0051, Settings › Appearance › Code colours' *Unchanged lines in a diff*,
+   `data-diff-unchanged` on <html>): their tokens keep 40 % of their colour mixed into the secondary ink (*Quiet*, the
+   start) or none (*Grey*), so the changed lines carry the colour. A mix of two colours that pass 4.5:1 passes. Changed
+   lines and word marks are as they were. Where `color-mix` is missing a quiet token is the secondary ink. */
+html[data-diff-unchanged="quiet"] .tf-diff .tf-ln:not(.tf-add, .tf-del),
+html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) { color: var(--ink-2); }
+html[data-diff-unchanged="quiet"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="tf-hl-"] { color: color-mix(in oklab, var(--hl) 40%, var(--ink-2)); }
+html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="tf-hl-"] { color: var(--ink-2); }
+@supports not (color: color-mix(in oklab, red, blue)) {
+  html[data-diff-unchanged="quiet"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="tf-hl-"] { color: var(--ink-2); }
+}
 .tf-diff .tf-hunk { display: flex; align-items: center; gap: 8px; background: var(--info-bg); color: var(--info); font-size: calc(var(--t-xs) * var(--fs)); line-height: 26px; padding-left: 12px; white-space: pre; }
 /* Expand context (#2267): small buttons in the gap's row, as the mockup draws them. */
 .tf-diff .tf-exp {
@@ -422,10 +433,10 @@
    nothing by 60 % of the column, the caption's pair. The bar and the tint's start are outer shadows in the side's
    padding, drawn outside the block's box, so marking a block moves none of its text. */
 .tf-rside-old .tf-md > .tf-rchg {
-  background-image: linear-gradient(90deg, var(--err-bg), transparent 60%); box-shadow: -9px 0 0 var(--err-bg), -12px 0 0 var(--err);
+  background-image: linear-gradient(90deg, var(--diff-del), transparent 60%); box-shadow: -9px 0 0 var(--diff-del), -12px 0 0 var(--err);
 }
 .tf-rside-new .tf-md > .tf-rchg {
-  background-image: linear-gradient(90deg, var(--ok-bg), transparent 60%); box-shadow: -9px 0 0 var(--ok-bg), -12px 0 0 var(--ok);
+  background-image: linear-gradient(90deg, var(--diff-add), transparent 60%); box-shadow: -9px 0 0 var(--diff-add), -12px 0 0 var(--ok);
 }
 .tf-rside-img { box-sizing: border-box; height: calc(var(--tf-rstage) - 1px); padding: 14px; display: grid; place-items: center; }
 .tf-rstage-open .tf-rside-img { height: auto; }
@@ -508,8 +519,8 @@
 .tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; background: var(--under); --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: calc(40px * var(--size-code)) calc(40px * var(--size-code)) 1fr; white-space: pre; overflow: visible; }
 .tf-was-hunk .tf-no, .tf-pdfd-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
-.tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--ok-bg); }
-.tf-was-hunk .tf-del, .tf-pdfd-hunk .tf-del { background: var(--err-bg); }
+.tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--diff-add); }
+.tf-was-hunk .tf-del, .tf-pdfd-hunk .tf-del { background: var(--diff-del); }
 .tf-diff.tf-split .tf-thread.tf-on-new, .tf-diff.tf-split .tf-newc.tf-on-new { margin-left: calc(50% + 56px); }
 /* A thread's footer, its reply and resolve (#2277; mockups/code-area .thr footer), and a resolved thread as one line. */
 .tf-thr-f, .tf-thr-h { display: flex; align-items: center; gap: var(--control-gap); margin: 6px -10px -6px; padding: 6px 8px; border-top: 1px solid var(--rule-2); background: var(--sheet-2); }
