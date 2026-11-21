@@ -16,6 +16,11 @@
 // --check  exit 1 when any place has a mover over `--px`
 //
 // A place with `tabs` is followed by each of its tabs (the shown page's `.tf-tabs` links), opened by their press.
+//
+// The highlighter-switch places (`hl-`, the themes follow-up, 2026-11-21): each code area opened, the highlighter changed on
+// Settings › Appearance › Code colours by its radio (`before`, and another one in `beforeReturn`), and the area opened again
+// by its address: its lines (`track`) must hold their boxes while the new engine's colours land. `hl-preview-` presses a radio
+// with the preview in view (`once`: a second press of the same radio changes nothing, so there is no return).
 import { writeFileSync, readFileSync } from "node:fs";
 import { attach, failedLine, isStalled, launch, runCase, sizeFrom, unlessStalled, viewport, sleep } from "./cdp.mjs";
 
@@ -78,6 +83,34 @@ const RUN_ANSWER = { in: `${shown} .tf-ftree`, changes: `${shown} .tf-ftree a[da
  * its row and band in the rail held to their boxes; `changes` says the answer drew.
  */
 const FOLDER_ANSWER = (changes) => ({ in: `${shown} .tf-dgrid`, changes, hold: '.tf-dfolder[data-folder="docs"] .tf-dfbar, .tf-dgdir[data-folder="docs"], .tf-dgband[data-folder="docs"]' });
+
+/** Settings › Appearance › Code colours' radio for an engine, pressed by its words. */
+const CODE_COLOURS = "#/settings/appearance/code-colours";
+const RADIO = (name) => ({ press: `${shown} .tf-thm-eng label`, text: name, starts: true });
+const ENGINE = { pierre: "Pierre Highlights", tanstack: "TanStack Highlight", shiki: "Shiki" };
+/** What a code area's reader holds: a file's lines, a diff's lines, rows and hunks, a Docs block. */
+const CODE_LINES = ".tf-l, .tf-ln, .tf-srow, .tf-hunk, .tf-pre pre, .tf-doc pre";
+/**
+ * A code area at `at` after a change of highlighter: opened, then Code colours, Shiki chosen (the slowest, its colours
+ * following the text furthest), then the area again by its address; the return chooses TanStack Highlight the same way.
+ */
+const SWITCHED = (name, at, more = {}) => ({
+  name: `hl-${name}`, fixture: true, start: at, before: [{ go: CODE_COLOURS }, RADIO(ENGINE.shiki)], beforeReturn: [RADIO(ENGINE.tanstack)],
+  go: at, hash: at, away: CODE_COLOURS, track: CODE_LINES, ...more,
+});
+const COMMIT = `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`;
+const HL_PLACES = [
+  SWITCHED("file", `#/repo/${REPO}/files/src/payout/retry/RetryQueue.java`),
+  ...["full", "quiet", "grey"].map((mode) => SWITCHED(`diff-${mode}`, COMMIT, { store: { "knobas.diff.unchanged": mode } })),
+  SWITCHED("diff-split", COMMIT, { store: { "knobas.diff.layout": "split" } }),
+  SWITCHED("pr", "#/pr/mock%3Apayout-service%23142/diff"),
+  SWITCHED("compare", `#/repo/${REPO}/compare/~working-tree`),
+  SWITCHED("docs-code", "#/page/confluence%3Asepa"),
+  ...["tanstack", "shiki", "pierre"].map((engine) => ({
+    name: `hl-preview-${engine}`, fixture: true, once: true, start: CODE_COLOURS, ...(engine === "pierre" ? { store: { "knobas.highlighter": "shiki" } } : {}),
+    ...RADIO(ENGINE[engine]), hash: null, ready: `${shown} input[name=tf-thm-engine][value=${engine}]:checked`, track: CODE_LINES, away: "#/settings",
+  })),
+];
 
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
@@ -200,6 +233,7 @@ const PLACES = [
   { name: "site-asks", fixture: true, fake: "fake-site-dirty", start: "#/site/confluence", setup: `${shown} .tf-veil .tf-primary`, setupOnce: true, press: `${shown} .tf-sitebar button[aria-label^="Close"]`, hash: null, ready: ".tf-sitebar.tf-asks", away: "Escape" },
   { name: "site-veiled", fixture: true, start: "#/site/confluence", setup: `${shown} .tf-veil .tf-primary`, setupOnce: true, key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
 ];
+PLACES.push(...HL_PLACES);
 const picked = (p) => !(p.fixture && real) && (!only || only.some((w) => p.name === w || p.name.startsWith(w))) && !skip.some((w) => p.name === w || p.name.startsWith(w));
 
 /** Every source ends a run that changed something (`open.mjs`'s `SYNCED`); on the fixture, the corpus grows first. */
@@ -305,6 +339,14 @@ async function leave(p) {
   else if (away.startsWith("#/")) { await js(`location.hash = ${JSON.stringify(away)}, 1`); await quiet(1200); }
   else { await press(await find(away === "settings" ? GEAR : nav(away))); await quiet(1200); }
 }
+/** `before` / `beforeReturn`: addresses (`go`) and presses (`press`, `text`, `starts`) made, unrecorded, before a round. */
+async function steps(list) {
+  for (const s of list ?? []) {
+    if (s.go) await js(`(location.hash = ${JSON.stringify(s.go)}, 1)`);
+    else await press(await find(s.press, s.text ?? null, !!s.starts));
+    await quiet(1200);
+  }
+}
 /** `scroll`: a scroller the place is pressed with scrolled to its end (a reader on what stands at the bottom of it). */
 async function scrolled(p, rate) {
   if (!p.scroll) return;
@@ -314,7 +356,7 @@ async function scrolled(p, rate) {
   await cpu(rate);
 }
 async function record(p) {
-  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, answer: p.answer ?? null, trace })})`);
+  await js(`__moves.arm(${JSON.stringify({ hash: p.hash ?? null, ms, px, ready: p.ready ?? null, anywhere: !!p.anywhere, anyKey: !!(p.key || p.type), still: p.still ?? null, changes: p.changes ?? null, answer: p.answer ?? null, trace, track: p.track ?? null })})`);
   const pressed = await act(p);
   let ticker = null;
   if (sync) ticker = setInterval(() => { js(SYNCED).catch(() => {}); }, 1500);
@@ -353,6 +395,7 @@ async function measure(p, rate) {
       if (p.setup) { await press(await find(p.setup)); await quiet(1200); }
       if (p.setupKey) { await key(p.setupKey); await quiet(1200); }
       if (!p.soon) await sleep(firstAfter);
+      await steps(p.before);
       await scrolled(p, rate);
       await cpu(rate);
       if (rounds.includes("first")) {
@@ -370,8 +413,9 @@ async function measure(p, rate) {
         const here = await js("location.hash");
         for (const href of [...new Set(list)]) if (href !== here) tabs.push({ name: `${p.name}-tab${href.slice(href.lastIndexOf("/"))}`, start: here, press: `${shown} .tf-tabs a[href="${href}"]`, hash: href, away: here, fromTab: true });
       }
-      if (rounds.includes("return")) {
+      if (rounds.includes("return") && !p.once) {
         await leave(p);
+        await steps(p.beforeReturn);
         // A setup that opens the place's page is pressed once; one that opens a menu the return closed, again.
         if (p.setup && !p.setupOnce) { await press(await find(p.setup)); await quiet(1200); }
         await scrolled(p, rate);

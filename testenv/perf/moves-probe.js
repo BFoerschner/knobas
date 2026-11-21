@@ -68,7 +68,9 @@
     const vh = innerHeight, vw = innerWidth;
     for (const root of roots) {
       if (!root) continue;
-      const list = root.matches?.(TRACKED) ? [root, ...root.querySelectorAll(TRACKED)] : root.querySelectorAll(TRACKED);
+      // `track`: what else a place's reader holds on to (a code area's lines, the highlighter-switch places).
+      const sel = r.track ? `${TRACKED}, ${r.track}` : TRACKED;
+      const list = root.matches?.(sel) ? [root, ...root.querySelectorAll(sel)] : root.querySelectorAll(sel);
       for (const e of list) {
         if (seen.has(e)) continue;
         seen.add(e);
@@ -232,12 +234,12 @@
     /**
      * Arm for one open. `hash`: the address it lands on (a prefix); `ms`: how long past the first useful frame it records;
      * `px`: what counts as a move; `ready`: a selector that says the place is drawn (an overlay); `anywhere`: the whole
-     * document, not the shown page and overlays.
+     * document, not the shown page and overlays; `track`: more selectors to hold to their boxes.
      */
-    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null, answer = null } = {}) {
+    arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null, answer = null, track = null } = {}) {
       const expectHash = hash !== null && ![].concat(hash).some((h) => location.hash.startsWith(h));
       const stillBoxes = new Map(still === null ? [] : inView(still).map((x) => [x.e, x]));
-      run = { hash, ms, px, ready, anywhere, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), answer, answerFrom: answer === null ? null : words(answer.changes), answered: null, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
+      run = { hash, ms, px, ready, anywhere, track, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), answer, answerFrom: answer === null ? null : words(answer.changes), answered: null, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
       requestAnimationFrame(frame);
       return 1;
     },
