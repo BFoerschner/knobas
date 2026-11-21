@@ -101,8 +101,8 @@
   /**
    * A click on a fold's row (Björn, 2026-11-21: "when I click on a tree element, I want it to always expand … click on
    * it again, it should toggle"): anywhere on the row right of the chevron opens the page and opens its fold, and never
-   * closes it; on the page already open it opens or closes the fold. The chevron, left of the title, folds alone, as
-   * the browser does. `Enter` on the row (a click with no count), a modified click and a middle click keep the link's
+   * closes it; on the page already open it opens or closes the fold. The chevron, left of the title, folds alone and
+   * opens no page. `Enter` on the row (a click with no count), a modified click and a middle click keep the link's
    * own way. The fold's state changes in this press, not in the browser's later `toggle`, so its rows draw in the same
    * frame as the chevron turns; a fold whose pages are not read yet draws them once it holds them all, as before.
    */
@@ -113,16 +113,24 @@
     const link = summary.querySelector<HTMLAnchorElement>(":scope > a");
     if (link === null) return;
     const onLink = event.target instanceof Node && link.contains(event.target);
-    if (!onLink && event.clientX < link.getBoundingClientRect().left) return;
-    const now = id === current ? !fold.open : true;
-    // A link inside a summary neither folds it nor needs stopping; the row's free end is the summary's, which would.
+    const onChevron = !onLink && event.clientX < link.getBoundingClientRect().left;
+    const now = onChevron || id === current ? !fold.open : true;
+    // A link inside a summary neither folds it nor needs stopping. The chevron and the row's free end are the summary's,
+    // whose own fold lands its rows a frame after the chevron turns (the browser's `toggle` comes later): folded here.
     if (!onLink) event.preventDefault();
     if (now !== fold.open) {
       toggled(id, now, starts);
       fold.open = now;
     }
     // The row's free end goes where its title goes, through the link, so the shell sees a plain press of it.
-    if (!onLink && id !== current) link.click();
+    if (!onLink && !onChevron && id !== current) link.click();
+  }
+
+  /** → and ← fold by key (`tree-keys.ts` sets `open`): the fold's state follows in the same press, so its rows land with it. */
+  function keyed(event: KeyboardEvent & { currentTarget: HTMLElement }, id: string, starts: boolean): void {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    const fold = event.currentTarget.parentElement as HTMLDetailsElement;
+    toggled(id, fold.open, starts);
   }
 
   /** The folds whose read has answered (or failed) since they opened: they draw what they hold, whole or not. */
@@ -161,7 +169,7 @@
   {#if hasChildren(node, index) || queued.length > 0}
     <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <summary onclick={(event) => pressed(event, node.entity_id, starts)} class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
+      <summary onclick={(event) => pressed(event, node.entity_id, starts)} onkeydown={(event) => keyed(event, node.entity_id, starts)} class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
         ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
         ></summary

@@ -473,15 +473,24 @@ test("the chevron folds alone, without opening the page, open or closed", async 
   const links: MouseEvent[] = [];
   row("Runbooks")!.addEventListener("click", (e) => links.push(e));
   const event = click(chevronAt22("Runbooks"), { clientX: 10 });
-  expect(event.defaultPrevented, "the browser folds it").toBe(false);
-  await settle();
-  expect(fold("Runbooks")!.open, "the browser's fold opens it").toBe(true);
-  const shut = click(chevronAt22("Runbooks"), { clientX: 10 });
-  expect(shut.defaultPrevented).toBe(false);
+  expect(event.defaultPrevented, "folded in the press, not by the browser a frame later").toBe(true);
+  flushSync();
+  expect(fold("Runbooks")!.open, "the chevron opens it").toBe(true);
+  expect(row("Restart the ledger"), "with its pages in the same frame").toBeDefined();
+  click(chevronAt22("Runbooks"), { clientX: 10 });
   await settle();
   expect(fold("Runbooks")!.open, "and closes it").toBe(false);
   expect(links, "no page opens").toEqual([]);
   expect(current()).toBe("On-call handbook");
+  // On the open page too.
+  click(row("Runbooks")!);
+  await go(["confluence:3"]);
+  click(chevronAt22("Runbooks"), { clientX: 10 });
+  await settle();
+  expect(fold("Runbooks")!.open).toBe(false);
+  click(chevronAt22("Runbooks"), { clientX: 10 });
+  await settle();
+  expect(fold("Runbooks")!.open).toBe(true);
 });
 
 test("Enter on a fold's row and a modified click open the page only, as before", async () => {
@@ -496,10 +505,12 @@ test("Enter on a fold's row and a modified click open the page only, as before",
     expect(fold("Runbooks")!.open, `${JSON.stringify(mod)} opens no fold`).toBe(false);
     expect(event.defaultPrevented, `${JSON.stringify(mod)} keeps the link's own way`).toBe(false);
   }
-  // → still opens it, and ← closes it.
+  // → still opens it, its pages drawn in the same press, and ← closes it.
   const link = row("Runbooks")!;
   link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  flushSync();
   expect(fold("Runbooks")!.open).toBe(true);
+  expect(row("Restart the ledger"), "→ draws the fold's pages with it").toBeDefined();
   link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
   expect(fold("Runbooks")!.open).toBe(false);
 });
