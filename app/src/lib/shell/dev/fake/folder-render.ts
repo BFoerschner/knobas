@@ -325,7 +325,9 @@ export function handlers(): Handlers {
       const renderer = saved.find((r) => r.id === at.renderer);
       if (!renderer) throw { code: "invalid", message: `'${at.renderer}' is not one of your folder renderers: see Settings › Renderers` };
       const slot = slotOf(at);
-      const view: FolderRenderView = { renderer: at.renderer, folder: at.folder, drawn: drawn.get(slot) ?? null, current: drawn.has(slot), running: null, failure: null, from: "clone", commit: at.commit };
+      // Where the copy is read from, as the backend says it: the working tree's at `~working-tree` (ux29).
+      const from = at.commit === "~working-tree" ? "working_tree" : "clone";
+      const view: FolderRenderView = { renderer: at.renderer, folder: at.folder, drawn: drawn.get(slot) ?? null, current: drawn.has(slot), running: null, failure: null, from, commit: at.commit };
       if (running.has(slot)) return { ...view, running: { state: "running", elapsed_ms: 0 } };
       const fault = failed.get(slot);
       const starts = at.ask === "again" || (at.ask === "open" && !drawn.has(slot) && !fault);
@@ -354,7 +356,7 @@ export function handlers(): Handlers {
               kind: { kind: "folder", files: tree.files.length, bytes: tree.bytes, left_out: tree.left_out_total },
               size: tree.bytes,
               commit: at.commit,
-              from: "clone",
+              from,
               took_ms: 3200,
               drawn_at: new Date().toISOString(),
             });
@@ -371,7 +373,7 @@ export function handlers(): Handlers {
               kind: png ? { kind: "image", mime: "image/png" } : page ? { kind: "html" } : { kind: "text" },
               size: made.length,
               commit: at.commit,
-              from: "clone",
+              from,
               took_ms: 1500,
               drawn_at: new Date().toISOString(),
             });

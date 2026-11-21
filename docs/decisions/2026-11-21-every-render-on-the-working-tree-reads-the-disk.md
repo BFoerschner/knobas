@@ -1,0 +1,27 @@
+# 2026-11-21: Every render on the working tree reads the disk
+
+**Reported (Björn, ux29):** "In the folder rendering, when I have the working tree selected, it tries to render the folder from the head and not from my local changes."
+
+## The cause
+
+The working tree in the branch box (`2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`) draws Files from the checkout's `HEAD` with git's list laid over it. It left folder renderers for later. Every render on the Files tab still asked at `local?.commit ?? null`, the clone's commit on a branch. On the working tree `local` is never set, so the ask went at `null` and the backend resolved the branch's tip. The folder renderer, *Run again*, the tree's marks, the made bar and the drawing header all read a commit. A file changed on disk was drawn from disk, but a file's other renderers did not use it. A pipeline, a PDF or image's bytes, the whole text of a cut file, a Markdown file's images and the JAR view all read at `file.commit`. That is `null` for a file read from disk, so they read the branch's tip too.
+
+Reproduced in the real app (scratch HOME, the live Gitea's `tidewater/payout-service` cloned through *Clone*, a text renderer on `docs`, `docs/retries.md` changed and `docs/new.md` untracked, *Working tree* picked from the branch box's native menu, the folder's glyph pressed): the drawing listed `retries.md` alone, without the change, under "Drawn by Lister at 93776ab" and "Drawn from the commit: what your checkout changed in this folder is not in it."
+
+## The fix
+
+- **One place decides** (`app/src/lib/render/read-at.ts`). `renderFrom` gives a folder render its entity, commit, paths, lane and stamp. `fileReadAt` gives a file's byte read its end. `TfRepoFiles` asks both for everything it renders.
+- **A folder** on the working tree is asked at `~working-tree` on the repository. That is ADR-0049's working-folder copy, the one Compare's working side makes (`folder_render::resolve::working_folder`): uncommitted and untracked files included, an ignored one never. No second copy path. It runs in the working tree's lane, `cmp:~working-tree`, which Compare's working side already uses. So the Files tab's slot for a commit never holds a working-tree drawing as its last one, and Files and Compare share one run.
+- **A new state.** The copy's key is the clone key over the items, with a changed or untracked file keyed by the SHA-256 of its bytes. An edit on disk is a new key, so it is not current, and a commit's kept drawing is neither served for it nor overwritten by it (the keys differ, the lanes differ). The render asks again when git's list's stamp moves. `FolderRun` takes a `stamp` and keeps the drawing until the new answer lands. Its listener is keyed by the slot alone, so a new state neither listens again nor leaves.
+- **A file**: one git lists changed or added is read at `~working-tree`. Any other is `HEAD`'s blob, as the folder copy takes it, and a deleted one has nothing on disk. Byte reads from disk are keyed by the stamp too, so a file changed again is read again. That covers pipelines, file renderers that read bytes, *Render as* (it draws the same read), the whole text of a cut file, Markdown images and the JAR view. `archive_open` gets a working-tree arm, read from the checkout and kept by no key. It had none, so it asked the source for `~working-tree`.
+- **The bars say so.** The made bar: "Made by Low-code site from your working tree, 2 files changed; 14 files, 1.2 MB, 3.2s". The drawing header: "Drawn by Flow diagram from your working tree, 1 file changed, 3.2s". An earlier drawing: "Made from your working tree 5 minutes ago. Your working tree changed since." The count is what git lists changed, added or deleted under the folder. The checkout-changes note and the "Drawn from the commit" banner no longer show on the working tree. A branch shows them as before.
+- Choosing a branch again renders that branch's commit, in the Files tab's own lane, as before.
+
+## Checked by
+
+- `TfRepoFiles.working.test.svelte.ts`: 9 tests, 8 of them failing before the fix. The ninth (a branch again) is the regression guard.
+- `read-at.test.ts`, a `FolderRun` test for the stamp, and a `workingWords` test.
+- 18 mutants, all caught.
+- The IPC-seam tests `folder_render::the_working_tree_is_rendered_from_disk_in_its_own_lane_and_leaves_the_commit_drawing_alone` and `working_reads::a_jar_on_the_working_tree_is_opened_as_it_is_on_disk`. The second fails without the archive arm ("no source with id").
+- The press trips `wt-folder-run-key` and `wt-folder-run-pointer`, and the moves place `wt-rerender-again`. The dev fake now answers `from: working_tree` at `~working-tree`, as the backend does.
+- The main path in the real app, after the fix: the drawing lists `new.md` and `retries.md` with the uncommitted line, under "Drawn by Lister from your working tree, 2 files changed", with no banner. A further edit and a focus drew it again with the edit. *Run again* ran on the disk. `main` picked again drew the commit with its banner.

@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import type { FolderRenderer, FolderRenderView, MadeLeftOut, MadeLeftOutWhy } from "../../ipc/app";
-  import { failureLines, runningLine, sizeLabel, tookLabel } from "../../render/folder";
+  import { failureLines, runningLine, sizeLabel, tookLabel, workingWords } from "../../render/folder";
   import { ago } from "../../shell/time";
   import { thousands } from "../counted";
   import TfPath from "../TfPath.svelte";
@@ -34,6 +34,7 @@
     elapsed = 0,
     made = null,
     changedInside = false,
+    working = null,
     busy = false,
     openIn,
     onpress,
@@ -64,6 +65,8 @@
     made?: { files: number; bytes: number; leftOut: readonly MadeLeftOut[]; leftOutTotal: number } | null;
     /** The checkout changed files under the folder, which the generated folder (of the commit) leaves out. */
     changedInside?: boolean;
+    /** On the working tree (ux29): the files git lists changed under the folder; `null` at a commit. */
+    working?: number | null;
     /** A run goes, or its new generated folder is still being read: the bar says so to assistive technology. */
     busy?: boolean;
     /** *Open in…*, drawn in its held room. */
@@ -80,6 +83,10 @@
   const running = $derived(view?.running ?? null);
   const failure = $derived(view?.failure ?? null);
   const failed = $derived(failure === null || failure.why === "stopped" ? null : failureLines(failure));
+  /** The folder is read from the working tree on disk now (ux29): the bar says so, never a commit. */
+  const onDisk = $derived(working !== null && view?.from === "working_tree");
+  /** Where a drawing was made: from the working tree, or at its commit. */
+  const madeAt = (d: { from: string; commit: string | null }) => (d.from === "working_tree" ? "from your working tree" : `at ${short(d.commit) ?? "an earlier commit"}`);
 
   /** The bar's words and its colour. */
   const status = $derived.by((): { text: string; tone: "info" | "warn" | "err" } => {
@@ -91,14 +98,21 @@
     }
     if (failed !== null) {
       return drawn !== null
-        ? { text: `The last run failed. This is what it made at ${short(drawn.commit) ?? "an earlier commit"}.`, tone: "err" }
+        ? { text: `The last run failed. This is what it made ${madeAt(drawn)}${drawn.from === "working_tree" ? " before" : ""}.`, tone: "err" }
         : { text: `${name} could not make this folder.`, tone: "err" };
+    }
+    if (drawn !== null && view.current && onDisk) {
+      const counted = made === null ? "" : `${thousands(made.files)} ${made.files === 1 ? "file" : "files"}, ${sizeLabel(made.bytes)}, `;
+      return { text: `Made by ${name} ${workingWords(working ?? 0)}; ${counted}${tookLabel(drawn.took_ms)}`, tone: "info" };
     }
     if (drawn !== null && view.current) {
       const at = short(drawn.commit);
       const counted = made === null ? "" : `, ${thousands(made.files)} ${made.files === 1 ? "file" : "files"}, ${sizeLabel(made.bytes)}`;
       const from = drawn.from === "forge" ? ", read from the source" : "";
       return { text: `Made by ${name}${at === null ? "" : ` at ${at}`}${counted}, ${tookLabel(drawn.took_ms)}${from}`, tone: "info" };
+    }
+    if (drawn !== null && onDisk) {
+      return { text: `Made ${madeAt(drawn)} ${ago(drawn.drawn_at, now())}. Your working tree changed since.`, tone: "warn" };
     }
     if (drawn !== null) {
       const now_ = short(view.commit);

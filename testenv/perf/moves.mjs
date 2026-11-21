@@ -157,6 +157,10 @@ const PLACES = [
   { name: "rerender-graft", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}`, press: `${shown} .tf-fdir[data-path="docs"] + .tf-frmark a`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}` },
   { name: "rerender-file", fixture: true, fake: "fake-rerender", start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-ftree a[data-made][href$="/files/page.html"]`, hash: `#/repo/${REPO}/rendered/site/docs/files/`, away: `#/repo/${REPO}/rendered/site/docs` },
   { name: "rerender-again", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}/rendered/site/docs`, press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
+  // The same on the working tree (ux29; Björn: "when I have the working tree selected, it tries to render the folder from
+  // the head and not from my local changes"): *Run again* runs on the working tree on disk, the bar saying "from your
+  // working tree, N files changed" where it said the commit, and the run's answer still lands in one frame.
+  { name: "wt-rerender-again", fixture: true, fake: "fake-rerender", answer: RUN_ANSWER, start: `#/repo/${REPO}/rendered/site/docs`, before: [{ eval: CHOOSE_WORKING_TREE }], beforeReturn: [{ eval: CHOOSE_WORKING_TREE }], press: `${shown} .tf-madebar-run`, hash: `#/repo/${REPO}/rendered/`, away: `#/repo/${REPO}/rendered/site/docs` },
   // A folder renderer in a comparison (ux26, the decision list's sections 9 and 10): with *Rendered* on, Compare with
   // the working tree groups `docs` under its bar; *Run* runs both sides (each 1.5 s, so both land late), and their
   // answer (the generated cards, the rail's generated rows) lands in one frame with the bar and the folder's row and band

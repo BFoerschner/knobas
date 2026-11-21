@@ -572,6 +572,10 @@ const PAGES = [
   { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [
     { id: "folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" } },
     { id: "folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render", query: "&fake-folder-render", prep: [{ wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" }, rows: ".tf-frender-run" },
+    // On the working tree (ux29): the folder rendered from the working tree on disk, *Run again* once by key and once
+    // with the pointer still.
+    { id: "wt-folder-run-key", kind: "enter-twice", strict: true, finding: "folder-render-working-tree", query: "&fake-folder-render", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" } },
+    { id: "wt-folder-run-pointer", kind: "pointer-twice", strict: true, finding: "folder-render-working-tree", query: "&fake-folder-render", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 2500 }], press: { sel: ".tf-frender-run", text: "Run again" }, rows: ".tf-frender-run" },
   ] },
   // A renderer's long page scrolls in its frame (2026-11-17), whatever it says of its own overflow.
   { page: "A folder renderer's long page", route: `${REPO}/render/folder-listing/src`, trips: [

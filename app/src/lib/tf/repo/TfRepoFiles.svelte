@@ -178,6 +178,7 @@
   import { ipcMadePorts, type MadePorts } from "../../render/made-ports";
   import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
   import { FolderRun } from "../../render/folder-run.svelte";
+  import { bytesKey, changedUnder, fileReadAt, renderFrom } from "../../render/read-at";
   import { thousands } from "../counted";
   import { WORKING_TREE } from "../diff/address";
   import type { WorkingMark } from "./repo";
@@ -781,11 +782,16 @@
   /** The section the source lists every path in, where it is the source's (a clone's tree reads at the clone). */
   const sourcePaths = $derived(pathsSection !== null && !pathsSection.startsWith(LOCAL) ? pathsSection : null);
   let marks = $state.raw<ReadonlyMap<string, ReadonlySet<string>>>(new Map());
+  /**
+   * Where every render of this tree reads (ux29, `render/read-at.ts`): the working tree on disk where it is chosen, else
+   * the clone's commit. The folder renders, *Run again*, the marks, and (`fileReadAt`) every file's renderer read it.
+   */
+  const readFrom = $derived(renderFrom(at, repoId, disk, local?.commit ?? null, sourcePaths));
   $effect(() => {
-    const [commit, paths, holders] = [local?.commit ?? null, sourcePaths, folders.list.some((r) => r.holds.length > 0)];
-    if (!holders || (commit === null && paths === null)) return;
+    const [from, holders] = [readFrom, folders.list.some((r) => r.holds.length > 0)];
+    if (!holders || (from.commit === null && from.paths === null)) return;
     let live = true;
-    folderMarks(at, commit, paths).then(
+    folderMarks(from.entityId, from.commit, from.paths).then(
       (found) => {
         if (!live) return;
         marks = markSets(found);
@@ -936,15 +942,16 @@
     () =>
       renderedNow === null
         ? null
-        : { entityId: at, renderer: renderedNow.renderer, command: "", folder: renderedNow.folder, commit: local?.commit ?? null, paths: sourcePaths, start: shownPage() },
+        : { ...readFrom, renderer: renderedNow.renderer, command: "", folder: renderedNow.folder, start: shownPage() },
     untrack(() => folderPorts),
   );
   /** The address's run asked again with `look`, once: a token the backend no longer held is read back from its store. */
   async function lookOnce(): Promise<void> {
     const now = renderedNow;
     if (now === null) return;
+    const from = readFrom;
     await folderPorts
-      .render({ entityId: at, renderer: now.renderer, folder: now.folder, commit: local?.commit ?? null, paths: sourcePaths, ask: "look" })
+      .render({ entityId: from.entityId, renderer: now.renderer, folder: now.folder, commit: from.commit, paths: from.paths, ask: "look", ...(from.lane ? { lane: from.lane } : {}) })
       .catch(() => {});
   }
   const notHeld = (cause: unknown) => typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "not_found";
@@ -1460,7 +1467,7 @@
     if (untrack(() => piped?.path) !== read.path) piped = null;
     let live = true;
     piping = true;
-    run(at, read.path, read.commit ?? null, $state.snapshot(chain)).then(
+    run(at, read.path, fileReadAt(untrack(() => disk), read.path, read.commit ?? null), $state.snapshot(chain)).then(
       (answer) => {
         if (!live) return;
         piped = { path: read.path, run: answer };
@@ -1491,7 +1498,7 @@
       ? null
       : fileMade !== null
         ? JSON.stringify(["made", fileMade.token, fileMade.rel])
-        : JSON.stringify([at, file.path, file.commit ?? null]),
+        : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk),
   );
   let whole = $state<{ key: string; text: string } | null>(null);
   $effect(() => {
@@ -1922,16 +1929,19 @@
   const imageRead = $derived.by(() => {
     const read = ports.fileBytes;
     const entityId = at;
-    const commit = file?.commit ?? null;
+    const fileAt = file?.commit ?? null;
+    // On the working tree a changed or added image is read from disk (ux29).
+    const onDisk = disk;
+    const commitOf = (path: string) => fileReadAt(onDisk, path, fileAt);
     // A generated file's images: its siblings' bytes by the token, else the repository's (ADR-0046).
     if (fileMade !== null) {
       return (path: string) => {
         const made = madeAt(path);
         if (made !== null && made.graft.token !== null) return madePorts.fileBytes(made.graft.token, made.rel);
-        return read === undefined ? Promise.reject(new Error(`${path} cannot be read`)) : read(entityId, path, commit);
+        return read === undefined ? Promise.reject(new Error(`${path} cannot be read`)) : read(entityId, path, commitOf(path));
       };
     }
-    return read === undefined ? null : (path: string) => read(entityId, path, commit);
+    return read === undefined ? null : (path: string) => read(entityId, path, commitOf(path));
   });
   /**
    * A file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
@@ -1944,7 +1954,7 @@
       ? null
       : fileMade !== null
         ? JSON.stringify(["made", fileMade.token, fileMade.rel])
-        : JSON.stringify([at, file.path, file.commit ?? null]),
+        : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk),
   );
   const bytesRead = $derived.by(() => {
     const read = ports.fileBytes;
@@ -1960,7 +1970,7 @@
    * The JAR view's reads for the archive shown (ux19), bound to where it was read: keyed by what they read, so a
    * re-read of the same file hands the view the same reads and it reads nothing again.
    */
-  const jarAt = $derived(file === null || drawAs !== "jar" ? null : JSON.stringify([at, file.path, file.commit ?? null]));
+  const jarAt = $derived(file === null || drawAs !== "jar" ? null : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk));
   const jarPorts = $derived.by((): JarPorts | null => {
     const reads = ports.archive;
     if (jarAt === null || reads === undefined) return null;
@@ -2319,15 +2329,18 @@
   {#if singleNow !== null}
     {#if renderedBy !== null}
       <TfFolderRender
-        entityId={at}
+        entityId={readFrom.entityId}
         renderer={renderedBy}
         renderers={folderChoices}
         folder={singleNow.folder}
         onpick={(id) => void folderPicks.set(repoId, repoId, singleNow!.folder, id).catch(() => {})}
-        commit={local?.commit ?? null}
-        paths={sourcePaths}
+        commit={readFrom.commit}
+        paths={readFrom.paths}
+        lane={readFrom.lane}
+        stamp={readFrom.stamp}
         start={shownPage()}
-        changedInside={[...changed].some((p) => singleNow.folder === "" || p.startsWith(`${singleNow.folder}/`))}
+        changedInside={disk === null && [...changed].some((p) => singleNow.folder === "" || p.startsWith(`${singleNow.folder}/`))}
+        working={disk === null ? null : changedUnder(disk.marks, singleNow.folder)}
         switchTo={(id) => renderLink(savedRenderer(id) ?? { id, output: "text" }, singleNow.folder)}
         {fileLink}
         {title}
@@ -2353,7 +2366,8 @@
         refused={madeRun.refused}
         elapsed={madeRun.elapsed}
         made={madeShown === null ? null : { files: madeShown.files.length, bytes: madeShown.bytes, leftOut: madeShown.leftOut, leftOutTotal: madeShown.leftOutTotal }}
-        changedInside={[...changed].some((p) => underFolder(p, graftFolder))}
+        changedInside={disk === null && [...changed].some((p) => underFolder(p, graftFolder))}
+        working={disk === null ? null : changedUnder(disk.marks, graftFolder)}
         busy={madeBusy}
         onpress={() => madeRun.press()}
         onreal={() => realFiles(graftFolder)}

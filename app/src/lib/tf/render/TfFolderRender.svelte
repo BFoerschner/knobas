@@ -32,7 +32,7 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { FolderRenderer } from "../../ipc/app";
-  import { failureLines, runningLine, tookLabel } from "../../render/folder";
+  import { failureLines, runningLine, tookLabel, workingWords } from "../../render/folder";
   import { FolderRun, ipcFolderRenderPorts, type FolderRenderPorts } from "../../render/folder-run.svelte";
   import type { FrameBridge } from "../../render/frame";
   import { tauriBridge } from "../../render/command";
@@ -52,8 +52,11 @@
     folder,
     commit = null,
     paths = null,
+    lane = undefined,
+    stamp = undefined,
     start = true,
     changedInside = false,
+    working = null,
     switchTo = null,
     onpick = () => {},
     fileLink = null,
@@ -75,10 +78,16 @@
     commit?: string | null;
     /** The section the source lists every path in, for a repository with no clone. */
     paths?: string | null;
+    /** The run's lane: the working tree's on the Files tab's working tree (ux29), absent otherwise. */
+    lane?: string | undefined;
+    /** Moves when the working tree changes on disk, so the render asks again (ux29); absent at a commit. */
+    stamp?: string | undefined;
     /** Whether a run may start: the page is shown and a person opened it. */
     start?: boolean;
     /** Files under the folder are changed in the checkout, which the drawing (of the commit) leaves out. */
     changedInside?: boolean;
+    /** On the working tree (ux29): the files git lists changed under the folder; `null` at a commit. */
+    working?: number | null;
     /** The address that draws the folder with another renderer; `null` draws no switch. */
     switchTo?: ((id: string) => string) | null;
     /** *Render with* chose a renderer: the folder's pick (ux26), kept before the address changes. */
@@ -95,10 +104,12 @@
 
   // The ask and listen loop (`FolderRun`): open while shown, look when kept hidden, again on each move.
   const run = new FolderRun(
-    () => ({ entityId, renderer: renderer.id, command: renderer.command, folder, commit, paths, start }),
+    () => ({ entityId, renderer: renderer.id, command: renderer.command, folder, commit, paths, start, ...(lane ? { lane } : {}), ...(stamp ? { stamp } : {}) }),
     untrack(() => ports),
   );
   const view = $derived(run.view);
+  /** The folder is read from the working tree on disk now (ux29): the bar says so, never a commit. */
+  const onDisk = $derived(working !== null && view?.from === "working_tree");
   const refused = $derived(run.refused);
   const press = () => run.press();
   /** What the drawing's token read as: an image's URL, text, or a page's source. */
@@ -189,8 +200,12 @@
   <header>
     <span class="tf-p">{#if folder === ""}{title || "The top folder"}{:else}{#if cut > 0}<span class="tf-pdir">{folder.slice(0, cut)}</span>{/if}{folder.slice(cut)}{/if}</span>
     <span class="tf-dim tf-small tf-fmeta" role="status">
-      {#if drawn !== null && view?.current}
+      {#if drawn !== null && view?.current && onDisk}
+        Drawn by {renderer.name} {workingWords(working ?? 0)}, {tookLabel(drawn.took_ms)}
+      {:else if drawn !== null && view?.current}
         Drawn by {renderer.name}{#if short(drawn.commit)}&nbsp;at <span class="tf-mono">{short(drawn.commit)}</span>{/if}, {tookLabel(drawn.took_ms)}{#if drawn.from === "forge"}, read from the source{/if}
+      {:else if drawn !== null && onDisk}
+        Drawn {#if drawn.from === "working_tree"}from your working tree{:else}at <span class="tf-mono">{short(drawn.commit) ?? "an earlier commit"}</span>{/if} {ago(drawn.drawn_at, now())}; your working tree changed since
       {:else if drawn !== null}
         Drawn at <span class="tf-mono">{short(drawn.commit) ?? "an earlier commit"}</span> {ago(drawn.drawn_at, now())}{#if short(view?.commit)}; the folder is at <span class="tf-mono">{short(view?.commit)}</span> now{/if}
       {:else}

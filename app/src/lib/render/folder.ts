@@ -63,6 +63,14 @@ export function rendererFor(
   return (pick === null ? undefined : taking.find((r) => r.id === pick)) ?? taking[0];
 }
 
+/**
+ * Where a drawing on the working tree was made from, for the bars (ux29): "from your working tree, 2 files changed",
+ * counting what git lists changed, added or deleted under the folder; never a commit.
+ */
+export function workingWords(changed: number): string {
+  return `from your working tree, ${changed === 0 ? "no files changed" : `${thousands(changed)} ${changed === 1 ? "file" : "files"} changed`}`;
+}
+
 const where = (from: ReadFrom | null) => (from === "forge" ? "the source" : from === "working_tree" ? "your working tree" : "your clone");
 
 /** What a run is doing, in a line. */

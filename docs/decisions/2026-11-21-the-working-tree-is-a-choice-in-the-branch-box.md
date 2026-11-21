@@ -60,6 +60,7 @@ The design system's *Controls* (form controls) carries the rule; ADR-0049 has a 
 ## Left for later
 
 Folder renderers on the working copy (until then a folder renderer renders `HEAD`'s files), and a rename as one row.
+Folder renderers on the working copy were built in ux29: `2026-11-21-every-render-on-the-working-tree-reads-the-disk.md`.
 
 ## Checked by
 

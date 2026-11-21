@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use knobas_app::checkout::set_override;
-use knobas_app::folder_render::runs::{Ask, FolderFailure, FolderRenderView, Runs};
+use knobas_app::folder_render::runs::{Ask, FolderFailure, FolderRenderView, ReadFrom, Runs};
 use knobas_app::folder_render::{self, FolderOutput, FolderRendererDraft, resolve};
 use sqlx::PgPool;
 
@@ -484,4 +484,144 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
         folder_render::made::tree(&token).is_ok(),
         "the kept folder stays"
     );
+}
+
+/// The Files tab on *Working tree* (ux29; Björn: "when I have the working tree selected, it tries to render the folder
+/// from the head and not from my local changes"): asked at `~working-tree` in the working tree's lane, the folder is
+/// the working folder as it is on disk, a changed and an untracked file included and an ignored one never; a further
+/// change on disk is a new state (the last drawing shown, not current); and the commit's drawing, in the Files tab's
+/// own lane, is neither served for it nor overwritten by it.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_working_tree_is_rendered_from_disk_in_its_own_lane_and_leaves_the_commit_drawing_alone()
+ {
+    const WT: &str = "~working-tree";
+    const LANE: &str = "cmp:~working-tree";
+    let pool = scratch("folder_render_working").await;
+    let clone = tempfile::tempdir().unwrap();
+    git(clone.path(), &["init", "-q", "-b", "main"]);
+    write(clone.path(), ".gitignore", "*.log\n");
+    write(clone.path(), "flows/orders/orders.lcproj", "{}\n");
+    write(clone.path(), "flows/orders/main.flow", "start -> end\n");
+    let head = commit(clone.path(), "first");
+    // Uncommitted: a changed file, an untracked one, an ignored one.
+    write(
+        clone.path(),
+        "flows/orders/main.flow",
+        "start -> refund -> end\n",
+    );
+    write(clone.path(), "flows/orders/extra.flow", "new\n");
+    write(clone.path(), "flows/orders/debug.log", "ignored\n");
+
+    let tools = tempfile::tempdir().unwrap();
+    let script = tools.path().join("list.sh");
+    std::fs::write(
+        &script,
+        "cd \"$1\" && find . -type f | sort && cat main.flow\n",
+    )
+    .unwrap();
+    let saved = folder_render::save(
+        &pool,
+        &[FolderRendererDraft {
+            id: None,
+            name: "Lister".to_owned(),
+            command: format!("sh {} {{path}}", script.display()),
+            holds: vec![],
+            folders: vec!["flows/*".to_owned()],
+            output: FolderOutput::Text,
+            timeout_secs: Some(20),
+        }],
+    )
+    .await
+    .unwrap();
+    let lister = saved[0].id.clone();
+    let id = repo(&pool, clone.path(), &format!("wt-{}", std::process::id())).await;
+    let head = head.as_str();
+
+    // The commit's drawing first, in the Files tab's lane: HEAD's file, nothing untracked.
+    ask_at(&pool, &id, &lister, head, "", Ask::Open).await;
+    let at_head = settled_at(&pool, &id, &lister, head, "").await;
+    assert_eq!(
+        text(&at_head),
+        "./main.flow\n./orders.lcproj\nstart -> end\n"
+    );
+
+    // The working tree: drawn from disk, not served the commit's drawing.
+    let opened = ask_at(&pool, &id, &lister, WT, LANE, Ask::Open).await;
+    assert!(opened.running.is_some(), "{opened:?}");
+    let on_disk = settled_at(&pool, &id, &lister, WT, LANE).await;
+    assert!(on_disk.current, "{on_disk:?}");
+    assert_eq!(on_disk.from, Some(ReadFrom::WorkingTree));
+    assert_eq!(
+        text(&on_disk),
+        "./extra.flow\n./main.flow\n./orders.lcproj\nstart -> refund -> end\n"
+    );
+    assert_ne!(
+        on_disk.drawn.as_ref().unwrap().token,
+        at_head.drawn.as_ref().unwrap().token
+    );
+
+    // A further change on disk is a new state: the last drawing shown, not current, and a run starts on open.
+    write(
+        clone.path(),
+        "flows/orders/main.flow",
+        "start -> pay -> end\n",
+    );
+    let moved = ask_at(&pool, &id, &lister, WT, LANE, Ask::Open).await;
+    assert!(!moved.current && moved.drawn.is_some(), "{moved:?}");
+    let again = settled_at(&pool, &id, &lister, WT, LANE).await;
+    assert!(
+        text(&again).ends_with("start -> pay -> end\n"),
+        "{}",
+        text(&again)
+    );
+
+    // The commit's drawing is still the commit's, current, in its own lane.
+    let back = ask_at(&pool, &id, &lister, head, "", Ask::Look).await;
+    assert!(back.current, "{back:?}");
+    assert_eq!(
+        back.drawn.as_ref().unwrap().token,
+        at_head.drawn.as_ref().unwrap().token
+    );
+    assert_eq!(text(&back), "./main.flow\n./orders.lcproj\nstart -> end\n");
+}
+
+async fn ask_at(
+    pool: &PgPool,
+    id: &str,
+    renderer: &str,
+    commit: &str,
+    lane: &str,
+    how: Ask,
+) -> FolderRenderView {
+    folder_render::ask(
+        pool,
+        None,
+        id,
+        renderer,
+        "flows/orders",
+        Some(commit),
+        None,
+        how,
+        lane,
+    )
+    .await
+    .unwrap()
+}
+
+async fn settled_at(
+    pool: &PgPool,
+    id: &str,
+    renderer: &str,
+    commit: &str,
+    lane: &str,
+) -> FolderRenderView {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let view = ask_at(pool, id, renderer, commit, lane, Ask::Look).await;
+        if view.running.is_none() || Instant::now() > deadline {
+            return view;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }

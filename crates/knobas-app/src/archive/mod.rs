@@ -328,6 +328,26 @@ pub async fn open(
             mebibytes(ARCHIVE_CAP)
         ))
     };
+    // The working tree's archive (ux29, the Files tab on *Working tree*): read from the checkout as it is on disk, never
+    // the source, and kept by no key, so a rebuilt JAR is read again.
+    if commit == Some(crate::checkout::working::END) {
+        use crate::checkout::working::Bytes;
+        return match crate::checkout::working_file_bytes(
+            pool,
+            entity_id,
+            crate::checkout::working::END,
+            path,
+            ARCHIVE_CAP,
+        )
+        .await?
+        {
+            Bytes::Read(bytes) => take_in(bytes, name, None).await.map(|i| (*i).clone()),
+            Bytes::TooLarge(size) => Err(too_large(size)),
+            Bytes::NotThere => Err(IpcError::not_found(format!(
+                "git lists no file {path} in the working tree"
+            ))),
+        };
+    }
     if let Some(commit) = commit {
         match crate::checkout::local_file_bytes(pool, entity_id, commit, path, ARCHIVE_CAP).await {
             Some(Ok(bytes)) => return take_in(bytes, name, key).await.map(|i| (*i).clone()),

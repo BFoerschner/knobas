@@ -83,3 +83,48 @@ test("a comparison's side asks in its own lane, and another lane's move is not i
   expect(h.asked.slice(before).map((a) => a.ask)).toEqual(["look"]);
   h.stop();
 });
+
+test("a new state of the same folder (the working tree's stamp, ux29) asks again, keeps the drawing and its listener", async () => {
+  const asked: FolderAsk[] = [];
+  let listens = 0;
+  const left: string[] = [];
+  const drawn = { token: "W", kind: { kind: "folder", files: 1, bytes: 8, left_out: 0 }, size: 8, commit: null, from: "working_tree", took_ms: 1, drawn_at: "2026-11-21T08:00:00Z" } as const;
+  let hold: Promise<void> = Promise.resolve();
+  const ports: FolderRenderPorts = {
+    render: async (at) => {
+      asked.push(at);
+      await hold;
+      return { renderer: at.renderer, folder: at.folder, drawn, current: true, running: null, failure: null, from: "working_tree", commit: null } satisfies FolderRenderView;
+    },
+    stop: () => Promise.resolve(),
+    leave: (_e, _r, folder) => (left.push(folder), Promise.resolve()),
+    output: () => Promise.resolve(new Uint8Array()),
+    frame: () => Promise.resolve("t"),
+    listen: () => ((listens += 1), Promise.resolve(() => {})),
+  };
+  const at: FolderRunAt = $state({ entityId: "r", renderer: "site", command: "", folder: "flows", commit: "~working-tree", paths: null, start: true, lane: "cmp:~working-tree", stamp: "s1" });
+  let run!: FolderRun;
+  const stop = $effect.root(() => {
+    run = new FolderRun(() => at, ports);
+  });
+  flushSync();
+  await settle();
+  expect(run.view?.drawn?.token).toBe("W");
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  at.stamp = "s2";
+  await settle();
+  expect(asked.map((a) => [a.ask, a.commit, a.lane])).toEqual([
+    ["open", "~working-tree", "cmp:~working-tree"],
+    ["open", "~working-tree", "cmp:~working-tree"],
+  ]);
+  expect(run.view?.drawn?.token, "drawn while the new answer is on its way").toBe("W");
+  expect([listens, left.length], "one listener, never left").toEqual([1, 0]);
+  release();
+  // Another folder is a new place: it starts blank.
+  hold = new Promise(() => {});
+  at.folder = "docs";
+  await settle();
+  expect(run.view).toBeNull();
+  stop();
+});

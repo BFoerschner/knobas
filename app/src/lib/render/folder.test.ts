@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { FolderRenderer } from "../ipc/app";
-import { failureLines, folderMatches, markSets, rendererFor, renderersFor, runningLine, tookLabel } from "./folder";
+import { failureLines, folderMatches, markSets, rendererFor, renderersFor, runningLine, tookLabel, workingWords } from "./folder";
 import { folderRenderHash, readRepoRoute } from "../tf/repo/repo";
 
 const R = (id: string, over: Partial<FolderRenderer> = {}): FolderRenderer => ({ id, name: id, command: "t {path}", holds: [], folders: [], output: "detect", timeout_secs: 30, ...over });
@@ -69,4 +69,11 @@ test("a folder render's address names the renderer, then the folder, and reads b
   expect(route).toMatchObject({ repoId: "gitea:repo:o/r", tab: "files", path: null, render: { renderer: "low code", folder: "apps/my flow" } });
   expect(readRepoRoute(["r", "render", "x"]).render).toEqual({ renderer: "x", folder: "" });
   expect(readRepoRoute(["r", "files", "a.md"]).render).toBeUndefined();
+});
+
+test("a drawing of the working tree says so with the files changed under the folder, never a commit (ux29)", () => {
+  expect(workingWords(2)).toBe("from your working tree, 2 files changed");
+  expect(workingWords(1)).toBe("from your working tree, 1 file changed");
+  expect(workingWords(0)).toBe("from your working tree, no files changed");
+  expect(workingWords(1200)).toBe(`from your working tree, ${(1200).toLocaleString("en-US")} files changed`);
 });

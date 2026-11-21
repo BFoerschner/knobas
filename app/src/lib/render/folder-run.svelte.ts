@@ -58,6 +58,11 @@ export interface FolderRunAt {
   start: boolean;
   /** The run's lane (ux26): absent for the Files tab; a side of a comparison. */
   lane?: string;
+  /**
+   * What moves when the folder's state moves without its commit (ux29: git's list's stamp on the working tree, whose
+   * commit is always `~working-tree`), so the render asks again; absent at a commit.
+   */
+  stamp?: string;
 }
 
 export class FolderRun {
@@ -80,14 +85,19 @@ export class FolderRun {
     this.#at = at;
     this.#ports = ports;
 
-    // The folder, the renderer or the commit changed: ask again, starting a run where the page is shown.
+    // The folder, the renderer or the commit changed, or the working tree on disk: ask again, starting a run where the
+    // page is shown.
+    let place: string | null = null;
     $effect(() => {
       const now = this.#at();
       if (now === null) return;
-      void [now.entityId, now.renderer, now.command, now.folder, now.commit, now.paths];
+      const asked = JSON.stringify([now.entityId, now.renderer, now.command, now.folder, now.commit, now.paths, now.lane ?? ""]);
+      void now.stamp;
       const kind = now.start ? "open" : "look";
       untrack(() => {
-        this.view = null;
+        // A new folder or commit starts blank; a new state of the same one keeps its drawing until the answer lands.
+        if (asked !== place) this.view = null;
+        place = asked;
         this.#answer(kind);
       });
     });
@@ -101,11 +111,15 @@ export class FolderRun {
       wasShown = now;
     });
 
-    // The run moved or ended: ask again.
-    $effect(() => {
+    // The run moved or ended: ask again. Keyed by the slot alone, so a new state of the folder keeps the listener.
+    const slotKey = $derived.by(() => {
       const now = this.#at();
-      if (now === null) return;
-      const slot = { entityId: now.entityId, renderer: now.renderer, folder: now.folder, lane: now.lane ?? "" };
+      return now === null ? null : JSON.stringify([now.entityId, now.renderer, now.folder, now.lane ?? ""]);
+    });
+    $effect(() => {
+      if (slotKey === null) return;
+      const [entityId, renderer, folder, lane] = JSON.parse(slotKey) as [string, string, string, string];
+      const slot = { entityId, renderer, folder, lane };
       let live = true;
       let off: (() => void) | null = null;
       void this.#ports
