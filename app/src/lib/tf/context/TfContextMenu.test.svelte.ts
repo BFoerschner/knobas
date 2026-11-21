@@ -434,3 +434,139 @@ test("a web link on a mirrored source opens in knobas when it resolves, else say
   await settle();
   expect(calls["go"]).toEqual([["#/ticket/jira%3APAY-1"]]);
 });
+
+
+// The stuck menu (ux27, 2026-11-21; Björn: "When I spam right click … the context menu stays open indefinitely"). Drawn in
+// the shell's float host, as in the app: the menu that closed took its *Open in…* with it only from where it was opened, and
+// the submenu's node stayed in the host with nothing left to close it.
+async function inHost(run: () => Promise<void>) {
+  const host = document.createElement("div");
+  host.className = "tf-floats";
+  document.body.append(host);
+  try {
+    await run();
+    expect(host.querySelectorAll(".tf-menu").length).toBe(menus().length);
+  } finally {
+    host.remove();
+  }
+}
+
+async function folderWithOpenIn() {
+  location.hash = `#/repo/${encodeURIComponent(REPO)}/files`;
+  await draw(`${TREE}<p class="else">else</p>`);
+  rightClick(page.querySelector(".tf-fdir")!);
+  await settle();
+  row("open-in").dispatchEvent(new PointerEvent("pointerenter"));
+  await settle();
+  expect(menus()).toHaveLength(2);
+}
+
+test("in the float host, Open in… goes with its menu when the window loses focus", async () => {
+  await inHost(async () => {
+    await folderWithOpenIn();
+    window.dispatchEvent(new Event("blur"));
+    await settle();
+    await settle();
+    expect(menus()).toHaveLength(0);
+  });
+});
+
+test("in the float host, a right press that went down on the menu and came up on another thing draws that thing's menu alone", async () => {
+  await inHost(async () => {
+    await folderWithOpenIn();
+    // WebView2 sends `contextmenu` as the button comes up: the hand moved off the menu between the two.
+    row("open-in").dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 2 }));
+    rightClick(page.querySelector(".file")!, 300, 200);
+    await settle();
+    await settle();
+    expect(menus()).toHaveLength(1);
+    expect(menu()!.style.left).toBe("300px");
+    expect(rows()[0]).toBe("open");
+    key("Escape");
+    await settle();
+    expect(menus()).toHaveLength(0);
+  });
+});
+
+test("in the float host, Esc walks back a level at a time and leaves nothing", async () => {
+  await inHost(async () => {
+    await folderWithOpenIn();
+    key("Escape");
+    await settle();
+    expect(menus()).toHaveLength(1);
+    key("Escape");
+    await settle();
+    expect(menus()).toHaveLength(0);
+  });
+});
+
+/** A small seeded random, so a failing seed fails the same way every run. */
+function seeded(seed: number) {
+  let at = seed;
+  return () => (at = (at * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+}
+
+test.each(Array.from({ length: 60 }, (_, index) => index + 1))("right-click spam, seed %i: at most a menu and its Open in…, and one press away closes everything", async (seed) => {
+  const random = seeded(seed);
+  /** None, a microtask, Svelte's tick or a task: the gaps a real press's events arrive with. */
+  const gap = async () => {
+    const at = random();
+    if (at < 0.3) return;
+    if (at < 0.55) return void (await Promise.resolve());
+    if (at < 0.8) return void (await tick());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  const any = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
+  const steps: string[] = [];
+  await inHost(async () => {
+    location.hash = `#/repo/${encodeURIComponent(REPO)}/files`;
+    await draw(`${TREE}${TICKET_ROW}<p class="else">else</p>`);
+    const things = [page.querySelector(".tf-fdir")!, page.querySelector(".file")!, page.querySelector(".t")!];
+    for (let step = 0; step < 40; step++) {
+      const open = menus();
+      const onMenu = open.length > 0 ? any([...open.flatMap((one) => [...one.querySelectorAll<HTMLElement>("[role=menuitem]")]), open[0]!]) : null;
+      const what = any(["press", "press", "press", "drift", "drift", "press-off", "esc", "blur", "hash"] as const);
+      steps.push(what);
+      const at = { clientX: 20 + Math.floor(random() * 500), clientY: 20 + Math.floor(random() * 400), button: 2, bubbles: true, cancelable: true };
+      if (what === "press" || what === "press-off") {
+        // A real press's events, in the Mac's order (`contextmenu` on the way down) or Windows' (on the way up). `press-off`:
+        // it went down on the menu and came up on a thing, the hand having moved.
+        const down = what === "press-off" && onMenu !== null ? onMenu : any(things);
+        const up = what === "press-off" ? any(things) : random() < 0.25 && onMenu !== null ? onMenu : down;
+        const mac = random() < 0.5;
+        down.dispatchEvent(new PointerEvent("pointerdown", at));
+        await gap();
+        down.dispatchEvent(new MouseEvent("mousedown", at));
+        await gap();
+        if (mac) up.dispatchEvent(new MouseEvent("contextmenu", at));
+        await gap();
+        up.dispatchEvent(new MouseEvent("mouseup", at));
+        await gap();
+        if (!mac) up.dispatchEvent(new MouseEvent("contextmenu", at));
+      } else if (what === "drift") {
+        // The pointer rests on a row: *Open in… ▸* opens its submenu, any other row closes it.
+        if (onMenu !== null) onMenu.dispatchEvent(new PointerEvent("pointerenter"));
+      } else if (what === "esc") {
+        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      } else if (what === "blur") {
+        window.dispatchEvent(new Event("blur"));
+      } else {
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      }
+      await gap();
+      flushSync();
+      const now = menus();
+      expect(now.length, steps.join(" ")).toBeLessThanOrEqual(2);
+      if (now.length === 2) expect(now.filter((one) => one.querySelector('[data-item="app-vscode"]') !== null), steps.join(" ")).toHaveLength(1);
+    }
+    await settle();
+    const away = page.querySelector(".else")!;
+    away.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    away.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    await settle();
+    await settle();
+    expect(menus(), steps.join(" ")).toHaveLength(0);
+    expect(layers.open, steps.join(" ")).toHaveLength(0);
+    expect(page.querySelectorAll("[data-ctx-on]"), steps.join(" ")).toHaveLength(0);
+  });
+});

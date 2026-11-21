@@ -552,18 +552,22 @@
   {/each}
 {/snippet}
 
-<TfMenu
-  bind:open
-  opener={shown?.back ?? null}
-  at={shown?.at ?? null}
-  label="Actions"
-  className="tf-ctx-m"
-  focusItem={shown?.keyed ?? false}
-  keep={() => floatOf(subEl)}
-  {layers}
->
-  <span class="tf-ctx-m-inner" bind:this={menuEl}>{@render rows(entries, true)}</span>
-</TfMenu>
+<!-- Each opening is a menu of its own, at its own point: one that opens while another stands (the press went down on the
+     menu and came up on another thing) replaces it, its listeners and its place on the layer stack with it. -->
+{#key shown}
+  <TfMenu
+    bind:open
+    opener={shown?.back ?? null}
+    at={shown?.at ?? null}
+    label="Actions"
+    className="tf-ctx-m"
+    focusItem={shown?.keyed ?? false}
+    keep={() => floatOf(subEl)}
+    {layers}
+  >
+    <span class="tf-ctx-m-inner" bind:this={menuEl}>{@render rows(entries, true)}</span>
+  </TfMenu>
+{/key}
 {#if sub !== null}
   <TfMenu bind:open={subOpen} opener={sub.opener} beside label={sub.item.label} className="tf-ctx-m" focusItem={subFocus} keep={() => floatOf(menuEl)} {layers}>
     <span class="tf-ctx-m-inner" bind:this={subEl}>{@render rows(sub.item.sub ?? [], false)}</span>

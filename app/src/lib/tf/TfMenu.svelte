@@ -14,7 +14,29 @@
   window losing focus closes it, since what it was opened on may have moved. Its opener is what had focus, which focus
   goes back to. Its *Open in…* is a second `TfMenu` `beside` its item, and each `keep`s the other: a press or focus in
   one is not leaving the other.
+
+  It owns its node to the end (the stuck right-click menu, ux27, 2026-11-21): drawn in the host, the node is outside the
+  run of nodes Svelte removes, and when what holds the menu goes while it stands (the right-click menu's *Open in…* as
+  its menu closes, a page's menu as the address moves), Svelte removes only that run and leaves the node to its own
+  teardown, which takes it out of the host. One menu stands at a time: opening one closes every other, but its own
+  submenu or the menu it is the submenu of.
 -->
+<script lang="ts" module>
+  /** A menu that stands: its node, what it keeps, and how it closes. */
+  interface Standing {
+    node: HTMLElement;
+    keep: () => Element | null;
+    close: () => void;
+  }
+  /** Every menu standing in the window: one, or a menu and its submenu. */
+  const standing = new Set<Standing>();
+
+  /** Tests only: how many menus stand. */
+  export function standingCount(): number {
+    return standing.size;
+  }
+</script>
+
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
 
@@ -82,7 +104,11 @@
   function place(node: HTMLElement) {
     return untrack(() => {
       menu = node;
-      inFloatHost(node);
+      const unhost = inFloatHost(node);
+      // One menu at a time: a menu opening closes every other but its own submenu or parent.
+      const me: Standing = { node, keep, close: () => (open = false) };
+      for (const other of [...standing]) if (other.node !== keep() && other.keep() !== node) other.close();
+      standing.add(me);
       const point = at;
       const spot = () => {
         const edges = node.offsetHeight - node.clientHeight;
@@ -130,6 +156,9 @@
       node.addEventListener("keydown", onkey);
       return () => {
         menu = null;
+        standing.delete(me);
+        // Out of the host, also when what holds the menu goes while it stands and Svelte leaves the node here.
+        unhost();
         window.removeEventListener("resize", spot);
         window.removeEventListener("scroll", scrolled, true);
         sized?.disconnect();
