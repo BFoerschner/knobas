@@ -25,6 +25,12 @@
 .tf-crepos .tf-cr-acts { width: 21px; }
 .tf-crepos tbody td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-crepos tbody td.tf-right { overflow: visible; }
+/* Where nothing hovers, the row's actions stand in the row (`.tf-rowend`, chrome.css): its end keeps a small button's
+   height from the first draw, so *Clone* or *Open in…*, which the checkout read brings, grows no row (the ux28 gate,
+   2026-11-21: 34 to 41 px, a while after the rows drew). Every repository ends up with one of the two. */
+@media not (hover: hover) {
+  .tf-crepos td.tf-right .tf-rowend { min-height: var(--control-h-sm); }
+}
 .tf-crname { display: flex; align-items: center; gap: .3em; min-width: 0; }
 .tf-crname > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-crname > :not(a) { flex: none; }
