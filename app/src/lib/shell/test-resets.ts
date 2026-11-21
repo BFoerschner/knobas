@@ -53,6 +53,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // Each role's face and size, and code's ligatures (2026-11-16, 2026-11-18), stored in `localStorage` and written on
   // <html>: each test starts on the bundled faces at 100 % with no ligatures, and reads the installed fonts afresh.
   "tf/fonts.svelte.ts#fonts": async () => (await import("../tf/fonts.svelte")).fonts.reset(),
+  // The two slots' themes, a person's own, and how a diff's unchanged lines draw (ADR-0051), stored in `localStorage`
+  // and written on <html>: each test starts on the knobas pair with nothing kept.
+  "tf/syntax-theme.svelte.ts#syntaxThemes": async () => (await import("../tf/syntax-theme.svelte")).syntaxThemes.reset(),
   "tf/settings/TfFontRole.svelte#asked": async () => (await import("../tf/settings/TfFontRole.svelte")).forgetInstalledFonts(),
   // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), read from the backend: each test starts on Docs'
   // own page with every space shown, over the real IPC.

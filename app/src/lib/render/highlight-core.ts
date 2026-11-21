@@ -23,7 +23,7 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { bundledLanguages, bundledLanguagesInfo } from "shiki/langs";
 
 import type { HighlightMessage, HighlightReply, LineTokens, Token } from "./port";
-import { roleIn, type TokenRole } from "./roles";
+import { tokenRole, type TokenRole } from "./roles";
 
 /** Lines per step of the pass from the top: a step is short enough for a focus to cut in. */
 export const CHUNK = 400;
@@ -187,18 +187,12 @@ export const loadBundled: Loader = async (id) => {
   return (await load()).default;
 };
 
-/** A token's role from its colour: `var(--hl-kw)` is `kw`, anything else plain. */
-function roleOf(token: ThemedToken): TokenRole {
-  const color = token.color ?? "";
-  return color.startsWith("var(--hl-") ? (color.slice("var(--hl-".length, -1) as TokenRole) : "";
-}
-
 /** Shiki's tokens as the port's: text and role, neighbours of one role joined. */
 function toLines(tokens: ThemedToken[][], lang: string): LineTokens[] {
   return tokens.map((line) => {
     const out: Token[] = [];
     for (const token of line) {
-      const kind = roleIn(lang, roleOf(token));
+      const kind = tokenRole("shiki", token.color ?? "", lang);
       const last = out[out.length - 1];
       if (last && last[1] === kind) out[out.length - 1] = [last[0] + token.content, kind];
       else out.push([token.content, kind]);

@@ -3,9 +3,11 @@
  * what a token is to a reader, never a colour. Each role is a class (`.tf-hl-<role>`, `tf/css/code.css`) and a variable
  * (`--hl-<role>`, `tf/css/tokens.css`) a theme sets, so a theme change recolours what is drawn with no second pass.
  *
- * The highlight worker turns each engine's own token names into these: Shiki's scopes through `ROLE_SCOPES`
- * (`highlight-core.ts`), Pierre Highlights' types through {@link PIERRE_ROLE}. Then {@link roleIn} folds a data
- * language's properties, tags and attributes into keys, whichever engine cut them.
+ * One way in for every engine: an engine cuts text into tokens with names of its own, its {@link RoleMap} turns a name
+ * into a role, and {@link tokenRole} folds a data language's properties, tags and attributes into keys, whichever
+ * engine cut them. Adding an engine is adding its map to {@link ROLE_MAPS}. Shiki's names are the colours its one theme
+ * gives each scope (`var(--hl-<role>)`, from `ROLE_SCOPES` in `highlight-core.ts`); Pierre Highlights' are its token
+ * types ({@link PIERRE_ROLE}).
  */
 
 /** The seventeen roles a theme colours, in the order the editor lists them. */
@@ -125,4 +127,36 @@ export const DATA_LANGS: ReadonlySet<string> = new Set(["json", "jsonc", "json5"
 /** What `role` is in `lang`: in a data language a property, tag or attribute is a key. */
 export function roleIn(lang: string, role: TokenRole): TokenRole {
   return DATA_LANGS.has(lang) && (role === "prop" || role === "tag" || role === "attr") ? "key" : role;
+}
+
+/** The engines that cut text into tokens. Which one runs is the worker's business (ADR-0051). */
+export type EngineId = "shiki" | "pierre";
+
+/** How one engine's token names become roles. */
+export interface RoleMap {
+  readonly engine: EngineId;
+  /** The role of one of the engine's token names; `""` for one that draws plain. */
+  role(name: string): TokenRole;
+}
+
+const ROLE_SET: ReadonlySet<string> = new Set<string>([...ROLES, ...SHAPES]);
+
+/** Each engine's map. */
+export const ROLE_MAPS: Readonly<Record<EngineId, RoleMap>> = {
+  // Shiki's one theme colours a scope `var(--hl-<role>)`: the name is that colour.
+  shiki: {
+    engine: "shiki",
+    role(name) {
+      if (!name.startsWith("var(--hl-")) return "";
+      const role = name.slice("var(--hl-".length, -1);
+      return ROLE_SET.has(role) ? (role as TokenRole) : "";
+    },
+  },
+  // Pierre Highlights' `cssVariables` theme colours a token `var(--hls-<type>)`.
+  pierre: { engine: "pierre", role: (name) => (name.startsWith("var(--hls-") ? pierreRole(name.slice("var(--hls-".length, -1)) : pierreRole(name)) },
+};
+
+/** The role a token `engine` named `name` carries in `lang`. */
+export function tokenRole(engine: EngineId, name: string, lang: string): TokenRole {
+  return roleIn(lang, ROLE_MAPS[engine].role(name));
 }

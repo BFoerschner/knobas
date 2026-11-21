@@ -1,7 +1,7 @@
 /** The roles a token carries, and how each engine's own names become them (ADR-0051). */
 import { expect, test } from "vitest";
 
-import { DATA_LANGS, PIERRE_ROLE, pierreRole, ROLE_NAMES, ROLES, roleIn } from "./roles";
+import { DATA_LANGS, PIERRE_ROLE, pierreRole, ROLE_NAMES, ROLES, roleIn, tokenRole } from "./roles";
 
 test("there are seventeen roles, each with the name a person reads", () => {
   expect(ROLES).toHaveLength(17);
@@ -47,4 +47,13 @@ test("a data language folds properties, tags and attributes into keys, and leave
   expect(roleIn("typescript", "prop")).toBe("prop");
   expect(roleIn("xml", "tag")).toBe("tag");
   expect(roleIn("java", "attr")).toBe("attr");
+});
+
+test("every engine's tokens become roles through one map, then the data-language fold", () => {
+  expect(tokenRole("shiki", "var(--hl-kw)", "java")).toBe("kw");
+  expect(tokenRole("shiki", "var(--hl-prop)", "yaml")).toBe("key");
+  expect(tokenRole("shiki", "var(--hl-nope)", "java")).toBe("");
+  expect(tokenRole("shiki", "var(--ink)", "java")).toBe("");
+  expect(tokenRole("pierre", "var(--hls-keyword-import)", "ts")).toBe("kw");
+  expect(tokenRole("pierre", "var(--hls-property)", "json")).toBe("key");
 });
