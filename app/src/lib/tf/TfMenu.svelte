@@ -35,6 +35,11 @@
   export function standingCount(): number {
     return standing.size;
   }
+
+  /** Tests only: forget the menus a test left standing (`test-resets.ts`). */
+  export function forgetStandingMenus(): void {
+    standing.clear();
+  }
 </script>
 
 <script lang="ts">
