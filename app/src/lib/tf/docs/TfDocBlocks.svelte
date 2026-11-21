@@ -19,6 +19,7 @@
   import { whileNear } from "../../shell/near-view";
   import TfDocEmbed from "./TfDocEmbed.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
+  import TfDocCode from "./TfDocCode.svelte";
   import TfMarked from "./TfMarked.svelte";
   import type { DocBlock, TableCell } from "../../ipc/entity";
   import { DOC_BLOCKS_FIRST, TABLE_ROWS_FIRST, headed, headerColumn, includeMiss, pageHash, panelLabel, panelTone } from "./docs";
@@ -130,7 +131,7 @@
         {#if block.language}<span>{block.language}</span>{/if}
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => oncopy(code)}>Copy</button>
       </div>
-      <pre><code><TfMarked text={code} {stems} /></code></pre>
+      {#key code}<TfDocCode {code} language={block.language ?? null} {stems} />{/key}
     </div>
   {:else if block.type === "table"}
     <!-- A cell holds blocks and spans what it spans; a header row heads columns and a header column rows (#2436).

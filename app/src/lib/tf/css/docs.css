@@ -118,6 +118,8 @@
   --fs: var(--size-code); font: calc(var(--t-md) * var(--fs))/1.55 var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule);
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
 }
+/* A block's code is as big as its `pre` (ADR-0051): `.tf-doc code` above is the inline chip, which would shrink and pad it. */
+.tf-doc pre code { font: inherit; font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; border-radius: 0; }
 /* A table scrolls sideways inside its frame, so a wide one never widens the page (#2436). */
 .tf-doc-tbl { overflow-x: auto; background: var(--paper); margin: 0 0 18px; }
 .tf-doc table { border-collapse: collapse; width: 100%; --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-md) * var(--fs)); line-height: 1.45; }
