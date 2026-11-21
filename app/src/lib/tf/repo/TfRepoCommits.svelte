@@ -23,10 +23,17 @@
 
   *Open in…* (#2274): a commit the mirror holds has the menu at the row's end,
   offering what accepts a commit and *Browser*; a click in it is not the row's.
+
+  **On the working tree** (`disk`, 2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`):
+  the table starts with *Uncommitted changes* where the checkout has any (it opens *Local changes*), then the commits
+  the checkout has that the forge lacks, read from the checkout (`entity_range_files` at `~working-tree`, ADR-0049:
+  against the mirror's tip of the checkout's branch, or the default branch where the forge lacks it), each *not pushed*
+  and drawn plain. A branch the forge lacks says so in a line over the table. The tab draws once both reads have
+  answered, so no row comes in above another.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { ShownView, ViewRow } from "../../ipc/entity";
+  import type { RangeCommit, ShownView, ViewRow } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import TfHeldNote from "../TfHeldNote.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -39,8 +46,9 @@
   import { onRefreshed } from "./refreshed.svelte";
   import { onViewFresh } from "./view-fresh.svelte";
   import { commitLine } from "./file-tree";
-  import { commitHash, sourceName, viewRows, visibleViewRows } from "./repo";
-  import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
+  import { commitHash, repoHash, sourceName, viewRows, visibleViewRows } from "./repo";
+  import { diffHash, picked, rangeOf, selectRange, shaOfCommit, WORKING_TREE, type RangePick } from "../diff/address";
+  import TfStateChip from "../TfStateChip.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { waitPhase } from "../waiting";
@@ -53,8 +61,9 @@
     defaultBranch,
     source = null,
     refreshed = 0,
+    disk = null,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "codeFacts" | "listen">;
+    ports: Pick<RepoPorts, "entityView" | "codeFacts" | "listen" | "rangeFiles">;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -64,6 +73,12 @@
     source?: WriteSource | null;
     /** The page's refreshes (#2135): each reads the commits again over what the tab drew. */
     refreshed?: number;
+    /**
+     * The working tree chosen in the branch box: the checkout's branch (`null` detached), whether the forge has it (`null`
+     * while the branches are being read), what its unpushed commits are counted against, how many paths are uncommitted,
+     * how many commits git counts ahead of the upstream, and a stamp that changes with any of it.
+     */
+    disk?: { branch: string | null; onForge: boolean | null; base: string | null; changed: number; ahead: number; stamp: string } | null;
   } = $props();
 
   /** The commits drawn: another branch's are kept, dimmed, while this one's are read (#2246). */
@@ -90,6 +105,35 @@
       live = false;
     };
   });
+
+  /** On the working tree, the checkout's commits the forge lacks, newest first; `null` until read. */
+  let unpushed = $state<RangeCommit[] | null>(null);
+  let unpushedRead = 0;
+  /** What the last read was for: the page hands a new `disk` on any change of its own, which asks nothing new. */
+  let unpushedFor: string | null = null;
+  $effect(() => {
+    const was = disk;
+    const key = was === null ? null : JSON.stringify(was);
+    if (key === unpushedFor) return;
+    unpushedFor = key;
+    if (was === null) return void (unpushed = null);
+    // A branch the forge has, with nothing ahead of its upstream, has nothing to list: no read.
+    const asks = was.branch !== null && was.base !== null && was.onForge !== null && (!was.onForge || was.ahead > 0);
+    if (!asks || ports.rangeFiles === undefined) return void (unpushed = was.onForge === null ? null : []);
+    const id = ++unpushedRead;
+    // Read again on a new stamp behind the rows drawn, which stay until it lands.
+    untrack(() => ports.rangeFiles!)(repoId, was.base!, WORKING_TREE, false, `commits-unpushed-${repoId}`).then(
+      (list) => {
+        if (id === unpushedRead) unpushed = list.range?.commits ?? [];
+      },
+      () => {
+        // A checkout git can't list leaves the forge's commits as they are.
+        if (id === unpushedRead) unpushed = [];
+      },
+    );
+  });
+  /** The working tree's own rows are drawn: none to wait for, or both reads answered. */
+  const diskReady = $derived(disk === null || unpushed !== null);
 
   // Kept by the app and read again behind its answer (PR #2479): a move is drawn over what the tab drew.
   onViewFresh(
@@ -159,6 +203,14 @@
   const shown = $derived(
     rows === null ? [] : visibleViewRows(rows, filter.text, (filter.chips["who"] ?? []).includes("Mine") ? mine : null),
   );
+  /** The working tree's rows the filter keeps: none under *Mine*, which reads only what the mirror declares. */
+  const mineOnly = $derived((filter.chips["who"] ?? []).includes("Mine"));
+  const typed = $derived(filter.text.trim().toLowerCase());
+  const localShown = $derived(
+    mineOnly || unpushed === null ? [] : unpushed.filter((commit) => typed === "" || [commit.sha.slice(0, 7), commit.title, commit.meta ?? ""].some((text) => text.toLowerCase().includes(typed))),
+  );
+  const dirtyShown = $derived(disk !== null && disk.changed > 0 && !mineOnly && (typed === "" || "uncommitted changes".includes(typed)));
+  const anyLocal = $derived(dirtyShown || localShown.length > 0);
 
   /** The commits picked for *Diff selected*, as rows of `shown`. */
   let pick = $state<RangePick | null>(null);
@@ -203,14 +255,37 @@
     onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
 <TfHeldNote {heldAt} source={sourceName(source)} failed={heldFailed} />
-<TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
-{#if rows !== null && rows.length === 0}
+{#if disk !== null && disk.onForge === false && disk.branch !== null}
+  <!-- The checkout's branch is not on the forge: what the table lists under it is the default branch's. -->
+  <p class="tf-heldnote tf-wtnote">{disk.branch} is not on {sourceName(source)} yet. Push it to open a pull request from it.</p>
+{/if}
+<TfWaiting phase={waitPhase({ drawn: rows !== null && diskReady, reading, failed: failed !== null })} error={failed}>
+{#if rows !== null && rows.length === 0 && !anyLocal}
   <div class="tf-empty"><p>{branch !== null && branch !== defaultBranch ? `${branch} has no commits ${defaultBranch ?? "its base"} lacks.` : "This branch has no commits yet."}</p></div>
-{:else if shown.length === 0}
+{:else if shown.length === 0 && !anyLocal}
   <TfNoMatch noun="commits" {filter} />
 {:else}
   <table class="tf-tbl tf-rcommits">
     <tbody>
+      {#if dirtyShown}
+        <tr class="tf-row tf-rlocal" onclick={(event) => (event.target as Element | null)?.closest("a") || (location.hash = repoHash(repoId, "local"))}>
+          {#if anyPickable}<td class="tf-rpick"></td>{/if}
+          <td class="tf-mono"></td>
+          <td><a href={repoHash(repoId, "local")}>Uncommitted changes</a></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval">{disk!.changed} {disk!.changed === 1 ? "file" : "files"} changed</span></td>
+          <td class="tf-ropen"></td>
+        </tr>
+      {/if}
+      {#each localShown as commit (commit.sha)}
+        <!-- Read from the checkout: the mirror holds no id for it yet, so it is drawn plain. -->
+        <tr class="tf-rlocal" title={`${commit.sha.slice(0, 7)} is in your checkout, not on ${sourceName(source)}`}>
+          {#if anyPickable}<td class="tf-rpick"></td>{/if}
+          <td class="tf-mono"><Marked text={commit.sha.slice(0, 7)} typed={filter.text} /></td>
+          <td><Marked text={commit.title} typed={filter.text} /> <TfStateChip text="not pushed" tone="warn" /></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commit.meta ?? ""} typed={filter.text} /></span></td>
+          <td class="tf-ropen"></td>
+        </tr>
+      {/each}
       {#each shown as row, n (n)}
         <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
           {#if anyPickable}

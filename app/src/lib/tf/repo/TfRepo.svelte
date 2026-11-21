@@ -964,6 +964,24 @@
   });
   const selected = $derived(onDisk ? (diskBranch ?? defaultBranch) : (picked ?? defaultBranch));
   /**
+   * The checkout's branch the forge lacks, once the branches are read: *New pull request* is off until it is pushed, and
+   * Commits says so over its table (2026-11-21).
+   */
+  const diskUnpushed = $derived(onDisk && diskTree?.branch != null && known !== null && diskBranch === null ? diskTree.branch : null);
+  /** What Commits lays over its table on the working tree (`TfRepoCommits`' `disk`). */
+  const commitsDisk = $derived(
+    onDisk && diskTree !== null
+      ? {
+          branch: diskTree.branch,
+          onForge: diskTree.branch === null ? true : known === null ? null : diskBranch !== null,
+          base: diskBranch?.name ?? defaultBranch?.name ?? null,
+          changed: diskTree.changed + diskTree.untracked,
+          ahead: diskTree.ahead,
+          stamp: `${diskTree.head ?? ""}:${diskTree.changed}:${diskTree.untracked}:${diskTree.ahead}`,
+        }
+      : null,
+  );
+  /**
    * The entity every tab reads at: the repository itself on its default
    * branch (or before the branches answer none), the branch on any other.
    */
@@ -1425,7 +1443,10 @@
              hidden and out of the Tab order, because a shorter row lets the tabs under it jump between tabs (F-249). Where the row
              stacks under the title it starts at the page's edge, so the hidden room goes after what shows (F-256). -->
         <span class="tf-repohold" class:tf-held={tab === "compare"} class:tf-stacked={stacked} inert={tab === "compare"}>
-          {#if oneBranch}
+          {#if diskUnpushed !== null}
+            <!-- The working tree's branch is not on the forge: a pull request needs it there first (2026-11-21). -->
+            <button type="button" class="tf-btn tf-primary" aria-disabled="true" title={`Push ${diskUnpushed} to ${sourceName(source)} first`}>New pull request</button>
+          {:else if oneBranch}
             <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
           {:else if sentWaits || seeking}
             <!-- Its room, unseen, so the tabs under the header hold still until the read brings it back (F-249), or until the
@@ -1580,7 +1601,7 @@
                 />
                 {/key}
               {:else if one === "commits"}
-                <TfRepoCommits {ports} {repoId} {at} {source} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
+                <TfRepoCommits {ports} {repoId} {at} {source} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} disk={commitsDisk} />
               {:else if one === "builds"}
                 <TfRepoBuilds
                   {repoId}

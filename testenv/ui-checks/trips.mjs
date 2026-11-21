@@ -198,7 +198,7 @@
 //                 each of `steps` by real input: { press } by real pointer at 15% of the control, with `file` the file chooser that press
 //                 opens answered with that file of `testenv/ui-checks/`; { key } a key; { type } words typed into what holds focus. Then
 //                 `check`, given what `before` read, must answer null within `within` ms (4000): until then it gives the reason it
-//                 fails. Also fails if the press moved the address or opened a dialog.
+//                 fails. Also fails if the press opened a dialog, or moved the address unless the trip `leaves`.
 //
 // A first Enter that changes nothing can't run: the trip would pass without having pressed anything.
 // Writes are counted by wrapping window.__TAURI_INTERNALS__.invoke, which @tauri-apps/api looks up on every call (shell/dev/fake-tauri.ts).
@@ -560,6 +560,13 @@ const PAGES = [
   { page: "The working tree in the branch box", route: `${REPO}/files/src/sepa/retry.rs`, trips: [
     { id: "wt-row-key", kind: "enter-twice", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }], press: { sel: ".tf-ftree a[data-path='Cargo.toml']" }, leaves: true },
     { id: "wt-fields", kind: "esc-sweep", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }] },
+  ] },
+  // Commits on the working tree (the themes follow-up, 2026-11-21): *Uncommitted changes* first, opening Local changes
+  // once by key and once with the pointer still; the commit to push under it, drawn plain.
+  { page: "Commits on the working tree", route: `${REPO}/commits`, trips: [
+    { id: "wt-commits-uncommitted-key", kind: "enter-twice", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }], press: { sel: ".tf-rlocal a", text: "Uncommitted changes" }, leaves: true },
+    { id: "wt-commits-uncommitted-pointer", kind: "press-result", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }], steps: [{ press: { sel: ".tf-rlocal a", text: "Uncommitted changes" } }], leaves: true, check: `() => location.hash.endsWith("/local") && document.querySelector(".tf-kept:not([hidden]) .tf-tabs a[aria-current=page]")?.textContent.trim().startsWith("Local changes") ? null : "the press went to " + location.hash` },
+    { id: "wt-commits-fields", kind: "esc-sweep", strict: true, finding: "working-tree", prep: [{ wait: 900 }, { eval: CHOOSE_WORKING_TREE }, { wait: 900 }] },
   ] },
   // Folder renderers (ADR-0044, ux17): every press they brought, twice by key and twice with the pointer still.
   { page: "A folder drawn by a folder renderer", route: `${REPO}/render/folder-listing/src`, trips: [
@@ -4018,7 +4025,7 @@ async function startBrowser() {
     }
     const after = await snap();
     const reasons = why ? [why] : [];
-    if (after.hash !== first.hash) reasons.push(`the address moved to ${after.hash}`);
+    if (after.hash !== first.hash && !t.leaves) reasons.push(`the address moved to ${after.hash}`);
     if (after.dialogs > first.dialogs) reasons.push(`a dialog opened: ${after.dialog}`);
     return { reasons, note: `${did.join(", then ")}: ${why ? "not as asked" : "as asked"}` };
   }

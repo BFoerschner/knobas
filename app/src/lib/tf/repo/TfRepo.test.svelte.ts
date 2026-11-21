@@ -1811,3 +1811,27 @@ test("a held working tree whose checkout stops reading goes back to the default 
   expect(branchSelect().value).toBe("main");
   expect(toasts.items.some((toast) => toast.text === "The working tree can't be read any more: git was not found. Showing main.")).toBe(true);
 });
+
+test("on a working tree whose branch the forge lacks, New pull request is off until the branch is pushed, and Commits says so", async () => {
+  const { stand } = onDiskPorts();
+  const unpushed = {
+    ...stand,
+    entityCheckout: async (id: string) => {
+      const was = await stand.entityCheckout(id);
+      return { ...was, tree: { status: "read" as const, branch: "feat/local-only", head: HEAD, upstream: null, ahead: 0, behind: 0, changed: 2, untracked: 1, conflicted: 0 } };
+    },
+  };
+  await draw([REPO, "commits"], unpushed);
+  const primary = () => [...target.querySelectorAll<HTMLElement>(".tf-fhead .tf-repohold .tf-primary")].find((el) => text(el) === "New pull request")!;
+  expect(primary().tagName).toBe("A");
+  await chooseWorkingTree();
+  expect(primary().tagName).toBe("BUTTON");
+  expect(primary().getAttribute("aria-disabled")).toBe("true");
+  expect(primary().title).toBe("Push feat/local-only to Tidewater Gitea first");
+  expect(text(target.querySelector(".tf-wtnote"))).toBe("feat/local-only is not on Tidewater Gitea yet. Push it to open a pull request from it.");
+  // Back on a branch, the button proposes one again.
+  branchSelect().value = "main";
+  branchSelect().dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(primary().tagName).toBe("A");
+});

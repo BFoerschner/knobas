@@ -41,12 +41,25 @@ The design system's *Controls* (form controls) carries the rule; ADR-0049 has a 
   no IPC addition.
 - A file git names changed that the folder read lacks still gets its row (the list is what is on disk).
 
+## Built later the same day (the themes follow-up)
+
+- **Commits** on the working tree starts its table with *Uncommitted changes* where the checkout has any (*N files
+  changed*, opening *Local changes*), then the commits the checkout has that the forge lacks, read from the checkout
+  (`entity_range_files` at `~working-tree`, ADR-0049: against the mirror's tip of the checkout's branch when git counts
+  it ahead, or the default branch where the forge lacks the branch), each drawn plain with a *Not pushed* chip, then the
+  forge's commits. The tab draws once both reads answer, so no row comes in above another; a new stamp reads again
+  behind the rows drawn. *Mine* leaves the checkout's rows out (it reads only what the mirror declares).
+- **A branch the forge lacks**: Commits says *⟨branch⟩ is not on ⟨source⟩ yet. Push it to open a pull request from it.*
+  over the table (the held-note line), and *New pull request* is drawn off with *Push ⟨branch⟩ to ⟨source⟩ first*.
+  Neither shows before the branch list has answered, so nothing flips.
+- The fixture's checkout lists its one commit to push. Checked by `TfRepoCommits.working.test.svelte.ts` and a test in
+  `TfRepo.test.svelte.ts` (mutants: drawn before the checkout answers, no read for a branch the forge lacks, no line,
+  no guard against the same facts handed again, the row on a clean checkout, no wait for the branch list, the button
+  left on), the trips `wt-commits-uncommitted-key`, `-pointer` and `wt-commits-fields`, and the moves place `wt-commits`.
+
 ## Left for later
 
-Commits' three lines (*Uncommitted changes* above the table, unpushed commits, a branch the mirror lacks), *New pull
-request* disabled with *Push ⟨branch⟩ to ⟨source⟩ first* where the forge lacks the checkout's branch, commits read
-from the checkout so unpushed ones list, folder renderers on the working copy (until then a folder renderer renders
-`HEAD`'s files), and a rename as one row.
+Folder renderers on the working copy (until then a folder renderer renders `HEAD`'s files), and a rename as one row.
 
 ## Checked by
 

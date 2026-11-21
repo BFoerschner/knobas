@@ -142,6 +142,8 @@ function workingFiles(): Record<string, [before: string | null, after: string]> 
   return asciiArt() ? { ...WORKING_FILES, "docs/states.txt": [ASCII_BEFORE, ASCII_AFTER] } : WORKING_FILES;
 }
 const WORKING_BASE = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
+/** The fixture checkout's one commit its upstream lacks (`tree.ahead` is 1): Commits on the working tree lists it. */
+const WORKING_AHEAD = { sha: "4f1c2a9e0b7d3c5a8e6f1b2d4c7a9e0f3b5d8c1a", title: "Park a batch after its third retry", meta: "mara · 20 minutes ago" };
 /** `?fake-touched`: every ask finds the tree touched since the last (a new stamp each time). */
 let workingAsks = 0;
 const touched = () => new URLSearchParams(globalThis.location?.search).has("fake-touched");
@@ -160,7 +162,8 @@ function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } 
   const tree = checkout.tree?.status === "read" ? checkout.tree : null;
   workingAsks += 1;
   return {
-    diff: { files, truncated: false, range: { repository: entityId, base: WORKING_BASE, head: WORKING, commits: [] }, read_at: "checkout" },
+    // The checkout's one commit to push (its tree is 1 ahead), as the commits `HEAD` has that the base lacks.
+    diff: { files, truncated: false, range: { repository: entityId, base: WORKING_BASE, head: WORKING, commits: [WORKING_AHEAD] }, read_at: "checkout" },
     working: {
       stamp: touched() ? `touched-${workingAsks}` : "fixed",
       head: tree?.head ?? "9c1d2aa0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a",

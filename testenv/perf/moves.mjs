@@ -99,7 +99,12 @@ const SWITCHED = (name, at, more = {}) => ({
   go: at, hash: at, away: CODE_COLOURS, track: CODE_LINES, ...more,
 });
 const COMMIT = `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`;
+/** The branch box's *Working tree* picked as its change event would: a scripted pick is no input, so it is a step, not the press. */
+const CHOOSE_WORKING_TREE = `(() => { const box = document.querySelector("${shown} .tf-bsel select"); box.value = "~working-tree"; box.dispatchEvent(new Event("change", { bubbles: true })); })()`;
 const HL_PLACES = [
+  // Commits on the working tree (the themes follow-up, 2026-11-21): *Uncommitted changes* and the commit to push draw with
+  // the forge's commits in one frame, the checkout's read landing 400 ms late, so none comes in above another.
+  { name: "wt-commits", fixture: true, late: "entity_range_files:400", start: `#/repo/${REPO}`, before: [{ eval: CHOOSE_WORKING_TREE }], beforeReturn: [{ eval: CHOOSE_WORKING_TREE }], press: `${shown} .tf-tabs a[href$="/commits"]`, hash: `#/repo/${REPO}/commits`, away: `#/repo/${REPO}` },
   SWITCHED("file", `#/repo/${REPO}/files/src/payout/retry/RetryQueue.java`),
   ...["full", "quiet", "grey"].map((mode) => SWITCHED(`diff-${mode}`, COMMIT, { store: { "knobas.diff.unchanged": mode } })),
   SWITCHED("diff-split", COMMIT, { store: { "knobas.diff.layout": "split" } }),
@@ -339,10 +344,11 @@ async function leave(p) {
   else if (away.startsWith("#/")) { await js(`location.hash = ${JSON.stringify(away)}, 1`); await quiet(1200); }
   else { await press(await find(away === "settings" ? GEAR : nav(away))); await quiet(1200); }
 }
-/** `before` / `beforeReturn`: addresses (`go`) and presses (`press`, `text`, `starts`) made, unrecorded, before a round. */
+/** `before` / `beforeReturn`: addresses (`go`), page scripts (`eval`) and presses (`press`, `text`, `starts`) made, unrecorded, before a round. */
 async function steps(list) {
   for (const s of list ?? []) {
     if (s.go) await js(`(location.hash = ${JSON.stringify(s.go)}, 1)`);
+    else if (s.eval) await js(`(${s.eval}, 1)`);
     else await press(await find(s.press, s.text ?? null, !!s.starts));
     await quiet(1200);
   }
