@@ -9,8 +9,8 @@
 .tf-views h2 { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
 .tf-views a { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; text-decoration: none; color: var(--ink); }
 .tf-views a:hover { background: var(--sheet-2); }
-.tf-views a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
-.tf-views a[aria-current="true"] .tf-count { background: rgba(255,255,255,.18); color: inherit; }
+.tf-views a[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
+.tf-views a[aria-current="true"] .tf-count { background: color-mix(in srgb, var(--on-fill) 18%, transparent); color: inherit; }
 .tf-views a .tf-count { margin-left: auto; }
 .tf-board-wrap .tf-sbody { display: flex; flex-direction: column; }
 /* The board head is the canonical header (#2293): the title block left, `.tf-acts` right (the Board/List
@@ -89,7 +89,7 @@
 .tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 /* As on the ticket's own card: `--rule` and `--ink-2` are the paper's, and go faint on the yellow in either theme. */
-.tf-tcard.tf-card .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
+.tf-tcard.tf-card .tf-lab { border-color: color-mix(in srgb, var(--card-shade) 25%, transparent); color: var(--card-ink); }
 /* A card's first line never wraps: the key holds its width, and what follows it gives up first. */
 .tf-thead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .tf-tcard .tf-k { --fs: var(--size-code); font: 600 calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); flex: 0 1 auto; min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

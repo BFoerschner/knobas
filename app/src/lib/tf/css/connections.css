@@ -39,7 +39,7 @@
 
 /* ---------- the Connections drawer (#820, R-4.3, R-6.1) ---------- */
 /* In the float host (`layers.css`), so nothing on the page can size it. */
-.tf-scrim { position: fixed; inset: 0; background: rgba(10,15,20,.35); z-index: 20; animation: tf-fade .15s ease-out; }
+.tf-scrim { position: fixed; inset: 0; background: color-mix(in srgb, var(--scrim) 35%, transparent); z-index: 20; animation: tf-fade .15s ease-out; }
 .tf-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--sheet);
   border-left: 1px solid var(--rule); z-index: 21; display: flex; flex-direction: column; box-shadow: var(--shadow);

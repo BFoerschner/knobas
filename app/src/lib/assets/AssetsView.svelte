@@ -3690,7 +3690,7 @@
 
   .row.tip {
     background: var(--fill);
-    color: var(--sheet);
+    color: var(--on-fill);
   }
 
   .row.tip .mg {
@@ -3790,7 +3790,7 @@
   }
 
   .row.tip .badge {
-    background: rgb(255 255 255 / 18%);
+    background: color-mix(in srgb, var(--on-fill) 18%, transparent);
     color: inherit;
   }
 

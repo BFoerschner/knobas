@@ -91,7 +91,7 @@
 .tf-ftree .tf-fdir { border: 0; background: none; cursor: pointer; font-weight: 600; }
 .tf-ftree .tf-fsub { color: var(--ink-2); }
 .tf-ftree a:hover, .tf-ftree .tf-fdir:hover { background: var(--sheet-2); }
-.tf-ftree a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
+.tf-ftree a[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
 .tf-ftree a[aria-current="true"] .tf-ficon { stroke: var(--sheet); }
 .tf-ftree a.tf-changed::after { content: "M"; margin-left: auto; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 700 calc(var(--t-2xs) * var(--fs)) var(--sans); color: var(--warn); }
 .tf-ftree a[aria-current="true"].tf-changed::after { color: inherit; }
@@ -363,7 +363,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-flist button:hover { background: var(--sheet-2); }
 /* The file you are in is the rail's ink pill, as every rail's selected row is. */
 .tf-flist button[aria-current="true"] {
-  background: var(--fill); color: var(--sheet); border-radius: 4px;
+  background: var(--fill); color: var(--on-fill); border-radius: 4px;
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
 }
 .tf-flist button[aria-current="true"] :is(.tf-add-n, .tf-del-n) { color: inherit; }

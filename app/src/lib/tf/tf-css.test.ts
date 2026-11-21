@@ -9,6 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
 
+import { parse, parseCss } from "svelte/compiler";
 import { expect, test } from "vitest";
 
 import { ROLES } from "../render/roles";
@@ -113,9 +114,15 @@ test("the spec's colour table was read, so the next two tests check something", 
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
 });
 
+/**
+ * A colour token as `tokens.css` writes it (ADR-0055): its side's variable with knobas's value behind it,
+ * `--paper: var(--paper-light, #E4E8EC);`, or the plain value for a token no theme sets.
+ */
+const holds = (body: string, token: string, side: "light" | "dark", value: string) => body.includes(`${token}: var(${token}-${side}, ${value});`) || body.includes(`${token}: ${value};`);
+
 test("light tokens are the spec's, on :root (#881)", () => {
   const light = block(code, ":root");
-  const wrong = COLOURS.filter(([token, value]) => !light.includes(`${token}: ${value};`));
+  const wrong = COLOURS.filter(([token, value]) => !holds(light, token, "light", value));
   expect(wrong).toEqual([]);
 });
 
@@ -124,7 +131,7 @@ test("dark tokens are the spec's, by the OS unless forced light, and when forced
   const byOs = block(media, ':root:not([data-theme="light"])');
   const forced = block(code, ':root[data-theme="dark"]');
   for (const dark of [byOs, forced]) {
-    const wrong = COLOURS.filter(([token, , value]) => !dark.includes(`${token}: ${value};`));
+    const wrong = COLOURS.filter(([token, , value]) => !holds(dark, token, "dark", value));
     expect(wrong).toEqual([]);
   }
 });
@@ -727,11 +734,20 @@ test("every yellow card is a light surface in both themes: the page card's, the 
       .filter(([, list]) => list!.split(",").some((one) => one.trim() === selector))
       .map(([, , body]) => body)
       .join("\n");
+  // Each card's tone reads the card's own token (ADR-0055), whose value in both of knobas's themes is the light tone's.
   const wrong = [".tf-ticketcard.tf-card", ".tf-tcard.tf-card", ".tf-row.tf-card"].flatMap((selector) => {
     const card = rulesNaming(selector);
-    return TONES.filter((token) => !card.includes(`${token}: ${light.get(token)};`)).map((token) => `${selector} ${token}`);
+    return TONES.filter((token) => !card.includes(`${token}: var(--card-${token.slice(2)});`)).map((token) => `${selector} ${token}`);
   });
   expect(wrong).toEqual([]);
+  const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
+  const sides = [["light", block(code, ":root")], ["dark", block(media, ':root:not([data-theme="light"])')], ["dark", block(code, ':root[data-theme="dark"]')]] as const;
+  for (const [side, body] of sides)
+    for (const token of TONES) {
+      // Dark's Unknown dot on the card is a step darker than light's, so it is 3:1 on dark's card (ADR-0055, 3.2).
+      const value = side === "dark" && token === "--muted" ? "#5D6773" : light.get(token)!;
+      expect(body, `${side} --card-${token.slice(2)}`).toContain(`--card-${token.slice(2)}: var(--card-${token.slice(2)}-${side}, ${value});`);
+    }
   // Every dot and chip draws from these tokens, so none needs a value of its own on the card.
   expect(block(code, ".tf-dot.tf-err")).toContain("var(--err)");
   expect(block(code, ".tf-jobcard .tf-chip.tf-err")).toContain("var(--err)");
@@ -852,8 +868,10 @@ test("a diff's unchanged lines draw quiet, grey or in full; changed lines and wo
 test("the preview's side classes re-declare the other side's surface and ink tokens as tokens.css writes them (ADR-0051)", () => {
   const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
   const decls = (body: string) => Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
-  const light = decls(block(code, ":root"));
-  const dark = decls(block(media, ':root:not([data-theme="light"])'));
+  // A token's value is the fallback behind its side's variable (ADR-0055).
+  const unwrap = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).map(([name, value]) => [name, /^var\(--[a-z0-9-]+-(?:light|dark), (.+)\)$/.exec(value)?.[1] ?? value]));
+  const light = unwrap(decls(block(code, ":root")));
+  const dark = unwrap(decls(block(media, ':root:not([data-theme="light"])')));
   for (const [cls, side] of [[".tf-as-light", light], [".tf-as-dark", dark]] as const) {
     const own = decls(block(code, cls));
     for (const [name, value] of Object.entries(own)) {
@@ -862,4 +880,127 @@ test("the preview's side classes re-declare the other side's surface and ink tok
     }
     expect(Object.keys(own)).toEqual(expect.arrayContaining(["--paper", "--sheet", "--sheet-2", "--ink", "--ink-2", "--ok-bg", "--err-bg", "--diff-add", "--diff-del"]));
   }
+});
+
+// ---------- every colour a token (ADR-0055) ----------
+
+type CssNode = { type: string; property?: string; value?: string; prelude?: CssNode | string; name?: string; block?: CssNode | null; children?: CssNode[]; start: number; end: number };
+
+/** Every stylesheet under `app/src` and every component's `<style>`, read as the style gate reads them (`style-cost.test.ts`). */
+function everySheet(): { file: string; source: string; sheet: CssNode }[] {
+  const root = join(APP, "src");
+  const files = (readdirSync(root, { recursive: true }) as string[]).sort();
+  const out: { file: string; source: string; sheet: CssNode }[] = [];
+  for (const file of files) {
+    if (file.endsWith(".css")) {
+      const source = readFileSync(join(root, file), "utf8");
+      out.push({ file, source, sheet: parseCss(source) as unknown as CssNode });
+    } else if (file.endsWith(".svelte")) {
+      const source = readFileSync(join(root, file), "utf8");
+      if (!source.includes("<style")) continue;
+      const sheet = (parse(source, { modern: true }) as unknown as { css: CssNode | null }).css;
+      if (sheet) out.push({ file, source, sheet });
+    }
+  }
+  return out;
+}
+
+/** Each declaration of a sheet with the selector of the rule it is in (an at-rule's prelude where it is in none). */
+function declarations(source: string, sheet: CssNode): { selector: string; property: string; value: string }[] {
+  const out: { selector: string; property: string; value: string }[] = [];
+  const visit = (node: CssNode | null | undefined, selector: string) => {
+    if (!node) return;
+    let here = selector;
+    if (node.type === "Rule" && typeof node.prelude === "object") here = source.slice(node.prelude.start, node.prelude.end).replace(/\s+/g, " ").trim();
+    if (node.type === "Declaration") out.push({ selector, property: node.property ?? "", value: node.value ?? "" });
+    for (const child of node.children ?? []) visit(child, here);
+    if (node.block) visit(node.block, here);
+  };
+  visit(sheet, "");
+  return out;
+}
+
+/** A colour written as a literal: hex, a colour function, or a named colour. */
+const LITERAL = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![0-9a-z_-])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(|(?<![-\w.#$])(?:white|black|red|green|blue|yellow|orange|purple|gray|grey|silver|navy|teal|pink|gold|magenta|cyan|brown)(?![-\w(])/i;
+/** The three token blocks of `tokens.css`: the palette's own definitions. */
+const TOKEN_BLOCKS = new Set([":root", ':root:not([data-theme="light"])', ':root[data-theme="dark"]']);
+
+function literalColours(): string[] {
+  const found: string[] = [];
+  for (const { file, source, sheet } of everySheet())
+    for (const { selector, property, value } of declarations(source, sheet)) {
+      if (file === "lib/tf/css/tokens.css" && TOKEN_BLOCKS.has(selector)) continue;
+      // A string or a `url()` is not a colour, whatever its letters spell.
+      const bare = value.replace(/"[^"]*"|'[^']*'/g, '""').replace(/url\([^)]*\)/g, "url()");
+      if (LITERAL.test(bare)) found.push(`${file} | ${selector} | ${property}: ${value}`);
+    }
+  return found;
+}
+
+const ALLOWED = readFileSync(join(APP, "src/lib/tf/theme/literal-colours.txt"), "utf8")
+  .split("\n")
+  .filter((line) => line.trim() !== "" && !line.startsWith("#"))
+  .map((line) => {
+    const [file, selector, reason] = line.split(" | ").map((part) => part.trim());
+    return { file: file!, selector: selector!, reason: reason ?? "" };
+  });
+
+test("every colour the app draws is a token, or is on theme/literal-colours.txt with its reason (ADR-0055)", () => {
+  const found = literalColours();
+  expect(found.length, "the four kept literals are found, so the search reads the sheets").toBeGreaterThanOrEqual(4);
+  const stray = found.filter((hit) => !ALLOWED.some(({ file, selector }) => hit.startsWith(`${file} | ${selector} | `)));
+  expect(stray).toEqual([]);
+  for (const { file, selector, reason } of ALLOWED) expect(reason.length, `${file} ${selector} says why`).toBeGreaterThan(20);
+});
+
+test("every line of theme/literal-colours.txt still matches a literal, so the list cannot outlive what it excuses", () => {
+  const found = literalColours();
+  const unused = ALLOWED.filter(({ file, selector }) => !found.some((hit) => hit.startsWith(`${file} | ${selector} | `)));
+  expect(unused).toEqual([]);
+});
+
+test("the literal search catches a white background in chrome.css", () => {
+  const source = ".tf-btn { background: #fff; }";
+  const hits = declarations(source, parseCss(source) as unknown as CssNode).filter(({ value }) => LITERAL.test(value));
+  expect(hits).toEqual([{ selector: ".tf-btn", property: "background", value: "#fff" }]);
+  expect(LITERAL.test("var(--paper)")).toBe(false);
+  expect(LITERAL.test("color-mix(in srgb, var(--card-shade) 12%, transparent)")).toBe(false);
+  expect(LITERAL.test("rgba(0,0,0,.12)")).toBe(true);
+});
+
+/**
+ * Text on a fill is `--on-fill`, on the primary button `--on-primary` (ADR-0055): a surface colour as text held only
+ * while the fill was the ink, and a theme with a blue button on a dark panel would get dark words on blue.
+ */
+test("no rule writes text in a surface colour on what is selected or on the primary button", () => {
+  const wrong: string[] = [];
+  for (const { file, source, sheet } of everySheet()) {
+    const rules = new Map<string, Record<string, string>>();
+    for (const { selector, property, value } of declarations(source, sheet)) rules.set(selector, { ...rules.get(selector), [property]: value.trim() });
+    for (const [selector, body] of rules) {
+      const ground = body.background ?? body["background-color"] ?? "";
+      if (/var\(--(sheet|paper|field)\)/.test(body.color ?? "") && /var\(--(fill|primary)\)/.test(ground)) wrong.push(`${file} ${selector}`);
+    }
+  }
+  expect(wrong).toEqual([]);
+  expect(block(code, '.tf-seg button[aria-pressed="true"]')).toMatch(/color: var\(--on-fill\)/);
+  expect(block(code, ".tf-btn.tf-primary")).toMatch(/background: var\(--primary\); color: var\(--on-primary\)/);
+});
+
+/** No colour fades (ADR-0055, 3.16): a fading surface would draw half a theme for the length of the fade. */
+test("no transition names a colour, but the site bar's key hint", () => {
+  const COLOURED = /\b(all|color|background(-color)?|border(-[a-z]+)?-color|border|fill|stroke|outline-color)\b/;
+  const wrong: string[] = [];
+  for (const { file, source, sheet } of everySheet())
+    for (const { selector, property, value } of declarations(source, sheet)) {
+      if (property !== "transition" && property !== "transition-property") continue;
+      if (value.trim() === "none") continue;
+      if (file === "lib/tf/css/site.css" && selector === ".tf-sitebar kbd") continue;
+      for (const part of value.split(",")) {
+        const [name, duration] = part.trim().split(/\s+/);
+        // A colour that changes at once after a delay (`0s .12s`, the side edge's hover) does not fade.
+        if (COLOURED.test(name!) && !/^0m?s$/.test(duration ?? "")) wrong.push(`${file} ${selector}: ${part.trim()}`);
+      }
+    }
+  expect(wrong).toEqual([]);
 });

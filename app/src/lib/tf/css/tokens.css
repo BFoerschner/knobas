@@ -1,16 +1,28 @@
 /* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
 :root {
-  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663; --fill: var(--ink);
-  --rule: #CBD2D9; --rule-2: #DDE2E7;
-  --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
-  --focus: #2F55D4; --mark: #F6E08F;
-  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
-  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  /* Every colour a theme may set (ADR-0051, ADR-0055): each reads its side's variable (`--<token>-light` here, `-dark` in
+     the two dark blocks), which `tf/themes.svelte.ts` writes on <html> for a theme that is not knobas's own, with
+     knobas's own value behind it, so with nothing written the window is knobas's. `tf/theme/app-roles.ts` names
+     each key and `app-derive.ts`'s `KNOBAS` holds the same values. `--selection` has none: unset, the system's own
+     highlight draws. */
+  --paper: var(--paper-light, #E4E8EC); --sheet: var(--sheet-light, #F7F8F9); --sheet-2: var(--sheet-2-light, #EEF1F4); --field: var(--field-light, #FFFFFF); --ink: var(--ink-light, #17212B); --ink-2: var(--ink-2-light, #4B5663); --muted: var(--muted-light, #5F6975);
+  --rule: var(--rule-light, #CBD2D9); --rule-2: var(--rule-2-light, #DDE2E7); --fill: var(--fill-light, var(--ink)); --on-fill: var(--on-fill-light, var(--sheet)); --primary: var(--primary-light, var(--fill)); --on-primary: var(--on-primary-light, var(--on-fill));
+  --card: var(--card-light, #F2D157); --card-2: var(--card-2-light, #E8C440); --card-ink: var(--card-ink-light, #2A230B); --card-ink-2: var(--card-ink-2-light, #5A4D1E);
+  --focus: var(--focus-light, #2F55D4); --link: var(--link-light, var(--info)); --mark: var(--mark-light, #F6E08F); --selection: var(--selection-light); --scroll: var(--scroll-light, var(--rule));
+  --ok: var(--ok-light, #1F7444); --warn: var(--warn-light, #8A5600); --err: var(--err-light, #B0262A); --info: var(--info-light, #2F55D4);
+  --ok-bg: var(--ok-bg-light, #DDEFE4); --warn-bg: var(--warn-bg-light, #F6EBD3); --err-bg: var(--err-bg-light, #F7DEDD); --info-bg: var(--info-bg-light, #DFE6FA); --muted-bg: var(--muted-bg-light, #E6E9EC);
   --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
   /* What rings the selected yellow card on a dark board, where `--card-ink` melts into the page. */
   --sel-halo: transparent;
-  /* The tones on an ink row (a selected rail row): ink is dark in light and pale in dark, so each theme borrows the other's. */
-  --on-ink-ok: #6FCF97; --on-ink-warn: #E5B04D; --on-ink-err: #FF8A80; --on-ink-info: #8AA6FF; --on-ink-muted: #94A0AC;
+  /* The tones on an ink row (a selected rail row): ink is dark in light and pale in dark, so each theme borrows the other's.
+     Then the yellow card's own tones, tints and highlight (the card is a light surface in both of knobas's themes), what
+     its translucent plates are mixed from, a diff's changed-word marks, and what dims the page under a dialog, which is
+     not a theme's. */
+  --on-ink-ok: var(--on-ink-ok-light, #6FCF97); --on-ink-warn: var(--on-ink-warn-light, #E5B04D); --on-ink-err: var(--on-ink-err-light, #FF8A80); --on-ink-info: var(--on-ink-info-light, #8AA6FF); --on-ink-muted: var(--on-ink-muted-light, #94A0AC);
+  --card-ok: var(--card-ok-light, #1F7444); --card-warn: var(--card-warn-light, #8A5600); --card-err: var(--card-err-light, #B0262A); --card-info: var(--card-info-light, #2F55D4); --card-muted: var(--card-muted-light, #5F6975);
+  --card-ok-bg: var(--card-ok-bg-light, #DDEFE4); --card-warn-bg: var(--card-warn-bg-light, #F6EBD3); --card-err-bg: var(--card-err-bg-light, #F7DEDD); --card-info-bg: var(--card-info-bg-light, #DFE6FA); --card-muted-bg: var(--card-muted-bg-light, #E6E9EC);
+  --card-mark: var(--card-mark-light, #F6E08F); --card-shade: var(--card-shade-light, #000000); --card-lift: var(--card-lift-light, #FFFFFF); --ok-word: var(--ok-word-light, #B4DEC3); --err-word: var(--err-word-light, #EFB9B6);
+  --scrim: #0A0F14;
   /* Each role's face (Settings › Fonts, 2026-11-18, `fonts.svelte.ts`): the family chosen for it first (`--<role>-chosen`,
      which `fonts.svelte.ts` sets on <html>), then the face knobas brings along, so a font missing on this machine draws
      in the bundled one. *Interface* is `--sans`, *Headings* `--head` (every rule that narrows with `"wdth"`), *Reading*
@@ -65,7 +77,7 @@
   /* A diff's colours (ADR-0051): its added and removed lines' tints and its changed words' marks, which a theme may set
      (`--diff-add-light` and its siblings), else the state tones' tints. */
   --diff-add: var(--diff-add-light, var(--ok-bg)); --diff-del: var(--diff-del-light, var(--err-bg));
-  --add-word: var(--add-word-light, #B4DEC3); --del-word: var(--del-word-light, #EFB9B6);
+  --add-word: var(--add-word-light, var(--ok-word)); --del-word: var(--del-word-light, var(--err-word));
   /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
   --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
   /* A form's one label column (`.tf-formgrid`). A dialog of long names widens it with this token. */
@@ -74,15 +86,18 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
-    --rule: #323C47; --rule-2: #28313A;
-    --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
-    --focus: #8AA6FF; --mark: #5C4E17;
-    --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
-    --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+    --paper: var(--paper-dark, #12171C); --sheet: var(--sheet-dark, #1A2027); --sheet-2: var(--sheet-2-dark, #212932); --field: var(--field-dark, #12171C); --ink: var(--ink-dark, #E4E9EE); --ink-2: var(--ink-2-dark, #A0ABB7); --muted: var(--muted-dark, #94A0AC);
+    --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill));
+    --card: var(--card-dark, #D9B941); --card-2: var(--card-2-dark, #C9A930); --card-ink: var(--card-ink-dark, #1D1806); --card-ink-2: var(--card-ink-2-dark, #3F3511);
+    --focus: var(--focus-dark, #8AA6FF); --link: var(--link-dark, var(--info)); --mark: var(--mark-dark, #5C4E17); --selection: var(--selection-dark); --scroll: var(--scroll-dark, var(--rule));
+    --ok: var(--ok-dark, #6FCF97); --warn: var(--warn-dark, #E5B04D); --err: var(--err-dark, #FF8A80); --info: var(--info-dark, #8AA6FF);
+    --ok-bg: var(--ok-bg-dark, #1B3427); --warn-bg: var(--warn-bg-dark, #3A2E14); --err-bg: var(--err-bg-dark, #3F1F1F); --info-bg: var(--info-bg-dark, #1F2A4A); --muted-bg: var(--muted-bg-dark, #262E37);
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
     --sel-halo: var(--ink);
-    --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
+    --on-ink-ok: var(--on-ink-ok-dark, #0F3F24); --on-ink-warn: var(--on-ink-warn-dark, #4A2E00); --on-ink-err: var(--on-ink-err-dark, #6E1014); --on-ink-info: var(--on-ink-info-dark, #17297A); --on-ink-muted: var(--on-ink-muted-dark, #2C333B);
+    --card-ok: var(--card-ok-dark, #1F7444); --card-warn: var(--card-warn-dark, #8A5600); --card-err: var(--card-err-dark, #B0262A); --card-info: var(--card-info-dark, #2F55D4); --card-muted: var(--card-muted-dark, #5D6773);
+    --card-ok-bg: var(--card-ok-bg-dark, #DDEFE4); --card-warn-bg: var(--card-warn-bg-dark, #F6EBD3); --card-err-bg: var(--card-err-bg-dark, #F7DEDD); --card-info-bg: var(--card-info-bg-dark, #DFE6FA); --card-muted-bg: var(--card-muted-bg-dark, #E6E9EC);
+    --card-mark: var(--card-mark-dark, #F6E08F); --card-shade: var(--card-shade-dark, #000000); --card-lift: var(--card-lift-dark, #FFFFFF); --ok-word: var(--ok-word-dark, #2C6243); --err-word: var(--err-word-dark, #6E3333);
     --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
     --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
     --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
@@ -90,20 +105,23 @@
     --hl-link: var(--hl-link-dark, var(--info));
     --hl-com-style: var(--hl-com-style-dark, italic);
     --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
-    --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
+    --add-word: var(--add-word-dark, var(--ok-word)); --del-word: var(--del-word-dark, var(--err-word));
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
-  --rule: #323C47; --rule-2: #28313A;
-  --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
-  --focus: #8AA6FF; --mark: #5C4E17;
-  --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
-  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+  --paper: var(--paper-dark, #12171C); --sheet: var(--sheet-dark, #1A2027); --sheet-2: var(--sheet-2-dark, #212932); --field: var(--field-dark, #12171C); --ink: var(--ink-dark, #E4E9EE); --ink-2: var(--ink-2-dark, #A0ABB7); --muted: var(--muted-dark, #94A0AC);
+  --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill));
+  --card: var(--card-dark, #D9B941); --card-2: var(--card-2-dark, #C9A930); --card-ink: var(--card-ink-dark, #1D1806); --card-ink-2: var(--card-ink-2-dark, #3F3511);
+  --focus: var(--focus-dark, #8AA6FF); --link: var(--link-dark, var(--info)); --mark: var(--mark-dark, #5C4E17); --selection: var(--selection-dark); --scroll: var(--scroll-dark, var(--rule));
+  --ok: var(--ok-dark, #6FCF97); --warn: var(--warn-dark, #E5B04D); --err: var(--err-dark, #FF8A80); --info: var(--info-dark, #8AA6FF);
+  --ok-bg: var(--ok-bg-dark, #1B3427); --warn-bg: var(--warn-bg-dark, #3A2E14); --err-bg: var(--err-bg-dark, #3F1F1F); --info-bg: var(--info-bg-dark, #1F2A4A); --muted-bg: var(--muted-bg-dark, #262E37);
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
   --sel-halo: var(--ink);
-  --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
+  --on-ink-ok: var(--on-ink-ok-dark, #0F3F24); --on-ink-warn: var(--on-ink-warn-dark, #4A2E00); --on-ink-err: var(--on-ink-err-dark, #6E1014); --on-ink-info: var(--on-ink-info-dark, #17297A); --on-ink-muted: var(--on-ink-muted-dark, #2C333B);
+  --card-ok: var(--card-ok-dark, #1F7444); --card-warn: var(--card-warn-dark, #8A5600); --card-err: var(--card-err-dark, #B0262A); --card-info: var(--card-info-dark, #2F55D4); --card-muted: var(--card-muted-dark, #5D6773);
+  --card-ok-bg: var(--card-ok-bg-dark, #DDEFE4); --card-warn-bg: var(--card-warn-bg-dark, #F6EBD3); --card-err-bg: var(--card-err-bg-dark, #F7DEDD); --card-info-bg: var(--card-info-bg-dark, #DFE6FA); --card-muted-bg: var(--card-muted-bg-dark, #E6E9EC);
+  --card-mark: var(--card-mark-dark, #F6E08F); --card-shade: var(--card-shade-dark, #000000); --card-lift: var(--card-lift-dark, #FFFFFF); --ok-word: var(--ok-word-dark, #2C6243); --err-word: var(--err-word-dark, #6E3333);
   --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
   --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
   --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
@@ -111,7 +129,7 @@
   --hl-link: var(--hl-link-dark, var(--info));
   --hl-com-style: var(--hl-com-style-dark, italic);
   --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
-  --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
+  --add-word: var(--add-word-dark, var(--ok-word)); --del-word: var(--del-word-dark, var(--err-word));
   color-scheme: dark;
 }
 
@@ -149,9 +167,19 @@ button, input, select, textarea { font: inherit; color: inherit; background: non
 /* A browser's `small` is a fifth off whatever holds it, which lands between steps (11.67, 12.5). */
 .tf small { font-size: calc(var(--t-xs) * var(--fs)); }
 button { cursor: pointer; }
-a { color: var(--info); text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 2px; }
+/* Selected text, where the theme of the side drawn sets a colour for it (`data-sel` on <html> names those sides,
+   `tf/themes.svelte.ts`); elsewhere the system's own highlight draws. One rule for each way a side is drawn. */
+@media not (prefers-color-scheme: dark) {
+  :root[data-sel~="light"]:not([data-theme="dark"]) ::selection { background: var(--selection); color: var(--ink); }
+}
+:root[data-theme="light"][data-sel~="light"] ::selection { background: var(--selection); color: var(--ink); }
+@media (prefers-color-scheme: dark) {
+  :root[data-sel~="dark"]:not([data-theme="light"]) ::selection { background: var(--selection); color: var(--ink); }
+}
+:root[data-theme="dark"][data-sel~="dark"] ::selection { background: var(--selection); color: var(--ink); }
 /* Where a board's two scrollbars meet: the page's own colour, not a white square. */
 ::-webkit-scrollbar-corner { background: transparent; }
 

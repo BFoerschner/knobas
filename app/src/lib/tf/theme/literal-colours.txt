@@ -1,0 +1,8 @@
+# The colours written as literals outside tokens.css's three token blocks (ADR-0055). Every other colour the app draws is
+# a token, so a theme reaches it. `tf-css.test.ts` fails on a literal not listed here, and on a line that matches nothing.
+# One line a rule: the stylesheet under app/src, the rule's selector as written, and why it keeps its own colour.
+lib/tf/css/code.css | .tf-pdf-page | A PDF page is paper: white, with its shadow, whatever the window wears
+lib/tf/css/docs.css | .tf-embed iframe | An embedded page is another document: white behind it, whatever the window wears
+lib/tf/css/settings.css | .tf-stg-sw i | The switch knob's shadow is a shadow, not a theme's colour, as `--shadow` is not
+lib/tf/css/settings.css | .tf-as-light | Code colours' preview of knobas Light's surfaces, until a preview takes its tokens from the theme it draws (step 3)
+lib/tf/css/settings.css | .tf-as-dark | Code colours' preview of knobas Dark's surfaces, until a preview takes its tokens from the theme it draws (step 3)

@@ -26,7 +26,7 @@
   --bg: var(--paper); --panel: var(--sheet); --raised: var(--sheet-2);
   --hair: var(--rule-2); --hair2: var(--rule);
   --text: var(--ink); --faint: var(--ink-2);
-  --amber: var(--warn); --fail: var(--err); --link: var(--info);
+  --amber: var(--warn); --fail: var(--err);
   --disp: var(--sans);
   --row: 30px;
 }

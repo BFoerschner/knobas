@@ -38,7 +38,7 @@
 .tf-sitebar .tf-esc:hover { color: var(--ink); }
 /* The first Esc: its cap is down while the second still counts. No fade in; a short fade out. */
 .tf-sitebar kbd { transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out; }
-.tf-sitebar kbd.tf-kbd-down { background: var(--fill); color: var(--sheet); border-color: var(--fill); transition: none; }
+.tf-sitebar kbd.tf-kbd-down { background: var(--fill); color: var(--on-fill); border-color: var(--fill); transition: none; }
 @media (prefers-reduced-motion: reduce) { .tf-sitebar kbd { transition: none; } }
 .tf-site .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The bar asks: one sentence and its answers in its own row, so the page under it stays in view. */

@@ -54,7 +54,7 @@
 .tf-timer-key.tf-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* A duration is the interface face with tabular figures, not mono (design system, Type). */
 .tf-timer-t { font-size: calc(var(--t-sm) * var(--fs)); font-variant-numeric: tabular-nums; }
-.tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
+.tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: color-mix(in srgb, var(--card-shade) 12%, transparent); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
 .tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
 /* An icon-only button is square at its row's height: the top bar's at the header height, a body row's `.tf-sm` (Controls). */
@@ -228,9 +228,9 @@
 .tf-empty .tf-btn { color: var(--ink); }
 /* The view's *Sync now* is a header's button, and under an empty state's sentence it is a page body's: small (F-425). */
 .tf-empty .tf-btn.tf-syncnow { height: var(--control-h-sm); padding: 0 8px; font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-btn.tf-primary { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
+.tf-btn.tf-primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 /* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. A disabled one does not answer. */
-.tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
+.tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--primary) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 /* Not `--sheet-2`: a row's hover is that fill too, and a ghost button in the row would show no change. */
 .tf-btn.tf-ghost:hover { background: var(--rule-2); border-color: var(--rule); }
@@ -342,7 +342,7 @@
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-seg button:not([aria-pressed="true"]):hover { background: var(--sheet-2); color: var(--ink); }
-.tf-seg button[aria-pressed="true"] { background: var(--fill); color: var(--sheet); }
+.tf-seg button[aria-pressed="true"] { background: var(--fill); color: var(--on-fill); }
 /* A choice that can't be drawn here says so and shows what is drawn (Compare's *Split*, F-226). */
 .tf-seg button[aria-disabled="true"], .tf-seg button[aria-disabled="true"]:not([aria-pressed="true"]):hover { background: var(--sheet); color: var(--muted); cursor: not-allowed; }
 .tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }

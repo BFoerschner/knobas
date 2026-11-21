@@ -9,7 +9,7 @@ import { BUILTINS } from "./builtins";
 import { contrast, fix, INK, INK_2, lowSentence, mixOklab, roleContrast, SURFACES, surfacesFor, toOklch, worst } from "./contrast";
 
 const tokens = readFileSync(join(process.cwd(), "src/lib/tf/css/tokens.css"), "utf8");
-const valueIn = (block: string, name: string) => new RegExp(`${name}:\\s*(#[0-9A-F]{6})`, "i").exec(block)?.[1]?.toUpperCase();
+const valueIn = (block: string, name: string) => new RegExp(`${name}:\\s*(?:var\\(${name}-(?:light|dark), )?(#[0-9A-F]{6})`, "i").exec(block)?.[1]?.toUpperCase();
 
 test("the surfaces and inks are the stylesheet's, light and dark", () => {
   const light = tokens.slice(tokens.indexOf(":root {"), tokens.indexOf("@media"));

@@ -7,7 +7,7 @@
 .tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .tf-stg-nav a:hover { background: var(--sheet-2); }
-.tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--sheet); }
+.tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--on-fill); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
 /* The nav's subtrees (2026-11-21, `TfSettingsNav.svelte`): a parent is a fold whose title is its page's link. Its chevron
    sits in the row's own left padding and the title where a leaf's stands, so no title moves; a child is indented. */
@@ -194,8 +194,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-addcols > .tf-btn { justify-self: end; }
 .tf-select { height: var(--control-h-sm); padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
-/* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
-.tf-stg-pick { --link: var(--info); }
+/* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields. Its links read `--link`, the window's own token since ADR-0055. */
 .tf-stg-pick select, .tf-stg-pick input {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
   font-size: calc(var(--t-md) * var(--fs)); width: min(420px, 100%);

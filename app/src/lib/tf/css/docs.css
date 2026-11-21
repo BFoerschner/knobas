@@ -15,14 +15,14 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree a:hover { background: var(--sheet-2); }
-.tf-rd-tree a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
+.tf-rd-tree a[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
 .tf-rd-tree details > summary {
   list-style: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: calc(var(--t-sm) * var(--fs));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree details > summary::-webkit-details-marker { display: none; }
 .tf-rd-tree details > summary:hover { background: var(--sheet-2); }
-.tf-rd-tree details > summary.tf-cur { background: var(--fill); color: var(--sheet); }
+.tf-rd-tree details > summary.tf-cur { background: var(--fill); color: var(--on-fill); }
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
 .tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
 /* A page with nothing under it keeps the chevron's column, so a level's titles start on one edge: 14 px is the chevron's 6 + its margins. */
@@ -168,7 +168,7 @@
 .tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }
 .tf-cmts { font-size: calc(var(--t-md) * var(--fs)); }
 .tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
-  color: var(--info); text-decoration: underline; text-underline-offset: 2px;
+  color: var(--link); text-decoration: underline; text-underline-offset: 2px;
 }
 .tf-doc .tf-doc-link { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; }
 .tf-cmts { border-top: 1px solid var(--rule); margin-top: 44px; padding-top: 18px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
@@ -196,7 +196,7 @@
   display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; white-space: normal; overflow: visible;
   border-bottom: 1px solid var(--rule-2); text-decoration: none;
 }
-.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--fill); color: var(--sheet); }
+.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
 .tf-rd-tree a.tf-dl-hit[aria-current="true"] :is(.tf-pth, .tf-n, .tf-sn b) { color: inherit; }
 /* A hit's title and snippet are the reading face, which keeps its own spacing; the label before a snippet is the interface's. */
 .tf-dl-hit :is(.tf-t, .tf-sn) { letter-spacing: var(--ls-read, normal); word-spacing: normal; }
@@ -240,7 +240,7 @@
 .tf-findhold > .tf-findbar .tf-findx { margin-left: 0; }
 .tf-findbar.tf-findwide .tf-findn { width: 22ch; }
 ::highlight(tf-find) { background-color: var(--mark); }
-::highlight(tf-find-now) { background-color: var(--fill); color: var(--sheet); }
+::highlight(tf-find-now) { background-color: var(--fill); color: var(--on-fill); }
 /* A comment that names the reader, edged as a ticket's is, where *For you* brings the page (F-431). */
 .tf-msg.tf-mention .tf-cmt-body { box-shadow: inset 3px 0 0 var(--mark); padding-left: 10px; }
 /* The title takes focus only by script: a closed find bar hands it there, with nothing to draw. */
@@ -387,7 +387,7 @@
   }
   .tf-rd-drawer .tf-rd-tree { transform: none; visibility: visible; transition: transform .18s ease-out; }
   .tf-rd-backdrop {
-    position: absolute; inset: 0; z-index: 5; background: rgba(10, 14, 18, .45); animation: tf-fade .15s ease-out;
+    position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--scrim) 45%, transparent); animation: tf-fade .15s ease-out;
   }
   .tf-rd-sheet { padding: 18px 16px 60px; }
   .tf .tf-rd-title { font-size: calc(30px * var(--fs)); }

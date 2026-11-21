@@ -179,7 +179,7 @@
 .tf-pl .tf-tr:hover::after { background: var(--sheet-2); }
 /* An inset ink pill, as every rail's selected row; the glyph's tones are re-declared for the ink. */
 .tf-pi[aria-current="true"] {
-  color: var(--sheet);
+  color: var(--on-fill);
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted); --rule: var(--on-ink-muted);
 }
 .tf-pl .tf-pi[aria-current="true"]::after { background: var(--fill); }
