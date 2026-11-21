@@ -85,7 +85,8 @@ mkdir -p "$tree/scripts" "$tree/target/release/bundle/deb" "$tree/target/release
 cp "$here/sign-update-artifacts.sh" "$tree/scripts/"
 printf 'deb' >"$tree/target/release/bundle/deb/knobas_${v}_amd64.deb"
 printf 'appimage' >"$tree/target/release/bundle/appimage/knobas_${v}_amd64.AppImage"
-for name in "knobas_${v}_amd64.deb" "knobas_${v}_amd64.AppImage"; do : >"$tree/target/release/bundle/${name##*.}/$name.sig"; done
+: >"$tree/target/release/bundle/deb/knobas_${v}_amd64.deb.sig"
+: >"$tree/target/release/bundle/appimage/knobas_${v}_amd64.AppImage.sig"
 sign() { (cd "$tree" && RUNNER_OS=Linux KNOBAS_UPDATE_SKIP_SIGN=1 KNOBAS_UPDATE_VERIFY=$scratch/verify scripts/sign-update-artifacts.sh); }
 # A fake verifier: the ids of two keys, which it trusts as FAKE_TRUSTS says, and every file verifies.
 cat >"$scratch/verify" <<'EOF'
