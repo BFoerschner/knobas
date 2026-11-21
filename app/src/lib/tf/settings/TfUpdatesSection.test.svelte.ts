@@ -179,3 +179,21 @@ test("a build without keys says updates aren't set up and offers nothing", async
   expect(second().classList.contains("tf-unseen")).toBe(true);
   expect(target.querySelector<HTMLButtonElement>(".tf-upd-check")?.disabled).toBe(true);
 });
+
+/** The trips' finding: a download's progress, landing four times a second, must not read the notes again each time. */
+test("the notes are read once per version, not on every update of the state", async () => {
+  const s = draw(fakeUpdate("downloading"));
+  let reads = 0;
+  const notes = s.notes;
+  s.notes = async (version: string) => {
+    reads += 1;
+    return notes(version);
+  };
+  await settle();
+  const before = reads;
+  for (const received of [50, 60, 70]) {
+    s.set({ ...fakeUpdate("downloading"), phase: { phase: "downloading", received: received * 1_000_000, total: 89_000_000 } });
+    await settle();
+  }
+  expect(reads).toBe(before);
+});

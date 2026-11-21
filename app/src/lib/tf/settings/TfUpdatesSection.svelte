@@ -111,11 +111,13 @@
 
   /** The notes shown: the offered version's, else the running one's. */
   const notesOf = $derived(upd === null ? null : (upd.offer?.version ?? upd.current));
+  /** A value, not the state: the notes are read again when the version changes, not on every `update:state`. */
+  const setUp = $derived(upd?.set_up ?? false);
   let notes = $state<UpdateNotes | null>(null);
   let notesFailed = $state(false);
   $effect(() => {
     const version = notesOf;
-    if (version === null || !upd?.set_up) return;
+    if (version === null || !setUp) return;
     let dead = false;
     notesFailed = false;
     void store.notes(version).then(
