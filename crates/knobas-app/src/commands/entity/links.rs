@@ -285,21 +285,34 @@ pub async fn owed_tickets<R: tauri::Runtime>(
 /// workflow, which is `internal` because it is a caller asking the wrong
 /// question rather than anything the user can act on;
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+///
+/// **`behind`** (ADR-0054): a read the board asks ahead of a press -- the
+/// pointer resting on a card, a key selecting one -- goes in the background
+/// lane, as [`entity_view`]'s does, so a person's own read goes first. Left
+/// out, the read is a person's: a press, a pickup, a ticket page opening.
 #[tauri::command]
 pub async fn reachable_transitions<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
+    behind: Option<bool>,
 ) -> Result<Vec<String>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::crud::reachable_transitions(
+    if behind == Some(true) {
+        crate::logging::mark_read_behind();
+    }
+    let read = crate::sources::crud::reachable_transitions(
         &state.pool,
         &state.secrets,
         &state.registry,
         &state.live,
         &entity_id,
-    )
-    .await
-    .map_err(|error| crate::sources::to_ipc(&error, None))
+    );
+    let answer = if behind == Some(true) {
+        knobas_http::behind(read).await
+    } else {
+        read.await
+    };
+    answer.map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
 /// The **source view** of one entity (#661, ADR-0020): what its adapter draws

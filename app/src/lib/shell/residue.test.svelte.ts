@@ -408,6 +408,7 @@ const plateZoom = createZoom({ storage: () => null, apply: () => {}, frame: (dra
 const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const TfSideEdgeFixture = (await import("../tf/TfSideEdge.fixture.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
+const StatusMenu = (await import("../tf/tickets/StatusMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
 const ViewEditor = (await import("../tf/tickets/ViewEditor.svelte")).default;
@@ -894,6 +895,14 @@ const CASES: Case[] = [
       app: mount(ViewMenu, { target, props: { name: "My work", onedit: () => {}, onduplicate: () => {}, ondelete: () => {} } }),
     }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** A ticket's status menu (ADR-0054): its menu's listeners live while it is open. */
+    name: "StatusMenu",
+    source: "lib/tf/tickets/StatusMenu.svelte",
+    open: (target) => ({
+      app: mount(StatusMenu, { target, props: { open: true, opener: null, at: { x: 10, y: 10 }, ticketKey: "PAY-1", status: "To Do", source: "Jira", reach: { statuses: ["In Progress"], standing: "exact" }, onpick: () => {} } }),
+    }),
   },
   {
     /** The Docs reader's More menu (#2082): its outside-click listener lives while it is open. */

@@ -137,8 +137,12 @@ export interface Band {
 }
 
 export interface BoardReader {
-  /** The board's answer, or `null` before one. */
+  /** The board's answer as drawn (with the page's overlay), or `null` before one. */
   readonly board: MiniBoard | null;
+  /** The board's answer as the source said it, before the overlay: what an echo settles against. */
+  readonly read: MiniBoard | null;
+  /** A view that shows every ticket: its list's rows as the source said them, before the overlay. */
+  readonly readRows: MiniBoardCard[] | null;
   /** How many tickets there are unfiltered: the count's "of 75". */
   readonly total: number | null;
   /** Why the board could not be read, or `null`. */
@@ -267,6 +271,15 @@ export interface BoardReaderOptions {
   sessions: ViewSessions;
   /** What the view on screen says about drawing it. */
   view: () => BoardView;
+  /**
+   * What is laid over every answer before it is drawn (ADR-0054): a ticket's move, drawn in its new column as an echo
+   * (`echo-board.ts`). Read reactively, so the board draws again when what it lays over moves; it answers the same
+   * object when it touches nothing. The caps, pages and counts the reader asks by are the read's own.
+   */
+  overlay?: {
+    board: (board: MiniBoard) => MiniBoard;
+    rows: (rows: MiniBoardCard[]) => MiniBoardCard[];
+  };
 }
 
 /** How long, in ms, typed words wait for a board read still out before they are read anyway. */
@@ -321,6 +334,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const readThrough = new Map<string, string>();
 
   const view = $derived(options.view());
+  /** The board as drawn: the read with the page's overlay laid over it. */
+  const shownBoard = $derived(board === null || options.overlay === undefined ? board : options.overlay.board(board));
+  const shownRows = $derived(rows === null || options.overlay === undefined ? rows : options.overlay.rows(rows));
   const own = $derived(sessions.views[state.scope.key]);
   const expanded = $derived(own?.expanded ?? []);
   const listAll = $derived(own?.listAll ?? false);
@@ -333,7 +349,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   const drawnTyping = $derived(state.drawn.words);
   const all = $derived(view.showAll === true);
   const bands = $derived(
-    boardLanes(board ?? emptyBoard(), laned ? lanes : "none", (columns) => columns).map((byStatus) => {
+    boardLanes(shownBoard ?? emptyBoard(), laned ? lanes : "none", (columns) => columns).map((byStatus) => {
       const lane: Lane = { ...byStatus, columns: viewColumns(byStatus.columns, view.columns) };
       return {
         lane,
@@ -527,7 +543,13 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
 
   return {
     get board() {
+      return shownBoard;
+    },
+    get read() {
       return board;
+    },
+    get readRows() {
+      return paged() ? rows : null;
     },
     get total() {
       return state.total;
@@ -566,7 +588,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       return all;
     },
     get rows() {
-      return paged() ? rows : null;
+      return paged() ? shownRows : null;
     },
     get rowsWaiting() {
       return paged() && rows === null;

@@ -2,8 +2,9 @@
   The ticket page's card (#816, R-4.2, spec #2396): the same card in two
   moods. On the yellow (`tf-card`, *Job card*) once the ticket is the chosen
   job; on a sheet (`tf-sheetcard`, *Ticket*) while it is only read. The mood
-  class is the only difference: the same markup, no punched hole, no status
-  select, no clock.
+  class is the only difference: the same markup, no punched hole, no clock.
+  The status is a control where the page hands one (`statusControl`,
+  `TfStatusMove`, ADR-0054): a menu of the statuses the ticket can reach.
 
   Top to bottom (#2400): the key at the display step with a copy button
   beside it, which puts *KEY title* on the clipboard, turns the ok tone for a
@@ -40,6 +41,7 @@
   import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { MediaQuery } from "svelte/reactivity";
+  import type { Snippet } from "svelte";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { acknowledged, openingWords } from "../../shell/ack.svelte";
@@ -67,6 +69,7 @@
     onlink,
     copy = (text: string) => navigator.clipboard.writeText(text),
     open = openExternal,
+    statusControl,
   }: {
     detail: EntityDetail;
     /** The other sources' tickets under the same key (#1476); none draws no source. */
@@ -92,6 +95,8 @@
     open?: (url: string) => Promise<void>;
     /** Writes the clipboard; the browser's unless a test hands its own. */
     copy?: (text: string) => Promise<void>;
+    /** The status as a control that moves the ticket (ADR-0054, `TfStatusMove`); absent, the plain chip. */
+    statusControl?: Snippet | undefined;
   } = $props();
 
   const key = $derived(keyOf(detail.row.entity_id));
@@ -199,7 +204,7 @@
     {/if}
   </div>
   <div class="tf-jobrow">
-    <TfStateChip text={detail.status ?? "No status"} />
+    {#if statusControl}{@render statusControl()}{:else}<TfStateChip text={detail.status ?? "No status"} />{/if}
     {#each blockedBy as blocker (blocker)}
       <span class="tf-chip tf-err">Blocked by <TfKey value={blocker} /></span>
     {/each}

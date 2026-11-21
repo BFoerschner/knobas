@@ -2,6 +2,7 @@
  * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting, a refused worklog (#828),
  * and a monitor pause refused with a second pause waiting behind it (#1473).
  */
+import { openMoves } from "./moves";
 import type { QueuedWrite } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 
@@ -170,7 +171,7 @@ export function handlers(): Handlers {
     // held write, one refused, one merely waiting -- because the whole surface
     // exists to keep those three apart, and a fixture with one of them cannot
     // show that it does.
-    pending_writes: () => FIXTURE_QUEUE,
+    pending_writes: () => [...openMoves(), ...FIXTURE_QUEUE],
     write_queue_counts: () => ({
       pending: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
       held: FIXTURE_QUEUE.filter((row) => row.state === "held").length,
@@ -183,6 +184,5 @@ export function handlers(): Handlers {
     flush_writes: () => null,
     apply_held_write: () => null,
     amend_write: () => null,
-    discard_write: () => null,
   };
 }

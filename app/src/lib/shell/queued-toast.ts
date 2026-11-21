@@ -49,6 +49,22 @@ export interface QueuedToastHow {
   where?: ToastAction | undefined;
   /** What the write is about: a toast with the same subject takes the last one's place (`ToastSpec.subject`). */
   subject?: string | undefined;
+  /**
+   * The toast's action is *Undo* (ADR-0054, a ticket's move): it stays after the write has gone, and *Show queue* moves
+   * to the toast's second button. Without it the action is *Show queue*.
+   */
+  undo?: (() => void) | undefined;
+  /**
+   * The toast's own words while the write is on its way and once it has gone, in place of *Queued: …* and *Sent: …*: a
+   * move says *Moving PAY-231 to Done* then *Moved PAY-231 to Done* (the press rule's fixed words, `moveWords`).
+   */
+  words?: { queued: string; sent: string } | undefined;
+}
+
+/** A ticket's move in the toast's fixed words (ADR-0054): *Moving PAY-231 to Done*, then *Moved PAY-231 to Done*. */
+export function moveWords(key: string, status: string, back = false): { queued: string; sent: string } {
+  const to = back ? "back to" : "to";
+  return { queued: `Moving ${key} ${to} ${status}`, sent: `Moved ${key} ${to} ${status}` };
 }
 
 /** A write's follow, by the toast it says *Sent* on: a toast that took its place stops the older write's follow. */
@@ -71,16 +87,21 @@ export function reviewSubject(entity: string): string {
  */
 export function toastQueued(what: string, source: WriteSource | null | undefined, how: QueuedToastHow = {}): number {
   const failing = failingName(source, how.store ?? health);
+  const showQueue = { label: "Show queue", run: openWriteQueue };
+  const undo = how.undo;
   const id = push({
-    text: queuedText(what, failing),
-    action: { label: "Show queue", run: openWriteQueue },
+    text: how.words === undefined ? queuedText(what, failing) : withSignIn(`${how.words.queued}.`, failing),
+    action: undo === undefined ? showQueue : { label: "Undo", run: undo },
+    ...(undo === undefined ? {} : { more: [showQueue] }),
     ...(how.subject === undefined ? {} : { subject: how.subject }),
   });
+  const sentAs = (where: ToastAction | undefined) =>
+    how.words === undefined ? toastSent(id, what, where) : amend(id, { text: `${how.words.sent}.`, ...(undo === undefined ? (where === undefined ? {} : { action: where }) : { action: { label: "Undo", run: undo } }) });
   if (how.subject !== undefined) following.get(id)?.();
   const write = how.write;
   if (write === null || write === undefined) return id;
   if (write.state === "sent") {
-    toastSent(id, what, how.where);
+    sentAs(how.where);
     return id;
   }
   let stopFollow: () => void = () => {};
@@ -103,7 +124,7 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
     if (!toasts.items.some((toast) => toast.id === id)) return finish();
     if (row === undefined) {
       finish();
-      toastSent(id, what, how.where);
+      sentAs(how.where);
     } else if (willNotGo(row)) finish();
   });
   if (over) stopFollow();

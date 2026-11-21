@@ -85,6 +85,8 @@ export interface JobPorts {
   startWork: StartWorkApi;
   /** What the ticket's source's credential cannot write (#2052); the bridge's when left out. */
   refusedWrites?: RefusedWritesPort;
+  /** Where the ticket can go from where it stands (`reachable_transitions`, ADR-0054); the bridge's when left out. */
+  reachableTransitions?: (entityId: string, behind: boolean) => Promise<string[]>;
   /** Hears `item:refreshed` and `sync:state`, which read the job again for its echoes (#2103); the bridge's when left out. */
   listen?: EchoListen;
   /** The ticket's *Refresh* or *Sync now* (#2134); the bridge's when left out. */

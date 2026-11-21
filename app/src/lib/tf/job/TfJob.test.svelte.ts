@@ -34,6 +34,7 @@ import type { FrameKinds } from "./job";
 import { cardSections, readCardReads } from "./card-sections";
 import { chosenJob, pageAsk } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
+import { sourceRoles } from "../roles.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
 let target: HTMLElement;
@@ -1400,4 +1401,68 @@ test("the epic chip draws once its parent's title has answered, never its key al
   answer();
   await settle();
   expect(target.querySelector(".tf-tkepicchip")?.textContent?.replace(/\s+/g, " ").trim()).toBe("PAY-200 Payout reliability");
+});
+
+// ---- the status is a control (ADR-0054, ticket-edit decisions section 13) ----
+
+test("the status opens a menu of where the ticket can go, and a pick moves it at once with Moving, queued", async () => {
+  sourceRoles.take([{ id: "jira", display_name: "Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  try {
+    const asked: [string, boolean][] = [];
+    open("PAY-231", { ports: ports({ reachableTransitions: (id, behind) => (asked.push([id, behind]), Promise.resolve(["In Review", "In Progress", "To Do"])) }) });
+    await settle();
+    // Asked with the page's first reads, as the person's own.
+    expect(asked).toEqual([[ID, false]]);
+    const button = target.querySelector<HTMLButtonElement>(".tf-jobrow .tf-statebtn")!;
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
+    const keyBox = target.querySelector(".tf-jobkey")!.getBoundingClientRect();
+    button.click();
+    await settle();
+    const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-move-m [role=menuitem]")];
+    expect(items.map((one) => one.textContent)).toEqual(["In Review1", "To Do2"]);
+    items[0]!.click();
+    flushSync();
+    expect(target.querySelector(".tf-jobrow .tf-statebtn")!.textContent).toBe("In review");
+    expect(target.querySelector(".tf-jobrow .tf-swrite")?.textContent).toBe("Moving, queued");
+    await settle();
+    expect(calls.writes).toContainEqual({ Transition: { entity: ID, status: "In Review" } });
+    expect(target.querySelector(".tf-jobkey")!.getBoundingClientRect()).toEqual(keyBox);
+  } finally {
+    sourceRoles.forget();
+  }
+});
+
+test("m opens the status menu from anywhere on the page outside a field", async () => {
+  sourceRoles.take([{ id: "jira", display_name: "Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  try {
+    open("PAY-231", { ports: ports({ reachableTransitions: () => Promise.resolve(["Done"]) }) });
+    await settle();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true }));
+    await settle();
+    expect([...document.querySelectorAll(".tf-move-m [role=menuitem]")].map((one) => one.textContent)).toEqual(["Done1"]);
+  } finally {
+    sourceRoles.forget();
+  }
+});
+
+test("a source that offers no moves, or a credential that may not, draws the chip plain with the reason and opens nothing", async () => {
+  const reason = "This Jira user cannot move tickets in PAY: it lacks the Transition Issues permission";
+  sourceRoles.take([{ id: "jira", display_name: "Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  try {
+    open("PAY-231", { ports: ports({ refusedWrites: () => Promise.resolve([{ entity: ID, op: "transition", reason }]), reachableTransitions: () => Promise.resolve(["Done"]) }) });
+    await settle();
+    const button = target.querySelector<HTMLButtonElement>(".tf-jobrow .tf-statebtn")!;
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.title).toBe(reason);
+    // The chevron's room is held, unseen.
+    expect(button.querySelector(".tf-chev")).not.toBeNull();
+    button.click();
+    await settle();
+    expect(document.querySelector(".tf-move-m")).toBeNull();
+    sourceRoles.take([{ id: "jira", display_name: "Jira", roles: [], role_misses: [], write_ops: [] }]);
+    flushSync();
+    expect(target.querySelector<HTMLButtonElement>(".tf-jobrow .tf-statebtn")!.title).toBe("Jira tickets cannot be moved from knobas: its adapter offers no moves.");
+  } finally {
+    sourceRoles.forget();
+  }
 });

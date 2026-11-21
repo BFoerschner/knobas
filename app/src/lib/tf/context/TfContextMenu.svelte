@@ -36,6 +36,7 @@
   import { siteStore } from "../site/site.svelte";
   import { docsChoices } from "../docs/docs-choices.svelte";
   import { runsRead } from "../builds/runs-read.svelte";
+  import { moveProvider } from "../tickets/moves.svelte";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
   let {
@@ -113,6 +114,7 @@
             docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
             runs: { isRead: (id) => runsRead.read?.has(id) ?? false },
             checkout: clonedHere,
+            moves: (id) => moveProvider()?.offer(id) ?? null,
           },
           facts,
         ),
@@ -201,6 +203,8 @@
       default:
         entity = thing.id;
     }
+    // A ticket's *Move to* asks where it can go as the menu opens (ADR-0054).
+    if (thing.kind === "ticket") moveProvider()?.ask(thing.id);
     const headRead = entity !== null ? head(entity) : code !== null ? head(code) : none;
     const checkoutRead = code !== null ? checkout(code) : none;
     const forgeRead =
@@ -483,6 +487,8 @@
         return void (act.read ? runsRead.markRead([act.id]) : runsRead.markUnread([act.id]));
       case "pipeline-read":
         return void runsRead.markAll({ runs: [], pipelines: [act.id] });
+      case "move":
+        return void moveProvider()?.move(act.entityId, act.status);
       case "clone": {
         const title = keyOf(act.repoId);
         return void ports.clone({ entityId: act.repoId, title }).then(() => push({ text: `Cloning ${title}` }), failed("Could not clone"));

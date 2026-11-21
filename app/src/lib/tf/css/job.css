@@ -316,3 +316,18 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-radio label:has(input:checked) { border-color: var(--ink); }
 .tf-radio label:has(> input:disabled) { cursor: not-allowed; color: var(--ink-2); }
 .tf-radio small { display: block; color: var(--ink-2); }
+
+/* ---- the ticket's status is a control (ADR-0054; ticket-edit decisions, section 13) ---- */
+/* The chip as it reads and a mark that it opens; the mark's room is held where it cannot open, so nothing moves when the grants answer. */
+.tf-statebtn { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 3px; padding: 0; }
+.tf-statebtn:disabled, .tf-statebtn[aria-disabled="true"] { cursor: default; }
+.tf-statebtn .tf-chev { font-size: calc(var(--t-2xs) * var(--fs)); opacity: 0.7; }
+.tf-statebtn .tf-chev::before { content: "▾"; }
+.tf-statebtn[aria-disabled="true"] .tf-chev { visibility: hidden; }
+.tf-jobrow .tf-swrite { font-weight: 500; }
+/* A move the source refused or knobas holds: under the status row, full width, in the source's words. */
+.tf-fact-note { flex-basis: 100%; display: flex; gap: 8px; align-items: flex-start; padding: 5px 8px; border-radius: 4px; background: var(--err-bg); color: var(--err); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.35; }
+.tf-fact-note.tf-held { background: var(--warn-bg); color: var(--warn); }
+.tf-fact-note > span { min-width: 0; }
+.tf-fact-note button { flex: none; text-decoration: underline; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.tf-fact-note button:first-of-type { margin-left: auto; }

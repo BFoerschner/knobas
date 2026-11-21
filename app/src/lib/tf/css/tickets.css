@@ -197,3 +197,27 @@
 @keyframes tf-pulse { 50% { opacity: .35; } }
 @keyframes tf-rise { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+
+/* ---- a ticket's move (ADR-0054; ticket-edit decisions, sections 11 and 12) ---- */
+/* Where its write is, on the head line: the type gives way, so the chip never adds a line and no card changes height. */
+.tf-thead .tf-twrite { margin-left: auto; flex: none; font-size: calc(var(--t-2xs) * var(--fs)); line-height: 16px; padding: 0 6px; }
+/* A move the source refused, or knobas holds: the card back where the source has it, saying so in the source's words. */
+.tf-trefused { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0 0; padding: 4px 6px; border-radius: 4px; background: var(--err-bg); color: var(--err); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.35; }
+.tf-trefused.tf-held { background: var(--warn-bg); color: var(--warn); }
+.tf-trefused-w { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; }
+.tf-trefused-x { margin-left: auto; flex: none; cursor: pointer; font-weight: 600; padding: 0 2px; border-radius: 3px; }
+.tf-trefused-x:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+/* The list's Status cell is a button: the status as it reads, a mark that it opens, the write's chip after it. */
+.tf-tbl .tf-statecell { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 22px; margin: -2px -6px; padding: 0 6px; border-radius: 4px; cursor: pointer; text-align: left; }
+.tf-tbl .tf-statecell:hover, .tf-tbl .tf-statecell[aria-expanded="true"] { background: var(--sheet-2); }
+.tf-tbl .tf-statecell[aria-disabled="true"] { cursor: default; background: none; }
+.tf-tbl .tf-statecell[aria-disabled="true"] .tf-chev { visibility: hidden; }
+.tf-tbl .tf-statecell > .tf-statename { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tbl .tf-statecell .tf-chev { font-size: calc(var(--t-2xs) * var(--fs)); opacity: 0.65; flex: none; }
+/* Drawn, not written: the cell's text is the status alone. */
+.tf-tbl .tf-statecell .tf-chev::before { content: "▾"; }
+.tf-tbl .tf-twrite { flex: none; font-size: calc(var(--t-2xs) * var(--fs)); line-height: 16px; padding: 0 6px; }
+/* A status menu: its heading, and each status's number for a pick without a second aim. */
+.tf-menu .tf-menu-h { padding: 4px 10px 6px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-menu .tf-menu-line { padding: 4px 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); max-width: 300px; }
+.tf-menu kbd { --fs: var(--size-code); margin-left: auto; font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }

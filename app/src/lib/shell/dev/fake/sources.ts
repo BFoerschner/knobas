@@ -116,6 +116,12 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
   },
 ];
 
+// A ticket system the fixture draws moves and comments on its tickets (ADR-0054), as Jira's and Gitea's adapters
+// declare; a Kestrel, whose adapter does not exist, declares nothing.
+for (const source of FIXTURE_SOURCES) {
+  if (source.id !== "kestrel" && source.roles.some((claim) => claim.role === "ticket-system")) source.write_ops = ["comment", "transition"];
+}
+
 /**
  * The `base_url` is passed in and spelled out at each call site rather than
  * built from `id`.
@@ -191,6 +197,8 @@ function fixtureSource(
     roles: [],
     // Its claimed roles whose paths missed (#1199): none, until a test records one.
     role_misses: [],
+    // The writes its adapter declares (ADR-0054): the ticket systems' are set below, from the roles each claims.
+    write_ops: [],
   };
 }
 

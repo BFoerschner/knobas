@@ -404,6 +404,10 @@ pub async fn list(
             .map(|t| t.roles.clone())
             .unwrap_or_default();
         out.push(SourceSummary {
+            write_ops: template
+                .as_ref()
+                .map(|t| t.write_ops.clone())
+                .unwrap_or_default(),
             role_misses: still_claimed(misses.remove(&id).unwrap_or_default(), &roles),
             roles,
             item_count: counts.get(&id).copied().unwrap_or(0),
@@ -1732,6 +1736,7 @@ async fn summarize(
         last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
         kinds: template.entity_kinds.clone(),
         roles: template.roles.clone(),
+        write_ops: template.write_ops.clone(),
         role_misses: still_claimed(
             knobas_sync::role_check::misses(pool)
                 .await?

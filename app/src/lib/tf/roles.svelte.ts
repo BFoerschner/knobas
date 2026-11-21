@@ -45,6 +45,11 @@ export interface ClaimingSource {
   /** The claimed roles whose declared paths missed on the source's records (#1199). */
   role_misses: readonly RoleMiss[];
   /**
+   * The writes its adapter declares (ADR-0054): a ticket is asked where it can go, and offered a move, only where its
+   * source declares `transition`. A list that leaves it out declares none.
+   */
+  write_ops?: readonly string[];
+  /**
    * Whether the source is turned on: a turned-off one is never run (#2106).
    * `list_sources` always says; a list that leaves it out reads as on.
    */
@@ -85,6 +90,11 @@ export interface SourceRoles {
   syncs(role: string): boolean;
   /** Whether `sourceId` fills `role` (a run of it can bring that role's views something new). Not knowing is no. */
   filledBy(role: string, sourceId: string): boolean;
+  /**
+   * Whether `sourceId`'s adapter declares the write `op` (ADR-0054: `transition`, a ticket's move). Not knowing is no:
+   * an undeclared write is not drawn (ADR-0020). Whether this instance's credential may make it is `refused_writes`'.
+   */
+  writes(sourceId: string, op: string): boolean;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -97,6 +107,7 @@ export function createSourceRoles(): SourceRoles {
         display_name: row.display_name,
         roles: [...row.roles],
         role_misses: [...row.role_misses],
+        write_ops: [...(row.write_ops ?? [])],
         enabled: row.enabled !== false,
       }));
     },
@@ -120,6 +131,9 @@ export function createSourceRoles(): SourceRoles {
     filledBy(role, sourceId) {
       const source = state.sources?.find((row) => row.id === sourceId);
       return source !== undefined && fills(source, role);
+    },
+    writes(sourceId, op) {
+      return state.sources?.find((row) => row.id === sourceId)?.write_ops?.includes(op) ?? false;
     },
   };
 }

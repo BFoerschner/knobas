@@ -91,6 +91,11 @@
   import TfConnections, { type DrawerPlace } from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
+  import TfStatusMove from "./TfStatusMove.svelte";
+  import { askReach, asking as reachAsking, forgetReach, moveRefusal, reachOf, type ReachKey } from "../tickets/reach.svelte";
+  import { dismissNote, moveTicket, ticketNotes, undoLastMove, watchTicketNotes } from "../tickets/moves.svelte";
+  import { sourceRoles } from "../roles.svelte";
+  import { echoOn } from "../queued.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
   import TfAttachmentPreview from "./TfAttachmentPreview.svelte";
   import { createAttachmentPreviews } from "./attachment-previews.svelte";
@@ -232,6 +237,46 @@
   });
   const commentRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "comment"));
   const moveRefused = $derived(refusalOf(refused, detail?.row.entity_id ?? null, "transition"));
+
+  // ---- the status, as a control (ADR-0054, ticket-edit decisions section 13) ----
+  /** The ticket as a move and its reach name it. */
+  const reachKey = $derived<ReachKey | null>(
+    detail
+      ? {
+          entity_id: detail.row.entity_id,
+          source_id: detail.row.source_id,
+          key: keyOf(detail.row.entity_id),
+          status: detail.status,
+          issue_type: detail.issue_type ?? null,
+          updated_at: detail.row.updated_at,
+        }
+      : null,
+  );
+  // Asked with the page's first reads, so the menu's items are there when it opens.
+  $effect(() => {
+    const key = reachKey;
+    if (key !== null && pageShown()) untrack(() => void askReach(key, "open", ports.reachableTransitions, ports.refusedWrites));
+  });
+  const statusMoves = $derived.by(() => {
+    if (!detail) return { can: false, why: null };
+    const source = detail.source.display_name;
+    if (!sourceRoles.writes(detail.row.source_id, "transition")) return { can: false, why: `${source} tickets cannot be moved from knobas: its adapter offers no moves.` };
+    const refusedNow = moveRefused ?? moveRefusal(detail.row.entity_id) ?? null;
+    return refusedNow === null ? { can: true, why: null } : { can: false, why: refusedNow };
+  });
+  let statusOpen = $state(false);
+  $effect(() => untrack(() => watchTicketNotes()));
+  function moveTo(status: string) {
+    if (!detail || !statusMoves.can) return;
+    const key = reachKey!;
+    void moveTicket(key, status, { surface: JOB, ports: { submitWrite: ports.submitWrite, ...(ports.reachableTransitions ? { reachableTransitions: ports.reachableTransitions } : {}) } });
+  }
+  function retryReach() {
+    const key = reachKey;
+    if (key === null) return;
+    forgetReach(key.entity_id);
+    void askReach(key, "press", ports.reachableTransitions, ports.refusedWrites);
+  }
 
   /** Whether keep-alive shows this job or holds it hidden (#2247). */
   const pageShown = pageVisible();
@@ -507,6 +552,19 @@
     const onkey = (event: KeyboardEvent) => {
       // A page keep-alive holds hidden (#2247) takes no keys.
       if (!pageShown()) return;
+      // `⌘Z` / `Ctrl+Z` undoes the last move while its toast stands (ADR-0054), outside a field and with nothing open.
+      if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && !event.defaultPrevented) {
+        if (layers.open.length > 0 || inTextField(document.activeElement)) return;
+        if (undoLastMove()) event.preventDefault();
+        return;
+      }
+      // `m` opens the status menu (ADR-0054), as `L` opens the drawer.
+      if (event.key === "m" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented) {
+        if (!detail || drawer || layers.open.length > 0 || inTextField(document.activeElement) || !statusMoves.can) return;
+        event.preventDefault();
+        statusOpen = true;
+        return;
+      }
       if (event.key.toLowerCase() !== "l" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (!detail || drawer || layers.open.length > 0 || inTextField(document.activeElement)) return;
       event.preventDefault();
@@ -657,7 +715,24 @@
       onaction={act}
       {table}
       onlink={() => (drawer = true)}
-    />
+    >
+      {#snippet statusControl()}
+        <TfStatusMove
+          status={detail.status}
+          ticketKey={key}
+          source={detail.source.display_name}
+          reach={reachKey === null ? null : reachOf(reachKey)}
+          asking={reachKey !== null && reachAsking(reachKey)}
+          moves={statusMoves}
+          echo={echoOn(detail.row.entity_id, "status")}
+          note={ticketNotes[detail.row.entity_id] ?? null}
+          bind:open={statusOpen}
+          onmove={moveTo}
+          onretry={retryReach}
+          ondismiss={() => void dismissNote(detail.row.entity_id)}
+        />
+      {/snippet}
+    </TfJobCard>
     <TfScroller class="tf-work">
       <div class="tf-wbody">
         <div class="tf-tkread" bind:this={reading}>

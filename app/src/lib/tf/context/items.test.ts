@@ -263,3 +263,23 @@ test("a source whose pages open inside knobas offers Open in browser right after
   const off = menuFor({ kind: "ticket", id: "jira:PAY-1", hash: "#/ticket/jira%3APAY-1" }, null, ctx({ sourceName: (id) => names[id] ?? null }));
   expect(ids(off)).not.toContain("web-browser");
 });
+
+test("a ticket's Move to: the statuses it can reach as a submenu, after what it does; disabled with the reason; absent without a page offering moves (ADR-0054)", () => {
+  const offer = { statuses: ["In Review", "Done"], asking: null, unsure: null, disabled: null };
+  const entries = menuFor(TICKET, null, ctx({ moves: () => offer }));
+  expect(ids(entries).slice(0, 4)).toEqual(["open", "work", "timer", "move"]);
+  const move = item(entries, "move");
+  expect(move.label).toBe("Move to");
+  expect(move.sub!.map((one) => ("rule" in one ? "|" : one.label))).toEqual(["In Review", "Done"]);
+  expect((move.sub![1] as Item).act).toEqual({ do: "move", entityId: TICKET.id, status: "Done" });
+
+  const asking = item(menuFor(TICKET, null, ctx({ moves: () => ({ ...offer, statuses: [], asking: "Asking Jira…" }) })), "move");
+  expect(asking.sub).toEqual([{ id: "move-asking", label: "Asking Jira…", disabled: "Asking Jira…" }]);
+  const unsure = item(menuFor(TICKET, null, ctx({ moves: () => ({ ...offer, unsure: "Jira did not answer; it decides when the move is sent." }) })), "move");
+  expect((unsure.sub![0] as Item).disabled).toBe("Jira did not answer; it decides when the move is sent.");
+
+  const refused = item(menuFor(TICKET, null, ctx({ moves: () => ({ ...offer, disabled: "Jira tickets cannot be moved from knobas: its adapter offers no moves." }) })), "move");
+  expect(refused).toEqual({ id: "move", label: "Move to", disabled: "Jira tickets cannot be moved from knobas: its adapter offers no moves." });
+  expect(ids(menuFor(TICKET, null, ctx()))).not.toContain("move");
+  expect(ids(menuFor(TICKET, null, ctx({ moves: () => null })))).not.toContain("move");
+});

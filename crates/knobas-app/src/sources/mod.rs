@@ -410,6 +410,15 @@ pub struct SourceSummary {
     /// roles still in [`roles`](Self::roles); empty when every claimed role
     /// is filled or not judged yet.
     pub role_misses: Vec<knobas_source::role::data::RoleMiss>,
+    /// The writes the adapter declares, from its descriptor template like
+    /// `kinds` (ADR-0054): the board asks a ticket where it can go, and
+    /// offers a move, only where its source declares `transition`. Empty for
+    /// a row whose adapter is no longer compiled in. Which of them this
+    /// instance's credential may make is `refused_writes`' answer. Off the
+    /// wire when empty, which the shell reads as none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub write_ops: Vec<String>,
 }
 
 /// What *Test connection* found.
@@ -924,6 +933,7 @@ mod tests {
             kinds: Vec::new(),
             roles: Vec::new(),
             role_misses: Vec::new(),
+            write_ops: Vec::new(),
         })
         .unwrap();
         assert_eq!(summary["roles"], serde_json::json!([]), "{summary}");

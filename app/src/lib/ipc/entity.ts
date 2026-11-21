@@ -913,8 +913,9 @@ export function owedTickets(entityId: string): Promise<QueuedWrite[]> {
  * when its namespace is not a configured source, and `unauthorized` /
  * `unreachable` / `internal` as the source's own failure maps.
  */
-export function reachableTransitions(entityId: string): Promise<string[]> {
-  return invoke<string[]>("reachable_transitions", { entityId });
+export function reachableTransitions(entityId: string, behind = false): Promise<string[]> {
+  // `behind` (ADR-0054): a read the board asks ahead of a press goes in the background lane, so a person's own goes first.
+  return invoke<string[]>("reachable_transitions", behind ? { entityId, behind } : { entityId });
 }
 
 /**

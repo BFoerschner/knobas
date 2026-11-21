@@ -40,6 +40,14 @@
   24 cards or more (`TicketStack`), draw only the rows near the viewport
   (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
+  **Moving a ticket** (ADR-0054, ticket-edit decisions sections 3 to 13): a
+  card's right-click menu offers *Move to ▸* with the statuses it can reach,
+  and the list's Status cell is a button that opens them (`m` on the selected
+  row). A move is drawn at once, the card in its new column with *Queued*
+  then *Sent* (`moves.svelte.ts`, laid over the board's read by
+  `echo-board.ts`); a refused or held one puts the card back with a note.
+  `⌘Z` (`Ctrl+Z`) undoes the last move while its toast stands.
+
   **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
   module state, never written anywhere, so a restart forgets them. Each view
   keeps its own, over what it was saved with.
@@ -67,6 +75,8 @@
     TicketViewRow,
   } from "../../ipc/search";
   import type { BoardReaderPorts, ViewSessions } from "./board-reader.svelte";
+  import type { MovePorts, NotePorts } from "./moves.svelte";
+  import type { EchoListen } from "../queued.svelte";
 
   /** The reads this page makes, injectable so a test needs no bridge: the board reader's, and the views'. */
   export interface TicketsPorts extends BoardReaderPorts {
@@ -83,6 +93,10 @@
     openView: (id: string) => Promise<void>;
     /** A Jira view's query as its source reads it, for *Make an editable copy* (#1208). */
     translateView: (id: string) => Promise<QueryTranslation | null>;
+    /** A move's reads and writes, and the queue's open rows its notes are read from (ADR-0054); the bridge's when left out. */
+    moves?: Partial<MovePorts> & Partial<NotePorts>;
+    /** Hears `item:refreshed` and `sync:state`, which read the board again for its moves' echoes; the bridge's when left out. */
+    listen?: EchoListen;
   }
 
   /** What the page keeps for the session: each view's switches, and the selection. */
@@ -189,6 +203,12 @@
   import TfRailBar from "../TfRailBar.svelte";
   import type { EscTarget } from "../escape";
   import { filterKeys } from "../filter-keys";
+  import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { sameStatus } from "./drop";
+  import { withStatusEchoes, withStatusRows } from "./echo-board";
+  import { askReach, asking as reachAsking, moveRefusal, noteObserved, reachOf } from "./reach.svelte";
+  import { dismissNote, movedStatus, moveTicket, moveWaits, offerMoves, ticketNotes, undoLastMove, watchTicketNotes, type MoveOffer } from "./moves.svelte";
+  import StatusMenu from "./StatusMenu.svelte";
 
   let {
     ready,
@@ -380,6 +400,8 @@
       showAll: view?.show_all ?? false,
       sort: session.views[sessionKey]?.sort ?? saved.sort,
     }),
+    // A move is drawn in its new column at once, over every read (ADR-0054).
+    overlay: { board: (board) => withStatusEchoes(board, movedStatus), rows: (rows) => withStatusRows(rows, movedStatus) },
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
@@ -677,6 +699,133 @@
   });
   const listRows = $derived(heldList.rows);
 
+  // ---- a ticket's move (ADR-0054, ticket-edit decisions sections 3 to 13) ----
+  /** Where each moved card stood on the board, for the way back of a move refused, held or withdrawn. */
+  const movedFrom = new Map<string, { tag: string; rank: number }>();
+  // The refresh after a move, or a run of its source's end, reads the board again, so its echo settles.
+  $effect(() => untrack(() => watchEchoes("tickets", () => reader.refresh(), { listen: ports.listen })));
+  // The notes of refused and held moves, from the queue; and a move the queue still holds, drawn after a restart.
+  $effect(() => untrack(() => watchTicketNotes(ports.moves ?? {})));
+  // Each read: the statuses each source uses, and a move's echo gone once the read shows its status. The read as the
+  // source said it, before the overlay, or the echo would settle on itself.
+  $effect(() => {
+    const read = reader.read;
+    const rowsRead = reader.readRows;
+    if (read !== null) untrack(() => noteObserved(read.sources));
+    const cards = [...(read?.columns.flatMap((column) => column.cards) ?? []), ...(rowsRead ?? [])];
+    untrack(() => {
+      for (const card of cards) {
+        const echo = echoOn(card.entity_id, "status");
+        if (echo === null || !sameStatus(card.status, echo.text)) continue;
+        settleEchoes(card.entity_id, (one) => one.kind === "status" && sameStatus(card.status, one.text));
+        movedFrom.delete(card.entity_id);
+      }
+    });
+  });
+
+  /** A card by its entity id, among what the board or the list read. */
+  function cardById(entityId: string): MiniBoardCard | null {
+    for (const column of reader.board?.columns ?? []) for (const card of column.cards) if (card.entity_id === entityId) return card;
+    return reader.rows?.find((card) => card.entity_id === entityId) ?? null;
+  }
+
+  /** Why `card` cannot be moved from here, or `null`. */
+  function moveBlocked(card: MiniBoardCard): string | null {
+    const source = sourceRoles.nameOf(card.source_id);
+    if (!sourceRoles.writes(card.source_id, "transition")) return `${source} tickets cannot be moved from knobas: its adapter offers no moves.`;
+    return moveRefusal(card.entity_id) ?? null;
+  }
+
+  /** The board column a move to `status` lands `card` in, in its own lane, and the card it lands above: the column's top. */
+  function landing(card: MiniBoardCard, status: string): { place: string; before: string | null } | null {
+    const entry = heldBoard.rows.find((one) => one.card.entity_id === card.entity_id);
+    if (entry === undefined) return null;
+    const lane = boardHold.tagOf(entry).split("\u0001")[0] ?? "";
+    for (const { lane: band, drawn } of reader.bands) {
+      if ((band.key ?? "") !== lane) continue;
+      const column = drawn.find(({ column: one, listed }) => (listed.length > 0 ? listed.some((named) => sameStatus(named, status)) : sameStatus(one.status, status)));
+      if (column === undefined) return null;
+      const place = placeAt(band, column.column);
+      const first = (heldCards.get(place) ?? []).find((one) => one.entity_id !== card.entity_id);
+      return { place, before: first?.entity_id ?? null };
+    }
+    return null;
+  }
+
+  /** The card back where it stood: its move was refused, held or withdrawn. */
+  function putBack(entityId: string) {
+    const was = movedFrom.get(entityId);
+    movedFrom.delete(entityId);
+    if (was !== undefined) boardHold.restore(entityId, was);
+  }
+
+  /** Move `card` to `status`: on the board it stands at the top of its new column at once (section 8). */
+  function moveCard(card: MiniBoardCard, status: string) {
+    if (moveBlocked(card) !== null) return;
+    const id = card.entity_id;
+    if (showing.layout === "board") {
+      const lands = landing(card, status);
+      const was = lands === null ? null : boardHold.move(id, lands.place, lands.before);
+      if (was !== null && !movedFrom.has(id)) movedFrom.set(id, was);
+    }
+    void moveTicket(card, status, { ...(ports.moves ? { ports: ports.moves } : {}), onstop: () => putBack(id), onwithdrawn: () => putBack(id) });
+  }
+
+  /** The chip a moved card draws on its head line, in a column holding `listed` statuses (several: it names the one picked). */
+  function writeOf(card: MiniBoardCard, listed: readonly string[]): { words: string; tone: "info" | "muted"; title?: string } | null {
+    const echo = echoOn(card.entity_id, "status");
+    if (echo === null) return null;
+    const sent = echo.state === "sent";
+    const several = listed.length > 1;
+    const words = sent ? (several ? `${echo.text}, sent` : "Sent") : several ? `${echo.text}, queued` : "Queued";
+    const title = echo.write === null ? undefined : moveWaits[echo.write];
+    return { words, tone: sent ? "muted" : "info", ...(title === undefined ? {} : { title }) };
+  }
+
+  /** What *Move to ▸* in a ticket's right-click menu offers (section 10). */
+  function offerFor(entityId: string): MoveOffer | null {
+    const card = cardById(entityId);
+    if (card === null) return null;
+    const source = sourceRoles.nameOf(card.source_id);
+    const blocked = moveBlocked(card);
+    if (blocked !== null) return { statuses: [], asking: null, unsure: null, disabled: blocked };
+    const reach = reachOf(card);
+    if (reach === null) return { statuses: [], asking: reachAsking(card) ? `Asking ${source}…` : null, unsure: reachAsking(card) ? null : `${source} did not answer; it decides when the move is sent.`, disabled: null };
+    const statuses = reach.statuses.filter((status) => !sameStatus(status, card.status));
+    const unsure = reach.standing !== "exact" && reach.failed !== undefined ? `${source} did not answer; it decides when the move is sent.` : null;
+    if (statuses.length === 0 && unsure === null) return { statuses: [], asking: null, unsure: null, disabled: `${source} offers no move from ${card.status ?? "no status"}.` };
+    return { statuses, asking: null, unsure, disabled: null };
+  }
+
+  // While shown, the right-click menu's *Move to* on a ticket is this page's.
+  $effect(() => {
+    if (!pageShown()) return;
+    return untrack(() =>
+      offerMoves({
+        offer: offerFor,
+        ask: (id) => {
+          const card = cardById(id);
+          if (card !== null) void askReach(card, "press", ports.moves?.reachableTransitions);
+        },
+        move: (id, status) => {
+          const card = cardById(id);
+          if (card !== null) moveCard(card, status);
+        },
+      }),
+    );
+  });
+
+  // -- the list's Status cell (section 10) --
+  /** The ticket whose status menu stands, and the cell that opened it. */
+  let statusMenu = $state<{ card: MiniBoardCard; opener: HTMLElement } | null>(null);
+  let statusMenuOpen = $state(false);
+  function openStatusMenu(card: MiniBoardCard, opener: HTMLElement) {
+    if (moveBlocked(card) !== null) return;
+    void askReach(card, "press", ports.moves?.reachableTransitions);
+    statusMenu = { card, opener };
+    statusMenuOpen = true;
+  }
+
   /** How many lanes the board draws: the scroller's `tf-lane-one` or `tf-lanes` (`tickets.css`). */
   let lanesDrawn = $state(0);
   /** On each lane drawn: counts it while it is there. Untracked, or the attachment would run again on its own count. */
@@ -853,6 +1002,8 @@
     const to = seen ?? Math.min(visible.length - 1, Math.max(0, at + by));
     const next = visible[to]!;
     session.selected = next.card.entity_id;
+    // A selected card is asked where it can go, behind, so a status menu or a pickup lights from memory (section 5).
+    void askReach(next.card, "select", ports.moves?.reachableTransitions);
     // A row or card past the drawn ones is drawn first, in its column's window on the board; a row in view is drawn.
     if (seen === null) {
       if (showing.layout !== "board") win.reveal(to);
@@ -872,9 +1023,24 @@
     const onkey = (event: KeyboardEvent) => {
       // A page keep-alive holds hidden (#2247) takes no keys.
       if (!pageShown()) return;
+      // `⌘Z` / `Ctrl+Z` undoes the last move while its toast stands (ADR-0054), outside a field and with nothing open.
+      if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && !event.defaultPrevented) {
+        if (layers.open.length > 0 || inTextField(document.activeElement)) return;
+        if (undoLastMove()) event.preventDefault();
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;
+      // `m` on the list's selected row opens its status menu under the cell (section 10).
+      if (event.key === "m" && showing.layout === "list" && current !== null && layers.open.length === 0) {
+        const cell = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(current.card.entity_id)}"] .tf-statecell`);
+        if (cell !== null) {
+          event.preventDefault();
+          openStatusMenu(current.card, cell);
+        }
+        return;
+      }
       const by = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key] as 1 | -1 | undefined;
       if (by !== undefined) {
         event.preventDefault();
@@ -885,6 +1051,8 @@
       const card = at instanceof HTMLElement ? at.closest<HTMLElement>("[data-entity]") : null;
       if (at instanceof HTMLElement && at !== document.body && card === null && at.closest("a, button, select") !== null)
         return;
+      // A control of its own inside a row (its Status cell) takes its own Enter.
+      if (at instanceof HTMLElement && card !== null && at !== card && at.closest("a, button, select") !== null && card.contains(at)) return;
       // A focused card is the one Enter means, selected or not: the keydown
       // comes before its click would have selected it.
       const entry = card === null ? current : (visible.find((e) => e.card.entity_id === card.dataset.entity) ?? current);
@@ -1136,6 +1304,9 @@
                         chosen={chosenJob.id === card.entity_id}
                         onselect={() => openTicket(card)}
                         onopen={() => openTicket(card)}
+                        write={writeOf(card, listed)}
+                        note={ticketNotes[card.entity_id] ?? null}
+                        ondismiss={() => void dismissNote(card.entity_id)}
                       />
                     {/snippet}
                   </TicketStack>
@@ -1207,7 +1378,24 @@
                         >{/if}</td
                     >
                   {:else if column === "status"}
-                    <td class="tf-nowrap" title={columnName(card.status)}>{columnName(card.status)}</td>
+                    {@const blocked = moveBlocked(card)}
+                    {@const write = writeOf(card, [])}
+                    <td class="tf-nowrap tf-c-status"
+                      ><button
+                        type="button"
+                        class="tf-statecell"
+                        aria-haspopup={blocked === null ? "menu" : undefined}
+                        aria-expanded={blocked === null ? statusMenuOpen && statusMenu?.card.entity_id === card.entity_id : undefined}
+                        aria-disabled={blocked === null ? undefined : "true"}
+                        title={blocked ?? `${columnName(card.status)}. Change the status (M)`}
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          openStatusMenu(card, event.currentTarget);
+                        }}
+                        ondblclick={(event) => event.stopPropagation()}
+                        ><span class="tf-statename">{columnName(card.status)}</span><span class="tf-chev" aria-hidden="true"></span></button
+                      >{#if write}{" "}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} title={write.title}>{write.words}</span>{/if}</td
+                    >
                   {:else if column === "priority"}
                     <td class="tf-c-priority" title={sentenceCase(card.priority) ?? undefined}>{sentenceCase(card.priority) ?? ""}</td>
                   {:else if column === "signals"}
@@ -1237,6 +1425,21 @@
       </div>
     {/if}
   </TfScroller>
+
+  {#if statusMenu !== null}
+    {@const menuCard = statusMenu.card}
+    <StatusMenu
+      bind:open={statusMenuOpen}
+      opener={statusMenu.opener}
+      ticketKey={menuCard.key}
+      status={movedStatus(menuCard.entity_id) ?? menuCard.status}
+      source={sourceRoles.nameOf(menuCard.source_id)}
+      reach={reachOf(menuCard)}
+      asking={reachAsking(menuCard)}
+      onpick={(status) => moveCard(menuCard, status)}
+      onretry={() => void askReach(menuCard, "press", ports.moves?.reachableTransitions)}
+    />
+  {/if}
 
   {#if drafting !== null}
     {@const editing = drafting.editing}

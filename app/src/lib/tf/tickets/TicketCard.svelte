@@ -12,6 +12,12 @@
 
   A ticket view says what its cards show (#812, R-3.16, *Cards show*):
   `fields` names them; without it the card shows what it always has.
+
+  A move (ADR-0054) draws a chip at the right end of the head line, *Queued*
+  then *Sent* (*In Review, queued* where its column holds several statuses):
+  the type and priority give way to it, so no card changes height when it
+  comes or goes. A move the source refused, or knobas holds, is a note under
+  the head line in the source's words, with a `×` that discards the write.
 -->
 <script lang="ts">
   import type { Attachment } from "svelte/attachments";
@@ -34,6 +40,9 @@
     fields = null,
     source = null,
     row,
+    write = null,
+    note = null,
+    ondismiss,
   }: {
     card: MiniBoardCard;
     needles: readonly string[];
@@ -49,6 +58,12 @@
     source?: string | null;
     /** On the card itself: its column's window measures it and holds it still (`TicketStack`). */
     row?: Attachment<HTMLElement>;
+    /** Where its move's write is, drawn as a chip on the head line; `null` draws none. */
+    write?: { words: string; tone: "info" | "muted"; title?: string } | null;
+    /** What the card says of a move the source refused or knobas holds; `null` draws none. */
+    note?: { tone: "err" | "warn"; lead: string; words: string } | null;
+    /** The note's `×`: its write discarded. */
+    ondismiss?: () => void;
   } = $props();
 
   const shows = (field: CardField) => fields === null || fields.includes(field);
@@ -75,7 +90,30 @@
   <span class="tf-thead">
     <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>
     {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
+    {#if write}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} class:tf-muted={write.tone === "muted"} title={write.title}>{write.words}</span>{/if}
   </span>
+  {#if note}
+    {@const said = `${note.lead} ${note.words}`.trim()}
+    <span class="tf-trefused" class:tf-held={note.tone === "warn"} title={said}
+      ><span class="tf-trefused-w">{said}</span><span
+        class="tf-trefused-x"
+        role="button"
+        tabindex="0"
+        aria-label="Discard the move"
+        title="Discard the move"
+        onclick={(event) => {
+          event.stopPropagation();
+          ondismiss?.();
+        }}
+        onkeydown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          ondismiss?.();
+        }}>×</span
+      ></span
+    >
+  {/if}
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {needles} /></span>
   {#if epic && shows("epic")}<span class="tf-cep"><TfKeyed text={epic} /></span>{/if}

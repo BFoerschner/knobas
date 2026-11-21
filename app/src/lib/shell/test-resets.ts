@@ -64,6 +64,20 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The menus standing (the stuck menu, ux27, 2026-11-21): a menu leaves as it is torn down; one a test left drawn is
   // forgotten, so the next test's first menu closes none of it.
   "tf/TfMenu.svelte#standing": async () => (await import("../tf/TfMenu.svelte")).forgetStandingMenus(),
+  // A ticket's moves and where tickets can go (ADR-0054).
+  "tf/tickets/moves.svelte.ts#ticketNotes": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#moveWaits": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#reading": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#again": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#notePorts": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#seeding": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#offered": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/reach.svelte.ts#observed": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#failures": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#flying": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#version": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#grants": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#grantsAsked": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
   // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), read from the backend: each test starts on Docs'
   // own page with every space shown, over the real IPC.
   "tf/docs/docs-choices.svelte.ts#docsChoices": async () => (await import("../tf/docs/docs-choices.svelte")).docsChoices.forget(),

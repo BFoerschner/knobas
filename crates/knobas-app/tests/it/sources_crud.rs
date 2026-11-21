@@ -843,6 +843,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         kinds: Vec::new(),
         roles: Vec::new(),
         role_misses: Vec::new(),
+        write_ops: Vec::new(),
     })
     .unwrap();
     let keys: Vec<&str> = summary

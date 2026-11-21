@@ -118,3 +118,39 @@ test("byTag: a row of a group with no drawn row waits, counted, as a new board c
   const last = board.place([...at("todo", "a1", "a2"), ...at("done", "d1"), ...at("later", "l1")], "open");
   expect(last.waiting).toBe(0);
 });
+
+test("move: the person's move stands at once between two rows, at a group's start or its end, and a later read keeps it (ADR-0054)", () => {
+  const hold = new HeldOrder<Row>((r) => r.id, (r) => r.group ?? "", { byTag: true });
+  const read = [row("a", "todo"), row("b", "todo"), row("c", "doing"), row("d", "doing")];
+  hold.place(read, "x");
+  const group = (rows: readonly Row[], tag: string) => ids(rows.filter((r) => hold.tagOf(r) === tag));
+  // Between c and d.
+  expect(hold.move("a", "doing", "d")).toEqual({ tag: "todo", rank: 0 });
+  let placed = hold.place(read, "x");
+  expect(group(placed.rows, "doing")).toEqual(["c", "a", "d"]);
+  expect(group(placed.rows, "todo")).toEqual(["b"]);
+  // At the start, and at the end.
+  hold.move("b", "doing", "c");
+  placed = hold.place(read, "x");
+  expect(group(placed.rows, "doing")).toEqual(["b", "c", "a", "d"]);
+  hold.move("c", "todo", null);
+  expect(group(hold.place(read, "x").rows, "todo")).toEqual(["c"]);
+  // The read's old order does not take it back: the drawn order differs, so *Sort again* is offered.
+  expect(hold.place(read, "x").stale).toBe(true);
+  // A key that is not held moves nothing.
+  expect(hold.move("zz", "doing", null)).toBeNull();
+});
+
+test("restore puts a moved row back where it stood, with nothing else changed; a new basis sorts as read", () => {
+  const hold = new HeldOrder<Row>((r) => r.id, (r) => r.group ?? "", { byTag: true });
+  const read = [row("a", "todo"), row("b", "todo"), row("c", "doing")];
+  hold.place(read, "x");
+  const was = hold.move("a", "doing", "c")!;
+  hold.restore("a", was);
+  const placed = hold.place(read, "x");
+  expect(ids(placed.rows)).toEqual(["a", "b", "c"]);
+  expect(placed.rows.map((r) => hold.tagOf(r))).toEqual(["todo", "todo", "doing"]);
+  hold.move("a", "doing", null);
+  const fresh = hold.place(read, "y");
+  expect(fresh.rows.map((r) => hold.tagOf(r))).toEqual(["todo", "todo", "doing"]);
+});

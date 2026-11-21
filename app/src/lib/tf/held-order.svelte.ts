@@ -142,6 +142,38 @@ export class HeldOrder<T> {
     this.#released += 1;
   }
 
+  /**
+   * The person moved `key` to group `tag`, before the drawn row `before` (or at the group's end): it stands there at
+   * once, and a later read keeps it there until the person sorts again (ticket-edit decisions, section 8: a card lands
+   * where it was dropped). Answers where it stood, for {@link HeldOrder.restore}; `null` for a key that is not held.
+   */
+  move(key: string, tag: string, before: string | null): { tag: string; rank: number } | null {
+    const held = this.#held;
+    const place = held?.get(key);
+    if (held == null || place === undefined) return null;
+    const was = { tag: place.tag, rank: place.rank };
+    const group = [...held].filter(([other, row]) => other !== key && row.tag === tag).sort(([, a], [, b]) => a.rank - b.rank);
+    const at = before === null ? -1 : group.findIndex(([other]) => other === before);
+    let rank: number;
+    if (at < 0) rank = (group.at(-1)?.[1].rank ?? this.#next) + 1;
+    else if (at === 0) rank = group[0]![1].rank - 1;
+    else rank = (group[at - 1]![1].rank + group[at]![1].rank) / 2;
+    place.tag = tag;
+    place.rank = rank;
+    this.#next = Math.max(this.#next, Math.ceil(rank) + 1);
+    this.#released += 1;
+    return was;
+  }
+
+  /** Put `key` back where {@link HeldOrder.move} said it stood: a refused move's card, or an undone one. */
+  restore(key: string, was: { tag: string; rank: number }): void {
+    const place = this.#held?.get(key);
+    if (place === undefined) return;
+    place.tag = was.tag;
+    place.rank = was.rank;
+    this.#released += 1;
+  }
+
   /** The person asked for the list as it reads now: *Show N new* or *Sort again*. */
   release(): void {
     this.#held = null;

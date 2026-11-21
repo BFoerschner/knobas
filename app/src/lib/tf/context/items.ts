@@ -79,7 +79,9 @@ export type Act =
   /** Mark one run read or unread (ux18). */
   | { do: "run-read"; id: string; read: boolean }
   /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
-  | { do: "pipeline-read"; id: string };
+  | { do: "pipeline-read"; id: string }
+  /** *Move to ▸ ⟨status⟩* on a ticket (ADR-0054): the page offering moves makes it. */
+  | { do: "move"; entityId: string; status: string };
 
 export interface Item {
   id: string;
@@ -126,6 +128,30 @@ export interface MenuContext {
   runs?: { isRead(runId: string): boolean };
   /** Whether a repository is known to be cloned here (ux26): a commit offers *Compare with working tree* only then. */
   checkout?: (repoId: string) => boolean;
+  /**
+   * Where a ticket can go, from the page that draws it (ADR-0054, `moves.svelte.ts`'s `MoveProvider`): *Move to ▸*.
+   * Absent, or `null` for a ticket the page does not hold, the item is left out, so every other ticket menu is as it was.
+   */
+  moves?: (entityId: string) => MoveOffer | null;
+}
+
+/** What *Move to ▸* offers on a ticket (`moves.svelte.ts`). */
+export interface MoveOffer {
+  statuses: string[];
+  asking: string | null;
+  unsure: string | null;
+  disabled: string | null;
+}
+
+/** *Move to ▸* on a ticket: the statuses it can reach, the current one left out; disabled with the reason where it cannot move. */
+export function moveItem(entityId: string, offer: MoveOffer | null): Item[] {
+  if (offer === null) return [];
+  if (offer.disabled !== null) return [{ id: "move", label: "Move to", disabled: offer.disabled }];
+  const sub: Entry[] = [];
+  if (offer.asking !== null) sub.push({ id: "move-asking", label: offer.asking, disabled: offer.asking });
+  if (offer.unsure !== null) sub.push({ id: "move-unsure", label: offer.unsure, disabled: offer.unsure });
+  for (const status of offer.statuses) sub.push({ id: `move:${status}`, label: status, act: { do: "move", entityId, status } });
+  return [{ id: "move", label: "Move to", sub }];
 }
 
 const RULE: Entry = { rule: true };
@@ -259,7 +285,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
     case "ticket": {
       const key = keyOf(thing.id);
       return grouped(
-        [...open(thing.hash, ctx), ...fromSheet("ticket", thing.id, title, ctx)],
+        [...open(thing.hash, ctx), ...fromSheet("ticket", thing.id, title, ctx, moveItem(thing.id, ctx.moves?.(thing.id) ?? null))],
         inSource(thing.id, ctx),
         [
           { id: "copy-key", label: "Copy key", hint: key, act: { do: "copy", text: key, said: `Copied ${key}` } },

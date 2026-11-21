@@ -267,6 +267,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfUpdatesSection.svelte  words(box.first.label, FIRST_WORDS)": "named small: the two words the update box's first button ever says, stacked so it keeps the longest's width",
   "tf/settings/TfUpdatesSection.svelte  words(box.second.label, SECOND_WORDS)": "named small: the six words the update box's second button ever says, stacked so it keeps the longest's width",
   "tf/settings/TfUpdatesSection.svelte  asking ?? []": "named small: the three things a restart for an update can lose (drafts, a site's unsaved changes, a timer)",
+  "tf/tickets/StatusMenu.svelte  items": "named small: the statuses one ticket's workflow offers from where it stands, or a column's statuses (a handful)",
   "tf/render/TfFolderPickMenu.svelte  taking": "named small: the folder renderers that take one folder, in the glyph's menu, which the person saves by hand in Settings (a handful)",
   "shell/Booting.svelte  db.blocked.tried": "a handful by what it is: the routes one start tried to its own database, the loopback and the socket (ux28)",
   "shell/Booting.svelte  db.blocked.allow": "at most two: the programs an administrator allows, knobas-app and its postgres (ux28)",

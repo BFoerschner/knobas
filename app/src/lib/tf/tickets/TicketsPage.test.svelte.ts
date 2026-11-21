@@ -2495,3 +2495,127 @@ test("a view that shows every ticket draws eight a column in the frame its board
   // The eight drawn first stay where they drew.
   expect(firstCards.every((card) => card.isConnected)).toBe(true);
 });
+
+// ---- moving a ticket (ADR-0054, ticket-edit decisions sections 3 to 12) ----
+
+/** The move ports a test drives: the writes queued, the follow's ears, and the events the page listens to. */
+function movable(h: Harness, reach: string[] = ["In Progress", "Done"], submit?: (payload: unknown) => Promise<unknown>) {
+  const sent: unknown[] = [];
+  const ears = new Map<number, ((row: unknown) => void)[]>();
+  const heard = new Map<string, (event: { payload: unknown }) => void>();
+  let id = 100;
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  onTestFinished(() => sourceRoles.forget());
+  h.ports.listen = (event, handler) => {
+    heard.set(event, handler);
+    return Promise.resolve(() => {});
+  };
+  h.ports.moves = {
+    submitWrite: (payload) => {
+      sent.push(payload);
+      if (submit) return submit(payload) as never;
+      return Promise.resolve({ id: id++, state: "pending", entity_id: (payload as { Transition: { entity: string } }).Transition.entity } as never);
+    },
+    discardWrite: () => Promise.resolve(),
+    reachableTransitions: () => Promise.resolve(reach),
+    follower: {
+      follow: (write, hear) => {
+        const all = ears.get(write) ?? [];
+        all.push(hear as (row: unknown) => void);
+        ears.set(write, all);
+        return () => ears.set(write, (ears.get(write) ?? []).filter((one) => one !== hear));
+      },
+    },
+    pendingWrites: () => Promise.resolve([]),
+    listen: () => Promise.resolve(() => {}),
+  };
+  return { sent, ears, heard };
+}
+
+/** The cards' keys in the board column headed `status`, top to bottom. */
+const inColumn = (status: string) => {
+  const col = [...target.querySelectorAll(".tf-col")].find((one) => one.querySelector("h3")!.textContent!.trim().startsWith(status));
+  return [...(col?.querySelectorAll<HTMLElement>(".tf-tcard") ?? [])].map((one) => one.dataset.entity!.replace("jira:", ""));
+};
+const chipOf = (key: string) => target.querySelector(`[data-entity="jira:${key}"] .tf-twrite`)?.textContent ?? null;
+
+test("the list's Status cell opens the statuses the ticket can reach, and a pick queues the move, drawn at once", async () => {
+  const h = harness();
+  const { sent } = movable(h);
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const cell = target.querySelector<HTMLButtonElement>('[data-entity="jira:PAY-2"] .tf-statecell')!;
+  expect(cell.textContent).toBe("To do");
+  cell.click();
+  await settle();
+  const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-move-m [role=menuitem]")];
+  expect(items.map((one) => one.textContent)).toEqual(["In Progress1", "Done2"]);
+  items[1]!.click();
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-2"] .tf-statecell')!.textContent).toBe("Done");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  await settle();
+  expect(sent).toEqual([{ Transition: { entity: "jira:PAY-2", status: "Done" } }]);
+});
+
+test("a source that offers no moves draws the Status cell disabled with the reason, and a press queues nothing", async () => {
+  const h = harness();
+  const { sent } = movable(h);
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: [] }]);
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const cell = target.querySelector<HTMLButtonElement>('[data-entity="jira:PAY-2"] .tf-statecell')!;
+  expect(cell.getAttribute("aria-disabled")).toBe("true");
+  expect(cell.title).toBe("Tidewater Jira tickets cannot be moved from knobas: its adapter offers no moves.");
+  cell.click();
+  await settle();
+  expect(document.querySelector(".tf-move-m")).toBeNull();
+  expect(sent).toEqual([]);
+});
+
+test("a move from the card's menu stands the card at the top of its new column with Queued before the queue answers, and a read that shows it settles it in place", async () => {
+  const corpus = CORPUS.map((entry) => ({ ...entry }));
+  const h = harness([], [], corpus);
+  const { heard } = movable(h, ["In Progress", "Done"], () => new Promise(() => {}));
+  await open(h);
+  const { moveProvider } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "In Progress");
+  flushSync();
+  expect(inColumn("In progress")).toEqual(["PAY-3", "PAY-40"]);
+  expect(inColumn("To do")).not.toContain("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  // A board read that still says the old status keeps it where it was moved.
+  heard.get("sync:state")?.({ payload: { source_id: "jira", running: false } });
+  await settle();
+  expect(inColumn("In progress")).toEqual(["PAY-3", "PAY-40"]);
+  expect(chipOf("PAY-3")).toBe("Queued");
+  // The source moved it: the read shows it, the chip goes and nothing moves.
+  const box = target.querySelector('[data-entity="jira:PAY-3"]')!.getBoundingClientRect();
+  corpus.find((entry) => entry.card.key === "PAY-3")!.status = "In Progress";
+  heard.get("sync:state")?.({ payload: { source_id: "jira", running: false } });
+  await settle();
+  expect(chipOf("PAY-3")).toBeNull();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(target.querySelector('[data-entity="jira:PAY-3"]')!.getBoundingClientRect()).toEqual(box);
+});
+
+test("a refused move puts the card back in its column at its place, with the source's note", async () => {
+  const h = harness();
+  const { ears } = movable(h);
+  await open(h);
+  const before = inColumn("To do");
+  const { moveProvider, ticketNotes } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "Done");
+  await settle();
+  expect(inColumn("To do")).not.toContain("PAY-3");
+  const write = [...ears.keys()].at(-1)!;
+  for (const hear of [...ears.get(write)!]) hear({ id: write, state: "refused", entity_id: "jira:PAY-3", detail: "No move from To Do to Done.", held_snapshot: null });
+  await settle();
+  expect(inColumn("To do")).toEqual(before);
+  expect(chipOf("PAY-3")).toBeNull();
+  ticketNotes["jira:PAY-3"] = { write, tone: "err", lead: "Not moved to Done.", words: "No move from To Do to Done." };
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-trefused')?.textContent).toContain("Not moved to Done. No move from To Do to Done.");
+});
