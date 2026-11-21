@@ -97,7 +97,12 @@ On his PC (`files_corpus.exe`, a scratch folder in his Temp on NTFS, through WSL
 - **Gitea's archive**, live (`the_archive_hands_over_every_blob_of_the_tree` against the WSL box's Gitea): the tree's
   2 files in 1 request.
 
-The first fill against the live forge and a push's update on it are owed with the live script.
+Against the live forges (`testenv/live-everything.sh`, 2026-11-21, the Mac under the queue, the WSL box's Gitea
+and Forgejo through the tunnel, both seeded with the fixture's files): from an empty profile, the backend up in
+1.1 s and `settlebridge` finding `tidewater/ledger-gateway` by `SettleBridgeServer.java` on both forges 14.5 s after
+it started. On each forge a file pushed with a fresh word, changed to another and deleted, each followed by a sync:
+the new word found, the old one gone and the deleted file's word gone 4.1 to 4.2 s after each push (the run about
+2.5 s, then the pass, then the script's 2 s poll). 44.6 s for the whole witness.
 
 From the spike, on a corpus of 1,849 repositories, 194,653 files and 1,473 MB of text: the index 573 MB, built in
 40 s on the Mac and 39 s on his PC. A key 1.5 ms at the median and 9.5 at the worst of 163 on his PC. A push of 100
@@ -165,6 +170,11 @@ The mock source answers trees, blobs and archives from them with git's own shas,
 class, and the ticket whose comment names it. `testenv/seed-gitea.sh` pushes the files (section 4c), and
 `testenv/live-everything.sh` witnesses the first fill and a push on the live Gitea and Forgejo. The browser's fake
 keeps its table (`FAKE_FILE_REPOS`).
+
+**One pass at a time.** The index has one writer. The live run's first try read Forgejo's files after its first run
+and Gitea's only after its second, 312 s in: both first runs ended together, and Gitea's pass found the writer busy
+and read nothing. A pass now waits for the one before it (its budget counted from when it starts):
+`two_sources_passes_at_once_both_read`, then 14.5 s on the live forges.
 
 ## Left, with what it would take
 
