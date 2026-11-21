@@ -522,6 +522,8 @@ export function writeWords(
         const who = Array.isArray(op?.reviewers) ? op.reviewers.filter((r): r is string => typeof r === "string") : [];
         return [{ text: who.length > 0 ? `Ask ${who.join(", ")} to review ` : "Request a review of " }, key];
       }
+      case "EditTicket":
+        return editTicketWords(op, key);
       default: {
         const unheard: undefined = variant;
         void unheard;
@@ -532,6 +534,39 @@ export function writeWords(
   if (said !== null) return said.filter((part) => part.text !== "");
   const title = name(row.entity_id);
   return [{ text: title === null ? "A write" : `A write to ${title}` }];
+}
+
+/**
+ * An `EditTicket`'s heading (ADR-0054): *Assign PAY-231 to mara*, *Unassign
+ * PAY-231*, *Set PAY-231's priority to High*, *Retitle PAY-231*, *Label
+ * PAY-231: add sepa, remove triage*. An edit of several fields, or of a
+ * source's own field, is *Edit PAY-231*.
+ */
+function editTicketWords(op: Record<string, unknown> | undefined, key: WritePart): WritePart[] {
+  const set = (field: string): boolean => op?.[field] !== null && op?.[field] !== undefined;
+  const own = typeof op?.["fields"] === "object" && op["fields"] !== null ? Object.keys(op["fields"]) : [];
+  const named = ["title", "assignee", "priority", "labels"].filter(set);
+  if (named.length !== 1 || own.length > 0) return [{ text: "Edit " }, key];
+  switch (named[0]) {
+    case "assignee": {
+      const who = op?.["assignee"];
+      const account = typeof who === "object" && who !== null ? (who as { account?: unknown }).account : null;
+      return typeof account === "string" ? [{ text: "Assign " }, key, { text: ` to ${account}` }] : [{ text: "Unassign " }, key];
+    }
+    case "priority":
+      return [{ text: "Set " }, key, { text: `’s priority to ${String(op?.["priority"])}` }];
+    case "labels": {
+      const change = op?.["labels"] as { add?: unknown; remove?: unknown };
+      const names = (list: unknown): string[] => (Array.isArray(list) ? list.filter((n): n is string => typeof n === "string") : []);
+      const parts = [
+        names(change.add).length > 0 ? `add ${names(change.add).join(", ")}` : "",
+        names(change.remove).length > 0 ? `remove ${names(change.remove).join(", ")}` : "",
+      ].filter((part) => part !== "");
+      return [{ text: "Label " }, key, { text: parts.length > 0 ? `: ${parts.join(", ")}` : "" }];
+    }
+    default:
+      return [{ text: "Retitle " }, key];
+  }
 }
 
 /**

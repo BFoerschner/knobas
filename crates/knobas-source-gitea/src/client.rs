@@ -720,6 +720,35 @@ impl GiteaClient {
         self.http.send(request).await
     }
 
+    /// `DELETE <base>/api/v1/<path>`: [`Self::post`]'s twin for taking a
+    /// label off an issue (ADR-0054).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::post`].
+    pub(crate) async fn delete(&self, path: &str) -> Result<(), SourceError> {
+        let request = self
+            .http
+            .request(Method::DELETE, &format!("{API_ROOT}{path}"));
+        self.http.send(request).await.map(|_| ())
+    }
+
+    /// `GET /repos/{o}/{r}/assignees`: who an issue of the repository can be
+    /// assigned to (ADR-0054), as Gitea and Forgejo both answer it.
+    pub(crate) async fn assignees(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<crate::model::UserRef>, SourceError> {
+        let users: Option<Vec<crate::model::UserRef>> = self
+            .get_json(
+                &format!("/repos/{}/{}/assignees", segment(owner)?, segment(repo)?),
+                &[],
+            )
+            .await?;
+        Ok(users.unwrap_or_default())
+    }
+
     /// One path segment of a write, refused unless it is a name Gitea could
     /// have issued -- the same guard the reads use, reachable from
     /// [`crate::write`].

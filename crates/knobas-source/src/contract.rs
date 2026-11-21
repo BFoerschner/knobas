@@ -280,6 +280,17 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // A delete could not be taken back. The target is no branch's
         // address -- it has no `@refs/heads/` -- so an adapter that attempted
         // it anyway is refused on the id's shape before a request leaves.
+        // An edit would rename somebody's ticket. The target is no ticket's
+        // address, so an adapter that attempted it anyway is refused on the
+        // id's shape before a request leaves; and it carries only a title.
+        crate::WriteOp::EditTicket {
+            entity: target.clone(),
+            title: Some("contract battery probe".into()),
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: std::collections::BTreeMap::new(),
+        },
         crate::WriteOp::DeleteBranch { entity: target },
     ]
     .into_iter()
@@ -520,6 +531,208 @@ where
     {
         panic!("descriptor.code_pages: {error}");
     }
+    // 15. A ticket's fields (ADR-0054): answered exactly when `edit_ticket`
+    //     is declared, each answer in the vocabulary's rules, an empty edit
+    //     and an edit of a field the answer does not offer refused before
+    //     anything is sent, and every searched field's list answered.
+    check_ticket_fields(&*s, &d, &sink.0).await;
+}
+
+/// The most tickets clause 15 asks about: its reads are safe against a live
+/// instance, but a corpus of thousands would be thousands of requests.
+const TICKET_FIELDS_ASKED: usize = 10;
+
+/// The id clause 15 names as a source's own field, which no answer lists.
+const UNLISTED_FIELD: &str = "contract_battery_probe";
+
+/// Clause 15: [`crate::Source::ticket_fields`] and
+/// [`crate::Source::field_options`] over the tickets (kind `ticket`, the
+/// ticket-system role's) the adapter's own sync emitted, the first
+/// [`TICKET_FIELDS_ASKED`] of them.
+///
+/// 1. An adapter that does not declare `edit_ticket` answers `None` for
+///    each (clause 5 already holds its refusal of the op).
+/// 2. One that declares it answers `Some` for each ticket, and `None` for
+///    an entity of another kind.
+/// 3. Each answer keeps the vocabulary's rules ([`crate::ticket::fault`]).
+/// 4. An `edit_ticket` carrying nothing is refused with
+///    [`SourceError::Protocol`](crate::SourceError::Protocol) and no status:
+///    nothing was sent.
+/// 5. An `edit_ticket` naming a source's own field the answer did not list
+///    is refused by name. One naming a field the answer lists `readonly` is
+///    refused too; it carries the value the answer says the source holds,
+///    so an adapter that wrongly sent it sets what is already set.
+/// 6. `field_options` answers `Some` for each `search` field, and each
+///    `labels` field with a scope, the answers named.
+///
+/// The edits of 4 and 5 are the only writes this battery makes on a
+/// declared op, and each is one a conforming adapter refuses before a
+/// request leaves.
+async fn check_ticket_fields(
+    s: &dyn crate::Source,
+    d: &crate::SourceDescriptor,
+    items: &[crate::SyncItem],
+) {
+    let edits = d.write_ops.iter().any(|w| w == "edit_ticket");
+    let tickets = items
+        .iter()
+        .filter(|i| i.kind == "ticket" && !i.deleted)
+        .take(TICKET_FIELDS_ASKED);
+    for item in tickets {
+        let entity = item.entity.to_string();
+        let answer = s.ticket_fields(&entity).await;
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(error) => panic!("ticket_fields of {entity} failed: {error:?}"),
+        };
+        let Some(answer) = answer else {
+            assert!(
+                !edits,
+                "an adapter that declares \"edit_ticket\" must answer ticket_fields with Some for \
+                 every ticket it emits, and answered None for {entity}"
+            );
+            continue;
+        };
+        assert!(
+            edits,
+            "an adapter that does not declare \"edit_ticket\" must answer ticket_fields with \
+             None, and answered Some for {entity}: its fields would be offered with no write to \
+             send"
+        );
+        if let Some(fault) = crate::ticket::fault(&answer) {
+            panic!("ticket_fields of {entity}: {fault}");
+        }
+        let empty = s
+            .write(crate::WriteOp::EditTicket {
+                entity: entity.clone(),
+                title: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                fields: std::collections::BTreeMap::new(),
+            })
+            .await;
+        assert!(
+            matches!(
+                &empty,
+                Err(crate::SourceError::Protocol { status: None, .. })
+            ),
+            "an edit_ticket carrying nothing must be refused with SourceError::Protocol and no \
+             status, before a request leaves; got {empty:?}"
+        );
+        let unlisted = s
+            .write(crate::WriteOp::EditTicket {
+                entity: entity.clone(),
+                title: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                fields: [(
+                    UNLISTED_FIELD.to_owned(),
+                    serde_json::json!("contract battery probe"),
+                )]
+                .into(),
+            })
+            .await;
+        match &unlisted {
+            Err(crate::SourceError::Protocol { message, .. })
+                if message.contains(UNLISTED_FIELD) => {}
+            other => panic!(
+                "an edit_ticket naming a field ticket_fields did not list ({UNLISTED_FIELD:?}) must \
+                 be refused by name with SourceError::Protocol; got {other:?}"
+            ),
+        }
+        for field in answer.fields.iter().filter(|f| f.readonly.is_some()) {
+            let op = repeat_of(&entity, field);
+            let refused = s.write(op).await;
+            assert!(
+                matches!(&refused, Err(crate::SourceError::Protocol { .. })),
+                "an edit_ticket of {:?}, which ticket_fields of {entity} lists read only, must be \
+                 refused with SourceError::Protocol; got {refused:?}",
+                field.id
+            );
+        }
+        for field in answer.fields.iter().filter(|f| f.kind.has_options()) {
+            let options = s.field_options(&entity, &field.id, "").await;
+            assert!(
+                matches!(options, Ok(Some(_))),
+                "field {:?} of {entity} is of kind {:?} and so has a list: field_options must \
+                 answer it with Some, got {options:?}",
+                field.id,
+                field.kind.word()
+            );
+        }
+    }
+    if edits && let Some(other) = items.iter().find(|i| i.kind != "ticket" && !i.deleted) {
+        let entity = other.entity.to_string();
+        let answer = s.ticket_fields(&entity).await;
+        assert!(
+            matches!(answer, Ok(None)),
+            "ticket_fields of {entity}, of kind {:?} and so not a ticket, must be None; got \
+             {answer:?}",
+            other.kind
+        );
+    }
+}
+
+/// An `edit_ticket` of `field` setting the value the answer says the source
+/// holds: what clause 15 probes a read-only field with, so even a wrong
+/// adapter that sent it would change nothing.
+fn repeat_of(entity: &str, field: &crate::ticket::TicketField) -> crate::WriteOp {
+    use crate::ticket::{ASSIGNEE, LABELS, PRIORITY, TITLE};
+    let text = || field.value.as_str().unwrap_or_default().to_owned();
+    let mut op = crate::WriteOp::EditTicket {
+        entity: entity.to_owned(),
+        title: None,
+        assignee: None,
+        priority: None,
+        labels: None,
+        fields: std::collections::BTreeMap::new(),
+    };
+    if let crate::WriteOp::EditTicket {
+        title,
+        assignee,
+        priority,
+        labels,
+        fields,
+        ..
+    } = &mut op
+    {
+        match field.id.as_str() {
+            TITLE => *title = Some(text()),
+            ASSIGNEE => {
+                *assignee = Some(match field.value.as_str() {
+                    Some(a) => crate::Assignee::Account(a.to_owned()),
+                    None => crate::Assignee::Nobody,
+                });
+            }
+            PRIORITY => *priority = Some(text()),
+            LABELS => {
+                let first = field
+                    .value
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                // Adding a label already there changes nothing; with none,
+                // removing the battery's own name changes nothing either.
+                *labels = Some(match first {
+                    Some(name) => crate::LabelChange {
+                        add: vec![name],
+                        remove: vec![],
+                    },
+                    None => crate::LabelChange {
+                        add: vec![],
+                        remove: vec![UNLISTED_FIELD.to_owned()],
+                    },
+                });
+            }
+            own => {
+                fields.insert(own.to_owned(), field.value.clone());
+            }
+        }
+    }
+    op
 }
 
 /// Clause 13: the read of one item by id ([`crate::Source::refresh`]).
@@ -1967,6 +2180,28 @@ mod tests {
         ClaimsTicketSystemAndAnswersTheTransitionRead,
         /// The same claim over tickets that declare no priority (#1193).
         ClaimsTicketSystemWithoutPriority,
+        /// A ticket system that declares `edit_ticket` and claims
+        /// `ticket_fields`, answers the fields of its tickets in the
+        /// vocabulary's rules (the priority read only), refuses an empty
+        /// edit, an unlisted field and the read-only one by name, answers the
+        /// assignee's list, and panics on any other edit: the conforming case
+        /// of clause 15 (ADR-0054).
+        EditsTickets,
+        /// The same, answering `None` for its ticket.
+        EditsTicketsAnsweringNone,
+        /// The same, its summary of kind `number`.
+        EditsTicketsWithAFaultyField,
+        /// The same, taking an edit that carries nothing.
+        EditsTicketsAcceptingAnEmptyEdit,
+        /// The same, taking an edit of a field its answer did not list.
+        EditsTicketsAcceptingAnUnlistedField,
+        /// The same, taking an edit of the priority it says is read only.
+        EditsTicketsAcceptingAReadOnlyField,
+        /// The same, answering no list for its assignee.
+        EditsTicketsWithoutOptions,
+        /// A read-only ticket system (`ClaimsTicketSystem`) that answers
+        /// `ticket_fields` all the same.
+        AnswersFieldsWithoutEdit,
         /// Claims CI over a pipeline and a run kind declaring their paths,
         /// with `run_log` and one optional read: conforming (#1193).
         ClaimsCi,
@@ -2071,7 +2306,14 @@ mod tests {
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionsWithoutTheOp
                     | Behavior::SourceActionOpWithoutActions
-                    | Behavior::RepeatsASourceAction => {
+                    | Behavior::RepeatsASourceAction
+                    | Behavior::EditsTickets
+                    | Behavior::EditsTicketsAnsweringNone
+                    | Behavior::EditsTicketsWithAFaultyField
+                    | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                    | Behavior::EditsTicketsAcceptingAnUnlistedField
+                    | Behavior::EditsTicketsAcceptingAReadOnlyField
+                    | Behavior::EditsTicketsWithoutOptions => {
                         vec![Capability::Search, Capability::Write]
                     }
                     Behavior::Refreshes
@@ -2100,9 +2342,20 @@ mod tests {
                         }
                         Behavior::ClaimsTicketSystem
                         | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead
-                        | Behavior::ClaimsTicketSystemWithoutPriority => {
+                        | Behavior::ClaimsTicketSystemWithoutPriority
+                        | Behavior::AnswersFieldsWithoutEdit => {
                             vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])]
                         }
+                        Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions => vec![RoleClaim::new(
+                            TICKET_SYSTEM,
+                            ["reachable_transitions", crate::role::TICKET_FIELDS],
+                        )],
                         Behavior::ClaimsCi => vec![RoleClaim::new(CI, ["run_log", "run_tests"])],
                         Behavior::ClaimsCiWithoutRunLog => vec![RoleClaim::new(CI, ["run_tests"])],
                         Behavior::ClaimsWikiWithoutParent => {
@@ -2126,6 +2379,13 @@ mod tests {
                         vec!["comment".into()]
                     }
                     Behavior::DeclaresTransition => vec!["transition".into()],
+                    Behavior::EditsTickets
+                    | Behavior::EditsTicketsAnsweringNone
+                    | Behavior::EditsTicketsWithAFaultyField
+                    | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                    | Behavior::EditsTicketsAcceptingAnUnlistedField
+                    | Behavior::EditsTicketsAcceptingAReadOnlyField
+                    | Behavior::EditsTicketsWithoutOptions => vec!["edit_ticket".into()],
                     Behavior::DeclaresASourceAction
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionOpWithoutActions
@@ -2434,9 +2694,15 @@ mod tests {
                             ..good
                         }],
                         Behavior::ClaimsTicketSystem
-                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead => {
-                            vec![ticket_system(true)]
-                        }
+                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead
+                        | Behavior::AnswersFieldsWithoutEdit
+                        | Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions => vec![ticket_system(true)],
                         Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
                         Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
                             use knobas_spi_types::payload::Frame;
@@ -2683,6 +2949,55 @@ mod tests {
             {
                 return Ok(crate::WriteReceipt::none());
             }
+            if let WriteOp::EditTicket {
+                title,
+                assignee,
+                priority,
+                labels,
+                fields,
+                ..
+            } = &op
+                && matches!(
+                    self.behavior,
+                    Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                )
+            {
+                if crate::edit_is_empty(
+                    title.as_ref(),
+                    assignee.as_ref(),
+                    priority.as_ref(),
+                    labels.as_ref(),
+                    fields,
+                ) {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAnEmptyEdit {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    return Err(SourceError::protocol("nothing to edit on test:1"));
+                }
+                if let Some(id) = fields.keys().next() {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAnUnlistedField {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    return Err(SourceError::protocol(format!(
+                        "the test adapter has no field {id:?} on test:1"
+                    )));
+                }
+                if priority.is_some() {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAReadOnlyField {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    return Err(SourceError::protocol(
+                        "the priority of test:1 cannot be changed here",
+                    ));
+                }
+                unreachable!("battery must not perform an edit a conforming adapter would send");
+            }
             if let WriteOp::SourceAction { id, .. } = &op
                 && self.behavior == Behavior::DeclaresASourceAction
                 && self.descriptor().source_actions.contains(id)
@@ -2745,6 +3060,97 @@ mod tests {
                 })),
                 (_, Some(other)) => Err(SourceError::protocol(format!("no section {other:?}"))),
             }
+        }
+
+        async fn ticket_fields(
+            &self,
+            entity: &str,
+        ) -> Result<Option<crate::ticket::TicketFields>, SourceError> {
+            use crate::ticket::{FieldOption, TicketField, TicketFieldKind, TicketFields};
+            if entity != "test:1"
+                || !matches!(
+                    self.behavior,
+                    Behavior::AnswersFieldsWithoutEdit
+                        | Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                )
+                || self.behavior == Behavior::EditsTicketsAnsweringNone
+            {
+                return Ok(None);
+            }
+            let field = |id: &str, kind: TicketFieldKind, value: serde_json::Value| TicketField {
+                id: id.into(),
+                label: id.into(),
+                kind,
+                value,
+                shown: None,
+                required: false,
+                readonly: None,
+            };
+            let title_kind = if self.behavior == Behavior::EditsTicketsWithAFaultyField {
+                TicketFieldKind::Number
+            } else {
+                TicketFieldKind::Text
+            };
+            Ok(Some(TicketFields {
+                fields: vec![
+                    field("title", title_kind, serde_json::json!("One")),
+                    field(
+                        "assignee",
+                        TicketFieldKind::Search {
+                            scope: "PAY".into(),
+                            person: true,
+                        },
+                        serde_json::Value::Null,
+                    ),
+                    TicketField {
+                        readonly: Some("Not on this ticket's edit screen.".into()),
+                        ..field(
+                            "priority",
+                            TicketFieldKind::Choice {
+                                options: vec![FieldOption {
+                                    value: "High".into(),
+                                    label: "High".into(),
+                                    hint: None,
+                                }],
+                            },
+                            serde_json::json!("High"),
+                        )
+                    },
+                    field(
+                        "labels",
+                        TicketFieldKind::Labels {
+                            scope: None,
+                            create: true,
+                        },
+                        serde_json::json!(["payments"]),
+                    ),
+                ],
+            }))
+        }
+
+        async fn field_options(
+            &self,
+            _entity: &str,
+            field: &str,
+            _typed: &str,
+        ) -> Result<Option<crate::ticket::FieldOptions>, SourceError> {
+            if field != "assignee" || self.behavior == Behavior::EditsTicketsWithoutOptions {
+                return Ok(None);
+            }
+            Ok(Some(crate::ticket::FieldOptions {
+                options: vec![crate::ticket::FieldOption {
+                    value: "mara".into(),
+                    label: "Mara Lindqvist".into(),
+                    hint: Some("mara".into()),
+                }],
+                complete: true,
+            }))
         }
 
         async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
@@ -3479,6 +3885,80 @@ mod tests {
         rejects(
             Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead,
             "a ticket system that does not declare it claims the read and refuses it",
+        )
+        .await;
+    }
+
+    // -- clause 15: a ticket's fields (ADR-0054) ------------------------------
+
+    /// Its `write` panics on any edit a conforming adapter would send, so
+    /// the battery accepting it is proof clause 15 sent none.
+    #[tokio::test]
+    async fn accepts_a_ticket_system_that_edits_its_tickets() {
+        run(Behavior::EditsTickets)
+            .await
+            .expect("a ticket system that declares edit_ticket and answers its fields");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_editing_adapter_that_answers_no_fields() {
+        rejects(
+            Behavior::EditsTicketsAnsweringNone,
+            "must answer ticket_fields with Some",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_fields_answered_without_the_edit() {
+        rejects(
+            Behavior::AnswersFieldsWithoutEdit,
+            "does not declare \"edit_ticket\" must answer ticket_fields with None",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_field_answer_that_breaks_the_rules() {
+        rejects(
+            Behavior::EditsTicketsWithAFaultyField,
+            "field \"title\" is of kind \"number\"",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_an_empty_edit() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAnEmptyEdit,
+            "carrying nothing",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_an_unlisted_field() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAnUnlistedField,
+            "did not list (\"contract_battery_probe\")",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_a_read_only_field() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAReadOnlyField,
+            "edit_ticket of \"priority\", which ticket_fields of test:1 lists read only",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_searched_field_with_no_list() {
+        rejects(
+            Behavior::EditsTicketsWithoutOptions,
+            "field \"assignee\" of test:1 is of kind \"search\"",
         )
         .await;
     }

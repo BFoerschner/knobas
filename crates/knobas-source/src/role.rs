@@ -315,9 +315,17 @@ pub const MINIMUMS: &[Minimum] = &[
         // ticket system has no moves to offer. The battery's clause 8 holds
         // both halves.
         reads: &["reachable_transitions"],
-        // *Make an editable copy* of a saved view (#1208).
-        optional_reads: &[TRANSLATE_QUERY],
-        writes: &["transition", "comment", "create_ticket", "log_work"],
+        // *Make an editable copy* of a saved view (#1208); what a ticket
+        // lets a person change (ADR-0054), read exactly when `edit_ticket`
+        // is declared (`check`).
+        optional_reads: &[TRANSLATE_QUERY, TICKET_FIELDS],
+        writes: &[
+            "transition",
+            "comment",
+            "create_ticket",
+            "log_work",
+            "edit_ticket",
+        ],
     },
     Minimum {
         role: CI,
@@ -417,6 +425,16 @@ pub enum ClaimError {
          reads \"clone_urls\""
     )]
     UnclaimedCloneAddress,
+    #[error(
+        "descriptor.write_ops declares \"edit_ticket\", and no \"ticket-system\" claim reads \
+         \"ticket_fields\": a ticket's editable fields are what the shell offers an edit from"
+    )]
+    EditWithoutFields,
+    #[error(
+        "the \"ticket-system\" claim reads \"ticket_fields\", and descriptor.write_ops does not \
+         declare \"edit_ticket\": the fields would be offered with no write to send"
+    )]
+    FieldsWithoutEdit,
 }
 
 /// The code-host read a descriptor answers with
@@ -425,6 +443,12 @@ pub const CLONE_URLS: &str = "clone_urls";
 /// The ticket-system read [`Source::translate_query`](crate::Source::translate_query)
 /// answers (#1208): a saved view's query read into the search grammar.
 pub const TRANSLATE_QUERY: &str = "translate_query";
+/// The ticket-system read [`Source::ticket_fields`](crate::Source::ticket_fields)
+/// answers (ADR-0054): what a ticket lets a person change. Claimed exactly
+/// when the descriptor declares the `edit_ticket` write.
+pub const TICKET_FIELDS: &str = "ticket_fields";
+/// The write [`TICKET_FIELDS`] goes with.
+const EDIT_TICKET: &str = "edit_ticket";
 
 /// Hold every role `descriptor` claims to that role's minimum, and answer the
 /// first item missing. A descriptor that claims nothing passes.
@@ -484,7 +508,24 @@ pub fn check(descriptor: &SourceDescriptor) -> Result<(), ClaimError> {
             return Err(ClaimError::NoCloneAddress { role });
         }
     }
-    check_clone_from(descriptor)
+    check_clone_from(descriptor)?;
+    check_ticket_fields(descriptor)
+}
+
+/// `edit_ticket` in `write_ops` and a ticket-system claim's `ticket_fields`
+/// are two signals for one fact (ADR-0054), held to each other as
+/// `Capability::Write` is to `write_ops`.
+fn check_ticket_fields(d: &SourceDescriptor) -> Result<(), ClaimError> {
+    let edits = d.write_ops.iter().any(|w| w == EDIT_TICKET);
+    let reads = d
+        .roles
+        .iter()
+        .any(|c| c.role == TICKET_SYSTEM && c.reads.iter().any(|r| r == TICKET_FIELDS));
+    match (edits, reads) {
+        (true, false) => Err(ClaimError::EditWithoutFields),
+        (false, true) => Err(ClaimError::FieldsWithoutEdit),
+        _ => Ok(()),
+    }
 }
 
 /// `clone_from` and a code-host claim's `clone_urls` are two signals for one
@@ -811,6 +852,67 @@ mod tests {
             saved.optional_paths,
             [Field::BoardType, Field::SubQuery, Field::Sprint]
         );
+    }
+
+    /// `edit_ticket` and the ticket-system read `ticket_fields` go together
+    /// (ADR-0054): a claim with the read and without the op is refused, and
+    /// the reverse, each by its own sentence.
+    #[test]
+    fn edit_ticket_and_ticket_fields_go_together() {
+        let ticket_system = |reads: &[&str], ops: &[&str]| {
+            let mut d = code_host(
+                vec![RoleClaim::new(TICKET_SYSTEM, reads.iter().copied())],
+                "repo",
+            );
+            d.clone_from.clear();
+            d.entity_kinds.push(KindInfo {
+                id: "ticket".into(),
+                label: "Ticket".into(),
+                plural: "Tickets".into(),
+                monogram: "TK".into(),
+                full_sync_exhaustive: true,
+                refreshes: true,
+            });
+            let at = |key: &str| vec![PayloadPath::of([key])];
+            d.payload_paths.push(KindPaths {
+                kind: "ticket".into(),
+                status_name: at("status"),
+                priority: at("priority"),
+                assignee: at("assignee"),
+                issue_type: at("type"),
+                labels: vec![crate::ListPath::default()],
+                parent: vec![ParentPath {
+                    kind: "ticket".into(),
+                    at: PayloadPath::of(["parent"]),
+                    names: vec![PayloadPath::of(["key"])],
+                }],
+                project_key: at("project"),
+                ..KindPaths::default()
+            });
+            d.write_ops = ops.iter().map(|o| (*o).to_owned()).collect();
+            check(&d)
+        };
+        assert_eq!(
+            ticket_system(&["reachable_transitions"], &["transition"]),
+            Ok(())
+        );
+        assert_eq!(
+            ticket_system(
+                &["reachable_transitions", TICKET_FIELDS],
+                &["transition", "edit_ticket"]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            ticket_system(&["reachable_transitions", TICKET_FIELDS], &["transition"]),
+            Err(ClaimError::FieldsWithoutEdit)
+        );
+        let refused = ticket_system(&["reachable_transitions"], &["edit_ticket"]);
+        assert_eq!(refused, Err(ClaimError::EditWithoutFields));
+        assert!(refused.unwrap_err().to_string().contains("ticket_fields"));
+        let min = minimum(TICKET_SYSTEM).unwrap();
+        assert!(min.writes.contains(&"edit_ticket"));
+        assert!(min.optional_reads.contains(&TICKET_FIELDS));
     }
 
     #[test]

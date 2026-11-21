@@ -286,7 +286,8 @@ impl Source for TeamCitySource {
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
-            | WriteOp::RequestReviewers { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),

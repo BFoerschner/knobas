@@ -90,6 +90,8 @@ import type {
   RangeNames,
   Reached,
   RefusedWrite,
+  TicketFields,
+  FieldOptions,
   RuleTicket,
   RunLog,
   RunPreset,
@@ -295,6 +297,11 @@ export type {
   ReachOrigin,
   Reached,
   RefusedWrite,
+  TicketFields,
+  TicketField,
+  TicketFieldKind,
+  FieldOption,
+  FieldOptions,
   BranchPull,
   RepoBuilds,
   RepoPipelineRow,
@@ -1081,6 +1088,28 @@ export function entityFilePiped(entityId: string, path: string, commit: string |
 export function refusedWrites(asks: WriteAsk[]): Promise<RefusedWrite[]> {
   if (asks.length === 0) return Promise.resolve([]);
   return invoke<RefusedWrite[]>("refused_writes", { asks });
+}
+
+/**
+ * What a person may change on the ticket `entityId` besides its status, as its
+ * source says now — `knobas_app::commands::entity::ticket_fields` (ADR-0054).
+ *
+ * Read live and never stored; the window keeps it (`tf/tickets/fields.svelte.ts`).
+ * `null` is a source that offers no edits, or an entity that is not a ticket.
+ * `behind` sends its requests in the background lane: a read asked ahead of a
+ * press. Rejects as {@link reachableTransitions} does.
+ */
+export function ticketFields(entityId: string, behind = false): Promise<TicketFields | null> {
+  return invoke<TicketFields | null>("ticket_fields", { entityId, behind });
+}
+
+/**
+ * The choices of `field` on the ticket `entityId` that match `typed` (empty: the
+ * first of them) — `knobas_app::commands::entity::field_options` (ADR-0054).
+ * `null` is a field with no list. Rejects as {@link reachableTransitions} does.
+ */
+export function fieldOptions(entityId: string, field: string, typed: string): Promise<FieldOptions | null> {
+  return invoke<FieldOptions | null>("field_options", { entityId, field, typed });
 }
 
 /**

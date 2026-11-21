@@ -68,6 +68,10 @@ pub fn jira_date(t: DateTime<Utc>, off: FixedOffset) -> String {
     t.with_timezone(&off).format(JIRA_DATE_FMT).to_string()
 }
 
+/// The priorities a Jira with the default scheme offers, in its order:
+/// what `editmeta` answers as the priority's `allowedValues` (ADR-0054).
+pub const PRIORITIES: [&str; 5] = ["Highest", "High", "Medium", "Low", "Lowest"];
+
 /// One issue, in the shape the Jira serialisers need.
 #[derive(Debug, Clone)]
 pub struct JiraIssue {
@@ -93,6 +97,10 @@ pub struct JiraIssue {
     pub original_estimate_secs: Option<u64>,
     /// `fields.attachment` (#2404).
     pub attachments: Vec<JiraAttachment>,
+    /// `fields.labels`: empty from the fixture, which names none (the #28
+    /// ruling); only an edit through `PUT /issue/{key}` puts one here
+    /// (ADR-0054).
+    pub labels: Vec<String>,
 }
 
 /// One `fields.attachment` entry (#2404): the list, never the bytes.
@@ -356,6 +364,64 @@ impl MockState {
         Some(Ok(to))
     }
 
+    /// Edit issue `key` as `PUT /issue/{key}` does (ADR-0054): a new
+    /// summary, a priority by name (one of [`PRIORITIES`]), labels added
+    /// and removed by name. Moves `updated`, so a sync after it sees the
+    /// change. `None` for an issue mockd does not have; `Err` with Jira's
+    /// sentence for a priority it does not know.
+    pub fn edit_issue(
+        &self,
+        key: &str,
+        summary: Option<&str>,
+        priority: Option<&str>,
+        add: &[String],
+        remove: &[String],
+    ) -> Option<Result<(), String>> {
+        let mut inner = self.write();
+        let idx = inner.issues.iter().position(|i| i.key == key)?;
+        if let Some(p) = priority
+            && !PRIORITIES.contains(&p)
+        {
+            return Some(Err(format!("priority: Priority name '{p}' is not valid")));
+        }
+        let now = inner.tick();
+        let issue = &mut inner.issues[idx];
+        if let Some(s) = summary {
+            issue.summary = s.to_owned();
+        }
+        if let Some(p) = priority {
+            issue.priority = Some(p.to_owned());
+        }
+        for name in add {
+            if !issue.labels.contains(name) {
+                issue.labels.push(name.clone());
+            }
+        }
+        issue.labels.retain(|l| !remove.contains(l));
+        issue.updated = now;
+        Some(Ok(()))
+    }
+
+    /// Assign issue `key` as `PUT /issue/{key}/assignee` does, or unassign it
+    /// with `None` (ADR-0054). `None` for an issue mockd does not have; `Err`
+    /// for a user the fixture does not name.
+    pub fn assign_issue(&self, key: &str, name: Option<&str>) -> Option<Result<(), String>> {
+        let mut inner = self.write();
+        let idx = inner.issues.iter().position(|i| i.key == key)?;
+        if let Some(n) = name
+            && !knobas_source_mock::fixture()
+                .people
+                .iter()
+                .any(|p| p.username == n)
+        {
+            return Some(Err(format!("User '{n}' does not exist.")));
+        }
+        let now = inner.tick();
+        inner.issues[idx].assignee = name.map(str::to_owned);
+        inner.issues[idx].updated = now;
+        Some(Ok(()))
+    }
+
     /// Append a new issue to `project` and return it.
     ///
     /// `None` if `project` is not one the fixture has -- a real Jira answers
@@ -410,6 +476,7 @@ impl MockState {
             links: Vec::new(),
             original_estimate_secs: None,
             attachments: Vec::new(),
+            labels: Vec::new(),
         };
         inner.issues.push(issue.clone());
         Some(issue)
@@ -765,6 +832,7 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
             links: Vec::new(),
             original_estimate_secs: t.estimate_h.map(|h| u64::from(h) * 3600),
             attachments,
+            labels: Vec::new(),
         });
     }
     resolve_references(&mut issues, fx);

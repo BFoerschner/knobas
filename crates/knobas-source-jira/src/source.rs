@@ -372,6 +372,24 @@ impl Source for JiraSource {
                 // copy can ever name the row it stands for (issue #280).
                 Ok(WriteReceipt::id(id))
             }
+            WriteOp::EditTicket {
+                entity,
+                title,
+                assignee,
+                priority,
+                labels,
+                fields,
+            } => {
+                let edit = crate::tickets::Edit {
+                    title: title.as_deref(),
+                    assignee: assignee.as_ref(),
+                    priority: priority.as_deref(),
+                    labels: labels.as_ref(),
+                    fields,
+                };
+                crate::tickets::edit(&self.http, &self.issue_key(entity)?, &edit).await?;
+                Ok(WriteReceipt::none())
+            }
             WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
@@ -435,6 +453,38 @@ impl Source for JiraSource {
     /// `mypermissions` and never probed: see [`crate::grants`]. A ticket's
     /// asks are answered in its project, a create's in the project it names;
     /// an entity of another source, or one that is neither, is not answered.
+    /// The issue's summary, assignee, priority and labels, from one read
+    /// of its values and its edit screen (ADR-0054); `None` for an id that
+    /// is not an issue of this source.
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let Ok(key) = self.issue_key(entity) else {
+            return Ok(None);
+        };
+        crate::tickets::fields(&self.http, &key).await.map(Some)
+    }
+
+    /// Who the issue can be assigned to (ADR-0054). Every other field has
+    /// its options in the fields' answer.
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let Ok(key) = self.issue_key(entity) else {
+            return Ok(None);
+        };
+        if field != knobas_source::ticket::ASSIGNEE {
+            return Ok(None);
+        }
+        crate::tickets::assignable(&self.http, &key, typed)
+            .await
+            .map(Some)
+    }
+
     async fn refused_writes(
         &self,
         asks: &[knobas_source::grants::WriteAsk],
@@ -600,7 +650,13 @@ mod tests {
         );
         assert_eq!(
             d.write_ops,
-            vec!["comment", "transition", "create_ticket", "log_work"]
+            vec![
+                "comment",
+                "transition",
+                "create_ticket",
+                "log_work",
+                "edit_ticket"
+            ]
         );
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.

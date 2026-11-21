@@ -401,6 +401,21 @@ test("every op this build knows reads as words", () => {
   for (const [row, expected] of cases) expect(words(row, names)).toBe(expected);
 });
 
+test("a ticket's edit says which field it sets, and an edit of several says Edit (ADR-0054)", () => {
+  const edit = (change: Record<string, unknown>) => ({
+    op: "edit_ticket",
+    entity_id: "jira:PAY-231",
+    payload: { EditTicket: { entity: "jira:PAY-231", title: null, assignee: null, priority: null, labels: null, fields: {}, ...change } } as never,
+  });
+  expect(words(edit({ assignee: { account: "mara" } }))).toBe("Assign PAY-231 to mara");
+  expect(words(edit({ assignee: "nobody" }))).toBe("Unassign PAY-231");
+  expect(words(edit({ priority: "High" }))).toBe("Set PAY-231’s priority to High");
+  expect(words(edit({ title: "New" }))).toBe("Retitle PAY-231");
+  expect(words(edit({ labels: { add: ["sepa"], remove: ["triage"] } }))).toBe("Label PAY-231: add sepa, remove triage");
+  expect(words(edit({ title: "New", priority: "High" }))).toBe("Edit PAY-231");
+  expect(words(edit({ fields: { customfield_10010: "2026-12-01" } }))).toBe("Edit PAY-231");
+});
+
 // -- a page edit names its section (#1520) -----------------------------------
 
 /** A Confluence page as the mirror holds it: storage format and a version. */

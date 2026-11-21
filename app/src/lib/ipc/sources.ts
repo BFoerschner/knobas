@@ -69,6 +69,8 @@ export type {
   PayloadPath,
   ProjectPath,
   PullRequestState,
+  Assignee,
+  LabelChange,
   QueueCounts,
   QueuedWrite,
   EntityRefresh,

@@ -76,6 +76,13 @@ refused: string | null,
 update: UpdateCheck | null, };
 
 /**
+ * Whom an [`EditTicket`](WriteOp::EditTicket) assigns: `"nobody"`, or
+ * `{"account": "mara"}`, the account as the source names it (the value
+ * `ticket_fields`' assignee options carry).
+ */
+export type Assignee = "nobody" | { "account": string };
+
+/**
  * Where a record keeps **the files attached to it**, and where each file's
  * facts sit inside its element (#2404): Jira's `fields.attachment`.
  *
@@ -808,6 +815,13 @@ export type KindStateColours = { kind: string, words: Array<StateWordColour>,
  * legend ends the kind with its category line by this.
  */
 has_category: boolean, };
+
+/**
+ * The labels an [`EditTicket`](WriteOp::EditTicket) adds and removes, by
+ * name. Adding one already there and removing one not there change nothing,
+ * so a label somebody else added a second ago is never lost.
+ */
+export type LabelChange = { add: Array<string>, remove: Array<string>, };
 
 /**
  * Where a **list** of strings lives: the array, and where the string sits
@@ -2026,6 +2040,7 @@ seconds: Array<PayloadPath>, };
  * | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
  * | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
  * | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
+ * | [`EditTicket`](Self::EditTicket) | `"edit_ticket"` | ticket fields, ADR-0054 (Jira, Gitea) |
  *
  * The enum grows per milestone and **each growth is a §10.8 ratified
  * exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -2223,7 +2238,34 @@ entity: string, } } | { "EditPullRequest": {
  * The **pull request** (#706). A field below left `null` is not
  * written, so only what the reader changed reaches the source.
  */
-entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "UpdatePullRequestBranch": { 
+entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "EditTicket": { 
+/**
+ * The **ticket**. A field below left `null` is not written.
+ */
+entity: string, 
+/**
+ * The new summary.
+ */
+title: string | null, 
+/**
+ * Whom it is assigned to: `"nobody"`, or `{"account": "mara"}`.
+ */
+assignee: Assignee | null, 
+/**
+ * The priority's name in the source's spelling, one `ticket_fields`
+ * offered.
+ */
+priority: string | null, 
+/**
+ * The labels added and removed, by name.
+ */
+labels: LabelChange | null, 
+/**
+ * The source's own fields, by the id `ticket_fields` named, each in
+ * the form its kind takes; `null` clears one. The shell copies them
+ * from the control the adapter declared and never reads them.
+ */
+fields: Record<string, unknown>, } } | { "UpdatePullRequestBranch": { 
 /**
  * The **pull request** (#708).
  */

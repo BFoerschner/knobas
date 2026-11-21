@@ -7,7 +7,10 @@
 
 use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 
-use crate::{WRITE_OP_COMMENT, WRITE_OP_CREATE_TICKET, WRITE_OP_LOG_WORK, WRITE_OP_TRANSITION};
+use crate::{
+    WRITE_OP_COMMENT, WRITE_OP_CREATE_TICKET, WRITE_OP_EDIT_TICKET, WRITE_OP_LOG_WORK,
+    WRITE_OP_TRANSITION,
+};
 
 /// The static, instance-free descriptor: `id == adapter_kind` (interfaces §4.2).
 /// A configured instance's descriptor is this with `id` and `name` replaced by
@@ -38,6 +41,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             [
                 "reachable_transitions",
                 knobas_source::role::TRANSLATE_QUERY,
+                knobas_source::role::TICKET_FIELDS,
             ],
         )],
         // M2's ratified Jira set (issue #43, ADR-0006), plus M3.1's `log_work`
@@ -58,6 +62,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_TRANSITION.to_owned(),
             WRITE_OP_CREATE_TICKET.to_owned(),
             WRITE_OP_LOG_WORK.to_owned(),
+            WRITE_OP_EDIT_TICKET.to_owned(),
         ],
         entity_kinds: vec![
             KindInfo {
@@ -410,7 +415,13 @@ mod tests {
         );
         assert_eq!(
             d.write_ops,
-            vec!["comment", "transition", "create_ticket", "log_work"],
+            vec![
+                "comment",
+                "transition",
+                "create_ticket",
+                "log_work",
+                "edit_ticket"
+            ],
             "the action bar is rendered from this list alone"
         );
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);

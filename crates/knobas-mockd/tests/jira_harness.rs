@@ -173,7 +173,7 @@ async fn a_contract_verb_mockd_does_not_serve_is_a_501_not_a_bare_405() {
     let cases = [
         (reqwest::Method::POST, "/rest/api/2/search"),
         (reqwest::Method::PUT, "/rest/api/2/myself"),
-        (reqwest::Method::PUT, "/rest/api/2/issue/PAY-231"),
+        // `PUT /issue/{key}` is served since ADR-0054 (a ticket's edit).
         (reqwest::Method::DELETE, "/rest/api/2/issue/PAY-231"),
         (reqwest::Method::POST, "/rest/api/2/issue/PAY-231/worklog"),
     ];

@@ -94,6 +94,7 @@ mod model;
 mod refresh;
 mod source;
 mod sync;
+mod tickets;
 mod view;
 mod write;
 
@@ -260,6 +261,10 @@ pub const WRITE_OP_RESOLVE_THREAD: &str = "resolve_thread";
 /// See [`WRITE_OP_CREATE_BRANCH`]. *Request…* in a pull request's Reviewers
 /// panel (#2303): `POST …/pulls/{n}/requested_reviewers`.
 pub const WRITE_OP_REQUEST_REVIEWERS: &str = "request_reviewers";
+/// See [`WRITE_OP_CREATE_BRANCH`]. A ticket's title, assignee and labels
+/// (ADR-0054): `PATCH …/issues/{n}`, then `POST` and `DELETE`
+/// `…/issues/{n}/labels`.
+pub const WRITE_OP_EDIT_TICKET: &str = "edit_ticket";
 
 /// This adapter's one [source action](knobas_source::WriteOp::SourceAction)
 /// (#1194, ADR-0029): *Add label…* on a pull request, a write no role's
@@ -309,7 +314,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             ),
             knobas_source::role::RoleClaim::new(
                 knobas_source::role::TICKET_SYSTEM,
-                ["reachable_transitions"],
+                ["reachable_transitions", knobas_source::role::TICKET_FIELDS],
             ),
         ],
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
@@ -334,6 +339,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_REPLY_TO_THREAD.to_owned(),
             WRITE_OP_RESOLVE_THREAD.to_owned(),
             WRITE_OP_REQUEST_REVIEWERS.to_owned(),
+            WRITE_OP_EDIT_TICKET.to_owned(),
         ],
         // Writes outside every role's vocabulary (#1194, ADR-0029), each
         // drawn by the view that offers it.
@@ -779,7 +785,8 @@ mod tests {
                 "source_action",
                 "reply_to_thread",
                 "resolve_thread",
-                "request_reviewers"
+                "request_reviewers",
+                "edit_ticket"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );

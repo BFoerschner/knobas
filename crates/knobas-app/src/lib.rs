@@ -796,6 +796,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // #2040's read of the writes a source's credential cannot make,
         // appended at the foot: the list is append-only (§10.8).
         commands::entity::refused_writes,
+        commands::entity::ticket_fields,
+        commands::entity::field_options,
         // #2106's *Sync now* for a role view, appended at the foot: the
         // list is append-only (§10.8).
         commands::sources::sync_role,

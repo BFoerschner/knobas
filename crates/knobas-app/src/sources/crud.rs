@@ -863,6 +863,55 @@ pub async fn reachable_transitions(
     Ok(source.reachable_transitions(entity_id).await?)
 }
 
+/// What a person may change on `entity_id` besides its status (ADR-0054),
+/// asked of its adapter live as [`reachable_transitions`] is and never
+/// stored. `None` is an adapter that offers no edits, or an entity that is
+/// not a ticket.
+///
+/// An answer whose fields break the vocabulary's rules is drawn without
+/// them: each such field is dropped with a log line naming the source, never
+/// drawn half (a WASM guest is not held to the battery at run time).
+///
+/// # Errors
+///
+/// As [`reachable_transitions`].
+pub async fn ticket_fields(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+) -> Result<Option<knobas_source::ticket::TicketFields>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
+    let Some(answer) = source.ticket_fields(entity_id).await? else {
+        return Ok(None);
+    };
+    let (kept, dropped) = knobas_source::ticket::keep_fitting(answer);
+    for why in dropped {
+        tracing::warn!(entity = entity_id, "ticket_fields: a field left out: {why}");
+    }
+    Ok(Some(kept))
+}
+
+/// The choices of `field` on `entity_id` matching `typed` (ADR-0054), asked
+/// of its adapter live and never stored; the window keeps them by scope.
+///
+/// # Errors
+///
+/// As [`reachable_transitions`].
+pub async fn field_options(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+    field: &str,
+    typed: &str,
+) -> Result<Option<knobas_source::ticket::FieldOptions>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
+    Ok(source.field_options(entity_id, field, typed).await?)
+}
+
 /// The writes among `asks` their sources' credentials cannot make, each with
 /// its reason (#2040): what a surface that draws a write from the template
 /// `write_ops` asks after drawing it, to draw the refused ones disabled.

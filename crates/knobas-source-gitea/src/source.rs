@@ -254,6 +254,12 @@ impl GiteaSource {
         }
     }
 
+    /// What a person calls this instance (*Tidewater Gitea*), for a sentence
+    /// that tells them where to go (ADR-0054).
+    pub(crate) fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
     /// The issue a write or a read acts on (#1206).
     ///
     /// # Errors
@@ -551,6 +557,25 @@ impl Source for GiteaSource {
                 write::add_label(&self.client, &owner, &repo, index, label).await?;
                 Ok(WriteReceipt::none())
             }
+            WriteOp::EditTicket {
+                entity,
+                title,
+                assignee,
+                priority,
+                labels,
+                fields,
+            } => {
+                let (owner, repo, index) = self.issue_of(entity)?;
+                let edit = crate::tickets::Edit {
+                    title: title.as_deref(),
+                    assignee: assignee.as_ref(),
+                    priority: priority.as_deref(),
+                    labels: labels.as_ref(),
+                    fields,
+                };
+                crate::tickets::edit(self, &owner, &repo, index, &edit).await?;
+                Ok(WriteReceipt::none())
+            }
             WriteOp::Transition { entity, status } => {
                 let (owner, repo, index) = self.issue_of(entity)?;
                 write::transition(&self.client, &owner, &repo, index, status).await?;
@@ -611,6 +636,39 @@ impl Source for GiteaSource {
             .filter(|other| *other != state)
             .map(str::to_owned)
             .collect())
+    }
+
+    /// An issue's title, assignee and labels (ADR-0054), from the read
+    /// `reachable_transitions` makes; `None` for anything but an issue of
+    /// this source (a pull request is not a ticket).
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let Ok(crate::keys::GiteaKey::Issue {
+            owner,
+            repo,
+            number,
+        }) = self.key_of(entity)
+        else {
+            return Ok(None);
+        };
+        crate::tickets::fields(self, &owner, &repo, number)
+            .await
+            .map(Some)
+    }
+
+    /// The repository's assignees, or the labels it may use (ADR-0054).
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let Ok(crate::keys::GiteaKey::Issue { owner, repo, .. }) = self.key_of(entity) else {
+            return Ok(None);
+        };
+        crate::tickets::options(self, &owner, &repo, field, typed).await
     }
 
     /// The asks the token cannot make (#2054), from the empty-bodied probes a

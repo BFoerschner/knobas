@@ -17,7 +17,7 @@ use crate::model::UserRef;
 use crate::source::GiteaSource;
 
 pub(crate) mod diffs;
-mod label;
+pub(crate) mod label;
 mod land;
 mod maintain;
 mod range;

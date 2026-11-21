@@ -2168,6 +2168,34 @@ commit: string, };
 export type FieldKind = { "type": "text", suggestions: Array<string>, } | { "type": "long_text" } | { "type": "choice", options: Array<ChoiceOption>, } | { "type": "flag" };
 
 /**
+ * One choice of a `choice` or `search` field, or a label on offer.
+ */
+export type FieldOption = { 
+/**
+ * What is written: the account, the option's id or name.
+ */
+value: string, 
+/**
+ * What a person reads.
+ */
+label: string, 
+/**
+ * A second, muted word: the account under a person's name.
+ */
+hint?: string, };
+
+/**
+ * A searched field's choices for what was typed
+ * ([`Source::field_options`](crate::Source::field_options)).
+ */
+export type FieldOptions = { options: Array<FieldOption>, 
+/**
+ * Every choice there is for `typed` is here. `false`: the source has
+ * more than it sent, and a longer `typed` asks again.
+ */
+complete: boolean, };
+
+/**
  * A [`LineThread`] on a file the diff no longer holds (issue #709): written
  * on `path` in an earlier round, which a later push reverted or dropped.
  * Outdated by definition -- there is no line left to be on -- and drawn in
@@ -4899,6 +4927,68 @@ mine: boolean,
  * `@name` or Jira's `[~name]`, for an account `@me` resolves to.
  */
 mentions_me: boolean, };
+
+/**
+ * One thing of a ticket a person can change, with the value the source
+ * holds now.
+ */
+export type TicketField = { 
+/**
+ * `title`, `assignee`, `priority` or `labels` for the four the op names.
+ * Any other id is the adapter's own, and its value goes in
+ * `EditTicket::fields` under it.
+ */
+id: string, 
+/**
+ * What the field is called, in the reader's language (*Assignee*, *Due date*).
+ */
+label: string, kind: TicketFieldKind, 
+/**
+ * What the source holds now, in the form the kind takes; `null` for none.
+ */
+value: unknown, 
+/**
+ * What the value reads as where it is not the value itself: a person's
+ * name for an account, a choice's label for its value.
+ */
+shown?: string, 
+/**
+ * It may not be cleared.
+ */
+required: boolean, 
+/**
+ * Why it cannot be changed now, in words a person can act on; absent is
+ * editable. (*Not on this ticket's edit screen in Jira.*)
+ */
+readonly?: string, };
+
+/**
+ * The control a [`TicketField`] takes, and so the form of its value.
+ *
+ * - `text`: one line of text. Value: a string.
+ * - `choice`: one of `options`, all of them here. Value: an option's `value`.
+ * - `search`: one of a list too long to send with every ticket, read through
+ *   `field_options`. Value: an option's `value`. `scope` names the list in
+ *   the adapter's own words, so one answer serves every ticket whose field
+ *   names the same scope. `person`: the options are accounts.
+ * - `labels`: several short names. Value: an array of strings. `create`: a
+ *   name the source has not seen may be added. With `scope`, the names on
+ *   offer are read through `field_options`; without, the shell offers the
+ *   ones the mirror holds for the source.
+ * - `date`: a calendar day. Value: `YYYY-MM-DD`.
+ * - `number`: a number. Value: a JSON number.
+ * - `flag`: yes or no. Value: a boolean.
+ *
+ * The kinds are documented here and not on each variant because the
+ * generated TypeScript carries a type's doc but not a variant's (#1325).
+ */
+export type TicketFieldKind = { "type": "text" } | { "type": "choice", options: Array<FieldOption>, } | { "type": "search", scope: string, person: boolean, } | { "type": "labels", scope: string | null, create: boolean, } | { "type": "date" } | { "type": "number" } | { "type": "flag" };
+
+/**
+ * What a person may change on one ticket besides its status, in the order
+ * the source would show them.
+ */
+export type TicketFields = { fields: Array<TicketField>, };
 
 /**
  * What a value means to a reader, in the shell's five words.

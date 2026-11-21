@@ -11,13 +11,13 @@ use std::sync::Arc;
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::FixedOffset;
 use serde_json::{Value, json};
 
 use crate::jql::{SortKey, parse_jql};
-use crate::state::{JiraComment, JiraIssue, JiraWorklog, MockState, jira_date};
+use crate::state::{JiraComment, JiraIssue, JiraWorklog, MockState, PRIORITIES, jira_date};
 use crate::validate::{jira_error, jira_guard, unimplemented, unknown_field, unsupported_query};
 
 /// The Jira version mockd claims to be — the same one the pinned WADL
@@ -42,7 +42,14 @@ pub fn router(state: Arc<MockState>) -> Router {
         // The fixture gives her none, which is what an account that never
         // starred one answers: an empty array.
         .route("/rest/api/2/filter/favourite", get(favourite_filters))
-        .route("/rest/api/2/issue/{issueIdOrKey}", get(issue))
+        .route(
+            "/rest/api/2/issue/{issueIdOrKey}",
+            get(issue).merge(put(edit_issue)),
+        )
+        // ADR-0054: a ticket's assignee has its own resource, and who it can
+        // be given to its own search.
+        .route("/rest/api/2/issue/{issueIdOrKey}/assignee", put(assign))
+        .route("/rest/api/2/user/assignable/search", get(assignable))
         .route(
             "/rest/api/2/issue/{issueIdOrKey}/comment",
             get(issue_comments).merge(post(post_comment)),
@@ -66,7 +73,7 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/secure/thumbnail/{id}/{name}", get(attachment_bytes))
         .fallback(unimplemented)
         // A verb the WADL declares on a path mockd *does* serve (`POST
-        // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
+        // /search`, `PUT /myself`, `DELETE /issue/{key}`, `POST
         // .../worklog`) is not a method violation: the middleware already let
         // it through, because the contract has it. Without this, axum answers
         // its own 405 -- an `Allow` header describing mockd's routing table
@@ -287,6 +294,8 @@ const EXPANDABLE: &[&str] = &[
     "schema",
     "changelog",
     "transitions",
+    // ADR-0054: what this user may change on the issue.
+    "editmeta",
 ];
 
 impl ExpandSel {
@@ -582,9 +591,10 @@ pub(crate) fn issue_json(
         f.insert("updated".into(), json!(jira_date(issue.updated, off)));
     }
     if fields.has("labels") {
-        // Always empty: the dataset names no labels, and mockd inventing some
-        // would put them in `payload` and in the search index (the #28 ruling).
-        f.insert("labels".into(), json!([]));
+        // Empty from the fixture: the dataset names no labels, and mockd
+        // inventing some would put them in `payload` and in the search index
+        // (the #28 ruling). Only an edit puts one here (ADR-0054).
+        f.insert("labels".into(), json!(issue.labels));
     }
     if fields.has("parent") {
         // Absent, not null, where there is no epic -- which is how Jira
@@ -682,7 +692,46 @@ pub(crate) fn issue_json(
     if expand.has("transitions") {
         out["transitions"] = json!([]);
     }
+    if expand.has("editmeta") {
+        out["editmeta"] = editmeta_json();
+    }
     out
+}
+
+/// What mockd's one user may change on any issue (ADR-0054): the summary,
+/// the assignee, the priority and the labels, in the `field-meta` shape the
+/// WADL's issue schema declares. The fixture models no edit screens, so
+/// every issue answers the same four.
+fn editmeta_json() -> Value {
+    let meta = |name: &str, system: &str, kind: &str, required: bool, ops: &[&str]| {
+        json!({
+            "required": required,
+            "name": name,
+            "fieldId": system,
+            "schema": { "type": kind, "system": system },
+            "operations": ops,
+        })
+    };
+    let mut priority = meta("Priority", "priority", "priority", false, &["set"]);
+    priority["allowedValues"] = PRIORITIES
+        .iter()
+        .enumerate()
+        .map(|(n, name)| json!({ "id": (n + 1).to_string(), "name": name }))
+        .collect();
+    let mut labels = meta(
+        "Labels",
+        "labels",
+        "array",
+        false,
+        &["add", "set", "remove"],
+    );
+    labels["schema"]["items"] = json!("string");
+    json!({ "fields": {
+        "summary": meta("Summary", "summary", "string", true, &["set"]),
+        "assignee": meta("Assignee", "assignee", "user", false, &["set"]),
+        "priority": priority,
+        "labels": labels,
+    } })
 }
 
 // -- GET /rest/api/2/search -------------------------------------------------
@@ -830,6 +879,139 @@ async fn issue(
         &expand,
     ))
     .into_response()
+}
+
+/// `PUT /rest/api/2/issue/{key}` -- edit one (ADR-0054): `fields.summary`,
+/// `fields.priority.name`, and `update.labels` as `add` and `remove`
+/// operations. 204, no body, as Jira answers. A field mockd does not edit is
+/// refused the way Jira refuses a field off the edit screen.
+async fn edit_issue(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    let body = body.map(|Json(v)| v).unwrap_or_default();
+    let fields = body["fields"].as_object().cloned().unwrap_or_default();
+    for name in fields.keys() {
+        if !matches!(name.as_str(), "summary" | "priority") {
+            return jira_error(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Field '{name}' cannot be set. It is not on the appropriate screen, or unknown."
+                ),
+            );
+        }
+    }
+    let update = body["update"].as_object().cloned().unwrap_or_default();
+    let (mut add, mut remove) = (Vec::new(), Vec::new());
+    for (name, ops) in &update {
+        if name != "labels" {
+            return jira_error(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Field '{name}' cannot be set. It is not on the appropriate screen, or unknown."
+                ),
+            );
+        }
+        for op in ops.as_array().into_iter().flatten() {
+            if let Some(l) = op["add"].as_str() {
+                add.push(l.to_owned());
+            } else if let Some(l) = op["remove"].as_str() {
+                remove.push(l.to_owned());
+            } else {
+                return jira_error(
+                    StatusCode::BAD_REQUEST,
+                    "labels: the operations mockd takes are add and remove",
+                );
+            }
+        }
+    }
+    let summary = fields.get("summary").and_then(Value::as_str);
+    if summary.is_some_and(|s| s.trim().is_empty()) {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "summary: You must specify a summary of the issue.",
+        );
+    }
+    let priority = fields.get("priority").map(|p| p["name"].as_str());
+    if priority == Some(None) {
+        return jira_error(StatusCode::BAD_REQUEST, "priority: name is required");
+    }
+    match s.edit_issue(&i.key, summary, priority.flatten(), &add, &remove) {
+        None => no_such_issue(&id_or_key),
+        Some(Err(message)) => jira_error(StatusCode::BAD_REQUEST, message),
+        Some(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// `PUT /rest/api/2/issue/{key}/assignee` -- `{"name": "mara"}` assigns,
+/// `{"name": null}` unassigns (ADR-0054). 204, no body.
+async fn assign(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    let body = body.map(|Json(v)| v).unwrap_or_default();
+    if body.get("name").is_none() {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "name: the user to assign is required",
+        );
+    }
+    match s.assign_issue(&i.key, body["name"].as_str()) {
+        None => no_such_issue(&id_or_key),
+        Some(Err(message)) => jira_error(StatusCode::BAD_REQUEST, message),
+        Some(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// `GET /rest/api/2/user/assignable/search?issueKey=…&username=…` -- who an
+/// issue can be assigned to (ADR-0054): every person of the fixture, those
+/// whose username or name holds `username` when it is given, at most
+/// `maxResults`. One of `issueKey` and `project` is required, as on Jira.
+async fn assignable(State(s): State<Arc<MockState>>, req: Request) -> Response {
+    let q = query_map(&req);
+    let max = match num_param(&q, "maxResults", DEFAULT_MAX_RESULTS) {
+        Ok(v) => v as usize,
+        Err(m) => return unsupported_query(&s, &req, &m),
+    };
+    match (q.get("issueKey"), q.get("project")) {
+        (Some(key), _) => {
+            if find_issue(&s, key).is_none() {
+                return no_such_issue(key);
+            }
+        }
+        (None, Some(_)) => {}
+        (None, None) => {
+            return jira_error(
+                StatusCode::BAD_REQUEST,
+                "one of issueKey or project is required",
+            );
+        }
+    }
+    let typed = q
+        .get("username")
+        .map(|u| u.trim().to_lowercase())
+        .unwrap_or_default();
+    let base = s.base_url(API);
+    let users: Vec<Value> = knobas_source_mock::fixture()
+        .people
+        .iter()
+        .filter(|p| {
+            typed.is_empty()
+                || p.username.to_lowercase().contains(&typed)
+                || p.name.to_lowercase().contains(&typed)
+        })
+        .take(max)
+        .map(|p| user_json(&base, &p.username))
+        .collect();
+    Json(Value::Array(users)).into_response()
 }
 
 async fn issue_comments(

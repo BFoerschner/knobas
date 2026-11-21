@@ -38,6 +38,7 @@ pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod ticket;
 pub mod tree;
 pub mod url_forms;
 pub mod view;
@@ -687,6 +688,7 @@ impl SourceError {
 /// | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
 /// | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
 /// | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
+/// | [`EditTicket`](Self::EditTicket) | `"edit_ticket"` | ticket fields, ADR-0054 (Jira, Gitea) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1174,6 +1176,47 @@ pub enum WriteOp {
         #[serde(default)]
         state: Option<PullRequestState>,
     },
+    /// Identifier `"edit_ticket"`. Change a ticket's summary, assignee,
+    /// priority, labels, or one of its source's own fields (ADR-0054).
+    /// `entity` is the **ticket**.
+    ///
+    /// **Only what is set is written** (as `EditPullRequest`): a field left
+    /// `null` is not sent, so an edit of the assignee never sends a stale copy
+    /// of a summary somebody else changed. An edit with nothing in it is
+    /// refused before a request leaves.
+    ///
+    /// The status is not here: a status is reached through the workflow, by
+    /// [`Transition`](WriteOp::Transition). Which fields a ticket lets a
+    /// person change, and the values each takes, is
+    /// [`Source::ticket_fields`]' answer; the write is not bound by it, and an
+    /// adapter refuses by name, at write time, a field it cannot set.
+    ///
+    /// Hold detection is per field: a queued edit is compared only on the
+    /// title, assignee and priority it writes, never on its labels or a
+    /// source's own field (`knobas_core::write_queue::project`).
+    EditTicket {
+        /// The **ticket**. A field below left `null` is not written.
+        entity: String,
+        /// The new summary.
+        #[serde(default)]
+        title: Option<String>,
+        /// Whom it is assigned to: `"nobody"`, or `{"account": "mara"}`.
+        #[serde(default)]
+        assignee: Option<Assignee>,
+        /// The priority's name in the source's spelling, one `ticket_fields`
+        /// offered.
+        #[serde(default)]
+        priority: Option<String>,
+        /// The labels added and removed, by name.
+        #[serde(default)]
+        labels: Option<LabelChange>,
+        /// The source's own fields, by the id `ticket_fields` named, each in
+        /// the form its kind takes; `null` clears one. The shell copies them
+        /// from the control the adapter declared and never reads them.
+        #[serde(default)]
+        #[ts(type = "Record<string, unknown>")]
+        fields: std::collections::BTreeMap<String, serde_json::Value>,
+    },
     /// Identifier `"update_pull_request_branch"`. Bring a pull request's head
     /// branch up to date with its base (spec #701 workflow 9, issue #708):
     /// the base merged into the head, or the head rebased onto the base, as
@@ -1373,6 +1416,65 @@ impl PullRequestState {
             PullRequestState::Closed => "closed",
         }
     }
+}
+
+/// Whom an [`EditTicket`](WriteOp::EditTicket) assigns: `"nobody"`, or
+/// `{"account": "mara"}`, the account as the source names it (the value
+/// `ticket_fields`' assignee options carry).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum Assignee {
+    Nobody,
+    Account(String),
+}
+
+impl Assignee {
+    /// The account, or `None` for nobody.
+    #[must_use]
+    pub fn account(&self) -> Option<&str> {
+        match self {
+            Assignee::Nobody => None,
+            Assignee::Account(a) => Some(a),
+        }
+    }
+}
+
+/// The labels an [`EditTicket`](WriteOp::EditTicket) adds and removes, by
+/// name. Adding one already there and removing one not there change nothing,
+/// so a label somebody else added a second ago is never lost.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct LabelChange {
+    #[serde(default)]
+    pub add: Vec<String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
+impl LabelChange {
+    /// Neither adds nor removes anything.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.add.is_empty() && self.remove.is_empty()
+    }
+}
+
+/// The edit `op` carries is empty: nothing set, or only empty label changes.
+/// An adapter refuses one before a request leaves (battery clause 15).
+#[must_use]
+pub fn edit_is_empty(
+    title: Option<&String>,
+    assignee: Option<&Assignee>,
+    priority: Option<&String>,
+    labels: Option<&LabelChange>,
+    fields: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    title.is_none()
+        && assignee.is_none()
+        && priority.is_none()
+        && labels.is_none_or(LabelChange::is_empty)
+        && fields.is_empty()
 }
 
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
@@ -1614,6 +1716,7 @@ impl WriteOp {
             WriteOp::ReplyToThread { .. } => "reply_to_thread",
             WriteOp::ResolveThread { .. } => "resolve_thread",
             WriteOp::RequestReviewers { .. } => "request_reviewers",
+            WriteOp::EditTicket { .. } => "edit_ticket",
         }
     }
 
@@ -1683,8 +1786,9 @@ impl WriteOp {
                 can_leave_unclaimed: false,
                 ..conservative
             },
-            // Overwrites only the fields it carries (#706).
-            WriteOp::EditPullRequest { .. } => Delivery {
+            // Overwrites only the fields it carries (#706); a ticket's edit
+            // too, and a second arrival sets what is already set (ADR-0054).
+            WriteOp::EditPullRequest { .. } | WriteOp::EditTicket { .. } => Delivery {
                 projection: Projection::Whole { per_field: true },
                 resend_harmless: true,
                 can_leave_unclaimed: false,
@@ -1796,7 +1900,8 @@ impl WriteOp {
                 | WriteOp::SourceAction { entity, .. }
                 | WriteOp::ReplyToThread { entity, .. }
                 | WriteOp::ResolveThread { entity, .. }
-                | WriteOp::RequestReviewers { entity, .. } => Some(entity),
+                | WriteOp::RequestReviewers { entity, .. }
+                | WriteOp::EditTicket { entity, .. } => Some(entity),
                 WriteOp::CreatePage { .. } | WriteOp::CommitFile { .. } => None,
             },
         };
@@ -1942,7 +2047,8 @@ impl WriteOp {
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
-            | WriteOp::RequestReviewers { .. } => false,
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => false,
         }
     }
 }
@@ -2151,6 +2257,38 @@ pub trait Source: Send + Sync {
     ///
     /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
+    /// What a person may change on `entity` besides its status, as the
+    /// source says **now** (ADR-0054): each field with its kind, the value
+    /// the source holds, and why not where it cannot be changed. Read when a
+    /// ticket's page opens and when a surface is about to offer an edit;
+    /// never stored.
+    ///
+    /// `Ok(None)`, the default, is an adapter that offers no edits, or an
+    /// entity that is not a ticket. An adapter that declares `edit_ticket`
+    /// answers `Some` for every ticket it emits, and one that does not
+    /// answers `None` (battery clause 15). The write is not bound by this
+    /// answer: the adapter refuses by name, at write time, a field it cannot
+    /// set.
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<ticket::TicketFields>, SourceError> {
+        let _ = entity;
+        Ok(None)
+    }
+    /// The choices of `field` (an id [`ticket_fields`](Source::ticket_fields)
+    /// named, of kind `search`, or `labels` with a scope) on `entity` that
+    /// match `typed`; with `typed` empty, the first of them. `Ok(None)`, the
+    /// default, is a field with no list.
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<ticket::FieldOptions>, SourceError> {
+        let _ = (entity, field, typed);
+        Ok(None)
+    }
     /// The **source view** this adapter draws for one of its own entities
     /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
     /// the fixed vocabulary in [`view`], read live when a detail opens and
@@ -3113,6 +3251,21 @@ mod tests {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 reviewers: vec!["olu".into(), "kai".into()],
             },
+            WriteOp::EditTicket {
+                entity: "jira:PAY-231".into(),
+                title: Some("SEPA payouts retry three times".into()),
+                assignee: Some(Assignee::Account("mara".into())),
+                priority: Some("High".into()),
+                labels: Some(LabelChange {
+                    add: vec!["sepa".into()],
+                    remove: vec!["triage".into()],
+                }),
+                fields: [(
+                    "customfield_10010".to_owned(),
+                    serde_json::json!("2026-12-01"),
+                )]
+                .into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -3141,7 +3294,8 @@ mod tests {
                 | WriteOp::SourceAction { .. }
                 | WriteOp::ReplyToThread { .. }
                 | WriteOp::ResolveThread { .. }
-                | WriteOp::RequestReviewers { .. } => {}
+                | WriteOp::RequestReviewers { .. }
+                | WriteOp::EditTicket { .. } => {}
             }
         }
         probes
@@ -3207,6 +3361,75 @@ mod tests {
             panic!("{bare:?}")
         };
         assert!(fields.is_empty());
+    }
+
+    /// An `EditTicket` (ADR-0054) carries only what is set: the assignee as
+    /// `"nobody"` or `{"account": …}`, the labels as names added and removed,
+    /// and an absent field reads as not written.
+    #[test]
+    fn an_edit_ticket_carries_only_what_is_set() {
+        let op: WriteOp = serde_json::from_value(serde_json::json!({
+            "EditTicket": { "entity": "jira:PAY-231", "assignee": "nobody" }
+        }))
+        .unwrap();
+        assert_eq!(op.identifier(), "edit_ticket");
+        assert_eq!(op.target(), "jira:PAY-231");
+        assert!(!op.receipt_names_an_entity());
+        let WriteOp::EditTicket {
+            title,
+            assignee,
+            priority,
+            labels,
+            fields,
+            ..
+        } = &op
+        else {
+            panic!("{op:?}")
+        };
+        assert_eq!(assignee, &Some(Assignee::Nobody));
+        assert!(title.is_none() && priority.is_none() && labels.is_none() && fields.is_empty());
+        assert!(!edit_is_empty(
+            title.as_ref(),
+            assignee.as_ref(),
+            priority.as_ref(),
+            labels.as_ref(),
+            fields
+        ));
+
+        let wire = serde_json::to_value(WriteOp::EditTicket {
+            entity: "gitea:o/r#4".into(),
+            title: None,
+            assignee: Some(Assignee::Account("mara".into())),
+            priority: None,
+            labels: Some(LabelChange {
+                add: vec!["sepa".into()],
+                remove: vec![],
+            }),
+            fields: std::collections::BTreeMap::new(),
+        })
+        .unwrap();
+        assert_eq!(
+            wire["EditTicket"]["assignee"],
+            serde_json::json!({ "account": "mara" })
+        );
+        assert_eq!(
+            wire["EditTicket"]["labels"],
+            serde_json::json!({ "add": ["sepa"], "remove": [] })
+        );
+        assert!(wire["EditTicket"]["title"].is_null());
+
+        let bare: LabelChange =
+            serde_json::from_value(serde_json::json!({ "add": ["x"] })).unwrap();
+        assert!(bare.remove.is_empty());
+        assert!(edit_is_empty(
+            None,
+            None,
+            None,
+            Some(&LabelChange::default()),
+            &std::collections::BTreeMap::new()
+        ));
+        assert_eq!(Assignee::Nobody.account(), None);
+        assert_eq!(Assignee::Account("a".into()).account(), Some("a"));
     }
 
     /// A descriptor's source actions (#1194) cross the hop as declared, and
@@ -3640,7 +3863,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 26, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 27, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

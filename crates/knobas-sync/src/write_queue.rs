@@ -829,7 +829,8 @@ async fn project_now(
 
 /// The snapshot a write is queued (or amended) with: the target projected
 /// now, and for a move, `after`, the statuses the same ticket's open moves
-/// are going to set (ADR-0054), so the person's own earlier move landing
+/// are going to set (ADR-0054), for a ticket's edit the values its open
+/// edits are going to set, by field, so the person's own earlier move landing
 /// before this one is sent does not hold it. Read before the row is written,
 /// so a new move never lists itself; an amended one (`amended`, its id) lists
 /// only the moves queued before it.
@@ -845,6 +846,14 @@ async fn snapshot(
         let after = store::statuses_on_their_way(&deps.pool, entity, amended).await?;
         if let (false, Some(fields)) = (after.is_empty(), snapshot.as_object_mut()) {
             fields.insert("after".to_owned(), serde_json::json!(after));
+        }
+    }
+    // An edit of a ticket's fields: the values its earlier open edits are
+    // going to set, by field (ADR-0054), where it compares any field at all.
+    if matches!(op, WriteOp::EditTicket { .. }) && snapshot.get("fields").is_some() {
+        let after = store::fields_on_their_way(&deps.pool, entity, amended).await?;
+        if let (false, Some(fields)) = (after.is_empty(), snapshot.as_object_mut()) {
+            fields.insert("after".to_owned(), serde_json::Value::Object(after));
         }
     }
     Ok(snapshot)
