@@ -18,6 +18,9 @@
     (each default with the kind its spec gives and *Change…* through the
     write queue, a select for a fixed list), *Triggers*.
 
+  With a job chosen, nothing draws until the job's branches are read (`drawing`): they decide *Run on <job branch>*
+  and the job's chips, and drawn late they moved every run down (the ux28 gate, 2026-11-21).
+
   **Read and unread** (ux18): an unread failed run carries a dot hung in its number cell; its row actions and `m` mark
   it read or unread, and the header's *Mark all as read* marks every failed run of the pipeline, with *Undo*.
 
@@ -156,6 +159,8 @@
   let settingsFailed = $state<string | null>(null);
   let settingsRead = $state(false);
   let jobBranches = $state<string[]>([]);
+  /** The job `jobBranches` was read for, once its read answered (or failed); `null` while it is out. */
+  let branchesFor = $state<string | null>(null);
   let adapters = $state<SourceDescriptor[]>([]);
   let sources = $state<SourceSummary[]>([]);
   let sync = $state<SourceSyncStatus[]>([]);
@@ -318,14 +323,26 @@
   $effect(() => {
     const wanted = job;
     jobBranches = [];
+    branchesFor = null;
     if (wanted === null) return;
     ports.jobBranches(wanted).then(
       (names) => {
-        if (job === wanted) jobBranches = names;
+        if (job !== wanted) return;
+        jobBranches = names;
+        branchesFor = wanted;
       },
-      () => {},
+      () => {
+        if (job === wanted) branchesFor = wanted;
+      },
     );
   });
+  /**
+   * With a job, the page draws once the job's branches are read (the ux28 gate, 2026-11-21): they decide *Run on
+   * <job branch>*, the job's chips and *This job*'s count. Drawn before, *Run on main* turned into the job's longer branch,
+   * the header's actions wrapped under the name, and every run moved 34 px down. `TfBuilds`'s `deciding` holds a bare
+   * `#/builds` the same way.
+   */
+  const drawing = $derived(job === null || branchesFor === job);
 
   /**
    * Runs queued this session, here or on a run page, drawn *queued*, then
@@ -665,6 +682,7 @@
   });
 </script>
 
+{#if drawing}
 <header class="tf-fhead tf-bhead">
   <div>
     <h1>{pipeline.name}</h1>
@@ -998,6 +1016,7 @@
       <p class="tf-dim">Read only. Edit triggers in {pipeline.source_name}.</p>
     {/if}
   </div>
+{/if}
 {/if}
 
 {#if dialog !== null}

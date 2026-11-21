@@ -333,6 +333,28 @@ test("with no job branch it built, Run on names the default branch; a failing si
   expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity/reenter");
 });
 
+test("with a job, the page draws once the job's branches are read: Run on and the rows never draw twice (ux28 gate, builds-rows-still)", async () => {
+  // The job's branches came 400 ms after the runs: *Run on main* turned into *Run on feature/PAY-231-sepa-retry*, the
+  // header's actions wrapped under the name, and every run moved 34 px down under the pointer.
+  let answer: (names: string[]) => void = () => {};
+  draw(undefined, "PAY-231", { jobBranches: () => new Promise((resolve) => (answer = resolve)) });
+  await settle();
+  expect(button("Run on main")).toBeUndefined();
+  expect(target.querySelector(".tf-bhead")).toBeNull();
+  expect(target.querySelector(".tf-runs tbody tr")).toBeNull();
+  answer(["feature/PAY-231-sepa-retry"]);
+  await settle();
+  expect(button("Run on feature/PAY-231-sepa-retry")).toBeDefined();
+  expect(target.querySelector(".tf-runs tbody tr .tf-jobchip-sm")?.textContent).toBe("PAY-231");
+});
+
+test("a job whose branches cannot be read still draws the page, Run on naming the default branch", async () => {
+  draw(undefined, "PAY-231", { jobBranches: () => Promise.reject(new Error("no ticket")) });
+  await settle();
+  expect(button("Run on main")).toBeDefined();
+  expect(target.querySelector(".tf-runs tbody tr")).not.toBeNull();
+});
+
 test("the chart draws the last thirty runs as links to each run, with Passed, Usual duration and Last passing", async () => {
   draw();
   await settle();
