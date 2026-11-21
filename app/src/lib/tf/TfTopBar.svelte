@@ -144,7 +144,7 @@
   <a
     class="tf-iconbtn tf-upd-host"
     href={navHref("settings")}
-    aria-label={marked(update.state) ? "Settings, an update is waiting" : "Settings"}
+    aria-label="Settings"
     title={cogTitle(keyHint("Settings (⌘,)"), update.state)}
     aria-current={current === "settings" ? "page" : undefined}
     onclick={(event) => press(event, "settings")}
