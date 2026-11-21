@@ -10,20 +10,31 @@
  *
  * The faces are the app's own files (`tf/fonts/fonts.css`), so loading the ones no page uses yet costs a few local
  * reads and no network. The interface's latin face is not among them: `index.html` preloads it, so it has landed
- * before the first draw (2026-11-20).
+ * before the first draw (2026-11-20). Nor is the Cascadia the ligature switch does not draw (2026-11-21,
+ * `unusedCodeFace`): turning the switch loads it then.
  */
+import { unusedCodeFace } from "../tf/fonts.svelte";
+
 
 /** The page's font set, as much of it as this reads: jsdom has none. */
-type Faces = { forEach(each: (face: { status: string; load(): Promise<unknown> }) => void): void };
+type Faces = { forEach(each: (face: { family: string; status: string; load(): Promise<unknown> }) => void): void };
 
-/** Loads every face of `fonts` not yet loaded or loading, after `later` (the window idle). */
-export function loadEveryFace(fonts: Faces | undefined = globalThis.document?.fonts, later: (go: () => void) => void = whenIdle): void {
+/** A family as `FontFace.family` gives it, quoted or not, without its quotes. */
+const bare = (family: string) => family.replace(/^\s*(["'])(.*)\1\s*$/, "$2").trim();
+
+/** Loads every face of `fonts` not yet loaded or loading, after `later` (the window idle), but the one `unused` names. */
+export function loadEveryFace(
+  fonts: Faces | undefined = globalThis.document?.fonts,
+  later: (go: () => void) => void = whenIdle,
+  unused: () => string = unusedCodeFace,
+): void {
   if (!fonts) return;
-  later(() =>
+  later(() => {
+    const skip = unused();
     fonts.forEach((face) => {
-      if (face.status === "unloaded") face.load().catch(() => undefined);
-    }),
-  );
+      if (face.status === "unloaded" && bare(face.family) !== skip) face.load().catch(() => undefined);
+    });
+  });
 }
 
 /** After the window has drawn and is idle; WebKit before 18.4 has no `requestIdleCallback`. */

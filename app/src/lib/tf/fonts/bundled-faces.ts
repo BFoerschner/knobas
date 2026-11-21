@@ -31,11 +31,19 @@ export const BUNDLED_FACES: readonly BundledFace[] = [
     licence: () => import("./inter/OFL.txt?raw").then((text) => text.default),
   },
   {
+    name: "Cascadia Mono",
+    folder: "cascadia-mono",
+    version: "2407.24",
+    by: "Microsoft Corporation",
+    roles: "Code",
+    licence: () => import("./cascadia-mono/OFL.txt?raw").then((text) => text.default),
+  },
+  {
     name: "Cascadia Code",
     folder: "cascadia-code",
     version: "2407.24",
     by: "Microsoft Corporation",
-    roles: "Code",
+    roles: "Code, with ligatures on",
     licence: () => import("./cascadia-code/OFL.txt?raw").then((text) => text.default),
   },
 ];

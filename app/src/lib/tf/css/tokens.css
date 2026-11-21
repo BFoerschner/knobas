@@ -15,7 +15,8 @@
      which `fonts.svelte.ts` sets on <html>), then the face knobas brings along, so a font missing on this machine draws
      in the bundled one. *Interface* is `--sans`, *Headings* `--head` (every rule that narrows with `"wdth"`), *Reading*
      `--serif`, *Code* `--mono`. The brand is a mark, not text: Inter whatever is chosen. Since 2026-11-20 the bundled
-     face of the first three is Inter, and of Code Cascadia Code (`fonts/fonts.css`); Reading keeps its token's name. */
+     face of the first three is Inter, and of Code Cascadia Mono since 2026-11-21 (`fonts/fonts.css`); Reading keeps its
+     token's name. */
   --sans: var(--ui-chosen, "Inter"), "Inter", system-ui, sans-serif;
   --head: var(--head-chosen, "Inter"), "Inter", system-ui, sans-serif;
   --serif: var(--read-chosen, "Inter"), "Inter", system-ui, sans-serif;
@@ -27,12 +28,16 @@
   --size-ui: 1; --size-head: 1; --size-read: 1; --size-code: 1;
   --fs: var(--size-ui);
   /* Code's face (2026-11-16): the family chosen in Settings › Fonts first (`--mono-chosen`, which `fonts.svelte.ts`
-     sets on <html>), then the bundled Cascadia Code (2026-11-20), its stand-ins while it loads (`fonts/fonts.css`), and
-     the system's monospace, so a font missing on this machine draws in Cascadia Code and never in a proportional face.
-     `--mono-ligatures` is *Ligatures in code*, on until turned off (2026-11-20; Björn: "enable ligatures by default"):
-     every rule that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
-  --mono: var(--mono-chosen, "Cascadia Code"), "Cascadia Code", "Cascadia Code over Menlo", "Cascadia Code over Consolas", ui-monospace, monospace;
-  --mono-ligatures: normal;
+     sets on <html>), then the bundled face (`--mono-bundled`), its stand-ins while it loads (`fonts/fonts.css`), and
+     the system's monospace, so a font missing on this machine draws in the bundled face and never in a proportional
+     one. The bundled face is Cascadia Mono (2026-11-21; Björn: "Cascadia Mono looks better with like, ASCII and
+     boxes"), with no programming ligatures. *Ligatures in code* is off until turned on; on, `fonts.svelte.ts` sets
+     `--mono-bundled` to Cascadia Code, which draws `=>` and `->` as one sign, and `--mono-ligatures` to `normal`, so a
+     chosen face draws its own. Only one of the two Cascadias is in the list, so the other is never loaded. Every rule
+     that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
+  --mono-bundled: "Cascadia Mono";
+  --mono: var(--mono-chosen, var(--mono-bundled)), var(--mono-bundled), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;
+  --mono-ligatures: none;
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;

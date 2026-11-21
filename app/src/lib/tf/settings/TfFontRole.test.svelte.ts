@@ -131,7 +131,7 @@ test.each([
 
 test("the option under the keys draws in the specimen before it is chosen; Enter chooses it for the whole app", async () => {
   await draw();
-  expect(caption()).toBe("Cascadia Code, 100 %");
+  expect(caption()).toBe("Cascadia Mono, 100 %");
   key("ArrowDown");
   key("ArrowDown");
   expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"Menlo"/);
@@ -253,7 +253,7 @@ test("a notch clicked sets its size, and Back to 100 % shows only off 100", asyn
   flushSync();
   expect(fonts.size("code")).toBe(115);
   expect(target.querySelector(".tf-fr-on")).toBe(target.querySelectorAll(".tf-fr-notch")[6]);
-  expect(caption()).toBe("Cascadia Code, 115 %");
+  expect(caption()).toBe("Cascadia Mono, 115 %");
   button("Back to 100 %")!.click();
   flushSync();
   expect(fonts.size("code")).toBe(100);
@@ -275,7 +275,7 @@ test("the step that evens the chosen face out is ringed and named, and nothing s
   expect(target.querySelector(".tf-fr-hint")).toBeNull();
 });
 
-test("Ligatures in code is a switch under Code alone, on until turned off, for all code at once", async () => {
+test("Ligatures in code is a switch under Code alone, off until turned on, and on draws Cascadia Code for all code at once", async () => {
   await draw("read");
   expect(target.querySelector('[role="switch"]')).toBeNull();
   unmount(view!);
@@ -283,14 +283,21 @@ test("Ligatures in code is a switch under Code alone, on until turned off, for a
   await draw("code");
   const sw = target.querySelector<HTMLButtonElement>('[role="switch"]')!;
   expect(sw.getAttribute("aria-label")).toBe("Ligatures in code");
-  expect(sw.getAttribute("aria-checked")).toBe("true");
+  expect(sw.getAttribute("aria-checked")).toBe("false");
+  expect(caption()).toBe("Cascadia Mono, 100 %");
   sw.click();
   flushSync();
-  expect(sw.getAttribute("aria-checked")).toBe("false");
-  expect(style.props.get("--mono-ligatures")).toBe("none");
+  expect(sw.getAttribute("aria-checked")).toBe("true");
+  expect(style.props.get("--mono-ligatures")).toBe("normal");
+  expect(style.props.get("--mono-bundled")).toBe('"Cascadia Code"');
+  // The row names the face drawn: the caption, the field's placeholder.
+  expect(caption()).toBe("Cascadia Code, 100 %");
+  expect(target.querySelector<HTMLInputElement>('[role="combobox"]')!.placeholder).toBe("Cascadia Code (comes with knobas)");
   sw.click();
   flushSync();
   expect(style.props.has("--mono-ligatures")).toBe(false);
+  expect(style.props.has("--mono-bundled")).toBe(false);
+  expect(caption()).toBe("Cascadia Mono, 100 %");
 });
 
 test("the Fonts section is the proof line and the four roles in order, one read of the fonts for all", async () => {
@@ -320,7 +327,8 @@ test("the faces that come with knobas are listed with their licences, each text 
   const rows = [...section.querySelectorAll<HTMLDetailsElement>("details.tf-fr-lic")];
   expect(rows.map((row) => row.querySelector("summary")!.textContent!.replace(/\s+/g, " ").trim())).toEqual([
     "Inter 4.1Interface, Headings, Reading© The Inter Project Authors",
-    "Cascadia Code 2407.24Code© Microsoft Corporation",
+    "Cascadia Mono 2407.24Code© Microsoft Corporation",
+    "Cascadia Code 2407.24Code, with ligatures on© Microsoft Corporation",
   ]);
   const text = rows[1]!.querySelector("pre")!;
   expect(text.textContent).toBe("");

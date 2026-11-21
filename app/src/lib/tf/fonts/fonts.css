@@ -14,9 +14,13 @@
   moved every word on the page (the brief: no text reflows after first paint). A face that has not landed at all draws
   after 3 s in the fallback, as a broken bundle would.
 
-  **Cascadia Code** (Code): Microsoft's own woff2 files from release v2407.24, unmodified (`cascadia-code/SOURCE.md`).
-  Its licence reserves the name "Cascadia Code": a modified copy may not carry it, so the files are never subset or
-  re-encoded. One variable file a style, weights 200 to 700; the italic draws comments.
+  **Cascadia Mono** (Code, since 2026-11-21, `docs/decisions/2026-11-21-code-is-cascadia-mono.md`) and **Cascadia Code**
+  (Code with *Ligatures in code* on): Microsoft's own woff2 files from release v2407.24, unmodified
+  (`cascadia-mono/SOURCE.md`, `cascadia-code/SOURCE.md`). Mono is Code without the programming ligatures, so `->`,
+  `=>`, `---`, `|--` and box drawing stay the characters they are; the metrics are the same to the unit, so switching
+  moves nothing. The licence reserves the name "Cascadia Code": a modified copy may not carry it, so the files are
+  never subset or re-encoded. One variable file a style, weights 200 to 700; the italic draws comments. `--mono` names
+  only the one the switch draws (`css/tokens.css`), so the other is never loaded.
 
   `size-adjust: 105%`: Cascadia's lower case is .518 em, JetBrains Mono's was .55, so at the code role's sizes
   Cascadia drew a step smaller than the face it replaced. At 105 % it draws as tall (.544 em), which is the size Björn
@@ -60,6 +64,16 @@
   unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
 }
 @font-face {
+  font-family: "Cascadia Mono"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-mono/CascadiaMono.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "Cascadia Mono"; font-style: italic; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-mono/CascadiaMonoItalic.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
   font-family: "Cascadia Code"; font-style: normal; font-weight: 200 700; font-display: swap;
   src: url("./cascadia-code/CascadiaCode.woff2") format("woff2");
   size-adjust: 105%;
@@ -71,7 +85,7 @@
 }
 
 /*
-  Cascadia Code's stand-ins: the system's own monospace, sized to Cascadia's metrics at its 105 %, drawn in the
+  The Cascadias' stand-ins (Mono's and Code's metrics are one): the system's own monospace, sized to Cascadia's metrics at its 105 %, drawn in the
   moment before the bundled face has loaded, so a line of code is as wide and sits where it will when the face lands.
   Cascadia: 1200 of 2048 units an advance (times 1.05: .6152 em), ascent 1900, descent 480, no line gap.
   `size-adjust` matches the advance (Menlo 1233 of 2048, Consolas 1126 of 2048); the overrides are Cascadia's times
@@ -79,10 +93,10 @@
   and not yet the overrides; every code view sets a line height of its own, so they move nothing there either way.
 */
 @font-face {
-  font-family: "Cascadia Code over Menlo"; src: local("Menlo"), local("Menlo-Regular");
+  font-family: "Cascadia over Menlo"; src: local("Menlo"), local("Menlo-Regular");
   size-adjust: 102.19%; ascent-override: 95.32%; descent-override: 24.08%; line-gap-override: 0%;
 }
 @font-face {
-  font-family: "Cascadia Code over Consolas"; src: local("Consolas");
+  font-family: "Cascadia over Consolas"; src: local("Consolas");
   size-adjust: 111.9%; ascent-override: 87.05%; descent-override: 21.99%; line-gap-override: 0%;
 }

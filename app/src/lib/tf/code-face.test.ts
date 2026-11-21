@@ -6,8 +6,9 @@
  * Read off disk, every stylesheet and every component's `<style>` under `app/src/`, as the style gate does. It fails
  * when
  *
- * - (a) `--mono` does not start with the chosen family and fall back to the bundled Cascadia Code, its stand-ins and
- *   the system's monospace, or `--mono-ligatures` is not `normal` until turned off (2026-11-20);
+ * - (a) `--mono` does not start with the chosen family and fall back to the bundled face (Cascadia Mono, 2026-11-21, or
+ *   Cascadia Code when the switch sets `--mono-bundled`), its stand-ins and the system's monospace, or
+ *   `--mono-ligatures` is not `none` until turned on;
  * - (b) the base rule is missing: `pre`, `code`, `kbd`, `samp` and `tt` take `--mono` and the ligature switch at no
  *   specificity, so code in any rendered text (Markdown, a Confluence macro, Jira's `{code}`, `{noformat}` and
  *   `{{monospace}}`) is drawn in it with no rule of its own;
@@ -172,18 +173,22 @@ const sources = files(ROOT, /\.(css|svelte)$/).map((file) => ({ file, text: read
 const sheets = sources.map(({ file, text }) => ({ file, rules: rules(stylesheet(file, text)) }));
 const codeClasses = new Set([...CODE_CLASSES, ...sources.filter(({ file }) => file.endsWith(".svelte")).flatMap(({ text }) => markupCodeClasses(text))]);
 
-test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are on until turned off", () => {
+test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are off until turned on", () => {
   const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
+  expect(tokens).toMatch(/--mono-bundled: "Cascadia Mono";/);
   expect(tokens).toMatch(
-    /--mono: var\(--mono-chosen, "Cascadia Code"\), "Cascadia Code", "Cascadia Code over Menlo", "Cascadia Code over Consolas", ui-monospace, monospace;/,
+    /--mono: var\(--mono-chosen, var\(--mono-bundled\)\), var\(--mono-bundled\), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;/,
   );
-  expect(tokens).toMatch(/--mono-ligatures: normal;/);
-  // The bundled face at 105 %, and each stand-in a local face sized to its advance there, so nothing moves when it lands.
+  expect(tokens).toMatch(/--mono-ligatures: none;/);
+  // Both Cascadias at 105 %, and each stand-in a local face sized to its advance there, so nothing moves when one lands.
   const faces = readFileSync(join(ROOT, FACES), "utf8");
-  expect(faces).toMatch(/@font-face \{\s*font-family: "Cascadia Code"; font-style: normal;[^}]*src: url\("\.\/cascadia-code\/CascadiaCode\.woff2"\)[^}]*size-adjust: 105%;/);
-  expect(faces).toMatch(/@font-face \{\s*font-family: "Cascadia Code"; font-style: italic;[^}]*src: url\("\.\/cascadia-code\/CascadiaCodeItalic\.woff2"\)[^}]*size-adjust: 105%;/);
+  for (const [name, folder, file] of [["Cascadia Mono", "cascadia-mono", "CascadiaMono"], ["Cascadia Code", "cascadia-code", "CascadiaCode"]] as const) {
+    for (const [style, suffix] of [["normal", ""], ["italic", "Italic"]] as const) {
+      expect(faces).toMatch(new RegExp(`@font-face \\{\\s*font-family: "${name}"; font-style: ${style};[^}]*src: url\\("\\./${folder}/${file}${suffix}\\.woff2"\\)[^}]*size-adjust: 105%;`));
+    }
+  }
   for (const stand of ["Menlo", "Consolas"]) {
-    const face = new RegExp(`@font-face \\{\\s*font-family: "Cascadia Code over ${stand}"; src: local\\("${stand}"\\)[^}]*size-adjust: [\\d.]+%`);
+    const face = new RegExp(`@font-face \\{\\s*font-family: "Cascadia over ${stand}"; src: local\\("${stand}"\\)[^}]*size-adjust: [\\d.]+%`);
     expect(faces).toMatch(face);
   }
 });
@@ -257,7 +262,7 @@ test("(e) no stylesheet, component or module names a monospace family but --mono
     }
     if (file.endsWith(".ts") && /font(?:-f|F)amily["']?\s*[:=]\s*["'`][^"'`]*(?:JetBrains|Menlo|Consolas|Courier|monospace)/.test(css)) named.push(file);
   }
-  const custom = rules(readFileSync(join(ROOT, TOKENS), "utf8")).flatMap(({ decls }) => decls.filter(([prop, value]) => prop.startsWith("--") && prop !== "--mono" && MONO_FAMILY.test(value)));
+  const custom = rules(readFileSync(join(ROOT, TOKENS), "utf8")).flatMap(({ decls }) => decls.filter(([prop, value]) => prop.startsWith("--") && prop !== "--mono" && prop !== "--mono-bundled" && MONO_FAMILY.test(value)));
   expect(named).toEqual([]);
   expect(custom).toEqual([]);
 });

@@ -38,7 +38,7 @@
   import { flushSync, untrack } from "svelte";
 
   import { Windowed } from "../../shell/windowed.svelte";
-  import { BUNDLED, BUNDLED_CSS, cssFamily, FAMILY_PROPERTY, evenStep, familyName, fonts as windowFonts, LARGEST, ROLE_NAMES, SIZES, SMALLEST, type Fonts, type Role } from "../fonts.svelte";
+  import { cssFamily, FAMILY_PROPERTY, evenStep, familyName, fonts as windowFonts, LARGEST, ROLE_NAMES, SIZES, SMALLEST, type Fonts, type Role } from "../fonts.svelte";
 
   let {
     role,
@@ -55,7 +55,8 @@
   const uid = $props.id();
   const listId = `tf-fr-${uid}-list`;
   const name = $derived(ROLE_NAMES[role]);
-  const bundled = $derived(BUNDLED[role]);
+  /** The face the role draws in with none chosen: for code, Cascadia Mono, or Cascadia Code with ligatures on (2026-11-21). */
+  const bundled = $derived(fonts.bundled(role));
 
   /** What each role says it draws, under its name. */
   const WHAT: Record<Role, string> = {
@@ -217,7 +218,7 @@
     return (node: HTMLElement) => {
       const property = FAMILY_PROPERTY[role];
       const stack = getComputedStyle(document.documentElement).getPropertyValue(property).trim();
-      const first = cssFamily(family ?? BUNDLED_CSS[role]);
+      const first = cssFamily(family ?? fonts.bundled(role));
       node.style.setProperty(property, stack === "" ? first : `${first}, ${stack}`);
     };
   }
@@ -320,7 +321,7 @@
     </div>
     <figure class="tf-cf-spec tf-fr-spec">
       {#if role === "code"}
-        <pre class="tf-code" aria-hidden="true" {@attach drawnIn(previewed)}><div class="tf-l"><span>1</span><span><span class="tf-hl-kw">const</span> failed = runs.<span class="tf-hl-fn">filter</span>((run) =&gt; run.state !== <span class="tf-hl-str">"ok"</span>);</span></div><div class="tf-l"><span>2</span><span><span class="tf-hl-kw">if</span> (failed.length &gt;= <span class="tf-hl-num">3</span>) <span class="tf-hl-kw">return</span> <span class="tf-hl-fn">retry</span>(failed, &#123; after: <span class="tf-hl-num">0x1F</span> &#125;);</span></div><div class="tf-l"><span>3</span><span><span class="tf-hl-com">// 0O 1lI -&gt; =&gt; &lt;= != === :: |&gt;</span></span></div></pre>
+        <pre class="tf-code" aria-hidden="true" {@attach drawnIn(previewed)}><div class="tf-l"><span>1</span><span><span class="tf-hl-kw">const</span> failed = runs.<span class="tf-hl-fn">filter</span>((run) =&gt; run.state !== <span class="tf-hl-str">"ok"</span>);</span></div><div class="tf-l"><span>2</span><span><span class="tf-hl-kw">if</span> (failed.length &gt;= <span class="tf-hl-num">3</span>) <span class="tf-hl-kw">return</span> <span class="tf-hl-fn">retry</span>(failed, &#123; after: <span class="tf-hl-num">0x1F</span> &#125;);</span></div><div class="tf-l"><span>3</span><span><span class="tf-hl-com">// 0O 1lI -&gt; =&gt; != === |-- ┌─┐</span></span></div></pre>
       {:else if role === "ui"}
         <div class="tf-fr-sample tf-fr-sample-ui" aria-hidden="true" {@attach drawnIn(previewed)}>
           <b>Release checklist for 4.2</b>
@@ -355,8 +356,9 @@
     <div class="tf-stg-row">
       <label class="tf-stg-l" for="tf-fr-{uid}-lig"
         >Ligatures in code<small
-          >Draws <code>=&gt;</code>, <code>!=</code>, <code>-&gt;</code> and the like as one sign, in fonts that have them.
-          Each still takes the width of its characters.</small
+          >Draws <code>=&gt;</code>, <code>!=</code>, <code>-&gt;</code> and the like as one sign, in Cascadia Code instead
+          of Cascadia Mono, or in a font you chose that has them. Each still takes the width of its characters; ASCII art
+          and boxes draw best with them off.</small
         ></label
       >
       <div class="tf-stg-c tf-stg-inl">

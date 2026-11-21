@@ -12,8 +12,10 @@
  *   `font-stretch: N%` too, so a chosen face narrows through its own width axis or condensed members, and one that
  *   has neither, Inter among them, draws at its normal width.
  * - **Reading** (`read`, Inter; Source Serif 4 before): Docs pages. `--serif`.
- * - **Code** (`code`, Cascadia Code since 2026-11-20): code everywhere (`code-face` before this pass). `--mono`, and its
- *   ligatures, on until turned off.
+ * - **Code** (`code`, Cascadia Mono since 2026-11-21, Cascadia Code from 2026-11-20): code everywhere (`code-face`
+ *   before this pass). `--mono`. *Ligatures in code* is off until turned on; on, the bundled face is Cascadia Code,
+ *   whose ligatures draw `=>` and `->` as one sign, and a chosen face draws its own
+ *   (`docs/decisions/2026-11-21-code-is-cascadia-mono.md`).
  *
  * Each family token (`css/tokens.css`) is `var(--<role>-chosen, <bundled>)` first, then the bundled face and its
  * stand-ins, so a family missing on this machine draws in the bundled face. A size is `--size-<role>`, a number, which
@@ -22,11 +24,11 @@
  * the lengths tuned around text (controls, rows, padding) hold. Zoom makes everything bigger.
  *
  * Kept in the webview's `localStorage` (`knobas.<role>.font`, `knobas.<role>.size` a whole percent, absent for 100,
- * and `knobas.code.ligatures`, `off` when turned off), and applied before the shell mounts (`main.ts`), as the code face was: read from the
+ * and `knobas.code.ligatures`, `on` when turned on), and applied before the shell mounts (`main.ts`), as the code face was: read from the
  * database, a choice would land after the first draw. It names fonts installed on this machine, so it is this
  * machine's, not the profile's a backup carries.
  */
-import { keptValue, windowStorage, type KeptStorage } from "./kept-value";
+import { keptValue, windowStorage, type KeptStorage, type KeptValue } from "./kept-value";
 
 export type Role = "ui" | "head" | "read" | "code";
 export const ROLES: readonly Role[] = ["ui", "head", "read", "code"];
@@ -36,20 +38,25 @@ export const ROLE_NAMES: Record<Role, string> = { ui: "Interface", head: "Headin
 
 /** Inter's lower case over its em (`OS/2.sxHeight`, 1118 of 2048 units). */
 export const INTER_X_HEIGHT = 1118 / 2048;
-/** Cascadia Code's lower case over its em (`OS/2.sxHeight`, 1060 of 2048 units). */
+/** Cascadia's lower case over its em (`OS/2.sxHeight`, 1060 of 2048 units), Mono's and Code's alike. */
 export const CASCADIA_X_HEIGHT = 1060 / 2048;
 /**
- * The bundled Cascadia Code's `size-adjust` (`fonts/fonts.css`): drawn at 105 %, its lower case is as tall as the
- * JetBrains Mono it replaced, which is the size Björn set for Cascadia by hand. The code role's 100 % is that.
+ * The bundled Cascadias' `size-adjust` (`fonts/fonts.css`): drawn at 105 %, the lower case is as tall as the
+ * JetBrains Mono they replaced, which is the size Björn set for Cascadia by hand. The code role's 100 % is that
+ * (2026-11-20; kept for Cascadia Mono on 2026-11-21, so its "105 %" is what the slider calls 100 %).
  */
 export const CASCADIA_SIZE_ADJUST = 1.05;
+/** The code face knobas draws in (2026-11-21): no programming ligatures, so ASCII art and boxes stay as drawn. */
+export const CASCADIA_MONO = "Cascadia Mono";
+/** The code face drawn with *Ligatures in code* on: Cascadia Mono's metrics, with `=>`, `->` and the like joined. */
+export const CASCADIA_CODE = "Cascadia Code";
 /** A kept code family that is Cascadia under one of its names (Code, Mono, NF, PL, or Nerd Fonts' CaskaydiaCove/Mono). */
 const CASCADIA = /^\s*["']?\s*(?:cascadia|caskaydia)/i;
 
 /** The face knobas brings along for each role, as a person names it. */
-export const BUNDLED: Record<Role, string> = { ui: "Inter", head: "Inter", read: "Inter", code: "Cascadia Code" };
+export const BUNDLED: Record<Role, string> = { ui: "Inter", head: "Inter", read: "Inter", code: CASCADIA_MONO };
 /** The bundled faces' own family names (`fonts/fonts.css` declares them), which a typed name may also be. */
-export const BUNDLED_CSS: Record<Role, string> = { ui: "Inter", head: "Inter", read: "Inter", code: "Cascadia Code" };
+export const BUNDLED_CSS: Record<Role, string> = { ui: "Inter", head: "Inter", read: "Inter", code: CASCADIA_MONO };
 /**
  * The bundled faces' x-heights over their em (`OS/2.sxHeight`, read from the vendored files): the step that draws a
  * chosen face's lower case as tall as these is the one the size marks.
@@ -65,6 +72,8 @@ export const CHOSEN_PROPERTY: Record<Role, string> = { ui: "--ui-chosen", head: 
 export const fontKey = (role: Role) => `knobas.${role}.font`;
 export const sizeKey = (role: Role) => `knobas.${role}.size`;
 export const LIGATURES_KEY = "knobas.code.ligatures";
+/** Set once this machine's code settings have been carried over to Cascadia Mono (`toCascadiaMono`). */
+export const MONO_KEY = "knobas.code.mono";
 
 /** The sizes, in percent: 85 to 130 in fives. Below 85 the 11 px step is under 9.4 px; 130 still fits a 13 px line in a 26 px row. */
 export const SIZES = [85, 90, 95, 100, 105, 110, 115, 120, 125, 130] as const;
@@ -87,6 +96,8 @@ export function familyName(typed: string | null, role: Role = "code"): string | 
   if (/^(["']).*\1$/.test(name)) name = name.slice(1, -1).trim();
   const lower = name.toLowerCase();
   if (name === "" || name.length > LONGEST || lower === BUNDLED[role].toLowerCase() || lower === BUNDLED_CSS[role].toLowerCase()) return null;
+  // Both Cascadias are declared by the bundle, which wins over an installed face of the same name: either is the bundled face.
+  if (role === "code" && lower === CASCADIA_CODE.toLowerCase()) return null;
   return name;
 }
 
@@ -121,31 +132,54 @@ export type SizeListener = (role: Role, ratio: number) => void;
 export interface Fonts {
   /** The role's chosen family, or `null` for its bundled face. */
   family(role: Role): string | null;
+  /** The face the role draws in when none is chosen: for code, Cascadia Code while ligatures are on, else Cascadia Mono. */
+  bundled(role: Role): string;
   /** The role's size, in percent. */
   size(role: Role): number;
-  /** Whether code draws its font's ligatures (`=>`, `!=`, `->` as one sign); on until turned off (2026-11-20). */
+  /**
+   * Whether code draws ligatures (`=>`, `!=`, `->` as one sign): the bundled face is then Cascadia Code, and a chosen
+   * face draws its own. Off until turned on (2026-11-21).
+   */
   readonly ligatures: boolean;
-  /** Choose a family; an empty name or the bundled face's goes back to the bundled face. */
+  /**
+   * Choose a family; an empty name or the bundled face's goes back to the bundled face. Cascadia Code is the bundled
+   * face with ligatures on, and Cascadia Mono with them off, so choosing either sets the switch too.
+   */
   setFamily(role: Role, name: string | null): void;
   /** Choose a size, in percent; put on the nearest step. */
   setSize(role: Role, percent: number): void;
   setLigatures(on: boolean): void;
   /** Calls `heard` after each change of a size, until the returned function is called. */
   onSize(heard: SizeListener): () => void;
-  /** Tests only: the bundled faces at 100 %, ligatures on, nothing stored, nobody listening. */
+  /** Tests only: the bundled faces at 100 %, ligatures off, nothing stored, nobody listening. */
   reset(): void;
 }
 
-export function createFonts(storage: () => KeptStorage | null, root: () => RootStyle | null): Fonts {
+/**
+ * Loads a bundled face's upright and italic before code turns to it, so no line is drawn in the stand-ins first and
+ * again in the face (the window's font set); `null` when there is nothing to wait for, and the turn is at once.
+ */
+export type LoadFace = (family: string) => Promise<unknown> | null;
+
+const loadFromDocument: LoadFace = (family) => {
+  const set = typeof document === "undefined" ? undefined : document.fonts;
+  if (!set || typeof set.load !== "function") return null;
+  const name = cssFamily(family);
+  return Promise.all([set.load(`16px ${name}`), set.load(`italic 16px ${name}`)]);
+};
+
+export function createFonts(storage: () => KeptStorage | null, root: () => RootStyle | null, loadFace: LoadFace = loadFromDocument): Fonts {
   const keptFamily = Object.fromEntries(ROLES.map((role) => [role, keptValue(storage, fontKey(role))])) as Record<Role, ReturnType<typeof keptValue>>;
   const keptSize = Object.fromEntries(ROLES.map((role) => [role, keptValue(storage, sizeKey(role))])) as Record<Role, ReturnType<typeof keptValue>>;
   const keptLigatures = keptValue(storage, LIGATURES_KEY);
-  cascadiaIsBundled(keptFamily.code, keptSize.code);
+  toCascadiaMono(keptFamily.code, keptSize.code, keptLigatures, keptValue(storage, MONO_KEY));
 
   const families = $state(Object.fromEntries(ROLES.map((role) => [role, familyName(keptFamily[role].read(), role)])) as Record<Role, string | null>);
   const sizes = $state(Object.fromEntries(ROLES.map((role) => [role, sizeStep(keptSize[role].read())])) as Record<Role, number>);
-  // Off only when turned off: `on` is what the switch kept while ligatures were off until set (2026-11-16 to 11-20).
-  let ligatures = $state(keptLigatures.read() !== "off");
+  // On only when turned on (2026-11-21); `toCascadiaMono` cleared what earlier builds kept.
+  let ligatures = $state(keptLigatures.read() === "on");
+  /** Counts the switch's presses, so a face that lands after a later press is not applied. */
+  let pressed = 0;
   const listeners = new Set<SizeListener>();
 
   function applyFamily(style: RootStyle, role: Role): void {
@@ -160,9 +194,30 @@ export function createFonts(storage: () => KeptStorage | null, root: () => RootS
     else style.setProperty(`--size-${role}`, String(size / 100));
   }
 
-  function applyLigatures(style: RootStyle): void {
-    if (ligatures) style.removeProperty("--mono-ligatures");
-    else style.setProperty("--mono-ligatures", "none");
+  /** On: Cascadia Code as the bundled face and every face's ligatures; off: the sheet's Cascadia Mono, none (`css/tokens.css`). */
+  function applyLigatures(style: RootStyle, on: boolean = ligatures): void {
+    if (on) {
+      style.setProperty("--mono-bundled", cssFamily(CASCADIA_CODE));
+      style.setProperty("--mono-ligatures", "normal");
+    } else {
+      style.removeProperty("--mono-bundled");
+      style.removeProperty("--mono-ligatures");
+    }
+  }
+
+  function setLigatures(on: boolean): void {
+    ligatures = on;
+    if (on) keptLigatures.write("on");
+    else keptLigatures.clear();
+    const press = ++pressed;
+    const apply = () => {
+      const style = root();
+      if (style && press === pressed) applyLigatures(style, on);
+    };
+    // The face turned to is drawn once it has landed; one that fails to load draws in its stand-ins, as at a start.
+    const landing = loadFace(on ? CASCADIA_CODE : CASCADIA_MONO);
+    if (landing === null) apply();
+    else void landing.then(apply, apply);
   }
 
   {
@@ -178,12 +233,18 @@ export function createFonts(storage: () => KeptStorage | null, root: () => RootS
 
   return {
     family: (role) => families[role],
+    bundled: (role) => (role === "code" && ligatures ? CASCADIA_CODE : BUNDLED[role]),
     size: (role) => sizes[role],
     get ligatures() {
       return ligatures;
     },
     setFamily(role, name) {
       const family = familyName(name, role);
+      if (role === "code" && family === null && name !== null) {
+        const lower = familyName(name, "ui")?.toLowerCase();
+        if (lower === CASCADIA_CODE.toLowerCase() && !ligatures) setLigatures(true);
+        else if (lower === CASCADIA_MONO.toLowerCase() && ligatures) setLigatures(false);
+      }
       families[role] = family;
       if (family === null) keptFamily[role].clear();
       else keptFamily[role].write(family);
@@ -201,20 +262,15 @@ export function createFonts(storage: () => KeptStorage | null, root: () => RootS
       if (style) applySize(style, role);
       for (const heard of [...listeners]) heard(role, size / was);
     },
-    setLigatures(on) {
-      ligatures = on;
-      if (on) keptLigatures.clear();
-      else keptLigatures.write("off");
-      const style = root();
-      if (style) applyLigatures(style);
-    },
+    setLigatures,
     onSize(heard) {
       listeners.add(heard);
       return () => listeners.delete(heard);
     },
     reset() {
       listeners.clear();
-      ligatures = true;
+      ligatures = false;
+      pressed += 1;
       keptLigatures.clear();
       const style = root();
       for (const role of ROLES) {
@@ -233,19 +289,36 @@ export function createFonts(storage: () => KeptStorage | null, root: () => RootS
 }
 
 /**
- * Since 2026-11-20 Cascadia Code is the face knobas brings along for code, drawn at 105 % (`CASCADIA_SIZE_ADJUST`). A
- * Cascadia chosen from the machine's fonts before that becomes the bundled one, and its size is divided by 1.05 onto
- * the nearest step so it draws as large as it did: Björn's 105 % is 100 %, and a Cascadia kept at 100 % is 95 %.
- * The choice is cleared, so this runs once.
+ * Once a machine, on the first start since 2026-11-21 (`MONO_KEY`), code's settings move to Cascadia Mono:
+ *
+ * - A Cascadia chosen from the machine's fonts (Code, Mono, NF, PL, or Nerd Fonts' CaskaydiaCove) becomes the bundled
+ *   face, drawn at 105 % (`CASCADIA_SIZE_ADJUST`), its size divided by 1.05 onto the nearest step so it draws as large
+ *   as it did: an installed Cascadia Mono at 105 % is the bundled one at 100 %. (From 2026-11-20 this ran on every
+ *   start, so a Cascadia picked after it was taken away again at the next; now it runs once and a pick stays.)
+ * - Ligatures: the bundled face draws Cascadia Mono, whatever an earlier build kept (an `on` kept before 2026-11-20 was
+ *   never cleared, and Björn asked for Mono). A chosen face keeps its ligatures as they drew, on unless turned off,
+ *   kept as this build's `on`.
+ *
+ * Sizes stay as they are: code's 100 % is the same size as before.
  */
-function cascadiaIsBundled(family: ReturnType<typeof keptValue>, size: ReturnType<typeof keptValue>): void {
+function toCascadiaMono(family: KeptValue, size: KeptValue, ligatures: KeptValue, done: KeptValue): void {
+  if (done.read() !== null) return;
   const kept = family.read();
-  if (kept === null || !CASCADIA.test(kept)) return;
-  family.clear();
-  const was = sizeStep(size.read());
-  const now = sizeStep(was / CASCADIA_SIZE_ADJUST);
-  if (now === 100) size.clear();
-  else size.write(String(now));
+  if (kept !== null && CASCADIA.test(kept)) {
+    family.clear();
+    const now = sizeStep(sizeStep(size.read()) / CASCADIA_SIZE_ADJUST);
+    if (now === 100) size.clear();
+    else size.write(String(now));
+  }
+  const chosen = familyName(family.read(), "code") !== null;
+  if (chosen && ligatures.read() !== "off") ligatures.write("on");
+  else ligatures.clear();
+  done.write("1");
+}
+
+/** The bundled code face no rule draws while the switch is as it is, which the idle loader leaves alone (`shell/faces.ts`). */
+export function unusedCodeFace(of: Fonts = fonts): string {
+  return of.ligatures ? CASCADIA_MONO : CASCADIA_CODE;
 }
 
 /**

@@ -240,8 +240,8 @@ test("the faces are the app's own files, each beside its licence, as SOURCE.md s
   const faces = readFileSync(join(fonts, "fonts.css"), "utf8");
   expect(faces).not.toMatch(/https?:/);
   const files = [...faces.matchAll(/url\("\.\/([\w-]+)\/([\w-]+\.woff2)"\)/g)].map(([, folder, file]) => ({ folder: folder!, file: file! }));
-  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-code"]);
-  expect(files).toHaveLength(9);
+  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-mono", "cascadia-code"]);
+  expect(files).toHaveLength(11);
   for (const { folder, file } of files) {
     const bytes = readFileSync(join(fonts, folder, file));
     expect(bytes.subarray(0, 4).toString("latin1"), file).toBe("wOF2");
@@ -254,24 +254,27 @@ test("the faces are the app's own files, each beside its licence, as SOURCE.md s
   // The copyright notice above the licence's text, where a reserved name is declared.
   const notice = (folder: string) => readFileSync(join(fonts, folder, "OFL.txt"), "utf8").split("This Font Software is licensed")[0]!;
   expect(notice("cascadia-code")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("cascadia-mono")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
   expect(notice("inter")).toMatch(/The Inter Project Authors/);
   expect(notice("inter")).not.toMatch(/Reserved Font Name/);
 });
 
 /**
  * The axes are in the font files, not synthesised: Inter's `opsz` (14 to 32), which draws headings in its display cut
- * by itself, and its `wght`; Cascadia Code's `wght` (200 to 700), which code's 400 and 600 take.
+ * by itself, and its `wght`; Cascadia Mono's and Code's `wght` (200 to 700), which code's 400 and 600 take.
  *
  * WOFF2 keeps its table data in one Brotli stream after a variable-length table directory; an `fvar` axis record is
  * the tag followed by min, default and max as 16.16 fixed.
  */
-test("the bundled Inter has its optical size and weight axes, Cascadia Code its weight axis", () => {
+test("the bundled Inter has its optical size and weight axes, Cascadia Mono and Code their weight axis", () => {
   const font = (path: string) => readFileSync(join(APP, "src/lib/tf/fonts", path));
   const inter = font("inter/inter-latin-opsz-normal.woff2");
   expect(axes(inter, "opsz")).toContainEqual({ tag: "opsz", min: 14, max: 32 });
   expect(axes(inter, "wght")).toContainEqual({ tag: "wght", min: 100, max: 900 });
   expect(axes(font("cascadia-code/CascadiaCode.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
   expect(axes(font("cascadia-code/CascadiaCodeItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-mono/CascadiaMono.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-mono/CascadiaMonoItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
 });
 
 function axes(woff2: Buffer, tag: string): { tag: string; min: number; max: number }[] {
