@@ -11,6 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@pierre/highlights": "0.5.2",
+    "@tanstack/highlight": "1.2.12",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-notification": "2.4.0",
     "@tauri-apps/plugin-opener": "2.5.4",

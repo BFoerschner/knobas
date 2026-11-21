@@ -1,0 +1,21 @@
+[
+  ["com://! The app's commands."],
+  ["kw:use ",":std","punct:::",":collections","punct:::","ty:HashMap","punct:;"],
+  [],
+  ["attr:#","punct:[","attr:derive","punct:(","ty:Debug","punct:, ","ty:Clone","punct:)]"],
+  ["kw:pub struct ","ty:Batch","op:<","con:'a","op:> ","punct:{"],
+  ["punct:    ","kw:pub ",":id","punct:: ","op:&","con:'a ","ty:str","punct:,"],
+  ["punct:    ",":tries","punct:: ","ty:u32","punct:,"],
+  ["punct:}"],
+  [],
+  ["kw:impl","op:<","con:'a","op:> ","ty:Batch","op:<","con:'a","op:> ","punct:{"],
+  ["punct:    ","kw:pub fn ","fn:settle","punct:(","op:&","kw:mut self","punct:) ","op:-> ","ty:Result","op:<","ty:String","punct:, ","ty:String","op:> ","punct:{"],
+  ["punct:        ","kw:let mut ",":seen","punct:: ","ty:HashMap","op:<&","ty:str","punct:, ","ty:u32","op:> = ","ty:HashMap","punct:::","fn:new","punct:();"],
+  ["punct:        ","kw:self","punct:.","prop:tries ","op:+= ","num:1","punct:;"],
+  ["punct:        ","kw:if self","punct:.","prop:tries ","op:> ","num:3 ","punct:{ ","kw:return ","fn:Err","punct:(","fn:format","op:!","punct:(","str:\"parked {}\"","punct:, ","kw:self","punct:.","prop:id","punct:)); }"],
+  ["punct:        ",":seen","punct:.","fn:insert","punct:(","kw:self","punct:.","prop:id","punct:, ","kw:self","punct:.","prop:tries","punct:);"],
+  ["punct:        ","fn:Ok","punct:(","ty:String","punct:::","fn:from","punct:(","str:\"sent","esc:\\n","str:\"","punct:))"],
+  ["punct:    }"],
+  ["punct:}"],
+  []
+]

@@ -1,165 +1,105 @@
 /**
- * The highlighting worker's core over the real Shiki (#2254): what a file
- * opened gets back, in which order, and which grammars it loads.
+ * The worker's core across engines (the highlighter re-ruling, 2026-11-21, tests 7 and 8): the net when an engine
+ * throws or cannot load, and that an engine is imported only when a job needs it. Stub engines; each engine's own
+ * answers are `engines/*.test.ts`.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { expect, test } from "vitest";
 
-import { CHUNK, createHighlightCore, loadBundled, languageOf } from "./highlight-core";
-import type { HighlightReply, LineTokens } from "./port";
+import type { Engine } from "./engines/engine";
+import { createHighlightCore } from "./highlight-core";
+import type { EngineId } from "./roles";
+import type { HighlightReply } from "./port";
 
-/**
- * A core whose replies are collected, with the grammars it loaded. A fresh
- * highlighter compiles its grammar's patterns inside the first line's time
- * limit, which a loaded machine can spend before the line ends, so the helper
- * sets no bound a test could race (#2457).
- */
-function core(tokenizeTimeLimit = 60_000) {
+/** An engine that answers every line as one token of `role`, or throws. */
+const stub = (role: string, fail = false): Engine => ({
+  async run(text, _name, _lang, ctx) {
+    if (fail) throw new Error(`${role} fails`);
+    ctx.post(0, text.split("\n").map((line) => [[line, role] as const]));
+  },
+});
+
+function core(engines: Partial<Record<EngineId, () => Promise<Engine>>>) {
   const replies: HighlightReply[] = [];
-  const grammars: string[] = [];
-  let finished: () => void = () => {};
-  const done = new Promise<void>((resolve) => (finished = resolve));
-  const handle = createHighlightCore({
-    tokenizeTimeLimit,
-    post: (reply) => {
-      replies.push(reply);
-      if (reply.type !== "lines") finished();
-    },
-    load: (id) => {
-      grammars.push(id);
-      return loadBundled(id);
-    },
-  });
-  /** Line `n`'s tokens, from the last reply that covered it. */
-  const lineAt = (n: number): LineTokens | undefined => {
-    let found: LineTokens | undefined;
-    for (const reply of replies) if (reply.type === "lines" && n >= reply.from && n < reply.from + reply.lines.length) found = reply.lines[n - reply.from];
-    return found;
+  const warned: string[] = [];
+  const c = createHighlightCore({ post: (reply) => void replies.push(reply), engines, warn: (text) => void warned.push(text) });
+  const settle = async () => {
+    for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
   };
-  return { ...handle, replies, grammars, done, lineAt };
+  return { ...c, replies, warned, settle };
 }
 
-const kinds = (line: LineTokens | undefined) => (line ?? []).filter(([, kind]) => kind !== "").map(([text, kind]) => `${kind}:${text.trim()}`);
-
-test("a line that runs out of its time limit ends in one token holding the rest of it", async () => {
-  const c = core(1e-6);
-  c.handle({ type: "open", id: 1, path: "web/client.ts", text: "export const a: number = 1;" });
-  await c.done;
-
-  expect(c.lineAt(0)!.map(([text]) => text).join("")).toBe("export const a: number = 1;");
-  expect(kinds(c.lineAt(0))).not.toContain("num:1");
+test("a Pierre that throws: TanStack answers Java, Shiki a language only it has, and all three throwing is plain", async () => {
+  const c = core({ pierre: async () => stub("kw", true), tanstack: async () => stub("str"), shiki: async () => stub("num") });
+  c.handle({ type: "open", id: 1, path: "A.java", text: "x", engine: "pierre" });
+  c.handle({ type: "open", id: 2, path: "a.raku", text: "x", engine: "pierre" });
+  await c.settle();
+  expect(c.replies.filter((r) => r.type !== "failed")).toEqual(
+    expect.arrayContaining([
+      { type: "lines", id: 1, from: 0, lines: [[["x", "str"]]] },
+      { type: "done", id: 1 },
+      { type: "lines", id: 2, from: 0, lines: [[["x", "num"]]] },
+      { type: "done", id: 2 },
+    ]),
+  );
+  expect(c.warned).toHaveLength(1);
+  const all = core({ pierre: async () => stub("kw", true), tanstack: async () => stub("str", true), shiki: async () => stub("num", true) });
+  all.handle({ type: "open", id: 3, path: "A.java", text: "x", engine: "pierre" });
+  await all.settle();
+  expect(all.replies).toEqual([{ type: "plain", id: 3 }]);
 });
 
-test("a Rust file comes back as tokens of the knobas kinds, loading the Rust grammar alone", async () => {
-  const c = core();
-  c.handle({ type: "open", id: 1, path: "src/main.rs", text: 'fn main() {\n    // go\n    let n = 42;\n    run("now");\n}' });
-  await c.done;
-
-  expect(kinds(c.lineAt(0))).toContain("kw:fn");
-  expect(kinds(c.lineAt(1))).toEqual(["com:// go"]);
-  expect(kinds(c.lineAt(2))).toEqual(expect.arrayContaining(["kw:let", "num:42"]));
-  expect(kinds(c.lineAt(3))).toContain('str:"now"');
-  expect(c.lineAt(0)!.map(([text]) => text).join("")).toBe("fn main() {");
-  expect(c.replies.at(-1)).toEqual({ type: "done", id: 1 });
-  expect(c.grammars).toEqual(["rust"]);
+test("an engine whose import fails is said once, and no later job imports it again", async () => {
+  let tries = 0;
+  const c = core({
+    pierre: () => {
+      tries += 1;
+      return Promise.reject(new Error("no WebAssembly"));
+    },
+    tanstack: async () => stub("str"),
+  });
+  c.handle({ type: "open", id: 1, path: "A.java", text: "x", engine: "pierre" });
+  await c.settle();
+  c.handle({ type: "open", id: 2, path: "B.java", text: "y", engine: "pierre" });
+  await c.settle();
+  expect(c.replies.filter((r) => r.type === "failed")).toEqual([{ type: "failed", engine: "pierre" }]);
+  expect(tries).toBe(1);
+  expect(c.replies.filter((r) => r.type === "done")).toHaveLength(2);
+  // *Try again*: the failure is forgotten and the import tried once more.
+  c.handle({ type: "warm", engine: "pierre", retry: true });
+  await c.settle();
+  expect(tries).toBe(2);
 });
 
-test("opening a TypeScript file after it loads the TypeScript grammar and nothing else", async () => {
-  const c = core();
-  c.handle({ type: "open", id: 1, path: "a.rs", text: "fn a() {}" });
-  await c.done;
-  const second = core();
-  second.handle({ type: "open", id: 2, path: "web/client.ts", text: "export const a: number = 1;" });
-  await second.done;
-
-  expect(c.grammars).toEqual(["rust"]);
-  expect(second.grammars).toEqual(["typescript"]);
-  expect(kinds(second.lineAt(0))).toEqual(expect.arrayContaining(["kw:export", "kw:const", "num:1"]));
+test("a Java job under Pierre imports Pierre alone; SQL imports TanStack and not Shiki; a warm-up imports the chosen one", async () => {
+  const loaded: string[] = [];
+  const count = (id: EngineId, role: string) => async () => (loaded.push(id), stub(role));
+  const c = core({ pierre: count("pierre", "kw"), tanstack: count("tanstack", "str"), shiki: count("shiki", "num") });
+  c.handle({ type: "open", id: 1, path: "A.java", text: "x", engine: "pierre" });
+  await c.settle();
+  expect(loaded).toEqual(["pierre"]);
+  c.handle({ type: "open", id: 2, path: "q.sql", text: "x", engine: "pierre" });
+  await c.settle();
+  expect(loaded).toEqual(["pierre", "tanstack"]);
+  const warm = core({ pierre: count("pierre", "kw"), tanstack: count("tanstack", "str"), shiki: count("shiki", "num") });
+  loaded.length = 0;
+  warm.handle({ type: "warm", engine: "tanstack" });
+  await warm.settle();
+  expect(loaded).toEqual(["tanstack"]);
 });
 
-test("a file in no language Shiki knows is answered plain, and no grammar loads", async () => {
-  const c = core();
-  c.handle({ type: "open", id: 1, path: "notes/plan.zzq", text: "fn main() {}" });
-  await c.done;
-
-  expect(c.replies).toEqual([{ type: "plain", id: 1 }]);
-  expect(c.grammars).toEqual([]);
+test("a cancelled job posts nothing more", async () => {
+  const c = core({ pierre: async () => stub("kw") });
+  c.handle({ type: "open", id: 1, path: "A.java", text: "x", engine: "pierre" });
+  c.handle({ type: "cancel", id: 1 });
+  await c.settle();
+  expect(c.replies).toEqual([]);
 });
 
-test("the lines in view of a long file come back before the pass from the top reaches them", async () => {
-  const c = core();
-  const text = Array.from({ length: 10 * CHUNK }, (_, i) => `let v${i} = ${i};`).join("\n");
-  c.handle({ type: "open", id: 1, path: "BULK.rs", text, focus: [3_000, 3_040] });
-  await c.done;
-
-  const first = c.replies[0];
-  expect(first).toMatchObject({ type: "lines", from: 3_000 });
-  expect(first?.type === "lines" && first.lines).toHaveLength(40);
-  expect(kinds(c.lineAt(3_010))).toEqual(["kw:let", "op:=", "num:3010", "punct:;"]);
-  expect(c.lineAt(10 * CHUNK - 1)).toBeDefined();
-});
-
-test("a block comment opened in the first chunk colours a line in a later one", async () => {
-  const c = core();
-  const text = ["/* opened here", ...Array.from({ length: CHUNK + 10 }, () => "still a comment"), "*/", "fn after() {}"].join("\n");
-  c.handle({ type: "open", id: 1, path: "a.rs", text });
-  await c.done;
-
-  expect(kinds(c.lineAt(CHUNK + 5))).toEqual(["com:still a comment"]);
-  expect(kinds(c.lineAt(CHUNK + 12))).toContain("kw:fn");
-});
-
-test("Java's class names are types and null a constant; an annotation is an attribute (ADR-0051)", async () => {
-  const c = core();
-  c.handle({ type: "open", id: 1, path: "A.java", text: "@Override\nString s = null;\nint n = 0;" });
-  await c.done;
-
-  expect(kinds(c.lineAt(0))).toEqual(["attr:@Override"]);
-  expect(kinds(c.lineAt(1))).toEqual(["ty:String", "op:=", "con:null", "punct:;"]);
-  expect(kinds(c.lineAt(2))).toEqual(["kw:int", "op:=", "num:0", "punct:;"]);
-});
-
-test("Rust's let and struct stay keywords, Kotlin's annotation is an attribute", async () => {
-  const rust = core();
-  rust.handle({ type: "open", id: 1, path: "a.rs", text: "struct S;\nlet x = 1;" });
-  await rust.done;
-  expect(kinds(rust.lineAt(0))).toContain("kw:struct");
-  expect(kinds(rust.lineAt(1))).toContain("kw:let");
-
-  const kotlin = core();
-  kotlin.handle({ type: "open", id: 1, path: "a.kt", text: '@Suppress("x") class Q' });
-  await kotlin.done;
-  expect(kinds(kotlin.lineAt(0))).toEqual(expect.arrayContaining(["attr:@Suppress", "kw:class", "ty:Q"]));
-});
-
-test("in a data language a property is a key, whichever scope cut it", async () => {
-  const yaml = core();
-  yaml.handle({ type: "open", id: 1, path: "a.yaml", text: "name: knobas" });
-  await yaml.done;
-  expect(kinds(yaml.lineAt(0))).toEqual(["key:name", "op::", "str:knobas"]);
-
-  const json = core();
-  json.handle({ type: "open", id: 1, path: "a.json", text: '{"a": true}' });
-  await json.done;
-  expect(kinds(json.lineAt(0))).toEqual(expect.arrayContaining(["key:a", "con:true"]));
-});
-
-test("a TOML key and a dotenv key are keys", async () => {
-  const toml = core();
-  toml.handle({ type: "open", id: 1, path: "Cargo.toml", text: 'name = "knobas"' });
-  await toml.done;
-  expect(kinds(toml.lineAt(0))).toContain("key:name");
-  const env = core();
-  env.handle({ type: "open", id: 1, path: ".env", text: "RETRY_LIMIT=3" });
-  await env.done;
-  expect(kinds(env.lineAt(0))).toContain("key:RETRY_LIMIT");
-});
-
-test("a file's name picks its language", () => {
-  expect(languageOf("src/main.rs")).toBe("rust");
-  expect(languageOf("web/client.ts")).toBe("typescript");
-  expect(languageOf("README.md")).toBe("markdown");
-  expect(languageOf(".teamcity/settings.kts")).toBe("kotlin");
-  expect(languageOf("Dockerfile")).toBe("docker");
-  expect(languageOf("LICENSE")).toBeNull();
-  expect(languageOf("data.zzq")).toBeNull();
+test("the core, the walk and the language table import no engine's package", () => {
+  const imports = (file: string) => [...readFileSync(join(process.cwd(), "src/lib/render", file), "utf8").matchAll(/^import[^;]*?from\s+"([^"]+)"/gms)].map((m) => m[1]!);
+  for (const file of ["highlight-core.ts", "engines.ts", "languages.ts", "highlight.worker.ts", "roles.ts", "port.ts"])
+    for (const from of imports(file)) expect(from, `${file} imports ${from}`).not.toMatch(/^(shiki|@pierre\/highlights|@tanstack\/highlight)/);
 });

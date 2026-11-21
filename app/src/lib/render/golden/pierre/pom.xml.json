@@ -1,0 +1,16 @@
+[
+  ["attr:<?xml version=\"1.0\" encoding=\"UTF-8\"?>"],
+  ["com:<!-- The payout service. -->"],
+  ["punct:<","tag:project ","attr:xmlns","punct:=","str:\"http://maven.apache.org/POM/4.0.0\"","punct:>"],
+  [":  ","punct:<","tag:modelVersion","punct:>",":4.0.0","punct:</","tag:modelVersion","punct:>"],
+  [":  ","punct:<","tag:artifactId","punct:>",":payout-service","punct:</","tag:artifactId","punct:>"],
+  [":  ","punct:<","tag:dependencies","punct:>"],
+  [":    ","punct:<","tag:dependency ","attr:scope","punct:=","str:\"test\"","punct:>"],
+  [":      ","punct:<","tag:groupId","punct:>",":org.junit","punct:</","tag:groupId","punct:>"],
+  [":      ","punct:<","tag:version","punct:>",":${junit.version}","punct:</","tag:version","punct:>"],
+  [":    ","punct:</","tag:dependency","punct:>"],
+  [":  ","punct:</","tag:dependencies","punct:>"],
+  [":  ","punct:<","tag:description","punct:>","str:<![CDATA[Retries & parks]]>","punct:</","tag:description","punct:>"],
+  ["punct:</","tag:project","punct:>"],
+  []
+]

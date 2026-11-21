@@ -12,7 +12,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { SourceView, TreeEntry, TreeSections } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import TfRepoFilesRefreshed from "./TfRepoFiles.refresh.fixture.svelte";
-import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import type { EngineId } from "../../render/engines";
+import { workerPort, type HighlightHandlers, type HighlightMessage, type HighlightReply, type HighlightRequest, type RenderPort } from "../../render/port";
 import { installCommands, type CommandPort } from "../../render/command";
 import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
 import type { RendererDefault } from "../../render/defaults";
@@ -421,6 +422,39 @@ test("a file draws as plain text first and gains colour when the highlighter ans
 
   expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
   expect(lineText(1)).toEqual(["2", "    run(42);"]);
+});
+
+test("a change of highlighter recolours an open file in place: its old colours stay until the new land (the re-ruling, test 10)", async () => {
+  // The app's port over a worker answered by hand, so the replay is the port's own.
+  const sent: HighlightMessage[] = [];
+  let listen: (event: { data: HighlightReply }) => void = () => {};
+  let engine: EngineId = "pierre";
+  const port = workerPort(
+    () =>
+      ({
+        postMessage: (message: HighlightMessage) => void sent.push(message),
+        addEventListener: (_type: string, handler: (event: { data: HighlightReply }) => void) => (listen = handler),
+      }) as unknown as Pick<Worker, "postMessage" | "addEventListener">,
+    () => ({ engine: () => engine, failed: () => {} }),
+  );
+  draw(openSource({ "src/main.rs": "fn main() {\n    run(42);\n}" }).entityView, "src/main.rs", null, port);
+  await settle();
+  const opened = () => sent.filter((m): m is Extract<HighlightMessage, { type: "open" }> => m.type === "open");
+  listen({ data: { type: "lines", id: opened()[0]!.id, from: 0, lines: [[["fn", "kw"], [" main() {", ""]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", ""]]] } });
+  flushSync();
+  const rows = [...target.querySelectorAll(".tf-fileview .tf-code .tf-l")];
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  engine = "shiki";
+  port.rehighlight();
+  flushSync();
+  expect(opened()[1]).toMatchObject({ engine: "shiki", path: "src/main.rs" });
+  // Before any new answer the rows still carry their role spans, and they are the same rows.
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  expect([...target.querySelectorAll(".tf-fileview .tf-code .tf-l")]).toEqual(rows);
+  listen({ data: { type: "lines", id: opened()[1]!.id, from: 0, lines: [[["fn", "kw"], [" ", ""], ["main", "fn"], ["() {", "punct"]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", "punct"]]] } });
+  flushSync();
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-fn:main", "tf-hl-punct:() {", "tf-hl-num:42", "tf-hl-punct:}"]);
+  expect([...target.querySelectorAll(".tf-fileview .tf-code .tf-l")]).toEqual(rows);
 });
 
 test("a file in a language the highlighter does not know stays plain text, with no error", async () => {

@@ -1,0 +1,23 @@
+[
+  ["kw:package ",":payout","punct:.",":retry","punct:;"],
+  [],
+  ["kw:import ",":java","punct:.","prop:util","punct:.","ty:List","punct:;"],
+  [],
+  ["com:/** Retries a batch, then parks it. */"],
+  ["attr:@Service"],
+  ["kw:public final class ","ty:RetryQueue ","punct:{"],
+  ["punct:    ","kw:private static final ","ty:int ","con:MAX_TRIES ","op:= ","num:3","punct:;"],
+  [],
+  ["punct:    ","attr:@Override"],
+  ["attr:    ","kw:public ","ty:Receipt ","fn:settle","punct:(","ty:Batch ",":batch","punct:) {"],
+  ["punct:        ","ty:int ",":tries ","op:= ","num:0","punct:;"],
+  ["punct:        ","kw:while ","punct:(",":tries","op:++ < ","con:MAX_TRIES","punct:) {"],
+  ["punct:            ","kw:var ",":sent ","op:= ",":gateway","punct:.","fn:send","punct:(",":batch","punct:.","fn:id","punct:());"],
+  ["punct:            ","kw:if ","punct:(",":sent","punct:.","fn:ok","punct:()) ","kw:return ",":sent","punct:.","fn:receipt","punct:();"],
+  ["punct:            ",":log","punct:.","fn:warn","punct:(","str:\"retry {} of {}","esc:\\n","str:\"","punct:, ",":tries","punct:, ","con:MAX_TRIES","punct:);"],
+  ["punct:        }"],
+  ["punct:        ","kw:throw new ","ty:ParkedException","punct:(",":batch","punct:, ","con:null","punct:, ","con:true","punct:);"],
+  ["punct:    }"],
+  ["punct:}"],
+  []
+]

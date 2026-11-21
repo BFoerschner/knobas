@@ -1,206 +1,39 @@
 /**
- * Highlighting with Shiki (spec #2234 step 5, #2254), the part that runs in
- * the web worker (`highlight.worker.ts`). Kept apart from the worker so a node
- * test drives it whole.
+ * The highlight worker's core (spec #2234 step 5, #2254; ADR-0051 and the highlighter re-ruling of 2026-11-21), the
+ * part that runs in the web worker (`highlight.worker.ts`). Kept apart from the worker so a node test drives it whole.
  *
- * - **Grammars load lazily**: a language's grammar is imported the first time
- *   a file in it is opened, never before (`load`), so app start pays nothing.
- * - **A token carries a role, never a colour** (ADR-0051): Shiki's one theme
- *   colours each scope `var(--hl-<role>)` ({@link ROLE_SCOPES}), sent on as
- *   its role (`kw`) and drawn by class (`.tf-hl-kw`, `tf/css/code.css`). The
- *   colours are variables a theme sets (`tf/css/tokens.css`,
- *   `tf/syntax-theme.svelte.ts`), so a theme change recolours what is drawn
+ * - **A token carries a role, never a colour**: each engine's own token names become one of `roles.ts`'s roles, drawn
+ *   by class (`.tf-hl-<role>`, `tf/css/code.css`) in a variable a theme sets, so a theme change recolours what is drawn
  *   without asking the worker again.
- * - **Lines in view first**: a file is tokenized from the top in chunks,
- *   carrying the grammar's state, so a comment opened on line 3 still colours
- *   line 40,000. Before that pass reaches the lines in view, they are
- *   tokenized on their own, from a fresh state, and sent first; the pass
- *   overwrites them when it gets there.
- * - A file in no language Shiki knows gets `plain`: the viewer keeps its text.
+ * - **The engine is the setting's** (`open` carries it, as a worker has no `localStorage`): the chosen one draws every
+ *   language it has, the next in its order what it lacks or throws on (`engines.ts`). An engine is imported the first
+ *   time a job needs it, never before; one whose import fails is marked failed for the session, said once (`failed`),
+ *   and skipped from then on. A throw starts the job again on the next engine from line 0, overwriting what was sent;
+ *   it is warned once per engine and language.
+ * - A text in no language any engine knows, over 100,000 lines or 8 MB, gets `plain`: the viewer keeps its text.
+ *
+ * This file imports no engine's package (a test reads its imports): the engines are `engines/*.ts`.
  */
-import { createHighlighterCore, type GrammarState, type HighlighterCore, type LanguageRegistration, type ThemedToken } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-import { bundledLanguages, bundledLanguagesInfo } from "shiki/langs";
+import { languageOf, languageOfFence, nameIn, walk, type EngineId } from "./engines";
+import type { Engine } from "./engines/engine";
+import type { HighlightMessage, HighlightReply, LineTokens } from "./port";
 
-import type { HighlightMessage, HighlightReply, LineTokens, Token } from "./port";
-import { tokenRole, type TokenRole } from "./roles";
+export { CHUNK } from "./engines/engine";
+export { languageOf, languageOfFence } from "./engines";
 
-/** Lines per step of the pass from the top: a step is short enough for a focus to cut in. */
-export const CHUNK = 400;
+/** Lines over which a text is answered plain: at a million tokens and more the page would hold too much. */
+export const HIGHLIGHT_MAX_LINES = 100_000;
+/** Characters over which a text is answered plain (8 MB). */
+export const HIGHLIGHT_MAX_CHARS = 8 * 1024 * 1024;
 
-/**
- * Shiki's scopes onto the roles (`roles.ts`). A scope takes the role of the longest selector it starts with, so
- * `keyword.operator.new` is a keyword though `keyword.operator` is an operator, Java's, Kotlin's and Groovy's
- * `storage.type.<lang>` (a class name there) is a type though `storage.type` is a keyword, and Kotlin's
- * `entity.name.type.annotation` is an annotation though `entity.name.type` is a type. Rust's `storage.type.rust` is
- * `let`, `struct` and `enum`, so it stays a keyword.
- */
-export const ROLE_SCOPES: readonly (readonly [role: TokenRole, scopes: readonly string[]])[] = [
-  ["com", ["comment", "punctuation.definition.comment"]],
-  ["str", ["string", "punctuation.definition.string", "constant.character", "markup.inline.raw", "markup.fenced_code", "markup.raw", "string.unquoted"]],
-  [
-    "esc",
-    [
-      "constant.character.escape",
-      "string.regexp",
-      "constant.other.placeholder",
-      "punctuation.definition.template-expression",
-      "punctuation.section.embedded",
-      "punctuation.section.interpolation",
-      "constant.character.format.placeholder",
-      "punctuation.definition.variable",
-      "keyword.control.anchor.regexp",
-    ],
-  ],
-  ["num", ["constant.numeric"]],
-  ["con", ["constant.language", "constant.other", "support.constant", "variable.other.constant", "variable.other.enummember", "constant.other.symbol"]],
-  [
-    "kw",
-    [
-      "keyword",
-      "storage",
-      "storage.type",
-      "storage.modifier",
-      "keyword.control",
-      "variable.language",
-      "keyword.operator.new",
-      "keyword.operator.expression",
-      "keyword.operator.logical.python",
-      "keyword.operator.instanceof",
-      "keyword.operator.wordlike",
-      "keyword.other",
-      "storage.type.primitive",
-      "storage.type.function",
-      "storage.type.class",
-      "constant.language.import-export-all",
-    ],
-  ],
-  ["op", ["keyword.operator", "punctuation.separator.key-value", "storage.type.function.arrow"]],
-  ["punct", ["punctuation", "meta.brace"]],
-  [
-    "fn",
-    ["entity.name.function", "support.function", "meta.function-call.generic", "variable.function", "entity.name.command", "support.function.builtin"],
-  ],
-  [
-    "ty",
-    [
-      "entity.name.type",
-      "entity.name.class",
-      "entity.name.struct",
-      "entity.name.enum",
-      "entity.name.trait",
-      "entity.name.namespace",
-      "support.type",
-      "support.class",
-      "entity.other.inherited-class",
-      "storage.type.java",
-      "storage.type.generic.java",
-      "storage.type.object.array.java",
-      "storage.type.kotlin",
-      "entity.name.type.kotlin",
-      "storage.type.groovy",
-    ],
-  ],
-  [
-    "prop",
-    ["variable.other.property", "variable.other.object.property", "meta.object-literal.key", "variable.other.member", "support.variable.property", "entity.name.variable.field"],
-  ],
-  // TOML names a key `variable.other.key` and dotenv `variable.key` (the highlighter re-ruling, 2026-11-21).
-  ["key", ["support.type.property-name", "entity.name.tag.yaml", "keyword.other.definition.ini", "variable.other.key", "variable.key"]],
-  ["tag", ["entity.name.tag", "punctuation.definition.tag"]],
-  [
-    "attr",
-    [
-      "entity.other.attribute-name",
-      "storage.type.annotation",
-      "entity.name.type.annotation",
-      "punctuation.definition.annotation",
-      "meta.declaration.annotation",
-      "entity.name.function.decorator",
-      "meta.decorator",
-      "meta.attribute.rust",
-      "punctuation.definition.attribute.rust",
-      "entity.name.function.macro",
-      "entity.name.function.preprocessor",
-      "meta.preprocessor",
-      "keyword.control.directive",
-      "comment.line.shebang",
-      "meta.tag.preprocessor.xml",
-      "meta.tag.sgml.doctype",
-    ],
-  ],
-  ["var", ["variable.parameter"]],
-  ["head", ["markup.heading", "punctuation.definition.heading", "entity.name.section"]],
-  ["link", ["markup.underline.link", "string.other.link"]],
-  ["strong", ["markup.bold"]],
-  ["emph", ["markup.italic"]],
-];
+/** Each engine's module, imported on demand (a chunk of its own in the build). */
+export type EngineLoaders = Readonly<Record<EngineId, () => Promise<Engine>>>;
 
-/** The one Shiki theme: a colour per role, which is a variable, so every theme is CSS. */
-export const THEME = {
-  name: "knobas",
-  type: "light" as const,
-  fg: "var(--ink)",
-  bg: "transparent",
-  settings: ROLE_SCOPES.map(([role, scope]) => ({ scope: [...scope], settings: { foreground: `var(--hl-${role})` } })),
+export const LOADERS: EngineLoaders = {
+  pierre: () => import("./engines/pierre").then((m) => m.createPierre()),
+  tanstack: () => import("./engines/tanstack").then((m) => m.createTanstack()),
+  shiki: () => import("./engines/shiki").then((m) => m.createShiki()),
 };
-
-/** Names Shiki has no extension for. */
-const BY_NAME: Record<string, string> = {
-  dockerfile: "docker",
-  containerfile: "docker",
-  makefile: "make",
-  justfile: "just",
-  "cargo.lock": "toml",
-  "go.mod": "go",
-  ".gitignore": "shellscript",
-  ".env": "dotenv",
-};
-const BY_EXT: Record<string, string> = { h: "c", hpp: "cpp", cc: "cpp", htm: "html", svg: "xml", kts: "kotlin", mjs: "javascript", cjs: "javascript" };
-
-const KNOWN = new Map<string, string>();
-for (const info of bundledLanguagesInfo) {
-  KNOWN.set(info.id, info.id);
-  for (const alias of info.aliases ?? []) KNOWN.set(alias, info.id);
-}
-
-/** The Shiki language for a file's path, or `null` where it has none. */
-export function languageOf(path: string): string | null {
-  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  if (BY_NAME[name]) return BY_NAME[name]!;
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return null;
-  const ext = name.slice(dot + 1);
-  return BY_EXT[ext] ?? KNOWN.get(ext) ?? null;
-}
-
-/** The Shiki language for a Markdown fence's language, or `null`. */
-export function languageOfFence(lang: string): string | null {
-  return KNOWN.get(lang.trim().toLowerCase()) ?? null;
-}
-
-export type Loader = (id: string) => Promise<LanguageRegistration[]>;
-
-/** The grammar of `id`, imported on demand (a chunk of its own in the build). */
-export const loadBundled: Loader = async (id) => {
-  const load = bundledLanguages[id as keyof typeof bundledLanguages];
-  if (!load) throw new Error(`no grammar for ${id}`);
-  return (await load()).default;
-};
-
-/** Shiki's tokens as the port's: text and role, neighbours of one role joined. */
-function toLines(tokens: ThemedToken[][], lang: string): LineTokens[] {
-  return tokens.map((line) => {
-    const out: Token[] = [];
-    for (const token of line) {
-      const kind = tokenRole("shiki", token.color ?? "", lang);
-      const last = out[out.length - 1];
-      if (last && last[1] === kind) out[out.length - 1] = [last[0] + token.content, kind];
-      else out.push([token.content, kind]);
-    }
-    return out;
-  });
-}
 
 interface Job {
   id: number;
@@ -214,89 +47,86 @@ export interface HighlightCore {
 }
 
 /**
- * The worker's side: takes the port's messages, `post`s its replies.
- * `pause` yields between chunks, so a focus or a cancel is read in between.
- * `tokenizeTimeLimit` bounds one line in ms; left out, Shiki's own bound holds.
+ * The worker's side: takes the port's messages, `post`s its replies. `pause` yields between chunks, so a focus or a
+ * cancel is read in between. `engines` replaces an engine's loader (tests count imports and stub throws).
  */
 export function createHighlightCore({
   post,
-  load = loadBundled,
+  engines = {},
   pause = () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
-  tokenizeTimeLimit,
+  warn = (text: string) => console.warn(text),
 }: {
   post: (reply: HighlightReply) => void;
-  load?: Loader;
+  engines?: Partial<EngineLoaders>;
   pause?: () => Promise<void>;
-  tokenizeTimeLimit?: number;
+  warn?: (text: string) => void;
 }): HighlightCore {
-  let shiki: Promise<HighlighterCore> | null = null;
-  const loaded = new Map<string, Promise<void>>();
   const jobs = new Map<number, Job>();
+  const loaded = new Map<EngineId, Promise<Engine>>();
+  const failed = new Set<EngineId>();
+  const warned = new Set<string>();
 
-  const highlighter = () =>
-    (shiki ??= createHighlighterCore({ themes: [THEME], langs: [], engine: createJavaScriptRegexEngine({ forgiving: true }) }));
-
-  async function ready(lang: string): Promise<HighlighterCore> {
-    const h = await highlighter();
-    let grammar = loaded.get(lang);
-    if (!grammar) {
-      grammar = load(lang).then((registration) => h.loadLanguage(...registration));
-      loaded.set(lang, grammar);
+  /** The engine, imported once; a failed import marks it failed and says so once. */
+  async function engine(id: EngineId): Promise<Engine | null> {
+    let got = loaded.get(id);
+    if (!got) {
+      got = (engines[id] ?? LOADERS[id])();
+      loaded.set(id, got);
     }
-    await grammar;
-    return h;
-  }
-
-  function tokenize(h: HighlighterCore, lang: string, lines: string[], grammarState?: GrammarState) {
-    return h.codeToTokens(lines.join("\n"), {
-      lang,
-      theme: THEME.name,
-      tokenizeMaxLineLength: 4000,
-      ...(tokenizeTimeLimit === undefined ? {} : { tokenizeTimeLimit }),
-      ...(grammarState ? { grammarState } : {}),
-    });
-  }
-
-  async function run(job: Job, text: string, lang: string | null) {
     try {
-      await pass(job, text, lang);
+      return await got;
+    } catch {
+      if (!failed.has(id)) {
+        failed.add(id);
+        post({ type: "failed", engine: id });
+      }
+      return null;
+    }
+  }
+
+  async function pass(job: Job, text: string, lang: string | null, chosen: EngineId): Promise<void> {
+    if (lang === null || text.length > HIGHLIGHT_MAX_CHARS || text.split("\n", HIGHLIGHT_MAX_LINES + 2).length > HIGHLIGHT_MAX_LINES) {
+      return post({ type: "plain", id: job.id });
+    }
+    for (const id of walk(chosen, lang, failed)) {
+      const name = nameIn(id, lang);
+      if (name === undefined || failed.has(id)) continue;
+      const run = await engine(id);
+      if (job.cancelled) return;
+      if (run === null) continue;
+      try {
+        await run.run(text, name, lang, {
+          post: (from: number, lines: LineTokens[]) => {
+            if (!job.cancelled) post({ type: "lines", id: job.id, from, lines });
+          },
+          pause,
+          cancelled: () => job.cancelled,
+          takeFocus: () => {
+            const focus = job.focus;
+            job.focus = null;
+            return focus;
+          },
+        });
+        if (!job.cancelled) post({ type: "done", id: job.id });
+        return;
+      } catch (error) {
+        if (job.cancelled) return;
+        const key = `${id} ${lang}`;
+        if (!warned.has(key)) {
+          warned.add(key);
+          warn(`highlight: ${id} failed on ${lang}, the next highlighter draws it: ${String(error)}`);
+        }
+      }
+    }
+    if (!job.cancelled) post({ type: "plain", id: job.id });
+  }
+
+  async function run(job: Job, text: string, lang: string | null, chosen: EngineId) {
+    try {
+      await pass(job, text, lang, chosen);
     } finally {
       jobs.delete(job.id);
     }
-  }
-
-  async function pass(job: Job, text: string, lang: string | null) {
-    if (lang === null) return post({ type: "plain", id: job.id });
-    let h: HighlighterCore;
-    try {
-      h = await ready(lang);
-    } catch {
-      return post({ type: "plain", id: job.id });
-    }
-    const lines = text.split("\n");
-    let next = 0;
-    let state: GrammarState | undefined;
-    while (next < lines.length && !job.cancelled) {
-      const focus = job.focus;
-      job.focus = null;
-      // The lines in view, ahead of the pass, from a fresh state: the pass corrects them later.
-      if (focus !== null) {
-        const from = Math.max(focus[0], next);
-        const to = Math.min(focus[1], lines.length);
-        if (from >= next + CHUNK && from < to) {
-          post({ type: "lines", id: job.id, from, lines: toLines(tokenize(h, lang, lines.slice(from, to)).tokens, lang) });
-          await pause();
-          continue;
-        }
-      }
-      const end = Math.min(next + CHUNK, lines.length);
-      const result = tokenize(h, lang, lines.slice(next, end), state);
-      state = result.grammarState;
-      post({ type: "lines", id: job.id, from: next, lines: toLines(result.tokens, lang) });
-      next = end;
-      if (next < lines.length) await pause();
-    }
-    if (!job.cancelled) post({ type: "done", id: job.id });
   }
 
   return {
@@ -305,7 +135,10 @@ export function createHighlightCore({
         const job: Job = { id: message.id, cancelled: false, focus: message.focus ?? null };
         jobs.set(job.id, job);
         const lang = message.lang !== undefined ? languageOfFence(message.lang) : languageOf(message.path ?? "");
-        void run(job, message.text, lang);
+        void run(job, message.text, lang, message.engine ?? "pierre");
+      } else if (message.type === "warm") {
+        if (message.retry && failed.delete(message.engine)) loaded.delete(message.engine);
+        void engine(message.engine);
       } else if (message.type === "focus") {
         const job = jobs.get(message.id);
         if (job) job.focus = [message.from, message.to];

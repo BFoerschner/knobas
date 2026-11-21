@@ -1,0 +1,19 @@
+[
+  ["com:#!/usr/bin/env bash"],
+  ["com:# Starts the live products and waits for them."],
+  ["fn:set",": -euo pipefail"],
+  [],
+  ["var:RETRY_LIMIT",":=","var:${RETRY_LIMIT:-3}"],
+  [],
+  [":wait_for() {"],
+  [":  ","fn:local",": url=$1 tries=0"],
+  [":  ","kw:until",": curl -fsS ","str:\"$url\"",": >/dev/null; ","kw:do"],
+  [":    tries=$((tries + 1))"],
+  [":    [ ","str:\"$tries\"",": -ge ","str:\"$RETRY_LIMIT\"",": ] && { echo ","str:\"gave up on $url\"",": >&2; ","fn:return",": 1; }"],
+  [":    ","fn:sleep",": 2"],
+  [":  ","kw:done"],
+  [":}"],
+  [],
+  ["fn:wait_for",": ","str:\"http://127.0.0.1:3000/api/healthz\"",": && ","fn:echo",": ok"],
+  []
+]

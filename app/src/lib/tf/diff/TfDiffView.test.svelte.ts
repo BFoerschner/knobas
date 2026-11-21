@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createPendingComments } from "../../detail/view/pending-comments.svelte";
+import type { EngineId } from "../../render/engines";
 import { createHighlightCore } from "../../render/highlight-core";
 import { workerPort, type HighlightMessage, type HighlightReply, type RenderPort } from "../../render/port";
 import { installFindKey } from "../filter-keys";
@@ -39,14 +40,15 @@ const RETRY: DiffFile = {
  * between them are not drawn, and `MESSAGE` is a constant both sides keep.
  */
 const SPANNING: DiffFile = {
-  path: "src/message.rs",
+  // TypeScript's template string: Pierre Highlights, the default, carries it across lines (its Rust lexer does not).
+  path: "src/message.ts",
   old_path: null,
   change: "modified",
   additions: 1,
   deletions: 1,
   hunks: [
-    { header: "@@ -1,2 +1,2 @@", lines: [del(1, "const LIMIT: u32 = 3;"), add(1, "const LIMIT: u32 = 5;"), ctx(2, 2, 'const MESSAGE: &str = "retry')] },
-    { header: "@@ -9,2 +9,2 @@", lines: [ctx(9, 9, 'gave up";'), ctx(10, 10, "fn main() {}")] },
+    { header: "@@ -1,2 +1,2 @@", lines: [del(1, "const LIMIT = 3;"), add(1, "const LIMIT = 5;"), ctx(2, 2, "const MESSAGE = `retry")] },
+    { header: "@@ -9,2 +9,2 @@", lines: [ctx(9, 9, "gave up`;"), ctx(10, 10, "function main() {}")] },
   ],
   truncated: false,
   threads: [],
@@ -63,16 +65,16 @@ function memoryStorage() {
   };
 }
 
-/** The app's worker port over the real highlighter core, run in this thread. */
-function shikiPort(): RenderPort {
+/** The app's worker port over the real highlighter core, run in this thread, with `engine` chosen (Pierre, the default). */
+function corePort(engine: EngineId = "pierre"): RenderPort {
   return workerPort(() => {
     let listen: (event: { data: HighlightReply }) => void = () => {};
-    const core = createHighlightCore({ tokenizeTimeLimit: 60_000, post: (reply) => listen({ data: reply }) });
+    const core = createHighlightCore({ post: (reply) => listen({ data: reply }) });
     return {
       postMessage: (message: HighlightMessage) => core.handle(message),
       addEventListener: (_type: string, handler: (event: { data: HighlightReply }) => void) => (listen = handler),
     } as unknown as Pick<Worker, "postMessage" | "addEventListener">;
-  });
+  }, () => ({ engine: () => engine, failed: () => {} }));
 }
 
 let target: HTMLElement;
@@ -194,21 +196,21 @@ async function highlighted(count: number) {
 test("a string that spans hunks is highlighted as one string on both sides", async () => {
   const storage = memoryStorage();
   storage.setItem(LAYOUT_KEY, "split");
-  draw({ files: [SPANNING], layout: createDiffLayout(() => storage), render: shikiPort() });
+  draw({ files: [SPANNING], layout: createDiffLayout(() => storage), render: corePort() });
   await highlighted(20);
   const rows = [...target.querySelectorAll(".tf-srow")];
   const closing = rows.find((row) => squash(row).includes("gave up"))!;
-  const after = rows.find((row) => squash(row).includes("fn main"))!;
+  const after = rows.find((row) => squash(row).includes("function main"))!;
   for (const side of [0, 1]) {
     // The second hunk opens inside the string the first one left open…
-    expect(kinds(closing.children[side]!)).toEqual(['str:gave up"', "punct:;"]);
+    expect(kinds(closing.children[side]!)).toEqual(["str:gave up`", "punct:;"]);
     // …and the code after it is code again, not more string.
-    expect(kinds(after.children[side]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:main"]));
+    expect(kinds(after.children[side]!)).toEqual(expect.arrayContaining(["kw:function", "fn:main"]));
   }
 });
 
 test("a labelled file is titled by its label and highlighted by its path's language", async () => {
-  draw({ files: [{ ...RETRY, label: "src/retry.rs (modified, staged)" }], layout: createDiffLayout(() => null), render: shikiPort() });
+  draw({ files: [{ ...RETRY, label: "src/retry.rs (modified, staged)" }], layout: createDiffLayout(() => null), render: corePort() });
   await highlighted(3);
   expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs");
   expect(squash(target.querySelector(".tf-fh .tf-state"))).toBe("modified, staged");
@@ -216,7 +218,7 @@ test("a labelled file is titled by its label and highlighted by its path's langu
 });
 
 test("a re-read with the same texts keeps its tokens and starts no job; a changed side starts one", async () => {
-  const port = shikiPort();
+  const port = corePort();
   const opened: string[] = [];
   const counting: RenderPort = { highlight: (request, handlers) => (opened.push(request.text), port.highlight(request, handlers)) };
   const props = $state({ files: [RETRY], layout: createDiffLayout(() => null), render: counting });
@@ -261,12 +263,12 @@ test("one file's tokens landing redraws that file's lines, not another file's", 
   expect(kinds(cardOf("src/other.rs").querySelectorAll(".tf-ln")[0]!)).toEqual(["kw:fn retry() {"]);
   const before = reads;
   // The first file's new side answers, line by line.
-  const side = [...asked.keys()].find((text) => text.startsWith("const LIMIT: u32 = 5;"))!;
-  asked.get(side)!.onLines(0, [[["const", "kw"], [" LIMIT: u32 = 5;", ""]]]);
+  const side = [...asked.keys()].find((text) => text.startsWith("const LIMIT = 5;"))!;
+  asked.get(side)!.onLines(0, [[["const", "kw"], [" LIMIT = 5;", ""]]]);
   flushSync();
-  asked.get(side)!.onLines(1, [[['const MESSAGE: &str = "retry', ""]]]);
+  asked.get(side)!.onLines(1, [[["const MESSAGE = `retry", ""]]]);
   flushSync();
-  expect(kinds(cardOf("src/message.rs").querySelectorAll(".tf-ln")[1]!)).toEqual(expect.arrayContaining(["kw:const"]));
+  expect(kinds(cardOf("src/message.ts").querySelectorAll(".tf-ln")[1]!)).toEqual(expect.arrayContaining(["kw:const"]));
   expect(reads).toBe(before);
 });
 

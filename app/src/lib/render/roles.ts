@@ -43,8 +43,11 @@ export const ROLE_NAMES: Record<Role, string> = {
 };
 
 /**
- * Pierre Highlights' token types onto roles. The type is read from the token's colour, `var(--hls-<type>)`, its dots
- * spelt as dashes (pinned by `highlight-core.test.ts`). A type left out is plain. A map, so `constructor` is a type.
+ * Pierre Highlights' token types onto roles (the highlighter re-ruling, 2026-11-21, section 5). The type is read from the
+ * token's colour, `var(--hls-<type>)`, where the package writes a type's dots and underscores as dashes (`link_text` is
+ * `link-text`; pinned by `engines/pierre.test.ts`). A type left out is plain (`none`, `variable`, `namespace`, `embedded`,
+ * `primary`, `text-jsx`, `markup-strikethrough`, `diff-plus`, `diff-minus`, `background`, `foreground`). A map, so
+ * `constructor` is a type.
  */
 export const PIERRE_ROLE: ReadonlyMap<string, TokenRole> = new Map<string, TokenRole>([
   ["comment", "com"],
@@ -83,7 +86,6 @@ export const PIERRE_ROLE: ReadonlyMap<string, TokenRole> = new Map<string, Token
   ["tag-component-jsx", "ty"],
   ["property", "prop"],
   ["property-json-key", "key"],
-  ["property-json_key", "key"],
   ["tag", "tag"],
   ["tag-jsx", "tag"],
   ["selector", "tag"],
@@ -104,11 +106,11 @@ export const PIERRE_ROLE: ReadonlyMap<string, TokenRole> = new Map<string, Token
   ["punctuation-delimiter", "punct"],
   ["punctuation-delimiter-html", "punct"],
   ["punctuation-delimiter-jsx", "punct"],
-  ["punctuation-list_marker", "punct"],
+  ["punctuation-list-marker", "punct"],
   ["punctuation-markup", "punct"],
   ["title", "head"],
-  ["link_text", "link"],
-  ["link_uri", "link"],
+  ["link-text", "link"],
+  ["link-uri", "link"],
   ["emphasis", "emph"],
   ["emphasis-strong", "strong"],
   ["emphasis-strong-italic", "strong"],
@@ -129,8 +131,36 @@ export function roleIn(lang: string, role: TokenRole): TokenRole {
   return DATA_LANGS.has(lang) && (role === "prop" || role === "tag" || role === "attr") ? "key" : role;
 }
 
-/** The engines that cut text into tokens. Which one runs is the worker's business (ADR-0051). */
-export type EngineId = "shiki" | "pierre";
+/**
+ * TanStack Highlight's twenty classes onto roles (section 5). It has no class for an escape, a key or punctuation: an
+ * escape stays in its string's colour, punctuation is ink, and the data-language fold makes the keys. Typed by the
+ * package's closed union, so `svelte-check` fails when the union changes.
+ */
+export const TANSTACK_ROLE: Readonly<Record<import("@tanstack/highlight/core").HighlightTokenClass, TokenRole>> = {
+  comment: "com",
+  keyword: "kw",
+  string: "str",
+  "code-inline": "str",
+  number: "num",
+  literal: "con",
+  function: "fn",
+  command: "fn",
+  type: "ty",
+  property: "prop",
+  tag: "tag",
+  selector: "tag",
+  attr: "attr",
+  meta: "attr",
+  variable: "var",
+  operator: "op",
+  heading: "head",
+  link: "link",
+  inserted: "",
+  deleted: "",
+};
+
+/** The engines that cut text into tokens: a setting picks one, and a fixed order says who draws what it cannot (ADR-0051). */
+export type EngineId = "pierre" | "tanstack" | "shiki";
 
 /** How one engine's token names become roles. */
 export interface RoleMap {
@@ -154,6 +184,8 @@ export const ROLE_MAPS: Readonly<Record<EngineId, RoleMap>> = {
   },
   // Pierre Highlights' `cssVariables` theme colours a token `var(--hls-<type>)`.
   pierre: { engine: "pierre", role: (name) => (name.startsWith("var(--hls-") ? pierreRole(name.slice("var(--hls-".length, -1)) : pierreRole(name)) },
+  // TanStack's token carries its class.
+  tanstack: { engine: "tanstack", role: (name) => (Object.hasOwn(TANSTACK_ROLE, name) ? TANSTACK_ROLE[name as keyof typeof TANSTACK_ROLE] : "") },
 };
 
 /** The role a token `engine` named `name` carries in `lang`. */
