@@ -14,13 +14,22 @@ Each product's sign-in, read from its `Set-Cookie` headers on the live testenv p
 | Gitea 1.27.3 | `i_like_gitea` | none: ends with the browser process | `gitea_incredible`, 31 days |
 | Forgejo | `session` | none | `persistent`, 31 days |
 | Jira Data Center 10.3.24 | `JSESSIONID` | none | `seraph.rememberme.cookie`, 14 days |
+| Confluence Data Center | `JSESSIONID` | none | `seraph.confluence`, 14 days |
+| TeamCity 2026.1.3 | `TCSESSIONID` | none | `RememberMe` (persistent; its box is ticked by default) |
+| Uptime Kuma | a token in the page's session storage | ends with the page | the token in local storage |
 
 - **A browser-session cookie is never written to disk** by WebKit or WebView2, so it ended with knobas. On the Mac,
   after a sign-in to Gitea in a site, the site's store (`~/Library/WebKit/<app>/WebsiteDataStore/<id>/Cookies`) held
   `gitea_incredible` alone, written within a second of the sign-in; `i_like_gitea` was never there.
-- **A Jira restart ends its sessions on the server too** (Björn's hypothesis, measured): after `docker restart
-  knobas-jira`, `JSESSIONID` answered 401 with or without "remember me", and `seraph.rememberme.cookie` alone answered
-  200. So the cookie that lasts across both restarts is the one the product sets for "remember me".
+- **A Jira or Confluence restart ends its sessions on the server too** (Björn's hypothesis, measured): after `docker
+  restart knobas-jira`, `JSESSIONID` answered 401 with or without "remember me", and `seraph.rememberme.cookie` alone
+  answered 200; after `docker restart knobas-confluence`, `JSESSIONID` no longer authenticated and `seraph.confluence`
+  alone signed in as `knobas`. So the cookie that lasts across both restarts is the one the product sets for
+  "remember me".
+- **WebView2 writes its cookie store late.** On Windows the site's `Network/Cookies` file kept its creation time for
+  the first half minute after a Confluence sign-in (Chromium commits every 30 s) and was written at 30 s and again at
+  the quit. TeamCity's `RememberMe`, set 18 to 22 s before a quit, reached disk only at the quit. So quitting now waits
+  for each site's browser process to end after its view is dropped (measured 172 to 203 ms with one site).
 - **The store's identifier is stable**: the same function of the keychain service and the source id on every run; the
   store survived quit and start on the Mac.
 - **The forget list** was empty in every run; nothing removed a store.
@@ -54,6 +63,22 @@ carries the next start, and a fill signs in again when it has run out.
 - **Found on the way (macOS 27)**: a site's view covered its own bar. The window's content view runs under the title
   bar (900 points for an 868-point page 32 points down), and the view was placed against the content view. It is now
   placed against the page (`mac::under_title`, the content view's height less `contentLayoutRect`'s).
+
+## In the real apps
+
+- **Mac, the real window** (before Björn took the Mac back): Gitea filled by itself on `/user/login` and went to the
+  dashboard; after ⌘Q and a new start the site opened signed in with nothing filled, twice. Jira 10 filled on its second
+  look (its form is React) and signed in; the site's store held `seraph.rememberme.cookie` alone. The Jira proof after
+  a Jira restart was cut off when the Mac went back to Björn; the cookie's survival of that restart is measured above
+  with curl.
+- **Windows, knobas's WebView2 window on his PC** (scratch profile, a debug build of this head in ux28's unpacked
+  layout, CDP from a portable Node, Björn idle the whole time): Confluence sent the site to `/login.action`, knobas
+  filled it on the second look and Confluence signed in; quit; Confluence's container restarted; a new start opened the
+  site signed in with nothing saved to fill. TeamCity filled on the first look (its page encrypts the password itself),
+  quit, new start: signed in. Uptime Kuma's dialog was found on `/dashboard` and filled; after a new start the dashboard
+  showed signed in. Five runs' logs hold none of the three passwords.
+- Not run in a window: Gitea and Forgejo on Windows, Jira on Windows, and Forgejo, Confluence, TeamCity and Kuma on the
+  Mac.
 
 ## Tested
 

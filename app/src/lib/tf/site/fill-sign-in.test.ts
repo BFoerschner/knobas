@@ -46,7 +46,7 @@ const KINDS: { file: string; user: string; password: string; remember: string }[
   { file: "gitea.html", user: "#user_name", password: "#password", remember: "input[name=remember]" },
   { file: "forgejo.html", user: "#user_name", password: "#password", remember: "input[name=remember]" },
   { file: "jira.html", user: "#username-field", password: "#password-field", remember: "input[name=rememberMe]" },
-  { file: "confluence.html", user: "#os_username", password: "#os_password", remember: "input[name=os_cookie]" },
+  { file: "confluence.html", user: "#username-field", password: "#password-field", remember: "input[name=rememberMe]" },
   { file: "teamcity.html", user: "#username", password: "#password", remember: "input[name=remember]" },
   { file: "kuma.html", user: "input[autocomplete=username]", password: "input[type=password]", remember: "#remember" },
 ];
