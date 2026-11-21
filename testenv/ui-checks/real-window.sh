@@ -15,7 +15,8 @@
 #   restart             quit the app and start it again (a changed system setting, such as Full Keyboard Access, is read at launch)
 #   js EXPR             the value of EXPR in the page, as JSON
 #   ev CMD...           real input into the window: move X Y [STEPS], click X Y [COUNT], down X Y, up X Y,
-#                       drag X1 Y1 X2 Y2 [STEPS], wheel DY X Y [N], key NAME [cmd+shift+alt+ctrl], type TEXT, sleep S, front, where.
+#                       drag X1 Y1 X2 Y2 [STEPS], wheel DY X Y [N], key NAME [cmd+shift+alt+ctrl], type TEXT, sleep S, front, where,
+#                       rclick X Y (a right press), rspam X Y N GAP JITTER (N right presses up to GAP ms apart, drifting JITTER px).
 #                       X and Y are the page's CSS pixels.
 #   keys HASH PRESS BOX press PRESS (a CSS selector to press in the text of, or btn:<words>), then PageDown, Space and Down,
 #                       each from the top of BOX; prints where BOX moved and where focus is
@@ -168,7 +169,7 @@ tabs)
     echo
     ;;
 *)
-    sed -n '10,22p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '10,23p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

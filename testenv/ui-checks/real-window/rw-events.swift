@@ -8,6 +8,8 @@
 //   move X Y [STEPS]            glide from where the pointer is to X,Y
 //   click X Y [COUNT]           press and let go (COUNT 2 is a double press)
 //   down X Y | up X Y           half a press
+//   rclick X Y                  a right press and let go, where a person's right button would
+//   rspam X Y N GAP JITTER      N right presses at X,Y, GAP ms apart (each a random 0..GAP), the pointer drifting up to JITTER px
 //   drag X1 Y1 X2 Y2 [STEPS]    press, glide, let go
 //   wheel DY X Y [N]            N wheel notches of DY pixels over X,Y (positive scrolls down)
 //   key NAME [MODS]             a key, MODS any of cmd,shift,alt,ctrl joined by +
@@ -74,6 +76,11 @@ func press(_ p: CGPoint, count: Int) {
   }
 }
 
+func rpress(_ p: CGPoint, hold: Double) {
+  post(CGEvent(mouseEventSource: src, mouseType: .rightMouseDown, mouseCursorPosition: p, mouseButton: .right)); pause(hold)
+  post(CGEvent(mouseEventSource: src, mouseType: .rightMouseUp, mouseCursorPosition: p, mouseButton: .right))
+}
+
 let keys: [String: CGKeyCode] = [
   "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15,
   "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
@@ -119,6 +126,18 @@ while i < args.count {
   case "up":
     let p = at(num(i + 1), num(i + 2)); glide(to: p, steps: 8)
     post(CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)); buttonDown = false; i += 3
+  case "rclick":
+    let p = at(num(i + 1), num(i + 2)); glide(to: p, steps: 8); rpress(p, hold: 0.04); pause(0.06); i += 3
+  case "rspam":
+    let base = at(num(i + 1), num(i + 2)), n = Int(num(i + 3)), gap = num(i + 4) / 1000, jitter = num(i + 5)
+    glide(to: base, steps: 8)
+    for _ in 0..<max(0, n) {
+      let p = jitter > 0 ? CGPoint(x: base.x + Double.random(in: -jitter...jitter), y: base.y + Double.random(in: -jitter...jitter)) : base
+      if jitter > 0 { post(CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)) }
+      rpress(p, hold: Double.random(in: 0.005...0.03))
+      pause(Double.random(in: 0...gap))
+    }
+    i += 6
   case "drag":
     let steps = (i + 5 < args.count ? Int(args[i + 5]) : nil)
     let a = at(num(i + 1), num(i + 2)), b = at(num(i + 3), num(i + 4))

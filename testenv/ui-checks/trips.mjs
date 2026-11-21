@@ -139,6 +139,14 @@
 //                 *Open in… ▸*) is chosen by pointer, and then `toast` must start a toast, `ack` an opening's chip (ux21), `hash`
 //                 start the address, or `launcher` be the launcher's box. The clipboard is the page's own stub: nothing reaches the machine's.
 //
+//   right-spam    2026-11-21 (Björn: "When I spam right click … the context menu stays open indefinitely"). Three rounds of real right
+//                 presses on `on`'s rows, 10 to 50 ms apart, the pointer drifting a few px and now and then resting on a row of the
+//                 open menu. Then the pointer rests on the menu's `rest` row (*Open in… ▸* opens its submenu), and one `close`:
+//                 `esc`, `away` (a left press off the menus), `blur` (the window losing focus, as a switch to another program does)
+//                 or `hash` (another address). Fails if more than a menu and its submenu stood at once, or if anything of the menu
+//                 (a node in the float host, a row still marked) is left after the close. Before ux27 the submenu outlived its
+//                 menu on a blur or a press that came up elsewhere, with nothing left to close it.
+//
 //   app-page      The application page (PR #2479, 2026-11-13). From `route` (a repository), *Open in… › Add an application*, the page
 //                 must be at its address; name and command typed, the second repository picked, *It will run* must name that repository's
 //                 checkout; *Try it* must start it there, *Add application* must save and go back to `route`, whose *Open in…* then lists it.
@@ -267,9 +275,33 @@ const COLD = [
   ] },
 ];
 
+// Right-click spam (ux27, 2026-11-21): each page with a right-click menu, each way it closes.
+const SPAM = (id, on, close, rest) => ({ id, kind: "right-spam", finding: "right-spam", on: { sel: on }, close, rest });
+const RIGHT_SPAM = [
+  { page: "Right-click spam, Code", route: "code", trips: [
+    SPAM("rs-repo-blur", "tbody tr.tf-row td:last-child", "blur", "open-in"),
+    SPAM("rs-repo-esc", "tbody tr.tf-row td:last-child", "esc", "prs"),
+    SPAM("rs-repo-away", "tbody tr.tf-row td:last-child", "away", "open-in"),
+  ] },
+  { page: "Right-click spam, a repository's files", route: `${REPO}/files`, trips: [
+    SPAM("rs-folder-blur", ".tf-ftrows .tf-fdir", "blur", "open-in"),
+    SPAM("rs-file-hash", ".tf-ftrows a", "hash", "open-in"),
+    SPAM("rs-file-esc", ".tf-ftrows a", "esc", "history"),
+  ] },
+  { page: "Right-click spam, a pull request's commits", route: "pr/mock%3Apayout-service%23142/commits", trips: [
+    SPAM("rs-commit-blur", "a[href*='/commits/mock']", "blur", "open-in"),
+  ] },
+  { page: "Right-click spam, Tickets", route: "tickets", trips: [SPAM("rs-ticket-away", ".tf-tcard", "away", "web")] },
+  { page: "Right-click spam, Inbox", route: "inbox", trips: [SPAM("rs-inbox-esc", ".tf-ib a", "esc", null)] },
+  { page: "Right-click spam, Monitors", route: "monitors", trips: [SPAM("rs-monitor-blur", ".tf-mon-row .tf-mon-state", "blur", null)] },
+  { page: "Right-click spam, a run", route: RUN, trips: [SPAM("rs-run-away", ".tf-main h1", "away", "tests")] },
+  { page: "Right-click spam, Docs", route: "docs/space/ENG", trips: [SPAM("rs-docs-hash", ".tf-dl-leaf, .tf-sl", "hash", null)] },
+];
+
 const PAGES = [
   ...COLD,
   ...RIGHT_CLICK,
+  ...RIGHT_SPAM,
   // The still-rows pass (PR #2479, 2026-11-11): each late read lands after the first draw, and nothing drawn may move.
   { page: "Code, Repositories", route: "code", trips: [
     // *Show N new* itself: a sync brings a repository above the drawn rows, then the press, twice by key and twice by a still pointer.
@@ -3716,7 +3748,87 @@ async function startBrowser() {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function rightSpam(t) {
+    await open(t);
+    const reasons = [];
+    // What stands: every menu node, the right-click menus among them, rows still marked, and where each menu row is.
+    // `owned`: the menus an open menu accounts for, itself and the submenu its *Open in… ▸* says is open. Any other is left over.
+    const state = async () => JSON.parse(await evaluate(`JSON.stringify((() => { const ctx = [...document.querySelectorAll('.tf-ctx-m[aria-label="Actions"]')]; return { menus: document.querySelectorAll(".tf-menu").length, ctx: ctx.length, owned: ctx.length + ctx.reduce((n, m) => n + m.querySelectorAll('[aria-expanded="true"]').length, 0), marked: document.querySelectorAll("[data-ctx-on]").length, hash: location.hash }; })())`));
+    const rowAt = async (id) => {
+      const raw = await evaluate(`(() => { const m = document.querySelector('.tf-ctx-m[aria-label="Actions"]'); const e = m && (${JSON.stringify(id)} ? m.querySelector('[data-item="' + ${JSON.stringify(id)} + '"]') : [...m.querySelectorAll('[role=menuitem]')][Math.floor(Math.random() * m.querySelectorAll('[role=menuitem]').length)]); if (!e) return null; const r = e.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + Math.min(24, r.width / 2)), y: Math.round(r.top + r.height / 2) }); })()`);
+      return raw ? JSON.parse(raw) : null;
+    };
+    const spots = async () => JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll(${JSON.stringify(t.on.sel)})].filter((e) => e.getClientRects().length && !e.closest("[hidden], .tf-menu")).map((e) => e.getBoundingClientRect()).filter((r) => r.top > 0 && r.bottom < innerHeight).slice(0, 6).map((r) => ({ x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + r.height / 2) })))`));
+    const press = async (at, button) => {
+      await mouseTo(at.x, at.y);
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button, buttons: button === "right" ? 2 : 1, clickCount: 1 });
+      await sleep(Math.random() * 15);
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button, buttons: 0, clickCount: 1 });
+    };
+    let most = 0;
+    let leftOver = null;
+    const notes = [];
+    for (let round = 0; round < 3; round++) {
+      if (round > 0) await open(t);
+      const list = await spots();
+      if (!list.length) throw new Error(`can't find ${t.on.sel}`);
+      let at = list[0];
+      for (let i = 0; i < 24; i++) {
+        if (i % 6 === 5) {
+          // The hand comes to rest on the open menu for a moment, as it does between presses.
+          const row = await rowAt(null);
+          if (row) await mouseTo(row.x, row.y);
+          await sleep(30);
+        }
+        if (Math.random() < 0.25) at = list[Math.floor(Math.random() * list.length)];
+        await press({ x: at.x + Math.round(Math.random() * 8 - 4), y: at.y + Math.round(Math.random() * 8 - 4) }, "right");
+        await sleep(10 + Math.random() * 40);
+        const now = await state();
+        most = Math.max(most, now.ctx);
+        if (now.menus > now.owned && !leftOver) leftOver = `round ${round + 1}, press ${i + 1}: ${now.menus - now.owned} menu left over that no open menu accounts for`;
+      }
+      await sleep(150);
+      if ((await state()).ctx === 0) await press(list[0], "right");
+      await sleep(120);
+      if (t.rest) {
+        const row = await rowAt(t.rest);
+        if (!row) throw new Error(`no row ${t.rest} in the menu on ${t.on.sel}`);
+        await mouseTo(row.x - 6, row.y);
+        await mouseTo(row.x, row.y);
+        await sleep(200);
+      }
+      const before = await state();
+      most = Math.max(most, before.ctx);
+      if (before.ctx === 0) {
+        reasons.push(`round ${round + 1}: no menu stood after the spam`);
+        continue;
+      }
+      if (t.close === "esc") await key("Escape");
+      else if (t.close === "blur") await evaluate(`window.dispatchEvent(new Event("blur")), 1`);
+      else if (t.close === "hash") await evaluate(`location.hash = "#/time", 1`);
+      else {
+        const away = JSON.parse(await evaluate(`JSON.stringify((() => { const all = [...document.querySelectorAll(".tf-menu")].map((m) => m.getBoundingClientRect()); const right = Math.max(...all.map((r) => r.right)); const left = Math.min(...all.map((r) => r.left)); const top = Math.min(...all.map((r) => r.top)); return left > 120 ? { x: left - 60, y: top + 4 } : { x: Math.min(innerWidth - 8, right + 60), y: top + 4 }; })())`));
+        await press(away, "left");
+      }
+      await sleep(300);
+      const after = await state();
+      notes.push(`${before.menus} → ${after.menus}`);
+      if (after.menus > 0) reasons.push(`round ${round + 1}: ${t.close} left ${after.menus} of ${before.menus} menus standing`);
+      if (after.marked > 0) reasons.push(`round ${round + 1}: ${t.close} left the row marked as the menu's`);
+      if (after.menus > 0) {
+        // Whether anything still closes it: a left press away and Esc.
+        await press({ x: 8, y: 8 }, "left");
+        await key("Escape");
+        await sleep(200);
+        if ((await state()).menus > 0) reasons.push(`round ${round + 1}: nothing closes it now, not a left press away nor Esc`);
+      }
+    }
+    if (most > 1) reasons.push(`${most} right-click menus stood at once`);
+    if (leftOver) reasons.push(leftOver);
+    return { reasons, note: `3 rounds of 24 right presses, resting on ${t.rest ?? "a row"}, then ${t.close}: menus ${notes.join(", ")}` };
+  }
+
+  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "right-spam": rightSpam, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   return { run: (t) => KINDS[t.kind](t), stop };
 }
 
