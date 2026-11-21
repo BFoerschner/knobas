@@ -16,7 +16,10 @@ import { languageOf, nameIn, type EngineId } from "./engines";
 import type { LineTokens } from "./port";
 
 const DIR = join(process.cwd(), "src/lib/render/golden");
-const FIXTURES = readdirSync(join(DIR, "fixtures")).sort();
+/** Each fixture is kept as `<name>.txt`, so the house rules that read the app's sources never read it as code. */
+const FIXTURES = readdirSync(join(DIR, "fixtures"))
+  .map((file) => file.replace(/\.txt$/, ""))
+  .sort();
 const ENGINES: Record<EngineId, Engine> = { pierre: createPierre(), tanstack: createTanstack(), shiki: createShiki({ tokenizeTimeLimit: 60_000 }) };
 
 async function answer(engine: Engine, text: string, name: string, lang: string): Promise<LineTokens[]> {
@@ -45,7 +48,7 @@ for (const engine of ["pierre", "tanstack", "shiki"] as const)
     const name = nameIn(engine, lang);
     if (name === undefined) continue;
     test(`${engine} on ${file} answers as its golden`, async () => {
-      const text = readFileSync(join(DIR, "fixtures", file), "utf8");
+      const text = readFileSync(join(DIR, "fixtures", `${file}.txt`), "utf8");
       const got = written(await answer(ENGINES[engine], text, name, lang));
       const path = join(DIR, engine, `${file}.json`);
       if (process.env.UPDATE_GOLDEN === "1") {

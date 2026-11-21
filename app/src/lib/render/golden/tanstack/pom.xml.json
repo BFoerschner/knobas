@@ -1,7 +1,7 @@
 [
   [":<?xml version=\"1.0\" encoding=\"UTF-8\"?>"],
   ["com:<!-- The payout service. -->"],
-  [":<","tag:project",": ","attr:xmlns",":=","str:\"http://maven.apache.org/POM/4.0.0\"",":>"],
+  [":<","tag:project",": ","attr:xmlns",":=","str:\"urn:example:pom\"",":>"],
   [":  <","tag:modelVersion",":>4.0.0</","tag:modelVersion",":>"],
   [":  <","tag:artifactId",":>payout-service</","tag:artifactId",":>"],
   [":  <","tag:dependencies",":>"],
