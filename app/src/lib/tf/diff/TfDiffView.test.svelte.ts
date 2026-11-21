@@ -201,7 +201,7 @@ test("a string that spans hunks is highlighted as one string on both sides", asy
   const after = rows.find((row) => squash(row).includes("fn main"))!;
   for (const side of [0, 1]) {
     // The second hunk opens inside the string the first one left open…
-    expect(kinds(closing.children[side]!)).toEqual(['str:gave up"']);
+    expect(kinds(closing.children[side]!)).toEqual(['str:gave up"', "punct:;"]);
     // …and the code after it is code again, not more string.
     expect(kinds(after.children[side]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:main"]));
   }

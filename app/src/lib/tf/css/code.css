@@ -160,13 +160,23 @@
 .tf-code .tf-l > span:first-child { color: var(--ink-2); text-align: right; padding-right: 12px; user-select: none; }
 .tf-code .tf-l:hover { background: var(--sheet-2); }
 .tf-code .tf-l.tf-at { background: var(--warn-bg); }
-/* Highlighting (#2254): a token's kind is a class, its colour a token, so a theme switch recolours it. */
-.tf-hl-kw { color: var(--hl-kw); } .tf-hl-str { color: var(--hl-str); } .tf-hl-num { color: var(--hl-num); }
-.tf-hl-com { color: var(--hl-com); font-style: italic; }
-/* On a diff's tints `--muted` falls under 4.5:1. */
-.tf-diff .tf-hl-com { color: var(--ink-2); }
+/* Highlighting (ADR-0051): a token's role is a class, its colour the role's variable, which a theme sets (`tokens.css`),
+   so a theme change recolours what is drawn. Each role sets `--hl` and draws in it, so a diff's quiet lines can mix it.
+   Two roles change a glyph's shape, never its advance in a monospace face: a comment's slant, a heading's weight. */
+.tf-hl-com { --hl: var(--hl-com); color: var(--hl); font-style: var(--hl-com-style); }
+.tf-hl-kw { --hl: var(--hl-kw); color: var(--hl); } .tf-hl-str { --hl: var(--hl-str); color: var(--hl); }
+.tf-hl-esc { --hl: var(--hl-esc); color: var(--hl); } .tf-hl-num { --hl: var(--hl-num); color: var(--hl); }
+.tf-hl-con { --hl: var(--hl-con); color: var(--hl); } .tf-hl-fn { --hl: var(--hl-fn); color: var(--hl); }
+.tf-hl-ty { --hl: var(--hl-ty); color: var(--hl); } .tf-hl-prop { --hl: var(--hl-prop); color: var(--hl); }
+.tf-hl-key { --hl: var(--hl-key); color: var(--hl); } .tf-hl-tag { --hl: var(--hl-tag); color: var(--hl); }
+.tf-hl-attr { --hl: var(--hl-attr); color: var(--hl); } .tf-hl-var { --hl: var(--hl-var); color: var(--hl); }
+.tf-hl-op { --hl: var(--hl-op); color: var(--hl); } .tf-hl-punct { --hl: var(--hl-punct); color: var(--hl); }
+.tf-hl-head { --hl: var(--hl-head); color: var(--hl); font-weight: 600; } .tf-hl-link { --hl: var(--hl-link); color: var(--hl); }
+.tf-hl-strong { font-weight: 700; } .tf-hl-emph { font-style: italic; }
+/* On a diff's tints `--muted` falls under 4.5:1: a comment on an added or removed line draws in the secondary ink. */
+.tf-diff :is(.tf-add, .tf-del) .tf-hl-com { --hl: var(--ink-2); }
 /* A comment in a diff is words, so it takes the interface's spacing back from the code around it. */
-.tf-diff :is(.tf-thread, .tf-newc) { letter-spacing: .006em; word-spacing: .06em; } .tf-hl-fn { color: var(--hl-fn); } .tf-hl-ty { color: var(--hl-ty); }
+.tf-diff :is(.tf-thread, .tf-newc) { letter-spacing: .006em; word-spacing: .06em; }
 /* Find in file (#2299), as Find in log. */
 .tf-findbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--rule-2); }
 .tf-findbar .tf-fsearch { max-width: 300px; }

@@ -36,9 +36,16 @@
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
-  /* Highlighting (#2254, spec #2234 step 5): the two themes are these tokens' light and dark values,
-     as the Code area mockup (mockups/code-area/base.css) draws them. */
-  --hl-kw: #7A3EB1; --hl-str: var(--ok); --hl-num: var(--warn); --hl-com: var(--muted); --hl-fn: var(--info); --hl-ty: #A2461B;
+  /* Highlighting (ADR-0051): a colour per role (`render/roles.ts`), read from the theme in the *While light* slot
+     (`--hl-<role>-light`, which `tf/syntax-theme.svelte.ts` writes on <html>) and, where none is written, knobas Light:
+     the Code area mockup's six colours (mockups/code-area/base.css) spread over the seventeen roles. The dark blocks
+     read `-dark` the same way, so the system changing sides runs no script. */
+  --hl-com: var(--hl-com-light, var(--muted)); --hl-kw: var(--hl-kw-light, #7A3EB1); --hl-str: var(--hl-str-light, var(--ok)); --hl-esc: var(--hl-esc-light, var(--warn));
+  --hl-num: var(--hl-num-light, var(--warn)); --hl-con: var(--hl-con-light, var(--warn)); --hl-fn: var(--hl-fn-light, var(--info)); --hl-ty: var(--hl-ty-light, #A2461B);
+  --hl-prop: var(--hl-prop-light, var(--ink)); --hl-key: var(--hl-key-light, #A2461B); --hl-tag: var(--hl-tag-light, #A2461B); --hl-attr: var(--hl-attr-light, var(--warn));
+  --hl-var: var(--hl-var-light, var(--ink)); --hl-op: var(--hl-op-light, var(--ink)); --hl-punct: var(--hl-punct-light, var(--ink)); --hl-head: var(--hl-head-light, #7A3EB1);
+  --hl-link: var(--hl-link-light, var(--info));
+  --hl-com-style: var(--hl-com-style-light, italic);
   --add-word: #B4DEC3; --del-word: #EFB9B6;
   /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
   --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
@@ -57,7 +64,13 @@
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
     --sel-halo: var(--ink);
     --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
-    --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
+    --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
+    --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
+    --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
+    --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
+    --hl-link: var(--hl-link-dark, var(--info));
+    --hl-com-style: var(--hl-com-style-dark, italic);
+    --add-word: #2C6243; --del-word: #6E3333;
     color-scheme: dark;
   }
 }
@@ -71,7 +84,13 @@
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
   --sel-halo: var(--ink);
   --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
-  --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
+  --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
+  --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
+  --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
+  --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
+  --hl-link: var(--hl-link-dark, var(--info));
+  --hl-com-style: var(--hl-com-style-dark, italic);
+  --add-word: #2C6243; --del-word: #6E3333;
   color-scheme: dark;
 }
 

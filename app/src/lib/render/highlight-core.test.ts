@@ -94,7 +94,7 @@ test("the lines in view of a long file come back before the pass from the top re
   const first = c.replies[0];
   expect(first).toMatchObject({ type: "lines", from: 3_000 });
   expect(first?.type === "lines" && first.lines).toHaveLength(40);
-  expect(kinds(c.lineAt(3_010))).toEqual(["kw:let", "num:3010"]);
+  expect(kinds(c.lineAt(3_010))).toEqual(["kw:let", "op:=", "num:3010", "punct:;"]);
   expect(c.lineAt(10 * CHUNK - 1)).toBeDefined();
 });
 
@@ -106,6 +106,41 @@ test("a block comment opened in the first chunk colours a line in a later one", 
 
   expect(kinds(c.lineAt(CHUNK + 5))).toEqual(["com:still a comment"]);
   expect(kinds(c.lineAt(CHUNK + 12))).toContain("kw:fn");
+});
+
+test("Java's class names are types and null a constant; an annotation is an attribute (ADR-0051)", async () => {
+  const c = core();
+  c.handle({ type: "open", id: 1, path: "A.java", text: "@Override\nString s = null;\nint n = 0;" });
+  await c.done;
+
+  expect(kinds(c.lineAt(0))).toEqual(["attr:@Override"]);
+  expect(kinds(c.lineAt(1))).toEqual(["ty:String", "op:=", "con:null", "punct:;"]);
+  expect(kinds(c.lineAt(2))).toEqual(["kw:int", "op:=", "num:0", "punct:;"]);
+});
+
+test("Rust's let and struct stay keywords, Kotlin's annotation is an attribute", async () => {
+  const rust = core();
+  rust.handle({ type: "open", id: 1, path: "a.rs", text: "struct S;\nlet x = 1;" });
+  await rust.done;
+  expect(kinds(rust.lineAt(0))).toContain("kw:struct");
+  expect(kinds(rust.lineAt(1))).toContain("kw:let");
+
+  const kotlin = core();
+  kotlin.handle({ type: "open", id: 1, path: "a.kt", text: '@Suppress("x") class Q' });
+  await kotlin.done;
+  expect(kinds(kotlin.lineAt(0))).toEqual(expect.arrayContaining(["attr:@Suppress", "kw:class", "ty:Q"]));
+});
+
+test("in a data language a property is a key, whichever scope cut it", async () => {
+  const yaml = core();
+  yaml.handle({ type: "open", id: 1, path: "a.yaml", text: "name: knobas" });
+  await yaml.done;
+  expect(kinds(yaml.lineAt(0))).toEqual(["key:name", "op::", "str:knobas"]);
+
+  const json = core();
+  json.handle({ type: "open", id: 1, path: "a.json", text: '{"a": true}' });
+  await json.done;
+  expect(kinds(json.lineAt(0))).toEqual(expect.arrayContaining(["key:a", "con:true"]));
 });
 
 test("a file's name picks its language", () => {

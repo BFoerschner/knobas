@@ -434,3 +434,15 @@ test("(l) a column of one line of text follows its role's size, and the job key 
   ];
   for (const [file, selector, prop, value] of want) expect(decl(file, selector, prop), `${file} ${selector} ${prop}`).toMatch(value);
 });
+
+test("(m) a syntax role changes a token's colour, slant or weight and nothing else, so colours land without moving a line (ADR-0051)", () => {
+  // The bundled Cascadia face keeps one advance in its italic and bold, so a comment's slant and a heading's weight
+  // never widen a line; a size, a family, spacing or a box would.
+  const allowed = new Set(["--hl", "color", "font-style", "font-weight"]);
+  const found: string[] = [];
+  for (const { file, rules: all } of sheets)
+    for (const { selectors, decls } of all)
+      if (selectors.some((selector) => subjects(selector).some((subject) => /(?:^|[.\]])tf-hl-|\[class\*="tf-hl-"\]/.test(subject))))
+        for (const [prop] of decls) if (!allowed.has(prop)) found.push(`${file} ${selectors.join(", ")}: ${prop}`);
+  expect(found).toEqual([]);
+});

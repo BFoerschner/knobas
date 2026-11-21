@@ -14,7 +14,11 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 
 import { FRAME_SCHEME } from "./frame";
 
-/** A run of a line's text and its kind (`kw`, `str`, `num`, `com`, `fn`, `ty`; `""` is plain ink). */
+/**
+ * A run of a line's text and its role (`render/roles.ts`): one of the seventeen a theme colours (`com`, `kw`, `str`,
+ * `esc`, `num`, `con`, `fn`, `ty`, `prop`, `key`, `tag`, `attr`, `var`, `op`, `punct`, `head`, `link`), one of the two
+ * shapes (`strong`, `emph`), or `""`, plain ink. Never a colour, a scope or an engine's own name (ADR-0051).
+ */
 export type Token = readonly [text: string, kind: string];
 export type LineTokens = readonly Token[];
 

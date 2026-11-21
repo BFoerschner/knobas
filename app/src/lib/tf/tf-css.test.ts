@@ -11,6 +11,7 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
+import { ROLES } from "../render/roles";
 import { EMBED_FRAME_BORDER, OUTLINE_ROOM, READER_DRAWER } from "./docs/docs";
 
 const APP = process.cwd();
@@ -549,24 +550,45 @@ test("the Tickets page's row is bounded by the page, so a preview change does no
   expect(block(narrow, "  .tf-tickets")).toMatch(/grid-template-rows:\s*none;[^}]*height:\s*auto;/);
 });
 
-test("the highlighting themes are the Code area mockup's --hl-* tokens, light on :root and dark in both dark blocks (#2254)", () => {
+test("each role's colour reads its slot's variable in the right block, with knobas's own as the fallback (ADR-0051)", () => {
   const mockup = readFileSync(join(APP, "../mockups/code-area/base.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  /** Each `--hl-*` token a theme sets: light on `:root`, dark by the OS and when forced. */
-  const themes = (source: string) => {
+  /** Each `--hl-*` token a block sets, as written: light on `:root`, dark by the OS and when forced. */
+  const blocks = (source: string) => {
     const media = source.slice(source.indexOf("@media (prefers-color-scheme: dark)"));
-    const hl = (body: string) => Object.fromEntries([...body.matchAll(/(--hl-[a-z]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+    const hl = (body: string) => Object.fromEntries([...body.matchAll(/(--hl-[a-z-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
     return {
       light: hl(block(source, ":root")),
       os: hl(block(media, ':root:not([data-theme="light"])')),
       forced: hl(block(source, ':root[data-theme="dark"]')),
     };
   };
-  const ours = themes(code);
-  expect(Object.keys(ours.light).sort()).toEqual(["--hl-com", "--hl-fn", "--hl-kw", "--hl-num", "--hl-str", "--hl-ty"]);
-  expect(ours).toEqual(themes(mockup));
-  // The two literal colours differ by theme; the rest follow --ok, --warn, --muted and --info.
-  expect(ours.os["--hl-kw"]).not.toBe(ours.light["--hl-kw"]);
-  expect(ours.os["--hl-ty"]).not.toBe(ours.light["--hl-ty"]);
+  const ours = blocks(code);
+  expect(Object.keys(ours.light).sort()).toEqual([...ROLES.map((role) => `--hl-${role}`), "--hl-com-style"].sort());
+  expect(ours.os).toEqual(ours.forced);
+  const read = (value: string, side: string, role: string) => {
+    const m = new RegExp(`^var\\(--hl-${role}-${side}, (.+)\\)$`).exec(value);
+    expect(m, `--hl-${role} reads --hl-${role}-${side}`).not.toBeNull();
+    return m![1]!;
+  };
+  // The fallbacks are the mockup's six colours, spread over the seventeen roles: nothing drawn today changes colour
+  // but what the new roles split off.
+  const before = blocks(mockup);
+  for (const [side, now, was] of [["light", ours.light, before.light], ["dark", ours.os, before.os]] as const) {
+    const fallback = Object.fromEntries(ROLES.map((role) => [role, read(now[`--hl-${role}`]!, side, role)]));
+    const old = (role: string) => was[`--hl-${role}`] ?? before.light[`--hl-${role}`];
+    for (const role of ["kw", "str", "num", "com", "fn", "ty"]) expect(fallback[role]).toBe(old(role));
+    for (const role of ["esc", "con", "attr"]) expect(fallback[role]).toBe(old("num"));
+    for (const role of ["key", "tag"]) expect(fallback[role]).toBe(old("ty"));
+    expect(fallback.head).toBe(old("kw"));
+    expect(fallback.link).toBe(old("fn"));
+    for (const role of ["prop", "var", "op", "punct"]) expect(fallback[role]).toBe("var(--ink)");
+    expect(now["--hl-com-style"]).toBe(`var(--hl-com-style-${side}, italic)`);
+  }
+});
+
+test("every role is a class that draws in its variable through --hl (ADR-0051)", () => {
+  for (const role of ROLES) expect(block(code, `.tf-hl-${role}`)).toMatch(new RegExp(`--hl:\\s*var\\(--hl-${role}\\);\\s*color:\\s*var\\(--hl\\)`));
+  expect(block(code, ".tf-hl-com")).toMatch(/font-style:\s*var\(--hl-com-style\)/);
 });
 
 /** `--control-*` → px, from the Controls section's token table (#2238). */
