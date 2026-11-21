@@ -2297,7 +2297,7 @@ test("> with nothing after it lists every section, then Settings and its section
   await settle();
   await search(">");
   const labels = paletteLabels();
-  expect(labels).toHaveLength(28);
+  expect(labels).toHaveLength(30);
   expect(labels.slice(0, 10)).toEqual([
     "Tickets",
     "Inbox",
@@ -2310,7 +2310,9 @@ test("> with nothing after it lists every section, then Settings and its section
     "Time",
     "Settings",
   ]);
-  expect(labels.at(-1)).toBe("Settings › Updates");
+  expect(labels.at(-2)).toBe("Settings › Updates");
+  // The one action that is not a place (ADR-0055).
+  expect(labels.at(-1)).toBe("Put knobas's themes back");
   expect(labels).not.toContain("Job");
 });
 
@@ -2607,8 +2609,10 @@ test("Settings' sections are offered by their own names, and by what they hold w
   await settle();
   await search("appearance");
   expect(optionNames()).toContain("Settings › Appearance");
-  await search("theme");
+  await search("zoom");
   expect(optionNames()).toContain("Settings › Appearance");
+  await search("theme");
+  expect(optionNames()).toContain("Settings › Appearance › Theme");
   // Not fourteen rows for the one word.
   await search("settings");
   expect(optionNames().filter((name) => name?.startsWith("Settings"))).toEqual(["Settings"]);

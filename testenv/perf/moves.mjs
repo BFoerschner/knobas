@@ -231,7 +231,13 @@ const PLACES = [
   { name: "settings", start: "#/time", gear: true, hash: "#/settings", away: "Escape" },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   // Appearance's children (the subtrees ruling, 2026-11-21), pressed in the nav's tree.
-  ...["code-colours", "fonts"].map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/appearance/${s}"]`, hash: `#/settings/appearance/${s}`, away: "#/settings" })),
+  ...["theme", "code-colours", "fonts"].map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/appearance/${s}"]`, hash: `#/settings/appearance/${s}`, away: "#/settings" })),
+  // Settings › Appearance › Theme (ADR-0055): a theme changing moves nothing. A copy taking the slot (a theme change of the
+  // whole window), a code slot set apart, and Dracula drawn while dark by its kept slot.
+  ...[["theme-duplicate", "Duplicate and edit", ".tf-thm-edh button"], ["theme-set-apart", "Set apart", ".tf-apt-code button"]].map(([name, text, sel]) => ({
+    name, start: "#/settings/appearance/theme", press: `${shown} ${sel}`, text, hash: "#/settings/appearance/theme", away: "#/settings",
+  })),
+  { name: "theme-dracula", fixture: true, store: { "knobas.app-theme.dark": "dracula", "knobas.theme.mode": "dark" }, start: "#/settings", press: `${shown} a[href="#/settings/appearance/theme"]`, hash: "#/settings/appearance/theme", away: "#/settings" },
   // Settings › Updates (ADR-0052): `update:state` lands while the page is drawn, an update found, a download ending, a
   // check failing. The box's rooms keep their size and place.
   ...[["found", "up-to-date", "available"], ["downloaded", "downloading", "ready"], ["check-failed", "checking", "check-failed"]].map(([what, first, then]) => ({

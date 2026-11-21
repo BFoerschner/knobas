@@ -120,6 +120,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘K", "Anywhere", "Search, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
+  ["⌘⇧⌫", "Anywhere, a field too", "Put knobas's own themes back; yours are kept"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
   ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],

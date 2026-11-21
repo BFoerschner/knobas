@@ -219,11 +219,11 @@ function rowValue(label: string): string {
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
 
-test("Appearance draws Zoom, then State colours, below Theme, one section per kind with a state (#2466)", async () => {
+test("Appearance draws Zoom, then State colours, below Mode, one section per kind with a state (#2466)", async () => {
   await open("appearance");
   // A row's label without its hint.
   const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.firstChild?.textContent?.trim());
-  expect(heads).toEqual(["Theme", "Zoom", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+  expect(heads).toEqual(["Mode", "Zoom", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
 });
 
 test("Fonts draws the four roles and code's ligatures before the database is up (2026-11-18)", async () => {
@@ -248,7 +248,7 @@ test("Appearance's State colours waits for the database; Theme does not (#2466)"
     props: { rest: ["appearance"], job: null, ready: false, ports: sourcePorts, sectionPorts: p, layers: createLayers(), now: () => NOW, theme: createTheme() },
   });
   await settle();
-  expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  expect(target.querySelector('[aria-label="Mode"]')).not.toBeNull();
   // Zoom is the webview's own setting: it needs no database either.
   expect(target.querySelector('[aria-label="Zoom"]')).not.toBeNull();
   expect(target.querySelector(".tf-sc")).toBeNull();
@@ -258,7 +258,7 @@ test("Appearance's State colours waits for the database; Theme does not (#2466)"
 test("Appearance and the top bar's toggle are the same setting", async () => {
   const theme = createTheme();
   await open("appearance", sectionPorts(), { theme });
-  const pressed = () => target.querySelector('[aria-label="Theme"] [aria-pressed="true"]')?.textContent;
+  const pressed = () => target.querySelector('[aria-label="Mode"] [aria-pressed="true"]')?.textContent;
   expect(pressed()).toBe("Like the system");
 
   button("Dark").click();
@@ -796,7 +796,7 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(30);
+  expect(rows).toHaveLength(31);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",

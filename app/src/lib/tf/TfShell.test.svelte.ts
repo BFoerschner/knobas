@@ -1230,7 +1230,7 @@ test("the top bar's toggle and Settings › Appearance are one setting", async (
   await settle();
   const root = document.documentElement;
   const choice = (label: string) =>
-    [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Theme"] button')].find((b) => b.textContent === label)!;
+    [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Mode"] button')].find((b) => b.textContent === label)!;
   choice("Dark").click();
   flushSync();
   expect(root.getAttribute("data-theme")).toBe("dark");
@@ -2598,4 +2598,25 @@ test("the named pipelines are held once the database answers, and every diff rea
   // An edit in Settings reaches the diffs: the lookup reads the held list at each ask.
   namedPipelines.hold([{ id: "b64", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }]);
   expect(defaultPipelines.of("x.json.b64")?.steps).toHaveLength(2);
+});
+
+test("⌘⇧⌫, pressed in a text field, puts knobas's own themes back and says so with Undo, which writes them back (ADR-0055)", async () => {
+  const { themes: windowThemes } = await import("./themes.svelte");
+  const { toasts } = await import("../shell/toasts.svelte");
+  start({ prefersDark: () => false });
+  await settle();
+  windowThemes.chooseApp("dracula");
+  windowThemes.chooseApp("github-light");
+  windowThemes.choose("one-dark");
+  const field = document.createElement("input");
+  target.append(field);
+  field.focus();
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", ctrlKey: true, shiftKey: true, bubbles: true }));
+  flushSync();
+  expect([windowThemes.appSlot("light"), windowThemes.appSlot("dark"), windowThemes.follows("dark")]).toEqual(["knobas-light", "knobas-dark", true]);
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("knobas's own themes are back. Your themes are kept.");
+  toast.action!.run();
+  expect([windowThemes.appSlot("light"), windowThemes.appSlot("dark"), windowThemes.slot("dark")]).toEqual(["github-light", "dracula", "one-dark"]);
+  field.remove();
 });

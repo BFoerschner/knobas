@@ -1,6 +1,7 @@
 <!--
   One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
-  small panel under it: the hex field, the platform's own colour well, *Use ink* (for a role) and *Reset to ⟨from⟩'s*.
+  small panel under it: the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
+  for a role; *Auto* for a window colour on the Theme page, which is then derived again) and *Reset to ⟨from⟩'s*.
   Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
   panel and leaves focus on the swatch. A built-in's swatches are not buttons.
 -->
@@ -17,6 +18,7 @@
     fallback,
     editable,
     inkable = true,
+    leave = "Use ink",
     resetTo,
     resetName,
     onchange,
@@ -29,6 +31,8 @@
     fallback: string;
     editable: boolean;
     inkable?: boolean;
+    /** The name of the button that leaves the colour out: *Use ink* for a role, *Auto* for a window colour. */
+    leave?: string;
     /** The colour the theme it came from has here, `undefined` for ink, `null` when there is none to go back to. */
     resetTo?: string | undefined | null;
     resetName?: string;
@@ -38,7 +42,8 @@
   let open = $state(false);
   let swatch = $state<HTMLButtonElement | null>(null);
   let typed = $state("");
-  const ink = $derived(value === undefined && inkable);
+  // A role left out draws in ink; a window colour left out is derived, and its swatch shows what was derived.
+  const ink = $derived(value === undefined && inkable && leave === "Use ink");
 
   function close(focus = true): void {
     open = false;
@@ -113,7 +118,7 @@
         >
         <div class="tf-thm-popa">
           {#if inkable}
-            <button type="button" class="tf-btn tf-sm" disabled={value === undefined} onclick={() => ((typed = ""), onchange?.(undefined))}>Use ink</button>
+            <button type="button" class="tf-btn tf-sm" disabled={value === undefined} onclick={() => ((typed = ""), onchange?.(undefined))}>{leave}</button>
           {/if}
           {#if resetTo !== null && resetName}
             <button type="button" class="tf-btn tf-sm" disabled={resetTo === value} onclick={() => ((typed = resetTo ?? ""), onchange?.(resetTo))}>Reset to {resetName}'s</button>

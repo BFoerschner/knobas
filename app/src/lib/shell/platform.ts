@@ -29,9 +29,12 @@ const ORDER = ["Ctrl", "Alt", "Shift", "Win"];
 /** A run of modifier glyphs and the key after it: a word key (`Enter`) or one character, else none. */
 const CHORD = /([⌘⌃⌥⇧]+)(Enter|Esc|Tab|Space|Backspace|[^\s⌘⌃⌥⇧])?/gu;
 
+/** A key the Mac writes as a glyph and other platforms by its name. */
+const KEY_NAMES: Record<string, string> = { "⌫": "Backspace" };
+
 function named(glyphs: string, key: string, names: Record<string, string>): string[] {
   const mods = [...new Set([...glyphs].map((glyph) => names[glyph]!))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
-  return key === "" ? mods : [...mods, key];
+  return key === "" ? mods : [...mods, KEY_NAMES[key] ?? key];
 }
 
 /**

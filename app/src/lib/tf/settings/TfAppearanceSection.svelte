@@ -1,6 +1,7 @@
 <!--
   Settings › Appearance (#831, R-13a.8): prototype-6's `STGV.appearance`. The
-  same setting as the top bar's toggle (`theme.svelte.ts`). Below it, *State
+  same setting as the top bar's toggle (`theme.svelte.ts`): *Mode*, light or dark (its colours are Settings ›
+  Appearance › Theme since ADR-0055). Below it, *State
   colours* (#2466), which reads the database and so waits for it: Theme
   draws before the database is up. Between them, *Zoom* (`TfZoomSetting.svelte`), which needs no database either.
   The faces and their sizes, *Code font* and *Ligatures in code* among them, are Settings › Fonts since 2026-11-18
@@ -26,9 +27,9 @@
 
 <header class="tf-stg-h"><h1>Appearance</h1></header>
 <div class="tf-stg-row">
-  <div class="tf-stg-l">Theme</div>
+  <div class="tf-stg-l">Mode</div>
   <div class="tf-stg-c">
-    <div class="tf-seg" role="group" aria-label="Theme">
+    <div class="tf-seg" role="group" aria-label="Mode">
       {#each CHOICES as [key, label] (key)}
         <button aria-pressed={theme.choice === key} onclick={() => theme.set(key)}>{label}</button>
       {/each}

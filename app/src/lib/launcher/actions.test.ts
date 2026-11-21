@@ -32,6 +32,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Settings › Notes and capture",
     "Settings › Backup and export",
     "Settings › Appearance",
+    "Settings › Appearance › Theme",
     "Settings › Appearance › Code colours",
     "Settings › Appearance › Fonts",
     "Settings › Performance",
@@ -39,6 +40,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Settings › Keyboard",
     "Settings › Logs and database",
     "Settings › Updates",
+    "Put knobas's themes back",
   ]);
 });
 
@@ -77,6 +79,7 @@ test("every row's address parses back to the section it names", () => {
     ["Settings › Notes and capture", "settings/notes"],
     ["Settings › Backup and export", "settings/backup"],
     ["Settings › Appearance", "settings/appearance"],
+    ["Settings › Appearance › Theme", "settings/theme"],
     ["Settings › Appearance › Code colours", "settings/code-colours"],
     ["Settings › Appearance › Fonts", "settings/fonts"],
     ["Settings › Performance", "settings/performance"],
@@ -84,6 +87,8 @@ test("every row's address parses back to the section it names", () => {
     ["Settings › Keyboard", "settings/keyboard"],
     ["Settings › Logs and database", "settings/logs"],
     ["Settings › Updates", "settings/updates"],
+    // The one action that does something: its address is the page it acts on (ADR-0055).
+    ["Put knobas's themes back", "settings/theme"],
   ]);
 });
 
@@ -144,8 +149,8 @@ test("a place matches at the start of a word of its name, and a settings section
 });
 
 test("where nothing else answered, what a place holds counts too, after the names", () => {
-  expect(names("theme")).toEqual([]);
-  expect(names("theme", true)).toEqual(["Settings › Appearance", "Settings › Appearance › Code colours"]);
+  expect(names("theme")).toEqual(["Settings › Appearance › Theme", "Put knobas's themes back"]);
+  expect(names("theme", true)).toEqual(["Settings › Appearance › Theme", "Put knobas's themes back", "Settings › Appearance › Code colours"]);
   // A child of a section is found by its own name (the subtrees ruling, 2026-11-21).
   expect(names("fon")).toEqual(["Settings › Appearance › Fonts"]);
   expect(names("code col")).toEqual(["Settings › Appearance › Code colours"]);

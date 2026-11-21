@@ -10,6 +10,8 @@
 import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
 import { SETTINGS_SECTIONS, type SettingsSection, settingsHash, settingsName, settingsParent } from "../tf/settings/settings";
 import { docsChoices } from "../tf/docs/docs-choices.svelte";
+import { putKnobasBack } from "../tf/theme-reset";
+import { themes } from "../tf/themes.svelte";
 
 /** One row of the `>` palette. */
 export interface LauncherAction {
@@ -18,8 +20,10 @@ export interface LauncherAction {
   label: string;
   /** The second line: what pressing it does. */
   detail: string;
-  /** Where it goes. Every action here is a navigation. */
+  /** Where it goes. Every action here is a navigation, but one that `run`s. */
   hash: string;
+  /** An action that does something where it is instead of going anywhere: *Put knobas's themes back*. */
+  run?: () => void;
 }
 
 /** What each section holds, in one line: the row's second line. */
@@ -48,7 +52,8 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   search: "What Everything looks through",
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
-  appearance: "Theme, zoom and state colours",
+  appearance: "Light or dark, zoom and state colours",
+  theme: "The colours of the whole window, while light and while dark",
   "code-colours": "Themes for code and diffs, while light and while dark, and the highlighter",
   fonts: "Each face the app draws in, and its size",
   performance: "How many pages stay open in the background",
@@ -91,6 +96,8 @@ export function navigationActions(): LauncherAction[] {
       detail: SETTINGS_DETAIL[section],
       hash: settingsHash(section),
     })),
+    // The one action that is not a place (ADR-0055): ⌘K, *put kn*, Enter works without reading the result.
+    { id: "theme-reset", label: "Put knobas's themes back", detail: "Both window themes knobas's own, code following them. Your themes are kept", hash: settingsHash("theme"), run: () => putKnobasBack(themes) },
   ];
 }
 

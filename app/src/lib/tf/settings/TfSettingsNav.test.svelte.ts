@@ -65,7 +65,7 @@ afterEach(() => {
   target.remove();
 });
 
-test("the rows are the sections in their order, Code colours and Fonts under Appearance, every fold open at first", () => {
+test("the rows are the sections in their order, Theme, Code colours and Fonts under Appearance, every fold open at first", () => {
   draw("sources");
   expect(rowNames()).toEqual([
     "Sources",
@@ -79,6 +79,7 @@ test("the rows are the sections in their order, Code colours and Fonts under App
     "Notes and capture",
     "Backup and export",
     "Appearance",
+    "Theme",
     "Code colours",
     "Fonts",
     "Performance",
@@ -88,7 +89,7 @@ test("the rows are the sections in their order, Code colours and Fonts under App
     "Updates",
   ]);
   expect(fold().open).toBe(true);
-  expect([...fold().querySelectorAll("a.tf-stg-child")].map((a) => a.getAttribute("href"))).toEqual(["#/settings/appearance/code-colours", "#/settings/appearance/fonts"]);
+  expect([...fold().querySelectorAll("a.tf-stg-child")].map((a) => a.getAttribute("href"))).toEqual(["#/settings/appearance/theme", "#/settings/appearance/code-colours", "#/settings/appearance/fonts"]);
 });
 
 test("a first click on a parent's title opens its page and its fold, and never closes it", () => {

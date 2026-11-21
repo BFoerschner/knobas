@@ -42,6 +42,21 @@ export const DIFF_PROPERTY: Record<DiffKey, string> = { added: "--diff-add", rem
 
 /** How long after the last change a person's theme is saved. */
 export const SAVE_AFTER = 300;
+/** How long an unreadable theme stands before the window goes back by itself (the decisions' 3.9). */
+export const KEEP_SECONDS = 15;
+
+/**
+ * An unreadable theme drawn on trial: `use` after *Use as it is*, `edit` after an edit took the drawn theme under the
+ * floor. It ends by *Keep it*, by going back, or by the time running out, which goes back.
+ */
+export interface Trial {
+  kind: "use" | "edit";
+  theme: Theme;
+  /** The name of what going back draws: the slot's theme before *Use as it is*, or the theme being edited. */
+  backTo: string;
+  /** When the window goes back by itself, in `Date.now()`'s milliseconds. */
+  endsAt: number;
+}
 
 /** Where the choices are written: `<html>`'s inline style and attributes. */
 export interface ThemeRoot {
@@ -140,6 +155,16 @@ export interface Themes {
   keptAsIs(id: string): boolean;
   /** Remembers that an unreadable theme may be drawn (*Keep it*). */
   keepAsIs(id: string): void;
+  /** Whether a theme's window colours fall under the floor and it was not kept as it is: choosing it asks first. */
+  asksFirst(theme: Theme): boolean;
+  /** *Use as it is*: draws an unreadable theme in its slot for {@link KEEP_SECONDS} s, then goes back unless kept. */
+  useAsIs(id: string): void;
+  /** The unreadable theme drawn on trial, if one is. */
+  readonly trial: Trial | null;
+  /** *Keep it*: the trial's theme is kept as it is. */
+  keepTrial(): void;
+  /** *Go back now*: the slot as it was before *Use as it is*, or the theme as it was before the first edit under the floor. */
+  endTrial(): void;
   // ---------- code ----------
   /** The id of the code theme drawn for a side. */
   slot(kind: ThemeKind): string;
@@ -224,6 +249,10 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   };
   let unchanged = $state<Unchanged>(readUnchanged());
   let saving: ReturnType<typeof setTimeout> | null = null;
+  let trial = $state<Trial | null>(null);
+  /** What going back restores: the slot's id before *Use as it is*, or the theme before the first edit under the floor. */
+  let trialBack: { slot: string | null } | { theme: Theme } | null = null;
+  let trialTimer: ReturnType<typeof setTimeout> | null = null;
   let framed = false;
   let paint = 0;
 
@@ -240,7 +269,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
     }
     return c;
   };
-  const drawable = (theme: Theme) => asis.includes(theme.id) || unreadable(coloursOf(theme)).length === 0;
+  const drawable = (theme: Theme) => asis.includes(theme.id) || trial?.theme.id === theme.id || unreadable(coloursOf(theme)).length === 0;
 
   /** The window slot's theme where it exists, is of that side, has window colours and may be drawn; else knobas's. */
   const appDrawn = (kind: ThemeKind): Theme => {
@@ -351,6 +380,32 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
     else keptAsis.write(JSON.stringify(next));
   }
 
+  function startTrial(kind: Trial["kind"], theme: Theme, back: { slot: string | null } | { theme: Theme }): void {
+    if (trialTimer !== null) timers.clear(trialTimer);
+    const backTo = "slot" in back ? (back.slot === null ? knobas(theme.kind) : (find(back.slot) ?? knobas(theme.kind))).name : back.theme.name;
+    trial = { kind, theme, backTo, endsAt: Date.now() + KEEP_SECONDS * 1000 };
+    trialBack = back;
+    trialTimer = timers.set(() => goBack(), KEEP_SECONDS * 1000);
+  }
+  function stopTrial(): void {
+    if (trialTimer !== null) timers.clear(trialTimer);
+    trialTimer = null;
+    trial = null;
+    trialBack = null;
+  }
+  function goBack(): void {
+    const now = trial;
+    const back = trialBack;
+    stopTrial();
+    if (!now || !back) return;
+    if ("slot" in back) writeApp(now.theme.kind, back.slot);
+    else {
+      own = own.map((t) => (t.id === back.theme.id ? back.theme : t));
+      save();
+    }
+    applyNow();
+  }
+
   // At start: a slot whose theme cannot be read and was not kept draws knobas's, keeps its value, and says so once.
   for (const kind of KINDS) {
     const id = appSlots[kind];
@@ -382,6 +437,25 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       writeAsis([...asis, id]);
       applyNow();
     },
+    asksFirst: (theme) => hasApp(theme) && !asis.includes(theme.id) && unreadable(coloursOf(theme)).length > 0,
+    useAsIs(id) {
+      const theme = find(id);
+      if (!theme || !hasApp(theme)) return;
+      const before = appSlots[theme.kind];
+      startTrial("use", theme, { slot: before });
+      writeApp(theme.kind, isKnobas(id) ? null : id);
+      applyNow();
+    },
+    get trial() {
+      return trial;
+    },
+    keepTrial() {
+      const now = trial;
+      stopTrial();
+      if (now && !asis.includes(now.theme.id)) writeAsis([...asis, now.theme.id]);
+      applyNow();
+    },
+    endTrial: () => goBack(),
     slot: (kind) => codeDrawn(kind).id,
     drawn: codeDrawn,
     follows: (kind) => codeSlots[kind] === null,
@@ -415,8 +489,17 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
     update(id, change) {
       const at = own.findIndex((t) => t.id === id);
       if (at === -1) return;
-      const next = { ...change(own[at]!), id, kind: own[at]!.kind };
+      const before = own[at]!;
+      const next = { ...change(before), id, kind: before.kind };
       own = own.map((t, i) => (i === at ? next : t));
+      // An edit that takes the drawn theme under the floor keeps drawing it on trial, and goes back unless kept; an
+      // edit that brings it back over the floor ends the trial.
+      if (appSlots[next.kind] === id && hasApp(next) && !asis.includes(id)) {
+        const under = unreadable(coloursOf(next)).length > 0;
+        if (under && trial === null && drawable(before)) startTrial("edit", next, { theme: before });
+        else if (under && trial?.theme.id === id) trial = { ...trial, theme: next };
+        else if (!under && trial?.kind === "edit" && trial.theme.id === id) stopTrial();
+      }
       if (KINDS.some((kind) => appDrawn(kind).id === id || codeDrawn(kind).id === id || appSlots[kind] === id)) applyLater();
       saveLater();
     },

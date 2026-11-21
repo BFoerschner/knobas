@@ -11,15 +11,15 @@
   import { onMount, untrack } from "svelte";
 
   import { renderPort, type RenderPort } from "../../render/port";
-  import { ROLE_NAMES, ROLES, type Role } from "../../render/roles";
+  import { ROLE_NAMES, type Role } from "../../render/roles";
   import { push, undoable } from "../../shell/toasts.svelte";
   import type { EngineId } from "../../render/engines";
   import { highlighter as appHighlighter, type HighlighterChoice } from "../highlighter.svelte";
   import { themes as appThemes, type Themes } from "../themes.svelte";
   import { theme as windowTheme, type Theme as WindowTheme } from "../theme.svelte";
-  import { fixedRole } from "../theme/contrast";
+  import { importText } from "../theme-import";
   import { cssVars } from "../theme/paint";
-  import { importThemes, type Theme, type ThemeKind } from "../theme/themes";
+  import type { Theme, ThemeKind } from "../theme/themes";
   import TfThemeEditor from "./TfThemeEditor.svelte";
 
   let {
@@ -88,42 +88,16 @@
     });
   }
 
-  // ---------- import ----------
+  // ---------- import: the Theme page's control and reading (`theme-import.ts`) ----------
   let picker = $state<HTMLInputElement | null>(null);
-
-  /** The roles of `t` under 4.5:1. */
-  const lowRoles = (t: Theme) => ROLES.filter((role) => fixedRole(themes.colours(t.kind), t.kind, role, t.syntax[role], t.diff ?? {}) !== null);
-
-  function fixAll(ids: readonly string[]): void {
-    for (const id of ids)
-      themes.update(id, (t) => {
-        const syntax = { ...t.syntax };
-        for (const role of lowRoles(t)) syntax[role] = fixedRole(themes.colours(t.kind), t.kind, role, t.syntax[role], t.diff ?? {})!;
-        return { ...t, syntax };
-      });
-    themes.flush();
-  }
 
   async function imported(event: Event): Promise<void> {
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
-    const result = importThemes(await file.text());
-    if ("refused" in result) return void push({ text: result.refused });
-    const added: Theme[] = [];
-    for (const one of result.themes) {
-      const t = themes.add(one);
-      if (t) added.push(t);
-    }
-    if (added.length === 0) return void push({ text: "knobas keeps 64 themes of your own. Delete one to import another." });
-    editingId = added[0]!.id;
-    const low = added.reduce((n, t) => n + lowRoles(t).length, 0);
-    const what = added.length === 1 ? `${added[0]!.name} as a ${added[0]!.kind} theme` : `${added.length} themes`;
-    const tail = low === 0 ? "" : low === 1 ? " 1 colour is under 4.5:1." : ` ${low} colours are under 4.5:1.`;
-    const ids = added.map((t) => t.id);
-    if (low === 0) push({ text: `Imported ${what}.` });
-    else push({ text: `Imported ${what}.${tail}`, action: { label: "Fix all", run: () => fixAll(ids) } });
+    const added = importText(themes, await file.text());
+    if (added) editingId = added[0]!.id;
   }
 </script>
 
@@ -134,7 +108,7 @@
   </div>
   <div class="tf-acts">
     <button type="button" class="tf-btn" onclick={() => picker?.click()}>Import…</button>
-    <input type="file" accept=".json,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
+    <input type="file" accept=".json,.jsonc,.yaml,.yml,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
   </div>
 </header>
 <div class="tf-stg-row tf-thm-eng">

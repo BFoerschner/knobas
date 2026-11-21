@@ -284,7 +284,9 @@ test("a child's page sits under its parent's address, Fonts' old address still l
   // The page was planned as *Themes* and never shipped there: unknown.
   expect(settingsKnows(["themes"])).toBe(false);
   expect(settingsKnows(["code-colours"])).toBe(false);
-  expect(settingsKnows(["appearance", "theme"])).toBe(false);
+  // The whole window's theme (ADR-0055): the first child, where the subtrees ruling reserved it.
+  expect(settingsKnows(["appearance", "theme"])).toBe(true);
+  expect(settingsHash("theme")).toBe("#/settings/appearance/theme");
   expect(settingsKnows(["appearance", "nonsense"])).toBe(false);
   expect(settingsKnows(["appearance", "fonts", "more"])).toBe(false);
   expect(settingsKnows(["time", "fonts"])).toBe(false);

@@ -9,6 +9,7 @@
  * here touches the page or storage (`tf/themes.svelte.ts` does).
  */
 import { PIERRE_ROLE, ROLES, type Role } from "../../render/roles";
+import { appFromVsCode, appFromZed, fromBase16, kindOfVsCode, readBase16 } from "./app-import";
 import { type AppKey, KEYS } from "./app-roles";
 
 export type ThemeKind = "light" | "dark";
@@ -51,7 +52,7 @@ export const MOST_THEMES = 64;
 export const LARGEST_FILE = 1024 * 1024;
 export const LONGEST_NAME = 60;
 
-export const REFUSED = "That file is not a theme knobas can read. It has no `knobasTheme`, `tokenColors` or `syntax`.";
+export const REFUSED = "That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style` or Base16 colours.";
 
 /** A colour a theme may hold, as `#RRGGBB` upper case, or `null`: `#RGB`, `#RRGGBB` and `#RRGGBBAA` are read, alpha dropped. */
 export function colour(value: unknown): string | null {
@@ -230,15 +231,8 @@ export function ruleFor(rules: readonly VsCodeRule[], scope: string, want: "fore
   return best;
 }
 
-const luminance = (hex: string) => {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-};
 
-/** A VS Code theme onto the roles. */
+/** A VS Code theme: `tokenColors` onto the roles, `colors` onto the window's colours (`app-import.ts`). A file with one of the two gives a theme with one part. */
 export function fromVsCode(json: Record<string, unknown>): ImportedTheme {
   const rules = (Array.isArray(json.tokenColors) ? json.tokenColors : []) as VsCodeRule[];
   const syntax: Partial<Record<Role, string>> = {};
@@ -251,18 +245,11 @@ export function fromVsCode(json: Record<string, unknown>): ImportedTheme {
       }
     }
   const name = themeName(json.name);
-  let kind: ThemeKind;
-  const type = typeof json.type === "string" ? json.type.toLowerCase() : "";
-  if (type === "light" || type === "dark") kind = type;
-  else if (type === "hc" || type === "hc-black") kind = "dark";
-  else if (type === "hc-light") kind = "light";
-  else if (/\blight\b/i.test(name)) kind = "light";
-  else if (/\bdark\b/i.test(name)) kind = "dark";
-  else {
-    const bg = colour((json.colors as Record<string, unknown> | undefined)?.["editor.background"]);
-    kind = bg !== null && luminance(bg) > 0.4 ? "light" : "dark";
-  }
+  // Its `type`, else the panel's luminance, else its name; a `type` the background contradicts gives way.
+  const kind = kindOfVsCode(json);
   const theme: ImportedTheme = { name, kind, syntax, from: name };
+  const colors = json.colors;
+  if (colors !== null && typeof colors === "object" && !Array.isArray(colors) && Object.keys(colors).length > 0) theme.app = appFromVsCode(json).set;
   const slant = ruleFor(rules, "comment", "fontStyle");
   if (slant !== null && !/italic/.test(slant)) theme.italicComments = false;
   return theme;
@@ -274,8 +261,8 @@ export function fromZed(json: Record<string, unknown>): ImportedTheme[] {
   const out: ImportedTheme[] = [];
   for (const item of themes as Record<string, unknown>[]) {
     const style = item?.style as Record<string, unknown> | undefined;
-    const syntaxStyles = style?.syntax as Record<string, { color?: string; font_style?: string } | undefined> | undefined;
-    if (!syntaxStyles || typeof syntaxStyles !== "object") continue;
+    if (!style || typeof style !== "object") continue;
+    const syntaxStyles = (style.syntax ?? {}) as Record<string, { color?: string; font_style?: string } | undefined>;
     const syntax: Partial<Record<Role, string>> = {};
     const nameLength: Partial<Record<Role, number>> = {};
     let italic: boolean | undefined;
@@ -293,16 +280,29 @@ export function fromZed(json: Record<string, unknown>): ImportedTheme[] {
     const name = themeName(item.name);
     const kind: ThemeKind = item.appearance === "light" ? "light" : "dark";
     const theme: ImportedTheme = { name, kind, syntax, from: name };
+    if (style && typeof style === "object") {
+      const app = appFromZed(style, kind).set;
+      if (Object.keys(app).length > 0) theme.app = app;
+    }
     if (italic === false) theme.italicComments = false;
     out.push(theme);
   }
   return out;
 }
 
-/** What a file read for import gave: the themes in it, or why it was refused. */
-export type ImportResult = { themes: ImportedTheme[] } | { refused: string };
+/** What a file read for import gave: the themes in it (and a file it includes that knobas cannot read here), or why it was refused. */
+export type ImportResult = { themes: ImportedTheme[]; includes?: string } | { refused: string };
 
-/** A file's text read as themes: knobas's own, a VS Code theme, or a Zed family. */
+/** A Base16 scheme as a theme with both parts. */
+function base16Theme(text: string): ImportResult | null {
+  const read = readBase16(text);
+  if (read === null) return null;
+  const { kind, set, syntax } = fromBase16(read.base);
+  const name = themeName(read.name);
+  return { themes: [{ name, kind, app: set, syntax, from: name }] };
+}
+
+/** A file's text read as themes: knobas's own, a VS Code theme, a Zed family, or a Base16 or Base24 scheme. */
 export function importThemes(text: string): ImportResult {
   if (text.length > LARGEST_FILE) return { refused: "That file is over 1 MB, too large for a theme." };
   let json: unknown;
@@ -313,7 +313,8 @@ export function importThemes(text: string): ImportResult {
     try {
       json = JSON.parse(stripJsonc(text));
     } catch {
-      return { refused: REFUSED };
+      // A Base16 scheme is YAML as often as JSON.
+      return base16Theme(text) ?? { refused: REFUSED };
     }
   }
   if (json === null || typeof json !== "object" || Array.isArray(json)) return { refused: REFUSED };
@@ -329,12 +330,18 @@ export function importThemes(text: string): ImportResult {
     if (v.italicComments === false) theme.italicComments = false;
     return { themes: [theme] };
   }
-  if (Array.isArray(v.tokenColors)) return { themes: [fromVsCode(v)] };
+  const colors = v.colors !== null && typeof v.colors === "object" && !Array.isArray(v.colors);
+  if (Array.isArray(v.tokenColors) || colors) {
+    const out: ImportResult = { themes: [fromVsCode(v)] };
+    // An `include` is not followed: the colours that file sets are worked out.
+    if (typeof v.include === "string" && v.include !== "") out.includes = v.include.split(/[\\/]/).pop()!;
+    return out;
+  }
   if (Array.isArray(v.themes)) {
     const themes = fromZed(v);
     if (themes.length > 0) return { themes };
   }
-  return { refused: REFUSED };
+  return base16Theme(text) ?? { refused: REFUSED };
 }
 
 /** JSONC to JSON: comments and trailing commas out, strings left as they are. */

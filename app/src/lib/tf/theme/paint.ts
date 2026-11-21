@@ -5,6 +5,7 @@
 import type { Attachment } from "svelte/attachments";
 
 import type { LineTokens } from "../../render/port";
+import { exportTheme, type Theme } from "./themes";
 
 /** Sets each of `values()` on the element's style, and removes what a later run no longer sets. */
 export function cssVars(values: () => Record<string, string>): Attachment<HTMLElement> {
@@ -39,4 +40,18 @@ export function marked(text: string, tokens: LineTokens | undefined, from = -1, 
     at += part.length;
   }
   return out;
+}
+
+/** Saves a theme as knobas's file through the browser's download (*Export…* on Theme and on Code colours). */
+export function saveThemeFile(theme: Theme): void {
+  const { fileName, text } = exportTheme(theme);
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

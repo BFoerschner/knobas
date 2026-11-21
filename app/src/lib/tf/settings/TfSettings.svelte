@@ -43,6 +43,7 @@
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfFontsSection from "./TfFontsSection.svelte";
+  import TfThemeSection from "./TfThemeSection.svelte";
   import TfThemesSection from "./TfThemesSection.svelte";
   import TfSettingsNav from "./TfSettingsNav.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
@@ -303,6 +304,8 @@
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
+      {:else if place.section === "theme"}
+        <TfThemeSection mode={theme} />
       {:else if place.section === "code-colours"}
         <TfThemesSection mode={theme} />
       {:else if place.section === "fonts"}

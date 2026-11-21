@@ -38,6 +38,7 @@ test("on the Mac every hint is as written", () => {
 test("off the Mac ⌘ is Ctrl, each chord in a sentence is named and joined by +, modifiers in Ctrl, Alt, Shift order", () => {
   on("windows");
   expect(keyHint("⌘K")).toBe("Ctrl+K");
+  expect(keyHint("⌘⇧⌫")).toBe("Ctrl+Shift+Backspace");
   expect(keyHint("⌘/")).toBe("Ctrl+/");
   expect(keyHint("Settings (⌘,)")).toBe("Settings (Ctrl+,)");
   expect(keyHint("⌘?")).toBe("Ctrl+?");

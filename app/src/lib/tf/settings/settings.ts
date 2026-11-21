@@ -29,6 +29,7 @@ export type SettingsSection =
   | "notes"
   | "backup"
   | "appearance"
+  | "theme"
   | "code-colours"
   | "fonts"
   | "performance"
@@ -65,8 +66,8 @@ export const SETTINGS_TREE: readonly SettingsNode[] = [
     key: "appearance",
     name: "Appearance",
     children: [
-      // Later: the app-wide theme page (Björn, 2026-11-21: "full on editor themes is something i'll want to add later"),
-      // the first child, key `theme`, at `#/settings/appearance/theme`. No row until it is built.
+      // The whole window's colours (ADR-0055), the first child, as the subtrees ruling reserved it.
+      { key: "theme", name: "Theme" },
       { key: "code-colours", name: "Code colours" },
       { key: "fonts", name: "Fonts" },
     ],

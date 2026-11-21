@@ -493,3 +493,100 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: 250px; overflow: auto; padding: 12px 16px; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }
 .tf-upd-lost { margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
 .tf-upd-lost li { padding: 7px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+/* ---------- Settings › Appearance › Theme (ADR-0055; the mockups' `theme-mock.css`, `.tf-apt-*`). Everything else on
+   the page is Code colours' own (`.tf-thm-*`): the slots, the editor's head, a role's row, the swatch, its panel, a low row. ---------- */
+/* The page is wider than Code colours: its preview is a small window. */
+.tf-stg-body:has(> .tf-apt-top) { max-width: 1240px; }
+.tf-apt-top .tf-stg-note { margin-top: 6px; }
+.tf-thm-ed.tf-apt-ed { grid-template-columns: minmax(470px, 500px) minmax(0, 1fr); }
+/* A slot says what code does beside it. */
+.tf-apt-code { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-top: 7px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-apt-code .tf-btn { margin-left: auto; flex: none; }
+.tf-thm-chips.tf-apt-chips i { width: 22px; height: 10px; border: 1px solid var(--rule); }
+/* Started with `knobas --default-theme`, and the foot's way back. */
+.tf-apt-started { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; background: var(--info-bg); color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-started .tf-btn { margin-left: auto; flex: none; }
+.tf-apt-foot { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+/* A theme just read from a file: what it holds and where to use it. */
+.tf-apt-use { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--control-gap); padding: 8px 12px; border-radius: 6px; background: var(--info-bg); color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-use > span { margin-right: auto; }
+/* A row may hold a ground and what is written on it: two swatches, one figure. */
+.tf-thm-role.tf-apt-role { grid-template-columns: 42px 118px minmax(0, 1fr) 92px 46px; }
+.tf-thm-role.tf-apt-fold { grid-template-columns: 42px minmax(0, 1fr) 0 92px 46px; }
+.tf-apt-foldname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-apt-sws { display: flex; gap: 4px; }
+.tf-apt-eg { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; }
+.tf-apt-eg > span { overflow: hidden; text-overflow: ellipsis; }
+.tf-apt-hex { display: flex; align-items: center; gap: 5px; justify-content: flex-start; }
+.tf-apt-auto { font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; font-style: normal; }
+/* The examples: each drawn in the colour its row sets, on the ground it is checked against. */
+.tf-apt-plate { display: inline-block; flex: none; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); }
+.tf-apt-btn { border-color: transparent; font-weight: 500; }
+.tf-apt-cardeg { border-color: var(--card-2); }
+.tf-apt-strong { font-weight: 700; }
+.tf-apt-line { display: inline-block; flex: none; width: 28px; border-top: 1px solid; }
+.tf-apt-ring { display: inline-block; flex: none; width: 30px; height: 14px; border-radius: 4px; border: 1px solid var(--rule); outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-off); margin: 0 4px; }
+.tf-apt-mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+.tf-apt-sel { background: var(--selection); color: var(--ink); padding: 1px 3px; }
+.tf-apt-link { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.tf-apt-told { display: flex; align-items: center; gap: 8px; padding: 6px 10px 7px 12px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-apt-told .tf-btn { margin-left: auto; flex: none; color: var(--ink); }
+.tf-apt-more { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 12px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); text-align: left; cursor: pointer; border-top: 1px solid var(--rule-2); }
+.tf-apt-more:hover { color: var(--ink); background: var(--sheet-2); }
+/* The preview: a small knobas, made of the app's own parts, on the theme's own page. */
+.tf-apt-pv { display: grid; gap: 10px; min-width: 0; }
+.tf-apt-pvh { display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); }
+.tf-apt-pvh .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); margin-left: auto; text-align: right; }
+.tf-apt-stage { border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink); overflow: hidden; }
+.tf-apt-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: var(--sheet); border-bottom: 1px solid var(--rule); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-bar .tf-apt-nav { padding: 4px 9px; border-radius: 4px; color: var(--ink-2); }
+.tf-apt-bar .tf-apt-nav[aria-current="page"] { color: var(--ink); font-weight: 600; background: var(--sheet-2); }
+.tf-apt-bar .tf-apt-find { margin-left: auto; width: 150px; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field); padding: 0 8px; display: flex; align-items: center; color: var(--muted); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-apt-grid { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 10px; padding: 10px; }
+.tf-apt-grid .tf-col h3 { margin-top: 0; }
+.tf-apt-right { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.tf-apt-rail { display: flex; gap: 2px; }
+.tf-apt-rail .tf-apt-nav { padding: 4px 9px; border-radius: 4px; color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-rail .tf-apt-nav[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
+.tf-apt-rail .tf-apt-segr { margin-left: auto; }
+.tf-apt-stage .tf-tbl td { white-space: nowrap; }
+.tf-apt-stage .tf-tbl .tf-apt-hover td { background: var(--sheet-2); }
+/* Settings lets a code value in a table break anywhere. In the preview a key is one word. */
+.tf-stg-body .tf-apt-stage .tf-tbl :is(td.tf-mono, td .tf-mono) { white-space: nowrap; overflow-wrap: normal; }
+.tf-apt-stage .tf-tbl td.tf-apt-t { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-apt-stage .tf-apt-diff { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--sheet); }
+.tf-apt-stage .tf-apt-diff .tf-ln { display: flex; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) / 1.6 var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre; }
+.tf-apt-stage .tf-apt-diff .tf-no { flex: none; width: 34px; text-align: right; padding-right: 8px; color: var(--muted); }
+.tf-apt-stage .tf-apt-diff .tf-add { background: var(--diff-add); }
+.tf-apt-stage .tf-apt-diff .tf-del { background: var(--diff-del); }
+.tf-apt-stage .tf-apt-diff .tf-aw { background: var(--add-word); color: var(--ink); border-radius: 2px; }
+.tf-apt-stage .tf-apt-diff .tf-dw { background: var(--del-word); color: var(--ink); border-radius: 2px; }
+.tf-apt-low { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; padding: 0 10px 10px; align-items: start; }
+.tf-apt-stage .tf-apt-dialog { position: static; width: auto; max-height: none; }
+.tf-apt-stage .tf-apt-dialog header { padding: 9px 12px; }
+.tf-apt-stage .tf-apt-dialog header h2 { font-size: calc(var(--t-md) * var(--fs)); margin: 0; }
+.tf-apt-dbody { padding: 10px 12px; display: grid; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-field { display: flex; align-items: center; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); padding: 0 8px; }
+.tf-apt-field.tf-apt-focused { outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-in); }
+.tf-apt-dfoot { display: flex; justify-content: flex-end; gap: var(--control-gap); padding: 9px 12px; border-top: 1px solid var(--rule); }
+.tf-apt-float { display: grid; gap: 10px; min-width: 0; }
+.tf-apt-stage .tf-apt-toast { position: static; transform: none; animation: none; max-width: none; padding: 8px 12px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-ln { border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); box-shadow: var(--shadow); overflow: hidden; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-lnq { padding: 8px 12px; border-bottom: 1px solid var(--rule); color: var(--ink); }
+.tf-apt-lnr { display: flex; gap: 10px; padding: 5px 12px; align-items: baseline; }
+.tf-apt-lnr.tf-on { background: var(--sheet-2); }
+.tf-apt-lnr > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-apt-lnr small { margin-left: auto; flex: none; white-space: nowrap; color: var(--ink-2); }
+.tf-apt-lnr mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+/* Pick what to change: the pointer names what it is over, a press lists the colours there. */
+.tf-apt-stage.tf-apt-picking { cursor: crosshair; }
+.tf-apt-stage.tf-apt-picking .tf-apt-hit { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
+.tf-apt-pickmenu { position: fixed; z-index: 6; width: 232px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-apt-pickmenu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 4px; text-align: left; cursor: pointer; }
+.tf-apt-pickmenu button:hover, .tf-apt-pickmenu button:focus-visible { background: var(--sheet-2); }
+.tf-apt-pickmenu i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); flex: none; }
+.tf-apt-pickmenu small { margin-left: auto; color: var(--ink-2); --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+/* A theme that cannot be read is kept only if someone says so: the plate stands in knobas Light's own colours
+   (`scopeValues`), so it reads whatever the window has become. */
+.tf-apt-keep { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--sheet); color: var(--ink); border: 2px solid var(--ink); box-shadow: 0 12px 40px -10px color-mix(in srgb, var(--scrim) 60%, transparent); font-size: calc(var(--t-md) * var(--fs)); }
+.tf-apt-keep b { font-variant-numeric: tabular-nums; }

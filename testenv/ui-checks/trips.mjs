@@ -285,11 +285,13 @@ const DUPLICATE_CHECK = String.raw`(b) => {
   if (own.length !== b.own + 1) return own.length + " themes of one's own are kept, " + b.own + " before";
   const copy = own.at(-1);
   if (copy.name !== "knobas Light copy" || copy.kind !== "light") return "the copy is " + copy.name + ", " + copy.kind;
-  if (localStorage.getItem("knobas.theme.light") !== copy.id) return "the light slot holds " + localStorage.getItem("knobas.theme.light") + ", not the copy";
+  // While code follows the window's theme, the copy goes to the window's slot and code goes on following it (ADR-0055).
+  if (localStorage.getItem("knobas.app-theme.light") !== copy.id) return "the window's light slot holds " + localStorage.getItem("knobas.app-theme.light") + ", not the copy";
+  if (localStorage.getItem("knobas.theme.light") !== null) return "the code slot was set apart to " + localStorage.getItem("knobas.theme.light");
   const page = document.querySelector(".tf-kept:not([hidden])");
   const h = page.querySelector(".tf-thm-edh h2")?.textContent.trim();
   if (h !== "knobas Light copy") return "the editor shows " + h;
-  if (page.querySelector(".tf-thm-slot[data-slot=light] select").value !== copy.id) return "the light slot's select does not show the copy";
+  if (page.querySelector(".tf-thm-slot[data-slot=light] select").value !== "") return "the light slot's select no longer follows the app theme";
   const swatches = page.querySelectorAll(".tf-thm-roles button.tf-thm-sw").length;
   if (swatches !== 21) return swatches + " swatches are buttons, not the 21 of a theme one can change";
   return null;
@@ -319,6 +321,88 @@ const SLOT_CHECK = String.raw`(b) => {
   if (h !== "GitHub Light") return "the editor shows " + h;
   const chip = page.querySelector(".tf-thm-slot[data-slot=light] .tf-thm-chips i[title=Keyword]");
   if (chip && getComputedStyle(chip).backgroundColor !== "rgb(195, 36, 58)") return "the slot's keyword chip is " + getComputedStyle(chip).backgroundColor;
+  return null;
+}`;
+// Settings › Appearance › Theme (ADR-0055).
+const APP_BEFORE = String.raw`() => ({ own: JSON.parse(localStorage.getItem("knobas.themes") ?? "[]").length, sheet: getComputedStyle(document.documentElement).getPropertyValue("--sheet").trim() })`;
+const appPage = String.raw`document.querySelector(".tf-kept:not([hidden])")`;
+const APP_SLOT_CHECK = String.raw`(b) => {
+  const page = ${appPage};
+  if (page.querySelector(".tf-thm-slot[data-slot=light] select").value !== "github-light") return "the light slot's select shows " + page.querySelector(".tf-thm-slot[data-slot=light] select").value;
+  if (localStorage.getItem("knobas.app-theme.light") !== "github-light") return "the window's light slot keeps " + localStorage.getItem("knobas.app-theme.light");
+  const sheet = document.documentElement.style.getPropertyValue("--sheet-light").trim();
+  if (sheet !== "#FFFFFF") return "--sheet-light on <html> is " + (sheet || "unset");
+  const h = page.querySelector(".tf-thm-edh h2")?.textContent.trim();
+  if (h !== "GitHub Light") return "the editor shows " + h;
+  return null;
+}`;
+const APP_DUPLICATE_CHECK = String.raw`(b) => {
+  const own = JSON.parse(localStorage.getItem("knobas.themes") ?? "[]");
+  if (own.length !== b.own + 1) return own.length + " themes of one's own are kept, " + b.own + " before";
+  const copy = own.at(-1);
+  if (localStorage.getItem("knobas.app-theme.light") !== copy.id) return "the window's light slot holds " + localStorage.getItem("knobas.app-theme.light") + ", not the copy";
+  const page = ${appPage};
+  if (page.querySelector(".tf-thm-edh h2")?.textContent.trim() !== "knobas Light copy") return "the editor shows " + page.querySelector(".tf-thm-edh h2")?.textContent.trim();
+  const swatches = page.querySelectorAll(".tf-apt-roles button.tf-thm-sw").length;
+  if (swatches !== 30) return swatches + " swatches are buttons, not the 30 of a theme one can change";
+  return null;
+}`;
+/** A light theme of one's own in the window's light slot: knobas Light with a white panel. */
+const APP_OWN_STORE = {
+  "knobas.themes": JSON.stringify([{ id: "own-tripappx", name: "Trip window", kind: "light", from: "knobas Light", app: { sheet: "#FFFFFF" }, syntax: {} }]),
+  "knobas.app-theme.light": "own-tripappx",
+};
+/** The same with a Passed too light to read on it. */
+const APP_LOW_STORE = {
+  "knobas.themes": JSON.stringify([{ id: "own-tripappx", name: "Trip window", kind: "light", from: "knobas Light", app: { sheet: "#FFFFFF", ok: "#7BC67E" }, syntax: {} }]),
+  "knobas.app-theme.light": "own-tripappx",
+};
+const keptApp = String.raw`(JSON.parse(localStorage.getItem("knobas.themes") ?? "[]").find((t) => t.id === "own-tripappx")?.app ?? {})`;
+const APP_SWATCH_CHECK = String.raw`(b) => {
+  const row = ${appPage}.querySelector(".tf-thm-role[data-row=ok]");
+  if (${keptApp}.ok !== "#7BC67E") return "the theme keeps Passed " + ${keptApp}.ok;
+  if (!row.classList.contains("tf-low") || !row.querySelector(".tf-thm-why button")) return "the Passed row draws no warning with its fix";
+  const chip = ${appPage}.querySelector(".tf-apt-stage .tf-chip.tf-ok");
+  if (getComputedStyle(chip).color !== "rgb(123, 198, 126)") return "the preview's Passed chip draws " + getComputedStyle(chip).color;
+  return null;
+}`;
+const APP_FIX_CHECK = String.raw`(b) => {
+  const row = ${appPage}.querySelector(".tf-thm-role[data-row=ok]");
+  if (row.classList.contains("tf-low")) return "the Passed row is still under its mark: " + row.querySelector(".tf-thm-cr").textContent;
+  if (${keptApp}.ok === "#7BC67E") return "the theme keeps the light green";
+  return null;
+}`;
+const APP_APART_CHECK = String.raw`(b) => {
+  const app = ${keptApp};
+  if (!app.ok || !app.warn || !app.err) return "the three states are not set: " + JSON.stringify(app);
+  const line = ${appPage}.querySelector(".tf-apt-told span").textContent;
+  if (!line.startsWith("Told apart")) return "the line says " + line;
+  return null;
+}`;
+const APP_BAND_CHECK = (how) => String.raw`(b) => {
+  const own = JSON.parse(localStorage.getItem("knobas.themes") ?? "[]");
+  const night = own.find((t) => t.name === "Trip Harbour Night");
+  if (!night) return "Trip Harbour Night was not kept";
+  const app = localStorage.getItem("knobas.app-theme.dark"), code = localStorage.getItem("knobas.theme.dark");
+  if (${JSON.stringify(how)} === "follows" && (app !== night.id || code !== null)) return "window " + app + ", code " + code;
+  if (${JSON.stringify(how)} === "apart" && (app !== night.id || code !== "knobas-dark")) return "window " + app + ", code " + code;
+  if (${JSON.stringify(how)} === "code" && (app !== null || code !== night.id)) return "window " + app + ", code " + code;
+  if (${appPage}.querySelector(".tf-apt-use")) return "the band is still there";
+  return null;
+}`;
+const APP_PICK_CHECK = String.raw`(b) => {
+  const page = ${appPage};
+  if (page.querySelector(".tf-apt-stage.tf-apt-picking")) return "the pick mode is still on";
+  if (!page.querySelector(".tf-thm-pop[aria-label="Attention's tint"]")) return "Attention's tint's panel is not open";
+  return null;
+}`;
+/** Dracula while dark, GitHub Light while light, One Dark's code while dark. */
+const APP_KEPT_STORE = { "knobas.app-theme.dark": "dracula", "knobas.app-theme.light": "github-light", "knobas.theme.dark": "one-dark" };
+const APP_RESET_CHECK = (undone) => String.raw`(b) => {
+  const kept = ["knobas.app-theme.dark", "knobas.app-theme.light", "knobas.theme.dark"].map((k) => localStorage.getItem(k));
+  const want = ${undone} ? ["dracula", "github-light", "one-dark"] : [null, null, null];
+  if (kept.join() !== want.join()) return "kept: " + kept.join(", ");
+  if (!${undone} && ![...document.querySelectorAll(".tf-toast")].some((t) => t.textContent.includes("knobas's own themes are back"))) return "no toast says knobas's own themes are back";
   return null;
 }`;
 /** A light theme of one's own in the light slot, its keyword the knobas purple. */
@@ -650,6 +734,19 @@ const PAGES = [
     { id: "theme-slot", kind: "press-result", finding: "themes", before: SLOT_BEFORE, steps: [{ focus: ".tf-thm-slot[data-slot=light] select" }, { chars: "gi" }], check: SLOT_CHECK },
     // A colour of one's own theme changed through its swatch's hex field, and its contrast row with it.
     { id: "theme-swatch", kind: "press-result", finding: "themes", store: OWN_THEME_STORE, before: SWATCH_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Keyword']" } }, { press: { sel: "input[aria-label='Keyword as hex']" } }, { selectAll: true }, { type: "#C8B6E2" }], check: SWATCH_CHECK },
+  ] },
+  // Settings › Appearance › Theme (ADR-0055): the window's slots, a swatch, a row's fix, Tell them apart, import and its band,
+  // the pick mode and Put knobas's themes back with its Undo.
+  { page: "Settings, Theme", route: "settings/appearance/theme", trips: [
+    { id: "app-slot", kind: "press-result", finding: "themes", before: APP_BEFORE, steps: [{ focus: ".tf-thm-slot[data-slot=light] select" }, { chars: "gi" }], check: APP_SLOT_CHECK },
+    { id: "app-duplicate", kind: "press-result", finding: "themes", before: APP_BEFORE, steps: [{ press: { sel: ".tf-thm-edh button", text: "Duplicate and edit" } }], check: APP_DUPLICATE_CHECK },
+    { id: "app-swatch", kind: "press-result", finding: "themes", store: APP_OWN_STORE, before: APP_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Passed']" } }, { press: { sel: "input[aria-label='Passed as hex']" } }, { selectAll: true }, { type: "#7BC67E" }], check: APP_SWATCH_CHECK },
+    { id: "app-fix", kind: "press-result", finding: "themes", store: APP_LOW_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-thm-role[data-row=ok] .tf-thm-why button" } }], check: APP_FIX_CHECK },
+    { id: "app-apart", kind: "press-result", finding: "themes", store: APP_OWN_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-told button", text: "Tell them apart" } }], check: APP_APART_CHECK },
+    ...[["The app and code", "follows"], ["The app only", "apart"], ["Code only", "code"]].map(([text, how]) => ({ id: `app-import-${how}`, kind: "press-result", finding: "themes", before: APP_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/vscode-app-fixture.json" }, { press: { sel: ".tf-apt-use button", text } }], check: APP_BAND_CHECK(how) })),
+    { id: "app-pick", kind: "press-result", finding: "themes", store: APP_OWN_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-pvh button", text: "Pick from the preview" } }, { press: { sel: ".tf-apt-stage .tf-chip.tf-warn[data-keys^='warn ']" } }, { press: { sel: "[role=menuitem]", starts: "Attention's tint" } }], check: APP_PICK_CHECK },
+    { id: "app-reset", kind: "press-result", finding: "themes", store: APP_KEPT_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-foot button", text: "Put knobas's themes back" } }], check: APP_RESET_CHECK(false) },
+    { id: "app-reset-undo", kind: "press-result", finding: "themes", store: APP_KEPT_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-foot button", text: "Put knobas's themes back" } }, { press: { sel: ".tf-toast button", text: "Undo" } }], check: APP_RESET_CHECK(true) },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },

@@ -10,6 +10,10 @@ import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
 import type { KeptStorage } from "../kept-value";
 import { APP_SLOT_KEY, createThemes, SLOT_KEY, THEMES_KEY, type Themes, type ThemeRoot } from "../themes.svelte";
 import { createTheme } from "../theme.svelte";
+import { derive, KNOBAS } from "../theme/app-derive";
+import { BUILTINS } from "../theme/builtins";
+import { ratioText } from "../theme/colour";
+import { roleContrast } from "../theme/contrast";
 import TfThemesSection from "./TfThemesSection.svelte";
 
 function memory(seed: Record<string, string> = {}): KeptStorage & { data: Map<string, string> } {
@@ -149,7 +153,7 @@ test("importing a VS Code theme shows it in the editor and offers to fix what is
   // Shown, not put in a slot. Its one `string` rule colours escapes and links too: three colours under 4.5:1.
   expect(themes.slot("light")).toBe("knobas-light");
   const toast = toasts.items.at(-1)!;
-  expect(toast.text).toBe("Imported Sunny Light as a light theme. 3 colours are under 4.5:1.");
+  expect(toast.text).toBe("Imported Sunny Light as a light theme. 3 colours are under their mark.");
   toast.action!.run();
   flushSync();
   expect(q('[data-role="str"]')!.classList.contains("tf-low")).toBe(false);
@@ -161,7 +165,7 @@ test("a file that is not a theme is refused in one sentence", async () => {
   Object.defineProperty(input, "files", { value: [new File(['{"name":"x"}'], "x.json")], configurable: true });
   input.dispatchEvent(new Event("change", { bubbles: true }));
   for (let i = 0; i < 20 && toasts.items.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
-  expect(toasts.items.at(-1)?.text).toBe("That file is not a theme knobas can read. It has no `knobasTheme`, `tokenColors` or `syntax`.");
+  expect(toasts.items.at(-1)?.text).toBe("That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style` or Base16 colours.");
 });
 
 test("Same as the app theme follows the window's theme, and a choice sets the slot apart", () => {
@@ -186,8 +190,12 @@ test("Same as the app theme follows the window's theme, and a choice sets the sl
 test("a theme's contrast is read on the window theme drawn for its side, and its small print names it", () => {
   draw({ [APP_SLOT_KEY.light]: "github-light", [SLOT_KEY.light]: "knobas-light" });
   expect(q(".tf-thm-grp small")?.textContent).toBe("lowest contrast on any surface of GitHub Light");
-  // knobas Light's string on GitHub Light's added line, not knobas's own.
-  expect(q('[data-role="str"] .tf-thm-cr')?.textContent).toMatch(/^\d+\.\d:1$/);
+  // knobas Light's keyword on GitHub Light's surfaces, not knobas's own.
+  const github = BUILTINS.find((t) => t.id === "github-light")!;
+  const kw = BUILTINS.find((t) => t.id === "knobas-light")!.syntax.kw;
+  const there = ratioText(roleContrast(derive("light", github.app).colours, "kw", kw).ratio);
+  expect(there).not.toBe(ratioText(roleContrast(KNOBAS.light, "kw", kw).ratio));
+  expect(q('[data-role="kw"] .tf-thm-cr')?.textContent).toBe(there);
 });
 
 test("a theme with window colours that the window does not draw offers Use for the app too; one without says so", () => {

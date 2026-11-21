@@ -81,6 +81,8 @@ const SCREENS = [
   { id: "settings-remove-worktree", route: "settings/checkouts", press: "Remove…" },
   // Settings › Appearance › Code colours (2026-11-21): the slots, the role list and the preview held to their boxes.
   { id: "settings-code-colours", route: "settings/appearance/code-colours" },
+  // Settings › Appearance › Theme (ADR-0055): the slots, the role list with its long names and the preview, held to their boxes.
+  { id: "settings-theme", route: "settings/appearance/theme" },
   { id: "job", route: "job/PAY-231" },
   { id: "toast-cloned", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800 },
   { id: "toast-cloned-open", route: "repo/mock%3Atidewater%2Fledger", press: "Clone", wait: 3800, toast: "Open in VS Code" },

@@ -1038,6 +1038,11 @@
       box?.focus();
       return;
     }
+    if (row.kind === "action" && row.action.run) {
+      close();
+      row.action.run();
+      return;
+    }
     let hash = addressOf(row);
     if (!hash) return;
     if (row.kind === "hit") {
