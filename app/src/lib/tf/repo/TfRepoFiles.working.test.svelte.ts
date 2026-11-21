@@ -120,9 +120,10 @@ afterEach(() => {
   location.hash = "";
 });
 
-function draw(start: Partial<Place>, renderers: FolderRenderer[] = [SITE]) {
+function draw(start: Partial<Place>, renderers: FolderRenderer[] = [SITE], answer?: (at: FolderAsk) => Promise<FolderRenderView>) {
   const place: Place = $state({ at: REPO, path: null, rendered: null, folderRender: null, disk: CHANGED, ...start });
   const fp = folderPorts();
+  if (answer) fp.answerWith(answer);
   const disk = checkoutPorts(tree);
   const bytesRead: string[] = [];
   const marksAsked: string[] = [];
@@ -304,4 +305,20 @@ test("a changed image's bytes are read from disk, and read again when it changes
   place.disk = { ...CHANGED, stamp: "s4" };
   await settle();
   expect(bytesRead.slice(was).filter((r) => r === `${WT}:img/logo.png`).length).toBeGreaterThan(0);
+});
+
+test("a grafted folder on the working tree holds its generated rows alone, never its changed real file", async () => {
+  let land!: () => void;
+  const landed = new Promise<void>((resolve) => (land = resolve));
+  draw({ rendered: RENDERED }, [SITE], async (at) => {
+    await landed;
+    return { renderer: at.renderer, folder: at.folder, drawn: { token: "W", kind: { kind: "folder", files: 1, bytes: 8, left_out: 0 }, size: 8, commit: HEAD, from: "working_tree", took_ms: 3200, drawn_at: "2026-11-21T08:00:00Z" }, current: true, running: null, failure: null, from: "working_tree", commit: HEAD };
+  });
+  const rows = () => [...target.querySelectorAll<HTMLElement>(".tf-ftree [data-path]")].map((el) => el.dataset["path"]!).filter((p) => p.startsWith("flows/orders/"));
+  await settle();
+  // While the run goes: no real row under the band, the changed `main.flow` among them least of all.
+  expect(rows()).toEqual([]);
+  land();
+  await settle();
+  expect(rows()).toEqual(["flows/orders/index.md"]);
 });

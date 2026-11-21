@@ -1072,14 +1072,16 @@
       files: graft.index?.files ?? [],
     })),
   );
-  /** The listings the tree draws: the real ones, with each graft's rows in its folder's place. */
-  const readListings = $derived(grafts.size === 0 ? listings : graftedListings(listings, grafted));
   /** The working tree's changes laid over `HEAD`'s listings (`diskListings`): a new list re-lays them, nothing read again. */
-  const treeListings = $derived(
-    disk === null
-      ? readListings
-      : diskListings(readListings, disk.marks, (full) => diskId(disk.head, full, disk.stamp), (full) => localId(disk.head, "dir", full)),
+  const realListings = $derived(
+    disk === null ? listings : diskListings(listings, disk.marks, (full) => diskId(disk.head, full, disk.stamp), (full) => localId(disk.head, "dir", full)),
   );
+  /**
+   * The listings the tree draws: the real ones, with each graft's rows in its folder's place. The graft goes over the
+   * working tree's changes, never under them (ux29): a changed file of a grafted folder is no row among its generated
+   * ones, which pushed every row under it down when the run's files landed.
+   */
+  const treeListings = $derived(grafts.size === 0 ? realListings : graftedListings(realListings, grafted));
   /** How a path stands in the working tree, or `M` for a file the checkout changed while a branch is shown. */
   const markOf = (full: string): WorkingMark | undefined => (disk !== null ? disk.marks.get(full) : changed.has(full) ? "M" : undefined);
   const MARK_WORDS: Record<WorkingMark, string> = { M: "Changed in your checkout", A: "Added in your working tree", D: "Deleted in your working tree" };
