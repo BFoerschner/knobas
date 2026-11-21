@@ -645,6 +645,12 @@ const PAGES = [
   { page: "Settings, Performance", route: "settings/performance", trips: [
     { id: "performance-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-perf-kept", "#tf-perf-sites"] },
   ] },
+  // Settings › Updates (ADR-0052): Esc in every control, and the forward button pressed twice by key, which must open
+  // nothing, send no second write and keep its place.
+  { page: "Settings, Updates", route: "settings/updates", trips: [
+    { id: "updates-fields", kind: "esc-sweep", strict: true, finding: "updates" },
+    { id: "updates-download-twice", kind: "enter-twice", strict: true, finding: "updates", query: "&fake-update=available", press: { sel: ".tf-upd-b2", starts: "Download" } },
+  ] },
   { page: "Settings, Backup", route: "settings/backup", trips: [
     { id: "backup-fields", kind: "esc-sweep", finding: "F-641", typed: ["#tf-bak-keep"] },
   ] },

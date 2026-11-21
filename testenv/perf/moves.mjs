@@ -55,7 +55,7 @@ const CMD_K = { key: "k", code: "KeyK", modifiers: process.platform === "darwin"
 /** A repository with a checkout and pipelines on each corpus. */
 const REPO = real ? "live-gitea%3Ascale-data%2Fbi-dashboards" : "mock%3Atidewater%2Fpayout-service";
 const SPACE = real ? "SCLENG" : "ENG";
-const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "monitoring", "docs", "search", "notes", "backup", "appearance", "performance", "renderers", "keyboard", "logs"];
+const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "monitoring", "docs", "search", "notes", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "updates"];
 
 /**
  * The places. `start`: the address a first open starts at; one of `nav` (a section's entry), `gear`, `press` (the first
@@ -211,6 +211,12 @@ const PLACES = [
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/${s}"]`, hash: `#/settings/${s}`, away: "#/settings" })),
   // Appearance's children (the subtrees ruling, 2026-11-21), pressed in the nav's tree.
   ...["code-colours", "fonts"].map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/appearance/${s}"]`, hash: `#/settings/appearance/${s}`, away: "#/settings" })),
+  // Settings › Updates (ADR-0052): `update:state` lands while the page is drawn, an update found, a download ending, a
+  // check failing. The box's rooms keep their size and place.
+  ...[["found", "up-to-date", "available"], ["downloaded", "downloading", "ready"], ["check-failed", "checking", "check-failed"]].map(([what, first, then]) => ({
+    name: `settings-updates-${what}`, fixture: true, fake: `fake-update=${first}&fake-update-then=${then}&fake-update-after=3500`,
+    start: "#/settings", press: `${shown} a[href="#/settings/updates"]`, hash: "#/settings/updates", away: "#/settings",
+  })),
   { name: "settings-source", start: "#/settings/sources", press: `${shown} a[href^="#/settings/source/"]`, hash: "#/settings/source/", away: "Escape" },
   { name: "app-edit", start: "#/settings/checkouts", press: `${shown} .tf-stg-apps a`, text: "Edit", hash: "#/settings/checkouts/app/", away: "Escape" },
   // From the list rather than Open in…, so it opens on every corpus: on the saved scale database no repository is cloned,
