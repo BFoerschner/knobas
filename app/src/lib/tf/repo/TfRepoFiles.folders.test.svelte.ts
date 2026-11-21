@@ -164,3 +164,53 @@ test("a hidden page only looks, and a renderer that is not saved says so", async
   await settle();
   expect(target.textContent).toContain("There is no folder renderer named “gone”.");
 });
+
+// The ux26 Windows boot check saw a renderer's glyph only after a reload: its save had called the command from devtools,
+// past the app's copy (the small-fixes sweep, 2026-11-21). A save in Settings goes through that copy, so the open tree
+// follows it at once, by a folder's name and by a file it holds alike.
+test("a renderer saved while the tab is open gets its glyph at once, by name and by a file the folder holds", async () => {
+  let stored: FolderRenderer[] = [];
+  const folders = createFolderRenderers({ read: async () => stored, save: async () => stored });
+  const marksAsked: string[][] = [];
+  app = mount(TfRepoFiles, {
+    target,
+    context: pageContext(() => shown),
+    props: {
+      ports: { entityView, submitWrite: async () => ({}) as never },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: null,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults({ read: async () => [], save: async (list) => list }),
+      folders,
+      // The backend marks what the stored renderers holding a file glob take.
+      folderMarks: () => {
+        marksAsked.push(stored.map((r) => r.id));
+        return Promise.resolve(stored.some((r) => r.id === "lc") ? [{ renderer: "lc", folders: ["flows/orders"] }] : []);
+      },
+      folderPorts: folderPorts().ports,
+      folderRender: null,
+    },
+  });
+  flushSync();
+  await settle();
+  target.querySelector<HTMLButtonElement>('.tf-fdir[data-path="flows"]')!.click();
+  await settle();
+  expect(rowLink("docs")).toBeNull();
+  expect(rowLink("flows/orders")).toBeNull();
+  // No renderer holds a file glob yet, so no marks were asked.
+  expect(marksAsked).toEqual([]);
+
+  stored = [DOCS];
+  await folders.save([]);
+  await settle();
+  expect(rowLink("docs")?.getAttribute("title")).toBe("Render with Docs site");
+  expect(rowLink("flows/orders")).toBeNull();
+
+  stored = [DOCS, LC];
+  await folders.save([]);
+  await settle();
+  expect(marksAsked).toEqual([["docs", "lc"]]);
+  expect(rowLink("flows/orders")?.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/render/lc/flows/orders");
+});
