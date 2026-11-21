@@ -59,3 +59,10 @@ test("a refused press changes nothing", async () => {
   await store.install();
   expect(store.state?.phase.phase).toBe("idle");
 });
+
+test("the just-updated sample toasts once the shell is drawn", async () => {
+  const { store, toasts } = rig(fakeUpdate("just-updated"));
+  store.start();
+  await settle();
+  expect(toasts).toEqual(["3.2.9-ux28"]);
+});

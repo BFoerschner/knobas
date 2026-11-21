@@ -97,6 +97,14 @@ export function updateSample(name: string | null): UpdateState {
       };
     case "development":
       return { ...up, standing: { standing: "by_hand", why: "development", kind: null }, checks_itself: false, next_check_at: null, checked_at: null, newest: null, last: null };
+    case "just-updated":
+      return {
+        ...up,
+        current: "3.2.9-ux28",
+        newest: { version: OFFER.version, pre_release: true, published_at: OFFER.published_at, page_url: OFFER.page_url },
+        last: { from: "3.2.9-ux27", to: "3.2.9-ux28", at: AT(1), installed: true, backup: "knobas-20261121-140112.knobas" },
+        just_updated: true,
+      };
     case "not-set-up":
       return { ...up, set_up: false, checks_itself: false, next_check_at: null, checked_at: null, newest: null, last: null };
     default:
