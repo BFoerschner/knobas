@@ -60,6 +60,14 @@ function unsafe(): string[] {
 
 /** The lists drawn whole, each with why it stays small. Keyed `path  list` as `eaches` writes them. */
 const SMALL: Record<string, string> = {
+  "tf/docs/TfDocCode.svelte  lines": "one code block's lines on a Docs page, drawn whole as its text was before it was coloured; a page's blocks are cut at DOC_BLOCKS_FIRST",
+  "tf/docs/TfDocCode.svelte  codeRuns(line, tokens[n], stems)": "the runs of one line's tokens and find marks",
+  "tf/settings/TfSettingsNav.svelte  node.children": "a set the code fixes: a section's children in the Settings tree",
+  "tf/settings/TfThemePreview.svelte  marked(lines[key][n] ?? \"\", tokens[key][n], from, to)": "the runs of one line's tokens and its changed word",
+  "tf/settings/TfThemePreview.svelte  lines.java": "a set the code fixes: the preview's eleven Java lines",
+  "tf/settings/TfThemePreview.svelte  lines.shell": "a set the code fixes: the preview's four lines of shell",
+  "tf/settings/TfThemePreview.svelte  lines.markdown": "a set the code fixes: the preview's six lines of Markdown",
+  "tf/settings/TfThemesSection.svelte  themes.of(kind)": "the built-ins of a side and the person's own, at most MOST_THEMES (64), in a select",
   "tf/site/TfSiteQuit.svelte  unsaved": "a handful by what it is: the live sites, at most Sites kept open (6) and the ones that held changes past it",
   "tf/site/TfSiteSection.svelte  setting.allowed": "a handful by what it is: the sign-in hosts one source's site was allowed to show",
   "tf/site/TfSiteSection.svelte  setting.suggested": "a handful by what it is: the hosts an Open in this source named this session",

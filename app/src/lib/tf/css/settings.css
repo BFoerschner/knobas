@@ -382,7 +382,6 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-thm-edh { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); }
 .tf-thm-edh h2 { --fs: var(--size-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); margin: 0; }
 .tf-thm-edh .tf-thm-name { width: 260px; height: var(--control-h-sm); }
-.tf-thm-edh .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); }
 .tf-thm-roles { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink); }
 .tf-thm-grp { display: flex; justify-content: space-between; padding: 7px 12px 5px; --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); }
 .tf-thm-grp:first-child { border-radius: 6px 6px 0 0; }
@@ -407,7 +406,7 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 .tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
 /* The preview stays in view while the role list scrolls. */
-.tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; }
+.tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; background: var(--paper); }
 .tf-thm-pre { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
 .tf-thm-preh { display: flex; align-items: center; gap: 10px; }
 .tf-thm-preh .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); margin-left: auto; text-align: right; }

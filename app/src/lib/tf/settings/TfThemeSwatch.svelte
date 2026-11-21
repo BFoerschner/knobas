@@ -100,6 +100,7 @@
         <label class="tf-thm-popf"
           ><span>Hex</span><input
             class="tf-stg-in"
+            aria-label="{label} as hex"
             spellcheck="false"
             autocomplete="off"
             bind:value={typed}
@@ -108,7 +109,7 @@
           /></label
         >
         <label class="tf-thm-popf"
-          ><span>Pick</span><input type="color" value={value ?? fallback} oninput={(event) => onchange?.((event.currentTarget as HTMLInputElement).value.toUpperCase())} /></label
+          ><span>Pick</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={(event) => onchange?.((event.currentTarget as HTMLInputElement).value.toUpperCase())} /></label
         >
         <div class="tf-thm-popa">
           {#if inkable}

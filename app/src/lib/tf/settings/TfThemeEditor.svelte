@@ -57,7 +57,7 @@
     op: "= ++ < &&",
     punct: "( ) { } ; ,",
     head: "## Running it",
-    link: "https://…",
+    link: "[the notes](retry.md)",
   };
   const DIFF_NAMES: Record<DiffKey, string> = { added: "Added line", removed: "Removed line", addedWord: "Added word", removedWord: "Removed word" };
   const UNCHANGED_NAMES: Record<Unchanged, string> = { full: "Full colour", quiet: "Quiet", grey: "Grey" };
@@ -160,7 +160,7 @@
       <h2>{theme.name}</h2>
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
-    <div class="tf-acts">
+    <div class="tf-trail">
       {#if own}
         <button type="button" class="tf-btn tf-sm" onclick={startRename}>Rename…</button>
         <button type="button" class="tf-btn tf-sm" onclick={() => onduplicate(theme)}>Duplicate</button>
