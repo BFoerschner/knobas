@@ -169,7 +169,7 @@ The mock source answers trees, blobs and archives from them with git's own shas,
 `just demo`; `knobas-app/tests/it/everything_fixture.rs` finds `ledger-gateway` by `settlebridge`, shown by its
 class, and the ticket whose comment names it. `testenv/seed-gitea.sh` pushes the files (section 4c), and
 `testenv/live-everything.sh` witnesses the first fill and a push on the live Gitea and Forgejo. The browser's fake
-keeps its table (`FAKE_FILE_REPOS`).
+reads the same files (`FAKE_FILE_REPOS`; amended 2026-11-21, `2026-11-21-the-small-fixes-sweep.md`).
 
 **One pass at a time.** The index has one writer. The live run's first try read Forgejo's files after its first run
 and Gitea's only after its second, 312 s in: both first runs ended together, and Gitea's pass found the writer busy

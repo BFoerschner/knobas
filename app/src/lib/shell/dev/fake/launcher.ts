@@ -350,35 +350,63 @@ onFakeReset(() => {
 });
 
 /**
- * The fixture's repositories found by their files (the everything-search decisions, D16): the renamed repository, whose
- * classes and image still say its old name `SettleBridge` while its name, README and pom do not, and a client of it that
- * only imports it. **Fixture-only**, beside the corpus rather than in it, so no pinned count of the corpus moves; the
- * engine's read is `knobas-files`', witnessed in `knobas-search`'s ranking table.
+ * The fixture's repositories found by their files (the everything-search decisions, D16):
+ * `fixtures/tidewater/files/<owner>/<name>/…`, the files the mock source compiles in (`knobas-source-mock`'s `files.rs`),
+ * read here as text. The renamed `ledger-gateway`, whose classes and image still say its old name `SettleBridge` while
+ * its name, README and pom do not, `ledger-api`, which only imports it, and `payout-service` with a file for each rule
+ * that leaves a file's text out. The engine's read is `knobas-files`', witnessed in `knobas-search`'s ranking table.
  */
-export const FAKE_FILE_REPOS: readonly { entity_id: string; title: string; files: readonly (readonly [string, string])[] }[] = [
-  {
-    entity_id: "mock:tidewater/ledger-gateway",
-    title: "tidewater/ledger-gateway",
-    files: [
-      [
-        "src/main/java/com/tidewater/settlebridge/SettleBridgeServer.java",
-        "package com.tidewater.settlebridge;\n\nimport com.tidewater.settlebridge.config.SettleBridgeConfig;\n\n/** Terminates TLS and forwards settlement batches to the ledger. */\npublic final class SettleBridgeServer {\n    private final SettleBridgeConfig config;\n}",
-      ],
-      ["src/main/java/com/tidewater/settlebridge/config/SettleBridgeConfig.java", "public record SettleBridgeConfig(String host, int port) {\n    public static SettleBridgeConfig fromEnv() {"],
-      ["src/test/java/com/tidewater/settlebridge/SettleBridgeServerTest.java", "class SettleBridgeServerTest {\n    void startsOnTheConfiguredPort() {}"],
-      ["deploy/k8s/deployment.yaml", "spec:\n  containers:\n    - name: gateway\n      image: registry.tidewater.example/settle-bridge:4.2.0"],
-      ["README.md", "# Ledger gateway\nForwards settlement batches to the ledger."],
-    ],
-  },
-  {
-    entity_id: "mock:tidewater/ledger-api",
-    title: "tidewater/ledger-api",
-    files: [
-      ["src/main/java/com/tidewater/ledger/SettleClient.java", "import com.tidewater.settlebridge.client.Client;\npublic class SettleClient {}"],
-      ["src/main/java/com/tidewater/ledger/LedgerClient.java", "public class LedgerClient {}"],
-    ],
-  },
-];
+// `exhaustive`: a glob passes `node_modules` by otherwise, and the fixture has one for the rule that leaves a folder out.
+const FIXTURE_FILES = import.meta.glob<string>("../../../../../../fixtures/tidewater/files/**/*", { query: "?raw", import: "default", eager: true, exhaustive: true });
+const FIXTURE_ROOT = "fixtures/tidewater/files/";
+
+/** A repository of the fixture: every file by its path, and whether the engine keeps its text. */
+export interface FakeFileRepo {
+  entity_id: string;
+  title: string;
+  files: readonly (readonly [string, string])[];
+  /** The files whose text the rules leave out, counted by rule (`knobas_core::code_text::LeftOut::word`). */
+  left_out: Readonly<Record<string, number>>;
+}
+
+/** `knobas_core::code_text`'s rules in miniature: why a file's text is not read, or `null` to read it. */
+const SKIP_FOLDERS = new Set([".git", "node_modules", "vendor", "third_party", "third-party", "target", "build", "dist", "out", ".gradle", ".idea", ".vscode", "__pycache__", ".venv", "venv", "bower_components", "Pods", ".next", ".nuxt", "coverage", ".terraform", ".mvn"]);
+const LOCK_FILES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "Gemfile.lock", "poetry.lock", "composer.lock", "go.sum", "Pipfile.lock", "gradle.lockfile", "packages.lock.json", "flake.lock", "uv.lock", "bun.lock"]);
+const MADE_SUFFIXES = [".min.js", ".min.css", ".map", ".svg", ".snap", ".pb.go", ".g.dart", ".designer.cs", ".generated.cs", "_pb2.py", ".pbxproj", ".ipynb", ".csv", ".tsv"];
+const GENERATED_MARKS = ["@generated", "do not edit", "automatically generated", "auto-generated"];
+export function fakeLeftOut(path: string, text: string): string | null {
+  const parts = path.split("/");
+  const name = parts.pop() ?? path;
+  if (parts.some((folder) => SKIP_FOLDERS.has(folder))) return "folder";
+  if (LOCK_FILES.has(name) || name.endsWith(".lock")) return "lock_file";
+  if (MADE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix))) return "made_file";
+  if (text.length === 0) return "empty";
+  if (text.includes("\0")) return "binary";
+  if (text.split("\n").some((line) => line.length > 2_000)) return "long_line";
+  const head = text.slice(0, 600).toLowerCase();
+  if (GENERATED_MARKS.some((mark) => head.includes(mark))) return "generated";
+  return null;
+}
+
+/** The fixture's repositories, as `mock:<owner>/<name>`. */
+export const FAKE_FILE_REPOS: readonly FakeFileRepo[] = (() => {
+  const byRepo = new Map<string, [string, string][]>();
+  for (const [key, text] of Object.entries(FIXTURE_FILES)) {
+    const [owner, name, ...path] = key.slice(key.indexOf(FIXTURE_ROOT) + FIXTURE_ROOT.length).split("/");
+    if (owner === undefined || name === undefined || path.length === 0) continue;
+    const files = byRepo.get(`${owner}/${name}`) ?? [];
+    files.push([path.join("/"), text]);
+    byRepo.set(`${owner}/${name}`, files);
+  }
+  return [...byRepo].map(([repo, files]) => {
+    const left_out: Record<string, number> = {};
+    for (const [path, text] of files) {
+      const why = fakeLeftOut(path, text);
+      if (why !== null) left_out[why] = (left_out[why] ?? 0) + 1;
+    }
+    return { entity_id: `mock:${repo}`, title: repo, files, left_out };
+  });
+})();
 
 /**
  * `?fake-long-paths` (the everything-search build, 2026-11-20): each file under a deep folder with a long name, so the
@@ -390,6 +418,11 @@ const LONG_FILE_FOLDER = "services/the-repository-name-that-is-long/modules/with
 function fileRepos(): typeof FAKE_FILE_REPOS {
   if (!longFiles) return FAKE_FILE_REPOS;
   return FAKE_FILE_REPOS.map((repo) => ({ ...repo, files: repo.files.map(([path, text]) => [LONG_FILE_FOLDER + path, text] as const) }));
+}
+
+/** A file's text as the index keeps it: none where the rules leave it out (`fakeLeftOut`). */
+function keptText([path, text]: readonly [string, string]): string {
+  return fakeLeftOut(path.startsWith(LONG_FILE_FOLDER) ? path.slice(LONG_FILE_FOLDER.length) : path, text) === null ? text : "";
 }
 
 /** An identifier's words as the engine reads them, cut down: lower-cased runs and their capital parts, each to the run's end. */
@@ -413,7 +446,7 @@ export function fakeFilesFound(words: readonly string[]) {
   };
   return fileRepos().flatMap((repo) => {
     const byName = repo.files.filter(([path]) => holds(path));
-    const byText = repo.files.filter(([, text]) => holds(text));
+    const byText = repo.files.filter((file) => holds(keptText(file)));
     const shown = [...byName, ...byText].sort((a, b) => Number(!byName.includes(a)) - Number(!byName.includes(b)) || a[0].length - b[0].length)[0];
     if (!shown) return [];
     const lines = shown[1].split("\n");
@@ -471,7 +504,11 @@ function searchSettingsAnswer(): SearchSettings {
   const live = CORPUS.filter((entry) => entry.deleted_at === null);
   const count = (kind: string) => live.filter((entry) => entry.kind === kind).length;
   const files = fileRepos().flatMap((repo) => repo.files);
-  const textBytes = files.reduce((all, [, text]) => all + text.length, 0);
+  const kept_files = files.filter((file) => keptText(file) !== "");
+  const textBytes = kept_files.reduce((all, [, text]) => all + new TextEncoder().encode(text).length, 0);
+  const corpusRepos = new Set(live.filter((entry) => entry.kind === "repo").map((entry) => entry.entity_id));
+  const left_out: Record<string, number> = {};
+  for (const repo of FAKE_FILE_REPOS) for (const [why, n] of Object.entries(repo.left_out)) left_out[why] = (left_out[why] ?? 0) + n;
   return {
     everything,
     tickets: count("ticket"),
@@ -479,12 +516,12 @@ function searchSettingsAnswer(): SearchSettings {
     pages: count("page"),
     pipelines: fakePipelines().length,
     files: files.length,
-    text_files: kept === 0 ? 0 : files.length,
+    text_files: kept === 0 ? 0 : kept_files.length,
     kept_mb: kept,
     text_bytes: kept === 0 ? 0 : textBytes,
     repositories_read: FAKE_FILE_REPOS.length,
-    repositories: live.filter((entry) => entry.kind === "repo").length + FAKE_FILE_REPOS.length,
-    left_out: { lock_file: 1, binary: 2 },
+    repositories: corpusRepos.size + FAKE_FILE_REPOS.filter((repo) => !corpusRepos.has(repo.entity_id)).length,
+    left_out,
   };
 }
 
@@ -532,6 +569,13 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     found.sort((a, b) => b.byName - a.byName || b.byText - a.byText);
     for (const one of found) {
       const hits = byKind.get("repo") ?? [];
+      // A repository the corpus holds and its words found too: one row, its files' evidence on it.
+      const own = hits.find((hit) => hit.entity_id === one.repo.entity_id);
+      if (own) {
+        own.excerpts = [...own.excerpts, fakeFileExcerpt(one, words)];
+        own.files = { by_text: one.byText, by_name: one.byName, branch: "main" };
+        continue;
+      }
       hits.push({
         entity_id: one.repo.entity_id,
         kind: "repo",

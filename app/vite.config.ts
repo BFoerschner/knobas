@@ -1,5 +1,5 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import type { Plugin } from "vite";
+import { searchForWorkspaceRoot, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
@@ -32,6 +32,8 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 1420,
     strictPort: true,
+    // The browser's fake reads the fixture repositories' files (`fake/launcher.ts`), which live beside `app/`.
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files"] },
   },
   build: {
     // **Three documents, not one** (#503, #2381). `index.html` is the shell; the second

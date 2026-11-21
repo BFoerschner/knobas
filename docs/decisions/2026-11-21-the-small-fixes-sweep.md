@@ -44,3 +44,17 @@ following the list fails it. A boot check that saves through a command call relo
 **Not changed.** It is the rule: the design system says `Esc` takes the words and then closes, so an opening with no
 words closes in one press, and that `Esc` never loses typed words in one press (*Keys*, `filterKeys`).
 `Launcher.svelte`'s `Escape` does that (the chip stays with the words gone, and the next press closes).
+
+## The browser's fake reads the fixture's files
+
+**Found (the Everything search finish).** The browser's fake kept a table of its own of two repositories' files
+(`FAKE_FILE_REPOS` in `shell/dev/fake/launcher.ts`), beside `fixtures/tidewater/files/`, which the mock source compiles
+in and `seed-gitea.sh` pushes. It had drifted: no `payout-service`, and Settings › Search counted two files left out
+where the fixture has five.
+
+**Taken.** The fake reads the fixture with an eager `import.meta.glob` as text (`exhaustive`, so the fixture's
+`node_modules` folder is read too; the dev server may serve the folder, `vite.config.ts`). The engine's rules on what
+text is kept are mirrored in miniature (`fakeLeftOut`: a folder, a lock file, a made file, empty, a NUL byte, a line over
+2,000 bytes, a generated head), so a left-out file is found by its name only and counted by its rule.
+`payout-service` is in the corpus too: its files' evidence joins its own row instead of drawing a second.
+`fake-files.test.ts` holds the fake's table to the folder on disk.
