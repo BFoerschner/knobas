@@ -46,6 +46,30 @@ On Björn's PC in headless Edge 157, per 1,000 lines: Pierre 0.4 to 0.9 ms, TanS
 fourteen languages: 6 MB, 6 MB and 43 MB. Every built-in role passes 4.5:1 on every surface of its side, and so does
 its quiet mix (`theme/contrast.test.ts`).
 
+## As built, where it differs from the rulings
+
+- **Rust's `storage.type.rust` stays a keyword.** The ruling's Shiki table put it under *type*; in Shiki's Rust grammar
+  that scope is `let`, `struct` and `enum`, which would have drawn as types. `entity.name.type` already makes Rust's types.
+- **Kotlin's `entity.name.type.annotation` is an attribute**, so `@Suppress` reads as `@Override` does.
+- **`properties` is a language of its own**, `ini` to Shiki and `properties` to the other two, and **a `.gradle` file is
+  Groovy**; before, a properties file was Shiki's `ini` and a Gradle file had no language.
+- **`CHUNK` stays 400 on every engine.** The ruling halves it on the fast engines if a slice's main-thread time passes 8 ms
+  at 6x. Measured in headless Chrome on the WSL box with a stand-in view that redraws 60 rows a slice, the slowest slice
+  of a 20,000-line TypeScript file at 6x was 13 to 22 ms at both 400 and 200 lines a slice, varying run to run, while 200
+  doubled the slices and the time to colour the whole file (Pierre 703 ms against 1,214 ms). The size of a slice is not
+  what costs; no main-thread task passed 50 ms at 6x under any engine.
+- **A Docs code block, the theme page's preview and Markdown fences hold their jobs**, so a change of highlighter colours
+  them again; `highlightSnippet` lets its job go once answered.
+
+## Measured in the build
+
+Headless Chrome on the WSL box (Ryzen 5 5600X), the built app's own worker, from asking to the first colours and to the
+last slice (`S/hlprobe`): a 2,000-line TypeScript file in a new worker (the first file of a session) 39 ms under Pierre,
+24 ms under TanStack and 400 ms under Shiki; warm, 8, 11 and 69 ms to first colours. A 20,000-line one: first colours in
+59 to 70 ms under Pierre (it tokenizes the whole file in one call first), 75 to 91 ms under TanStack, 72 ms under Shiki
+(its lines in view first), and the whole file 0.2 s, 0.2 s and 4.0 s. Throttling the page's CPU 4x and 6x does not slow the
+worker. The worker's own chunk is 23.5 KB; Pierre 430 KB, Shiki's core 186 KB and TanStack 80 KB are chunks of their own.
+
 ## Not in this pass
 
 A build's log. Colours for the rest of the window (the app-wide theme page has its slot under Appearance). Themes in a

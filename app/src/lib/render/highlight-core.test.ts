@@ -59,7 +59,7 @@ test("an engine that throws after taking the focus leaves it to the next, which 
     },
   };
   const firstOf: Engine = {
-    async run(text, _name, _lang, ctx) {
+    async run(_text, _name, _lang, ctx) {
       const focus = ctx.takeFocus();
       ctx.post(focus?.[0] ?? 0, [[["x", "kw"]]]);
     },
