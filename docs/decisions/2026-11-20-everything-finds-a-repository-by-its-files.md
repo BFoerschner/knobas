@@ -30,7 +30,8 @@ A repository was found by its name and its description. Nothing of its files was
    another kind's letter.
 3. **Every mirrored repository's files are read, not only the cloned ones'.** A file's bytes come from a checkout on
    this machine where its object store holds the blob. Else from the forge: one archive a repository, or single reads
-   for 24 files and fewer. After each sync, behind the app, only what the stored tree says changed.
+   for 3 files and fewer and where the tree holds more than 512 KiB a wanted file (amended 2026-11-21, below; it
+   was 24 files). After each sync, behind the app, only what the stored tree says changed.
 4. **Which files.** Text up to 512 KiB. Not binaries, lock files, minified or generated files, vendored folders, or
    what `.gitattributes` marks generated or vendored. Those are still found by name.
 5. **A file's words are its identifiers' parts.** `ADProxyServer` is found by `adproxy`, `proxy`, `proxyserver` and
@@ -125,8 +126,8 @@ own and the live Gitea clause.
   best line) and `knobas-files` (writes, reads, the bound, a removed file and repository found no more, a folder
   holding garbage opening empty, two writers refused).
 - **The pass**: `knobas-sync`'s `code_files` against a fake forge: a second pass writes nothing, a push reads only
-  what changed, more than 24 files are one archive, a checkout spares the forge, the bounds cut a repository and the
-  next pass finishes it, the bound on kept text, a withdrawn repository, a crash between tantivy's commit and
+  what changed, more than 3 files are one archive where the archive is mostly them, a checkout spares the forge, the
+  bounds cut a repository and the next pass finishes it, the bound on kept text, a withdrawn repository, a crash between tantivy's commit and
   PostgreSQL's record, bring-up's reconcile, a failing forge, and the tree read a level at a time by its key.
 - **The archive**: Gitea's `read_archive` against a tarball the test serves, and live against the WSL box's Gitea.
 
@@ -137,12 +138,38 @@ guard against a repository named twice (the merge already keys by id), set the l
 (the flag is read only where `in_files` is not), and drop the source filter on the file read (the repositories it
 is handed are already the filter's).
 
+## Amended 2026-11-21: the pass in the app, the first fill, and D16
+
+**The pass never ran in the app.** The ux26 boot check on Björn's PC, on a ux25-era scale copy: three Gitea syncs,
+the stored-trees pass each time, and `sync.code_repo`, `sync.code_file` and `files-1` stayed empty, with no log line.
+`sources::start_scheduler` wraps the app's events in `FollowLandings`, outside `FilesOnSync`, and `FollowLandings`
+did not pass `files()` on, so the scheduler got the trait's `None` and skipped the pass on every run. The fill
+measured above called the pass directly (`files_fill`). Every wrapper now passes `files()` and `code_files()` on, and
+`knobas-app/tests/it/files_on_sync.rs` drives the pass through the app's scheduler after a sync: it timed out before
+the change.
+
+**The first fill.** On a copy of the scale home, the windowless backend syncing the live Gitea on the WSL box
+(Mac, under the queue): 64 repositories, 886 files, 6.2 MB of text. With D3 as decided (an archive over 24 wanted
+files, 20 archives and 100 single reads a run) almost every repository went a file at a time, 6 or 7 a run, and the
+fill took 11 runs, 658 s back to back, about 55 minutes at the default interval. Fable ruled (xhigh): an archive
+where more than 3 files are wanted and the whole tree is at most 512 KiB a wanted file and at most 1 GiB
+(`code_files::by_archive`); 200 archives and 600 single reads a run, the 120 s budget the real bound. A ten-file
+repository beside a 50 MB binary still goes a file at a time. Measured again from a fresh copy: filled after 183 s
+and 3 runs, the files themselves read in about 20 s once the trees were stored; the stored-trees pass is now what
+paces the first fill.
+
+**D16 as designed.** `fixtures/tidewater/files/<owner>/<repo>/`: the renamed `ledger-gateway`, `ledger-api` that
+imports it, `payout-service` with five files saying `RetryQueue` and one file for each rule that leaves a file out.
+The mock source answers trees, blobs and archives from them with git's own shas, so the passes run in tests and in
+`just demo`; `knobas-app/tests/it/everything_fixture.rs` finds `ledger-gateway` by `settlebridge`, shown by its
+class, and the ticket whose comment names it. `testenv/seed-gitea.sh` pushes the files (section 4c), and
+`testenv/live-everything.sh` witnesses the first fill and a push on the live Gitea and Forgejo. The browser's fake
+keeps its table (`FAKE_FILE_REPOS`).
+
 ## Left, with what it would take
 
-- D16's checked-in fixture files and the mock source reading them: the mock source answers no tree today, so the
-  pass does not run in `just demo`. The browser's fake holds the two repositories' files as a table
-  (`FAKE_FILE_REPOS`) instead. With them, `testenv/seed-gitea.sh` pushing them and `testenv/live-everything.sh`
-  finding `tidewater/ledger-gateway` on Gitea and Forgejo after a sync.
+- An archive the run's deadline cuts is asked again every run and holds up the repositories after it; the 1 GiB cap
+  narrows it. Remembering the cut would close it.
 - Commit messages finding their repository: a corpus like the pipeline log's.
 - Typos in files: tantivy's Levenshtein automaton under the same bound.
 - Other branches.
