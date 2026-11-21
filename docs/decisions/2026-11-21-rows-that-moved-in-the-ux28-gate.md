@@ -46,3 +46,18 @@ WSL (`fx-ui` went from 34 to 41 px at 515 ms); after it, it passes. The `rows-st
 - `theme-slot` pressed the `<select>` and then ↓ and Enter. On macOS a press or ↓ opens the native menu, which headless
   Chrome can't drive. It now focuses the select (`{ focus }`) and types "gi" (`{ chars }`), which chooses GitHub Light by
   its first letters on every platform.
+
+## The coverage plans' fixture holds still under autovacuum
+
+**Found.** `knobas-search`'s `coverage_plans::a_probe_never_reads_a_table_to_prove_a_source_has_nothing` read 305 child
+rows of `gitea-swept-last` against its 257 once, in the ux28 gate's `just test` on WSL. Alone on the Mac it passed 5 of
+5. The plan was the one meant: 256 rows from the far end, then the look from the head, which read 49 rows before its first
+live one. The fixture writes that source's live rows first so they head the index. But an index orders equal keys by
+their place in the table, and a vacuum between two of the writes (autovacuum vacuums after a thousand inserts) lets the
+later withdrawn rows fill earlier pages, ahead of the live ones. A vacuum at that point read 270. With autovacuum made
+eager (1 s naptime, an insert threshold of 50), the test failed 4 of 6.
+
+**Taken.** The fixture turns autovacuum off on every `knobas` and `sync` table before it writes
+(`knobas_db::plan_shape::never_analyzed`, the method #767 and #768 used, as `reach.rs` does), so it is what it says, and
+"never analyzed" stays true. Under the same eager autovacuum it passed 6 of 6. The limit stays 257: it was right, and the
+probe's code is unchanged.

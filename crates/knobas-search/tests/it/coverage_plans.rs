@@ -46,6 +46,12 @@ const SWEPT_LAST: &str = "gitea-swept-last";
 async fn corpus_with_parents() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
+    // Nothing vacuums or analyzes behind the test's back. A vacuum between two of the
+    // writes below lets the later rows fill the earlier pages, and an index orders equal
+    // keys by their place in the table, so withdrawn rows came ahead of
+    // `SWEPT_LAST`'s live ones and the look from the head read 49 of them (the ux28
+    // gate's `just test` on WSL, under load). It also keeps "never analyzed" true.
+    knobas_db::plan_shape::never_analyzed(&pool).await;
     testing::seed_sources(&pool).await.unwrap();
     Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
         .await
