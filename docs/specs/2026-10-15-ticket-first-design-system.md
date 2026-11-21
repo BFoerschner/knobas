@@ -14,15 +14,15 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and appears behind matched search text and what mentions you. A chip that names the job is neutral.
-- **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones, their tints and `--mark` at their light values (`job.css`), so the blocked chip, every dot and a matched word follow without a rule of their own (spec #2396, #2400).
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and appears behind matched search text and what mentions you. A chip that names the job is neutral. A theme may recolour the card. Whatever its colour, it marks the ticket you are on and nothing else.
+- **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones, their tints and `--mark` from the card's own tokens (`--card-ok` and its siblings, `--card-mark`), which are the light values in both of knobas's themes (`job.css`), so the blocked chip, every dot and a matched word follow without a rule of their own (spec #2396, #2400; ADR-0055).
 - **Weight does the shouting, not colour or size.** Big figures (the job key, counts, durations) are the headings face at weight 800, in Inter's display cut, which its optical size axis picks by itself at those sizes. They keep their `"wdth" 62` and page titles their `"wdth" 85`: a chosen Headings face with a width axis or condensed members draws them narrow; Inter has neither and draws them at its normal width (amended 2026-11-20, below). Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
 - **Structure means something.** A border separates things that are different. A shadow means the thing floats above the page. Labels are sentence case and never all caps. The prototype has no `text-transform: uppercase` anywhere, and the app keeps it that way.
 
 ## Colour
 
-Tokens are the prototype's, unchanged, except `--field`, which it did not have. Light and dark come from the same names.
+The values below are knobas's own two themes. A theme may set any of them (Themes, below). Tokens are the prototype's, unchanged, except `--field`, which it did not have, and those ADR-0055 added. Light and dark come from the same names.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -48,6 +48,17 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--muted` / `--muted-bg` | `#5F6975` / `#E6E9EC` | `#94A0AC` / `#262E37` | Unknown, no data, not monitored |
 | `--on-ink-ok` / `-warn` / `-err` / `-info` / `-muted` | `#6FCF97` / `#E5B04D` / `#FF8A80` / `#8AA6FF` / `#94A0AC` | `#0F3F24` / `#4A2E00` / `#6E1014` / `#17297A` / `#2C333B` | The tones on `--fill` (a rail's selected row). Dark's five clear 4.5:1 on the fill, at 5.62 to 6.04 |
 | `--shadow` | `0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25)` | `0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6)` | Floating things only |
+| `--on-fill` | `--sheet` | `--sheet` | Text on `--fill`: a pressed segment, a rail's selected row, the Docs tree's current page (ADR-0055) |
+| `--primary` / `--on-primary` | `--fill` / `--on-fill` | `--fill` / `--on-fill` | The primary button and its words. Split from `--fill`, so a theme's button colour never fills every selected row |
+| `--link` | `--info` | `--info` | A link in words |
+| `--selection` | none | none | Selected text where a theme sets it (`data-sel` on `<html>`); unset, the system's own highlight |
+| `--scroll` | `--rule` | `--rule` | A scrollbar's thumb |
+| `--scrim` | `#0A0F14`, both sides | | What dims the page under a dialog or a drawer, mixed with `transparent`. Not a theme's |
+| `--ok-word` / `--err-word` | `#B4DEC3` / `#EFB9B6` | `#2C6243` / `#6E3333` | A changed word's mark in a diff, where the code theme sets none (`--add-word`, `--del-word` read them) |
+| `--card-ok` / `-warn` / `-err` / `-info` / `-muted` | `#1F7444` / `#8A5600` / `#B0262A` / `#2F55D4` / `#5F6975` | `#1F7444` / `#8A5600` / `#B0262A` / `#2F55D4` / `#5D6773` | The tones on the yellow card. Dark's Unknown is a step darker, 3.00:1 on dark's card |
+| `--card-ok-bg` / `-warn-bg` / `-err-bg` / `-info-bg` / `-muted-bg` | `#DDEFE4` / `#F6EBD3` / `#F7DEDD` / `#DFE6FA` / `#E6E9EC` | `#DDEFE4` / `#F6EBD3` / `#F7DEDD` / `#DFE6FA` / `#E6E9EC` | Their tints on the card |
+| `--card-mark` | `#F6E08F` | `#F6E08F` | A highlight on the card |
+| `--card-shade` / `--card-lift` | `#000000` / `#FFFFFF` | `#000000` / `#FFFFFF` | What the card's translucent plates are mixed from, `color-mix()` with `transparent` |
 
 The ticket page's card has two moods and one markup (spec #2396). While the ticket is only read it sits on `--sheet` with `--ink` (`.tf-sheetcard`); once it is the chosen job it sits on `--card` with `--card-ink` (`.tf-card`), and the class is the only difference. The yellow follows the first rule above: the page card, the chosen job's card and row on the Tickets board and list, and the running timer. A selected card or row that is not the chosen job stays on `--sheet` with its outline in `--ink`.
 
@@ -80,13 +91,32 @@ passes, and every built-in's does on `--sheet`.
 
 Every role colour is held to 4.5:1 on each surface code is drawn on: `--sheet`, `--sheet-2`, `--paper`, `--ok-bg` and
 `--err-bg` (a comment on neither of the last two). Settings › Appearance › Code colours shows each role's lowest ratio and,
-under 4.5:1, names the surface and offers a fix that moves the colour's lightness in OKLCH, hue kept. Its preview draws a
-theme of the other side on that side's surfaces (`.tf-as-light`, `.tf-as-dark`, which re-declare the surface and ink
-tokens above as `tokens.css` writes them).
+under 4.5:1, names the surface and offers a fix that moves the colour's lightness in OKLCH, hue kept. The surfaces are
+those of the window theme drawn for that side (ADR-0055). Its preview draws a theme of the other side on that side's
+window theme, every token set by its plain name on the preview (`scopeValues`, `tf/themes.svelte.ts`).
+
+### Themes
+
+Amended 2026-11-22 (ADR-0055, `docs/decisions/2026-11-21-a-theme-colours-the-whole-window.md`). A theme has two parts,
+the window's colours and code's, and may hold either or both. Settings › Appearance › Theme chooses the window's for
+each side, Code colours code's, which follows the window's theme until set apart.
+
+- **A theme sets colours and nothing else.** No radius, shadow geometry, spacing, density or font.
+- **The token names are the contract.** A theme sets any of 51 keys (`tf/theme/app-roles.ts`), each one of the tokens
+  above, and what it leaves out is derived from what it sets (`app-derive.ts`). A colour drawn anywhere in the app is a
+  token, or is on `tf/theme/literal-colours.txt` with its reason (`tf-css.test.ts`).
+- **Text on a fill is `--on-fill`, on the primary button `--on-primary`**, and never a surface token: a theme's blue
+  button on a dark panel would otherwise get dark words on blue. A link is `--link`.
+- **On the yellow card the states are the card's own tokens** (`--card-ok` and its siblings).
+- **A translucent plate is a `color-mix()` of a token with `transparent`**, never an `rgba()` literal.
+- **No colour fades.** A `transition` names no colour property (the site bar's key hint aside), so a theme switch never
+  draws half a theme.
 
 ### Contrast, measured
 
 I computed WCAG ratios for every text pair the prototype uses. All text passes 4.5:1 in both themes. The tightest are light `--muted` on `--paper` at 4.53 and on `--muted-bg` at 4.58, so no lighter grey may be added for text.
+
+Every theme knobas ships passes the checks of `tf/theme/app-check.ts`, and a theme of one's own is shown each pair under its mark.
 
 One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the ticket page's yellow card or the chosen job's card on the board is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
 
@@ -502,7 +532,7 @@ The ticket page is two columns that each scroll on their own (spec #2396): the c
 
 Amended 2026-11-21 (`docs/decisions/2026-11-21-settings-has-subtrees.md`). The nav is a tree fixed in code: a parent is a
 section with a page of its own, its children indented 14 px under it, its chevron in the row's own left padding, so no
-title stands anywhere but where a leaf's would. Appearance holds Code colours and Fonts. A click opens a parent's page and
+title stands anywhere but where a leaf's would. Appearance holds Theme, Code colours and Fonts. A click opens a parent's page and
 fold and never closes it; a second on the open parent toggles; the chevron folds alone. A folded parent holding the open
 page carries the open row's fill as a 2 px edge, as Docs' tree does. The nav is one Tab stop and walks by arrow keys.
 

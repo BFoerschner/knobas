@@ -40,11 +40,19 @@ What a run of code is to a reader (a keyword, a string, a key, a type), one of s
 _Avoid_: role alone (that is a source's [role](#role)), scope, token type, kind (that is an entity's)
 
 **Theme**:
-A name, a side (light or dark) and a colour for some [syntax roles](#syntax-role), with the diff's colours if it sets them; a role it leaves out draws in ink. Seven come with knobas; a person's own is a copy, kept on this computer (Settings › Appearance › Code colours). Colours code and diffs only, so far.
-_Avoid_: colour scheme, palette
+A name, a side (light or dark) and colours in two parts: the window's (any of its 51 colours, the rest [derived](#derived)) and code's (a colour for some [syntax roles](#syntax-role), with the diff's colours if it sets them; a role it leaves out draws in ink). A theme may hold either part or both (ADR-0055). Seven come with knobas, each with both; a person's own is a copy or an import, kept on this computer (Settings › Appearance › Theme and Code colours). Colours and nothing else: no font, radius or density.
+_Avoid_: colour scheme, palette, skin
 
 **Slot**:
-Which [theme](#theme) draws while the window is light, and which while it is dark: *While light*, *While dark*. A theme only fills the slot of its side.
+Which [theme](#theme) draws for a side: *While light* and *While dark* for the window, and the same two for code, four in all (ADR-0055). A theme only fills a slot of its side.
+
+**Follows**:
+A code [slot](#slot) that holds no theme of its own draws the window slot's theme of its side, or knobas's where that theme has no code colours. The start; *Set apart* keeps what it draws as its own.
+_Avoid_: linked, synced
+
+**Derived**:
+A window colour worked out from the ones a [theme](#theme) sets, because it sets none (`app-derive.ts`); the editor labels it *auto*. knobas's own two themes are the empty set: every colour derived is knobas's own.
+_Avoid_: default, computed, fallback (that is the stylesheet's value behind a token)
 
 ## Sync
 

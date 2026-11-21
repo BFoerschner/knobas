@@ -261,8 +261,9 @@ SOFTWARE.
 ## The themes that come with knobas
 
 GitHub Light and GitHub Dark (primer/github-vscode-theme), One Dark (Binaryify/OneDark-Pro), Dracula
-(dracula/visual-studio-code) and Catppuccin Mocha (catppuccin/vscode) are each read onto knobas's seventeen roles from
-the copies Shiki ships, with some colours changed to reach 4.5:1 on knobas's surfaces (`app/src/lib/tf/theme/builtins.ts`).
+(dracula/visual-studio-code) and Catppuccin Mocha (catppuccin/vscode) are each read onto knobas's seventeen roles, and
+their window colours onto knobas's own, from the copies Shiki ships, with some colours changed to reach 4.5:1 on knobas's
+surfaces and their own (`app/src/lib/tf/theme/builtins.ts`).
 Each is under the MIT License, as published by its authors:
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated

@@ -38,3 +38,4 @@ tokens is the worker's own business.**
 - New dependencies for the engines (their licences and sizes in the PR's *Merge Danger*). No IPC, no migration, no crate.
 - A theme imported from another editor is a reading of it onto seventeen roles, not the theme.
 - When the window's own colours become part of a theme, the surfaces contrast is checked against become the theme's.
+- Amended by ADR-0055: a theme may now hold the window's colours, and contrast is checked against the window theme drawn.
