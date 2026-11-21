@@ -6,4 +6,4 @@
 
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-exec node --test --test-timeout=90000 "$here/test/"
+exec node --test --test-timeout=90000 "$here"/test/*.test.mjs
