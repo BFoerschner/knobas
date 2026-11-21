@@ -186,6 +186,9 @@ check:
 #
 # Its vitest run is the tests the change can reach, not the whole suite
 # (#920): `front-changed` below. `check` still runs every test.
+#
+# Vitest forks: `VITEST_WORKERS`, 4 when unset (the cap `app/vite.config.ts`
+# explains). On a loaded box pass fewer: `VITEST_WORKERS=2 just check-front`.
 check-front base="origin/main":
     python3 -I scripts/doc-lists.py
     just conflict-markers
@@ -232,9 +235,12 @@ docs-check:
 # by import or by reading files -- through a global a changed module sets up
 # at import time in some other test's graph, say. None is known (2026-10-15).
 # `check` runs every test, so the full gate still sees one.
+#
+# `VITEST_WORKERS` sets vitest's forks, 4 when unset (`check-front` above).
 front-changed base="origin/main": deps
     #!/usr/bin/env bash
     set -euo pipefail
+    workers=${VITEST_WORKERS:-4}
     mb=$(git merge-base "{{base}}" HEAD)
     cd app
     npx svelte-check --tsconfig ./tsconfig.json
@@ -257,10 +263,10 @@ front-changed base="origin/main": deps
       < <(grep -rlE 'readFileSync|readdirSync|import\.meta\.glob|\?raw' src | grep -E '\.test\.(svelte\.)?ts$' | sort)
     if [ -n "$all" ] || [ ${#guards[@]} -eq 0 ]; then
         echo "front-changed: the whole vitest suite: ${all:-no fs-reading guard tests found}"
-        npx vitest run
+        npx vitest run --maxWorkers "$workers"
     else
         echo "front-changed: vitest related to ${#changed[@]} changed files, plus ${#guards[@]} fs-reading guard tests"
-        npx vitest related --run ${changed[@]+"${changed[@]}"} "${guards[@]}"
+        npx vitest related --run --maxWorkers "$workers" ${changed[@]+"${changed[@]}"} "${guards[@]}"
     fi
     npm run build
 
