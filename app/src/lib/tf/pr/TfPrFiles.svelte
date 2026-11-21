@@ -393,6 +393,9 @@
     let set = pickWidth;
     if (set !== null) host?.style.setProperty("--tf-pick-w", set);
     const read = () => {
+      // Hidden with its page (keep-alive), the bar has no box and measures 0: the room it had stands for the return, which
+      // would otherwise draw the toolbar's controls at the left edge for a frame and then 242 px right (the themes follow-up).
+      if (bar.getClientRects().length === 0) return;
       const width = `${bar.offsetWidth}px`;
       pickWidth = width;
       if (width === set) return;

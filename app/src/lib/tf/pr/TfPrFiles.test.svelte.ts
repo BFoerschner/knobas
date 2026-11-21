@@ -5,7 +5,7 @@
  * and the outdated apart, and a `+` that keeps a comment pending.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DiffFile, DiffRange, SourceView } from "../../ipc/entity";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
@@ -391,6 +391,41 @@ test("a viewer who never reviewed the pull request is not offered since my last 
   flushSync();
   expect(option(/All commits/)).toBeDefined();
   expect(option(/Since your last review/)).toBeUndefined();
+});
+
+test("hidden with its page, the picker keeps its room on the toolbar, so the return draws the toolbar where it stood (the themes follow-up's moves)", async () => {
+  const watchers: [Element, (entries: ResizeObserverEntry[]) => void][] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly heard: (entries: ResizeObserverEntry[]) => void) {}
+      observe(node: Element) {
+        watchers.push([node, this.heard]);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  try {
+    await draw(rangedView(), { [`compare:${MID}^...${MID}`]: compareView(`${MID}^`, MID) });
+    const bar = target.querySelector<HTMLElement>(".tf-pickbar")!;
+    const host = target.querySelector<HTMLElement>(".tf-prfiles")!;
+    const shown = (width: number, drawn: boolean) => {
+      Object.defineProperty(bar, "offsetWidth", { configurable: true, value: width });
+      bar.getClientRects = () => (drawn ? [new DOMRect(0, 0, width, 24)] : []) as unknown as DOMRectList;
+      for (const [node, heard] of watchers) if (node === bar) heard([]);
+    };
+    shown(242, true);
+    expect(host.style.getPropertyValue("--tf-pick-w")).toBe("242px");
+    // Keep-alive hides the page: the bar has no box and measures 0.
+    shown(0, false);
+    expect(host.style.getPropertyValue("--tf-pick-w")).toBe("242px");
+    // A picker that is drawn narrower still gives its room back.
+    shown(180, true);
+    expect(host.style.getPropertyValue("--tf-pick-w")).toBe("180px");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 test("a diff that names no range draws no picker", async () => {
