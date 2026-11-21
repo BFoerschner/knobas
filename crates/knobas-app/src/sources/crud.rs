@@ -294,6 +294,7 @@ pub async fn add(
             kind: input.auth_kind,
             value: typed,
             account: input.secret.account.clone().map(Into::into),
+            web: None,
         },
     )
     .await?;
@@ -567,10 +568,12 @@ pub async fn set_secret(
     // show. Removing an account is therefore not something this call can do;
     // deleting and re-adding the source is, and it is the honest cost of a
     // form that may never read a credential back.
-    let credential = Credential::keeping(
-        &secret,
-        knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?,
-    );
+    let stored =
+        knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
+    // A saved web sign-in (ADR-0050) is not part of the form: re-entering the
+    // credential keeps it.
+    let web = stored.as_ref().and_then(|stored| stored.web.clone());
+    let credential = Credential::keeping(&secret, stored);
     let Some(value) = credential.secret.clone() else {
         return Err(SourcesError::Invalid(format!(
             "source {id:?} has no stored credential to keep -- type one in"
@@ -584,6 +587,7 @@ pub async fn set_secret(
             kind: method,
             value,
             account: credential.account.clone(),
+            web,
         },
     )
     .await?;

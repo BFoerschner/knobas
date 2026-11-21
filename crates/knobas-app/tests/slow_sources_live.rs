@@ -149,6 +149,7 @@ fn products() -> Vec<Product> {
                     username: need("KNOBAS_KUMA_USER"),
                     password: need("KNOBAS_KUMA_PASSWORD"),
                 }),
+                web: None,
             },
             auth: AuthMethod::ApiToken,
             config: json!({}),

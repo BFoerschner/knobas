@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::keys::{Claim, Press};
-use crate::scripts::Dirty;
+use crate::scripts::{Dirty, SignInCall};
 use crate::state::SiteFailure;
 
 /// A rectangle in the main window, in logical pixels.
@@ -113,11 +113,23 @@ pub trait SiteView {
     fn probe(&self, answer: Box<dyn FnOnce(Dirty) + Send>);
     /// Sleep while hidden, or wake.
     fn sleep(&self, asleep: bool);
+    /// The view's own top-level address, read from the engine now: the
+    /// saved sign-in's origin check (`sign_in::may_fill`).
+    fn url(&self) -> Option<String>;
+    /// Run [`crate::scripts::FILL_SIGN_IN`] once with `call` and hand its
+    /// JSON answer over, on the main thread, at most once. The caller checked
+    /// the origin a moment before, on the main thread.
+    fn sign_in(&self, call: &SignInCall, answer: Box<dyn FnOnce(String) + Send>);
     /// Read the address, history and loading state now (the Mac has no
     /// event for `pushState`).
     fn poll(&self) -> Option<ViewEvent>;
     /// The main window moved (Windows: a page's drop-down follows it).
     fn window_moved(&self) {}
+    /// The process that writes the site's session to disk, which quitting
+    /// waits for once the view is dropped (Windows; ux29).
+    fn browser_process(&self) -> Option<u32> {
+        None
+    }
     /// The person already answered "leave anyway" in the bar: the page's
     /// own "Leave site?" for the next navigation, within [`LEAVE_FREELY`],
     /// is answered yes rather than asked a second time.
@@ -159,4 +171,10 @@ pub trait SiteHost {
     /// is gone; `false` when it must wait for the next start (the folder is
     /// still held).
     fn forget(&self, spec: &ViewSpec) -> bool;
+    /// Quitting, after every view was dropped: wait, at most until
+    /// `deadline`, for the sessions to be written (`processes` from
+    /// [`SiteView::browser_process`]).
+    fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
+        let _ = (processes, deadline);
+    }
 }

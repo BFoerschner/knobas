@@ -1,0 +1,136 @@
+<!-- forgejo's sign-in page, recorded 2026-11-21 from the live testenv product (scripts, stylesheets and icons removed). -->
+<!DOCTYPE html>
+<html lang="en-US" data-theme="forgejo-auto">
+<head>
+	<title>Sign in - Forgejo: Beyond coding. We forge.</title>
+</head>
+<body class="no-js" hx-swap="outerHTML" hx-ext="morph" hx-push-url="false">
+	<div class="full height">
+		<noscript>
+			<div class="tw-ml-2 tw-mr-2 tw-text-center tw-text-text-light-2">This website requires JavaScript.</div>
+		</noscript>
+<nav id="navbar" aria-label="Navigation bar">
+	<div class="navbar-left ui secondary menu">
+		<a class="item" id="navbar-logo" href="/" aria-label="Home">
+			<img width="30" height="30" src="/assets/img/logo.svg" alt="Logo" aria-hidden="true">
+		</a>
+		<div class="ui secondary menu item navbar-mobile-right only-mobile">
+			<button class="item tw-w-auto ui icon mini button tw-p-2 tw-m-0" id="navbar-expand-toggle" aria-label="Toggle menu"><svg></svg></button>
+		</div>
+			<a class="item" href="/explore/repos">Explore</a>
+			<a class="item" target="_blank" rel="noopener noreferrer" href="https://forgejo.org/docs/v17.0/">Help</a>
+	</div>
+	<div class="navbar-right ui secondary menu">
+			<a class="item active" rel="nofollow" href="/user/login">
+				<svg></svg>
+				<span>Sign in</span>
+			</a>
+	</div>
+</nav>
+<div role="main" aria-label="Sign in" class="page-content user signin">
+	<div class="ui middle very relaxed page grid">
+		<div class="column tw-flex tw-flex-col tw-gap-4 tw-max-w-2xl tw-m-auto">
+			<div class="ui container fluid">
+	<div id="flash-message" hx-swap-oob="true"></div>
+	<h4 class="ui top attached header center">
+			Sign in
+	</h4>
+	<div class="ui attached segment">
+		<form class="ui form tw-mb-4" action="/user/login" method="post">
+			<div class="required field ">
+				<label for="user_name">Username or email address</label>
+				<input id="user_name" type="text" name="user_name" value="" autofocus required autocorrect="off" autocapitalize="none">
+			</div>
+			<div class="required field ">
+				<label for="password">Password</label>
+				<input id="password" name="password" type="password" value="" autocomplete="current-password" required>
+			</div>
+			<div class="inline field">
+				<div class="ui checkbox">
+					<label>Remember this device</label>
+					<input name="remember" type="checkbox">
+				</div>
+			</div>
+			<div class="field">
+				<button class="ui primary button tw-w-full">
+						Sign in
+				</button>
+			</div>
+		</form>
+	</div>
+</div>
+<div class="ui container fluid">
+	<div id="webauthn-error" class="ui negative message tw-hidden">
+	<div class="header">Could not read your security key.</div>
+	<div id="webauthn-error-msg" class="tw-pt-2"></div>
+	<div class="tw-hidden">
+		<div data-webauthn-error-msg="browser">Your browser does not currently support WebAuthn.</div>
+		<div data-webauthn-error-msg="unknown">An unknown error occurred. Please retry.</div>
+		<div data-webauthn-error-msg="insecure">WebAuthn only supports secure connections. For testing over HTTP, you can use the origin "localhost" or "127.0.0.1"</div>
+		<div data-webauthn-error-msg="unable-to-process">The server could not process your request.</div>
+		<div data-webauthn-error-msg="duplicated">The security key is not permitted for this request. Please make sure that the key is not already registered.</div>
+		<div data-webauthn-error-msg="empty">You must set a name for this key.</div>
+		<div data-webauthn-error-msg="timeout">Timeout reached before your key could be read. Please reload this page and retry.</div>
+	</div>
+</div>
+		<div class="ui attached segment header top tw-max-w-2xl tw-m-auto tw-flex tw-flex-col tw-items-center">
+			<div class="field">
+				<a href="/user/forgot_password">Forgot password?</a>
+			</div>
+		</div>
+</div>
+		</div>
+	</div>
+</div>
+	</div>
+	<footer class="page-footer" role="group" aria-label="Footer">
+	<div class="left-links" role="contentinfo" aria-label="About this software">
+			<a target="_blank" rel="noopener noreferrer" href="https://forgejo.org">Powered by Forgejo</a>
+			Version:
+				17.0.0
+			Page: <strong>18ms</strong>
+			Template: <strong>13ms</strong>
+	</div>
+	<div class="right-links" role="group" aria-label="Links">
+		<div class="ui dropdown upward language">
+			<span class="flex-text-inline"><svg></svg> English</span>
+			<div class="menu language-menu">
+					<a lang="id-ID" data-url="/?lang=id-ID" class="item ">Bahasa Indonesia</a>
+					<a lang="da" data-url="/?lang=da" class="item ">Dansk</a>
+					<a lang="de-DE" data-url="/?lang=de-DE" class="item ">Deutsch</a>
+					<a lang="en-US" data-url="/?lang=en-US" class="item active selected">English</a>
+					<a lang="es-ES" data-url="/?lang=es-ES" class="item ">Español</a>
+					<a lang="eo" data-url="/?lang=eo" class="item ">Esperanto</a>
+					<a lang="fil" data-url="/?lang=fil" class="item ">Filipino</a>
+					<a lang="fr-FR" data-url="/?lang=fr-FR" class="item ">Français</a>
+					<a lang="it-IT" data-url="/?lang=it-IT" class="item ">Italiano</a>
+					<a lang="lv-LV" data-url="/?lang=lv-LV" class="item ">Latviešu</a>
+					<a lang="hu-HU" data-url="/?lang=hu-HU" class="item ">Magyar nyelv</a>
+					<a lang="nl-NL" data-url="/?lang=nl-NL" class="item ">Nederlands</a>
+					<a lang="nds" data-url="/?lang=nds" class="item ">Plattdüütsch</a>
+					<a lang="pl-PL" data-url="/?lang=pl-PL" class="item ">Polski</a>
+					<a lang="pt-PT" data-url="/?lang=pt-PT" class="item ">Português de Portugal</a>
+					<a lang="pt-BR" data-url="/?lang=pt-BR" class="item ">Português do Brasil</a>
+					<a lang="sl" data-url="/?lang=sl" class="item ">Slovenščina</a>
+					<a lang="fi-FI" data-url="/?lang=fi-FI" class="item ">Suomi</a>
+					<a lang="sv-SE" data-url="/?lang=sv-SE" class="item ">Svenska</a>
+					<a lang="tr-TR" data-url="/?lang=tr-TR" class="item ">Türkçe</a>
+					<a lang="cs-CZ" data-url="/?lang=cs-CZ" class="item ">Čeština</a>
+					<a lang="el-GR" data-url="/?lang=el-GR" class="item ">Ελληνικά</a>
+					<a lang="bg" data-url="/?lang=bg" class="item ">Български</a>
+					<a lang="ru-RU" data-url="/?lang=ru-RU" class="item ">Русский</a>
+					<a lang="uk-UA" data-url="/?lang=uk-UA" class="item ">Українська</a>
+					<a lang="fa-IR" data-url="/?lang=fa-IR" class="item ">فارسی</a>
+					<a lang="ja-JP" data-url="/?lang=ja-JP" class="item ">日本語</a>
+					<a lang="zh-CN" data-url="/?lang=zh-CN" class="item ">简体中文</a>
+					<a lang="zh-TW" data-url="/?lang=zh-TW" class="item ">繁體中文（台灣）</a>
+					<a lang="zh-HK" data-url="/?lang=zh-HK" class="item ">繁體中文（香港）</a>
+					<a lang="ko-KR" data-url="/?lang=ko-KR" class="item ">한국어</a>
+			</div>
+		</div>
+		<a href="/assets/licenses.txt">Licenses</a>
+		<a href="/api/swagger">API</a>
+	</div>
+</footer>
+</body>
+</html>

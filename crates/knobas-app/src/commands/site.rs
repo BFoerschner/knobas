@@ -11,6 +11,18 @@ use crate::IpcError;
 use crate::commands::app::Lifecycle;
 use crate::site::{self, SiteSetting};
 
+/// One source's setting after a write, the native rules and sign-ins
+/// brought in line.
+async fn setting<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &sqlx::PgPool,
+    id: &str,
+) -> Result<SiteSetting, IpcError> {
+    let sources = crate::sources::state(app).ok();
+    let reads = sources.as_ref().map(|state| site::SignInReads::of(state));
+    site::setting_of(pool, site::state(app).ok().as_ref(), reads, id).await
+}
+
 fn to_ipc(error: SiteError) -> IpcError {
     match error {
         SiteError::Invalid(message) => IpcError::invalid(message),
@@ -33,7 +45,9 @@ pub async fn site_settings<R: Runtime>(
 ) -> Result<Vec<SiteSetting>, IpcError> {
     let pool = lifecycle.pool()?;
     let sites = site::state(&app).ok();
-    site::settings_and_rules(&pool, sites.as_ref()).await
+    let sources = crate::sources::state(&app).ok();
+    let reads = sources.as_ref().map(|state| site::SignInReads::of(state));
+    site::settings_and_rules(&pool, sites.as_ref(), reads).await
 }
 
 /// *Open its pages inside knobas* for one source.
@@ -51,7 +65,7 @@ pub async fn set_site_open_inside<R: Runtime>(
     let pool = lifecycle.pool()?;
     site::set_open_inside(&pool, &id, on).await?;
     tracing::info!(source = %id, on, "a source's pages open inside knobas");
-    site::setting_of(&pool, site::state(&app).ok().as_ref(), &id).await
+    setting(&app, &pool, &id).await
 }
 
 /// Add an origin to the ones a site may show.
@@ -70,7 +84,7 @@ pub async fn site_allow<R: Runtime>(
     knobas_site::policy::Origin::parse(&origin).map_err(IpcError::invalid)?;
     let pool = lifecycle.pool()?;
     site::allow(&pool, &id, &origin, true).await?;
-    site::setting_of(&pool, site::state(&app).ok().as_ref(), &id).await
+    setting(&app, &pool, &id).await
 }
 
 /// Remove an allowed origin.
@@ -89,7 +103,7 @@ pub async fn site_disallow<R: Runtime>(
     knobas_site::policy::Origin::parse(&origin).map_err(IpcError::invalid)?;
     let pool = lifecycle.pool()?;
     site::allow(&pool, &id, &origin, false).await?;
-    site::setting_of(&pool, site::state(&app).ok().as_ref(), &id).await
+    setting(&app, &pool, &id).await
 }
 
 /// An *Open in ⟨source⟩* named an origin outside the site's and went to the
@@ -334,6 +348,63 @@ pub async fn set_sites_kept<R: Runtime>(
     Ok(kept)
 }
 
+/// Save or change the web sign-in typed into `id`'s site (ux29), in the
+/// source's keychain item. Nothing reads the password back to the page.
+///
+/// # Errors
+///
+/// `NotReady`; `Invalid` for an empty field or a source with no stored
+/// credential; `Internal` for the keychain.
+#[tauri::command]
+pub async fn site_sign_in_save<R: Runtime>(
+    app: AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    username: String,
+    password: String,
+) -> Result<SiteSetting, IpcError> {
+    let pool = lifecycle.pool()?;
+    let sources = crate::sources::state(&app)?;
+    site::write_sign_in(
+        &sources.secrets,
+        &id,
+        Some(knobas_secrets::WebSignIn { username, password }),
+    )
+    .await?;
+    tracing::info!(source = %id, "a site's sign-in saved");
+    setting(&app, &pool, &id).await
+}
+
+/// Remove `id`'s saved web sign-in.
+///
+/// # Errors
+///
+/// `NotReady`; `Internal` for the keychain.
+#[tauri::command]
+pub async fn site_sign_in_remove<R: Runtime>(
+    app: AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+) -> Result<SiteSetting, IpcError> {
+    let pool = lifecycle.pool()?;
+    let sources = crate::sources::state(&app)?;
+    site::write_sign_in(&sources.secrets, &id, None).await?;
+    tracing::info!(source = %id, "a site's sign-in removed");
+    setting(&app, &pool, &id).await
+}
+
+/// *Fill sign-in*: the saved sign-in into the site's page now, if it is on
+/// the source's own origin.
+///
+/// # Errors
+///
+/// `NotReady`; `NotFound` when the site is not open; `Invalid` when no
+/// sign-in is saved or the page is elsewhere.
+#[tauri::command]
+pub fn site_fill<R: Runtime>(app: AppHandle<R>, source: String) -> Result<(), IpcError> {
+    site::state(&app)?.press_fill(&source).map_err(to_ipc)
+}
+
 #[cfg(test)]
 mod tests {
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/site.ts");
@@ -342,7 +413,7 @@ mod tests {
     /// its registered name, and the mirror invokes no other.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("site", MIRROR, "app/src/lib/ipc/site.ts", 19);
+        crate::commands::mirror::assert_mirrors("site", MIRROR, "app/src/lib/ipc/site.ts", 22);
     }
 
     /// The keys each call sends are the command's arguments.
@@ -357,6 +428,9 @@ mod tests {
             ("site_forget", &["id", "force"]),
             ("set_site_open_inside", &["id", "on"]),
             ("site_reveal_download", &["id"]),
+            ("site_sign_in_save", &["id", "username", "password"]),
+            ("site_sign_in_remove", &["id"]),
+            ("site_fill", &["source"]),
         ] {
             assert_eq!(keys(invocation(MIRROR, command)), args, "{command}");
         }

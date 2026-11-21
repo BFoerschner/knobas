@@ -4,6 +4,7 @@
 //! - [`keys`]: the keys knobas takes from a site, and Esc twice.
 //! - [`state`]: one site's state, and how long sites live.
 //! - [`session`]: where a site keeps its session.
+//! - [`sign_in`]: a saved web sign-in, typed into the site's own form.
 //! - [`scripts`]: the only scripts knobas runs in a site.
 //! - [`host`]: what the controller asks of a platform.
 //! - [`sites`]: the controller, its commands and its events.
@@ -20,6 +21,7 @@ pub mod menu;
 pub mod policy;
 pub mod scripts;
 pub mod session;
+pub mod sign_in;
 pub mod sites;
 pub mod state;
 

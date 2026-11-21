@@ -206,6 +206,7 @@ async fn app_with(
                 kind: AuthMethod::ApiToken,
                 value: env.key.clone(),
                 account: Some(env.account.clone()),
+                web: None,
             },
         )
         .expect("the Kuma credential is stored");

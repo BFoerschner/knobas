@@ -49,3 +49,14 @@ Not defended against: a source's own page doing harm inside that source with his
 - A site's page never receives the chords knobas claims. ⌘K is among them.
 - The frozen surfaces grow by the site commands and events (contract §10.8). No existing command changes.
 - `CONTEXT.md` gains *Site*, *Site session* and *Allowed address*.
+
+## Amended 2026-11-21 (ux29): a saved web sign-in, filled into the site's own form
+
+Björn asked for a site to stay signed in across restarts and to sign itself in. Measured on the live products: Jira's and Confluence's `JSESSIONID`, Gitea's `i_like_gitea` and Forgejo's `session` carry no expiry, so they end with the site's browser process, and a server restart ends Jira's and Confluence's sessions on its own side too. What lasts is the product's own "remember me" cookie (`seraph.rememberme.cookie` for 14 days on Jira, `gitea_incredible` and Forgejo's `persistent` for 31), which Jira still accepted after its container restarted. So decisions §13 (b) is built, opt-in per source:
+
+- **Kept** in the source's keychain item beside its credential: the envelope's `v` goes to 3 with an optional `web` member, written only when one is saved (an item without one stays v2, byte for byte). Re-entering the credential keeps it, deleting the source removes it. Never in the database, a log line or a backup. Settings shows the username alone.
+- **Filled** only into a page whose top-level origin is exactly the source's own, checked natively at that moment against both the committed address and the view's own (`knobas_site::sign_in::may_fill`): never on an allowed address, never in a redirect. On *Fill sign-in* in the site's bar, and by itself once a page loads at a sign-in path the adapter declares (the descriptor's new optional `web_sign_in`: `/login.jsp`, `/login.action`, `/user/login`, `/login.html`), or on any page of the own origin for one that declares `any_page` (Uptime Kuma's dialog). The script ticks the form's "remember me", so the product keeps the session past its own restarts and knobas's.
+- **One try.** A sign-in form still on the page after a fill means the site did not take it: the bar says so and nothing is filled by itself until a press. A one-time code is never typed, and a provider's page (an allowed origin) is the provider's.
+- **Quitting** drops every view and then waits up to 3 s for each site's browser process to end on Windows, which is when Chromium writes its cookie store (it commits only every 30 s before).
+
+The exposure the original text names stands: a page on the source's own origin that imitates its form receives the password, as it would from a browser's password manager.

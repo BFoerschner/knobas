@@ -1425,7 +1425,19 @@ url_forms: Array<UrlForm>,
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as a source with no code pages: *Browser* is then not offered.
  */
-code_pages?: CodePages, };
+code_pages?: CodePages, 
+/**
+ * Where the source's own website shows its sign-in form (ADR-0050,
+ * ux29, [`web_sign_in`]): a saved web sign-in is filled there by itself
+ * once per landing. [`web_sign_in::check`] holds it to its rules
+ * (contract battery clause 15). Read on the Rust side; the shell never
+ * does.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this --
+ * an external adapter's JSON among them -- decodes as a source whose
+ * saved sign-in is filled on a press alone.
+ */
+web_sign_in?: WebSignInPages, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -1981,6 +1993,20 @@ fields: Array<PayloadPath>, };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type WaitReason = "unreachable" | "unauthorized";
+
+/**
+ * Where the site shows its sign-in form.
+ */
+export type WebSignInPages = { 
+/**
+ * Paths after the base URL, each starting with `/`, with no query, no
+ * fragment and no `.` or `..` segment.
+ */
+paths: Array<string>, 
+/**
+ * The form can stand on any page of the site's own origin.
+ */
+any_page: boolean, };
 
 /**
  * Where a ticket's **worklog** is, and what each entry says (#2403): who

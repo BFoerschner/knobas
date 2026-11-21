@@ -43,6 +43,7 @@ pub mod tree;
 pub mod url_forms;
 pub mod view;
 pub mod watermark;
+pub mod web_sign_in;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
 /// the one a descriptor without [`SourceDescriptor::min_sync_interval_secs`]
@@ -244,6 +245,18 @@ pub struct SourceDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub code_pages: Option<code_pages::CodePages>,
+    /// Where the source's own website shows its sign-in form (ADR-0050,
+    /// ux29, [`web_sign_in`]): a saved web sign-in is filled there by itself
+    /// once per landing. [`web_sign_in::check`] holds it to its rules
+    /// (contract battery clause 16). Read on the Rust side; the shell never
+    /// does.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this --
+    /// an external adapter's JSON among them -- decodes as a source whose
+    /// saved sign-in is filled on a press alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_sign_in: Option<web_sign_in::WebSignInPages>,
 }
 
 impl SourceDescriptor {
@@ -2831,6 +2844,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
@@ -2888,6 +2902,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             ..a_descriptor()
         };

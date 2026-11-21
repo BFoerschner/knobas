@@ -13,7 +13,7 @@ use raw_window_handle::HasWindowHandle;
 use wry::{NewWindowResponse, PageLoadEvent, WebContext, WebView, WebViewBuilder};
 
 use crate::host::{Hooks, HostError, LeaveFreely, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
-use crate::scripts::{DIRTY_PROBE, Dirty};
+use crate::scripts::{DIRTY_PROBE, Dirty, SignInCall, fill_sign_in};
 
 /// knobas's main window, and how to give its own web view the keyboard.
 pub struct WryHost<W: HasWindowHandle + 'static> {
@@ -30,6 +30,25 @@ impl<W: HasWindowHandle + 'static> WryHost<W> {
             window,
             focus_shell,
         }
+    }
+}
+
+/// `bounds`, measured in knobas's page, in the content view wry places a
+/// child in. On the Mac the page may start below the content view's top.
+fn placed(view: &WebView, bounds: Rect) -> wry::Rect {
+    #[cfg(target_os = "macos")]
+    {
+        let down = crate::mac::under_title(view);
+        wry_rect(Rect {
+            y: bounds.y + down,
+            height: (bounds.height - down).max(1.0),
+            ..bounds
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = view;
+        wry_rect(bounds)
     }
 }
 
@@ -130,6 +149,7 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
             "site view built"
         );
         let _ = view.zoom(spec.zoom);
+        let _ = view.set_bounds(placed(&view, spec.bounds));
         let leaving = LeaveFreely::default();
         #[cfg(target_os = "macos")]
         let mac = crate::mac::wrap(&view, &spec.source, &hooks, &leaving);
@@ -148,6 +168,14 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
 
     fn focus_shell(&self) {
         (self.focus_shell)();
+    }
+
+    fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
+        #[cfg(windows)]
+        crate::win::wait_for_exit(processes, deadline);
+        #[cfg(target_os = "macos")]
+        crate::mac::flush(deadline);
+        let _ = (processes, deadline);
     }
 
     fn forget(&self, spec: &ViewSpec) -> bool {
@@ -174,7 +202,7 @@ impl SiteView for WryView {
     }
 
     fn set_bounds(&self, bounds: Rect) {
-        let _ = self.view.set_bounds(wry_rect(bounds));
+        let _ = self.view.set_bounds(placed(&self.view, bounds));
     }
 
     fn set_visible(&self, visible: bool) {
@@ -232,6 +260,28 @@ impl SiteView for WryView {
         }
     }
 
+    fn url(&self) -> Option<String> {
+        self.view.url().ok().filter(|url| !url.is_empty())
+    }
+
+    fn sign_in(&self, call: &SignInCall, answer: Box<dyn FnOnce(String) + Send>) {
+        let answer = std::sync::Mutex::new(Some(answer));
+        // The script carries the password: it is built here, handed to the
+        // engine, and dropped; nothing logs it (wry's own span is the name
+        // `wry::eval` alone).
+        let asked =
+            self.view
+                .evaluate_script_with_callback(fill_sign_in(call).as_str(), move |text| {
+                    let taken = answer.lock().ok().and_then(|mut slot| slot.take());
+                    if let Some(answer) = taken {
+                        answer(text);
+                    }
+                });
+        if let Err(error) = asked {
+            tracing::debug!(%error, "a site's page could not be asked to sign in");
+        }
+    }
+
     fn sleep(&self, asleep: bool) {
         #[cfg(windows)]
         crate::win::sleep(&self.view, asleep);
@@ -253,6 +303,17 @@ impl SiteView for WryView {
     fn window_moved(&self) {
         #[cfg(windows)]
         crate::win::moved(&self.view);
+    }
+
+    fn browser_process(&self) -> Option<u32> {
+        #[cfg(windows)]
+        {
+            crate::win::browser_process(&self.view)
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
     }
 
     fn leave_freely(&self) {

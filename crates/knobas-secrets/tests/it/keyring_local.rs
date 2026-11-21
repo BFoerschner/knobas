@@ -62,6 +62,7 @@ fn the_keyring_store_honours_the_store_contract() {
                     username: "knobas".into(),
                     password: "knobas-dev".into(),
                 }),
+                web: None,
             },
         )
         .unwrap();

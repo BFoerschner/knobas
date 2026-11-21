@@ -26,6 +26,7 @@ const SETTING: SiteSetting = {
   kept_since: null,
   offered: true,
   persists: true,
+  sign_in_user: null,
 };
 
 function status(over: Partial<SiteStatus> = {}): SiteStatus {
@@ -43,6 +44,7 @@ function status(over: Partial<SiteStatus> = {}): SiteStatus {
     asks_origin: null,
     failure: null,
     esc_again_ms: 500,
+    fill: false,
     ...over,
   };
 }

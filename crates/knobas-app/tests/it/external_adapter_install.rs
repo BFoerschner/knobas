@@ -634,6 +634,7 @@ async fn the_fixture_s_custom_role_opens_its_block_view() {
             kind: knobas_source::AuthMethod::Pat,
             value: "a token".to_owned(),
             account: None,
+            web: None,
         },
     )
     .await

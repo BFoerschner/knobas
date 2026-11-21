@@ -668,6 +668,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: vec![crate::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             write_ops: vec![],
             entity_kinds: ["repo", "branch", "pr", "commit"].map(kind).to_vec(),

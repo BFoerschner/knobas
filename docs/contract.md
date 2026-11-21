@@ -71,6 +71,8 @@ account = "source:<source_id>"            e.g. "source:jira", "source:jira-eu"
 value   = {"v":1,"kind":"pat","secret":"…"}   JSON envelope
 ```
 
+*Amended (ux29, ADR-0050):* the envelope is read at versions 1, 2 and 3. Version 2 (#452) carries Uptime Kuma's optional `account`; version 3 carries an optional `web` (`{"username":…,"password":…}`), a site's saved web sign-in, and is written only when one is saved, so an item without one keeps the v2 bytes an older build reads.
+
 Rationale: one item per source (not per auth method) means changing PAT → password rewrites in place instead of orphaning an item; the envelope's `kind`/`v` leave room for OAuth (access + refresh + expiry) without a naming change (§3 "OAuth later"); a dev-suffixed service keeps `just dev` off the real credentials, and gotcha 10 (unsigned dev builds re-prompt every run) is then at least survivable.
 
 **One exception: a debug build on the demo profile** keeps its credentials in `<demo profile dir>/dev-secrets.json` (mode 0600, same envelope, one key per account) through `knobas_secrets::FileStore`, not the keychain (#2384). The `knobas-dev` certificate has no Apple team ID, so macOS partitions a dev build's keychain items by the writer's cdhash and every rebuild prompted once per item. `FileStore` is compiled only under `debug_assertions`, the demo profile holds testenv credentials only, and `sources::secret_store` is the one place that picks it (`uses_dev_secret_file`, pinned by test). Release builds and the user's own profile, debug or release, keep the keychain.

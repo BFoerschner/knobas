@@ -21,12 +21,16 @@ use ts_rs::TS;
 use crate::host::{Hooks, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
 use crate::keys::{Claim, KeyName, Keyboard, Platform, Press};
 use crate::policy::{Decision, Origin, Refusal, SiteRules, decide, download_name};
-use crate::scripts::Dirty;
+use crate::scripts::{Dirty, FillMode, SignInCall};
 use crate::session;
+use crate::sign_in::{FillAct, FillAnswer, SignInRule, is_sign_in_page, may_fill};
 use crate::state::{
     KEPT_DEFAULT, KEPT_MAX, KEPT_MIN, Liveness, Site, SiteKeyboard, SitePhase, SiteStatus, choose,
     idle, room, sleepers,
 };
+
+/// How long quitting waits, at most, for the sites' sessions to be written.
+pub const QUIT_FLUSH: Duration = Duration::from_secs(3);
 
 /// How long a page has to answer [`crate::scripts::DIRTY_PROBE`].
 pub const PROBE_TIMEOUT: Duration = Duration::from_millis(300);
@@ -235,6 +239,11 @@ pub trait Shell: Send + Sync + 'static {
     /// A page on `source`'s own address committed for the first time in
     /// this view: its sign-in is kept from now (*Kept since*).
     fn landed(&self, source: &str);
+    /// `source`'s site wants its saved web sign-in typed in (ux29): read it
+    /// from the keychain item and hand it to [`Sites::fill_with`], or call
+    /// [`Sites::fill_none`] when there is none. Never from inside the
+    /// caller's own call.
+    fn sign_in(&self, source: &str);
 }
 
 /// The fixed parts of the controller.
@@ -282,6 +291,9 @@ struct Book {
     sent: HashMap<String, SiteStatus>,
     /// The site that held the keyboard when the window lost focus.
     keyboard_on_blur: Option<String>,
+    /// Where each source's site asks for a sign-in, and whether one is
+    /// saved (ux29).
+    sign_ins: HashMap<String, SignInRule>,
 }
 
 thread_local! {
@@ -363,6 +375,33 @@ impl Sites {
     /// it is closed.
     pub fn set_rules(&self, rules: HashMap<String, SiteRules>) {
         self.book().rules = rules;
+    }
+
+    /// Where each source's site asks for a sign-in and whether one is saved
+    /// (ux29). A site whose saved sign-in came or went is armed again.
+    pub fn set_sign_ins(&self, sign_ins: HashMap<String, SignInRule>) {
+        let changed: Vec<String> = {
+            let mut book = self.book();
+            let mut changed = Vec::new();
+            for site in book.sites.values() {
+                let saved = sign_ins.get(&site.source).is_some_and(|rule| rule.saved);
+                if saved != site.sign_in_saved {
+                    changed.push(site.source.clone());
+                }
+            }
+            for source in &changed {
+                let saved = sign_ins.get(source).is_some_and(|rule| rule.saved);
+                if let Some(site) = book.sites.get_mut(source) {
+                    site.sign_in_saved = saved;
+                    site.filler.rearm();
+                }
+            }
+            book.sign_ins = sign_ins;
+            changed
+        };
+        for source in changed {
+            self.sync_later(&source);
+        }
     }
 
     /// The rules of `source`, when its pages open inside knobas.
@@ -582,8 +621,9 @@ impl Sites {
         let now = self.now();
         {
             let mut book = self.book();
-            book.sites
-                .insert(source.to_owned(), Site::opening(source, &target, now));
+            let mut site = Site::opening(source, &target, now);
+            site.sign_in_saved = book.sign_ins.get(source).is_some_and(|rule| rule.saved);
+            book.sites.insert(source.to_owned(), site);
             let platform = self.inner.config.platform;
             book.keyboards
                 .insert(source.to_owned(), Keyboard::new(platform));
@@ -795,9 +835,12 @@ impl Sites {
     fn event(&self, source: &str, event: ViewEvent) {
         let mut ended = false;
         let mut landed = false;
+        let mut fill = None;
+        let now = self.now();
         {
             let mut book = self.book();
             let rules = book.rules.get(source).cloned();
+            let sign_in = book.sign_ins.get(source).cloned().unwrap_or_default();
             let Some(site) = book.sites.get_mut(source) else {
                 return;
             };
@@ -807,6 +850,7 @@ impl Sites {
                         site.commit(&url, rules);
                     }
                     site.loading = true;
+                    site.filler.moved_on();
                     if site.own && !site.landed_own {
                         site.landed_own = true;
                         landed = true;
@@ -816,6 +860,10 @@ impl Sites {
                     site.loading = false;
                     if let Some(rules) = &rules {
                         site.moved(&url, rules);
+                        if site.own && site.phase == SitePhase::Live {
+                            let page = is_sign_in_page(&rules.base, &sign_in, &url);
+                            fill = site.filler.loaded(page, site.sign_in_saved, now);
+                        }
                     }
                 }
                 ViewEvent::Title(raw) => site.titled(&raw),
@@ -873,6 +921,154 @@ impl Sites {
         }
         if landed {
             self.shell().landed(source);
+        }
+        if let Some(act) = fill {
+            self.fill_act(source, act);
+        }
+        self.sync_later(source);
+    }
+
+    /// Do what the one-try rule asked: fetch the saved sign-in for a fill
+    /// (through the shell, later), or look for the form now.
+    fn fill_act(&self, source: &str, act: FillAct) {
+        match act {
+            FillAct::Fill { auto } => {
+                tracing::info!(source, auto, "site sign-in asked for");
+                let shell = Arc::clone(self.shell());
+                let source = source.to_owned();
+                self.shell().later(Box::new(move || shell.sign_in(&source)));
+            }
+            FillAct::Look => {
+                let this = self.clone();
+                let source = source.to_owned();
+                self.shell()
+                    .later(Box::new(move || this.run_fill(&source, SignInCall::look())));
+            }
+        }
+    }
+
+    /// *Fill sign-in*: the saved sign-in into the page now.
+    ///
+    /// # Errors
+    ///
+    /// [`SiteError::NotOpen`]; [`SiteError::Invalid`] when no sign-in is
+    /// saved or the page is not on the source's own origin.
+    pub fn press_fill(&self, source: &str) -> Result<(), SiteError> {
+        let now = self.now();
+        let act = {
+            let mut book = self.book();
+            let site = book.sites.get_mut(source).ok_or(SiteError::NotOpen)?;
+            if !site.sign_in_saved {
+                return Err(SiteError::Invalid(
+                    "no sign-in is saved for this site".into(),
+                ));
+            }
+            if !site.own {
+                return Err(SiteError::Invalid(
+                    "the saved sign-in goes only into the source's own page".into(),
+                ));
+            }
+            site.filler.press(now)
+        };
+        self.fill_act(source, act);
+        self.sync_later(source);
+        Ok(())
+    }
+
+    /// The saved sign-in the shell read for `source`: typed into the page
+    /// if, at this moment, the view's own address is on the source's own
+    /// origin. Neither value is kept or logged.
+    pub fn fill_with(&self, source: &str, username: String, password: String) {
+        let this = self.clone();
+        let source = source.to_owned();
+        self.shell().on_main(Box::new(move || {
+            this.run_fill(
+                &source,
+                SignInCall {
+                    username,
+                    password,
+                    mode: FillMode::Fill,
+                },
+            );
+        }));
+    }
+
+    /// The shell found no saved sign-in for `source`.
+    pub fn fill_none(&self, source: &str) {
+        {
+            let mut book = self.book();
+            if let Some(rule) = book.sign_ins.get_mut(source) {
+                rule.saved = false;
+            }
+            if let Some(site) = book.sites.get_mut(source) {
+                site.sign_in_saved = false;
+                site.filler.refused();
+            }
+        }
+        tracing::info!(source, "site sign-in: none saved");
+        self.sync_later(source);
+    }
+
+    /// Run the fill script in `source`'s view, after the native origin
+    /// check. On the main thread.
+    fn run_fill(&self, source: &str, call: SignInCall) {
+        let mode = call.mode;
+        let Some(view) = view(source) else {
+            if let Some(site) = self.book().sites.get_mut(source) {
+                site.filler.refused();
+            }
+            return;
+        };
+        let live = view.url();
+        let checked = {
+            let book = self.book();
+            match (book.rules.get(source), book.sites.get(source)) {
+                (Some(rules), Some(site)) => may_fill(
+                    rules,
+                    site.sign_in_saved || mode == FillMode::Look,
+                    site.url.as_deref(),
+                    live.as_deref(),
+                ),
+                _ => return,
+            }
+        };
+        if let Err(why) = checked {
+            tracing::info!(source, why = ?why, mode = ?mode, "site sign-in refused");
+            if let Some(site) = self.book().sites.get_mut(source) {
+                match mode {
+                    FillMode::Fill => site.filler.refused(),
+                    FillMode::Look => site.filler.judged(FillAnswer::Odd),
+                }
+            }
+            self.sync_later(source);
+            return;
+        }
+        let this = self.clone();
+        let owned = source.to_owned();
+        view.sign_in(
+            &call,
+            Box::new(move |text| this.filled(&owned, mode, &text)),
+        );
+    }
+
+    /// The fill script answered.
+    fn filled(&self, source: &str, mode: FillMode, text: &str) {
+        let answer = FillAnswer::from_answer(text);
+        let now = self.now();
+        let more = {
+            let mut book = self.book();
+            let Some(site) = book.sites.get_mut(source) else {
+                return;
+            };
+            match mode {
+                FillMode::Fill => site.filler.answered(answer, now),
+                FillMode::Look => site.filler.judged(answer),
+            }
+            site.filler.tick(now)
+        };
+        tracing::info!(source, mode = ?mode, answer = ?answer, "site sign-in answered");
+        if let Some(act) = more {
+            self.fill_act(source, act);
         }
         self.sync_later(source);
     }
@@ -1323,6 +1519,7 @@ impl Sites {
     /// shown site's address is read (a `pushState` raises no event).
     pub async fn tick(&self) {
         let now = self.now();
+        let mut fills: Vec<(String, FillAct)> = Vec::new();
         let (changed, asleep, idle_ones, poll): (
             Vec<String>,
             Vec<String>,
@@ -1334,6 +1531,9 @@ impl Sites {
             for site in book.sites.values_mut() {
                 if site.tick(now) {
                     changed.push(site.source.clone());
+                }
+                if let Some(act) = site.filler.tick(now) {
+                    fills.push((site.source.clone(), act));
                 }
             }
             let asleep: Vec<String> = sleepers(book.sites.values(), now)
@@ -1357,6 +1557,9 @@ impl Sites {
                 .collect();
             (changed, asleep, idle_ones, poll)
         };
+        for (source, act) in fills {
+            self.fill_act(&source, act);
+        }
         let this = self.clone();
         self.shell().on_main(Box::new(move || {
             for source in &asleep {
@@ -1414,11 +1617,27 @@ impl Sites {
         }
     }
 
-    /// Drop every view. On the main thread, before the database stops.
+    /// Drop every view, then wait at most [`QUIT_FLUSH`] for the sites'
+    /// sessions to be written, so a sign-in made a moment before quitting
+    /// is there at the next start (ux29). On the main thread, before the
+    /// database stops.
     pub fn shutdown(&self) {
         let views = VIEWS.with(|views| std::mem::take(&mut *views.borrow_mut()));
+        let alive = !views.is_empty();
+        let processes: Vec<u32> = views
+            .values()
+            .filter_map(|view| view.browser_process())
+            .collect();
         drop(views);
         self.book().sites.clear();
+        if alive && let Some(host) = host() {
+            let started = std::time::Instant::now();
+            host.flush(&processes, started + QUIT_FLUSH);
+            tracing::info!(
+                ms = started.elapsed().as_secs_f64() * 1000.0,
+                "site sessions written"
+            );
+        }
     }
 }
 

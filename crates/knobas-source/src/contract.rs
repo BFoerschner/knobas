@@ -536,6 +536,13 @@ where
     //     and an edit of a field the answer does not offer refused before
     //     anything is sent, and every searched field's list answered.
     check_ticket_fields(&*s, &d, &sink.0).await;
+    // 16. The web sign-in's pages (ADR-0050): paths after the base URL, each
+    //     starting with `/` -- see `web_sign_in::check`.
+    if let Some(pages) = &d.web_sign_in
+        && let Err(error) = crate::web_sign_in::check(pages)
+    {
+        panic!("descriptor.web_sign_in: {error}");
+    }
 }
 
 /// The most tickets clause 15 asks about: its reads are safe against a live
@@ -2409,6 +2416,7 @@ mod tests {
                     _ => Vec::new(),
                 },
                 url_forms: Vec::new(),
+                web_sign_in: None,
                 code_pages: None,
                 entity_kinds: {
                     let kind = |id: &str, label: &str, monogram: &str| KindInfo {

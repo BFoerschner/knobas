@@ -41,6 +41,7 @@ impl Source for Tickets {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {

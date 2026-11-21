@@ -96,6 +96,37 @@ pub fn forget(id: [u8; 16]) {
     });
 }
 
+/// Quitting: the sites' cookies to disk. WebKit's network process keeps
+/// them and writes them itself (measured, ux29); nothing to wait for here.
+pub fn flush(deadline: std::time::Instant) {
+    let _ = deadline;
+}
+
+/// How far knobas's own page starts down the window's content view: on a
+/// window whose content view runs under its title bar (measured on macOS 27:
+/// a 900-point content view, a 868-point page 32 points down), the title
+/// bar's height; else 0. The site's rectangle is measured in the page, so it
+/// moves down by this and loses it from its height (ux29: before, a site
+/// covered its own bar).
+pub fn under_title(view: &WebView) -> f64 {
+    let webview = view.webview();
+    // SAFETY: `window`, `contentView`, `frame` and `contentLayoutRect` are
+    // plain AppKit reads on the main thread.
+    unsafe {
+        let window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>> =
+            msg_send![&*webview, window];
+        let Some(window) = window else {
+            return 0.0;
+        };
+        let Some(content) = window.contentView() else {
+            return 0.0;
+        };
+        let full = content.frame().size.height;
+        let layout = window.contentLayoutRect().size.height;
+        (full - layout).max(0.0)
+    }
+}
+
 /// Back, forward, stop.
 pub enum Go {
     Back,

@@ -7412,6 +7412,7 @@ mod tests {
                         username: "marker".to_owned(),
                         password: "marker".to_owned(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

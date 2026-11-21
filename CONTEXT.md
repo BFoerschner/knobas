@@ -484,6 +484,10 @@ _Avoid_: profile (the demo or the real knobas), login (knobas's own to a source)
 An origin a [site](#site) may show besides its source's own: a sign-in host the person said yes to when the site was sent there, or a second address of the same system. Per source, listed in Settings, never taken from a mirrored record. An address outside the list opens the browser.
 _Avoid_: whitelist, trusted site, base URL (the source's own, which is always allowed)
 
+**Web sign-in**:
+A username and password saved for a [site](#site), kept in its source's keychain item beside the credential and typed into the site's own sign-in form: on *Fill sign-in*, and by itself once a page loads where the adapter says its sign-in form is. Only on the source's own origin, with "remember me" ticked; never a one-time code, never a provider's page. Settings shows the username alone (ADR-0050, ux29).
+_Avoid_: account (Uptime Kuma's second API credential), saved password (says where, not what), auto-login
+
 **Update**:
 A newer knobas than the one running, offered on Settings › Updates and marked by a dot on the Settings cog. knobas
 finds it in its own GitHub releases, downloads it on a press, checks it against its own signing keys, backs up, and

@@ -5,7 +5,7 @@
  * Closing, reloading and pointing the site elsewhere ask the page first (Rust's probe); when it objects, the bar asks
  * in its row ({@link SiteQuestion}) and the keyboard comes to knobas, onto the answer that keeps the page.
  */
-import { siteClose, siteDo, siteOpen, type SiteAsked } from "../../ipc/site";
+import { siteClose, siteDo, siteFill, siteOpen, type SiteAsked } from "../../ipc/site";
 import { measureShown } from "./shown";
 import { siteStore, type SiteQuestion, type SiteStore } from "./site.svelte";
 
@@ -14,12 +14,15 @@ export interface SiteActionPorts {
   close: (source: string, force: boolean) => Promise<SiteAsked>;
   act: (source: string, act: "back" | "forward" | "reload" | "stop" | "focus" | "focus-shell", force: boolean) => Promise<SiteAsked>;
   open: (source: string, url: string, force: boolean) => Promise<SiteAsked>;
+  /** *Fill sign-in* (ux29). */
+  fill?: (source: string) => Promise<void>;
 }
 
 export const BRIDGE_ACTIONS: SiteActionPorts = {
   close: (source, force) => siteClose(source, force),
   act: (source, act, force) => siteDo(source, act, force),
   open: (source, url, force) => siteOpen(source, url, measureShown(), force),
+  fill: (source) => siteFill(source),
 };
 
 function asked(store: SiteStore, source: string, answer: SiteAsked, question: SiteQuestion, ports: SiteActionPorts): void {
