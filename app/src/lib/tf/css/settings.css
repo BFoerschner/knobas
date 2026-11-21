@@ -444,3 +444,55 @@ button.tf-thm-sw { cursor: pointer; }
   --diff-add: var(--ok-bg); --diff-del: var(--err-bg);
   color-scheme: dark;
 }
+/* ---------- Settings › Updates (ADR-0052; design system, *The update box*) ---------- */
+/* One box, the same rooms in every state: only its words, the track's fill and the two buttons' words change. */
+.tf-upd {
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); padding: 14px 16px 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 0.9fr) minmax(0, 1fr); column-gap: 18px;
+}
+.tf-upd-end { display: flex; flex-direction: column; min-width: 0; }
+.tf-upd-end.tf-upd-new { text-align: right; align-items: flex-end; }
+.tf-upd-lab, .tf-upd-sub { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* A version is an identifier, as a ticket's key is: the code face, at the page's large step. */
+.tf-upd-v {
+  --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; line-height: 28px; height: 28px; letter-spacing: -.01em; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.tf-upd-v.tf-quiet { color: var(--ink-2); font-weight: 400; }
+/* The way: empty when there is nowhere to go, an outline with an arrowhead when there is, filling while the download
+   runs, whole when it is checked. */
+.tf-upd-way { display: flex; flex-direction: column; padding-top: 30px; min-width: 0; }
+.tf-upd-track { position: relative; height: 4px; border-radius: 2px; background: var(--rule-2); }
+.tf-upd-track > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--info); }
+.tf-upd-track.tf-go::after { content: ""; position: absolute; right: -1px; top: -3px; border-left: 6px solid var(--rule); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+.tf-upd-track.tf-go.tf-full::after { border-left-color: var(--info); }
+.tf-upd-track.tf-bad > i { background: var(--err); }
+.tf-upd-n { margin-top: 6px; text-align: center; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); line-height: 18px; height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf .tf-upd-n.tf-ok { color: var(--ok); }
+.tf .tf-upd-n.tf-err { color: var(--err); }
+/* What it says: two lines' room, always. */
+.tf-upd-says {
+  grid-column: 1 / -1; margin: 12px 0 0; padding-top: 11px; border-top: 1px solid var(--rule-2);
+  font-size: calc(var(--t-sm) * var(--fs)); line-height: 19px; min-height: calc(11px + 38px); color: var(--ink);
+}
+.tf .tf-upd-says.tf-err { color: var(--err); }
+/* Two slots at the right: the first is "not now" in every state, the second the step forward. Each holds every word it
+   ever says in one grid cell, the others hidden, so it is as wide as its longest word at the fonts in use. */
+.tf-upd-acts { grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; gap: var(--control-gap); margin-top: 8px; height: var(--control-h); }
+.tf-upd-acts .tf-btn.tf-unseen { visibility: hidden; }
+.tf-upd-words { display: inline-grid; }
+.tf-upd-words > span { grid-area: 1 / 1; text-align: center; }
+.tf-upd-words > .tf-upd-off { visibility: hidden; }
+.tf-upd-rest { margin-right: auto; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-upd-rest a, .tf-upd-h2 a { color: var(--ink); text-underline-offset: 2px; }
+.tf-upd-first { margin-top: 14px; }
+/* The channel's line: one room for either choice's words, the longer's three lines. */
+.tf-upd-chan { flex-basis: 100%; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.4; color: var(--ink-2); min-height: calc(3 * 1.4em); margin-top: 2px; }
+.tf .tf-upd-chan.tf-warn { color: var(--warn); }
+.tf-upd-h2 { display: flex; align-items: baseline; gap: 12px; }
+.tf-upd-h2 a { margin-left: auto; font-family: var(--sans); font-weight: 400; font-size: calc(var(--t-sm) * var(--fs)); font-variation-settings: normal; font-stretch: normal; }
+/* The notes: a room of one height, scrolled inside, so a long release never grows the page. */
+.tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: 250px; overflow: auto; padding: 12px 16px; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }
+.tf-upd-lost { margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
+.tf-upd-lost li { padding: 7px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }

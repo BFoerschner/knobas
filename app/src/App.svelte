@@ -33,6 +33,7 @@
   import { foregroundOf } from "./lib/tf/foreground";
   import { parseTfHash, sectionHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
+  import { updates } from "./lib/tf/update.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
   import { readerDay } from "./lib/time/day";
@@ -230,6 +231,9 @@
       }
       bridgeReady = true;
       if (disposed) return;
+      // The updater needs no database (ADR-0052): its state is read now, so the start screen's line and the cog's dot
+      // are right from their first frame.
+      stops.push(updates.start());
       // The answer cache (the instant-open pass, 2026-11-12, `ipc/answer-cache.ts`), in front of the bridge before anything
       // reads, and its ears first, so a run's end drops what it changed before a page that hears it reads again.
       // Guarded: nothing here may stop the lifecycle below from starting. v3.2.9-ux7 assigned to Tauri's read-only
@@ -455,5 +459,6 @@
     version={lifecycle.status?.app_version ?? ""}
     demo={lifecycle.status?.demo ?? false}
     onretry={() => void onRetry()}
+    update={updates}
   />
 {/if}

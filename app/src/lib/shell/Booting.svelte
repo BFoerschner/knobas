@@ -9,21 +9,47 @@
   No spinner. A spinner is the same picture for "downloading 60 MB" and "wedged
   on a port that is already taken", and the difference between those is the
   only thing worth showing here.
+
+  When the database cannot start, one line under *Retry* offers a newer knobas (ADR-0052, decisions D14): the updater
+  needs no database, so a pre-release build whose migration fails can still be replaced. Its room is kept whether or not
+  there is an offer. *Download and restart* downloads, checks and installs in one go, saying each step in the line.
 -->
 <script lang="ts">
   import type { DbState } from "../ipc/app";
+  import type { Updates } from "../tf/update.svelte";
+  import { bootLine, bootStep } from "../tf/settings/updates";
 
   let {
     db,
     version,
     demo,
     onretry,
+    update = null,
   }: {
     db: DbState;
     version: string;
     demo: boolean;
     onretry: () => void;
+    /** The updater, for the line that offers a newer knobas when the database cannot start. */
+    update?: Pick<Updates, "state" | "check" | "download" | "install"> | null;
   } = $props();
+
+  const line = $derived(bootLine(update?.state ?? null));
+  /** Pressed *Download and restart*: the download's end installs at once. */
+  let going = $state(false);
+  const step = $derived(going && update?.state ? bootStep(update.state.phase) : null);
+
+  $effect(() => {
+    if (going && update?.state?.phase.phase === "ready") void update.install();
+  });
+
+  async function press() {
+    if (update === null || line === null) return;
+    if (line.does === "check") return void update.check();
+    going = true;
+    if (update.state?.phase.phase === "ready") await update.install();
+    else await update.download();
+  }
 
   /** The line under the heading, or `null` when there is nothing true to say. */
   const detail = $derived(db.state === "starting" ? db.detail : null);
@@ -38,6 +64,12 @@
       <p>knobas {version} · profile {demo ? "demo" : "default"}</p>
       <div class="acts">
         <button class="tf-btn tf-primary" onclick={onretry}>Retry</button>
+      </div>
+      <div class="boot-upd" data-testid="boot-update">
+        {#if line !== null}
+          <span>{step ?? line.text}</span>
+          <button class="tf-btn" disabled={going && step !== null && !step.startsWith("Not installed")} onclick={() => void press()}>{line.button}</button>
+        {/if}
       </div>
     {:else if db.state === "migrating"}
       <h1>Bringing the schema up to date</h1>
@@ -119,7 +151,24 @@
     gap: var(--control-gap);
   }
 
-  .acts :focus-visible {
+  /* The update's line: its room is kept, offer or none, so Retry never moves (ADR-0052). */
+  .boot-upd {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    min-height: 45px;
+  }
+
+  .boot-upd span {
+    flex: 1;
+    font-size: calc(var(--t-sm) * var(--fs));
+    color: var(--ink);
+  }
+
+  .acts :focus-visible, .boot-upd :focus-visible {
     outline: var(--focus-w) solid var(--focus);
     outline-offset: var(--focus-off);
   }

@@ -22,8 +22,17 @@ export interface Drafts<T> {
   reset(): void;
 }
 
+/** Every store {@link createDrafts} made, for {@link draftCount}. */
+const stores: SvelteMap<string, unknown>[] = [];
+
+/** How many drafts the window holds, in every store: what a restart for an update would lose (ADR-0052). */
+export function draftCount(): number {
+  return stores.reduce((count, held) => count + held.size, 0);
+}
+
 export function createDrafts<T>(): Drafts<T> {
   const held = new SvelteMap<string, T>();
+  stores.push(held);
   return {
     held: (key) => held.get(key),
     has: (key) => held.has(key),

@@ -63,6 +63,9 @@
   import TfTimeSection from "./TfTimeSection.svelte";
   import TfPerformanceSection from "./TfPerformanceSection.svelte";
   import TfRenderersSection from "./TfRenderersSection.svelte";
+  import TfUpdatesSection from "./TfUpdatesSection.svelte";
+  import { updates } from "../update.svelte";
+  import { marked } from "./updates";
 
   let {
     rest,
@@ -264,6 +267,8 @@
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
           {:else if key === "sources" && anyDraft}
             <span class="tf-dot tf-warn" role="img" aria-label="A source has changes not saved" title="A source has changes not saved"></span>
+          {:else if key === "updates" && marked(updates.state)}
+            <span class="tf-dot tf-info" role="img" aria-label="An update is waiting" title="An update is waiting"></span>
           {/if}
         {/snippet}
       </TfSettingsNav>
@@ -314,6 +319,8 @@
         <TfKeyboardSection />
       {:else if place.section === "logs"}
         <TfLogsSection ports={sectionPorts} />
+      {:else if place.section === "updates"}
+        <TfUpdatesSection {layers} />
       {:else if place.section === "checkouts" && appAt !== null}
         {#key rest.join("/")}
           <TfAppPage at={appAt} {back} />

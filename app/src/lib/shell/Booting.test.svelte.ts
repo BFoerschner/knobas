@@ -130,3 +130,46 @@ test("the sentences while it comes up are prose, not mono", () => {
     screen.done();
   }
 });
+
+/** The start screen's update line (ADR-0052, decisions D14): its room is there with an offer and without one. */
+test("a failed start offers a newer knobas in a line whose room is always kept", async () => {
+  const { fakeUpdate } = await import("./dev/fake/update");
+  const pressed: string[] = [];
+  const rendered = (state: ReturnType<typeof fakeUpdate> | null) => {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const box = $state({ state });
+    const update = {
+      get state() {
+        return box.state;
+      },
+      check: async () => void pressed.push("check"),
+      download: async () => {
+        pressed.push("download");
+        box.state = { ...box.state!, phase: { phase: "ready" } };
+      },
+      install: async () => void pressed.push("install"),
+    };
+    const app = mount(Booting, { target, props: { db: { state: "failed", message: "migration 102 failed" }, version: "3.2.9-ux28", demo: false, onretry: () => {}, update } });
+    flushSync();
+    return { target, done: () => (unmount(app), target.remove()) };
+  };
+
+  const none = rendered(fakeUpdate("up-to-date"));
+  expect(none.target.querySelector("[data-testid=boot-update]")?.textContent).toContain("No newer version yet.");
+  none.done();
+  // Mutant: draw the line only with an offer, and this room is gone.
+  const unknown = rendered(null);
+  expect(unknown.target.querySelector("[data-testid=boot-update]")).not.toBeNull();
+  unknown.done();
+
+  const offered = rendered(fakeUpdate("available"));
+  const line = offered.target.querySelector("[data-testid=boot-update]")!;
+  expect(line.textContent).toContain("knobas 3.2.9-ux28 is out and may fix this.");
+  line.querySelector("button")!.click();
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  flushSync();
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  expect(pressed).toEqual(["download", "install"]);
+  offered.done();
+});

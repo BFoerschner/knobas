@@ -55,6 +55,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   renderers: "Your own commands that draw files and Markdown fences",
   keyboard: "The shortcuts",
   logs: "The sync log and the local database",
+  updates: "Version, check for updates, pre-release builds",
 };
 
 /**

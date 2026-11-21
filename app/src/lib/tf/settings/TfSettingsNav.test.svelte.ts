@@ -85,6 +85,7 @@ test("the rows are the sections in their order, Code colours and Fonts under App
     "Renderers",
     "Keyboard",
     "Logs and database",
+    "Updates",
   ]);
   expect(fold().open).toBe(true);
   expect([...fold().querySelectorAll("a.tf-stg-child")].map((a) => a.getAttribute("href"))).toEqual(["#/settings/appearance/code-colours", "#/settings/appearance/fonts"]);

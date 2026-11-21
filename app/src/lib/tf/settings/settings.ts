@@ -34,7 +34,8 @@ export type SettingsSection =
   | "performance"
   | "renderers"
   | "keyboard"
-  | "logs";
+  | "logs"
+  | "updates";
 
 /** A row of the navigation: a section, and the sections under it. */
 export interface SettingsNode {
@@ -74,6 +75,8 @@ export const SETTINGS_TREE: readonly SettingsNode[] = [
   { key: "renderers", name: "Renderers" },
   { key: "keyboard", name: "Keyboard" },
   { key: "logs", name: "Logs and database" },
+  // knobas updates itself (ADR-0052): last, at the top level; it needs no database.
+  { key: "updates", name: "Updates" },
 ];
 
 /** Every section in the navigation's order, a parent before its children, with its name. */

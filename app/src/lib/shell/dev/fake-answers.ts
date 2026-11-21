@@ -10,12 +10,21 @@ import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artif
 import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, fuzzyRank, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, rereadFiles, search, searchFiles, searchSettings, setSearchEverything, setSearchFilesKept, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
+import type { updateCancel, updateCheck, updateDownload, updateInstall, updateLater, updateNotes, updateSet, updateState } from "../../ipc/update";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
 
 /** Command name to the shape its barrel function resolves to. */
 export interface Answers {
+  update_state: Answer<typeof updateState>;
+  update_check: Answer<typeof updateCheck>;
+  update_set: Answer<typeof updateSet>;
+  update_download: Answer<typeof updateDownload>;
+  update_cancel: Answer<typeof updateCancel>;
+  update_install: Answer<typeof updateInstall>;
+  update_later: Answer<typeof updateLater>;
+  update_notes: Answer<typeof updateNotes>;
   site_settings: Answer<typeof siteSettings>;
   set_site_open_inside: Answer<typeof setSiteOpenInside>;
   site_allow: Answer<typeof siteAllow>;

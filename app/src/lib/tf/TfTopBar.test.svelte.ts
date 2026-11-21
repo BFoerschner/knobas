@@ -95,3 +95,42 @@ test("the search box, the timer and the gear name the platform's modifier: Ctrl 
   expect(target.querySelector('a[aria-label="Settings"]')!.getAttribute("title")).toBe("Settings (Ctrl+,)");
   agent.mockRestore();
 });
+
+/**
+ * An update waiting (ADR-0052): a dot on the cog, laid over the button's own box, so the button's box is the same with
+ * and without it. Mutant: show the dot from `offer` alone, ignoring *Later* (`marked`).
+ */
+test("the cog carries the update's dot over its own box, and only while the update is marked", async () => {
+  const { fakeUpdate } = await import("../shell/dev/fake/update");
+  const boxes: string[][] = [];
+  for (const [state, dot] of [
+    [fakeUpdate("up-to-date"), false],
+    [fakeUpdate("available"), true],
+    [{ ...fakeUpdate("available"), marked: false }, false],
+  ] as const) {
+    if (view) unmount(view);
+    view = mount(TfTopBar, {
+      target,
+      props: {
+        current: null,
+        job: null,
+        inbox: { count: 0 },
+        badges: { builds: null, monitors: null },
+        timer: { current: null, elapsed: null },
+        onsearch: () => {},
+        ontimer: undefined,
+        ontheme: () => {},
+        update: { state },
+      } as never,
+    });
+    flushSync();
+    const cog = target.querySelector<HTMLElement>('.tf-top a.tf-iconbtn')!;
+    const mark = cog.querySelector(".tf-upd-mark");
+    expect(mark !== null, JSON.stringify(state.offer)).toBe(dot);
+    if (mark) expect(getComputedStyle(mark).position).toBe("absolute");
+    expect(cog.title.endsWith("is ready to download")).toBe(dot);
+    const drawn = getComputedStyle(cog);
+    boxes.push([drawn.width, drawn.height, drawn.paddingTop, drawn.paddingLeft]);
+  }
+  for (const box of boxes) expect(box).toEqual(boxes[0]);
+});

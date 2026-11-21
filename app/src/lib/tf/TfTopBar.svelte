@@ -14,6 +14,8 @@
   import { keyHint } from "../shell/platform";
   import type { Badges } from "./badges.svelte";
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
+  import { updates as sharedUpdates, type Updates } from "./update.svelte";
+  import { cogTitle, marked } from "./settings/updates";
 
   type NavSection = Exclude<Section, "job">;
 
@@ -28,6 +30,7 @@
     ontheme,
     navHref = sectionHash,
     onnav,
+    update = sharedUpdates,
   }: {
     /** The section the address lights, or `null`. */
     current: Section | null;
@@ -44,6 +47,8 @@
     navHref?: (section: NavSection) => string;
     /** A plain press on a nav entry, which the shell makes, and whether a person made it; a plain link when left out. */
     onnav?: (section: NavSection, href: string, person: boolean) => void;
+    /** The updater's state: an update waiting puts a dot on the cog (ADR-0052). */
+    update?: Pick<Updates, "state">;
   } = $props();
 
   function press(event: MouseEvent, section: NavSection) {
@@ -137,10 +142,10 @@
     </button>
   {/if}
   <a
-    class="tf-iconbtn"
+    class="tf-iconbtn tf-upd-host"
     href={navHref("settings")}
-    aria-label="Settings"
-    title={keyHint("Settings (⌘,)")}
+    aria-label={marked(update.state) ? "Settings, an update is waiting" : "Settings"}
+    title={cogTitle(keyHint("Settings (⌘,)"), update.state)}
     aria-current={current === "settings" ? "page" : undefined}
     onclick={(event) => press(event, "settings")}
   >
@@ -149,6 +154,7 @@
       <circle cx="8" cy="8" r="3.9" stroke-width="1.6" />
       <circle cx="8" cy="8" r="1.3" stroke-width="1.4" />
     </svg>
+    {#if marked(update.state)}<span class="tf-upd-mark"></span>{/if}
   </a>
   <button class="tf-iconbtn" aria-label="Toggle colour theme" title="Toggle colour theme" onclick={ontheme}>
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

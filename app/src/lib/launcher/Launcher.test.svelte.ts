@@ -2297,7 +2297,7 @@ test("> with nothing after it lists every section, then Settings and its section
   await settle();
   await search(">");
   const labels = paletteLabels();
-  expect(labels).toHaveLength(27);
+  expect(labels).toHaveLength(28);
   expect(labels.slice(0, 10)).toEqual([
     "Tickets",
     "Inbox",
@@ -2310,7 +2310,7 @@ test("> with nothing after it lists every section, then Settings and its section
     "Time",
     "Settings",
   ]);
-  expect(labels.at(-1)).toBe("Settings › Logs and database");
+  expect(labels.at(-1)).toBe("Settings › Updates");
   expect(labels).not.toContain("Job");
 });
 
