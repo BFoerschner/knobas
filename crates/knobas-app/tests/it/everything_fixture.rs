@@ -98,11 +98,11 @@ fn rows<'a>(answer: &'a SearchResponse, kind: &str) -> Vec<&'a str> {
 async fn the_renamed_repository_is_found_by_a_word_only_its_code_holds() {
     let (demo, passed) = demo("everything-fixture-renamed").await;
     // Three repositories with files: ledger-gateway, ledger-api and
-    // payout-service, under 24 wanted files each, so a file at a time: 6, 4
-    // and the 10 of 12 that the lock file's and node_modules' paths leave.
+    // payout-service, more than three wanted files each in a small tree, so
+    // one archive each.
     assert_eq!(
         (passed.repositories, passed.archives, passed.reads),
-        (3, 0, 20)
+        (3, 3, 0)
     );
 
     let answer = ask(&demo, false, "settlebridge").await;

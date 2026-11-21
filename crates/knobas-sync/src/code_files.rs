@@ -16,7 +16,8 @@
 //!
 //! **Where the bytes come from** (D3), by blob: a checkout on this machine
 //! ([`Clones`]), then the forge, one archive where more than
-//! [`ARCHIVE_OVER`] files are wanted, else a file at a time.
+//! [`ARCHIVE_OVER`] files are wanted and the archive is mostly what is
+//! wanted ([`by_archive`]), else a file at a time.
 //!
 //! **Two stores, one rule** (D7 point 8): the index commits first, and one
 //! PostgreSQL transaction records it after. A crash between the two leaves
@@ -44,14 +45,36 @@ use sqlx::PgPool;
 pub const BUDGET: Duration = Duration::from_secs(120);
 
 /// The most archives one run asks the forge for: one repository each, one
-/// at a time.
-pub const ARCHIVES_PER_RUN: u32 = 20;
+/// at a time. A seat belt: [`BUDGET`] is the bound (Fable's ruling of
+/// 2026-11-21 on the first fill: 20 a run left a scale home's 64 small
+/// repositories to 11 runs, 55 minutes at the default interval).
+pub const ARCHIVES_PER_RUN: u32 = 200;
 
-/// The most single files one run asks the forge for.
-pub const READS_PER_RUN: u32 = 100;
+/// The most single files one run asks the forge for: half of what the
+/// forge's quota (10 a second) allows inside [`BUDGET`].
+pub const READS_PER_RUN: u32 = 600;
 
-/// More wanted files of a repository than this are read as one archive.
-pub const ARCHIVE_OVER: usize = 24;
+/// More wanted files of a repository than this are read as one archive,
+/// where the tree says the archive is mostly them ([`by_archive`]).
+pub const ARCHIVE_OVER: usize = 3;
+
+/// The largest whole tree read as one archive: past it a download the run's
+/// deadline cuts would be asked again every run and hold up every repository
+/// after it.
+pub const ARCHIVE_TREE_CAP: u64 = 1 << 30;
+
+/// Whether `missing` wanted files of a tree of `tree_bytes` in all are read
+/// as one archive (Fable's ruling of 2026-11-21, amending D3): more than
+/// [`ARCHIVE_OVER`] of them, and an archive no larger than the single reads
+/// could have been, [`code_text::SIZE_CAP`] a file, and than
+/// [`ARCHIVE_TREE_CAP`]. A ten-file repository beside a 50 MB binary is read
+/// a file at a time.
+#[must_use]
+pub fn by_archive(missing: usize, tree_bytes: u64) -> bool {
+    missing > ARCHIVE_OVER
+        && tree_bytes <= (missing as u64).saturating_mul(code_text::SIZE_CAP)
+        && tree_bytes <= ARCHIVE_TREE_CAP
+}
 
 /// The index commits every this many files written, and at a repository's end.
 pub const COMMIT_EVERY: usize = 2_000;
@@ -622,7 +645,11 @@ async fn read_repository(
         .filter(|file| !bytes.contains_key(&file.path))
         .collect();
     let mut complete = true;
-    if missing.len() > ARCHIVE_OVER && budget.0 > 0 && Instant::now() < deadline {
+    let tree_bytes: u64 = tree
+        .iter()
+        .map(|file| u64::try_from(file.size).unwrap_or(0))
+        .sum();
+    if by_archive(missing.len(), tree_bytes) && budget.0 > 0 && Instant::now() < deadline {
         let wanted: HashSet<String> = missing.iter().map(|file| file.path.clone()).collect();
         let wants = |path: &str| wanted.contains(path);
         let mut got: Vec<(String, Vec<u8>)> = Vec::new();

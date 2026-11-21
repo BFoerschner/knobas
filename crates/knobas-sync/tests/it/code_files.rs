@@ -440,7 +440,7 @@ async fn a_push_reads_only_what_changed_and_a_moved_or_deleted_file_follows() {
 }
 
 #[tokio::test]
-async fn more_than_24_wanted_files_are_one_archive_and_fewer_are_single_reads() {
+async fn more_than_3_wanted_files_are_one_archive_where_the_archive_is_mostly_them() {
     let forge = Forge {
         archive: true,
         ..Forge::default()
@@ -461,10 +461,33 @@ async fn more_than_24_wanted_files_are_one_archive_and_fewer_are_single_reads() 
     push(&world, "acme/many", "c1", &files).await;
     let passed = pass(&world).await;
     assert_eq!((passed.archives, passed.reads), (1, 0), "{passed:?}");
-    let few: Vec<(&str, &[u8])> = files[..3].to_vec();
-    push(&world, "acme/few", "c1", &few).await;
+    // Four small files: one archive, not four reads (Fable's ruling of
+    // 2026-11-21: the first fill of a scale home's small repositories).
+    push(&world, "acme/four", "c1", &files[..4]).await;
+    let passed = pass(&world).await;
+    assert_eq!((passed.archives, passed.reads), (1, 0), "{passed:?}");
+    // Three: a file at a time.
+    push(&world, "acme/few", "c1", &files[..3]).await;
     let passed = pass(&world).await;
     assert_eq!((passed.archives, passed.reads), (0, 3), "{passed:?}");
+    // Ten beside a 6 MB file the rules leave out: the archive would carry
+    // more than ten single reads could, so a file at a time.
+    let large = vec![b'x'; 6 << 20];
+    let mut beside: Vec<(&str, &[u8])> = files[..10].to_vec();
+    beside.push(("assets/video.bin", large.as_slice()));
+    push(&world, "acme/beside", "c1", &beside).await;
+    let passed = pass(&world).await;
+    assert_eq!((passed.archives, passed.reads), (0, 10), "{passed:?}");
+}
+
+#[test]
+fn an_archive_is_at_most_what_its_single_reads_could_be_and_a_gib() {
+    use knobas_core::code_text::SIZE_CAP;
+    assert!(!code_files::by_archive(3, 0));
+    assert!(code_files::by_archive(4, 4 * SIZE_CAP));
+    assert!(!code_files::by_archive(4, 4 * SIZE_CAP + 1));
+    assert!(code_files::by_archive(5_000, 1 << 30));
+    assert!(!code_files::by_archive(5_000, (1 << 30) + 1), "past a GiB");
 }
 
 #[tokio::test]
