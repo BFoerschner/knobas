@@ -10,7 +10,12 @@ A page with pages under it was a `<details>` whose `<summary>` held the page's l
 page and left the fold as it was: a link inside a summary does not fold it. Only the chevron, or the free end of the row
 right of the title, folded it, and → did by key.
 
-## Now (`TfDocTree.svelte`, `pressed`)
+## Now (`fold-press.ts`, used by `TfDocTree.svelte`)
+
+The rule is one shared helper, `app/src/lib/tf/fold-press.ts`: `foldPress` on a row's `<summary>` click and `foldKeyed`
+on its keydown, for any tree drawn as `<details>` whose `<summary>` holds the row's link (`summary > a`). The caller
+passes whether the link's place is open now and a setter for its own fold state. Settings' nav subtrees (the themes
+build) take it from there.
 
 - **A click on a page's row opens the page and its fold.** Anywhere right of the chevron: the title, or the row's free
   end, which goes through the link so the shell sees a plain press. A first click never closes a fold.
@@ -37,11 +42,11 @@ Checked, and left as they are:
 - **Assets** (`AssetsView.svelte`): Miller columns. One click selects a row and draws what it holds in the next column;
   there is nothing to fold.
 - **Docs' space list and *Hidden spaces*:** a space's head and the hidden fold have no page to open, so a click folds.
-- **Settings' nav:** flat, nothing nests.
+- **Settings' nav:** flat today. The themes build gives it subtrees and takes `fold-press.ts` for them.
 
 ## Tested
 
-`TfDocs.rail.test.svelte.ts` (first click opens and never closes, second click toggles, the free end, the chevron alone,
+`fold-press.test.ts` (the helper on a bare fold), `TfDocs.rail.test.svelte.ts` (first click opens and never closes, second click toggles, the free end, the chevron alone,
 `Enter`, → and modified clicks), `TfDocs.parts.test.svelte.ts` (a click on a fold cut short still waits for all its pages).
 Eleven mutants each fail a test. The press trip `docs-tree-click` (`--strict`) clicks by real pointer and fails on a row
 moved at or above the pressed one, or a frame with the fold open and none of its pages.

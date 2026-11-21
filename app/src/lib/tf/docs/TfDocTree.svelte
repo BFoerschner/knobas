@@ -26,7 +26,7 @@
   row whose fold is closed opens none: the closed fold holding it is marked instead (`tf-holds`), which takes no room.
   The one fold a press opens is the row's own, below the row.
 
-  **A click on a fold's row opens it, a click on the open page's row toggles it** (Björn, 2026-11-21, `pressed`): the
+  **A click on a fold's row opens it, a click on the open page's row toggles it** (Björn, 2026-11-21, `fold-press.ts`): the
   page opens and its fold with it, and a first click never closes one. The chevron folds alone.
 
   **One `Tab` stop** (F-444, `tree-keys.ts`): the open page's row, else the first. ↑ and ↓ walk the rows shown, → opens a
@@ -42,6 +42,7 @@
   import { childrenByParent, foldsHolding, pageHash } from "./docs";
   import { childrenMissing, hasChildren } from "./tree-store";
   import { treeKeys } from "./tree-keys";
+  import { foldKeyed, foldPress } from "../fold-press";
   import { Windowed } from "../../shell/windowed.svelte";
 
   let {
@@ -98,41 +99,6 @@
     else if (!now) open.delete(id);
   }
 
-  /**
-   * A click on a fold's row (Björn, 2026-11-21: "when I click on a tree element, I want it to always expand … click on
-   * it again, it should toggle"): anywhere on the row right of the chevron opens the page and opens its fold, and never
-   * closes it; on the page already open it opens or closes the fold. The chevron, left of the title, folds alone and
-   * opens no page. `Enter` on the row (a click with no count), a modified click and a middle click keep the link's
-   * own way. The fold's state changes in this press, not in the browser's later `toggle`, so its rows draw in the same
-   * frame as the chevron turns; a fold whose pages are not read yet draws them once it holds them all, as before.
-   */
-  function pressed(event: MouseEvent & { currentTarget: HTMLElement }, id: string, starts: boolean): void {
-    if (event.detail === 0 || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const summary = event.currentTarget;
-    const fold = summary.parentElement as HTMLDetailsElement;
-    const link = summary.querySelector<HTMLAnchorElement>(":scope > a");
-    if (link === null) return;
-    const onLink = event.target instanceof Node && link.contains(event.target);
-    const onChevron = !onLink && event.clientX < link.getBoundingClientRect().left;
-    const now = onChevron || id === current ? !fold.open : true;
-    // A link inside a summary neither folds it nor needs stopping. The chevron and the row's free end are the summary's,
-    // whose own fold lands its rows a frame after the chevron turns (the browser's `toggle` comes later): folded here.
-    if (!onLink) event.preventDefault();
-    if (now !== fold.open) {
-      toggled(id, now, starts);
-      fold.open = now;
-    }
-    // The row's free end goes where its title goes, through the link, so the shell sees a plain press of it.
-    if (!onLink && !onChevron && id !== current) link.click();
-  }
-
-  /** → and ← fold by key (`tree-keys.ts` sets `open`): the fold's state follows in the same press, so its rows land with it. */
-  function keyed(event: KeyboardEvent & { currentTarget: HTMLElement }, id: string, starts: boolean): void {
-    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-    const fold = event.currentTarget.parentElement as HTMLDetailsElement;
-    toggled(id, fold.open, starts);
-  }
-
   /** The folds whose read has answered (or failed) since they opened: they draw what they hold, whole or not. */
   const answered = new SvelteSet<string>();
   /** The folds whose read is out. */
@@ -169,7 +135,10 @@
   {#if hasChildren(node, index) || queued.length > 0}
     <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <summary onclick={(event) => pressed(event, node.entity_id, starts)} onkeydown={(event) => keyed(event, node.entity_id, starts)} class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
+      <summary
+        onclick={(event) => foldPress(event, node.entity_id === current, (now) => toggled(node.entity_id, now, starts))}
+        onkeydown={(event) => foldKeyed(event, (now) => toggled(node.entity_id, now, starts))}
+        class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
         ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
         ></summary
