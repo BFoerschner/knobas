@@ -154,7 +154,7 @@
     <span class="tf-upd-sub">{box?.here.sub ?? " "}</span>
   </div>
   <div class="tf-upd-way">
-    <div class="tf-upd-track" class:tf-go={box?.track.go} class:tf-full={box?.track.fill === 1} class:tf-part={box !== null && box.track.fill !== null && box.track.fill < 1} class:tf-bad={box?.track.bad}>
+    <div class="tf-upd-track" class:tf-upd-go={box?.track.go} class:tf-upd-whole={box?.track.fill === 1} class:tf-upd-bad={box?.track.bad}>
       {#if box !== null && box.track.fill !== null}<i class="tf-upd-fill" {@attach filled(box.track.fill)}></i>{/if}
     </div>
     <span class="tf-upd-n" class:tf-ok={box?.reading.tone === "ok"} class:tf-err={box?.reading.tone === "err"}>{box?.reading.text || " "}</span>
