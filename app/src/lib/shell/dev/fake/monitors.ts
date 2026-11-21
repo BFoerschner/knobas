@@ -5,6 +5,7 @@
 // The monitors the seeded Uptime Kuma holds -- the roster's rows. See
 // `fakeMonitorRoster`.
 import { fakeMove } from "./moves";
+import { fakeEdit, keepRefused } from "./ticket-fields";
 import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
 import type { OpenAlert } from "../../../ipc/assets";
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
@@ -115,9 +116,12 @@ export function fakeOpenAlerts(): OpenAlert[] {
  * would look like.
  */
 function fakeQueuedWrite(args: Record<string, unknown>): QueuedWrite {
-  const row = queuedRow(args);
+  const queued = queuedRow(args);
   // A ticket's move is `moves.ts`'s: a queued row that settles a moment later (ADR-0054).
-  if (row.op === "transition") return fakeMove(row);
+  if (queued.op === "transition") return fakeMove(queued);
+  // A ticket's edit (ADR-0054) changes the fixture's ticket, or is refused under `?fake-refuse-edits`.
+  const row = { ...queued, ...fakeEdit(queued.payload) };
+  keepRefused(row);
   if (row.op === "create_monitor") FIXTURE_CREATES.push(row);
   return row;
 }

@@ -2,6 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
+import { fakeEditRefusals } from "./ticket-fields";
 import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -611,7 +612,11 @@ export function handlers(): Handlers {
     },
     // Every fake source's credential may make every write it declares (#2040);
     // a commit onto a repository's protected `main` is refused (#2241).
-    refused_writes: (args) => repoRefusals((args["asks"] as Parameters<typeof repoRefusals>[0] | undefined) ?? []),
+    refused_writes: (args) => {
+      const asks = (args["asks"] as Parameters<typeof repoRefusals>[0] | undefined) ?? [];
+      // A ticket's edits under `?fake-readonly` (ADR-0054), beside the repositories' own.
+      return [...repoRefusals(asks), ...fakeEditRefusals(asks)];
+    },
     resolve_url: (args) => resolveUrl(args),
     create_link: (args) => {
       const from = String(args["fromId"]);

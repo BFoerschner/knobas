@@ -51,6 +51,7 @@ import type { RefusedWritesPort } from "../../shell/refused-writes";
 import type { SetPorts } from "../sets/ports";
 import type { SourceFacts } from "./job";
 import { TICKET_SYSTEM } from "../roles.svelte";
+import type { FieldPorts } from "./field-edits.svelte";
 
 export interface JobPorts {
   listSources: () => Promise<SourceFacts[]>;
@@ -99,6 +100,8 @@ export interface JobPorts {
   ticketBoard?: (query: string) => Promise<MiniBoard>;
   /** A branch's checkout on this machine (#2401), for Code's *not pushed*; the bridge's when left out. */
   entityCheckout?: (entityId: string) => Promise<CheckoutView>;
+  /** A ticket's fields and their notes (ADR-0054); the bridge's when left out. */
+  fields?: FieldPorts;
 }
 
 /** {@link JobPorts.ticketBoard} through the bridge: the Tickets view's own read and role. */

@@ -44,6 +44,7 @@
   import type { Snippet } from "svelte";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { routeWeb as openExternal, webPlaceName } from "../../shell/open-web";
@@ -54,6 +55,10 @@
   import { parentOf } from "../sets/apply";
   import { epicLine, initials, shortKey } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
+  import type { FieldEdits } from "./field-edits.svelte";
+  import { chipWords } from "../tickets/edits.svelte";
+  import TfFactControl from "./TfFactControl.svelte";
+  import type { Layers } from "../layers.svelte";
 
   let {
     detail,
@@ -70,6 +75,9 @@
     copy = (text: string) => navigator.clipboard.writeText(text),
     open = openExternal,
     statusControl,
+    edits = null,
+    assigning = $bindable(false),
+    layers,
   }: {
     detail: EntityDetail;
     /** The other sources' tickets under the same key (#1476); none draws no source. */
@@ -97,6 +105,11 @@
     copy?: (text: string) => Promise<void>;
     /** The status as a control that moves the ticket (ADR-0054, `TfStatusMove`); absent, the plain chip. */
     statusControl?: Snippet | undefined;
+    /** The fields its source lets a person change (ADR-0054); `null` draws every fact as text. */
+    edits?: FieldEdits | null;
+    /** The assignee's picker stands open: the page's `a`. */
+    assigning?: boolean;
+    layers?: Layers | undefined;
   } = $props();
 
   const key = $derived(keyOf(detail.row.entity_id));
@@ -128,12 +141,44 @@
   );
   const rowsHeld = heldHead(
     () => detail.row.entity_id,
-    () => table.settled,
+    () => table.settled && (edits === null || edits.answered),
   );
+  /**
+   * The facts a source may let a person set where the read holds none (ADR-0054): a Priority or Labels row is drawn
+   * empty where the field is editable, so the facts after the Assignee wait for the fields' answer, as the epic chip
+   * waits for its title, and show after the hold at the latest.
+   */
+  const factsHeld = heldHead(
+    () => detail.row.entity_id,
+    () => edits === null || edits.answered,
+  );
+  const editable = (id: string) => edits?.control(id).can ?? false;
+  /** The assignee as it reads with an edit not yet read back. */
+  const assignEcho = $derived(edits?.control("assignee").echo ?? null);
+  const assigneeShown = $derived(assignEcho === null ? (assigneeName ?? "Unassigned") : assignEcho.text);
+  const note = (id: string) => edits?.control(id).note ?? null;
   /** A meter segment's width, through the CSSOM: the app's CSP refuses `style=""` in markup, not this. */
   const width = (share: number) => (node: HTMLElement) => {
     node.style.width = `${share.toFixed(1)}%`;
   };
+
+  /** The labels as they stand with the edits not yet read back: a name added draws at once, one removed goes. */
+  function withLabelEchoes(read: readonly string[]): string[] {
+    let now = [...read];
+    for (const echo of edits?.labelEchoes() ?? []) {
+      const name = echo.text.slice(1);
+      if (echo.text.startsWith("+")) {
+        if (!now.includes(name)) now.push(name);
+      } else now = now.filter((label) => label !== name);
+    }
+    return now;
+  }
+  /** The labels' chip: the newest label edit not yet read back, in the fixed words. */
+  const labelChip = $derived.by(() => {
+    const echo = edits?.labelEchoes().at(-1);
+    if (echo === undefined) return null;
+    return { words: chipWords("labels", echo.text, echo.state), queued: echo.state === "queued" };
+  });
 
   /** The copy button's ok tone, for a moment after a copy. */
   let copied = $state(false);
@@ -173,6 +218,17 @@
     acknowledged(openingWords(webPlaceName(url, { source: detail.source.id })), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
   }
 </script>
+
+{#snippet fieldNote(id: string)}
+  {@const said = note(id)}
+  {#if said !== null}
+    <dd class="tf-fact-note" class:tf-held={said.tone === "warn"} role="status">
+      <span><strong>{said.lead}</strong> {said.words}</span>
+      <button type="button" onclick={openWriteQueue}>Open write queue</button>
+      <button type="button" class="tf-fact-x" title="Discard the edit" aria-label="Discard the edit" onclick={() => edits?.dismiss(said)}>×</button>
+    </dd>
+  {/if}
+{/snippet}
 
 <article
   class="tf-jobcard tf-ticketcard"
@@ -227,18 +283,39 @@
       </dd>
     {/if}
     <dt>Assignee</dt>
-    <dd>
-      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(assigneeName)}</span><span
-        >{assigneeName ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
+    <dd class:tf-fwriting={!!edits?.control("assignee").chip}>
+      <TfFactControl {edits} id="assignee" name="Assignee" {me} sourceName={detail.source.display_name} bind:open={assigning} {layers}
+        ><span class="tf-av" class:tf-me={assignEcho === null && mine && detail.author !== null} aria-hidden="true">{initials(assigneeShown === "Unassigned" ? null : assigneeShown)}</span><span
+          >{assigneeShown}{assignEcho === null && mine && detail.author !== null ? " (you)" : ""}</span
+        ></TfFactControl
       >
     </dd>
+    {@render fieldNote("assignee")}
     {#if detail.issue_type}<dt>Type</dt><dd>{detail.issue_type}</dd>{/if}
-    {#if detail.priority}<dt>Priority</dt><dd>{detail.priority}</dd>{/if}
-    {#if labels.length > 0}
-      <dt>Labels</dt>
-      <dd>{#each labels as label (label)}<span class="tf-lab">{label}</span>{" "}{/each}</dd>
+    {#if factsHeld.shown}
+      {@const priorityEcho = edits?.control("priority").echo ?? null}
+      {@const priority = priorityEcho?.text ?? detail.priority}
+      {#if priority || editable("priority")}
+        <dt>Priority</dt>
+        <dd class:tf-fwriting={!!edits?.control("priority").chip}>
+          <TfFactControl {edits} id="priority" name="Priority" sourceName={detail.source.display_name} {layers}
+            ><span class:tf-dim={!priority}>{priority || "None"}</span></TfFactControl
+          >
+        </dd>
+        {@render fieldNote("priority")}
+      {/if}
+      {#if labels.length > 0 || editable("labels") || (edits?.labelEchoes().length ?? 0) > 0}
+        {@const shownLabels = withLabelEchoes(labels)}
+        <dt>Labels</dt>
+        <dd class:tf-fwriting={labelChip !== null}>
+          <TfFactControl {edits} id="labels" name="Labels" sourceName={detail.source.display_name} {labels} {layers}
+            >{#each shownLabels as label (label)}<span class="tf-lab">{label}</span>{" "}{:else}<span class="tf-dim">None</span>{/each}</TfFactControl
+          >{#if labelChip !== null}<span class="tf-chip tf-fwrite" class:tf-info={labelChip.queued}>{labelChip.words}</span>{/if}
+        </dd>
+        {@render fieldNote("labels")}
+      {/if}
     {/if}
-    {#if logged !== null}
+    {#if factsHeld.shown && logged !== null}
       {@const line = logged.yours === null ? logged.text : `${logged.text}, ${logged.yours}`}
       <dt>Logged</dt>
       <dd>
@@ -254,6 +331,9 @@
       </dd>
     {/if}
   </dl>
+  {#if rowsHeld.shown && edits?.noEdits}
+    <p class="tf-tknoedits">{edits.noEdits}</p>
+  {/if}
   {#if rowsHeld.shown && table.rows.length > 0}
     <TfCardRows rows={table.rows} entityId={detail.row.entity_id} ticketKey={key} />
   {:else if table.settled}

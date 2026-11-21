@@ -331,3 +331,52 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-fact-note > span { min-width: 0; }
 .tf-fact-note button { flex: none; text-decoration: underline; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .tf-fact-note button:first-of-type { margin-left: auto; }
+/* A value a person can change on the facts list (ADR-0054, the 2026-11-21 ruling, section 25): the value as it reads
+   and a small mark that it opens. Where it does not open, the same box with the mark's room kept unseen, so nothing
+   moves when the source's answer lands or a credential is refused. The negative margin gives the hover its room
+   without moving the value off the label column's line. */
+.tf-fact-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 22px; margin: -1px -6px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.tf-fact-edit:hover, .tf-fact-edit[aria-expanded="true"] { background: color-mix(in srgb, var(--card-shade) 8%, transparent); }
+.tf-sheetcard .tf-fact-edit:hover, .tf-sheetcard .tf-fact-edit[aria-expanded="true"] { background: var(--sheet-2); }
+.tf-fact-edit .tf-chev { font-size: calc(var(--t-2xs) * var(--fs)); opacity: 0.65; flex: none; }
+/* Drawn, not written: the mark is no part of the value's text a reader copies or a screen reader reads. */
+.tf-fact-edit .tf-chev::after { content: "▾"; }
+.tf-fact-edit[aria-disabled="true"] { cursor: default; background: none; }
+.tf-fact-edit[aria-disabled="true"] .tf-chev { visibility: hidden; }
+.tf-fact-edit > span:not(.tf-av, .tf-chev, .tf-lab) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-fact-edit .tf-lab + .tf-lab { margin-left: 0; }
+/* A fact's write chip never adds a line: while it stands (`tf-fwriting` on its row) the row does not wrap, and the value gives way. */
+.tf-ticketcard .tf-facts dd.tf-fwriting { flex-wrap: nowrap; }
+.tf-ticketcard .tf-facts dd > .tf-fwrite { flex: none; margin-left: auto; }
+.tf-ticketcard .tf-facts dd.tf-fwriting .tf-fact-edit { flex: 0 1 auto; min-width: 0; }
+/* What a refused or held edit says, under its row, full width, in the source's words. */
+.tf-ticketcard .tf-facts dd.tf-fact-note { grid-column: 1 / -1; display: flex; flex-wrap: nowrap; gap: 8px; align-items: flex-start; padding: 5px 8px; border-radius: 4px; background: var(--err-bg); color: var(--err); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.35; }
+.tf-ticketcard .tf-facts dd.tf-fact-note.tf-held { background: var(--warn-bg); color: var(--warn); }
+.tf-facts .tf-fact-note > span { flex: 1 1 auto; }
+.tf-facts .tf-fact-note button { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
+.tf-facts .tf-fact-note .tf-fact-x { text-decoration: none; padding: 0 2px; }
+/* An adapter that offers no edits: one muted line under the facts. */
+.tf-tknoedits { margin: 0; font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.4; color: var(--card-ink-2); }
+.tf-sheetcard .tf-tknoedits { color: var(--ink-2); }
+
+/* The people and labels pickers: a field over a list, in the float host under its fact (`TfPeoplePick`). */
+.tf-pick { position: fixed; left: 0; top: 0; z-index: 35; width: 280px; display: flex; flex-direction: column; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-pick input { border: 1px solid var(--rule); background: var(--field); color: var(--ink); border-radius: 4px; height: 28px; padding: 0 8px; width: 100%; font: inherit; }
+.tf-pick .tf-pick-opts { display: flex; flex-direction: column; max-height: 252px; overflow: auto; margin-top: 6px; background: var(--sheet); }
+.tf-pick .tf-pick-opt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; min-height: 30px; }
+.tf-pick .tf-pick-opt.tf-at, .tf-pick .tf-pick-opt:hover { background: var(--sheet-2); }
+.tf-pick .tf-pick-opt[aria-selected="true"] { font-weight: 600; }
+.tf-pick .tf-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pick .tf-pick-opt small { margin-left: auto; padding-left: 8px; color: var(--ink-2); --fs: var(--size-code); font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: nowrap; }
+.tf-pick .tf-pick-tick { width: 14px; flex: none; text-align: center; }
+.tf-pick .tf-av { width: 22px; height: 22px; flex: none; }
+.tf-pick mark { background: var(--mark); color: inherit; }
+.tf-pick .tf-pick-none { padding: 6px; color: var(--ink-2); margin: 0; }
+.tf-pick .tf-pick-foot { padding: 6px 6px 2px; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); border-top: 1px solid var(--rule-2); }
+.tf-pick .tf-pick-foot.tf-err { color: var(--err); }
+/* The summary's pencil and its one-line field (ADR-0054): the pencil's room is kept, unseen, where the summary does not open. */
+.tf-tkpagehead .tf-tktitlepen { flex: none; margin-top: 6px; }
+.tf-tkpagehead .tf-tktitlepen.tf-unseen { visibility: hidden; }
+.tf-tkpagehead .tf-tktitlechip { vertical-align: middle; --fs: var(--size-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); letter-spacing: var(--ls-ui); }
+.tf-tktitleedit { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--control-gap); }
+.tf-tktitleedit input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xl) * var(--fs)) var(--sans); }

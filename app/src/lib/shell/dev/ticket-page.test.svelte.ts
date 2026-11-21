@@ -571,7 +571,9 @@ function facts(card: HTMLElement): [string, string][] {
   const terms = [...card.querySelectorAll("dl.tf-facts > dt")];
   const value = (dd: Element | null) => {
     if (dd === null) return "";
-    const parts = [...dd.children].map((part) => part.textContent?.trim() ?? "");
+    // A value a person can change stands in one box (ADR-0054): its parts are the box's.
+    const box = dd.querySelector(":scope > .tf-fact-edit");
+    const parts = [...(box?.children ?? dd.children)].filter((part) => !part.classList.contains("tf-chev")).map((part) => part.textContent?.trim() ?? "");
     return (parts.length > 0 ? parts.join(" ") : (dd.textContent ?? "")).replace(/\s+/g, " ").trim();
   };
   return terms.map((term) => [term.textContent?.trim() ?? "", value(term.nextElementSibling)]);

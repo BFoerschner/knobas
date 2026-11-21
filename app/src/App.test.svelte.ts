@@ -182,6 +182,9 @@ vi.mock("./lib/ipc/entity", () => ({
   jobReach: () => Promise.reject(new Error("no jobReach in this test")),
   openCheckout: () => Promise.reject(new Error("no openCheckout in this test")),
   reachableTransitions: () => Promise.reject(new Error("no reachableTransitions in this test")),
+  // A ticket's fields (ADR-0054): no source here offers edits.
+  ticketFields: () => Promise.resolve(null),
+  fieldOptions: () => Promise.resolve(null),
   roomSuggestions: () => Promise.reject(new Error("no roomSuggestions in this test")),
   visitEntity: () => Promise.reject(new Error("no visitEntity in this test")),
   getEntity: (entityId: string) =>

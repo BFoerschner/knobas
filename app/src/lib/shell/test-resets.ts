@@ -72,6 +72,11 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/tickets/moves.svelte.ts#notePorts": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
   "tf/tickets/moves.svelte.ts#seeding": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
   "tf/tickets/moves.svelte.ts#offered": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  // A ticket's fields and a field's choices, kept by the window (ADR-0054): forgotten between tests.
+  "tf/tickets/fields.svelte.ts#held": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#inFlight": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#options": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#optionsInFlight": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
   "tf/tickets/reach.svelte.ts#observed": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
   "tf/tickets/reach.svelte.ts#failures": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
   "tf/tickets/reach.svelte.ts#flying": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),

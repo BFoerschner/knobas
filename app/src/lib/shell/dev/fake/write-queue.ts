@@ -5,6 +5,7 @@
 import { openMoves } from "./moves";
 import type { QueuedWrite } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
+import { keepSeed } from "../fake-seed";
 
 /** Thursday of this week at 14:00, by the browser's clock: the held worklog's day. */
 function thisThursday(): string {
@@ -163,6 +164,8 @@ export const FIXTURE_QUEUE = [
   HELD_WORKLOG,
   ...BLOCKED_PAUSES,
 ] satisfies QueuedWrite[];
+// A handler may push to it (a refused ticket edit, `ticket-fields.ts`); a reset puts it back.
+keepSeed(FIXTURE_QUEUE);
 
 /** This feature's commands. */
 export function handlers(): Handlers {

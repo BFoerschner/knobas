@@ -96,6 +96,8 @@
   import { dismissNote, moveTicket, ticketNotes, undoLastMove, watchTicketNotes } from "../tickets/moves.svelte";
   import { sourceRoles } from "../roles.svelte";
   import { echoOn } from "../queued.svelte";
+  import TfTitleEdit from "./TfTitleEdit.svelte";
+  import { createFieldEdits } from "./field-edits.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
   import TfAttachmentPreview from "./TfAttachmentPreview.svelte";
   import { createAttachmentPreviews } from "./attachment-previews.svelte";
@@ -223,7 +225,10 @@
   /** As a string, so a re-read of the same ticket asks nothing again. */
   const asks = $derived.by(() => {
     const entity = detail?.row.entity_id;
-    return JSON.stringify(entity === undefined ? [] : ["comment", "transition"].map((op) => ({ entity, op })));
+    if (entity === undefined) return "[]";
+    // A ticket's fields (ADR-0054): the edit as a whole, and its assignee, which has its own permission.
+    const edits = [{ entity, op: "edit_ticket" }, { entity, op: "edit_ticket", field: "assignee" }];
+    return JSON.stringify([...["comment", "transition"].map((op) => ({ entity, op })), ...edits]);
   });
   /**
    * Bumped by a refresh and by the page being shown again, so the ticket's
@@ -277,6 +282,18 @@
     forgetReach(key.entity_id);
     void askReach(key, "press", ports.reachableTransitions, ports.refusedWrites);
   }
+  /** The card's field controls (ADR-0054): what the source lets a person change, and the edits queued here. */
+  const fieldEdits = createFieldEdits({
+    detail: () => detail,
+    refused: () => refused,
+    submitWrite: (payload) => ports.submitWrite(payload),
+    ports: untrack(() => ports.fields),
+    listen: untrack(() => ports.listen),
+    follower: untrack(() => follower),
+  });
+  /** The assignee's picker stands open (`a`), and the summary is a field (`e`). */
+  let assigning = $state(false);
+  let retitling = $state(false);
 
   /** Whether keep-alive shows this job or holds it hidden (#2247). */
   const pageShown = pageVisible();
@@ -565,10 +582,16 @@
         statusOpen = true;
         return;
       }
-      if (event.key.toLowerCase() !== "l" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+      const pressed = event.key.toLowerCase();
+      if (!["l", "a", "e"].includes(pressed) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (!detail || drawer || layers.open.length > 0 || inTextField(document.activeElement)) return;
+      // `a` assigns and `e` edits the summary (ADR-0054), where the source lets a person.
+      if (pressed === "a" && !fieldEdits.control("assignee").can) return;
+      if (pressed === "e" && !fieldEdits.control("title").can) return;
       event.preventDefault();
-      drawer = true;
+      if (pressed === "a") assigning = true;
+      else if (pressed === "e") retitling = true;
+      else drawer = true;
     };
     window.addEventListener("keydown", onkey);
     return () => {
@@ -715,6 +738,9 @@
       onaction={act}
       {table}
       onlink={() => (drawer = true)}
+      edits={fieldEdits}
+      bind:assigning
+      {layers}
     >
       {#snippet statusControl()}
         <TfStatusMove
@@ -738,7 +764,7 @@
         <div class="tf-tkread" bind:this={reading}>
           <TfFindBar root={() => reading} within="in this column" />
           <header class="tf-tkpagehead">
-            <h1>{detail.row.title}</h1>
+            <TfTitleEdit title={detail.row.title} edits={fieldEdits} bind:editing={retitling} {layers} />
             <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />
           </header>
           <TfDetailBanners {detail} {refresh} reread={rereadJob} />

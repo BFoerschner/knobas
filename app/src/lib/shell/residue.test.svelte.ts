@@ -411,6 +411,9 @@ const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const TfSideEdgeFixture = (await import("../tf/TfSideEdge.fixture.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const StatusMenu = (await import("../tf/tickets/StatusMenu.svelte")).default;
+const TfPeoplePick = (await import("../tf/job/TfPeoplePick.svelte")).default;
+const TfLabelsPick = (await import("../tf/job/TfLabelsPick.svelte")).default;
+const TfFactControl = (await import("../tf/job/TfFactControl.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
 const ViewEditor = (await import("../tf/tickets/ViewEditor.svelte")).default;
@@ -904,6 +907,33 @@ const CASES: Case[] = [
     source: "lib/tf/tickets/StatusMenu.svelte",
     open: (target) => ({
       app: mount(StatusMenu, { target, props: { open: true, opener: null, at: { x: 10, y: 10 }, ticketKey: "PAY-1", status: "To Do", source: "Jira", reach: { statuses: ["In Progress"], standing: "exact" }, onpick: () => {} } }),
+    }),
+  },
+  {
+    /** The people picker (ADR-0054): on the layer stack and listening for a press outside while it stands. */
+    name: "TfPeoplePick",
+    source: "lib/tf/job/TfPeoplePick.svelte",
+    open: (target) => ({
+      app: mount(TfPeoplePick, {
+        target,
+        props: { open: true, opener: null, label: "Assignee", current: null, options: [], complete: false, sourceName: "Jira", scope: "PAY", onpick: () => {} },
+      }),
+    }),
+  },
+  {
+    /** The labels picker (ADR-0054): as the people picker. */
+    name: "TfLabelsPick",
+    source: "lib/tf/job/TfLabelsPick.svelte",
+    open: (target) => ({
+      app: mount(TfLabelsPick, { target, props: { open: true, opener: null, label: "Labels", carried: ["sepa"], offered: ["bank"], create: true, ontoggle: () => {} } }),
+    }),
+  },
+  {
+    /** A fact's control (ADR-0054): asks its field's list when it opens. */
+    name: "TfFactControl",
+    source: "lib/tf/job/TfFactControl.svelte",
+    open: (target) => ({
+      app: mount(TfFactControl, { target, props: { edits: null, id: "assignee", name: "Assignee", sourceName: "Jira", children: (() => {}) as never } }),
     }),
   },
   {
