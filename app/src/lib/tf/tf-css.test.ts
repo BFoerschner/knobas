@@ -865,22 +865,6 @@ test("a diff's unchanged lines draw quiet, grey or in full; changed lines and wo
   expect(block(code, ".tf-diff .tf-del")).toMatch(/background:\s*var\(--diff-del\)/);
 });
 
-test("the preview's side classes re-declare the other side's surface and ink tokens as tokens.css writes them (ADR-0051)", () => {
-  const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
-  const decls = (body: string) => Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
-  // A token's value is the fallback behind its side's variable (ADR-0055).
-  const unwrap = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).map(([name, value]) => [name, /^var\(--[a-z0-9-]+-(?:light|dark), (.+)\)$/.exec(value)?.[1] ?? value]));
-  const light = unwrap(decls(block(code, ":root")));
-  const dark = unwrap(decls(block(media, ':root:not([data-theme="light"])')));
-  for (const [cls, side] of [[".tf-as-light", light], [".tf-as-dark", dark]] as const) {
-    const own = decls(block(code, cls));
-    for (const [name, value] of Object.entries(own)) {
-      if (name === "--diff-add" || name === "--diff-del" || name === "--add-word" || name === "--del-word") continue;
-      expect(value, `${cls} ${name}`).toBe(side[name]);
-    }
-    expect(Object.keys(own)).toEqual(expect.arrayContaining(["--paper", "--sheet", "--sheet-2", "--ink", "--ink-2", "--ok-bg", "--err-bg", "--diff-add", "--diff-del"]));
-  }
-});
 
 // ---------- every colour a token (ADR-0055) ----------
 

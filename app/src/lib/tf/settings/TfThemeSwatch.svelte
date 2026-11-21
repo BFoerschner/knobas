@@ -1,7 +1,7 @@
 <!--
   One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
   small panel under it: the hex field, the platform's own colour well, *Use ink* (for a role) and *Reset to ⟨from⟩'s*.
-  Every change is written at once; the theme is kept 300 ms after the last (`syntax-theme.svelte.ts`). `Esc` closes the
+  Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
   panel and leaves focus on the swatch. A built-in's swatches are not buttons.
 -->
 <script lang="ts">

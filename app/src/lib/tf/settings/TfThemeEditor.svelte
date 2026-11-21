@@ -15,11 +15,12 @@
   import { ROLE_NAMES, ROLES, type Role } from "../../render/roles";
   import { undoable } from "../../shell/toasts.svelte";
   import { layers } from "../layers.svelte";
-  import { UNCHANGED, type SyntaxThemes, type Unchanged } from "../syntax-theme.svelte";
+  import { scopeValues, UNCHANGED, type Themes, type Unchanged } from "../themes.svelte";
+  import { ratioText } from "../theme/colour";
   import { BUILTINS } from "../theme/builtins";
-  import { DIFF_DEFAULT, fixedRole, INK, lowSentence, roleContrast } from "../theme/contrast";
+  import { diffDefault, fixedRole, lowSentence, roleContrast } from "../theme/contrast";
   import { cssVars } from "../theme/paint";
-  import { DIFF_KEYS, exportTheme, LONGEST_NAME, themeName, type DiffKey, type Theme, type ThemeKind } from "../theme/themes";
+  import { DIFF_KEYS, exportTheme, hasApp, LONGEST_NAME, themeName, type DiffKey, type Theme, type ThemeKind } from "../theme/themes";
   import TfThemePreview from "./TfThemePreview.svelte";
   import TfThemeSwatch from "./TfThemeSwatch.svelte";
 
@@ -32,7 +33,7 @@
     ondelete,
   }: {
     theme: Theme;
-    themes: SyntaxThemes;
+    themes: Themes;
     drawnSide: ThemeKind;
     render: RenderPort;
     onduplicate: (theme: Theme) => void;
@@ -67,6 +68,10 @@
   const source = $derived(theme.from === undefined || theme.from === theme.name ? undefined : [...BUILTINS, ...themes.own].find((t) => t.name === theme.from && t.id !== theme.id));
   const tints = $derived({ ...(theme.diff?.added ? { added: theme.diff.added } : {}), ...(theme.diff?.removed ? { removed: theme.diff.removed } : {}) });
   const fixWord = $derived(theme.kind === "light" ? "Darken" : "Lighten");
+  /** The window theme drawn for this theme's side: the surfaces its code is checked and shown on (ADR-0055). */
+  const windowOf = $derived(themes.appDrawn(theme.kind));
+  const surfaces = $derived(themes.colours(theme.kind));
+  const DIFF_DEFAULT = $derived(diffDefault(surfaces));
 
   function setRole(role: Role, next: string | undefined): void {
     themes.update(theme.id, (t) => {
@@ -89,7 +94,7 @@
 
   function fixRole(role: Role): void {
     const was = theme.syntax[role];
-    const next = fixedRole(theme.kind, role, was, tints);
+    const next = fixedRole(surfaces, theme.kind, role, was, tints);
     if (next === null) return;
     setRole(role, next);
     undoable(`${ROLE_NAMES[role]} ${fixWord === "Darken" ? "darkened" : "lightened"} to 4.5:1.`, () => setRole(role, was), { subject: `theme-fix-${theme.id}-${role}` });
@@ -172,21 +177,36 @@
       {/if}
     </div>
   </div>
+  {#if hasApp(theme)}
+    {#if themes.appSlot(theme.kind) !== theme.id}
+      <div class="tf-thm-app">
+        <span>{theme.name} has colours for the window too.</span>
+        <button
+          type="button"
+          class="tf-btn tf-sm"
+          onclick={() => {
+            themes.chooseApp(theme.id);
+            themes.follow(theme.kind);
+          }}>Use for the app too</button
+        >
+      </div>
+    {/if}
+  {:else}
+    <p class="tf-thm-app tf-dim">It has no window colours. Import its file again to read them.</p>
+  {/if}
   <div
     class="tf-thm-roles"
-    class:tf-as-light={theme.kind !== drawnSide && theme.kind === "light"}
-    class:tf-as-dark={theme.kind !== drawnSide && theme.kind === "dark"}
-    {@attach cssVars(() => ({ "--hl-com-style": theme.italicComments === false ? "normal" : "italic" }))}
+    {@attach cssVars(() => (theme.kind !== drawnSide ? scopeValues(windowOf, theme, surfaces) : { "--hl-com-style": theme.italicComments === false ? "normal" : "italic" }))}
   >
-    <div class="tf-thm-grp">Code<small>lowest contrast on any surface</small></div>
+    <div class="tf-thm-grp">Code<small>lowest contrast on any surface of {windowOf.name}</small></div>
     {#each ROLES as role (role)}
       {@const value = theme.syntax[role]}
-      {@const c = roleContrast(theme.kind, role, value, tints)}
+      {@const c = roleContrast(surfaces, role, value, tints)}
       <div class="tf-thm-role" class:tf-low={c.low} data-role={role}>
         <TfThemeSwatch
           label={ROLE_NAMES[role]}
           {value}
-          fallback={INK[theme.kind]}
+          fallback={surfaces.ink}
           editable={own}
           resetTo={source ? source.syntax[role] : null}
           resetName={source?.name ?? ""}
@@ -195,7 +215,7 @@
         <span>{ROLE_NAMES[role]}</span>
         <code class="tf-hl-{role}" {@attach cssVars(() => ({ "--hl": value ?? "var(--ink)" }))}>{SAMPLE[role]}</code>
         <span class="tf-thm-hex">{value ?? "ink"}</span>
-        <span class="tf-thm-cr">{c.ratio.toFixed(1)}:1</span>
+        <span class="tf-thm-cr">{ratioText(c.ratio)}</span>
         {#if c.low}
           <div class="tf-thm-why">
             {lowSentence(c.ratio, c.on)}
@@ -211,7 +231,7 @@
         <TfThemeSwatch
           label={DIFF_NAMES[key]}
           {value}
-          fallback={DIFF_DEFAULT[theme.kind][key]}
+          fallback={DIFF_DEFAULT[key]}
           editable={own}
           inkable={false}
           resetTo={source ? (source.diff?.[key] ?? undefined) : null}
@@ -220,13 +240,13 @@
         />
         <span>{DIFF_NAMES[key]}</span>
         <code></code>
-        <span class="tf-thm-hex">{value ?? DIFF_DEFAULT[theme.kind][key]}</span>
+        <span class="tf-thm-hex">{value ?? DIFF_DEFAULT[key]}</span>
         <span class="tf-thm-cr"></span>
       </div>
     {/each}
   </div>
   <div class="tf-thm-side">
-    <TfThemePreview {theme} {drawnSide} {render} />
+    <TfThemePreview {theme} {drawnSide} {render} windowTheme={windowOf} colours={surfaces} />
     <div class="tf-thm-foot">
       <span>Unchanged lines in a diff</span>
       <div class="tf-seg" role="group" aria-label="Unchanged lines in a diff">

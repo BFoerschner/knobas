@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { plainPort } from "../../render/port";
 import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
 import type { KeptStorage } from "../kept-value";
-import { createSyntaxThemes, SLOT_KEY, THEMES_KEY, type SyntaxThemes, type ThemeRoot } from "../syntax-theme.svelte";
+import { APP_SLOT_KEY, createThemes, SLOT_KEY, THEMES_KEY, type Themes, type ThemeRoot } from "../themes.svelte";
 import { createTheme } from "../theme.svelte";
 import TfThemesSection from "./TfThemesSection.svelte";
 
@@ -18,7 +18,7 @@ function memory(seed: Record<string, string> = {}): KeptStorage & { data: Map<st
 }
 function root(): ThemeRoot & { props: Map<string, string> } {
   const props = new Map<string, string>();
-  return { props, style: { setProperty: (k: string, v: string) => void props.set(k, v), removeProperty: (k: string) => (props.delete(k), "") }, setAttribute: () => {} };
+  return { props, style: { setProperty: (k: string, v: string) => void props.set(k, v), removeProperty: (k: string) => (props.delete(k), "") }, setAttribute: () => {}, removeAttribute: () => {} };
 }
 
 /** A light theme of one's own whose string falls under 4.5:1. */
@@ -28,12 +28,12 @@ let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let storage: ReturnType<typeof memory>;
 let html: ReturnType<typeof root>;
-let themes: SyntaxThemes;
+let themes: Themes;
 
 function draw(seed: Record<string, string> = {}): void {
   storage = memory(seed);
   html = root();
-  themes = createSyntaxThemes(() => storage, () => html);
+  themes = createThemes(() => storage, () => html);
   view = mount(TfThemesSection, { target, props: { themes, mode: createTheme(), render: plainPort, prefersDark: () => false } });
   flushSync();
 }
@@ -69,7 +69,7 @@ test("the slot the window draws now has the ring", () => {
   expect(q('[data-slot="dark"]')?.classList.contains("tf-cur")).toBe(false);
 });
 
-test("a built-in has no swatch buttons, and Duplicate and edit makes a copy in its slot", () => {
+test("a built-in has no swatch buttons, and Duplicate and edit puts the copy where the original drew: the window's slot, code following", () => {
   draw();
   expect(q(".tf-thm-edh .tf-lab")?.textContent).toBe("comes with knobas");
   expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(0);
@@ -79,7 +79,8 @@ test("a built-in has no swatch buttons, and Duplicate and edit makes a copy in i
   expect(q(".tf-thm-edh .tf-lab")?.textContent).toBe("yours, from knobas Light");
   const copy = themes.own[0]!;
   expect(themes.slot("light")).toBe(copy.id);
-  expect(storage.data.get(SLOT_KEY.light)).toBe(copy.id);
+  expect(storage.data.get(APP_SLOT_KEY.light)).toBe(copy.id);
+  expect(storage.data.has(SLOT_KEY.light)).toBe(false);
   expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(17 + 4);
 });
 
@@ -123,6 +124,8 @@ test("a swatch's panel writes a typed colour at once, and Esc closes it leaving 
   field.value = "#123456";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  // Drawn by the next frame (ADR-0055: an edit is applied once a frame at most).
+  themes.flush();
   expect(html.props.get("--hl-kw-light")).toBe("#123456");
   field.focus();
   field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -159,4 +162,46 @@ test("a file that is not a theme is refused in one sentence", async () => {
   input.dispatchEvent(new Event("change", { bubbles: true }));
   for (let i = 0; i < 20 && toasts.items.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   expect(toasts.items.at(-1)?.text).toBe("That file is not a theme knobas can read. It has no `knobasTheme`, `tokenColors` or `syntax`.");
+});
+
+test("Same as the app theme follows the window's theme, and a choice sets the slot apart", () => {
+  draw();
+  const select = q<HTMLSelectElement>('select[aria-label="Theme while dark"]')!;
+  expect(select.value).toBe("");
+  expect(select.options[0]!.textContent).toBe("Same as the app theme");
+  themes.chooseApp("dracula");
+  flushSync();
+  expect(themes.drawn("dark").id).toBe("dracula");
+  select.value = "one-dark";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(storage.data.get(SLOT_KEY.dark)).toBe("one-dark");
+  select.value = "";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(storage.data.has(SLOT_KEY.dark)).toBe(false);
+  expect(themes.drawn("dark").id).toBe("dracula");
+});
+
+test("a theme's contrast is read on the window theme drawn for its side, and its small print names it", () => {
+  draw({ [APP_SLOT_KEY.light]: "github-light", [SLOT_KEY.light]: "knobas-light" });
+  expect(q(".tf-thm-grp small")?.textContent).toBe("lowest contrast on any surface of GitHub Light");
+  // knobas Light's string on GitHub Light's added line, not knobas's own.
+  expect(q('[data-role="str"] .tf-thm-cr')?.textContent).toMatch(/^\d+\.\d:1$/);
+});
+
+test("a theme with window colours that the window does not draw offers Use for the app too; one without says so", () => {
+  draw({ [SLOT_KEY.dark]: "dracula" });
+  const select = q<HTMLSelectElement>('select[aria-label="Theme while dark"]')!;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  themes.choose("dracula");
+  flushSync();
+  q<HTMLButtonElement>('.tf-thm-slot[data-slot="dark"] .tf-btn')!.click();
+  flushSync();
+  button("Use for the app too")!.click();
+  flushSync();
+  expect(themes.appDrawn("dark").id).toBe("dracula");
+  expect(themes.follows("dark")).toBe(true);
+  expect(button("Use for the app too")).toBeNull();
 });

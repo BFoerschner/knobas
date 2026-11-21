@@ -6,7 +6,7 @@ import { plainPort, type RenderPort } from "../render/port";
 import { createHighlighter, HIGHLIGHTER_KEY } from "./highlighter.svelte";
 import type { KeptStorage } from "./kept-value";
 import TfThemesSection from "./settings/TfThemesSection.svelte";
-import { createSyntaxThemes } from "./syntax-theme.svelte";
+import { createThemes } from "./themes.svelte";
 import { createTheme } from "./theme.svelte";
 
 function memory(seed: Record<string, string> = {}): KeptStorage & { data: Map<string, string> } {
@@ -53,7 +53,7 @@ function draw(seed: Record<string, string> = {}) {
   const warm = vi.fn();
   const port: RenderPort = { ...plainPort, rehighlight, warm };
   const highlighter = createHighlighter(() => storage, () => port);
-  const themes = createSyntaxThemes(() => memory(), () => null);
+  const themes = createThemes(() => memory(), () => null);
   view = mount(TfThemesSection, { target, props: { themes, mode: createTheme(), highlighter, render: port, prefersDark: () => false } });
   flushSync();
   return { storage, highlighter, rehighlight, warm };

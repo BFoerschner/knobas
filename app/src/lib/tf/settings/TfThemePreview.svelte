@@ -4,18 +4,19 @@
   YAML change with a changed word, an added line with a comment and quiet context), a Docs code block, and Markdown
   source. The code is highlighted through the port like any other text, so it is the engine's answer, not a picture.
 
-  The theme shown is the one in the editor, its colours set on this box. A theme of the side the window does not draw
-  is shown on that side's surfaces (`.tf-as-light`, `.tf-as-dark`, which re-declare the surface and ink tokens).
+  The theme shown is the one in the editor, its colours set on this box, on the surfaces of the window theme drawn for
+  its side (`scopeValues`, ADR-0055), so a dark code theme is shown on the dark window theme while the window is light.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
 
   import type { LineTokens, RenderPort } from "../../render/port";
-  import { previewValues } from "../syntax-theme.svelte";
+  import { scopeValues } from "../themes.svelte";
+  import type { Colours } from "../theme/app-derive";
   import { cssVars, marked } from "../theme/paint";
   import type { Theme, ThemeKind } from "../theme/themes";
 
-  let { theme, drawnSide, render }: { theme: Theme; drawnSide: ThemeKind; render: RenderPort } = $props();
+  let { theme, drawnSide, render, windowTheme, colours }: { theme: Theme; drawnSide: ThemeKind; render: RenderPort; windowTheme: Theme; colours: Colours } = $props();
 
   type Tab = "code" | "docs" | "markdown";
   let tab = $state<Tab>("code");
@@ -112,7 +113,7 @@
 
 {#snippet code(key: Key, n: number, from?: number, to?: number)}{#each marked(lines[key][n] ?? "", tokens[key][n], from, to) as piece, i (i)}{#if piece.mark}<span class="tf-wd">{#if piece.kind === ""}{piece.text}{:else}<span class="tf-hl-{piece.kind}">{piece.text}</span>{/if}</span>{:else if piece.kind === ""}{piece.text}{:else}<span class="tf-hl-{piece.kind}">{piece.text}</span>{/if}{/each}{/snippet}
 
-<div class="tf-thm-pre" class:tf-as-light={other && theme.kind === "light"} class:tf-as-dark={other && theme.kind === "dark"} {@attach cssVars(() => previewValues(theme))}>
+<div class="tf-thm-pre" {@attach cssVars(() => scopeValues(windowTheme, theme, colours))}>
   <div class="tf-thm-preh">
     <div class="tf-seg" role="group" aria-label="Preview">
       {#each TABS as [key, label] (key)}

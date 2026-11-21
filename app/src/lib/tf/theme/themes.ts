@@ -1,12 +1,15 @@
 /**
- * A theme (ADR-0051): a name, a side, and a colour for some of the roles (`render/roles.ts`). A role it leaves out draws
- * in ink. It may set the diff's four colours, and whether comments slant.
+ * A theme (ADR-0051, ADR-0055): a name, a side, and colours in two parts. Its window part (`app`) sets any of the
+ * window's 51 colours (`app-roles.ts`), the rest derived (`app-derive.ts`); its code part sets a colour for some of
+ * the roles (`render/roles.ts`), a role it leaves out drawing in ink, and may set the diff's four colours and whether
+ * comments slant. A theme may hold either part or both.
  *
  * This file is the model: what a theme may hold, reading one a person kept, and reading and writing theme files.
  * Import reads knobas's own file, a VS Code theme and a Zed theme onto the roles; export writes knobas's own. Nothing
- * here touches the page or storage (`tf/syntax-theme.svelte.ts` does).
+ * here touches the page or storage (`tf/themes.svelte.ts` does).
  */
 import { PIERRE_ROLE, ROLES, type Role } from "../../render/roles";
+import { type AppKey, KEYS } from "./app-roles";
 
 export type ThemeKind = "light" | "dark";
 
@@ -28,12 +31,19 @@ export interface Theme {
   kind: ThemeKind;
   /** The name it was copied or imported from, for the editor's line. */
   from?: string;
-  /** `#RRGGBB` a role; a role left out draws in ink. */
+  /** The window's colours it sets, `#RRGGBB` a key; absent where the theme has no window colours. */
+  app?: Partial<Record<AppKey, string>>;
+  /** `#RRGGBB` a role; a role left out draws in ink. Empty where the theme has no code colours. */
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
   /** Comments slant unless this is `false`. */
   italicComments?: boolean;
 }
+
+/** Whether a theme holds window colours. */
+export const hasApp = (t: Pick<Theme, "app">): boolean => t.app !== undefined;
+/** Whether a theme holds code colours. */
+export const hasCode = (t: Pick<Theme, "syntax">): boolean => Object.keys(t.syntax).length > 0;
 
 /** The most own themes a person keeps. */
 export const MOST_THEMES = 64;
@@ -86,6 +96,17 @@ function syntaxOf(value: unknown): Partial<Record<Role, string>> {
   return out;
 }
 
+/** A theme's window colours read key by key: a key it does not know, or a colour it cannot read, is dropped. */
+export function appOf(value: unknown): Partial<Record<AppKey, string>> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Partial<Record<AppKey, string>> = {};
+  for (const key of KEYS) {
+    const c = colour((value as Record<string, unknown>)[key]);
+    if (c !== null) out[key] = c;
+  }
+  return out;
+}
+
 function diffOf(value: unknown): DiffColours | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const out: DiffColours = {};
@@ -104,6 +125,8 @@ export function readTheme(value: unknown): Theme | null {
   if (v.kind !== "light" && v.kind !== "dark") return null;
   const theme: Theme = { id: v.id, name: themeName(v.name), kind: v.kind, syntax: syntaxOf(v.syntax) };
   if (typeof v.from === "string" && v.from !== "") theme.from = v.from.slice(0, LONGEST_NAME);
+  const app = appOf(v.app);
+  if (app) theme.app = app;
   const diff = diffOf(v.diff);
   if (diff) theme.diff = diff;
   if (v.italicComments === false) theme.italicComments = false;
@@ -138,6 +161,8 @@ export interface ThemeFile {
   knobasTheme: 1;
   name: string;
   kind: ThemeKind;
+  /** The window's colours, where the theme has them (ADR-0055). A build from before ignores the key. */
+  app?: Partial<Record<AppKey, string>>;
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
   italicComments: boolean;
@@ -145,7 +170,7 @@ export interface ThemeFile {
 
 /** `theme` as knobas's file: its name, `<name>.knobas-theme.json`, and its text. */
 export function exportTheme(theme: Theme): { fileName: string; text: string } {
-  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
+  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, ...(theme.app ? { app: { ...theme.app } } : {}), syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
   if (theme.diff) file.diff = { ...theme.diff };
   const safe = theme.name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "theme";
   return { fileName: `${safe}.knobas-theme.json`, text: `${JSON.stringify(file, null, 2)}\n` };
@@ -297,6 +322,8 @@ export function importThemes(text: string): ImportResult {
     if (v.kind !== "light" && v.kind !== "dark") return { refused: REFUSED };
     const name = themeName(v.name);
     const theme: ImportedTheme = { name, kind: v.kind, syntax: syntaxOf(v.syntax), from: name };
+    const app = appOf(v.app);
+    if (app) theme.app = app;
     const diff = diffOf(v.diff);
     if (diff) theme.diff = diff;
     if (v.italicComments === false) theme.italicComments = false;

@@ -37,6 +37,7 @@
 import { diagramKey, keepDiagramSize, keptDiagramSize } from "./diagram-sizes";
 import { svgFrame, type SvgFrame } from "./frame";
 import type { DiagramRequest, Palette, RenderPort } from "./port";
+import { KNOBAS } from "../tf/theme/app-derive";
 
 export type DiagramEngine = DiagramRequest["engine"];
 
@@ -47,16 +48,16 @@ export function isDiagramEngine(id: string): id is DiagramEngine {
   return Object.hasOwn(NAMES, id);
 }
 
-/** The light tokens (`tf/css/tokens.css`), for a document whose stylesheet holds none (jsdom). */
+/** knobas Light's tokens (`tf/theme/app-derive.ts`, which `tokens.css` holds equal), for a document whose stylesheet holds none (jsdom). */
 const LIGHT: Omit<Palette, "dark"> = {
-  paper: "#E4E8EC",
-  sheet: "#F7F8F9",
-  sheet2: "#EEF1F4",
-  ink: "#17212B",
-  ink2: "#4B5663",
-  rule: "#CBD2D9",
-  mutedBg: "#E6E9EC",
-  mark: "#F6E08F",
+  paper: KNOBAS.light.paper,
+  sheet: KNOBAS.light.sheet,
+  sheet2: KNOBAS.light.sheet2,
+  ink: KNOBAS.light.ink,
+  ink2: KNOBAS.light.ink2,
+  rule: KNOBAS.light.rule,
+  mutedBg: KNOBAS.light.mutedBg,
+  mark: KNOBAS.light.mark,
 };
 
 const TOKENS: Record<keyof typeof LIGHT, string> = {
@@ -87,12 +88,14 @@ function luminance(colour: string): number {
 
 /**
  * Calls `changed` whenever the theme drawn may have changed: the shell's
- * `data-theme` on `<html>`, or the OS's scheme. Returns how to stop.
+ * `data-theme` on `<html>`, a theme's colours (`data-paint`, which
+ * `tf/themes.svelte.ts` moves when a slot changes or an edit is saved), or the
+ * OS's scheme. Returns how to stop.
  */
 export function watchTheme(changed: () => void): () => void {
   const html = document.documentElement;
   const observer = new MutationObserver(changed);
-  observer.observe(html, { attributes: true, attributeFilter: ["data-theme"] });
+  observer.observe(html, { attributes: true, attributeFilter: ["data-theme", "data-paint"] });
   const scheme = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   scheme?.addEventListener?.("change", changed);
   return () => {

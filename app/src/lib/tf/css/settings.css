@@ -436,22 +436,10 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-doc p { margin: 0 0 10px; }
 .tf-thm-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-thm-italic { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
-/* A theme of the side the window does not draw is shown on that side's surfaces: the tokens of `tokens.css`'s other
-   block, re-declared (`tf-css.test.ts` holds them equal), as `job.css` re-declares the light tones on the yellow card. */
-.tf-as-light {
-  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663; --fill: var(--ink); --rule: #CBD2D9;
-  --rule-2: #DDE2E7; --focus: #2F55D4; --mark: #F6E08F; --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
-  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC; --add-word: #B4DEC3; --del-word: #EFB9B6;
-  --diff-add: var(--ok-bg); --diff-del: var(--err-bg);
-  color-scheme: light;
-}
-.tf-as-dark {
-  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE; --rule: #323C47;
-  --rule-2: #28313A; --focus: #8AA6FF; --mark: #5C4E17; --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
-  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37; --add-word: #2C6243; --del-word: #6E3333;
-  --diff-add: var(--ok-bg); --diff-del: var(--err-bg);
-  color-scheme: dark;
-}
+/* A code slot that follows a window theme with no code colours says which draws (ADR-0055). */
+.tf-thm-follow { grid-column: 1 / -1; margin: 0; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+/* Code colours' editor: the line on a theme's window colours, over the role list. */
+.tf-thm-app { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Updates (ADR-0052; design system, *The update box*) ---------- */
 /* One box, the same rooms in every state: only its words, the track's fill and the two buttons' words change. */
 .tf-upd {

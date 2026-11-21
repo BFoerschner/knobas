@@ -1,10 +1,11 @@
 <!--
   Settings › Appearance › Code colours (ADR-0051; `docs/decisions/2026-11-21-a-theme-is-yours-and-code-is-coloured-by-two-engines.md`,
   `docs/decisions/2026-11-21-settings-has-subtrees.md`): the colours of code and diffs. The window's side stays on
-  Appearance (*Theme*), an app-wide setting; this page reads it to ring the slot drawn now. Top to bottom: the two slots, *While light* and *While dark*, each a choice of that side's themes with six chips of its
+  Appearance (*Mode*), an app-wide setting; this page reads it to ring the slot drawn now. Top to bottom: the two slots, *While light* and *While dark*, each a choice of that side's themes with six chips of its
   colours, the slot the window draws now ringed in ink, and then the editor of the theme last chosen or edited
-  (`TfThemeEditor.svelte`). *Import…* sits at the header's right edge. Needs no database: everything here is this
-  computer's, in `localStorage` (`syntax-theme.svelte.ts`, `theme.svelte.ts`).
+  (`TfThemeEditor.svelte`). A slot's first choice, *Same as the app theme*, follows the window's theme of that side
+  (ADR-0055). *Import…* sits at the header's right edge. Needs no database: everything here is this computer's, in
+  `localStorage` (`themes.svelte.ts`, `theme.svelte.ts`).
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -14,20 +15,20 @@
   import { push, undoable } from "../../shell/toasts.svelte";
   import type { EngineId } from "../../render/engines";
   import { highlighter as appHighlighter, type HighlighterChoice } from "../highlighter.svelte";
-  import { syntaxThemes, type SyntaxThemes } from "../syntax-theme.svelte";
+  import { themes as appThemes, type Themes } from "../themes.svelte";
   import { theme as windowTheme, type Theme as WindowTheme } from "../theme.svelte";
-  import { fixedRole, INK } from "../theme/contrast";
+  import { fixedRole } from "../theme/contrast";
   import { cssVars } from "../theme/paint";
   import { importThemes, type Theme, type ThemeKind } from "../theme/themes";
   import TfThemeEditor from "./TfThemeEditor.svelte";
 
   let {
-    themes = syntaxThemes,
+    themes = appThemes,
     mode = windowTheme,
     highlighter = appHighlighter,
     render = renderPort(),
     prefersDark = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches,
-  }: { themes?: SyntaxThemes; mode?: WindowTheme; highlighter?: HighlighterChoice; render?: RenderPort; prefersDark?: () => boolean } = $props();
+  }: { themes?: Themes; mode?: WindowTheme; highlighter?: HighlighterChoice; render?: RenderPort; prefersDark?: () => boolean } = $props();
 
   /** The three highlighters, each with its line: speed, then exactness and reach, then age (the re-ruling, section 1). */
   const ENGINES: readonly (readonly [EngineId, string, string])[] = [
@@ -70,8 +71,10 @@
     const { id: _id, ...rest } = of;
     const copy = themes.add({ ...rest, name: `${of.name} copy`, from: of.name });
     if (copy === null) return void push({ text: "knobas keeps 64 themes of your own. Delete one to make another." });
-    // A person who copies a theme means to see their changes: it goes in its kind's slot.
-    themes.choose(copy.id);
+    // A person who copies a theme means to see their changes: the copy goes where the original drew. While code
+    // follows the window's theme and that is the original, to the window's slot, and code goes on following it.
+    if (themes.follows(of.kind) && themes.appDrawn(of.kind).id === of.id && copy.app) themes.chooseApp(copy.id);
+    else themes.choose(copy.id);
     editingId = copy.id;
   }
 
@@ -89,13 +92,13 @@
   let picker = $state<HTMLInputElement | null>(null);
 
   /** The roles of `t` under 4.5:1. */
-  const lowRoles = (t: Theme) => ROLES.filter((role) => fixedRole(t.kind, role, t.syntax[role], t.diff ?? {}) !== null);
+  const lowRoles = (t: Theme) => ROLES.filter((role) => fixedRole(themes.colours(t.kind), t.kind, role, t.syntax[role], t.diff ?? {}) !== null);
 
   function fixAll(ids: readonly string[]): void {
     for (const id of ids)
       themes.update(id, (t) => {
         const syntax = { ...t.syntax };
-        for (const role of lowRoles(t)) syntax[role] = fixedRole(t.kind, role, t.syntax[role], t.diff ?? {})!;
+        for (const role of lowRoles(t)) syntax[role] = fixedRole(themes.colours(t.kind), t.kind, role, t.syntax[role], t.diff ?? {})!;
         return { ...t, syntax };
       });
     themes.flush();
@@ -157,14 +160,23 @@
 <div class="tf-thm-slots">
   {#each SLOTS as [kind, label] (kind)}
     {@const held = themes.drawn(kind)}
+    {@const follows = themes.follows(kind)}
+    {@const app = themes.appDrawn(kind)}
     <div class="tf-thm-slot" class:tf-cur={kind === drawnSide} data-slot={kind}>
       <h3>{label}</h3>
       <select
         class="tf-thm-sel"
         aria-label="Theme {label.toLowerCase()}"
-        value={held.id}
-        onchange={(event) => choose((event.currentTarget as HTMLSelectElement).value)}
+        value={follows ? "" : held.id}
+        onchange={(event) => {
+          const id = (event.currentTarget as HTMLSelectElement).value;
+          if (id === "") {
+            themes.follow(kind);
+            editingId = themes.slot(kind);
+          } else choose(id);
+        }}
       >
+        <option value="">Same as the app theme</option>
         {#each themes.of(kind) as t (t.id)}
           <option value={t.id}>{t.id.startsWith("own-") ? `${t.name}, yours` : t.name}</option>
         {/each}
@@ -172,9 +184,12 @@
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editingId = held.id)}>Edit</button>
       <div class="tf-thm-chips" aria-hidden="true">
         {#each CHIPS as role (role)}
-          <i title={ROLE_NAMES[role]} {@attach cssVars(() => ({ background: held.syntax[role] ?? INK[kind] }))}></i>
+          <i title={ROLE_NAMES[role]} {@attach cssVars(() => ({ background: held.syntax[role] ?? themes.colours(kind).ink }))}></i>
         {/each}
       </div>
+      {#if follows && held.id !== app.id}
+        <p class="tf-thm-follow">{app.name} has no code colours, so {held.name} draws.</p>
+      {/if}
     </div>
   {/each}
 </div>

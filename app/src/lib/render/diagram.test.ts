@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { WARM_DIAGRAMS, diagramWarm, drawDiagram, forgetDiagrams, warmDiagrams, type DiagramRoom } from "./diagram";
+import { WARM_DIAGRAMS, diagramWarm, drawDiagram, forgetDiagrams, warmDiagrams, watchTheme, type DiagramRoom } from "./diagram";
 import { diagramKey, forgetDiagramSizes, keepDiagramSize, keptDiagramSize } from "./diagram-sizes";
 import type { DiagramAnswer, DiagramRequest, RenderPort } from "./port";
 
@@ -536,4 +536,22 @@ test("a port with no diagram engine is not warmed, and its diagrams stay source"
   const { body } = fence();
   draw(body, plain, null);
   expect(body.querySelector("pre code")?.textContent).toBe(FLOW);
+});
+
+test("a theme's colours changing (data-paint) calls watchTheme's callback, as the side changing does (ADR-0055)", async () => {
+  const html = document.documentElement;
+  let calls = 0;
+  const stop = watchTheme(() => (calls += 1));
+  try {
+    html.setAttribute("data-paint", "1");
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    html.setAttribute("data-theme", "dark");
+    await Promise.resolve();
+    expect(calls).toBe(2);
+  } finally {
+    stop();
+    html.removeAttribute("data-paint");
+    html.removeAttribute("data-theme");
+  }
 });

@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import { BUILTINS } from "./builtins";
-import { colour, exportTheme, importThemes, readThemes, REFUSED, ruleFor, uniqueName, type ImportedTheme } from "./themes";
+import { colour, exportTheme, hasApp, hasCode, importThemes, readTheme, readThemes, REFUSED, ruleFor, uniqueName, type ImportedTheme, type Theme } from "./themes";
 
 const imported = (text: string): ImportedTheme[] => {
   const result = importThemes(text);
@@ -131,4 +131,32 @@ test("colours and names", () => {
 
 test("seven themes come with knobas, the knobas pair first", () => {
   expect(BUILTINS.map((t) => t.name)).toEqual(["knobas Light", "knobas Dark", "GitHub Light", "GitHub Dark", "One Dark", "Dracula", "Catppuccin Mocha"]);
+});
+
+// ---------- the window's part (ADR-0055, the decisions' 3.1 and 3.5) ----------
+
+test("export then import gives the same theme, window colours and all", () => {
+  const theme: Theme = { id: "own-roundtr1", name: "Round", kind: "dark", app: { sheet: "#282A36", ok: "#50FA7B" }, syntax: { kw: "#FF79C6" }, italicComments: false };
+  const back = importThemes(exportTheme(theme).text);
+  expect("themes" in back && back.themes[0]).toEqual({ name: "Round", kind: "dark", app: { sheet: "#282A36", ok: "#50FA7B" }, syntax: { kw: "#FF79C6" }, from: "Round", italicComments: false });
+});
+
+test("a file with window colours and no code colours has one part; a version 1 file with no app imports as before", () => {
+  const appOnly = importThemes(JSON.stringify({ knobasTheme: 1, name: "A", kind: "light", app: { sheet: "#FFFFFF" }, syntax: {} }));
+  const t = "themes" in appOnly ? appOnly.themes[0]! : null;
+  expect(t && hasApp(t)).toBe(true);
+  expect(t && hasCode(t)).toBe(false);
+  const old = importThemes(JSON.stringify({ knobasTheme: 1, name: "B", kind: "dark", syntax: { kw: "#FF79C6" } }));
+  const o = "themes" in old ? old.themes[0]! : null;
+  expect(o && hasApp(o)).toBe(false);
+  expect(o?.syntax).toEqual({ kw: "#FF79C6" });
+});
+
+test("a kept theme with a bad colour in its window part loses that key, not the theme; a font, radius or density is never kept", () => {
+  const kept = readTheme({ id: "own-badcolor", name: "Bad", kind: "light", app: { sheet: "#FFFFFF", ink: "black", nope: "#000000" }, syntax: {}, font: "Comic Sans", radius: 9, density: "loose" });
+  expect(kept?.app).toEqual({ sheet: "#FFFFFF" });
+  expect(Object.keys(kept!)).not.toContain("font");
+  const file = importThemes(JSON.stringify({ knobasTheme: 1, name: "F", kind: "light", syntax: {}, font: "Comic Sans", radius: 9, density: "loose" }));
+  const f = "themes" in file ? file.themes[0]! : null;
+  expect(Object.keys(f!).sort()).toEqual(["from", "kind", "name", "syntax"]);
 });
