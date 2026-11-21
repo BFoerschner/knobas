@@ -1,7 +1,7 @@
 -- 0101_the_files_every_repository_holds.sql -- what the files index stands at:
 -- the commit each mirrored repository's files were read at, and the blob each
 -- file was read as (the everything-search decisions, 2026-11-20, D6 and D7;
--- PR #2479; ADR-0050;
+-- PR #2479; ADR-0048;
 -- `docs/decisions/2026-11-20-everything-finds-a-repository-by-its-files.md`).
 --
 -- Single-writer, like every migration. Announced under *Frozen surface* in
