@@ -11,8 +11,13 @@
 //!
 //! A socket path has a length limit (`sun_path`: 108 bytes with its NUL on
 //! Windows and Linux, 104 on macOS), so a profile folder deep enough to pass
-//! it has no socket: [`usable`] says so before the server is asked, and that
-//! start is TCP alone, as every start was before.
+//! it has no socket in the data folder: [`usable`] says so before the server
+//! is asked. On Windows the socket then goes to a short folder of its own,
+//! [`short_folder`] (the Windows pass on ux28: a scratch profile 41 bytes
+//! deeper than Björn's started on TCP alone, which is exactly the managed
+//! machine, with a long user name or a redirected AppData, the socket is
+//! for). Where that folder cannot hold one either, the start is TCP alone, as
+//! every start was before.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -78,6 +83,139 @@ fn bind_and_connect(_path: &Path) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "no Unix-domain sockets here",
     ))
+}
+
+/// The folder a Windows server's socket goes to when its data folder cannot
+/// hold one: `%LOCALAPPDATA%\knobas\<key>`, one per data folder ([`key`]), so
+/// the demo and the default profile never share one. Local AppData, not a
+/// shared folder: its inherited access list admits only the user, so a socket
+/// in it is still our server's (any local user can make folders under
+/// `C:\ProgramData` and listen there first), and `%TEMP%` is longer and gets
+/// cleaned. `None` off Windows (TCP comes first there, and the only short
+/// place is a shared `/tmp`) and where `LOCALAPPDATA` is unset or relative.
+///
+/// A test names its own root for it on any platform with
+/// `embedded::seam::fall_back_to`.
+#[must_use]
+pub fn short_folder(data_dir: &Path) -> Option<PathBuf> {
+    #[cfg(feature = "test-util")]
+    if let Some(root) = crate::embedded::seam::fallback_root(data_dir) {
+        return Some(root.join(key(data_dir)));
+    }
+    if !cfg!(windows) {
+        return None;
+    }
+    let local = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+    local
+        .is_absolute()
+        .then(|| local.join("knobas").join(key(data_dir)))
+}
+
+/// The folders a server of `data_dir` may have its socket in, in the order a
+/// start offers them and a liveness check or an adoption looks: the data
+/// folder, then [`short_folder`].
+#[must_use]
+pub fn folders(data_dir: &Path) -> Vec<PathBuf> {
+    std::iter::once(data_dir.to_path_buf())
+        .chain(short_folder(data_dir))
+        .collect()
+}
+
+/// The first of [`folders`] that holds `port`'s socket file: where a server
+/// left running listens. Not line 5 of `postmaster.pid`, which a data folder
+/// copied from another machine carries from there.
+#[must_use]
+pub fn find(data_dir: &Path, port: u16) -> Option<PathBuf> {
+    folders(data_dir)
+        .into_iter()
+        .find(|dir| file(dir, port).exists())
+}
+
+/// A data folder's name for its short socket folder: the first 8 hex digits
+/// of FNV-1a 64 over its path in lower case. Written here, never
+/// `DefaultHasher`, whose output may change between Rust releases: the name
+/// has to be the same for every build that adopts the server.
+#[must_use]
+pub fn key(data_dir: &Path) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+    let lower = data_dir.to_string_lossy().to_lowercase();
+    let hash = lower.bytes().fold(OFFSET, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    });
+    format!("{:08x}", hash >> 32)
+}
+
+/// Whether the server's command line can carry `dir` as an absolute
+/// `unix_socket_directories`: `postgresql_embedded` passes each setting as
+/// `-o "-c key=value"`, which `pg_ctl` splits on whitespace, so a space (or
+/// anything past plain ASCII path characters) breaks the start. The data
+/// folder itself never meets this: it is passed as `.`.
+///
+/// # Errors
+/// The reason, for the start's report.
+pub fn carriable(dir: &Path) -> Result<(), String> {
+    let plain = |byte: u8| byte.is_ascii_alphanumeric() || b"\\/:._-~".contains(&byte);
+    if dir.as_os_str().as_encoded_bytes().iter().all(|&b| plain(b)) {
+        Ok(())
+    } else {
+        Err("the folder's name has characters the server's command line cannot carry".to_owned())
+    }
+}
+
+/// `dir` as the server's `unix_socket_directories`: absolute, with forward
+/// slashes, which PostgreSQL reads on Windows as on Unix and which needs no
+/// quoting on its command line.
+#[must_use]
+pub fn setting(dir: &Path) -> String {
+    dir.to_string_lossy().replace('\\', "/")
+}
+
+/// Make `dir` and check it takes a socket: [`carriable`], then the folder,
+/// then [`usable`].
+///
+/// # Errors
+/// A sentence naming what failed.
+pub fn prepare(dir: &Path) -> Result<(), String> {
+    carriable(dir)?;
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("the folder could not be made: {error}"))?;
+    usable(dir)
+}
+
+/// Remove the socket files a killed server left in `dir`: `.s.PGSQL.<n>` and
+/// `.s.PGSQL.<n>.lock` for every `n` but `port`, the running server's. Every
+/// start picks a new port, so each kill leaves a pair behind. Never fails:
+/// what cannot be removed stays for the next start.
+pub fn sweep(dir: &Path, port: u16) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix(".s.PGSQL.") else {
+            continue;
+        };
+        let number = rest.strip_suffix(".lock").unwrap_or(rest);
+        match number.parse::<u16>() {
+            Ok(other) if other != port => {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// After a clean stop: remove the short folder `dir` and `%LOCALAPPDATA%\knobas`
+/// above it, each only when empty, so a quit leaves nothing behind. Never
+/// fails, and never touches the data folder (the caller passes the short one
+/// alone).
+pub fn tidy_short(dir: &Path) {
+    let _ = std::fs::remove_dir(dir);
+    if let Some(parent) = dir.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
 }
 
 /// Whether a server answers on `dir`'s socket for `port` within `within`: a
@@ -161,6 +299,116 @@ mod tests {
         let _listener = std::os::unix::net::UnixListener::bind(file(dir.path(), 5432)).unwrap();
         assert!(answers(dir.path(), 5432, Duration::from_secs(2)));
         assert!(!answers(dir.path(), 5433, Duration::from_millis(200)));
+    }
+
+    /// The short folder's name: 8 hex digits, the same for every build and
+    /// for the path in any case, and another for another data folder.
+    #[test]
+    fn the_key_is_stable_ignores_case_and_tells_folders_apart() {
+        let one = key(Path::new(
+            r"C:\Users\Long.Name\AppData\Roaming\dev.knobas.desktop\db\data",
+        ));
+        assert_eq!(one.len(), 8);
+        assert!(one.bytes().all(|b| b.is_ascii_hexdigit()), "{one}");
+        assert_eq!(
+            one,
+            key(Path::new(
+                r"c:\users\long.name\appdata\roaming\dev.knobas.desktop\db\data"
+            ))
+        );
+        assert_ne!(
+            one,
+            key(Path::new(
+                r"C:\Users\Long.Name\AppData\Roaming\dev.knobas.desktop\demo\db\data"
+            ))
+        );
+        // FNV-1a 64 of "a" is af63dc4c8601ec8c: the key is its top 32 bits.
+        assert_eq!(key(Path::new("A")), "af63dc4c");
+    }
+
+    /// A folder the server's command line cannot carry is refused with its
+    /// reason, before anything is made.
+    #[test]
+    fn a_folder_with_a_space_is_not_carriable() {
+        assert_eq!(
+            carriable(Path::new(r"C:\Users\bjfoer\AppData\Local\knobas\1a2b3c4d")),
+            Ok(())
+        );
+        let refused = carriable(Path::new(
+            r"C:\Users\John Smith\AppData\Local\knobas\1a2b3c4d",
+        ))
+        .expect_err("a space");
+        assert!(refused.contains("cannot carry"), "{refused}");
+        assert!(carriable(Path::new("/tmp/björn/x")).is_err());
+        assert!(prepare(Path::new("/tmp/kp space/x")).is_err());
+        assert!(!Path::new("/tmp/kp space").exists(), "nothing made");
+        assert_eq!(
+            setting(Path::new(r"C:\Users\b\AppData\Local\knobas\1a")),
+            "C:/Users/b/AppData/Local/knobas/1a"
+        );
+    }
+
+    /// The data folder first, always; off Windows nothing else unless a test
+    /// names a root.
+    #[test]
+    fn the_data_folder_comes_first() {
+        let data = Path::new("/nowhere/data");
+        let found = folders(data);
+        assert_eq!(found[0], data);
+        if !cfg!(windows) {
+            assert_eq!(found.len(), 1, "{found:?}");
+        }
+        assert_eq!(find(data, 5432), None);
+    }
+
+    /// A killed server's pair goes, the running server's stays, and nothing
+    /// else in the folder is touched.
+    #[test]
+    fn a_sweep_removes_other_ports_files_only() {
+        let dir = tempfile::Builder::new().tempdir_in(short_root()).unwrap();
+        for name in [
+            ".s.PGSQL.5000",
+            ".s.PGSQL.5000.lock",
+            ".s.PGSQL.6000",
+            ".s.PGSQL.6000.lock",
+            "postgresql.conf",
+            ".s.PGSQL.x",
+        ] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        sweep(dir.path(), 6000);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                ".s.PGSQL.6000",
+                ".s.PGSQL.6000.lock",
+                ".s.PGSQL.x",
+                "postgresql.conf"
+            ]
+        );
+    }
+
+    /// A tidy removes the short folder and its parent when empty, and leaves
+    /// a parent that holds something else.
+    #[test]
+    fn a_tidy_removes_only_empty_folders() {
+        let root = tempfile::Builder::new().tempdir_in(short_root()).unwrap();
+        let parent = root.path().join("knobas");
+        let short = parent.join("1a2b3c4d");
+        std::fs::create_dir_all(&short).unwrap();
+        std::fs::create_dir_all(parent.join("other")).unwrap();
+        tidy_short(&short);
+        assert!(!short.exists());
+        assert!(parent.exists(), "it holds another folder");
+        std::fs::remove_dir(parent.join("other")).unwrap();
+        std::fs::create_dir_all(&short).unwrap();
+        tidy_short(&short);
+        assert!(!parent.exists());
     }
 
     /// The Mac's `$TMPDIR` is too deep for a socket path; `/tmp` is not.

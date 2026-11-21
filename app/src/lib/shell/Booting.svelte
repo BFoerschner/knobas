@@ -68,6 +68,9 @@
       : "",
   );
 
+  /** The last lines the server wrote on a failed start (ux28's Windows pass): the screen keeps to the last six, *Copy details* has them all. */
+  const said = $derived(db.state === "failed" ? (db.said ?? []).slice(-6) : []);
+
   /** The button's own word for what the last press did; it says *Copy details* again after a moment. */
   let copied = $state<"idle" | "copied" | "failed">("idle");
   let settle: ReturnType<typeof setTimeout> | undefined;
@@ -108,6 +111,13 @@
       {/if}
       <!-- Text, always: the message is whatever PostgreSQL or the OS said. -->
       <p class="boot-mono boot-fail">{db.message}</p>
+      {#if said.length > 0}
+        <!-- The Windows pass on ux28: the server's own last lines, where the cause sits before its FATAL summary. -->
+        <p>PostgreSQL said</p>
+        <ul class="boot-paths boot-mono" data-testid="boot-said">
+          {#each said as line, n (n)}<li>{line}</li>{/each}
+        </ul>
+      {/if}
       <p>knobas {version} · profile {demo ? "demo" : "default"}</p>
       <div class="acts">
         <button class="tf-btn tf-primary" onclick={onretry}>Retry</button>

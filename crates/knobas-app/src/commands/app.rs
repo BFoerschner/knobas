@@ -56,6 +56,14 @@ pub enum DbState {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         blocked: Option<Blocked>,
+        /// What the server wrote to its log when it failed to start, each
+        /// line from its severity label on (the Windows pass on ux28): the
+        /// cause PostgreSQL names before its `FATAL` summary. The boot screen
+        /// draws the last few under the message. Absent when the server
+        /// wrote nothing or no start failed.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        said: Option<Vec<String>>,
     },
 }
 
@@ -67,6 +75,7 @@ impl DbState {
             message: message.into(),
             details: None,
             blocked: None,
+            said: None,
         }
     }
 }
@@ -1345,6 +1354,7 @@ mod tests {
             message: "blocked".to_owned(),
             details: Some("quick".to_owned()),
             blocked: None,
+            said: None,
         });
         assert!(!life.refine_failure("another", "full".to_owned()));
         assert!(life.refine_failure("blocked", "full".to_owned()));
@@ -1354,6 +1364,7 @@ mod tests {
                 message: "blocked".to_owned(),
                 details: Some("full".to_owned()),
                 blocked: None,
+                said: None,
             }
         );
         assert!(life.begin_retry());

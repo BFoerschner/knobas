@@ -1412,6 +1412,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             message: message.clone(),
             details: Some(details),
             blocked,
+            said: (!report.server_said.is_empty()).then(|| report.server_said.clone()),
         },
     );
     let handle = handle.clone();

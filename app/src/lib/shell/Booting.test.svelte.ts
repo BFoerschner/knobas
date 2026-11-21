@@ -228,6 +228,28 @@ test("a failure that is not a block shows no cause block", () => {
   screen.done();
 });
 
+/** ux28's Windows pass: the server's own last lines, under the message, the last six only, as text in mono; none without them. */
+test("what PostgreSQL said is drawn under the message, its last six lines", () => {
+  const said = Array.from({ length: 8 }, (_, n) => `LOG: line ${n} <i>x</i>`);
+  said.push('FATAL: configuration file "C:/x/postgresql.conf" contains errors');
+  const screen = render({ state: "failed", message: "did not start", said });
+  const list = screen.target.querySelector('[data-testid="boot-said"]');
+  expect(list).not.toBeNull();
+  const items = [...list!.querySelectorAll("li")].map((li) => li.textContent);
+  expect(items).toEqual([...said.slice(-6)]);
+  expect(list!.querySelector("i")).toBeNull();
+  expect(mono(list as HTMLElement)).toBe(true);
+  const lead = list!.previousElementSibling;
+  expect(lead?.textContent).toBe("PostgreSQL said");
+  expect(lead?.previousElementSibling?.textContent).toBe("did not start");
+  screen.done();
+
+  const none = render({ state: "failed", message: "did not start" });
+  expect(none.target.querySelector('[data-testid="boot-said"]')).toBeNull();
+  expect(none.text()).not.toContain("PostgreSQL said");
+  none.done();
+});
+
 /** *Copy details* copies the backend's report, and says it did. */
 test("Copy details copies the start's report and says Copied", async () => {
   const copy = vi.fn((_text: string) => Promise.resolve());

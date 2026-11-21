@@ -269,6 +269,11 @@ pub struct StartReport {
     pub server_exe: Option<PathBuf>,
     /// Every connection tried, in order.
     pub attempts: Vec<Attempt>,
+    /// What the server wrote to its log when it last failed to start, from
+    /// each line's severity label on: the cause PostgreSQL names before its
+    /// `FATAL` summary (the Windows pass on ux28). Empty when no start failed
+    /// or a later one worked.
+    pub server_said: Vec<String>,
 }
 
 impl StartReport {

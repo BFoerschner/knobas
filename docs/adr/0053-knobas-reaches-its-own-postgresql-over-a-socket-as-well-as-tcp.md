@@ -22,16 +22,26 @@ a Unix-domain socket in its own data folder, and a bring-up connects over the fi
 - **The socket is `unix_socket_directories = '.'`**, relative to the data folder, and `0700` on Unix. A relative folder
   avoids the path limit and the encoding on the server's side, and an absolute folder with a space in it fails on
   Windows. A data folder whose socket path would pass the limit (107 bytes on Windows and Linux, 103 on macOS), or that
-  will not take the file, gets no socket: the start is TCP alone, as before, and the report says why. A server that
+  will not take the file, gets no socket there. **Amended 2026-11-21 (the Windows pass on ux28):** on Windows the
+  socket then goes to `%LOCALAPPDATA%\knobas\<key>`, the key the first 8 hex digits of FNV-1a 64 over the data folder's
+  path in lower case, passed as an absolute folder with forward slashes. That folder is refused unread when its path
+  has a character the server's command line cannot carry (anything but ASCII letters, digits and `\ / : . _ - ~`), or
+  when it too will not take the file; the start is then TCP alone, as before, and the report names both folders as not
+  tried, with their reasons. A clean stop removes the folder and `knobas` above it when empty, and each `ready` sweeps
+  the socket files a killed server left in its socket folder. macOS and Linux get no second folder. A server that
   cannot make its socket file is started once more without it.
 - **sqlx reaches AF_UNIX on Windows through a patched `sqlx-core`** in `vendor/sqlx-core` (`[patch.crates-io]`, 25
   lines, `vendor/sqlx-core/KNOBAS.md`). tokio has no `UnixStream` on Windows, but its reactor polls any Winsock socket,
   so the connected socket is handed to it as a `TcpStream`.
-- **A lock's liveness reads the socket first.** A socket in our own data folder is our server's, which a port is not.
+- **A lock's liveness reads the socket first**, in the data folder, then in the short folder (not the folder
+  `postmaster.pid` names, which a copied data folder carries from another machine). A socket in a folder of ours is our
+  server's, which a port is not.
   A loopback probe refused for permissions counts as an answer, and `adopt` does not take a refused-for-permissions TCP
   error for a stranger: it keeps the lock and reports that it could not connect.
 - **A failure explains itself.** Every route tried goes on the start's report with its address or socket path and the
-  OS error, with the step reached and what the data folder held. The boot screen names a block in plain words, says
+  OS error, with the step reached and what the data folder held, and, when the server would not start, its own last
+  log lines from their severity labels on (`postgres said:`, up to 20 lines and 2,000 bytes; the boot screen draws the
+  last six as *PostgreSQL said*). The boot screen names a block in plain words, says
   what was tried and which two programs an administrator can allow, and *Copy details* carries the report.
 
 ## Rejected

@@ -974,6 +974,7 @@ impl EmbeddedDb {
             tracing::info!("the embedded postgres is not running: nothing to stop");
             return Ok(());
         }
+        let short = self.short_socket_folder();
         match &self.postgresql {
             // Started here: the handle knows how to stop it.
             Some(postgresql) => postgresql.stop().await?,
@@ -987,7 +988,20 @@ impl EmbeddedDb {
                 }
             }
         }
+        // A clean stop leaves no short socket folder behind: the server took
+        // its socket and lock file with it, so the folder is empty now.
+        if let Some(dir) = short {
+            let _ = tokio::task::spawn_blocking(move || crate::socket::tidy_short(&dir)).await;
+        }
         Ok(())
+    }
+
+    /// This data folder's short socket folder ([`crate::socket::short_folder`]),
+    /// whichever link the connector took: removed after a clean stop only
+    /// when empty, so a server that listened in the data folder loses
+    /// nothing.
+    fn short_socket_folder(&self) -> Option<PathBuf> {
+        crate::socket::short_folder(&self.server_settings()?.data_dir)
     }
 
     /// Stop the server without the shutdown checkpoint, for a data directory
@@ -1368,30 +1382,18 @@ async fn start_managed(
 
     report.reach(Step::Initdb);
     initialise(root_dir, &adoption).await?;
-    // The server's socket, in its own data folder (ux28, ADR-0053), where the
-    // folder can hold one: a path past the platform's limit, or a platform
-    // without AF_UNIX, starts on TCP alone, as every start did before.
-    let probing = data_dir.clone();
-    let socket_on = match off_runtime(&data_dir, move || crate::socket::usable(&probing)).await? {
-        Ok(()) => {
-            listen_on_socket(&mut settings);
-            true
-        }
-        Err(reason) => {
-            tracing::info!(%reason, "no socket in this data folder: TCP alone");
-            report.attempts.push(crate::report::Attempt::skipped(
-                socket_route(&data_dir),
-                reason,
-            ));
-            false
-        }
-    };
+    // The server's socket (ux28, ADR-0053): in its own data folder where the
+    // folder can hold one, else on Windows in a short folder of its own
+    // (`socket::short_folder`, the Windows pass on ux28). A path past the
+    // platform's limit in both, or a platform without AF_UNIX, starts on TCP
+    // alone, as every start did before.
+    let socket_dir = choose_socket_folder(&data_dir, &mut settings, report).await?;
     adoption = settings.clone();
     // The port is ours to pick, on the loopback, as late as the handle allows:
     // `setup()` below only finds the install and the data directory `initialise`
     // left, so the port is free for that long and no longer. See [`loopback_port`].
     settings.port = loopback_port().map_err(|source| DbError::io(&data_dir, source))?;
-    let without_socket = socket_on.then(|| {
+    let without_socket = socket_dir.is_some().then(|| {
         let mut plain = settings.clone();
         no_socket(&mut plain);
         plain
@@ -1408,8 +1410,32 @@ async fn start_managed(
     let owned = adoption.clone();
     off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
 
+    // A lock that names a server answering on its port is one left running,
+    // most often by a knobas that was killed: adopt it now. A second server
+    // started against it can only fail, and on Windows `pg_ctl start` takes
+    // about 33 s to say so (the Windows pass on ux28: 34 s from launch to the
+    // wizard after a kill, the same back to ux26). Read afresh, not from
+    // `report.found`: the stale-lock retry comes here after clearing it.
+    let reading = data_dir.clone();
+    let recorded = off_runtime(&data_dir, move || {
+        std::fs::read_to_string(reading.join("postmaster.pid"))
+            .ok()
+            .and_then(|contents| lock_port(&contents))
+            .filter(|&port| server_answers(&reading, port))
+    })
+    .await?;
+    if let Some(port) = recorded {
+        tracing::info!(
+            port,
+            "postmaster.pid names a server that answers: adopting it without starting another"
+        );
+        // No server of this handle's is running: never dropped, as below.
+        std::mem::forget(postgresql);
+        return adopt(adoption, port, owner_lock, report).await;
+    }
+
     report.reach(Step::ServerStart);
-    let mut socket_on = socket_on;
+    let mut socket_dir = socket_dir;
     let mut started_server = start_server_reporting(&mut postgresql, report).await;
     // The socket must never make a start worse than TCP alone: a server that
     // could not make its socket file is started once more without one.
@@ -1419,7 +1445,7 @@ async fn start_managed(
     {
         tracing::warn!(%reason, "the server could not make its socket: starting it on TCP alone");
         report.attempts.push(crate::report::Attempt::skipped(
-            socket_route(&data_dir),
+            socket_route(socket_dir.as_deref().unwrap_or(&data_dir)),
             format!("the server could not make it: {reason}"),
         ));
         // Its start failed, so `postmaster.pid` names no server of this
@@ -1430,7 +1456,7 @@ async fn start_managed(
         if let Err(source) = postgresql.setup().await {
             return Err(not_installed(&postgresql, source));
         }
-        socket_on = false;
+        socket_dir = None;
         report.reach(Step::ServerStart);
         started_server = start_server_reporting(&mut postgresql, report).await;
     }
@@ -1474,7 +1500,7 @@ async fn start_managed(
     // knobas's own connection, not `postgresql_embedded`'s `database_exists`:
     // that one's error said nothing of where it dialled (ux27's 10013), and
     // each attempt here goes on the report with its route.
-    let routes = routes_to(postgresql.settings(), socket_on)?;
+    let routes = routes_to(postgresql.settings(), socket_dir.as_deref())?;
     report.reach(Step::ClientConnect);
     let (maintenance, mut admin) = connect_first(&routes, report).await?;
     report.reach(Step::FirstQuery);
@@ -1494,6 +1520,7 @@ async fn start_managed(
         ms = started.elapsed().as_millis(),
         "embedded postgres ready"
     );
+    sweep_socket_folder(socket_dir, postgresql.settings().port);
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
@@ -1609,10 +1636,11 @@ async fn adopt(
     // happen before we trust the server, and creating `knobas` when it is
     // missing needs a connection that does not depend on it existing.
     // Over the socket too, where this server made one (a build before ux28
-    // made none in the data folder): the stranger rules below read the TCP
-    // answer alone, since a socket in our own data folder is our server's.
-    let socket_on = crate::socket::file(&data_dir, port).exists();
-    let routes = routes_to(&settings, socket_on)?;
+    // made none): in the data folder or, on Windows, its short folder
+    // (`socket::find`). The stranger rules below read the TCP answer alone,
+    // since a socket in a folder of ours is our server's.
+    let socket_dir = crate::socket::find(&data_dir, port);
+    let routes = routes_to(&settings, socket_dir.as_deref())?;
     let mut tcp_error = None;
     let mut reached = None;
     for (at, route) in routes.iter().enumerate() {
@@ -1753,6 +1781,7 @@ async fn adopt(
         route = %connector.route(),
         "adopting the orphaned postgres serving this data directory, and its stop"
     );
+    sweep_socket_folder(socket_dir, port);
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
         connector,
@@ -2428,11 +2457,24 @@ const FATAL: &str = "FATAL:";
 /// 0, `postgresql_embedded` picks one by listening on `0.0.0.0`
 /// ([`loopback_port`] says why that must not happen).
 async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
+    start_server_saying(postgresql)
+        .await
+        .map_err(|(error, _said)| error)
+}
+
+/// [`start_server`], with what the server wrote to its log on a failed start
+/// ([`server_said`]) beside the error.
+async fn start_server_saying(postgresql: &mut PostgreSQL) -> Result<(), (DbError, Vec<String>)> {
     let data_dir = postgresql.settings().data_dir.clone();
     if postgresql.settings().port == 0 {
-        return Err(DbError::io(
-            data_dir,
-            io::Error::other("no port picked: the server's port is chosen on the loopback first"),
+        return Err((
+            DbError::io(
+                data_dir,
+                io::Error::other(
+                    "no port picked: the server's port is chosen on the loopback first",
+                ),
+            ),
+            Vec::new(),
         ));
     }
     let log = data_dir.join(START_LOG);
@@ -2443,26 +2485,40 @@ async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
     };
     let written = tokio::fs::read(&log).await.unwrap_or_default();
     let reason = start_reason(&written, since).unwrap_or_else(|| source.to_string());
-    Err(DbError::ServerStart {
-        data_dir,
-        reason,
-        source: Box::new(source),
-    })
+    Err((
+        DbError::ServerStart {
+            data_dir,
+            reason,
+            source: Box::new(source),
+        },
+        server_said(&written, since),
+    ))
 }
 
 /// [`start_server`], moving `report` to [`Step::Bind`] when the server's
 /// reason is that it could not listen: on its port, or on its socket file.
+/// A failed start leaves what the server said on `report`
+/// ([`StartReport::server_said`]); a start that worked clears it, so it
+/// holds the last failed attempt only.
 async fn start_server_reporting(
     postgresql: &mut PostgreSQL,
     report: &mut StartReport,
 ) -> Result<(), DbError> {
-    let started = start_server(postgresql).await;
-    if let Err(DbError::ServerStart { reason, .. }) = &started
-        && is_bind_failure(reason)
-    {
-        report.reach(Step::Bind);
+    match start_server_saying(postgresql).await {
+        Ok(()) => {
+            report.server_said.clear();
+            Ok(())
+        }
+        Err((error, said)) => {
+            report.server_said = said;
+            if let DbError::ServerStart { reason, .. } = &error
+                && is_bind_failure(reason)
+            {
+                report.reach(Step::Bind);
+            }
+            Err(error)
+        }
     }
-    started
 }
 
 /// Whether a server's start reason says it could not listen.
@@ -2496,17 +2552,16 @@ fn server_exe(settings: &Settings) -> PathBuf {
 /// `-k` is Unix-only, and its drop removes that folder.
 const SOCKET_DIRECTORY: &str = ".";
 
-/// Have the server listen on its socket in the data folder too, readable by
-/// its owner alone on Unix (the folder already is).
-fn listen_on_socket(settings: &mut Settings) {
+/// Have the server listen on a socket too, in `directory` (the data folder's
+/// [`SOCKET_DIRECTORY`] or a short folder's [`crate::socket::setting`]),
+/// readable by its owner alone on Unix (both folders already are).
+fn listen_on_socket(settings: &mut Settings, directory: &str) {
     #[cfg(feature = "test-util")]
     let directory = if seam::socket_broken(&settings.data_dir) {
         "./no-such-folder"
     } else {
-        SOCKET_DIRECTORY
+        directory
     };
-    #[cfg(not(feature = "test-util"))]
-    let directory = SOCKET_DIRECTORY;
     settings
         .configuration
         .insert("unix_socket_directories".to_owned(), directory.to_owned());
@@ -2531,8 +2586,68 @@ fn is_socket_failure(reason: &str) -> bool {
 }
 
 /// The socket route as a report names it, before there is a port.
-fn socket_route(data_dir: &Path) -> String {
-    format!("unix {}", data_dir.display())
+fn socket_route(dir: &Path) -> String {
+    format!("unix {}", dir.display())
+}
+
+/// Where this start's server makes its socket, set on `settings`: the data
+/// folder where it can hold one ([`crate::socket::usable`]), else the short
+/// folder ([`crate::socket::short_folder`], Windows only) where that can,
+/// else `None`, TCP alone. Each folder refused goes on `report` as not tried,
+/// with its reason.
+async fn choose_socket_folder(
+    data_dir: &Path,
+    settings: &mut Settings,
+    report: &mut StartReport,
+) -> Result<Option<PathBuf>, DbError> {
+    let probing = data_dir.to_path_buf();
+    let in_data = off_runtime(data_dir, move || crate::socket::usable(&probing)).await?;
+    let Err(reason) = in_data else {
+        listen_on_socket(settings, SOCKET_DIRECTORY);
+        return Ok(Some(data_dir.to_path_buf()));
+    };
+    report.attempts.push(crate::report::Attempt::skipped(
+        socket_route(data_dir),
+        reason.clone(),
+    ));
+    let Some(short) = crate::socket::short_folder(data_dir) else {
+        tracing::info!(%reason, "no socket in this data folder: TCP alone");
+        return Ok(None);
+    };
+    let preparing = short.clone();
+    match off_runtime(data_dir, move || crate::socket::prepare(&preparing)).await? {
+        Ok(()) => {
+            tracing::info!(
+                %reason,
+                folder = %short.display(),
+                "the data folder cannot hold a socket: using the short folder"
+            );
+            listen_on_socket(settings, &crate::socket::setting(&short));
+            Ok(Some(short))
+        }
+        Err(why) => {
+            tracing::info!(
+                %reason,
+                short = %why,
+                folder = %short.display(),
+                "no socket in this data folder: TCP alone"
+            );
+            report
+                .attempts
+                .push(crate::report::Attempt::skipped(socket_route(&short), why));
+            Ok(None)
+        }
+    }
+}
+
+/// After `ready`, off the start's path: the socket files a killed server left
+/// in this server's socket folder go ([`crate::socket::sweep`]).
+fn sweep_socket_folder(socket_dir: Option<PathBuf>, port: u16) {
+    if let Some(dir) = socket_dir {
+        drop(tokio::task::spawn_blocking(move || {
+            crate::socket::sweep(&dir, port);
+        }));
+    }
 }
 
 /// How knobas reaches its own server (ux28, ADR-0053).
@@ -2565,13 +2680,13 @@ pub fn preferred_link() -> Link {
 
 /// The connectors to a server of ours on `settings`' port, to its maintenance
 /// database, in the order a bring-up tries them: [`preferred_link`] first,
-/// the socket only when `socket_on`.
-fn routes_to(settings: &Settings, socket_on: bool) -> Result<Vec<Connector>, DbError> {
+/// the socket in `socket_dir` only when there is one.
+fn routes_to(settings: &Settings, socket_dir: Option<&Path>) -> Result<Vec<Connector>, DbError> {
     let tcp = Connector::parse(&settings.url(MAINTENANCE_DATABASE))?;
-    if !socket_on {
+    let Some(dir) = socket_dir else {
         return Ok(vec![tcp]);
-    }
-    let socket = tcp.on_socket(&settings.data_dir);
+    };
+    let socket = tcp.on_socket(dir);
     Ok(match preferred_link() {
         Link::Socket => vec![socket, tcp],
         Link::Tcp => vec![tcp, socket],
@@ -2750,6 +2865,70 @@ fn start_reason(log: &[u8], since: u64) -> Option<String> {
     // A line ending in a comma is a sentence the postmaster wrapped, so it
     // reads on into the next line rather than being cut off with `; `.
     (!tail.is_empty()).then(|| tail.join("; ").replace(",; ", ", "))
+}
+
+/// The severity labels a server's log line starts its message with: with
+/// `lc_messages` pinned to `C` they are always these English words.
+const SEVERITIES: [&str; 8] = [
+    "LOG:", "WARNING:", "ERROR:", "FATAL:", "PANIC:", "DETAIL:", "HINT:", "CONTEXT:",
+];
+
+/// How many of the server's last lines a failed start's report keeps.
+const SAID_LINES: usize = 20;
+/// How many bytes of them, at most.
+const SAID_BYTES: usize = 2_000;
+/// How long one of them may be.
+const SAID_LINE_BYTES: usize = 400;
+
+/// What a failed start's server wrote to its log (the Windows pass on ux28):
+/// PostgreSQL's `FATAL` is often the summary, and the line before it the
+/// cause (`invalid value for parameter "shared_buffers"` before `configuration
+/// file ... contains errors`). Only the lines past `since`, read as
+/// [`start_reason`] reads them, blank ones dropped and whitespace collapsed;
+/// each from its severity label on, so the timestamp and pid go (a line with
+/// no label stays whole) and cut at [`SAID_LINE_BYTES`]. The last
+/// [`SAID_LINES`] lines within [`SAID_BYTES`], cut from the top, with a first
+/// line saying how many earlier ones were left out.
+fn server_said(log: &[u8], since: u64) -> Vec<String> {
+    let from = usize::try_from(since).unwrap_or(usize::MAX);
+    let written = String::from_utf8_lossy(log.get(from..).unwrap_or(log));
+    let lines: Vec<String> = written
+        .lines()
+        .map(|line| {
+            let at = SEVERITIES
+                .iter()
+                .filter_map(|label| line.find(label))
+                .min()
+                .unwrap_or(0);
+            let one = line[at..].split_whitespace().collect::<Vec<_>>().join(" ");
+            if one.len() <= SAID_LINE_BYTES {
+                return one;
+            }
+            let mut end = SAID_LINE_BYTES;
+            while !one.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &one[..end])
+        })
+        .filter(|line| !line.is_empty())
+        .collect();
+    let mut kept = 0;
+    let mut bytes = 0;
+    for line in lines.iter().rev() {
+        if kept == SAID_LINES || bytes + line.len() > SAID_BYTES {
+            break;
+        }
+        kept += 1;
+        bytes += line.len();
+    }
+    let left_out = lines.len() - kept;
+    let mut said = Vec::with_capacity(kept + 1);
+    if left_out > 0 {
+        let noun = if left_out == 1 { "line" } else { "lines" };
+        said.push(format!("{left_out} earlier {noun} left out"));
+    }
+    said.extend(lines.into_iter().skip(left_out));
+    said
 }
 
 /// Run `work` on a blocking thread and return its answer. A dropped caller
@@ -3294,6 +3473,38 @@ pub mod seam {
             .push(data_dir.to_path_buf());
     }
 
+    fn fallback_roots() -> &'static Mutex<HashMap<PathBuf, PathBuf>> {
+        static ROOTS: OnceLock<Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+        ROOTS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Give `data_dir` a short socket folder under `root`, on any platform,
+    /// as Windows gives one under `%LOCALAPPDATA%\knobas` (the Windows pass on
+    /// ux28): a data folder too deep for a socket then listens in
+    /// `<root>/<key>`. Undo with [`no_fallback`].
+    pub fn fall_back_to(data_dir: &Path, root: &Path) {
+        fallback_roots()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(data_dir.to_path_buf(), root.to_path_buf());
+    }
+
+    /// Undo [`fall_back_to`] for `data_dir`.
+    pub fn no_fallback(data_dir: &Path) {
+        fallback_roots()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(data_dir);
+    }
+
+    pub(crate) fn fallback_root(data_dir: &Path) -> Option<PathBuf> {
+        fallback_roots()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(data_dir)
+            .cloned()
+    }
+
     pub(crate) fn socket_broken(data_dir: &Path) -> bool {
         broken_sockets()
             .lock()
@@ -3432,7 +3643,10 @@ fn clear_lock(data_dir: &Path) -> Result<(), DbError> {
 /// ([`DbError::Unreachable`]) rather than clear one a live server of ours may
 /// hold.
 fn server_answers(data_dir: &Path, port: u16) -> bool {
-    if crate::socket::answers(data_dir, port, LIVENESS_TIMEOUT) {
+    if crate::socket::folders(data_dir)
+        .iter()
+        .any(|dir| crate::socket::answers(dir, port, LIVENESS_TIMEOUT))
+    {
         return true;
     }
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -3539,6 +3753,67 @@ mod tests {
             start_reason(b"FATAL:  could not load pg_hba.conf\n", 4096).as_deref(),
             Some("could not load pg_hba.conf")
         );
+    }
+
+    /// What the Windows pass on ux28 met: the cause sits in the `LOG` line
+    /// before the `FATAL`, and both are kept from their labels on; an
+    /// earlier start's lines are not this one's, and a line with no label
+    /// stays whole.
+    #[test]
+    fn what_the_server_said_is_this_starts_lines_from_their_labels() {
+        let earlier = "2026-11-21 16:16:59.838 CET [17524] LOG:  database system is shut down\n";
+        let log = format!(
+            "{earlier}2026-11-21 16:17:18.130 CET [18072] LOG:  invalid value for parameter \"shared_buffers\": \"nonsense_value\"\r\n\
+             \r\n\
+             2026-11-21 16:17:18.130 CET [18072] FATAL:  configuration file \"C:/x/postgresql.conf\" contains errors\n\
+             pg_ctl: could not start server\n"
+        );
+        assert_eq!(
+            server_said(log.as_bytes(), earlier.len() as u64),
+            vec![
+                "LOG: invalid value for parameter \"shared_buffers\": \"nonsense_value\""
+                    .to_owned(),
+                "FATAL: configuration file \"C:/x/postgresql.conf\" contains errors".to_owned(),
+                "pg_ctl: could not start server".to_owned(),
+            ]
+        );
+        // A log shorter than before the start is read whole.
+        assert_eq!(
+            server_said(b"FATAL:  x\n", 4096),
+            vec!["FATAL: x".to_owned()]
+        );
+        assert!(server_said(earlier.as_bytes(), earlier.len() as u64).is_empty());
+    }
+
+    /// The last 20 lines, within 2,000 bytes, cut from the top with a line
+    /// saying how many went; one line stops at 400 bytes on a character
+    /// boundary; bytes that are not UTF-8 are read lossily.
+    #[test]
+    fn what_the_server_said_is_capped() {
+        let many: String = (0..32)
+            .map(|n| format!("2026 [1] LOG:  line {n}\n"))
+            .collect();
+        let said = server_said(many.as_bytes(), 0);
+        assert_eq!(said.len(), 21, "{said:?}");
+        assert_eq!(said[0], "12 earlier lines left out");
+        assert_eq!(said[1], "LOG: line 12");
+        assert_eq!(said[20], "LOG: line 31");
+
+        let wide: String = (0..8)
+            .map(|n| format!("LOG: {n} {}\n", "x".repeat(380)))
+            .collect();
+        let said = server_said(wide.as_bytes(), 0);
+        assert_eq!(said[0], "3 earlier lines left out", "{said:?}");
+        assert_eq!(said.len(), 6);
+        assert!(said[1..].iter().map(String::len).sum::<usize>() <= 2_000);
+
+        let long = format!("FATAL: {}\n", "é".repeat(300));
+        let said = server_said(long.as_bytes(), 0);
+        assert!(said[0].ends_with("..."), "{}", said[0]);
+        assert!(said[0].len() <= 403, "{}", said[0].len());
+
+        let said = server_said(b"FATAL: bad \xff byte\n", 0);
+        assert_eq!(said, vec!["FATAL: bad \u{fffd} byte".to_owned()]);
     }
 
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {

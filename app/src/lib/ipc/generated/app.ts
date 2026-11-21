@@ -117,7 +117,15 @@ details?: string,
  * permissions (Windows' WSAEACCES, 10013): a firewall rule or
  * security software. The boot screen then says so in plain words.
  */
-blocked?: Blocked, };
+blocked?: Blocked, 
+/**
+ * What the server wrote to its log when it failed to start, each
+ * line from its severity label on (the Windows pass on ux28): the
+ * cause PostgreSQL names before its `FATAL` summary. The boot screen
+ * draws the last few under the message. Absent when the server
+ * wrote nothing or no start failed.
+ */
+said?: Array<string>, };
 
 /**
  * What kind of output a run made, as the Code page draws it.

@@ -1272,10 +1272,12 @@ async fn a_start_whose_own_connection_is_refused_for_permissions_explains_itself
         message,
         details,
         blocked,
+        said,
     } = app.state::<Lifecycle>().get()
     else {
         panic!("a refused connection fails the start");
     };
+    assert_eq!(said, None, "the server started; only the connection failed");
     let blocked = blocked.expect("the screen names the block");
     assert!(
         blocked
@@ -1321,6 +1323,51 @@ async fn a_start_whose_own_connection_is_refused_for_permissions_explains_itself
     assert!(
         !data_dir.join("postmaster.pid").exists(),
         "the failed start stopped the server it started"
+    );
+    shutdown(&app);
+}
+
+/// The Windows pass on ux28: a server that refuses its configuration says
+/// why in its log (`invalid value for parameter ...`) before its `FATAL`
+/// summary (`configuration file ... contains errors`). Both reach the boot
+/// screen's state and *Copy details*.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_will_not_start_says_why_on_the_screen_and_in_the_details() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let config = profile.db_config(None);
+    knobas_db::EmbeddedDb::start(config.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let conf = config.root_dir.join("data").join("postgresql.conf");
+    let mut text = std::fs::read_to_string(&conf).unwrap();
+    text.push_str("\nshared_buffers = nonsense_value\n");
+    std::fs::write(&conf, text).unwrap();
+
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    let DbState::Failed { details, said, .. } = app.state::<Lifecycle>().get() else {
+        panic!("a server that refuses its configuration fails the start");
+    };
+    let said = said.expect("what the server said");
+    assert!(
+        said.iter()
+            .any(|line| line.starts_with("LOG: invalid value for parameter \"shared_buffers\"")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|line| line.starts_with("FATAL: configuration file")),
+        "{said:?}"
+    );
+    let details = details.expect("Copy details");
+    assert!(
+        details.contains("postgres said:\n  LOG: invalid value for parameter \"shared_buffers\""),
+        "{details}"
     );
     shutdown(&app);
 }

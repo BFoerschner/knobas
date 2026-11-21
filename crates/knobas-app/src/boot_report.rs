@@ -304,6 +304,12 @@ pub fn details(
             out.push_str(&format!("  {attempt}\n"));
         }
     }
+    if !report.server_said.is_empty() {
+        out.push_str("postgres said:\n");
+        for line in &report.server_said {
+            out.push_str(&format!("  {line}\n"));
+        }
+    }
     if let Some(exe) = &machine.exe {
         out.push_str(&format!("knobas: {}\n", exe.display()));
     }
@@ -485,6 +491,24 @@ mod tests {
             windows_name("Windows 10 Enterprise|22H2|19045|5011").as_deref(),
             Some("Windows 10 Enterprise 22H2 build 19045.5011")
         );
+    }
+
+    /// What the server wrote on a failed start sits between what was tried
+    /// and the programs, and is left out when it wrote nothing.
+    #[test]
+    fn the_details_carry_what_postgres_said() {
+        let mut report = blocked_report();
+        report.server_said = vec![
+            "LOG: invalid value for parameter \"shared_buffers\": \"nonsense_value\"".into(),
+            "FATAL: configuration file \"C:/x/postgresql.conf\" contains errors".into(),
+        ];
+        let text = details("v", "default", "e", &report, &machine());
+        let tried = text.find("tried:\n").expect("tried");
+        let said = text.find("postgres said:\n  LOG: invalid value for parameter \"shared_buffers\": \"nonsense_value\"\n  FATAL: configuration file").expect(&text);
+        let knobas = text.find("\nknobas: ").expect("knobas");
+        assert!(tried < said && said < knobas, "{text}");
+        let without = details("v", "default", "e", &blocked_report(), &machine());
+        assert!(!without.contains("postgres said"), "{without}");
     }
 
     /// The firewall's lines go under the products, one each.
