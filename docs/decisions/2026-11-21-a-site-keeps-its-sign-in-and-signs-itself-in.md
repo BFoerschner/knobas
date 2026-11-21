@@ -15,8 +15,8 @@ Each product's sign-in, read from its `Set-Cookie` headers on the live testenv p
 | Forgejo | `session` | none | `persistent`, 31 days |
 | Jira Data Center 10.3.24 | `JSESSIONID` | none | `seraph.rememberme.cookie`, 14 days |
 | Confluence Data Center | `JSESSIONID` | none | `seraph.confluence`, 14 days |
-| TeamCity 2026.1.3 | `TCSESSIONID` | none | `RememberMe` (persistent; its box is ticked by default) |
-| Uptime Kuma | a token in the page's session storage | ends with the page | the token in local storage |
+| TeamCity 2026.1.3 | not on disk after a sign-in | none | `RememberMe`, persistent (its box is ticked by default) |
+| Uptime Kuma | not read (it signs in over a socket) | not read | signed in again after a new start |
 
 - **A browser-session cookie is never written to disk** by WebKit or WebView2, so it ended with knobas. On the Mac,
   after a sign-in to Gitea in a site, the site's store (`~/Library/WebKit/<app>/WebsiteDataStore/<id>/Cookies`) held
