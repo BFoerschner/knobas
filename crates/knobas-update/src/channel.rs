@@ -444,6 +444,7 @@ mod tests {
                 Some("2026-11-23T00:00:00Z"),
                 false
             ),
+            release("v3.2.8", false, false, Some("2026-09-01T00:00:00Z"), true),
             release(
                 "v3.2.9-ux28",
                 false,
@@ -451,7 +452,6 @@ mod tests {
                 Some("2026-11-22T00:00:00Z"),
                 true
             ),
-            release("v3.2.8", false, false, Some("2026-09-01T00:00:00Z"), true),
         ]);
         let fetch = Table::default().with(LIST, Ok(list.to_string())).with(
             "https://dl/v3.2.9-ux28/latest.json",
