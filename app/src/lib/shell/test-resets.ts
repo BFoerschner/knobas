@@ -116,6 +116,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "inbox/notify.svelte.ts#notifications": async () => (await import("../inbox/notify.svelte")).notifications.reset(),
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
+  // The updater's state in the window (ADR-0052): forgotten between tests.
+  "tf/update.svelte.ts#updates": async () => (await import("../tf/update.svelte")).updates.reset(),
   "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
   // The sections asked to be held ahead and not yet taken (the ux13-overs pass): a test's asks go with it.
   "tf/kept-pages.svelte.ts#aheadMoves": async () => void (await import("../tf/kept-pages.svelte")).takeAhead(),

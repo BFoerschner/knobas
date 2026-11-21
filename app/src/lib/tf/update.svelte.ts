@@ -69,7 +69,9 @@ export function createUpdates(ports: UpdatePorts = REAL_PORTS, onUpdated: (state
   let state = $state<UpdateState | null>(null);
   let toasted = false;
 
-  const apply = (next: UpdateState) => {
+  const apply = (next: UpdateState | null | undefined) => {
+    // A bridge that answers nothing (a test's, an older backend) leaves the state as it was.
+    if (next === null || next === undefined || typeof next !== "object") return;
     state = next;
     if (next.just_updated && !toasted) {
       toasted = true;
@@ -97,7 +99,7 @@ export function createUpdates(ports: UpdatePorts = REAL_PORTS, onUpdated: (state
         if (!dead && state === null) apply(first);
       }, () => {});
       void ports
-        .listen(EVENTS.updateState, ({ payload }) => apply(payload as UpdateState))
+        .listen(EVENTS.updateState, ({ payload }) => apply(payload as UpdateState | null))
         .then((stop) => (dead ? stop() : (off = stop)))
         .catch(() => {});
       return () => {

@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { UpdateState } from "../../ipc/update";
-import { fakeUpdate } from "../../shell/dev/fake/update";
+import { updateSample as fakeUpdate } from "./update-samples";
 import { createLayers } from "../layers.svelte";
 import { BY_POINTER_MS } from "../press-guard";
 import TfUpdatesSection from "./TfUpdatesSection.svelte";

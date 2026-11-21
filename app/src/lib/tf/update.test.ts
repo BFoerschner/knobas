@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { UpdateState } from "../ipc/update";
-import { fakeUpdate } from "../shell/dev/fake/update";
+import { updateSample as fakeUpdate } from "./settings/update-samples";
 import { createUpdates, type UpdatePorts } from "./update.svelte";
 
 function rig(first: UpdateState) {

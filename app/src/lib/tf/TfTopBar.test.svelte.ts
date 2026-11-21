@@ -101,7 +101,7 @@ test("the search box, the timer and the gear name the platform's modifier: Ctrl 
  * and without it. Mutant: show the dot from `offer` alone, ignoring *Later* (`marked`).
  */
 test("the cog carries the update's dot over its own box, and only while the update is marked", async () => {
-  const { fakeUpdate } = await import("../shell/dev/fake/update");
+  const { updateSample: fakeUpdate } = await import("./settings/update-samples");
   const boxes: string[][] = [];
   for (const [state, dot] of [
     [fakeUpdate("up-to-date"), false],

@@ -47,6 +47,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow, Project } from "../ipc/entity";
 import type { QueuedWrite } from "../ipc/sources";
 import { sourceFacts } from "../tf/job/source-facts.fixture";
+import Booting from "./Booting.svelte";
 
 // ---------------------------------------------------------------------------
 // Answers the test hands over on command, never on a timer.
@@ -2697,6 +2698,25 @@ const CASES: Case[] = [
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),
+  // Settings › Updates (ADR-0052): its notes' read.
+  sectionCase("TfUpdatesSection", "updates"),
+  {
+    /** The start screen's update line (ADR-0052): the effect that installs once a pressed download is ready. */
+    name: "Booting",
+    source: "lib/shell/Booting.svelte",
+    open: (target) => ({
+      app: mount(Booting, {
+        target,
+        props: {
+          db: { state: "failed", message: "migration 102 failed" },
+          version: "3.2.9-ux28",
+          demo: false,
+          onretry: () => {},
+          update: { state: null, check: () => deferred(undefined), download: () => deferred(undefined), install: () => deferred(undefined) },
+        },
+      }),
+    }),
+  },
   sectionCase("TfRenderersSection", "renderers"),
   // Appearance's State colours (#2466): its read lands late.
   sectionCase("TfStateColours", "appearance"),

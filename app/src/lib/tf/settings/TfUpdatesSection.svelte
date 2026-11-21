@@ -21,7 +21,7 @@
   import { BY_POINTER_MS } from "../press-guard";
   import { draftCount } from "../drafts.svelte";
   import { timer as sharedTimer } from "../../shell/timer.svelte";
-  import { openExternal } from "../../shell/open-external";
+  import { routeWeb } from "../../shell/open-web";
   import { sitesUnsaved } from "../../ipc/site";
   import type { UpdateNotes } from "../../ipc/update";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -33,7 +33,7 @@
     now = () => new Date(),
     layers = sharedLayers,
     losses = realLosses,
-    open = openExternal,
+    open = (url: string) => routeWeb(url),
   }: {
     store?: Pick<Updates, "state" | "check" | "setCheck" | "setChannel" | "download" | "cancel" | "install" | "later" | "notes">;
     now?: () => Date;
@@ -63,7 +63,7 @@
   const checking = $derived(upd?.phase.phase === "checking");
 
   /** When the second button last changed its meaning without a press, and whether the last change was ours. */
-  let changedAt = 0;
+  let changedAt = Number.NEGATIVE_INFINITY;
   let pressed = false;
   let lastMeaning = "";
   $effect.pre(() => {
@@ -145,7 +145,7 @@
   </div>
   <div class="tf-upd-way">
     <div class="tf-upd-track" class:tf-go={box?.track.go} class:tf-full={box?.track.fill === 1} class:tf-part={box !== null && box.track.fill !== null && box.track.fill < 1} class:tf-bad={box?.track.bad}>
-      {#if box !== null && box.track.fill !== null}<i style:width="{Math.round(box.track.fill * 1000) / 10}%"></i>{/if}
+      {#if box !== null && box.track.fill !== null}<progress class="tf-upd-fill" max="1000" value={Math.round(box.track.fill * 1000)} aria-label="Downloaded"></progress>{/if}
     </div>
     <span class="tf-upd-n" class:tf-ok={box?.reading.tone === "ok"} class:tf-err={box?.reading.tone === "err"}>{box?.reading.text || " "}</span>
   </div>
@@ -201,13 +201,13 @@
 </div>
 
 <section class="tf-stg-sec">
-  <h2 class="tf-upd-h2">
-    <span>What's new in <span class="tf-mono">{notesOf ?? ""}</span></span>
+  <div class="tf-upd-h2">
+    <h2>What's new in <span class="tf-mono">{notesOf ?? ""}</span></h2>
     {#if notes?.page_url ?? upd?.newest?.page_url}
       {@const page = notes?.page_url ?? upd?.newest?.page_url ?? ""}
       <a href={page} onclick={(event) => { event.preventDefault(); void open(page); }}>Open this release on GitHub</a>
     {/if}
-  </h2>
+  </div>
   <div class="tf-upd-notes" tabindex="-1">
     {#if upd !== null && !upd.set_up}
       <p class="tf-dim">The notes of each release are on GitHub.</p>

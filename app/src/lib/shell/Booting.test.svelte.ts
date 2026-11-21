@@ -133,7 +133,7 @@ test("the sentences while it comes up are prose, not mono", () => {
 
 /** The start screen's update line (ADR-0052, decisions D14): its room is there with an offer and without one. */
 test("a failed start offers a newer knobas in a line whose room is always kept", async () => {
-  const { fakeUpdate } = await import("./dev/fake/update");
+  const { updateSample: fakeUpdate } = await import("../tf/settings/update-samples");
   const pressed: string[] = [];
   const rendered = (state: ReturnType<typeof fakeUpdate> | null) => {
     const target = document.createElement("div");
@@ -155,12 +155,17 @@ test("a failed start offers a newer knobas in a line whose room is always kept",
     return { target, done: () => (unmount(app), target.remove()) };
   };
 
+  // Mutant: draw the line only with an offer, and these rooms are gone.
+  const shown = (target: HTMLElement) => {
+    const room = target.querySelector<HTMLElement>("[data-testid=boot-update]");
+    return room !== null && !room.hidden && room.closest("[hidden]") === null && room.classList.contains("boot-upd");
+  };
   const none = rendered(fakeUpdate("up-to-date"));
+  expect(shown(none.target)).toBe(true);
   expect(none.target.querySelector("[data-testid=boot-update]")?.textContent).toContain("No newer version yet.");
   none.done();
-  // Mutant: draw the line only with an offer, and this room is gone.
   const unknown = rendered(null);
-  expect(unknown.target.querySelector("[data-testid=boot-update]")).not.toBeNull();
+  expect(shown(unknown.target)).toBe(true);
   unknown.done();
 
   const offered = rendered(fakeUpdate("available"));
