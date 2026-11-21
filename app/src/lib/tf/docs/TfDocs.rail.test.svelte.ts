@@ -390,3 +390,116 @@ test("the foot stands with the tree's first rows while the sources' answer is st
   expect(spaceFolds()).toHaveLength(2);
   expect(foot(), "drawn with the rows, before the answer").not.toBeNull();
 });
+
+// A click on a row (Björn, 2026-11-21: "when I click on a tree element, I want it to always expand … click on it again,
+// it should toggle"): the page opens and its fold with it, a first click never closes one, a click on the open page's
+// row toggles its fold, the chevron folds alone, and the keys and a modified click keep what they did.
+
+/** A mouse's click, `count` times in a row: the browser's `detail`. A key's click on a link has none. */
+function click(el: Element, more: MouseEventInit = {}): MouseEvent {
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, button: 0, clientX: 100, ...more });
+  el.dispatchEvent(event);
+  return event;
+}
+
+/** The row's title starts 22 px in, past the chevron's column. */
+function chevronAt22(title: string): HTMLElement {
+  const summary = fold(title)!.querySelector<HTMLElement>(":scope > summary")!;
+  summary.querySelector("a")!.getBoundingClientRect = () => ({ left: 22, right: 200, top: 0, bottom: 20, width: 178, height: 20, x: 22, y: 0, toJSON: () => ({}) });
+  return summary;
+}
+
+test("a click on a closed fold's row opens the page and the fold, its pages drawn in the same press", async () => {
+  await draw(["confluence:2"]);
+  expect(fold("Runbooks")!.open).toBe(false);
+  const event = click(row("Runbooks")!);
+  flushSync();
+  expect(fold("Runbooks")!.open, "the fold opens with the click").toBe(true);
+  expect(row("Restart the ledger"), "its pages are drawn before the browser's toggle").toBeDefined();
+  expect(event.defaultPrevented, "the link opens the page").toBe(false);
+  await go(["confluence:3"]);
+  expect(current()).toBe("Runbooks");
+  expect(fold("Runbooks")!.open, "and it stays open once the page has arrived").toBe(true);
+});
+
+test("a first click never closes a fold: an open one stays open as its page opens", async () => {
+  await draw(["confluence:2"]);
+  await toggle(fold("Runbooks")!, true);
+  click(row("Runbooks")!);
+  await settle();
+  expect(fold("Runbooks")!.open).toBe(true);
+  await go(["confluence:3"]);
+  expect(fold("Runbooks")!.open).toBe(true);
+});
+
+test("a click on the open page's row toggles its fold, and the page stays", async () => {
+  await draw(["confluence:2"]);
+  click(row("Runbooks")!);
+  await go(["confluence:3"]);
+  expect(fold("Runbooks")!.open).toBe(true);
+
+  click(row("Runbooks")!);
+  await settle();
+  expect(fold("Runbooks")!.open, "the second click closes it").toBe(false);
+  expect(current()).toBe("Runbooks");
+  click(row("Runbooks")!);
+  await settle();
+  expect(fold("Runbooks")!.open, "the third opens it again").toBe(true);
+  expect(row("Restart the ledger")).toBeDefined();
+});
+
+test("a click on the row's free end, right of its title, does what a click on the title does", async () => {
+  await draw(["confluence:2"]);
+  const summary = chevronAt22("Runbooks");
+  const links: MouseEvent[] = [];
+  const link = row("Runbooks")!;
+  link.addEventListener("click", (e) => links.push(e));
+  const event = click(summary, { clientX: 260 });
+  flushSync();
+  expect(event.defaultPrevented, "the browser's own fold is not left to close it again").toBe(true);
+  expect(fold("Runbooks")!.open).toBe(true);
+  expect(links.map((e) => e.defaultPrevented), "the page opens through its link, a plain press of it").toEqual([false]);
+  await go(["confluence:3"]);
+  const again: MouseEvent[] = [];
+  row("Runbooks")!.addEventListener("click", (e) => again.push(e));
+  click(chevronAt22("Runbooks"), { clientX: 260 });
+  await settle();
+  expect(fold("Runbooks")!.open, "on the open page it toggles").toBe(false);
+  expect(again, "and opens no page").toEqual([]);
+});
+
+test("the chevron folds alone, without opening the page, open or closed", async () => {
+  await draw(["confluence:2"]);
+  const links: MouseEvent[] = [];
+  row("Runbooks")!.addEventListener("click", (e) => links.push(e));
+  const event = click(chevronAt22("Runbooks"), { clientX: 10 });
+  expect(event.defaultPrevented, "the browser folds it").toBe(false);
+  await settle();
+  expect(fold("Runbooks")!.open, "the browser's fold opens it").toBe(true);
+  const shut = click(chevronAt22("Runbooks"), { clientX: 10 });
+  expect(shut.defaultPrevented).toBe(false);
+  await settle();
+  expect(fold("Runbooks")!.open, "and closes it").toBe(false);
+  expect(links, "no page opens").toEqual([]);
+  expect(current()).toBe("On-call handbook");
+});
+
+test("Enter on a fold's row and a modified click open the page only, as before", async () => {
+  await draw(["confluence:2"]);
+  // Enter on a link is a click with no count.
+  click(row("Runbooks")!, { detail: 0 });
+  flushSync();
+  expect(fold("Runbooks")!.open, "Enter opens no fold").toBe(false);
+  for (const mod of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) {
+    const event = click(row("Runbooks")!, { ...mod, cancelable: true });
+    flushSync();
+    expect(fold("Runbooks")!.open, `${JSON.stringify(mod)} opens no fold`).toBe(false);
+    expect(event.defaultPrevented, `${JSON.stringify(mod)} keeps the link's own way`).toBe(false);
+  }
+  // → still opens it, and ← closes it.
+  const link = row("Runbooks")!;
+  link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  expect(fold("Runbooks")!.open).toBe(true);
+  link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+  expect(fold("Runbooks")!.open).toBe(false);
+});

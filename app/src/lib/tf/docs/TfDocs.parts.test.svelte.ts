@@ -165,6 +165,25 @@ test("a fold the outline cut short draws none of its pages until it holds them a
   expect(io.docsNodes).toHaveBeenCalledTimes(1);
 });
 
+test("a click on the row of a fold the outline cut short opens it, and it still draws its pages once it holds them all", async () => {
+  // Björn, 2026-11-21: a click on a row opens its fold. The ux24 rule holds for the fold a click opens.
+  let answer: (() => void) | null = null;
+  const io = await draw([], ports({ docsNodes: vi.fn((asked: DocsNodesAsked) => new Promise<DocSpace[]>((done) => (answer = () => done(nodes(asked))))) }));
+  const space = target.querySelector<HTMLDetailsElement>(".tf-rd-tree details")!;
+  space.open = true;
+  space.dispatchEvent(new Event("toggle"));
+  await settle();
+  const home = [...target.querySelectorAll<HTMLDetailsElement>(".tf-rd-tree .tf-dl-tree details")].find((d) => d.querySelector("summary")?.textContent === "Home")!;
+  home.querySelector(":scope > summary > a")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  await settle();
+  expect(home.open, "the click opens the fold").toBe(true);
+  expect(io.docsNodes).toHaveBeenCalledWith({ pages: [], folds: ["c:home"], spaces: [] });
+  expect(chapters(home), "none of the 24 it holds while the rest is read").toEqual([]);
+  answer!();
+  await settle();
+  expect(chapters(home), "all 30 at once").toHaveLength(30);
+});
+
 test("a fold whose read fails draws the pages it holds", async () => {
   const io = await draw([], ports({ docsNodes: vi.fn(async () => Promise.reject(new Error("the mirror is busy"))) }));
   const home = await openHome();

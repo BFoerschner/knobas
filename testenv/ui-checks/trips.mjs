@@ -154,6 +154,11 @@
 //                 scroll and every row of the rail (fold heads, links, the filter) with where it stands. Fails if a press changes any of them by
 //                 more than 1 px: a press in the tree opens the page and moves nothing in the rail.
 //
+//   tree-click    2026-11-21 (Björn: "when I click on a tree element, I want it to always expand … click on it again, it should toggle"). At `route`,
+//                 by real pointer on `fold`'s title: the first click must open a page and the fold, the next two on the open page close and open it,
+//                 two on its chevron close and open it with no page. Fails if a press moves a row at or above the pressed one, if the fold is ever drawn
+//                 open with none of its pages for a frame, or if Enter on `keyFold`'s row opens its fold (the keys stay as they were).
+//
 //   frame-scroll  2026-11-17 (Björn: "When I have an application render an html for code folders I can't scroll it even though it's longer than the page").
 //                 A renderer's long page in its sandboxed `frame` (a folder renderer's under `fake-folder-render=page <words>`, the *Cat* file renderer's
 //                 under `fake-render-page=<words>`). Fails if the frame's sandbox isn't "", if `header` or the frame's bottom is out of the pane at rest
@@ -311,6 +316,11 @@ const PAGES = [
     { id: "docs-tree-walk-space", kind: "tree-walk", strict: true, finding: "2026-11-19", size: [1440, 620], steps: [
       { fold: "Customs" }, { scroll: 40 }, { press: "EDI message formats" }, { press: "Payout batch lifecycle" }, { press: "Customs" },
     ] },
+  ] },
+  // A click on a fold's row opens the page and the fold, a click on the open page's row toggles it, the chevron folds alone,
+  // and Enter opens the page only (2026-11-21, Björn: "when I click on a tree element, I want it to always expand").
+  { page: "Docs, a fold's row", route: "page/confluence%3Asepa", trips: [
+    { id: "docs-tree-click", kind: "tree-click", strict: true, finding: "2026-11-21", size: [1440, 900], fold: "Customs", keyFold: "Tracking" },
   ] },
   { page: "Docs, a space", route: "docs/space/ENG", trips: [
     { id: "space-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["first", "return", "sync", "shown"], rows: "a.tf-dh-row, [role=treeitem]", query: STILL_Q },
@@ -2611,6 +2621,86 @@ async function startBrowser() {
     return { reasons, note: notes.join("; ") };
   }
 
+  async function treeClick(t) {
+    const reasons = [];
+    const notes = [];
+    const RAIL = ".tf-kept:not([hidden]) .tf-rd-tree";
+    const fold = (words) => `[...document.querySelectorAll(${JSON.stringify(`${RAIL} .tf-dl-body details`)})].find((d) => d.querySelector(":scope > summary > a")?.textContent.trim() === ${JSON.stringify(words)})`;
+    // Every row of the rail shown, with where it stands, and the fold's own state.
+    const read = async (words) => JSON.parse(await evaluate(`JSON.stringify((() => {
+      const rail = document.querySelector(${JSON.stringify(RAIL)});
+      const rows = [...rail.querySelectorAll(".tf-dl-body summary, .tf-dl-body a")].filter((e) => e.getClientRects().length && !(e.tagName === "A" && e.parentElement.tagName === "SUMMARY"));
+      const d = ${fold(words)};
+      const at = rows.indexOf(d.querySelector(":scope > summary"));
+      return { at, open: d.open, under: [...d.querySelectorAll(":scope > .tf-fold-in a")].filter((e) => e.getClientRects().length).length, rows: rows.map((e) => [e.textContent.trim().replace(/\\s+/g, " ").slice(0, 60), Math.round(e.getBoundingClientRect().top)]) };
+    })())`));
+    // Each frame from the press on: whether the fold is open, and how many of its rows show. Open with none is a frame drawn before its rows.
+    const watch = (words) => evaluate(`(() => {
+      const frames = (window.__tcFrames = []);
+      const d = ${fold(words)};
+      const end = performance.now() + 900;
+      const tick = () => { frames.push([d.open, [...d.querySelectorAll(":scope > .tf-fold-in a")].filter((e) => e.getClientRects().length).length]); if (performance.now() < end) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+      return true;
+    })()`);
+    const empty = async () => JSON.parse(await evaluate(`JSON.stringify(window.__tcFrames.filter(([open, n]) => open && n === 0).length)`));
+    const titleAt = async (words) => JSON.parse(await evaluate(`(() => { const a = ${fold(words)}.querySelector(":scope > summary > a"); a.scrollIntoView({ block: "nearest" }); const r = a.getBoundingClientRect(); return JSON.stringify({ x: r.left + Math.min(r.width / 2, 40), y: r.top + r.height / 2 }); })()`));
+    const chevronAt = async (words) => JSON.parse(await evaluate(`(() => { const s = ${fold(words)}.querySelector(":scope > summary"); const r = s.getBoundingClientRect(); return JSON.stringify({ x: r.left + 10, y: r.top + r.height / 2 }); })()`));
+    // Nothing above the pressed row, nor the row itself, moves: the fold opens below it.
+    const still = (what, before, after) => {
+      const upTo = before.rows.slice(0, before.at + 1);
+      const moved = upTo.filter(([words, top], i) => after.rows[i]?.[0] !== words || Math.abs(after.rows[i][1] - top) > 1);
+      if (moved.length > 0) reasons.push(`${what} moved ${moved.length} rows at or above the pressed one, the first "${moved[0][0]}"`);
+    };
+    const press = async (what, at, want) => {
+      const before = await read(t.fold);
+      const was = await hashNow();
+      await watch(t.fold);
+      await mouseTo(at.x, at.y);
+      await pressAt(at.x, at.y);
+      await opener.settleAfterChange();
+      await sleep(950);
+      const after = await read(t.fold);
+      const now = await hashNow();
+      if (want.page === true && now === was) reasons.push(`${what} opened no page`);
+      if (want.page === false && now !== was) reasons.push(`${what} went to ${now}`);
+      if (after.open !== want.open) reasons.push(`${what} left the fold ${after.open ? "open" : "closed"}`);
+      if (want.open && after.under === 0) reasons.push(`${what} opened the fold with none of its pages shown`);
+      const late = await empty();
+      if (late > 0) reasons.push(`${what} drew the fold open for ${late} frames before its pages`);
+      still(what, before, after);
+      notes.push(`${what}: ${after.open ? "open" : "closed"}, ${after.under} under, ${late} late frames`);
+    };
+    if (t.size) await fit(...t.size);
+    try {
+      await open(t);
+      await sleep(400);
+      if (!(await evaluate(`!!${fold(t.fold)}`))) throw new Error(`no fold "${t.fold}" in the rail`);
+      if (await evaluate(`${fold(t.fold)}.open`)) throw new Error(`the fold "${t.fold}" starts open`);
+      await press("the first click", await titleAt(t.fold), { page: true, open: true });
+      await press("a second click on the open page", await titleAt(t.fold), { page: false, open: false });
+      await press("a third", await titleAt(t.fold), { page: false, open: true });
+      await press("the chevron", await chevronAt(t.fold), { page: false, open: false });
+      await press("the chevron again", await chevronAt(t.fold), { page: false, open: true });
+      // Enter on another closed fold's row opens its page and no fold, as before.
+      if (t.keyFold) {
+        if (await evaluate(`${fold(t.keyFold)}.open`)) throw new Error(`the fold "${t.keyFold}" starts open`);
+        const was = await hashNow();
+        await sleep(500); // The press guard, as in nav-reopen.
+        if (!(await evaluate(`(() => { const a = ${fold(t.keyFold)}.querySelector(":scope > summary > a"); a.focus(); return document.activeElement === a; })()`))) throw new Error(`can't focus "${t.keyFold}"`);
+        await key("Enter");
+        await opener.settleAfterChange();
+        await sleep(600);
+        if ((await hashNow()) === was) reasons.push(`Enter on "${t.keyFold}" opened no page`);
+        if (await evaluate(`${fold(t.keyFold)}.open`)) reasons.push(`Enter on "${t.keyFold}" opened its fold`);
+        notes.push(`Enter on ${t.keyFold}: ${await hashNow()}`);
+      }
+    } finally {
+      if (t.size) await fit(1440, 900);
+    }
+    return { reasons, note: notes.join("; ") };
+  }
+
   async function navDocs(t) {
     const reasons = [];
     const notes = [];
@@ -3626,7 +3716,7 @@ async function startBrowser() {
     return { reasons, note: `${got.length} rows, up by the next frame (${Math.round(ctx?.ms ?? 0)} ms), Esc closes, ${t.sub ? `${t.pick} › ${t.sub}` : t.pick}: ${(after.toasts.at(-1) ?? after.hash).slice(0, 48)}` };
   }
 
-  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  const KINDS = { "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   return { run: (t) => KINDS[t.kind](t), stop };
 }
 
