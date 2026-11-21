@@ -57,6 +57,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // and written on <html>: each test starts on the knobas pair with nothing kept.
   // Settings' folded parents (the subtrees ruling, 2026-11-21), stored in `localStorage`: each test starts with all open.
   "tf/settings/settings-folds.svelte.ts#settingsFolds": async () => (await import("../tf/settings/settings-folds.svelte")).settingsFolds.reset(),
+  // The highlighter chosen (the highlighter re-ruling, 2026-11-21), stored in `localStorage`: each test starts on Pierre.
+  "tf/highlighter.svelte.ts#highlighter": async () => (await import("../tf/highlighter.svelte")).highlighter.reset(),
   "tf/syntax-theme.svelte.ts#syntaxThemes": async () => (await import("../tf/syntax-theme.svelte")).syntaxThemes.reset(),
   "tf/settings/TfFontRole.svelte#asked": async () => (await import("../tf/settings/TfFontRole.svelte")).forgetInstalledFonts(),
   // The menus standing (the stuck menu, ux27, 2026-11-21): a menu leaves as it is torn down; one a test left drawn is

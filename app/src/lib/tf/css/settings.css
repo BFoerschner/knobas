@@ -371,6 +371,17 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-body:has(> .tf-thm-top) { max-width: 1120px; }
 .tf-stg-h.tf-thm-top { display: flex; align-items: start; gap: 16px; }
 .tf-stg-h.tf-thm-top > div:first-child { flex: 1; }
+/* The highlighter (the re-ruling, section 1): three equal columns, since the three lines say the same three things in
+   the same order and a reader compares across. The chosen one has the radio group's ink border. */
+.tf-stg-row.tf-thm-eng { align-items: start; grid-template-columns: minmax(120px, 160px) minmax(0, 1fr); }
+.tf-thm-eng .tf-stg-c { flex-direction: column; align-items: stretch; }
+.tf-thm-eng .tf-radio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tf-thm-eng .tf-radio label { align-items: start; }
+.tf-thm-eng .tf-radio input { margin-top: 3px; }
+.tf-thm-eng .tf-radio small { margin-top: 2px; line-height: 1.4; }
+.tf-thm-eng .tf-stg-note { margin-top: 2px; }
+.tf-thm-engfail { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-thm-engfail .tf-btn { margin-left: auto; }
 .tf-thm-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
 .tf-thm-slot { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
 .tf-thm-slot.tf-cur { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }

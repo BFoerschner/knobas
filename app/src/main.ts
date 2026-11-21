@@ -6,6 +6,7 @@ import App from "./App.svelte";
 // Each role's face and size as chosen in Settings › Fonts, on <html> before anything draws (`fonts.svelte.ts`).
 import "./lib/tf/fonts.svelte";
 import "./lib/tf/syntax-theme.svelte";
+import "./lib/tf/highlighter.svelte";
 import "./lib/tf/theme.svelte";
 import "./lib/tf/tf.css";
 import { zoom } from "./lib/tf/zoom.svelte";

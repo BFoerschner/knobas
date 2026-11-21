@@ -12,6 +12,8 @@
   import { renderPort, type RenderPort } from "../../render/port";
   import { ROLE_NAMES, ROLES, type Role } from "../../render/roles";
   import { push, undoable } from "../../shell/toasts.svelte";
+  import type { EngineId } from "../../render/engines";
+  import { highlighter as appHighlighter, type HighlighterChoice } from "../highlighter.svelte";
   import { syntaxThemes, type SyntaxThemes } from "../syntax-theme.svelte";
   import { theme as windowTheme, type Theme as WindowTheme } from "../theme.svelte";
   import { fixedRole, INK } from "../theme/contrast";
@@ -22,9 +24,20 @@
   let {
     themes = syntaxThemes,
     mode = windowTheme,
+    highlighter = appHighlighter,
     render = renderPort(),
     prefersDark = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches,
-  }: { themes?: SyntaxThemes; mode?: WindowTheme; render?: RenderPort; prefersDark?: () => boolean } = $props();
+  }: { themes?: SyntaxThemes; mode?: WindowTheme; highlighter?: HighlighterChoice; render?: RenderPort; prefersDark?: () => boolean } = $props();
+
+  /** The three highlighters, each with its line: speed, then exactness and reach, then age (the re-ruling, section 1). */
+  const ENGINES: readonly (readonly [EngineId, string, string])[] = [
+    ["pierre", "Pierre Highlights", "Fastest. Colours arrive with the text, in a 50,000-line file too. 152 languages. New, since September 2026."],
+    ["tanstack", "TanStack Highlight", "Fast and small. 79 languages. Made for short code in documents, so YAML and shell are less exact. Since June 2026."],
+    ["shiki", "Shiki", "Most exact. The grammars VS Code uses, 242 languages. Slow in long files, where colours follow the text by seconds. Since 2018."],
+  ];
+  const engineName = (id: EngineId) => ENGINES.find(([key]) => key === id)![1];
+  /** Who colours while the chosen one cannot be loaded: the first of its order that loaded. */
+  const standIn = (id: EngineId) => engineName((["pierre", "tanstack", "shiki"] as EngineId[]).find((e) => e !== id && !highlighter.failed.has(e)) ?? "pierre");
 
   const SLOTS: readonly (readonly [ThemeKind, string])[] = [
     ["light", "While light"],
@@ -121,6 +134,26 @@
     <input type="file" accept=".json,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
   </div>
 </header>
+<div class="tf-stg-row tf-thm-eng">
+  <div class="tf-stg-l">Highlighter</div>
+  <div class="tf-stg-c">
+    <div class="tf-radio" role="radiogroup" aria-label="Highlighter">
+      {#each ENGINES as [key, name, line] (key)}
+        <label>
+          <input type="radio" name="tf-thm-engine" value={key} checked={highlighter.chosen === key} onchange={() => highlighter.choose(key)} />
+          <span>{name}<small>{line}</small></span>
+        </label>
+      {/each}
+    </div>
+    {#if highlighter.failed.has(highlighter.chosen)}
+      <div class="tf-thm-engfail" role="status">
+        {engineName(highlighter.chosen)} could not be loaded. {standIn(highlighter.chosen)} is colouring instead.
+        <button type="button" class="tf-btn tf-sm" onclick={() => highlighter.retry(highlighter.chosen)}>Try again</button>
+      </div>
+    {/if}
+    <p class="tf-stg-note">A language the chosen highlighter does not know is coloured by one of the other two. Under Pierre Highlights, SQL is coloured by TanStack Highlight.</p>
+  </div>
+</div>
 <div class="tf-thm-slots">
   {#each SLOTS as [kind, label] (kind)}
     {@const held = themes.drawn(kind)}

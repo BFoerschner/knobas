@@ -49,7 +49,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
   appearance: "Theme, zoom and state colours",
-  "code-colours": "Themes for code and diffs, while light and while dark",
+  "code-colours": "Themes for code and diffs, while light and while dark, and the highlighter",
   fonts: "Each face the app draws in, and its size",
   performance: "How many pages stay open in the background",
   renderers: "Your own commands that draw files and Markdown fences",
