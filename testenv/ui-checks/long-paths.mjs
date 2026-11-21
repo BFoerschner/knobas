@@ -25,6 +25,9 @@
 // on completely explode the columns") also holds every table it names to the shape Code's *Local checkout* column has: each
 // cell one line (a command, a pattern list, a path cut rather than wrapped), each column as wide with the long values as with
 // the fixture's short ones, and the table no wider than the box that holds it.
+// A screen with `under` (the small-fixes sweep, 2026-11-21: *Add a default*'s two dropdowns grew to 1,370 px with long names)
+// holds a row of controls to a table's columns: [a control in the row, the table], and each control of that row must stand
+// inside the table's column of the same place, its long names cut in their box.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -103,6 +106,7 @@ const SCREENS = [
   { id: "compare-folder-failed", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender&fake-rerender-fail", press: ".tf-drendered", then: [".tf-dfolder .tf-madebar-run"], wait: 3500 },
   { id: "compare-folder-pick", route: `${REPO}/compare/~working-tree`, fake: "&fake-rerender&fake-rerender-two", press: ".tf-drendered", then: [".tf-dgband", ".tf-dfmark"], wait: 300 },
   { id: "settings-renderers", route: "settings/renderers", tables: ".tf-stg-body .tf-tbl" },
+  { id: "settings-renderers-add-default", route: "settings/renderers", under: ["#tf-rnd-dpat", ".tf-rnd-defaults"] },
   { id: "settings-renderer-edit", route: "settings/renderers", press: '[aria-label^="Edit Orchestra score"]' },
   { id: "settings-folder-renderer", route: "settings/renderers/folder/orchestra-map" },
   // A TeamCity configuration whose VCS roots are named by their whole addresses, 64th of a chain of 70 long names (the
@@ -150,6 +154,23 @@ const TABLES = (selector) => String.raw`(() => {
       if (centres.length > 1 && Math.max(...centres) - Math.min(...centres) > 6)
         out.wraps.push({ at: key + " > td:nth-child(" + (td.cellIndex + 1) + ")", text: td.textContent.trim().slice(0, 48), lines: Math.round((Math.max(...centres) - Math.min(...centres)) / 16) + 1 });
     }
+  });
+  return JSON.stringify(out);
+})()`;
+
+// Runs in the page: each control in the row that holds `control` against the column of `table` at its place; null when either
+// is missing.
+const UNDER = ([control, table]) => String.raw`(() => {
+  const root = document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body;
+  const row = root.querySelector(${JSON.stringify(control)})?.parentElement;
+  const heads = [...(root.querySelector(${JSON.stringify(table)})?.querySelectorAll("thead th") ?? [])];
+  if (!row || heads.length === 0) return "null";
+  const out = [];
+  [...row.children].forEach((e, i) => {
+    const b = e.getBoundingClientRect(), col = heads[i]?.getBoundingClientRect();
+    if (!col) { out.push({ at: e.tagName.toLowerCase() + "#" + i, over: Math.round(b.width) }); return; }
+    const over = Math.max(b.right - col.right, col.left - b.left);
+    if (over > 1) out.push({ at: (e.getAttribute("aria-label") ?? e.tagName.toLowerCase()) + "#" + i, over: Math.round(over) });
   });
   return JSON.stringify(out);
 })()`;
@@ -340,7 +361,9 @@ for (const screen of SCREENS) {
       }
       if (screen.press || screen.focus || screen.context || screen.launcher) await opener.settleAfterChange();
       const tables = screen.tables ? JSON.parse(await evaluate(TABLES(screen.tables))) : null;
-      return { stepped, tables, ...JSON.parse(await evaluate(CHECK)) };
+      const under = screen.under ? JSON.parse(await evaluate(UNDER(screen.under))) : null;
+      if (screen.under && under === null) stepped = false;
+      return { stepped, tables, under, ...JSON.parse(await evaluate(CHECK)) };
     };
     const shoot = async (name) => {
       if (!shots) return;
@@ -354,10 +377,11 @@ for (const screen of SCREENS) {
     await shoot(`${screen.id}-${size}`);
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: [screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: [screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),
+      ...(long.under ?? []).map((u) => ({ kind: "under", at: u.at, text: "stands outside the table's column", over: u.over })),
       ...(long.tables?.wraps ?? []).map((w) => ({ kind: "wraps", at: w.at, text: `${w.text} (${w.lines} lines)` })),
       ...(long.tables?.wider ?? []).map((w) => ({ kind: "wider", at: w.at, text: "the table is wider than its box", over: w.over })),
       ...Object.entries(long.tables?.widths ?? {})

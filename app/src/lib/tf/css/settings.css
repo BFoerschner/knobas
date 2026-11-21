@@ -161,6 +161,19 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
 .tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
 .tf-rnd-defaults .tf-select { max-width: 100%; }
+/* *Add a default* is the table's next row (the small-fixes sweep, 2026-11-21: its two dropdowns grew to their longest name,
+   1,370 px with long ones). Its label goes above, and its controls stand on the table's columns: the pattern under *Files*,
+   each dropdown under its own column and no wider than the table's dropdowns there, *Add* where *Remove* is. The tracks are
+   the table's (its 1 px border, its cells' 10 px), so a long name cuts in its box, whole in its title. */
+.tf-stg-row.tf-rnd-addrow { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.tf-rnd-addcols {
+  display: grid; grid-template-columns: minmax(0, 1fr) 24% 24% calc(100px * var(--size-ui)); align-items: center;
+  padding-inline: 1px; min-width: 0;
+}
+.tf-rnd-addcols > :is(.tf-stg-in, .tf-select, .tf-btn) { margin-inline: 10px; min-width: 0; }
+.tf .tf-rnd-addcols .tf-stg-in { width: auto; height: var(--control-h-sm); padding-block: 0; }
+.tf-rnd-addcols .tf-select { justify-self: start; max-width: calc(100% - 20px); text-overflow: ellipsis; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-rnd-addcols > .tf-btn { justify-self: end; }
 .tf-select { height: var(--control-h-sm); padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
 /* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */

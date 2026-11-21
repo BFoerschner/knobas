@@ -468,15 +468,20 @@
         </tbody>
       </table>
     {/if}
-    <div class="tf-stg-row">
+    <div class="tf-stg-row tf-rnd-addrow">
       <label class="tf-stg-l" for="tf-rnd-dpat">Add a default<small>A file pattern, such as <span class="tf-mono">*.md</span> or <span class="tf-mono">docs/*.mmd</span>.</small></label>
-      <div class="tf-stg-c tf-stg-row1">
+      <div class="tf-rnd-addcols">
         <input id="tf-rnd-dpat" class="tf-stg-in tf-mono" bind:value={adding.pattern} placeholder="*.md" />
-        <select class="tf-select" aria-label="Through" bind:value={adding.pipeline}>
+        <select
+          class="tf-select"
+          aria-label="Through"
+          title={adding.pipeline === "" ? "No pipeline" : (pipelines.list.find((p) => p.id === adding.pipeline)?.name ?? adding.pipeline)}
+          bind:value={adding.pipeline}
+        >
           <option value="">No pipeline</option>
           {#each pipelines.list as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
         </select>
-        <select class="tf-select" aria-label="Open with" bind:value={adding.renderer}>
+        <select class="tf-select" aria-label="Open with" title={nameOf(adding.renderer) ?? adding.renderer} bind:value={adding.renderer}>
           {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
         </select>
         <button class="tf-btn tf-sm" disabled={adding.pattern.trim() === ""} onclick={() => void addDefault()}>Add</button>
