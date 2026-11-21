@@ -788,7 +788,7 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
         vec![
             (line("http"), dot("up", Tone::Ok)),
             (line("ping"), dot("down", Tone::Err)),
-            (line("dns"), dot("pending", Tone::Warn)),
+            (line("dns"), dot("pending", Tone::Info)),
             (line("port"), dot("maintenance", Tone::Muted)),
             (line("Payments, Platform"), None),
             (line("tidewater"), None),

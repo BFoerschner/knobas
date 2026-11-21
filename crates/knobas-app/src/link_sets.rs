@@ -478,6 +478,25 @@ async fn member_rows(
     Ok(out)
 }
 
+/// What each of `ids` says of itself: the dot a member row draws, an asset's
+/// health included. An id with no state is simply not in the answer.
+pub(crate) async fn states_of(
+    pool: &PgPool,
+    declarations: &sqlx::types::Json<serde_json::Value>,
+    ids: impl IntoIterator<Item = &str>,
+) -> Result<std::collections::HashMap<String, knobas_core::payload::StateChip>, IpcError> {
+    // The kind is the member row's own label and plays no part in the read.
+    let wanted: Vec<(String, String)> = ids
+        .into_iter()
+        .map(|id| (String::new(), id.to_owned()))
+        .collect();
+    Ok(member_rows(pool, declarations, &wanted)
+        .await?
+        .into_iter()
+        .filter_map(|row| row.state.map(|state| (row.entity_id, state)))
+        .collect())
+}
+
 /// An asset's health as a dot: the words the estate uses, in its tones.
 fn asset_chip(health: crate::assets::AssetStatus) -> Option<knobas_core::payload::StateChip> {
     use crate::assets::AssetStatus;
@@ -777,12 +796,35 @@ async fn read(
     }
     let grouped: Vec<(i32, &LinkSetRule)> = stored.iter().map(|(n, rule)| (*n, rule)).collect();
     for (n, ticket) in tickets_of(pool, registry, &grouped).await? {
-        let entry = &mut out[usize::try_from(n).map_err(IpcError::internal)?];
-        entry.0.tickets += 1;
-        entry.0.mine += i64::from(ticket.mine);
-        entry.1.push(ticket);
+        out[usize::try_from(n).map_err(IpcError::internal)?]
+            .1
+            .push(ticket);
+    }
+    for (row, tickets) in &mut out {
+        (row.tickets, row.mine) = counted(tickets);
     }
     Ok(out)
+}
+
+/// How many tickets a set shows on and how many of them are yours, one per
+/// ticket key (F-507): two sources can hold the same key, which is one ticket
+/// to its reader, and yours if either says so. The editor's *Shows on N*
+/// (`onePerKey` in `tf/sets/sets.ts`) counts the same way from the list this
+/// leaves whole, so the table and the editor say one number.
+fn counted(tickets: &[RuleTicket]) -> (i64, i64) {
+    let mut keys: std::collections::HashMap<&str, bool> = std::collections::HashMap::new();
+    for ticket in tickets {
+        let key = ticket
+            .entity_id
+            .split_once(':')
+            .map_or(ticket.entity_id.as_str(), |(_, key)| key);
+        *keys.entry(key).or_default() |= ticket.mine;
+    }
+    let mine = keys.values().filter(|mine| **mine).count();
+    (
+        i64::try_from(keys.len()).unwrap_or(i64::MAX),
+        i64::try_from(mine).unwrap_or(i64::MAX),
+    )
 }
 
 /// Every link set, by name, with its contents, rules and ticket counts
@@ -1112,6 +1154,11 @@ pub struct JobMember {
     pub title: Option<String>,
     /// Hidden on this ticket by *Hide here* (R-7.5).
     pub hidden: bool,
+    /// The state dot on its drawer row (F-036), as the set's editor reads it.
+    /// Absent on the wire where the entity says none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub state: Option<knobas_core::payload::StateChip>,
 }
 
 /// One set that applies to a job (R-4.4, R-6.2): the chip's name, the reason
@@ -1134,6 +1181,11 @@ pub struct JobLink {
     pub entity_id: String,
     pub kind: String,
     pub title: Option<String>,
+    /// The state dot on its drawer row (F-036). Absent on the wire where the
+    /// entity says none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub state: Option<knobas_core::payload::StateChip>,
 }
 
 /// The parent whose own links a sub-task shows (R-7.3).
@@ -1269,6 +1321,7 @@ pub async fn on_job(
                 entity_kind: row.get("entity_kind"),
                 title: row.get("title"),
                 hidden: row.get("hidden"),
+                state: None,
             });
         }
     }
@@ -1276,7 +1329,7 @@ pub async fn on_job(
         .bind(ticket_id)
         .fetch_all(pool)
         .await?;
-    let parent = rows.first().map(|first| JobParent {
+    let mut parent = rows.first().map(|first| JobParent {
         ticket: first.get("ticket"),
         title: first.get("ticket_title"),
         links: rows
@@ -1286,10 +1339,30 @@ pub async fn on_job(
                     entity_id: row.get::<Option<String>, _>("entity_id")?,
                     kind: row.get("kind"),
                     title: row.get("title"),
+                    state: None,
                 })
             })
             .collect(),
     });
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let ids: Vec<&str> = out
+        .iter()
+        .flat_map(|set| &set.members)
+        .map(|member| member.entity_id.as_str())
+        .chain(
+            parent
+                .iter()
+                .flat_map(|parent| &parent.links)
+                .map(|link| link.entity_id.as_str()),
+        )
+        .collect();
+    let states = states_of(pool, &declarations.as_param(), ids).await?;
+    for member in out.iter_mut().flat_map(|set| &mut set.members) {
+        member.state = states.get(&member.entity_id).cloned();
+    }
+    for link in parent.iter_mut().flat_map(|parent| &mut parent.links) {
+        link.state = states.get(&link.entity_id).cloned();
+    }
     Ok(JobLinkSets { sets: out, parent })
 }
 
@@ -1428,6 +1501,25 @@ mod tests {
         };
         assert_eq!(<MemberKind as ts_rs::TS>::inline(&cfg), union(MEMBER_KINDS));
         assert_eq!(<RuleKind as ts_rs::TS>::inline(&cfg), union(RULE_KINDS));
+    }
+
+    /// F-507: the table said *10 (7 yours)* where the editor said *9, 6 of them
+    /// yours*, because two sources holding `PAY-231` counted as two tickets.
+    #[test]
+    fn a_key_two_sources_hold_counts_once_and_is_yours_if_either_says_so() {
+        let ticket = |entity_id: &str, mine| RuleTicket {
+            entity_id: entity_id.to_owned(),
+            title: String::new(),
+            mine,
+        };
+        let tickets = [
+            ticket("jira:PAY-231", false),
+            ticket("mock:PAY-231", true),
+            ticket("jira:PAY-240", false),
+            ticket("jira:PAY-228", true),
+        ];
+        assert_eq!(counted(&tickets), (3, 2));
+        assert_eq!(counted(&[]), (0, 0));
     }
 
     fn draft() -> LinkSetDraft {

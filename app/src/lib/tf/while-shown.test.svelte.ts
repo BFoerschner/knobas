@@ -66,12 +66,13 @@ test("a timer stops while hidden and runs once when shown again", () => {
   expect(ticks).toBe(4);
 });
 
-/** An element whose scroll a test can set and read: jsdom keeps none. */
+/** An element whose scroll a test can set and read: jsdom keeps none. A scroll raises `scroll`, as a browser's does. */
 function scroller(el: HTMLElement): HTMLElement {
   let top = 0;
   let left = 0;
-  Object.defineProperty(el, "scrollTop", { get: () => top, set: (n: number) => (top = n), configurable: true });
-  Object.defineProperty(el, "scrollLeft", { get: () => left, set: (n: number) => (left = n), configurable: true });
+  const moved = () => el.dispatchEvent(new Event("scroll"));
+  Object.defineProperty(el, "scrollTop", { get: () => top, set: (n: number) => ((top = n), moved()), configurable: true });
+  Object.defineProperty(el, "scrollLeft", { get: () => left, set: (n: number) => ((left = n), moved()), configurable: true });
   return el;
 }
 
@@ -92,6 +93,114 @@ test("the shell's scroller and a scroller inside go back to where they were when
   main.scrollTop = 30;
   tree.scrollTop = 0;
 
+  show(true);
+  expect(main.scrollTop).toBe(840);
+  expect(tree.scrollTop).toBe(120);
+  main.remove();
+});
+
+test("keepScroll leaves a page's rail where it was on a move inside the shown page, which isn't a hide", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const rail = scroller(document.createElement("nav"));
+  anchor.append(rail);
+  main.append(anchor);
+  document.body.append(main);
+  // As the page host does: each address hands the page a new entry, with `visible` the same.
+  const entry = $state({ value: { visible: true, address: "#/builds/lint" } });
+  run(() => keepScroll(() => anchor, () => entry.value.visible, () => entry.value.address));
+  rail.scrollTop = 600;
+  entry.value = { visible: true, address: "#/build/lint/904" };
+  flushSync();
+  expect(rail.scrollTop).toBe(600);
+  main.remove();
+});
+
+test("keepScroll writes no scroll on a move inside the shown page, so it lays out nothing in the move's task (compare-first-open pass)", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const rail = scroller(document.createElement("nav"));
+  anchor.append(rail);
+  main.append(anchor);
+  document.body.append(main);
+  const entry = $state({ value: { visible: true, address: "#/repo/r" } });
+  run(() => keepScroll(() => anchor, () => entry.value.visible, () => entry.value.address));
+  main.scrollTop = 300;
+  rail.scrollTop = 600;
+  const writes = vi.fn();
+  for (const el of [main, rail]) {
+    const own = Object.getOwnPropertyDescriptor(el, "scrollTop")!;
+    const read = own.get!;
+    Object.defineProperty(el, "scrollTop", { get: () => read(), set: (n: number) => (writes(n), own.set!(n)), configurable: true });
+  }
+  entry.value = { visible: true, address: "#/repo/r/compare" };
+  flushSync();
+  expect(writes).not.toHaveBeenCalled();
+  expect([main.scrollTop, rail.scrollTop]).toEqual([300, 600]);
+  // A real hide still puts the place back on the show.
+  entry.value = { visible: false, address: "#/repo/r/compare" };
+  flushSync();
+  main.scrollTop = 0;
+  rail.scrollTop = 0;
+  entry.value = { visible: true, address: "#/repo/r/compare" };
+  flushSync();
+  expect([main.scrollTop, rail.scrollTop]).toEqual([300, 600]);
+  main.remove();
+});
+
+test("keepScroll sets a page back only at the address it was left at; another address starts at the top (F-454, F-067)", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const reading = scroller(document.createElement("article"));
+  anchor.append(reading);
+  main.append(anchor);
+  document.body.append(main);
+  let address = "#/page/sepa";
+  run(() => keepScroll(() => anchor, () => page.shown, () => address));
+
+  main.scrollTop = 40;
+  reading.scrollTop = 600;
+  show(false);
+  show(true);
+  expect(reading.scrollTop, "the same address keeps its place").toBe(600);
+  expect(main.scrollTop).toBe(40);
+
+  show(false);
+  address = "#/page/psp";
+  main.scrollTop = 300;
+  show(true);
+  expect(reading.scrollTop, "a page nobody was reading opens at its top").toBe(0);
+  expect(main.scrollTop).toBe(0);
+  main.remove();
+});
+
+test("a hide during a move takes each box's place from the move's note, reading no box after the next page is in", async () => {
+  const { noteScrolls } = await import("./scrolled");
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const tree = scroller(document.createElement("nav"));
+  anchor.append(tree);
+  main.append(anchor);
+  document.body.append(main);
+  run(() => keepScroll(() => anchor, () => page.shown));
+  main.scrollTop = 840;
+  tree.scrollTop = 120;
+
+  // The move notes the places, then builds the next page: from here a read of a box would lay that page out.
+  noteScrolls();
+  let reads = 0;
+  for (const el of [main, tree]) {
+    const top = el.scrollTop;
+    Object.defineProperty(el, "scrollTop", { get: () => (reads++, top), set: () => {}, configurable: true });
+  }
+  show(false);
+  expect(reads, "no box read at the hide").toBe(0);
+  scroller(main);
+  scroller(tree);
   show(true);
   expect(main.scrollTop).toBe(840);
   expect(tree.scrollTop).toBe(120);

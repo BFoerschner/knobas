@@ -677,6 +677,110 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
     }
 }
 
+/// **Every reason is in a person's words and names the source by its
+/// display name** (the live run on #2479): the digest said *you queued a
+/// source_action on it in live-gitea* and *live-teamcity attributes this
+/// build to you*, an op code and two source ids. A source action is named by
+/// the action the queue holds.
+#[tokio::test]
+async fn reasons_name_the_source_by_its_name_and_say_what_the_reader_did() {
+    let h = harness("standup-words").await;
+    for (id, name) in [(TRACKER, "Tidewater Jira"), (FORGE, "Tidewater Gitea")] {
+        sqlx::query("update knobas.source_config set display_name = $2 where id = $1")
+            .bind(id)
+            .bind(name)
+            .execute(&h.pool)
+            .await
+            .unwrap();
+    }
+    let pr = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/payout-service#142",
+            ME,
+            days_before(1, 9, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    let labelled = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/ledger-api#139",
+            "jonas",
+            days_before(1, 10, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    let (write_id,): (i64,) = sqlx::query_as(
+        "insert into knobas.write_queue (source_id, entity_id, op, payload, target_snapshot)
+         values ($1, $2, 'source_action', $3, '{}'::jsonb) returning id",
+    )
+    .bind(FORGE)
+    .bind(&labelled)
+    .bind(serde_json::json!({ "SourceAction": {
+        "entity": labelled, "id": "add_label", "fields": { "label": "7" } } }))
+    .fetch_one(&h.pool)
+    .await
+    .unwrap();
+    h.activity(
+        "user",
+        "queued",
+        &labelled,
+        days_before(1, 10, 30),
+        serde_json::json!({ "op": "source_action", "source_id": FORGE, "write_id": write_id }),
+    )
+    .await;
+    let merged = h
+        .item(
+            FORGE,
+            "pr",
+            "tidewater/payout-service#140",
+            "jonas",
+            days_before(1, 11, 0),
+            serde_json::json!({}),
+        )
+        .await;
+    h.activity(
+        "user",
+        "queued",
+        &merged,
+        days_before(1, 11, 30),
+        serde_json::json!({ "op": "merge_pull_request", "source_id": FORGE, "write_id": write_id + 1 }),
+    )
+    .await;
+    let logged = h.ticket("PAY-240", ME, "In Progress").await;
+    h.worklog(&logged, days_before(1, 14, 0)).await;
+
+    let digest = h.digest().await;
+    let reasons: Vec<(&str, &str)> = digest
+        .yesterday
+        .iter()
+        .map(|l| {
+            (
+                l.entity_id.as_deref().unwrap_or_default(),
+                l.reason.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reasons,
+        vec![
+            (logged.as_str(), "you logged work on it in Tidewater Jira"),
+            (merged.as_str(), "you merged it in Tidewater Gitea"),
+            (
+                labelled.as_str(),
+                "you asked Tidewater Gitea to add a label"
+            ),
+            (
+                pr.as_str(),
+                "Tidewater Gitea credits this pull request to you"
+            ),
+        ]
+    );
+}
+
 /// **The mirror half filters on whose the item is and on the day, and on
 /// nothing else -- the kind rides through** (issue #389).
 ///
@@ -1374,4 +1478,80 @@ async fn infrastructure_without_a_last_working_day_starts_at_todays_midnight() {
         .map(|l| l.title.as_str())
         .collect();
     assert_eq!(titles, vec!["queue"]);
+}
+
+/// **The blocked-status read finds the user's items as the scan did** (the
+/// ux12 Windows pass, 2026-11-15): the statement now finds the user's items
+/// by their stored assignee first, and walks payloads only where the
+/// assignee is not stored. Held to the statement it replaced
+/// (`blocked_by_status_both_ways`) on items that would catch a difference:
+/// mine in the declared status and in it spelled in another case, someone
+/// else's, mine under an assignee spelled in another case (the index is
+/// case-folded, the match is not), mine in an undeclared status, with no
+/// status, and withdrawn. Once before the declarations are stored, where
+/// both walk, and once after, where the triggers stored every item's fields
+/// and the new read takes the index.
+#[tokio::test]
+async fn the_blocked_status_read_finds_the_users_items_as_the_scan_did() {
+    let h = harness("standup-blocked-both-ways").await;
+    let cases = [
+        (ME, DECLARED_BLOCKED),
+        (ME, "waiting FOR support"),
+        (THEM, DECLARED_BLOCKED),
+        ("Mara.Lindqvist", DECLARED_BLOCKED),
+        (ME, UNDECLARED_BLOCKED),
+        (ME, ""),
+        (ME, DECLARED_BLOCKED),
+    ];
+    let mut ids = Vec::new();
+    for (n, (assignee, status)) in cases.into_iter().enumerate() {
+        let back = i64::try_from(n).expect("a small number") + 1;
+        ids.push(
+            h.ticket_at(
+                &format!("PAY-{n}"),
+                assignee,
+                status,
+                days_before(back, 9, 0),
+            )
+            .await,
+        );
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[6])
+        .execute(&h.pool)
+        .await
+        .expect("the last one withdrawn");
+    let identity = vec![ME.to_owned()];
+    let both = || async {
+        let declarations = knobas_app::sources::paths::declared_paths(&h.pool, h.registry.as_ref())
+            .await
+            .expect("the declarations");
+        knobas_app::standup::blocked_by_status_both_ways(&h.pool, &identity, &declarations)
+            .await
+            .expect("both reads")
+    };
+
+    let (walked, scanned) = both().await;
+    assert_eq!(walked, scanned, "with nothing stored");
+    knobas_app::commands::search::declare(&h.pool, h.registry.as_ref())
+        .await
+        .expect("the declarations stored");
+    let stored: i64 = sqlx::query_scalar(
+        "select count(*) from sync.item_field where field = 'assignee' and entity_id = any($1)",
+    )
+    .bind(&ids)
+    .fetch_one(&h.pool)
+    .await
+    .expect("the stored assignees");
+    assert_eq!(stored, 7, "every item's assignee stored by the triggers");
+    let (indexed, scanned) = both().await;
+    assert_eq!(indexed, scanned, "with every assignee stored");
+    assert_eq!(
+        indexed,
+        vec![
+            (ids[0].clone(), DECLARED_BLOCKED.to_owned()),
+            (ids[1].clone(), "waiting FOR support".to_owned()),
+        ],
+        "mine in the declared status, either case, newest first"
+    );
 }

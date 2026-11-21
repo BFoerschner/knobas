@@ -14,7 +14,8 @@
  * command behind one either — `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`
  * scans the Rust side to keep it that way.
  */
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AdapterPreview,
   AdapterStatus,

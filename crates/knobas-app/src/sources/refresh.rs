@@ -6,7 +6,7 @@
 //! landed write's ([`super::write_queue::after_landing`]) and, from #2107,
 //! the reader's *Refresh* on an item's detail.
 
-use knobas_sync::refresh::{RefreshError, RefreshOutcome};
+use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::{AdapterRegistry, RefreshEnd, RefreshEnded, Scheduler};
 
 /// Whether `adapter_kind`'s template declares the read of one item of
@@ -37,8 +37,13 @@ pub fn template_refreshes(
 /// follows the write ends. Then [`SyncEvents::refresh_ended`] is told how it
 /// ended, which is what the shell re-reads the item on.
 ///
+/// `lock` is whether it waits behind a run of the source in flight
+/// ([`Lock::Wait`], a landed write's read back) or answers
+/// [`RefreshOutcome::RunInFlight`] at once ([`Lock::Try`], the reader's).
+///
 /// A refresh that did not happen tells nothing: one the adapter does not
-/// offer ([`RefreshOutcome::NotOffered`]), and one refused before anything
+/// offer ([`RefreshOutcome::NotOffered`]), one a run in flight held off, and
+/// one refused before anything
 /// was read, for a source that is turned off, not configured, or an id that
 /// is not an entity's. A refresh that failed tells `failed` and changes
 /// nothing.
@@ -51,12 +56,13 @@ pub async fn refresh(
     scheduler: &Scheduler,
     entity_id: &str,
     write_id: Option<i64>,
+    lock: Lock,
 ) -> Result<RefreshOutcome, RefreshError> {
-    let outcome = scheduler.refresh(entity_id).await;
+    let outcome = scheduler.refresh(entity_id, lock).await;
     let ended = match &outcome {
         Ok(RefreshOutcome::Refreshed) => RefreshEnd::Refreshed,
         Ok(RefreshOutcome::Gone) => RefreshEnd::Gone,
-        Ok(RefreshOutcome::NotOffered)
+        Ok(RefreshOutcome::NotOffered | RefreshOutcome::RunInFlight)
         | Err(
             RefreshError::NotAnEntity(_)
             | RefreshError::NotConfigured(_)
@@ -99,6 +105,11 @@ pub enum EntityRefresh {
     NotOffered,
     /// The source is turned off, so nothing was read.
     TurnedOff,
+    /// A run of the source is in flight (the query audit of PR #2479): its
+    /// lock is held for the whole run, so nothing was read, and the detail
+    /// says the sync is running instead of waiting for it. The item is
+    /// current once that run ends.
+    RunInFlight,
     /// The read failed and nothing changed.
     Failed {
         /// The source's own reason.
@@ -117,10 +128,11 @@ pub async fn of_reader(
     scheduler: &Scheduler,
     entity_id: &str,
 ) -> Result<EntityRefresh, crate::IpcError> {
-    match refresh(scheduler, entity_id, None).await {
+    match refresh(scheduler, entity_id, None, Lock::Try).await {
         Ok(RefreshOutcome::Refreshed) => Ok(EntityRefresh::Refreshed),
         Ok(RefreshOutcome::Gone) => Ok(EntityRefresh::Gone),
         Ok(RefreshOutcome::NotOffered) => Ok(EntityRefresh::NotOffered),
+        Ok(RefreshOutcome::RunInFlight) => Ok(EntityRefresh::RunInFlight),
         Err(RefreshError::TurnedOff(_)) => Ok(EntityRefresh::TurnedOff),
         Err(error @ RefreshError::NotAnEntity(_)) => Err(crate::IpcError::invalid(error)),
         Err(error @ RefreshError::NotConfigured(_)) => Err(crate::IpcError::not_found(error)),

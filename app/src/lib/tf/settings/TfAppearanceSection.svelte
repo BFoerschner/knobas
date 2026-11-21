@@ -2,13 +2,20 @@
   Settings › Appearance (#831, R-13a.8): prototype-6's `STGV.appearance`. The
   same setting as the top bar's toggle (`theme.svelte.ts`). Below it, *State
   colours* (#2466), which reads the database and so waits for it: Theme
-  draws before the database is up.
+  draws before the database is up. Between them, *Zoom* (`TfZoomSetting.svelte`), which needs no database either.
+  The faces and their sizes, *Code font* and *Ligatures in code* among them, are Settings › Fonts since 2026-11-18
+  (`TfFontsSection.svelte`).
 -->
 <script lang="ts">
   import type { Theme, ThemeChoice } from "../theme.svelte";
   import TfStateColours, { type StateColourPorts } from "./TfStateColours.svelte";
+  import TfZoomSetting from "./TfZoomSetting.svelte";
 
-  let { theme, ready = true, ports }: { theme: Theme; ready?: boolean; ports: StateColourPorts } = $props();
+  let {
+    theme,
+    ready = true,
+    ports,
+  }: { theme: Theme; ready?: boolean; ports: StateColourPorts } = $props();
 
   const CHOICES: readonly (readonly [ThemeChoice, string])[] = [
     ["system", "Like the system"],
@@ -28,6 +35,7 @@
     </div>
   </div>
 </div>
+<TfZoomSetting />
 {#if ready}
   <TfStateColours {ports} />
 {/if}

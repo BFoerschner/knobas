@@ -8,7 +8,8 @@
  * second is a list of addresses: every place the shell has one for (#1417).
  */
 import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
-import { SETTINGS_SECTIONS, type SettingsSection, settingsHash } from "../tf/settings/settings";
+import { SETTINGS_SECTIONS, type SettingsSection, settingsHash, settingsName, settingsParent } from "../tf/settings/settings";
+import { docsChoices } from "../tf/docs/docs-choices.svelte";
 
 /** One row of the `>` palette. */
 export interface LauncherAction {
@@ -22,13 +23,14 @@ export interface LauncherAction {
 }
 
 /** What each section holds, in one line: the row's second line. */
-const SECTION_DETAIL: Record<Exclude<Section, "job" | "assets">, string> = {
+const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
   tickets: "Every ticket from every configured source",
   inbox: "What asks for you: mentions, reviews, failed builds",
   code: "Repositories, branches and pull requests",
   builds: "Pipelines and their runs",
   docs: "The wiki's spaces and pages",
   monitors: "Uptime checks and their current state",
+  assets: "The asset tree: your machines, VMs, containers and services, and what watches them",
   sets: "Groups of repos, pipelines and pages shown on tickets by rule",
   time: "Your day, your worklogs and your standup",
   settings: "Sources, checkouts, time, notifications and the rest",
@@ -42,13 +44,18 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   notifications: "What knobas tells you about, and how",
   standup: "Where the standup protocol is published",
   monitoring: "How Uptime Kuma data is read",
+  docs: "Where Docs opens and the spaces it hides",
+  search: "What Everything looks through",
   notes: "Notes and how you capture them",
   backup: "Export and restore what knobas keeps",
-  appearance: "Theme and density",
+  appearance: "Theme, zoom and state colours",
+  "code-colours": "Themes for code and diffs, while light and while dark, and the highlighter",
+  fonts: "Each face the app draws in, and its size",
   performance: "How many pages stay open in the background",
   renderers: "Your own commands that draw files and Markdown fences",
   keyboard: "The shortcuts",
   logs: "The sync log and the local database",
+  updates: "Version, check for updates, pre-release builds",
 };
 
 /**
@@ -74,24 +81,55 @@ export function navigationActions(): LauncherAction[] {
       id: section,
       label: SECTION_NAME[section],
       detail: SECTION_DETAIL[section],
-      hash: sectionHash(section),
+      // Docs opens where its home is, when one is chosen (PR #2479, 2026-11-17).
+      hash: section === "docs" ? docsChoices.start : sectionHash(section),
     })),
     ...SETTINGS_SECTIONS.map(([section, name]) => ({
       id: `settings-${section}`,
-      label: `${SECTION_NAME.settings} › ${name}`,
+      // A child carries its path: *Settings › Appearance › Fonts* (the subtrees ruling, 2026-11-21).
+      label: [SECTION_NAME.settings, ...(settingsParent(section) === null ? [] : [settingsName(settingsParent(section)!)]), name].join(" › "),
       detail: SETTINGS_DETAIL[section],
       hash: settingsHash(section),
     })),
   ];
 }
 
-/** The actions matching `text`, in the order they were declared. */
+/**
+ * The app's places, as *Go to* offers them above a search's answer: the `>`
+ * rows. Assets is one of them since it has its nav entry again (2026-11-19).
+ */
+export function placeActions(): LauncherAction[] {
+  return navigationActions();
+}
+
+/** Whether `words` start at the start of a word of `text`, both lower case. */
+const startsAWord = (text: string, words: string) => text.startsWith(words) || text.includes(` ${words}`);
+
+/**
+ * The places `typed` names, from `places`: the start of a word of the name
+ * (`sett`, `asset tree`), and a settings section by its own name, so *settings*
+ * is one row and not fourteen. With `andDetails`, where nothing else answered,
+ * the start of a word of what the place holds too (`theme`), after the names.
+ * Two letters at least: one matches too much to be worth a row over the answer.
+ */
+export function matchingPlaces(places: readonly LauncherAction[], typed: string, andDetails: boolean): LauncherAction[] {
+  const words = typed.trim().toLowerCase();
+  if (words.length < 2) return [];
+  const named = places.filter((place) => startsAWord((place.label.split(" › ").at(-1) ?? "").toLowerCase(), words));
+  if (!andDetails) return named;
+  return [...named, ...places.filter((place) => !named.includes(place) && startsAWord(place.detail.toLowerCase(), words))];
+}
+
+/**
+ * The actions matching `text`: by name, then by what they hold, as {@link matchingPlaces} ranks them (F-058), so `>builds`
+ * selects *Builds* and not *Inbox*, whose line mentions failed builds. Each half in the order it was declared.
+ */
 export function filterActions(actions: LauncherAction[], text: string): LauncherAction[] {
   const needle = text.trim().toLowerCase();
   if (!needle) return actions;
-  return actions.filter(
-    (action) =>
-      action.label.toLowerCase().includes(needle) ||
-      action.detail.toLowerCase().includes(needle),
-  );
+  // A name the words start a word of goes first, then one that only holds them: `set` is Link sets and Settings before
+  // Assets (2026-11-19, when Assets came back as a row).
+  const leading = actions.filter((action) => startsAWord(action.label.toLowerCase(), needle));
+  const named = [...leading, ...actions.filter((action) => !leading.includes(action) && action.label.toLowerCase().includes(needle))];
+  return [...named, ...actions.filter((action) => !named.includes(action) && action.detail.toLowerCase().includes(needle))];
 }

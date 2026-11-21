@@ -20,9 +20,12 @@ use super::*;
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 #[tauri::command]
-pub async fn docs_tree(lifecycle: State<'_, Lifecycle>) -> Result<crate::docs::DocsTree, IpcError> {
+pub async fn docs_tree(
+    lifecycle: State<'_, Lifecycle>,
+    cache: State<'_, crate::docs::TreeCache>,
+) -> Result<crate::docs::DocsTree, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_tree_inner(&pool, lifecycle.registry()).await
+    docs_tree_cached(&pool, lifecycle.registry(), Some(&cache)).await
 }
 
 /// [`docs_tree`] with the pool and the registry handed in, for a test.
@@ -33,6 +36,20 @@ pub async fn docs_tree(lifecycle: State<'_, Lifecycle>) -> Result<crate::docs::D
 pub async fn docs_tree_inner(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
+) -> Result<crate::docs::DocsTree, IpcError> {
+    docs_tree_cached(pool, registry, None).await
+}
+
+/// [`docs_tree_inner`] over a kept tree (`crate::docs::TreeCache`, the
+/// instant-open pass, 2026-11-12): read again only when the pages moved.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+pub async fn docs_tree_cached(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    cache: Option<&crate::docs::TreeCache>,
 ) -> Result<crate::docs::DocsTree, IpcError> {
     // The census table the spaces come from is resolved from the stored
     // declarations, which every search command writes first (#759).
@@ -46,8 +63,86 @@ pub async fn docs_tree_inner(
         |kind| registry.doc_projection(kind),
         &me,
         &fillers,
+        cache,
     )
     .await
+}
+
+/// The Docs home's first screen (the instant-open pass, 2026-11-12): every
+/// space with its page count and the top of its tree, the page read last
+/// and *For you*, never all of a space's pages (`crate::docs::outline`).
+/// Narrowed to the wiki role's fillers as [`docs_tree`] is.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+#[tauri::command]
+pub async fn docs_outline(
+    lifecycle: State<'_, Lifecycle>,
+    cache: State<'_, crate::docs::TreeCache>,
+) -> Result<crate::docs::DocsTree, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_outline_inner(&pool, lifecycle.registry(), Some(&cache)).await
+}
+
+/// [`docs_outline`] with the pool, the registry and the kept tree handed in.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+pub async fn docs_outline_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    cache: Option<&crate::docs::TreeCache>,
+) -> Result<crate::docs::DocsTree, IpcError> {
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    let me = identity_of(pool).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
+    crate::docs::outline(
+        pool,
+        &declarations,
+        |kind| registry.doc_projection(kind),
+        &me,
+        &fillers,
+        cache,
+    )
+    .await
+}
+
+/// Part of the Docs tree (the instant-open pass, 2026-11-12): the way to
+/// pages drawn open, the pages under folds, whole spaces
+/// (`crate::docs::nodes`). Narrowed to the wiki role's fillers as
+/// [`docs_tree`] is.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+#[tauri::command]
+pub async fn docs_nodes(
+    lifecycle: State<'_, Lifecycle>,
+    cache: State<'_, crate::docs::TreeCache>,
+    asked: crate::docs::DocsNodesAsked,
+) -> Result<Vec<crate::docs::DocSpace>, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_nodes_inner(&pool, lifecycle.registry(), &asked, Some(&cache)).await
+}
+
+/// [`docs_nodes`] with the pool, the registry and the kept tree handed in.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+pub async fn docs_nodes_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    asked: &crate::docs::DocsNodesAsked,
+    cache: Option<&crate::docs::TreeCache>,
+) -> Result<Vec<crate::docs::DocSpace>, IpcError> {
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
+    crate::docs::nodes(pool, &declarations, &fillers, asked, cache).await
 }
 
 /// One page as the Docs reader draws it: header fields, blocks and comments
@@ -108,7 +203,14 @@ pub async fn docs_search(
     space: Option<crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_search_inner(&pool, lifecycle.registry(), &query, space.as_ref()).await
+    docs_search_picked(
+        &pool,
+        lifecycle.registry(),
+        Some(lifecycle.picker()),
+        &query,
+        space.as_ref(),
+    )
+    .await
 }
 
 /// [`docs_search`] with the pool and the registry handed in, for a test.
@@ -122,7 +224,27 @@ pub async fn docs_search_inner(
     query: &str,
     space: Option<&crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
-    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    docs_search_picked(pool, registry, None, query, space).await
+}
+
+/// [`docs_search_inner`] with the pages' names `picker` holds joining the
+/// answer (the fuzzy-search decisions, 2026-11-19): what the `docs_search`
+/// command answers. No picker is the Docs search as it was.
+///
+/// # Errors
+///
+/// As [`docs_search`].
+pub async fn docs_search_picked(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    picker: Option<&knobas_search::picker::Picker>,
+    query: &str,
+    space: Option<&crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let mut searcher = crate::commands::search::searcher(pool, registry).await?;
+    if let Some(picker) = picker {
+        searcher = searcher.with_picker(picker.clone());
+    }
     // The wiki's search, so it narrows itself to the role's fillers (#1296).
     let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
     crate::docs::search(
@@ -354,4 +476,56 @@ pub async fn move_notes_payloads(
             .push(crate::docs::create_page(pool, |kind| registry.doc_writes(kind), &page).await?);
     }
     Ok(payloads)
+}
+
+// -- where Docs opens, and the spaces it hides (PR #2479, 2026-11-17) --------
+
+/// Where Docs opens and the spaces hidden from its browsing
+/// (`crate::docs::choices`), read once the database answers.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn docs_choices(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::choices(&pool).await
+}
+
+/// Store where Docs opens, `None` for its home, and answer the choices.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id of no space or page,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_docs_home(
+    lifecycle: State<'_, Lifecycle>,
+    home: Option<crate::docs::DocsHome>,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::set_home(&pool, home).await
+}
+
+/// Hide a space (`<source>/<key>`) from Docs' browsing, or show it again,
+/// and answer the choices. Search still finds its pages.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a space not named
+/// `<source>/<key>`, [`Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_docs_space_hidden(
+    lifecycle: State<'_, Lifecycle>,
+    space: String,
+    hidden: bool,
+) -> Result<crate::docs::DocsChoices, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::set_space_hidden(&pool, &space, hidden).await
 }

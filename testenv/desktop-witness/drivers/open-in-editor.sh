@@ -25,8 +25,8 @@
 #   1. a clones root and an application whose command is a stub, typed into
 #      the real Settings and stored by the real backend -- the root and the
 #      command read back off the section once its dialogs have closed;
-#   2. the repository payout-service, opened from ⌘K, with its *Cloned at*
-#      line naming the clone **on screen after the launcher's Return and not
+#   2. the repository payout-service, opened from ⌘K, with its clone's sign
+#      naming the clone **on screen after the launcher's Return and not
 #      before it** (#547);
 #   3. that picking the application from *Open in…* starts the stub with the
 #      checkout path as its **only** argument.
@@ -56,14 +56,12 @@ pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 # minutes into a run, with no clue in the failure. The new shell uppercases
 # none of them, so each is spelled as the markup spells it.
 readonly SETTINGS_BUTTON='Settings'                    # TfTopBar.svelte
-readonly CHECKOUTS_SECTION='Checkouts and Open in…'    # settings/settings.ts
+readonly CHECKOUTS_SECTION='Checkouts and Open in'    # settings/settings.ts
 readonly CHANGE_ROOT='Change…'                         # TfCheckoutsSection.svelte
 readonly CLONES_ROOT_FIELD='Clones root'
 readonly SAVE_ROOT='Save'
-readonly EDIT_APPS='Edit applications…'
-readonly ADD_APP='Add an application…'                 # openin/TfAppsManage.svelte
-readonly DONE='Done'
-readonly NAME_FIELD='Name'                             # openin/TfAppDialog.svelte
+readonly ADD_APP='Add an application'                  # the link under the table; the page is openin/TfAppPage.svelte
+readonly NAME_FIELD='Name'                             # openin/TfAppPage.svelte
 readonly COMMAND_FIELD='Command'
 readonly ADD_BUTTON='Add application'
 readonly OPEN_IN='Open in…'                            # openin/TfOpenIn.svelte
@@ -193,7 +191,7 @@ say "opening Settings › $CHECKOUTS_SECTION"
 press_when "$SETTINGS_BUTTON"
 press_when "$CHECKOUTS_SECTION"
 # The section the press lands on, held to the app's DOM by `App.test.svelte.ts` (#1968).
-lands_named settings-checkouts "$CHANGE_ROOT" "$EDIT_APPS"
+lands_named settings-checkouts "$CHANGE_ROOT" "$ADD_APP"
 
 press_when "$CHANGE_ROOT"
 fill "$CLONES_ROOT_FIELD" "$clones"
@@ -203,15 +201,13 @@ root_stored() { absent "$CLONES_ROOT_FIELD" && reads "$clones"; }
 wait_until "the clones root was not stored: the row does not read $clones" root_stored
 say "clones root set to $clones"
 
-press_when "$EDIT_APPS"
 press_when "$ADD_APP"
 fill "$NAME_FIELD" "$APP_NAME"
 fill "$COMMAND_FIELD" "$TEMPLATE"
 press_when "$ADD_BUTTON"
-# Adding returns to the list; *Done* closes it. The section's table then draws
-# the stored list, so the command on screen with no dialog up is the backend's.
-press_when "$DONE"
-app_stored() { absent "$DONE" && absent "$COMMAND_FIELD" && reads "$APP_NAME" && reads "$TEMPLATE"; }
+# Adding goes back to the section, whose table then draws the stored list, so
+# the command on screen with the page gone is the backend's.
+app_stored() { absent "$COMMAND_FIELD" && reads "$APP_NAME" && reads "$TEMPLATE"; }
 wait_until "the application was not stored: the table has no '$APP_NAME' running the stub" app_stored
 say "'$APP_NAME' is stored, and runs the stub"
 
@@ -223,7 +219,8 @@ lands_named cmd-k "$QUERY_BOX"
 "$ax" type "$REPO_NAME"
 wait_until "the launcher never answered '$REPO_NAME'" launcher_answered
 
-# The page's *Cloned at* line carries the clone's path as a value of its own.
+# The page's clone's sign carries the clone's path as a value of its own: its
+# description, a run of text that is visually hidden until its bubble opens.
 # Read before Return and after (#547): Settings, behind the launcher, reads the
 # *root* and not the clone, so the before-read is `no` on a correct app, and
 # one already there witnesses nothing.
@@ -248,7 +245,7 @@ too-early)
         "nothing about the page. Whatever drew it over the launcher is where to look."
     ;;
 never-appeared)
-    die "no *Cloned at* line naming the clone on the page for '$REPO_NAME'." \
+    die "no clone's sign naming the clone on the page for '$REPO_NAME'." \
         "demo.rs's the_demo_corpus_answers_the_checkout_the_desktop_driver_opens" \
         "covers the read under the window, so check that ⌘K's first hit is the" \
         "repository and that its page found the clone."
@@ -264,21 +261,23 @@ say "the repository is open, and it is cloned at the clone"
 
 press_when "$OPEN_IN"
 
-# The menu opens with the default focused, and the arrows wrap. Its buttons end
-# *…the applications, Add an application…, Manage applications…*, so three
-# steps up from the default is the last application -- the one this run added
-# -- however many came before it. Asserted on the focus before Return, by name.
+# The menu opens with the default focused, and the arrows wrap. It ends
+# *…the applications, Browser (where the source has a page), Add an
+# application, Manage applications*, so walking up from the default reaches the
+# last application -- the one this run added -- within a few steps, however many
+# came before it. Asserted on the focus before Return, by name.
 focus_is_a_menu_item() { [ "$(tsv_field "$("$ax" focused "$pid" 2>/dev/null || true)" role)" = AXMenuItem ]; }
 wait_until "'$OPEN_IN' opened no menu with a focused item" focus_is_a_menu_item
-for _ in 1 2 3; do
+found=no
+for _ in 1 2 3 4 5; do
     "$ax" key "$KEY_UP"
     sleep 0.2
+    focused=$("$ax" focused "$pid" 2>/dev/null || true)
+    case "$(tsv_field "$focused" title)|$(tsv_field "$focused" description)" in
+    "$APP_NAME"* | *"|$APP_NAME"*) found=yes; break ;;
+    esac
 done
-focused=$("$ax" focused "$pid" 2>/dev/null || true)
-case "$(tsv_field "$focused" title)|$(tsv_field "$focused" description)" in
-"$APP_NAME"* | *"|$APP_NAME"*) ;;
-*) die "the menu item three up from the default is not '$APP_NAME'." ;;
-esac
+[ "$found" = yes ] || die "walking up from the default never focused '$APP_NAME'."
 say "picking '$APP_NAME' from the menu"
 "$ax" key "$KEY_RETURN"
 

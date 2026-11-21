@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# The patched sqlx-core below is a path dependency, not a member (ux28).
+exclude = ["vendor/sqlx-core"]
 
 [workspace.package]
 edition = "2024"
@@ -61,7 +63,9 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 # *inside* one `send` can do (it never sees the limiter, and never sees a
 # response header).
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls", "system-proxy"] }
-governor = "0.10.4"
+# No `governor`: `knobas-http`'s limiter is a GCRA of its own since the
+# priority lane (2026-11-13), whose background lane keeps a reserve of the
+# burst that governor could not express.
 
 # Dev builds (`cargo build`/`check`/`clippy`, the app under `just dev`) keep
 # line tables only: a backtrace still names file and line, without the full
@@ -82,3 +86,11 @@ debug = "line-tables-only"
 [profile.test]
 debug = 0
 incremental = false
+
+# sqlx-core 0.9.0 with one patch (ux28, `vendor/sqlx-core/KNOBAS.md`): its
+# `connect_uds` reaches an AF_UNIX socket on Windows too, so knobas can reach
+# its own PostgreSQL where a firewall rule or security software blocks the
+# loopback TCP connect (os error 10013). Remade on every sqlx upgrade: Cargo
+# refuses to resolve a newer sqlx until it is.
+[patch.crates-io]
+sqlx-core = { path = "vendor/sqlx-core" }

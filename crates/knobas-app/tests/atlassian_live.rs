@@ -237,6 +237,12 @@ struct Env {
     /// configures it off `test_connection`'s discovery (#381); a source left
     /// without it stores no `epic` and mirrors no epic membership at all.
     epic_link_field: String,
+    /// The projects the seed made: `jira.projects`' keys and the narrowing
+    /// one. Every source here syncs them unless its test names a scope, and
+    /// [`Env::clear_leftovers`] searches nowhere else, so another estate on the
+    /// same Jira (`just seed-scale jira`'s SCL* projects) is neither synced
+    /// nor touched.
+    projects: Vec<String>,
 }
 
 /// The seed's narrowing-workflow project, as `seed-state.json` records it.
@@ -327,6 +333,18 @@ fn env() -> Env {
             )
         })
         .to_owned();
+    let mut projects: Vec<String> = whole["jira"]["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p["key"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        projects.iter().any(|p| p == CREATE_PROJECT),
+        "{}: jira.projects does not name {CREATE_PROJECT} -- run `./seed-atlassian-content.sh`",
+        state.display()
+    );
+    projects.push(narrowing.key.clone());
     Env {
         url: need("KNOBAS_JIRA_URL").trim_end_matches('/').to_owned(),
         user: need("KNOBAS_JIRA_USER"),
@@ -335,6 +353,7 @@ fn env() -> Env {
         statuses,
         narrowing,
         epic_link_field,
+        projects,
     }
 }
 
@@ -447,8 +466,14 @@ impl Env {
 
     /// Delete every issue and revoke every token a **killed** run left behind
     /// -- the ones no `Drop` ever reached. Read-only in the ordinary case.
+    /// The search names the seed's projects ([`Env::projects`]), so a
+    /// labelled issue in any other project is not this suite's to delete.
     async fn clear_leftovers(&self) {
-        for key in self.jql(&format!("labels = {LITTER_LABEL}")).await {
+        let scope = self.projects.join(", ");
+        for key in self
+            .jql(&format!("project in ({scope}) AND labels = {LITTER_LABEL}"))
+            .await
+        {
             let (status, body) = self
                 .api(
                     reqwest::Method::DELETE,
@@ -985,6 +1010,22 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
     app_with(name, env, auth, secret, json!({ "username": env.user })).await
 }
 
+/// `config` with the seed's projects ([`Env::projects`]) unless it names a
+/// scope of its own. A Jira source with none syncs every project the account
+/// sees, and this Jira may hold other estates beside the seed. With `boards:
+/// none` beside it unless the config names boards: a source with no projects
+/// brings no boards in under the default scope, and these tests were written
+/// against that.
+fn scoped(env: &Env, mut config: serde_json::Value) -> serde_json::Value {
+    if config.get("projects").is_none() && config.get("jql_filter").is_none() {
+        config["projects"] = json!(env.projects);
+        if config.get("boards").is_none() {
+            config["boards"] = json!("none");
+        }
+    }
+    config
+}
+
 /// As [`app`], with the source's `config` as given.
 async fn app_with(
     name: &str,
@@ -1010,6 +1051,7 @@ async fn app_over(
     events: Arc<dyn SyncEvents>,
     follow_landings: bool,
 ) -> SourcesState {
+    let config = scoped(env, config);
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector
         .pool(4)
@@ -3349,7 +3391,10 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
         state.registry.as_ref(),
         JIRA,
         SourcePatch {
-            config: Some(json!({ "username": env.user, "epic_link_field": found })),
+            config: Some(scoped(
+                &env,
+                json!({ "username": env.user, "epic_link_field": found }),
+            )),
             ..SourcePatch::default()
         },
     )
@@ -3397,6 +3442,9 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
 /// The Confluence source id, and the `EntityRef` namespace every mirrored page
 /// is in.
 const CONFLUENCE: &str = "confluence";
+/// What the seeded Confluence source is called, which the digest's reasons
+/// name it by (the live run on #2479: they named it by its id).
+const CONFLUENCE_NAME: &str = "Tidewater Confluence (seeded)";
 
 /// Where the seeded Confluence is, and the fixture ids the seed recorded.
 ///
@@ -3806,7 +3854,7 @@ async fn wiki_app(
         &knobas_sync::config::InsertConfig {
             id: CONFLUENCE.to_owned(),
             adapter_kind: "confluence".to_owned(),
-            display_name: "Tidewater Confluence (seeded)".to_owned(),
+            display_name: CONFLUENCE_NAME.to_owned(),
             base_url: wiki.url.clone(),
             auth_kind: knobas_sync::config::AuthKind::Method(auth),
             // The username is half of the Basic pair **and** the identity the
@@ -4642,10 +4690,10 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         "the mirror half says the source attributes the page to the reader, \
          never that the reader wrote it"
     );
-    assert!(
-        line.reason.contains(CONFLUENCE),
-        "the reason names the source it came from: {:?}",
-        line.reason
+    assert_eq!(
+        line.reason,
+        format!("{CONFLUENCE_NAME} credits this page to you"),
+        "the reason names the source it came from by its name"
     );
     println!("SEEDED digest page line: {} ({})", line.title, line.reason);
 
@@ -4987,10 +5035,11 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         !line.reason.trim().is_empty(),
         "a line whose provenance cannot be shown is not shippable: {line:?}"
     );
-    assert!(
-        line.reason.contains(CONFLUENCE),
-        "the reason names the source the write went to: {:?}",
-        line.reason
+    assert_eq!(
+        line.reason,
+        format!("you edited it in {CONFLUENCE_NAME}"),
+        "the reason says what the reader did and names the source the write went to, \
+         never the op's code"
     );
     println!(
         "SEEDED digest edit line: {} -- {} (version {} -> {})",
@@ -5236,15 +5285,21 @@ struct Protocol {
     user: String,
     password: String,
     id: String,
+    /// The space the page is in, which the index wait below searches: the
+    /// instance may hold other estates' spaces (`just seed-scale
+    /// confluence`'s 5,000 pages), and a search of the whole instance would
+    /// not reach this page in one page of results.
+    space: String,
 }
 
 impl Drop for Protocol {
     fn drop(&mut self) {
-        let (url, user, password, id) = (
+        let (url, user, password, id, space) = (
             self.url.clone(),
             self.user.clone(),
             self.password.clone(),
             self.id.clone(),
+            self.space.clone(),
         );
         undo("the published protocol page", move || async move {
             let http = client();
@@ -5295,6 +5350,12 @@ impl Drop for Protocol {
             // sync run here to make time pass -- and a bound rather than a
             // guessed sleep, so the failure names what did not happen.
             let deadline = std::time::Instant::now() + INDEX_BUDGET;
+            // The adapter's own query, which is what the next suite asks --
+            // `type = page` -- inside the space the page was published to, as
+            // a source scoped to that space asks it; percent-encoded.
+            let search = format!(
+                "rest/api/content/search?cql=space%20%3D%20%22{space}%22%20AND%20type%20%3D%20page&limit=200"
+            );
             loop {
                 let (status, listing) = api(
                     &http,
@@ -5302,9 +5363,7 @@ impl Drop for Protocol {
                     &user,
                     &password,
                     reqwest::Method::GET,
-                    // The adapter's own query, which is what the next suite
-                    // asks: `type = page`, percent-encoded.
-                    "rest/api/content/search?cql=type%20%3D%20page&limit=200",
+                    &search,
                     None,
                 )
                 .await;
@@ -5484,6 +5543,7 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
         user: wiki.user.clone(),
         password: wiki.password.clone(),
         id: content_id.clone(),
+        space: wiki.space.clone(),
     };
     // **Not linked yet, and that is the product working.** `submit` re-reads the
     // source when a write lands, but a Confluence incremental run reads CQL --
@@ -5656,6 +5716,7 @@ async fn a_second_page_with_one_title_in_one_space_is_refused() {
         user: wiki.user.clone(),
         password: wiki.password.clone(),
         id: id.clone(),
+        space: wiki.space.clone(),
     };
 
     // The same request again -- what an at-least-once redelivery is.

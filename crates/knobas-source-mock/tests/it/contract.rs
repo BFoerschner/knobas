@@ -138,7 +138,7 @@ async fn fixture_carries_the_whole_dataset() {
     assert_eq!(f.notes.len(), 3);
     let shas: Vec<&str> = f.commits.iter().map(|c| c.sha.as_str()).collect();
     assert_eq!(shas, ["c90d11", "a41f2c", "7be0e4"]);
-    assert_eq!(f.branches.len(), 3);
+    assert_eq!(f.branches.len(), 5);
     let repos: Vec<(&str, &str)> = f
         .repos
         .iter()
@@ -150,6 +150,9 @@ async fn fixture_carries_the_whole_dataset() {
             ("payout-service", "Rust"),
             ("ledger-api", "Kotlin"),
             ("ops-runbooks", "Markdown"),
+            ("ADProxy", "Go"),
+            ("abcMappingService", "Kotlin"),
+            ("ledger-gateway", "Java"),
         ]
     );
     let people: Vec<&str> = f.people.iter().map(|p| p.username.as_str()).collect();
@@ -265,7 +268,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v6");
+    assert_eq!(cursor, "tidewater-v8");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -391,11 +394,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v6".into()), &mut sink)
+        .sync(Some("tidewater-v8".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v6");
+    assert_eq!(cursor, "tidewater-v8");
 }
 
 /// ADR-0040: a built-in docs source writes a page's `body_text` with the shared
@@ -878,6 +881,9 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
             ("payout-service", "payout-service"),
             ("ledger-api", "ledger-api"),
             ("ops-runbooks", "ops-runbooks"),
+            ("ADProxy", "ADProxy"),
+            ("abcMappingService", "abcMappingService"),
+            ("ledger-gateway", "ledger-gateway"),
         ],
         "every repo the fixture holds, keyed and titled by its name"
     );
@@ -912,6 +918,8 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
             "payout-service@refs/heads/main",
             "payout-service@refs/heads/feature/PAY-231-sepa-retry",
             "payout-service@refs/heads/fix/PAY-228-partial-refund-drift",
+            "ledger-api@refs/heads/main",
+            "ledger-gateway@refs/heads/main",
         ]
     );
     let sepa = sink

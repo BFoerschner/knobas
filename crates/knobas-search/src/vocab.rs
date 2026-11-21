@@ -80,6 +80,11 @@ pub struct Vocabulary {
     /// `knobas.source_config`, because this is the one query on the hot path
     /// that already holds every source's id and adapter kind.
     pub declarations: Declarations,
+    /// The projects the mirror's tickets are numbered under, for reading
+    /// `pay 123` as the key `PAY-123` ([`crate::typed_key`]). Empty from
+    /// [`Self::load`]: a searcher with a picker fills it from the names the
+    /// picker holds, so it costs no read. Empty, no key is read.
+    pub projects: crate::typed_key::Projects,
 }
 
 /// Built-in source aliases (spec §4), mapping an alias to an **adapter kind**
@@ -207,6 +212,7 @@ impl Vocabulary {
             identity,
             kinds,
             declarations: Declarations::empty(),
+            projects: crate::typed_key::Projects::default(),
         })
     }
 
@@ -330,6 +336,7 @@ impl Vocabulary {
             identity: vec!["mara.lindqvist".to_owned()],
             kinds: KindCatalog::from_kinds(["ticket", "pr", "build", "page", "commit"]),
             declarations: Declarations::empty(),
+            projects: crate::typed_key::Projects::default(),
         }
     }
 }

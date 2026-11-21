@@ -189,6 +189,10 @@ pub struct TicketView {
     pub list_columns: Vec<String>,
     /// `None` is newest first.
     pub list_sort: Option<ListSort>,
+    /// *Show every ticket when the view opens* (ux18, migration `0097`): no
+    /// column, lane or list cut. The reader's, a view from a ticket system's
+    /// too.
+    pub show_all: bool,
     /// The saved view (a board or filter, `sync.saved_view`'s entity id) a
     /// view from a ticket system shows (#877; named for the role by #1245);
     /// `None` on a view somebody made.
@@ -218,6 +222,9 @@ pub struct TicketViewDraft {
     #[ts(as = "Vec<ListColumn>")]
     pub list_columns: Vec<String>,
     pub list_sort: Option<ListSort>,
+    /// *Show every ticket when the view opens* (ux18); off when left out.
+    #[serde(default)]
+    pub show_all: bool,
     pub saved_view: Option<String>,
 }
 
@@ -299,7 +306,7 @@ pub struct Unsynced {
 macro_rules! fields {
     () => {
         "id, name, view_group, position, query, layout, columns, lanes, card_fields, \
-         list_columns, list_sort, saved_view"
+         list_columns, list_sort, show_all, saved_view"
     };
 }
 
@@ -326,12 +333,16 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
             .map(serde_json::from_value)
             .transpose()
             .map_err(IpcError::internal)?,
+        show_all: row.get("show_all"),
         saved_view: row.get("saved_view"),
     })
 }
 
 /// Every ticket view in list order, each with its count or the part its text
-/// the grammar could not read.
+/// the grammar could not read. With `picker` (the launcher's), a key typed
+/// with a space or none in a view's text (`pay123`, `pay 123`) counts what
+/// the key does, as the view's board draws it (ux25, ux26); `None` reads no
+/// key.
 ///
 /// # Errors
 ///
@@ -339,6 +350,7 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 pub async fn list(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<Vec<TicketViewRow>, IpcError> {
     // A Jira view whose item is not live is not listed: its source is turned
     // off, and it comes back with the source, or its source was deleted with
@@ -359,22 +371,42 @@ pub async fn list(
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
     let mut sources = saved_view_sources(pool, registry, &views).await?;
-    let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
-    let readings = crate::commands::search::searcher(pool, registry)
-        .await?
+    // A saved view counts what its source put on it that knobas mirrors,
+    // which is what its board draws (#877); its text is not its own. So a
+    // text is read only for a view with no such count (the workers pass,
+    // 2026-11-16): each reading is a count of every live ticket the text
+    // admits, and Björn's nine views, all saved Jira views, had their texts
+    // counted on every opening of Tickets, 23,176 tickets nine times on two
+    // parallel workers, for counts nothing showed.
+    let sourced: Vec<Option<(u64, SavedViewSource)>> = views
+        .iter()
+        .map(|view| view.saved_view.as_ref().and_then(|r| sources.remove(r)))
+        .collect();
+    let texts: Vec<&str> = views
+        .iter()
+        .zip(&sourced)
+        .filter(|(_, source)| source.is_none())
+        .map(|(view, _)| view.query.as_str())
+        .collect();
+    let mut readings = if texts.is_empty() {
+        Vec::new()
+    } else {
+        let searcher = crate::commands::search::searcher(pool, registry).await?;
+        match picker {
+            Some(picker) => searcher.with_picker(picker.clone()),
+            None => searcher,
+        }
         .readings(&texts, "ticket")
-        .await?;
+        .await?
+    }
+    .into_iter();
     Ok(views
         .into_iter()
-        .zip(readings)
-        .map(|(view, reading)| {
-            // A saved view counts what its source put on it that knobas
-            // mirrors, which is what its board draws (#877); its text is not
-            // its own.
-            let source = view.saved_view.as_ref().and_then(|r| sources.remove(r));
+        .zip(sourced)
+        .map(|(view, source)| {
             let reading = match &source {
                 Some((count, _)) => knobas_search::Reading::Count(*count),
-                None => reading,
+                None => readings.next().unwrap_or(knobas_search::Reading::Count(0)),
             };
             let saved_view_source = source.map(|(_, source)| source);
             match reading {
@@ -764,14 +796,14 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
             .await?;
     let row = sqlx::query(concat!(
         "insert into knobas.ticket_view as v (id, name, view_group, position, query, layout, columns, \
-                                              lanes, card_fields, list_columns, list_sort, saved_view)
-         values ($1, $2, $3, coalesce($4, $5), $6, $7, $8, $9, $10, $11, $12, $13)
+                                              lanes, card_fields, list_columns, list_sort, saved_view, show_all)
+         values ($1, $2, $3, coalesce($4, $5), $6, $7, $8, $9, $10, $11, $12, $13, $14)
          on conflict (id) do update set
            name = excluded.name, view_group = excluded.view_group,
            position = coalesce($4, v.position), query = excluded.query, layout = excluded.layout,
            columns = excluded.columns, lanes = excluded.lanes, card_fields = excluded.card_fields,
            list_columns = excluded.list_columns, list_sort = excluded.list_sort,
-           saved_view = excluded.saved_view, updated_at = now()
+           saved_view = excluded.saved_view, show_all = excluded.show_all, updated_at = now()
          returning ",
         fields!()
     ))
@@ -788,6 +820,7 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
     .bind(json(&draft.list_columns)?)
     .bind(draft.list_sort.as_ref().map(json).transpose()?)
     .bind(&draft.saved_view)
+    .bind(draft.show_all)
     .fetch_one(&mut *tx)
     .await?;
     let view = view_of(&row)?;
@@ -945,6 +978,7 @@ mod tests {
             card_fields: vec!["type".to_owned(), "assignee".to_owned()],
             list_columns: vec!["key".to_owned(), "summary".to_owned()],
             list_sort: None,
+            show_all: false,
             saved_view: None,
         }
     }

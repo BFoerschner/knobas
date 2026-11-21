@@ -1,0 +1,17 @@
+{
+  "$schema": "https://zed.dev/schema/themes/v0.2.0.json",
+  "name": "Trip Lantern",
+  "author": "knobas trips",
+  "themes": [
+    {
+      "name": "Trip Lantern Light",
+      "appearance": "light",
+      "style": { "syntax": { "keyword": { "color": "#7a3eb1" }, "string": { "color": "#1f7444" }, "comment": { "color": "#5f6975", "font_style": "normal" } } }
+    },
+    {
+      "name": "Trip Lantern Dark",
+      "appearance": "dark",
+      "style": { "syntax": { "keyword": { "color": "#c79bf2ff" }, "string": { "color": "#6fcf97" }, "property": { "color": "#e5b04d" } } }
+    }
+  ]
+}

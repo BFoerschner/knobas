@@ -140,6 +140,9 @@ describe("what runs", () => {
       "On feature/PAY-231-sepa-retry, with test.filter=sepa::retry",
     );
     expect(summaryOf("main", [])).toBe("On main, defaults");
+    // With no overrides it says what *Start from* says (F-333).
+    expect(summaryOf("main", [], "#1187 settings")).toBe("On main, #1187 settings");
+    expect(summaryOf("main", [{ name: "a", value: "b" }], "#1187 settings")).toBe("On main, with a=b");
     expect(summaryOf("main", [{ name: "x", value: "" }])).toBe("On main, with x=(empty)");
   });
 

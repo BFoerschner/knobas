@@ -24,6 +24,7 @@ its focus back.
 app or a write it has today:
 
 - every entity: *Link to ⟨job⟩* first; *Copy key* on a ticket, *Copy title* on anything else, last;
+  **Amended 2026-11-06 (UX polish, F-637, how it feels wins):** the link no longer comes first. What the kind does comes first, on a ticket *Work on this* then *Start timer*, then the link, so the positions hold still and `Tab`, `Enter` does not write a link.
 - ticket: *Start timer* (on tickets only), *Work on this*;
 - pull request: *Review the files*, *Conversation*, *Approve*, *Open in ⟨app⟩*;
 - repository: *Pull requests*, *Branches*, *Open in ⟨app⟩*, *Clone*;

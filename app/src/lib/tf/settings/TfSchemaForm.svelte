@@ -60,6 +60,13 @@
     return typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
   }
 
+  /** A select's words, from the schema's raw value (`datacenter`): the value stays what is stored (F-626). */
+  function optionWord(option: string): string {
+    if (option === "" || /[A-Z]/.test(option)) return option;
+    const words = option.replace(/[-_]+/g, " ");
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+
   /** What a field adds under its control: the list and JSON hints. */
   function hint(field: SchemaField): string | null {
     if (field.control.kind === "list") return "One per line.";
@@ -82,7 +89,7 @@
       onchange={(event) => (values[field.key] = event.currentTarget.value)}
     >
       {#each field.control.options as option (option)}
-        <option value={option}>{option}</option>
+        <option value={option}>{optionWord(option)}</option>
       {/each}
     </select>
   {:else if field.control.kind === "toggle"}
@@ -167,7 +174,7 @@
 {:else}
   <div class="tf-formgrid tf-sf-grid">
     {#each fields as field (field.key)}
-      <label for={controlId(field.key)}>{field.label}</label>
+      <label for={controlId(field.key)}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
       <div class="tf-sf-c">
         {@render control(field)}
         {@render notes(field, true)}

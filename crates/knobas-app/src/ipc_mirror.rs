@@ -41,15 +41,42 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::app::AppStatus::export_all(cfg)?;
     crate::commands::app::DbState::export_all(cfg)?;
     crate::renderers::UserRenderer::export_all(cfg)?;
+    crate::code_font::InstalledFont::export_all(cfg)?;
     crate::renderers::UserRendererDraft::export_all(cfg)?;
     crate::renderers::RenderContent::export_all(cfg)?;
     crate::renderers::RenderRun::export_all(cfg)?;
     crate::renderers::RendererDefault::export_all(cfg)?;
+    crate::folder_render::FolderRenderer::export_all(cfg)?;
+    crate::folder_render::FolderPick::export_all(cfg)?;
+    crate::folder_render::made::MadeCompare::export_all(cfg)?;
+    crate::folder_render::FolderRendererDraft::export_all(cfg)?;
+    crate::folder_render::FolderMarks::export_all(cfg)?;
+    crate::folder_render::runs::FolderRenderView::export_all(cfg)?;
+    crate::folder_render::runs::FolderRenderMoved::export_all(cfg)?;
+    crate::folder_render::runs::Ask::export_all(cfg)?;
+    crate::folder_render::made::MadeTree::export_all(cfg)?;
+    crate::folder_render::store::MadeStore::export_all(cfg)?;
     crate::file_pipeline::saved::CommandStep::export_all(cfg)?;
     crate::file_pipeline::saved::CommandStepDraft::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
+    crate::archive::java::JavaRuntime::export_all(cfg)?;
+    // update.ts
+    crate::update::UpdateState::export_all(cfg)?;
+    crate::update::UpdateNotes::export_all(cfg)?;
+    // site.ts
+    crate::site::SiteSetting::export_all(cfg)?;
+    knobas_site::state::SiteStatus::export_all(cfg)?;
+    knobas_site::sites::SiteInsets::export_all(cfg)?;
+    knobas_site::sites::SiteAsked::export_all(cfg)?;
+    knobas_site::sites::SiteAct::export_all(cfg)?;
+    knobas_site::sites::SiteRouted::export_all(cfg)?;
+    knobas_site::sites::SiteDownload::export_all(cfg)?;
+    knobas_site::sites::SiteClosed::export_all(cfg)?;
+    knobas_site::sites::SiteKey::export_all(cfg)?;
     // entity.ts
+    knobas_jar::ArchiveIndex::export_all(cfg)?;
+    knobas_jar::ClassOutline::export_all(cfg)?;
     crate::file_pipeline::PipeFormat::export_all(cfg)?;
     crate::file_pipeline::PipeStep::export_all(cfg)?;
     crate::file_pipeline::PipeOutput::export_all(cfg)?;
@@ -80,9 +107,15 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::AttachmentBytes::export_all(cfg)?;
     knobas_core::builds::RunRow::export_all(cfg)?;
     knobas_core::builds::PipelineRow::export_all(cfg)?;
+    knobas_core::builds::RepoPipelineRow::export_all(cfg)?;
+    knobas_core::builds::RepoBuilds::export_all(cfg)?;
+    knobas_core::builds::BranchPull::export_all(cfg)?;
+    knobas_core::builds::CommitRepository::export_all(cfg)?;
     crate::commands::entity::PipelineReason::export_all(cfg)?;
     crate::commands::entity::JobPipeline::export_all(cfg)?;
     crate::commands::entity::CodeFacts::export_all(cfg)?;
+    crate::commands::entity::EntityBrief::export_all(cfg)?;
+    crate::commands::entity::CardRows::export_all(cfg)?;
     knobas_source::pipeline::PipelineRepository::export_all(cfg)?;
     knobas_source::pipeline::PipelineTrigger::export_all(cfg)?;
     knobas_source::pipeline::PipelineSettings::export_all(cfg)?;
@@ -144,6 +177,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::inbox::Shelf::export_all(cfg)?;
     knobas_core::inbox::InboxItem::export_all(cfg)?;
     crate::inbox::InboxEntry::export_all(cfg)?;
+    crate::inbox::InboxShelves::export_all(cfg)?;
     knobas_core::context::ContextKind::export_all(cfg)?;
     knobas_core::context::ContextRow::export_all(cfg)?;
     knobas_core::reach::Origin::export_all(cfg)?;
@@ -155,6 +189,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::mini_board::SourceStatuses::export_all(cfg)?;
     knobas_core::mini_board::MiniBoard::export_all(cfg)?;
     knobas_core::mini_board::LaneField::export_all(cfg)?;
+    knobas_core::mini_board::Page::export_all(cfg)?;
     knobas_core::mini_board::MiniBoardLane::export_all(cfg)?;
     knobas_core::mini_board::LaneColumn::export_all(cfg)?;
     knobas_core::project::Project::export_all(cfg)?;
@@ -167,6 +202,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::notify::NotificationDraft::export_all(cfg)?;
     crate::notify::NotificationClicked::export_all(cfg)?;
     crate::sources::live::ViewFresh::export_all(cfg)?;
+    crate::sources::live::ShownView::export_all(cfg)?;
     crate::checkout::FoundBy::export_all(cfg)?;
     crate::checkout::CheckoutView::export_all(cfg)?;
     crate::checkout::working_tree::WorkingTreeState::export_all(cfg)?;
@@ -187,6 +223,22 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::uncommitted::DiffRead::export_all(cfg)?;
     crate::checkout::DiffReadAt::export_all(cfg)?;
     crate::checkout::RangeDiff::export_all(cfg)?;
+    crate::checkout::MirrorTip::export_all(cfg)?;
+    crate::checkout::range_files::RangeFiles::export_all(cfg)?;
+    crate::checkout::range_files::RangeFilePage::export_all(cfg)?;
+    crate::checkout::range_files::RangeFileAsk::export_all(cfg)?;
+    crate::checkout::range_files::RangeNames::export_all(cfg)?;
+    crate::checkout::local::LocalTree::export_all(cfg)?;
+    crate::checkout::local::LocalDir::export_all(cfg)?;
+    crate::checkout::local::LocalPaths::export_all(cfg)?;
+    crate::checkout::local::LocalEntry::export_all(cfg)?;
+    crate::checkout::fetch::Fetched::export_all(cfg)?;
+    crate::checkout::clone_all::Plan::export_all(cfg)?;
+    crate::checkout::clone_all::PlannedSource::export_all(cfg)?;
+    crate::checkout::clone_all::Skipped::export_all(cfg)?;
+    crate::checkout::clone_all::Failed::export_all(cfg)?;
+    crate::checkout::clone_all::State::export_all(cfg)?;
+    crate::checkout::CheckoutOf::export_all(cfg)?;
     crate::capture::ShortcutView::export_all(cfg)?;
     crate::capture::Recorded::export_all(cfg)?;
     crate::conversation::ThreadComment::export_all(cfg)?;
@@ -196,6 +248,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::docs::DocForYou::export_all(cfg)?;
     crate::docs::DocSpace::export_all(cfg)?;
     crate::docs::DocNode::export_all(cfg)?;
+    crate::docs::DocsNodesAsked::export_all(cfg)?;
+    crate::docs::DocsChoices::export_all(cfg)?;
     crate::docs::DocPage::export_all(cfg)?;
     knobas_source::docs::SectionRefusal::export_all(cfg)?;
     knobas_source::docs::DocSection::export_all(cfg)?;
@@ -314,8 +368,15 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // What `keys` answers (#2429).
     knobas_search::Keys::export_all(cfg)?;
     knobas_search::FilterSuggestions::export_all(cfg)?;
+    // Settings › Search (the everything-search decisions, D13).
+    crate::search_settings::SearchSettings::export_all(cfg)?;
+    // What `search_files` answers (D11).
+    knobas_search::FilesInRepo::export_all(cfg)?;
+    // `code:files`'s payload, the files pass's progress (D7).
+    knobas_sync::code_files::FilesProgress::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;
+    crate::commands::search::FuzzyRanked::export_all(cfg)?;
     crate::ticket_views::TicketViewRow::export_all(cfg)?;
     crate::ticket_views::TicketViewDraft::export_all(cfg)?;
     // time.ts

@@ -1,48 +1,117 @@
 /* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
 :root {
-  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --ink: #17212B; --ink-2: #4B5663;
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663; --fill: var(--ink);
   --rule: #CBD2D9; --rule-2: #DDE2E7;
   --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
   --focus: #2F55D4; --mark: #F6E08F;
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
   --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
-  --sans: "Archivo Variable", system-ui, sans-serif;
-  --serif: "Source Serif 4 Variable", Georgia, serif;
-  --mono: "JetBrains Mono", ui-monospace, monospace;
+  /* What rings the selected yellow card on a dark board, where `--card-ink` melts into the page. */
+  --sel-halo: transparent;
+  /* The tones on an ink row (a selected rail row): ink is dark in light and pale in dark, so each theme borrows the other's. */
+  --on-ink-ok: #6FCF97; --on-ink-warn: #E5B04D; --on-ink-err: #FF8A80; --on-ink-info: #8AA6FF; --on-ink-muted: #94A0AC;
+  /* Each role's face (Settings › Fonts, 2026-11-18, `fonts.svelte.ts`): the family chosen for it first (`--<role>-chosen`,
+     which `fonts.svelte.ts` sets on <html>), then the face knobas brings along, so a font missing on this machine draws
+     in the bundled one. *Interface* is `--sans`, *Headings* `--head` (every rule that narrows with `"wdth"`), *Reading*
+     `--serif`, *Code* `--mono`. The brand is a mark, not text: Inter whatever is chosen. Since 2026-11-20 the bundled
+     face of the first three is Inter, and of Code Cascadia Mono since 2026-11-21 (`fonts/fonts.css`); Reading keeps its
+     token's name. */
+  --sans: var(--ui-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --head: var(--head-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --serif: var(--read-chosen, "Inter"), "Inter", system-ui, sans-serif;
+  --brand: "Inter", system-ui, sans-serif;
+  /* Each role's size, a number (`fonts.svelte.ts` writes it on <html>, 85 to 130 %). Every rule that sets a role's
+     family copies it into `--fs`, which inherits, and every font size is multiplied by `--fs` (`code-face.test.ts`):
+     a size evens one face out against the others, its text and line boxes follow it, the lengths tuned around text
+     hold. Zoom makes everything bigger. At 1 every computed size is what it was. */
+  --size-ui: 1; --size-head: 1; --size-read: 1; --size-code: 1;
+  --fs: var(--size-ui);
+  /* Code's face (2026-11-16): the family chosen in Settings › Fonts first (`--mono-chosen`, which `fonts.svelte.ts`
+     sets on <html>), then the bundled face (`--mono-bundled`), its stand-ins while it loads (`fonts/fonts.css`), and
+     the system's monospace, so a font missing on this machine draws in the bundled face and never in a proportional
+     one. The bundled face is Cascadia Mono (2026-11-21; Björn: "Cascadia Mono looks better with like, ASCII and
+     boxes"), with no programming ligatures. *Ligatures in code* is off until turned on; on, `fonts.svelte.ts` sets
+     `--mono-bundled` to Cascadia Code, which draws `=>` and `->` as one sign, and `--mono-ligatures` to `normal`, so a
+     chosen face draws its own. Only one of the two Cascadias is in the list, so the other is never loaded. Every rule
+     that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
+  --mono-bundled: "knobas Cascadia Mono";
+  --mono: var(--mono-chosen, var(--mono-bundled)), var(--mono-bundled), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;
+  --mono-ligatures: none;
+  /* A code row's height (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): every area that stacks code
+     lines (a file, a diff, a hunk, a fence, the editor, a log, a Docs block, an OpenAPI or JAR block) draws its rows at
+     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). *Joined*,
+     the default, is the drawn face's own line height (`--code-lh-face`, its ascent and descent over its size: Cascadia's
+     2380 of 2048 at 105 %, or an installed face's, measured when picked), rounded to whole device pixels
+     (`--dpr`, which `fonts.svelte.ts` writes on <html> with each scale), so its box drawing joins from row to row: 16 px
+     at 13 px. A custom line height is written to `--code-lh-face` the same way; *Open* sets `--code-lh` to `initial`, so
+     each area's own number stands. The `1em` is the area's own font size: a custom property is substituted where used. */
+  --code-lh-face: 1.2202;
+  --dpr: 1;
+  --code-lh: round(calc(var(--code-lh-face) * 1em), calc(1px / var(--dpr)));
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
   --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
   --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
-  /* Highlighting (#2254, spec #2234 step 5): the two themes are these tokens' light and dark values,
-     as the Code area mockup (mockups/code-area/base.css) draws them. */
-  --hl-kw: #7A3EB1; --hl-str: var(--ok); --hl-num: var(--warn); --hl-com: var(--muted); --hl-fn: var(--info); --hl-ty: #A2461B;
-  --add-word: #B4DEC3; --del-word: #EFB9B6;
+  /* Highlighting (ADR-0051): a colour per role (`render/roles.ts`), read from the theme in the *While light* slot
+     (`--hl-<role>-light`, which `tf/syntax-theme.svelte.ts` writes on <html>) and, where none is written, knobas Light:
+     the Code area mockup's six colours (mockups/code-area/base.css) spread over the seventeen roles. The dark blocks
+     read `-dark` the same way, so the system changing sides runs no script. */
+  --hl-com: var(--hl-com-light, var(--muted)); --hl-kw: var(--hl-kw-light, #7A3EB1); --hl-str: var(--hl-str-light, var(--ok)); --hl-esc: var(--hl-esc-light, var(--warn));
+  --hl-num: var(--hl-num-light, var(--warn)); --hl-con: var(--hl-con-light, var(--warn)); --hl-fn: var(--hl-fn-light, var(--info)); --hl-ty: var(--hl-ty-light, #A2461B);
+  --hl-prop: var(--hl-prop-light, var(--ink)); --hl-key: var(--hl-key-light, #A2461B); --hl-tag: var(--hl-tag-light, #A2461B); --hl-attr: var(--hl-attr-light, var(--warn));
+  --hl-var: var(--hl-var-light, var(--ink)); --hl-op: var(--hl-op-light, var(--ink)); --hl-punct: var(--hl-punct-light, var(--ink)); --hl-head: var(--hl-head-light, #7A3EB1);
+  --hl-link: var(--hl-link-light, var(--info));
+  --hl-com-style: var(--hl-com-style-light, italic);
+  /* A diff's colours (ADR-0051): its added and removed lines' tints and its changed words' marks, which a theme may set
+     (`--diff-add-light` and its siblings), else the state tones' tints. */
+  --diff-add: var(--diff-add-light, var(--ok-bg)); --diff-del: var(--diff-del-light, var(--err-bg));
+  --add-word: var(--add-word-light, #B4DEC3); --del-word: var(--del-word-light, #EFB9B6);
   /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
   --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
+  /* A form's one label column (`.tf-formgrid`). A dialog of long names widens it with this token. */
+  --tf-label: calc(132px * var(--size-ui));
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
     --rule: #323C47; --rule-2: #28313A;
     --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
     --focus: #8AA6FF; --mark: #5C4E17;
     --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
     --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
-    --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
+    --sel-halo: var(--ink);
+    --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
+    --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
+    --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
+    --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
+    --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
+    --hl-link: var(--hl-link-dark, var(--info));
+    --hl-com-style: var(--hl-com-style-dark, italic);
+    --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
+    --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
   --rule: #323C47; --rule-2: #28313A;
   --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
   --focus: #8AA6FF; --mark: #5C4E17;
   --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
   --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
-  --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
+  --sel-halo: var(--ink);
+  --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
+  --hl-com: var(--hl-com-dark, var(--muted)); --hl-kw: var(--hl-kw-dark, #C79BF2); --hl-str: var(--hl-str-dark, var(--ok)); --hl-esc: var(--hl-esc-dark, var(--warn));
+  --hl-num: var(--hl-num-dark, var(--warn)); --hl-con: var(--hl-con-dark, var(--warn)); --hl-fn: var(--hl-fn-dark, var(--info)); --hl-ty: var(--hl-ty-dark, #F0A274);
+  --hl-prop: var(--hl-prop-dark, var(--ink)); --hl-key: var(--hl-key-dark, #F0A274); --hl-tag: var(--hl-tag-dark, #F0A274); --hl-attr: var(--hl-attr-dark, var(--warn));
+  --hl-var: var(--hl-var-dark, var(--ink)); --hl-op: var(--hl-op-dark, var(--ink)); --hl-punct: var(--hl-punct-dark, var(--ink)); --hl-head: var(--hl-head-dark, #C79BF2);
+  --hl-link: var(--hl-link-dark, var(--info));
+  --hl-com-style: var(--hl-com-style-dark, italic);
+  --diff-add: var(--diff-add-dark, var(--ok-bg)); --diff-del: var(--diff-del-dark, var(--err-bg));
+  --add-word: var(--add-word-dark, #2C6243); --del-word: var(--del-word-dark, #6E3333);
   color-scheme: dark;
 }
 
@@ -50,32 +119,84 @@
    no scroll behind the window, and the paper under it ---------- */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
-body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
-button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; }
+body { --fs: var(--size-ui); letter-spacing: var(--ls-ui, normal); font: var(--wt-ui, 400) calc(var(--t-sm) * var(--fs))/1.45 var(--sans); -webkit-font-smoothing: antialiased; accent-color: var(--ink); }
+/* Code is drawn in code's face wherever it appears: a fence, a macro's block, a `{noformat}`, an inline `code` or `tt`
+   in any rendered text, a key. A rule that styles one names `--mono` too, or inherits this; at no specificity, so
+   such a rule wins without a fight (`code-face.test.ts`). */
+:where(pre, code, kbd, samp, tt) { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(1em * var(--size-code) / var(--size-ui)); }
+/* Code's size is applied once: code inside code (a `code` in a `pre`) is as big as what holds it. */
+:where(pre, code, kbd, samp, tt) :where(pre, code, kbd, samp, tt) { font-size: inherit; }
+/* Code keeps its columns, and the reading face its own fit. */
+:is(pre, code, kbd, samp, tt, .tf-mono, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title) { letter-spacing: normal; word-spacing: normal; }
+/* A Docs page's text is the reading face's, with Reading's letter spacing (Settings › Fonts, 2026-11-21). */
+.tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd) { letter-spacing: var(--ls-read, normal); word-spacing: normal; }
+/* The areas that stack code lines take Code's letter spacing (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`),
+   and so does the `code` a block wraps its lines in; their line numbers and a log's times keep their own, so no gutter column changes. A key,
+   inline code and `.tf-mono` keep `normal`, from the rule above. Held by `code-face.test.ts`. */
+:is(.tf-code, .tf-diff, .tf-was-hunk, .tf-pdfd-hunk, .tf-stepfail pre, .tf-md .tf-fence pre, .tf-md .tf-fence .tf-stepfail pre, .tf-jar-bad pre, .tf-jar-pending pre, .tf-oas-bad pre, .tf-oas-ex pre, .tf-editor, .tf-logv, .tf-tdetail pre, .tf-problem pre, .tf-log, .tf-doc pre), :is(.tf-code, .tf-diff, .tf-was-hunk, .tf-pdfd-hunk, .tf-stepfail pre, .tf-md .tf-fence pre, .tf-md .tf-fence .tf-stepfail pre, .tf-jar-bad pre, .tf-jar-pending pre, .tf-oas-bad pre, .tf-oas-ex pre, .tf-editor, .tf-logv, .tf-tdetail pre, .tf-problem pre, .tf-log, .tf-doc pre) > :is(code, kbd, samp, tt) { letter-spacing: var(--ls-code, normal); word-spacing: normal; }
+.tf-code .tf-l > span:first-child, .tf-diff .tf-no, .tf-ll :is(.tf-no, .tf-ts), :is(.tf-was-hunk, .tf-pdfd-hunk) .tf-no, .tf-editor .tf-nums { letter-spacing: normal; }
+/* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. It is told from the words by its
+   face, so it carries no underline until pointed at; a link made of words always does. */
+:is(span, a).tf-mono { white-space: nowrap; }
+.tf a.tf-mono { text-decoration: none; }
+.tf a.tf-mono:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* A placeholder is text: `--muted` is the lightest grey that passes on every field fill (4.5:1). */
+::placeholder { color: var(--muted); opacity: 1; }
+/* A browser resets a form control's spacing to `normal`, so a control has to ask for the interface's. */
+button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; letter-spacing: inherit; word-spacing: inherit; }
+/* No word alone on a last line, where the engine can avoid it. */
+.tf p, .tf small, .tf .tf-sub { text-wrap: pretty; }
+/* A browser's `small` is a fifth off whatever holds it, which lands between steps (11.67, 12.5). */
+.tf small { font-size: calc(var(--t-xs) * var(--fs)); }
 button { cursor: pointer; }
 a { color: var(--info); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+/* Where a board's two scrollbars meet: the page's own colour, not a white square. */
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---------- the root: its own paper, the whole window ---------- */
 .tf {
   position: fixed; inset: 0;
   display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
   background: var(--paper); color: var(--ink);
-  font: 400 var(--t-md)/1.45 var(--sans);
+  /* The colour a box sits on, for a scroller that is drawn on more than one surface: Chromium scrolls a box on its
+     compositor only when the box's own background is opaque (PR #2479), so such a scroller paints `var(--under)`.
+     A surface that holds one sets it to its own colour. */
+  --under: var(--paper);
+  --fs: var(--size-ui); letter-spacing: var(--ls-ui, normal); font: var(--wt-ui, 400) calc(var(--t-md) * var(--fs))/1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 .tf *, .tf *::before, .tf *::after { box-sizing: border-box; }
 .tf button, .tf select, .tf input, .tf textarea { font: inherit; color: inherit; }
 .tf a { color: inherit; }
-.tf h1, .tf h2, .tf h3, .tf p { margin: 0; }
+/* No `.tf p { margin: 0 }` here: `* { margin: 0 }` above already does it, and that rule's weight beat every
+   one-class margin on a heading or paragraph, so `.tf-md > * + *` and the like never applied. */
 
-/* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
-.tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-.tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
+/* Focus (design system, Motion and focus; docs/decisions/2026-11-21-a-ring-takes-the-shape-of-what-it-rings.md): a 2 px ring
+   in the surface's colour with no radius of its own, so it takes the shape of what it rings (a pill stays round, a square row
+   stays square). A control standing free wears it outside, `--focus-off`; a field, and anything in a box that clips, inside,
+   `--focus-in`, so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no
+   component writes an outline of its own. */
+:root { --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; }
+.tf { --focus-c: var(--focus); --focus-o: var(--focus-off); }
+.tf :focus-visible { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-o); }
+/* A field's ring is its own border, in `--focus` on the field's own fill wherever the field stands. */
+.tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { outline-color: var(--focus); outline-offset: var(--focus-in); }
+/* A box that is the field, its input bare inside it. */
+.tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-in); }
+/* A select pressed with the mouse draws no ring, as a button pressed so draws none (`input-modality.ts` sets `data-input`). */
+:root[data-input="pointer"] .tf select:focus-visible { outline: none; }
+/* On a yellow card the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
+.tf .tf-card { --focus-c: var(--card-ink); }
+/* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */
+.tf :is(.tf-seg button[aria-pressed="true"], .tf-pi[aria-current="true"], .tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"]) { --focus-c: var(--paper); }
+/* `hidden` means hidden. A class that sets `display` beat the browser's own rule, which is how a dead tab kept its button. */
+.tf [hidden] { display: none !important; }
 
-.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; }
+/* A step under its context, whole pixels: 14 to 13, 13 to 12, 12 to 11, so it stays on the type scale. */
+.tf .tf-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(.9em * var(--size-code) / var(--size-ui)); font-size: round(calc(.93em * var(--size-code) / var(--size-ui)), 1px); }
 .tf .tf-dim { color: var(--ink-2); }
 .tf .tf-num { font-variant-numeric: tabular-nums; }
 
@@ -87,4 +208,3 @@ a { color: var(--info); text-decoration: none; }
 
 /* The yellow card: the ticket you are on, and nothing else. */
 .tf .tf-card { background: var(--card); color: var(--card-ink); }
-

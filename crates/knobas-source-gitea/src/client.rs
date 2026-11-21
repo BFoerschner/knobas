@@ -37,6 +37,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use knobas_http::{Auth, CredentialRules, HttpClient, HttpConfig, Method, TokenSpelling};
 use knobas_source::{AuthMethod, SourceError};
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::config::GiteaConfig;
 
@@ -203,7 +204,13 @@ pub(crate) struct GiteaClient {
     /// Forgejo): its file entries are read from `contents` straight away
     /// after, not after a 404 each (#2241).
     no_contents_ext: std::sync::atomic::AtomicBool,
+    /// The reads several callers ask at once share ([`Self::get_json_shared`]),
+    /// by path: while one is out, the next asking it waits for its answer.
+    shared: std::sync::Mutex<std::collections::HashMap<String, Arc<SharedRead>>>,
 }
+
+/// One shared read's answer, and when it came.
+type SharedRead = tokio::sync::Mutex<Option<(tokio::time::Instant, Value)>>;
 
 impl GiteaClient {
     /// Build the client for one configured source.
@@ -234,6 +241,7 @@ impl GiteaClient {
         Ok(Self {
             http,
             no_contents_ext: std::sync::atomic::AtomicBool::new(false),
+            shared: std::sync::Mutex::default(),
         })
     }
 
@@ -562,6 +570,44 @@ impl GiteaClient {
     ///
     /// The query values are owned because every one of them is computed;
     /// borrowing would only move the temporaries to the call sites.
+    /// [`Self::get_json`] with no query, once among the callers that ask it
+    /// while it is out (the landing-rounds pass, 2026-11-16): a repository's
+    /// landing read its record six times and its default branch's tip three,
+    /// each section's read behind asking them a few milliseconds apart. A
+    /// caller that asks once the answer is in reads again: only a read under
+    /// way when it asked is shared, so no answer older than the ask is
+    /// handed out. A failed read is not shared; the next waiter asks itself.
+    pub(super) async fn get_json_shared<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, SourceError> {
+        let asked = tokio::time::Instant::now();
+        let slot = {
+            let mut shared = self
+                .shared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Only the reads someone still waits on stay.
+            shared.retain(|_, slot| Arc::strong_count(slot) > 1);
+            Arc::clone(shared.entry(path.to_owned()).or_default())
+        };
+        let mut held = slot.lock().await;
+        let value = match held.as_ref() {
+            Some((answered, value)) if *answered >= asked => value.clone(),
+            _ => {
+                let value: Value = self.get_json(path, &[]).await?;
+                *held = Some((tokio::time::Instant::now(), value.clone()));
+                value
+            }
+        };
+        drop(held);
+        serde_json::from_value(value).map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {API_ROOT}{path} answered an unreadable body: {error}"
+            ))
+        })
+    }
+
     async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -897,6 +943,86 @@ mod wire_tests {
             Auth::GiteaToken("tidewater-pat".to_owned()),
         )
         .expect("the client builds")
+    }
+
+    /// **A read several callers ask at once goes once** (the landing-rounds
+    /// pass, 2026-11-16): a repository's landing read its record six times
+    /// and its default branch's tip three, each section's read behind asking
+    /// them a few milliseconds apart. Three record reads and three tip reads
+    /// at once send one of each; one asked after the answers is read again;
+    /// a write's fresh read is its own.
+    #[tokio::test]
+    async fn reads_asked_at_once_go_once_and_a_later_one_reads_again() {
+        let server = MockServer::builder().start().await;
+        let slow = std::time::Duration::from_millis(150);
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/tidewater/payout-service"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "full_name": "tidewater/payout-service" }))
+                    .set_delay(slow),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/tidewater/payout-service/branches/main"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(
+                        serde_json::json!({ "name": "main", "commit": { "id": "c90d11" } }),
+                    )
+                    .set_delay(slow),
+            )
+            .mount(&server)
+            .await;
+        let client = client_for(&server).await;
+        let (o, r) = ("tidewater", "payout-service");
+        let (a, b, c, x, y, z) = tokio::join!(
+            client.repo_as::<Value>(o, r),
+            client.repo_as::<Value>(o, r),
+            client.repo_as::<Value>(o, r),
+            client.branch_as::<Value>(o, r, "main"),
+            client.branch_as::<Value>(o, r, "main"),
+            client.branch_as::<Value>(o, r, "main"),
+        );
+        for record in [a, b, c] {
+            assert_eq!(record.unwrap()["full_name"], "tidewater/payout-service");
+        }
+        for tip in [x, y, z] {
+            assert_eq!(tip.unwrap()["commit"]["id"], "c90d11");
+        }
+        async fn sent(server: &MockServer) -> (usize, usize) {
+            let requests = server.received_requests().await.unwrap_or_default();
+            let of = |p: &str| requests.iter().filter(|r| r.url.path() == p).count();
+            (
+                of("/api/v1/repos/tidewater/payout-service"),
+                of("/api/v1/repos/tidewater/payout-service/branches/main"),
+            )
+        }
+        assert_eq!(
+            sent(&server).await,
+            (1, 1),
+            "one of each for the three at once"
+        );
+
+        client.repo_as::<Value>(o, r).await.unwrap();
+        assert_eq!(
+            sent(&server).await,
+            (2, 1),
+            "asked after the answer: read again"
+        );
+
+        let (fresh, shared) = tokio::join!(
+            client.branch_fresh_as::<Value>(o, r, "main"),
+            client.branch_as::<Value>(o, r, "main"),
+        );
+        fresh.unwrap();
+        shared.unwrap();
+        assert_eq!(
+            sent(&server).await,
+            (2, 3),
+            "a write's fresh read is its own"
+        );
     }
 
     /// `stat`, `verification` and `files` default to **true** in Gitea, which

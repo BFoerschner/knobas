@@ -41,8 +41,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use knobas_app::commands::entity::{
     action_item_ticket_inner, create_action_item_ticket_in_background,
-    create_action_item_ticket_inner, publish_standup_protocol_in_background,
-    publish_standup_protocol_inner, standup_protocol_inner,
+    create_action_item_ticket_inner, publish_standup_protocol_again_inner,
+    publish_standup_protocol_in_background, publish_standup_protocol_inner, standup_protocol_inner,
 };
 use knobas_app::protocol::{self, PublishTarget};
 use knobas_app::sources::SourcesState;
@@ -101,6 +101,9 @@ struct Log {
     /// Every `CreatePage` body sent, so the storage-format translation is
     /// witnessed on the wire rather than only in its own unit test.
     pages: Vec<(String, String, String)>,
+    /// Every `UpdatePage` sent, as `(entity, base_version, body)`: *Publish
+    /// again* on the wire (F-327).
+    updates: Vec<(String, i64, String)>,
     /// Items the next sync will push.
     pending: Vec<SyncItem>,
     /// While true, `write` refuses the way an unreachable server does.
@@ -187,6 +190,14 @@ impl Source for Wiki {
                 // survive, so the fake keeps the two apart.
                 self.log().pending.push(page_item(CREATED_KEY, &title, ""));
                 Ok(WriteReceipt::id(CREATED_KEY))
+            }
+            WriteOp::UpdatePage {
+                entity,
+                base_version,
+                body,
+            } => {
+                self.log().updates.push((entity, base_version, body));
+                Ok(WriteReceipt::none())
             }
             // The real Jira answers the key it gave the ticket (#1754), and the
             // ticket reaches the mirror at the next sync, as a page does.
@@ -287,7 +298,7 @@ fn wiki_descriptor(id: &str) -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
-        write_ops: vec!["create_page".to_owned()],
+        write_ops: vec!["create_page".to_owned(), "update_page".to_owned()],
         entity_kinds: vec![kind("page")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
@@ -534,6 +545,15 @@ impl Harness {
     async fn create_pages_queued(&self) -> i64 {
         sqlx::query_scalar::<_, i64>(
             "select count(*) from knobas.write_queue where op = 'create_page'",
+        )
+        .fetch_one(self.pool())
+        .await
+        .expect("the count reads")
+    }
+
+    async fn updates_queued(&self) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from knobas.write_queue where op = 'update_page'",
         )
         .fetch_one(self.pool())
         .await
@@ -788,6 +808,179 @@ async fn a_publication_still_waiting_is_not_published_again() {
         harness.create_pages_queued().await,
         1,
         "a write the queue still owes is a publication, not a gap"
+    );
+}
+
+// -- publishing again (F-327) ------------------------------------------------
+
+/// *Publish again* in full: the read says the note moved on, the press sends
+/// the whole page onto the same page and no second page, the read then says it
+/// has not moved on, and a later press counts from the version the first wrote.
+#[tokio::test(flavor = "multi_thread")]
+async fn publishing_again_updates_the_one_page() {
+    let harness = Harness::new("protocol_again").await;
+    let opened = harness.open().await;
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- first\n")
+        .await;
+    harness.publish(Some(target())).await.expect("it publishes");
+    assert!(
+        !harness.open().await.changed_since,
+        "the page holds the note"
+    );
+
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- second\n")
+        .await;
+    assert!(
+        harness.open().await.changed_since,
+        "read from the queue, so it survives leaving the tab and coming back"
+    );
+
+    let again = publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it publishes again");
+    assert!(!again.changed_since, "the page holds the note again");
+    assert!(again.again.is_none(), "and a sent write is nothing to draw");
+    assert_eq!(
+        harness.log().updates,
+        [(
+            created_page_id(),
+            1,
+            "<h2>Notes</h2><ul><li>second</li></ul>".to_owned()
+        )],
+        "the whole page, against the version the create made"
+    );
+    assert_eq!(harness.create_pages_queued().await, 1, "one page, still");
+
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- third\n")
+        .await;
+    publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it publishes again");
+    assert_eq!(
+        harness.log().updates.last().map(|update| update.1),
+        Some(2),
+        "the version the last update wrote, though the mirror has not moved"
+    );
+}
+
+/// With nothing new it queues nothing, and a press beside a write still
+/// waiting is that write: two presses are one update.
+#[tokio::test(flavor = "multi_thread")]
+async fn publishing_again_twice_queues_one_update() {
+    let harness = Harness::new("protocol_again_twice").await;
+    let opened = harness.open().await;
+    harness.publish(Some(target())).await.expect("it publishes");
+
+    publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it answers");
+    assert_eq!(harness.updates_queued().await, 0, "nothing changed");
+
+    harness.log().offline = true;
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- second\n")
+        .await;
+    let first = publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it queues");
+    assert_eq!(
+        first.again.expect("on its way").state,
+        WriteState::Pending,
+        "the wiki is down, so the write waits, and the read draws it"
+    );
+    publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it answers");
+    assert_eq!(
+        harness.updates_queued().await,
+        1,
+        "one write, however many presses"
+    );
+}
+
+/// A page edited at the source since: the read says so, and the press refuses
+/// rather than replacing somebody's words.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_edited_at_the_source_is_not_replaced() {
+    let harness = Harness::new("protocol_again_moved").await;
+    let opened = harness.open().await;
+    harness.publish(Some(target())).await.expect("it publishes");
+
+    let mut edited = page_item(CREATED_KEY, "2026-09-03", "");
+    edited.payload["version"] = serde_json::json!({ "number": 2 });
+    harness.mirror(edited);
+    harness.sync(WIKI).await;
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- second\n")
+        .await;
+
+    assert!(
+        harness.open().await.page_moved,
+        "the mirror has passed what knobas wrote"
+    );
+    let refused = publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect_err("it refuses");
+    assert!(refused.message.contains("edited"), "{}", refused.message);
+    assert_eq!(
+        harness.updates_queued().await,
+        0,
+        "and nothing reached the queue"
+    );
+}
+
+/// A refused update left the page as it was: the read draws the refusal, the
+/// note still reads as changed, and a press may try again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_update_can_be_tried_again() {
+    let harness = Harness::new("protocol_again_refused").await;
+    let opened = harness.open().await;
+    harness.publish(Some(target())).await.expect("it publishes");
+    harness
+        .save_note(&opened.note_id, "## Notes\n\n- second\n")
+        .await;
+    publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it publishes again");
+    sqlx::query(
+        "update knobas.write_queue
+            set state = 'refused', detail = 'no', settled_at = null, remote_id = null
+          where op = 'update_page'",
+    )
+    .execute(harness.pool())
+    .await
+    .expect("the refusal is recorded");
+
+    let read = harness.open().await;
+    assert!(read.changed_since, "the page never took it");
+    let again = read.again.expect("the refusal is drawn");
+    assert_eq!(again.state, WriteState::Refused);
+    assert_eq!(again.detail.as_deref(), Some("no"));
+
+    publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect("it goes again");
+    assert_eq!(harness.updates_queued().await, 2);
+}
+
+/// The first publish still waiting has no page to update, so the press refuses.
+#[tokio::test(flavor = "multi_thread")]
+async fn publishing_again_before_the_first_landed_refuses() {
+    let harness = Harness::new("protocol_again_early").await;
+    harness.log().offline = true;
+    harness.open().await;
+    harness.publish(Some(target())).await.expect("it queues");
+
+    let refused = publish_standup_protocol_again_inner(&harness.state, day())
+        .await
+        .expect_err("it refuses");
+    assert!(
+        refused.message.contains("not landed"),
+        "{}",
+        refused.message
     );
 }
 

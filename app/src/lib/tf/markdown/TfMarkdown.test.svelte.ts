@@ -6,14 +6,17 @@
  * (headless Chrome witnesses it again against the dev server).
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DiagramRequest, HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import { warmDiagrams } from "../../render/diagram";
+import { diagramKey, forgetDiagramSizes, keepDiagramSize } from "../../render/diagram-sizes";
+import type { DiagramAnswer, DiagramRequest, HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { register } from "../../render/registry";
 import { registerFence } from "../../render/markdown";
 import { installCommands } from "../../render/command";
 import type { RenderContent } from "../../ipc/app";
 import TfMarkdown from "./TfMarkdown.svelte";
+import { IMAGE_HOLD_MS, blankImage, forgetImageSizes, keptImageSize, reloadImageSizes } from "./image-sizes";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
@@ -21,6 +24,7 @@ let view: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  forgetDiagramSizes();
 });
 
 afterEach(() => {
@@ -570,4 +574,462 @@ test("where the port has no diagram engine the fence stays its source", async ()
   await settle();
   expect(md().querySelector(".tf-fence pre code")?.textContent).toBe("flowchart LR\n  a --> b");
   expect(md().querySelector("iframe")).toBeNull();
+});
+
+/** A diagram engine whose drawings land when the test says, in the order asked. */
+function heldDiagrams() {
+  const waiting: ((answer: DiagramAnswer) => void)[] = [];
+  const port: RenderPort = { ...keywordPort(), diagram: () => new Promise((resolve) => waiting.push(resolve)) };
+  const land = async (w: number, h: number) => {
+    waiting.shift()!({ svg: `<svg viewBox="0 0 ${w} ${h}"><text>drawn</text></svg>` });
+    await settle();
+  };
+  return {
+    port,
+    land,
+    /** The app's warm-up, run through: the engine has answered in this session. */
+    async warm() {
+      warmDiagrams(port, (go) => go());
+      await land(10, 10);
+      await land(10, 10);
+    },
+  };
+}
+
+/** Every fence's body laid out in view, 125 px high from 100 px down, and each paragraph under it, as jsdom lays nothing out. */
+function fencesInView() {
+  const at = (top: number, height: number) => ({ x: 0, y: top, top, left: 0, width: 900, height, right: 900, bottom: top + height, toJSON: () => ({}) }) as DOMRect;
+  return vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains("tf-fence-body")) return at(100, 125);
+    return this.tagName === "P" && this.previousElementSibling?.classList.contains("tf-fence") ? at(260, 24) : at(0, 0);
+  });
+}
+
+const DIAGRAM_README = "Intro\n\n```mermaid\nflowchart TB\n  a --> b\n```\n\nUnder it.";
+const heldBlocks = () => [...md().children].map((el) => el.classList.contains("tf-heldbelow"));
+const diagramFrame = () => md().querySelector<HTMLIFrameElement>(".tf-fence .tf-diagram iframe");
+
+test("a diagram never seen, its engine warm, holds what stands from it down unseen until its drawing is in (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  const told: boolean[] = [];
+  const laid = fencesInView();
+  try {
+    draw(DIAGRAM_README, { render: engine.port, onheld: (held: boolean) => told.push(held) });
+    await settle();
+    expect(heldBlocks(), "the intro reads at once; the diagram's fence and what stands under it wait").toEqual([false, true, true]);
+    expect(md().hasAttribute("data-md-sizing")).toBe(true);
+    expect(told).toEqual([true]);
+    await engine.land(200, 226);
+    expect(heldBlocks()).toEqual([false, false, false]);
+    expect(told).toEqual([true, false]);
+    // It landed with nothing drawn under it: its own size, in a room of its own.
+    expect([diagramFrame()!.width, diagramFrame()!.height]).toEqual(["200", "226"]);
+    expect(md().querySelector<HTMLElement>(".tf-fence-body")!.style.height).toBe("");
+    expect(md().querySelector(".tf-dfull")).toBeNull();
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("the hold for a diagram ends after IMAGE_HOLD_MS, and the drawing that lands later keeps its source's room (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  const laid = fencesInView();
+  try {
+    draw(DIAGRAM_README, { render: engine.port });
+    await settle();
+    expect(heldBlocks()).toEqual([false, true, true]);
+    await new Promise((resolve) => setTimeout(resolve, IMAGE_HOLD_MS + 20));
+    expect(heldBlocks(), "the page under the diagram is drawn, with the diagram's source").toEqual([false, false, false]);
+    expect(md().querySelector(".tf-fence pre code")?.textContent).toBe("flowchart TB\n  a --> b");
+    await engine.land(200, 226);
+    const body = md().querySelector<HTMLElement>(".tf-fence-body")!;
+    expect(body.style.height, "the room the source had").toBe("125px");
+    expect([diagramFrame()!.width, diagramFrame()!.height], "whole, scaled to it").toEqual(["100", "113"]);
+    const full = md().querySelector<HTMLButtonElement>(".tf-fence > header .tf-dfull")!;
+    expect(text(full)).toBe("Show at full size");
+    full.click();
+    expect([diagramFrame()!.width, diagramFrame()!.height, body.style.height]).toEqual(["200", "226", ""]);
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("a text drawn again keeps the room its late diagram was fitted into, and one shown at full size stays so (#2510)", async () => {
+  const engine = heldDiagrams();
+  const laid = fencesInView();
+  const two = "```mermaid\nflowchart TB\n  a --> b\n```\n\nBetween.\n\n```mermaid\nflowchart TB\n  c --> d\n```\n\nUnder it.";
+  const props = $state({ text: two, base: "", fileLink: null, render: engine.port });
+  try {
+    view = mount(TfMarkdown, { target, props });
+    flushSync();
+    await settle();
+    await engine.land(200, 226);
+    await engine.land(200, 226);
+    const bodies = () => [...md().querySelectorAll<HTMLElement>(".tf-fence-body")];
+    const frames = () => bodies().map((body) => { const frame = body.querySelector("iframe")!; return [frame.width, frame.height, body.style.height]; });
+    expect(frames()).toEqual([["100", "113", "125px"], ["100", "113", "125px"]]);
+    // The reader shows the first at full size; the second stays fitted.
+    md().querySelectorAll<HTMLButtonElement>(".tf-dfull")[0]!.click();
+    expect(frames()).toEqual([["200", "226", ""], ["100", "113", "125px"]]);
+    const before = bodies();
+    // Its read answers again: the same text, drawn again.
+    props.base = "docs";
+    flushSync();
+    expect(bodies()[0]).not.toBe(before[0]);
+    expect(frames(), "each stands as it stood, in the task the text is drawn in").toEqual([["200", "226", ""], ["100", "113", "125px"]]);
+    expect(md().querySelectorAll(".tf-dfull")).toHaveLength(1);
+  } finally {
+    laid.mockRestore();
+  }
+});
+
+test("a diagram whose engine is cold holds nothing: its drawing could not land inside the hold (#2510)", async () => {
+  const engine = heldDiagrams();
+  const told: boolean[] = [];
+  draw(DIAGRAM_README, { render: engine.port, onheld: (held: boolean) => told.push(held) });
+  await settle();
+  expect(heldBlocks()).toEqual([false, false, false]);
+  expect(told).toEqual([]);
+});
+
+test("a diagram seen before holds nothing and stands at the size it drew at from the first frame (#2510)", async () => {
+  const engine = heldDiagrams();
+  await engine.warm();
+  keepDiagramSize(diagramKey("mermaid", "flowchart TB\n  a --> b", ""), { w: 200, h: 226 });
+  draw(DIAGRAM_README, { render: engine.port });
+  expect(heldBlocks()).toEqual([false, false, false]);
+  expect([diagramFrame()!.width, diagramFrame()!.height, diagramFrame()!.hasAttribute("srcdoc")]).toEqual(["200", "226", false]);
+  await engine.land(200, 226);
+  expect(diagramFrame()!.srcdoc).toContain("<img");
+});
+
+test("Copy on a fence whose diagram is drawn copies the diagram's source", async () => {
+  const copied: string[] = [];
+  draw(MERMAID_MD, { render: diagramPort(), copy: async (code: string) => void copied.push(code) });
+  await settle();
+  expect(md().querySelector(".tf-fence pre")).toBeNull();
+  md().querySelector<HTMLButtonElement>(".tf-fence-copy")!.click();
+  await settle();
+  expect(copied).toEqual(["flowchart LR\n  a --> b"]);
+});
+
+/** A long text: `parts` sections of a heading, a paragraph of about 1,000 characters and a fence each. */
+function long(parts: number): string {
+  const words = "rollback weekly trace region dashboard retries window payout index primary ".repeat(13);
+  return Array.from({ length: parts }, (_, i) => `## Part ${i}\n\n${words}\n\n\`\`\`ts\nconst part${i} = ${i};\n\`\`\``).join("\n\n");
+}
+
+/** An intersection observer that finds every mark near the view, as a reader scrolled to it does. */
+class NearObserver {
+  constructor(private readonly said: (entries: { isIntersecting: boolean }[]) => void) {}
+  observe() {
+    queueMicrotask(() => this.said([{ isIntersecting: true }]));
+  }
+  disconnect() {}
+}
+
+test("a long text draws its first blocks, the rest a piece a task as its end nears the view, and its fences as each piece lands", async () => {
+  const asked: HighlightRequest[] = [];
+  const was = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = NearObserver as unknown as typeof IntersectionObserver;
+  try {
+    draw(long(120), { render: keywordPort(asked) });
+  } finally {
+    globalThis.IntersectionObserver = was;
+  }
+  const first = md().querySelectorAll("h2").length;
+  expect(first).toBeGreaterThan(0);
+  expect(first).toBeLessThan(120);
+  expect(md().hasAttribute("data-md-held")).toBe(true);
+  expect(md().lastElementChild?.classList.contains("tf-md-more")).toBe(true);
+  expect(asked.length).toBe(md().querySelectorAll(".tf-fence").length);
+  expect(asked.length).toBeLessThan(120);
+  for (let round = 0; round < 40 && md().hasAttribute("data-md-held"); round += 1) await settle();
+  expect(md().querySelectorAll("h2").length).toBe(120);
+  expect(md().querySelector(".tf-md-more")).toBeNull();
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+  expect(asked.map((request) => request.text)).toEqual(Array.from({ length: 120 }, (_, i) => `const part${i} = ${i};`));
+  expect(md().querySelectorAll(".tf-hl-kw").length).toBe(120);
+});
+
+test("a long text drawn again gives a fence of a later piece its kept room, counted across the pieces (#2510)", async () => {
+  const was = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = NearObserver as unknown as typeof IntersectionObserver;
+  try {
+    const props = $state({ text: long(40), base: "", fileLink: null, render: keywordPort() });
+    view = mount(TfMarkdown, { target, props });
+    flushSync();
+    const whole = async () => {
+      for (let round = 0; round < 40 && md().hasAttribute("data-md-held"); round += 1) await settle();
+      return [...md().querySelectorAll<HTMLElement>(".tf-fence-body")];
+    };
+    const bodies = await whole();
+    expect(bodies).toHaveLength(40);
+    // The last fence, in the text's last piece, stands in a kept room.
+    bodies[39]!.style.height = "125px";
+    bodies[39]!.classList.add("tf-roomkept");
+    props.base = "docs";
+    flushSync();
+    expect(md().querySelectorAll(".tf-fence").length, "its first piece only").toBeLessThan(40);
+    const again = await whole();
+    expect(again[39]).not.toBe(bodies[39]);
+    expect(again.map((body) => (body.classList.contains("tf-roomkept") ? body.style.height : "")).filter((height) => height !== "")).toEqual(["125px"]);
+    expect(again[39]!.style.height).toBe("125px");
+  } finally {
+    globalThis.IntersectionObserver = was;
+  }
+});
+
+test("a short text draws whole at once, and an anchor in a long one draws the rest before it scrolls", () => {
+  draw("## One\n\nshort");
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+  expect(md().querySelector(".tf-md-more")).toBeNull();
+  unmount(view!);
+  view = null;
+  draw(`[to the end](#part-119)\n\n${long(120)}`);
+  expect(md().querySelector("#user-content-part-119")).toBeNull();
+  let scrolled: Element | null = null;
+  const proto = Element.prototype as Element & { scrollIntoView: (arg?: unknown) => void };
+  const was = proto.scrollIntoView;
+  proto.scrollIntoView = function (this: Element) {
+    scrolled = this;
+  };
+  try {
+    md().querySelector("a")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  } finally {
+    proto.scrollIntoView = was;
+  }
+  expect(scrolled).toBe(md().querySelector("#user-content-part-119"));
+  expect(md().hasAttribute("data-md-held")).toBe(false);
+});
+
+// The nothing-moves pass (2026-11-17): a README read again after a sync drew its badge from nothing, and its bytes
+// landing pushed the text under it 15 px down.
+test("an image drawn again holds the size it loaded at before, while its bytes are read", async () => {
+  forgetImageSizes();
+  const pending = () => new Promise<Uint8Array>(() => {});
+  draw("![badge](badge.png)\n\nUnder it.", { image: pending });
+  await settle();
+  const first = target.querySelector<HTMLImageElement>("img")!;
+  expect(first.hasAttribute("width"), "never seen: no size to hold").toBe(false);
+  Object.defineProperty(first, "naturalWidth", { value: 96 });
+  Object.defineProperty(first, "naturalHeight", { value: 32 });
+  first.dispatchEvent(new Event("load"));
+  unmount(view!);
+  view = null;
+  draw("![badge](badge.png)\n\nUnder it.", { image: pending });
+  await settle();
+  const again = target.querySelector<HTMLImageElement>("img")!;
+  expect([again.getAttribute("width"), again.getAttribute("height")]).toEqual(["96", "32"]);
+});
+
+// The ux21 README-image pass (2026-11-19): a README's logo, never seen in the session, pushed the text under it 15 px
+// down when its bytes loaded. Its size is now read from the head of its bytes before its `src`, what stands from it down
+// waits unseen until then, and the size is kept between sessions.
+
+/** A PNG's head of `w` by `h`: all a size needs. */
+function pngOf(w: number, h: number): Uint8Array {
+  const b = new Uint8Array(33);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  return b;
+}
+
+/** A byte read whose answers the test hands out: `answer(path, bytes)` or `refuse(path)`. */
+function heldRead() {
+  const waiting = new Map<string, { resolve: (b: Uint8Array) => void; reject: (e: unknown) => void }>();
+  return {
+    read: (path: string) => new Promise<Uint8Array>((resolve, reject) => void waiting.set(path, { resolve, reject })),
+    answer: (path: string, bytes: Uint8Array) => waiting.get(path)!.resolve(bytes),
+    refuse: (path: string) => waiting.get(path)!.reject(new Error("gone")),
+  };
+}
+
+const unseen = (el: Element | null) => el?.classList.contains("tf-heldbelow") ?? false;
+const LOGO_README = "# payout-service\n\nIntro.\n\n![logo](img/logo.png)\n\nUnder it.\n\n## Next";
+
+test("an image never seen holds what stands from it down unseen until its bytes say its size, set before its src", async () => {
+  forgetImageSizes();
+  const urls = blobUrls();
+  const told: boolean[] = [];
+  try {
+    const bytes = heldRead();
+    draw(LOGO_README, { image: bytes.read, imagesOf: "repo-a", onheld: (held: boolean) => told.push(held) });
+    await settle();
+    const blocks = [...md().children];
+    const img = md().querySelector("img")!;
+    expect(blocks.map(unseen), "the heading and intro read at once; the image's paragraph and all under it wait").toEqual([false, false, true, true, true]);
+    expect(md().hasAttribute("data-md-sizing")).toBe(true);
+    expect(told).toEqual([true]);
+    let sizedAtSrc: string[] = [];
+    const set = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src")!.set!;
+    Object.defineProperty(img, "src", { set(url: string) { sizedAtSrc = [img.getAttribute("width")!, img.getAttribute("height")!]; set.call(img, url); }, configurable: true });
+    bytes.answer("docs/img/logo.png", pngOf(96, 32));
+    await settle();
+    expect(sizedAtSrc, "the room is set before the image loads").toEqual(["96", "32"]);
+    expect(img.getAttribute("src")).toBe("blob:test/0");
+    expect([...md().children].some(unseen), "nothing waits once the size is in").toBe(false);
+    expect(md().hasAttribute("data-md-sizing")).toBe(false);
+    expect(told).toEqual([true, false]);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("a hold for an image's size ends after IMAGE_HOLD_MS when the bytes are slower, and when the read is refused", async () => {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw("![slow](slow.png)\n\nUnder it.\n\n![gone](gone.png)", { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  expect(unseen(md().children[0]!)).toBe(true);
+  bytes.refuse("docs/gone.png");
+  await settle();
+  expect(unseen(md().children[0]!), "the first still waits").toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, IMAGE_HOLD_MS + 20));
+  expect([...md().children].some(unseen)).toBe(false);
+});
+
+test("an image whose text names its size keeps it and holds nothing; one that names one side gets the other from its shape", async () => {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw('<img src="both.png" width="50" height="20">\n\n<img src="one.png" width="48">\n\nUnder.', { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  const [both, one] = [...md().querySelectorAll("img")];
+  expect(unseen(both!.closest(".tf-md > *")), "both sides named: nothing to wait for").toBe(false);
+  expect(unseen(one!.closest(".tf-md > *")), "one side named: the other waits for the bytes").toBe(true);
+  bytes.answer("docs/both.png", pngOf(500, 500));
+  bytes.answer("docs/one.png", pngOf(96, 32));
+  await settle();
+  expect([both!.getAttribute("width"), both!.getAttribute("height")]).toEqual(["50", "20"]);
+  expect([one!.getAttribute("width"), one!.getAttribute("height")]).toEqual(["48", "16"]);
+});
+
+test("an image's size is kept between sessions, for its repository alone", async () => {
+  // This runner's jsdom has no storage (`test-no-storage.ts`): one of the test's own, as the webview's.
+  const items = new Map<string, string>();
+  const storage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v), removeItem: (k: string) => void items.delete(k) };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
+  try {
+    await keptBetweenSessions(items);
+  } finally {
+    Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
+  }
+});
+
+async function keptBetweenSessions(items: Map<string, string>) {
+  forgetImageSizes();
+  const bytes = heldRead();
+  draw(LOGO_README, { image: bytes.read, imagesOf: "repo-a" });
+  await settle();
+  bytes.answer("docs/img/logo.png", pngOf(96, 32));
+  await settle();
+  unmount(view!);
+  view = null;
+  // Written a moment after, once for a burst of images.
+  for (let waited = 0; !items.has("knobas.image-sizes") && waited < 3000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+  reloadImageSizes();
+  expect(JSON.parse(items.get("knobas.image-sizes")!), "written to the store").toEqual([["repo-a|docs/img/logo.png", 96, 32]]);
+  expect(keptImageSize("repo-a|docs/img/logo.png"), "read back from the store").toEqual({ w: 96, h: 32 });
+  draw(LOGO_README, { image: heldRead().read, imagesOf: "repo-a" });
+  flushSync();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "drawn at its size from the first frame").toEqual(["96", "32"]);
+  expect([...md().children].some(unseen), "and nothing waits").toBe(false);
+  unmount(view!);
+  view = null;
+  draw(LOGO_README, { image: heldRead().read, imagesOf: "repo-b" });
+  flushSync();
+  expect(md().querySelector("img")!.hasAttribute("width"), "another repository's logo at the same path is another image").toBe(false);
+}
+
+test("a kept size the bytes contradict is set right before the image loads", async () => {
+  forgetImageSizes();
+  const first = heldRead();
+  draw("![logo](logo.png)", { image: first.read, imagesOf: "repo-a" });
+  await settle();
+  first.answer("docs/logo.png", pngOf(96, 32));
+  await settle();
+  unmount(view!);
+  view = null;
+  const again = heldRead();
+  draw("![logo](logo.png)", { image: again.read, imagesOf: "repo-a" });
+  await settle();
+  again.answer("docs/logo.png", pngOf(200, 50));
+  await settle();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["200", "50"]);
+  expect(keptImageSize("repo-a|docs/logo.png")).toEqual({ w: 200, h: 50 });
+});
+
+test("an image the text carries whole has its size from the first frame, with nothing held", () => {
+  forgetImageSizes();
+  draw(`![dot](${DOT})\n\nUnder it.`);
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["1", "1"]);
+  expect([...md().children].some(unseen)).toBe(false);
+});
+
+test("an attachment image is sized from its data URL before its src, no taller than the figure draws it", async () => {
+  forgetImageSizes();
+  const tall = `data:image/png;base64,${btoa(String.fromCharCode(...pngOf(400, 800)))}`;
+  let answer: (url: string) => void = () => {};
+  const read = { ...attachmentRead({}), load: () => new Promise<string>((resolve) => (answer = resolve)) };
+  draw("![trace.png](attachment:50000)\n\nUnder it.", { attachments: read, imagesOf: "ticket-1" });
+  await settle();
+  expect([...md().children].map(unseen)).toEqual([true, true]);
+  answer(tall);
+  await settle();
+  const img = md().querySelector("img")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "fitted to the 280 px figure, its shape kept").toEqual(["140", "280"]);
+  expect(img.getAttribute("src")).toBe(tall);
+  expect([...md().children].some(unseen)).toBe(false);
+  expect(keptImageSize("ticket-1|attachment|50000")).toEqual({ w: 400, h: 800 });
+});
+
+test("an image whose room is known before its bytes stands as a blank of that size, not as its alt text, until they are in", async () => {
+  forgetImageSizes();
+  const urls = blobUrls();
+  try {
+    const first = heldRead();
+    draw("![logo](logo.png)", { image: first.read, imagesOf: "repo-a" });
+    await settle();
+    expect(md().querySelector("img")!.hasAttribute("src"), "never seen: no size, so no stand-in").toBe(false);
+    first.answer("docs/logo.png", pngOf(96, 32));
+    await settle();
+    unmount(view!);
+    view = null;
+    const again = heldRead();
+    draw('![logo](logo.png)\n\n<img src="own.png" width="20" height="10" alt="own">', { image: again.read, imagesOf: "repo-a" });
+    flushSync();
+    const [logo, own] = [...md().querySelectorAll("img")];
+    expect(logo!.getAttribute("src"), "the kept size").toBe(blankImage("96", "32"));
+    expect(own!.getAttribute("src"), "the sides its text names").toBe(blankImage("20", "10"));
+    // The stand-in's load says nothing of the image: nothing kept from it.
+    Object.defineProperty(logo!, "naturalWidth", { value: 1, configurable: true });
+    Object.defineProperty(logo!, "naturalHeight", { value: 1, configurable: true });
+    logo!.dispatchEvent(new Event("load"));
+    expect(keptImageSize("repo-a|docs/logo.png")).toEqual({ w: 96, h: 32 });
+    again.answer("docs/logo.png", pngOf(96, 32));
+    again.answer("docs/own.png", pngOf(500, 500));
+    await settle();
+    expect([logo!.getAttribute("src"), own!.getAttribute("src")]).toEqual(["blob:test/1", "blob:test/2"]);
+    expect(logo!.hasAttribute("data-md-standin")).toBe(false);
+  } finally {
+    urls.restore();
+  }
+});
+
+test("a blank stand-in is an SVG an <img> loads: its namespace on its root, its sides as given", () => {
+  const url = blankImage("96", "32");
+  expect(url.startsWith("data:image/svg+xml,")).toBe(true);
+  const svg = new DOMParser().parseFromString(decodeURIComponent(url.slice("data:image/svg+xml,".length)), "image/svg+xml").documentElement;
+  // The SVG namespace, as the HTML parser gives an <svg>: without it the webview loads nothing and draws the alt text.
+  const parsed = document.createElement("div");
+  parsed.innerHTML = "<svg></svg>";
+  expect(svg.localName).toBe("svg");
+  expect(svg.namespaceURI).toBe(parsed.firstElementChild!.namespaceURI);
+  expect([svg.getAttribute("width"), svg.getAttribute("height")]).toEqual(["96", "32"]);
 });

@@ -107,11 +107,20 @@ pub async fn standup_protocol_inner(
     // With none stored nothing has been published from here, which is what
     // `None` says: `publish` refuses before it queues anything when the target
     // is missing, so there is no publication for a read to have missed.
+    let mut standing = crate::protocol::Standing::default();
     let publication = match crate::protocol::publish_target(pool).await? {
         None => None,
         Some(target) => {
             match crate::protocol::publication_of(pool, day, &target.source_id).await? {
                 Some(publication) => {
+                    standing = crate::protocol::standing(
+                        pool,
+                        day,
+                        &target.source_id,
+                        publication.page_entity_id.as_deref(),
+                        &note.body_md,
+                    )
+                    .await?;
                     Some(crate::protocol::reconcile(pool, &note.id, publication).await?)
                 }
                 None => None,
@@ -125,6 +134,9 @@ pub async fn standup_protocol_inner(
         page_title: crate::protocol::page_title_of(day),
         publication,
         owed_tickets,
+        changed_since: standing.changed_since,
+        page_moved: standing.page_moved,
+        again: standing.again,
     })
 }
 
@@ -182,7 +194,8 @@ pub async fn standup_protocol(
 /// `crate::protocol`'s ruling: the publication already on the queue is
 /// answered with, so *Publish* pressed twice is one page. The one case that
 /// composes a fresh op is a previous write that was refused or discarded,
-/// where nothing landed.
+/// where nothing landed. A page already there takes what changed through
+/// [`publish_standup_protocol_again`].
 ///
 /// The write goes through `sources::write_queue::submit` like every other, so
 /// it queues when Confluence is down and it shows in the pending-writes panel.
@@ -321,6 +334,119 @@ pub async fn publish_standup_protocol<R: tauri::Runtime>(
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let state = crate::sources::state(&app)?;
     publish_standup_protocol_in_background(&state, day, target).await
+}
+
+/// Send what the note says now to the date's page (F-327, Björn's approval of
+/// 2026-11-06): an `UpdatePage` of the whole page, against the version knobas
+/// last wrote (see `crate::protocol`'s header).
+///
+/// [`protocol::Standing`](crate::protocol::Standing) decides. A note with
+/// nothing new, or a *Publish again* still pending or held, queues nothing and
+/// answers the protocol as it stands, so a second press is one write.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) with no stored
+/// target, before the first publish has landed, or when the page was edited at
+/// the source since; otherwise whatever the write queue refuses with.
+pub async fn publish_standup_protocol_again_inner(
+    state: &crate::sources::SourcesState,
+    day: chrono::NaiveDate,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let pool = &state.pool;
+    let target = target_for(pool, None).await?;
+    if let Some(payload) = page_to_update(pool, day, &target).await? {
+        crate::sources::write_queue::submit(state, payload).await?;
+        crate::sources::write_queue::sync_after_write(state, &target.source_id).await;
+    }
+    standup_protocol_inner(pool, day).await
+}
+
+/// [`publish_standup_protocol_again_inner`], **answering once the write is
+/// queued** (#779): what the `publish_standup_protocol_again` command does.
+///
+/// # Errors
+///
+/// As [`publish_standup_protocol_again_inner`], all of them before anything is
+/// sent.
+pub async fn publish_standup_protocol_again_in_background(
+    state: &crate::sources::SourcesState,
+    day: chrono::NaiveDate,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let pool = &state.pool;
+    let target = target_for(pool, None).await?;
+    if let Some(payload) = page_to_update(pool, day, &target).await? {
+        let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+        crate::sources::write_queue::send_in_background_then(
+            state,
+            source_id,
+            queued.id,
+            target.source_id.clone(),
+            |_| async {},
+        );
+    }
+    standup_protocol_inner(pool, day).await
+}
+
+/// The `UpdatePage` a *Publish again* owes, or `None` when nothing is owed yet.
+async fn page_to_update(
+    pool: &PgPool,
+    day: chrono::NaiveDate,
+    target: &crate::protocol::PublishTarget,
+) -> Result<Option<serde_json::Value>, IpcError> {
+    let note = crate::protocol::get_or_create(pool, day).await?;
+    let page = crate::protocol::publication_of(pool, day, &target.source_id)
+        .await?
+        .and_then(|publication| publication.page_entity_id);
+    let Some(page) = page else {
+        return Err(IpcError::invalid(
+            "The first publish has not landed yet, so there is no page to update.",
+        ));
+    };
+    let standing =
+        crate::protocol::standing(pool, day, &target.source_id, Some(&page), &note.body_md).await?;
+    if standing.page_moved {
+        return Err(IpcError::invalid(
+            "The page was edited in the source since knobas published it, and publishing again \
+             would replace that edit. Open the page and copy your change across.",
+        ));
+    }
+    let going = standing.again.as_ref().is_some_and(|again| {
+        matches!(
+            again.state,
+            knobas_core::write_queue::WriteState::Pending
+                | knobas_core::write_queue::WriteState::Held
+        )
+    });
+    if going || !standing.changed_since {
+        return Ok(None);
+    }
+    let Some(base) = standing.base_version else {
+        return Err(IpcError::invalid(
+            "The first publish has not landed yet, so there is no page to update.",
+        ));
+    };
+    Ok(Some(crate::protocol::update_page_payload(
+        &page,
+        base,
+        &note.body_md,
+    )))
+}
+
+/// [`publish_standup_protocol_again_in_background`] behind the app handle:
+/// answers once the write is queued (#779).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
+/// otherwise as [`publish_standup_protocol_again_inner`].
+#[tauri::command]
+pub async fn publish_standup_protocol_again<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    day: chrono::NaiveDate,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let state = crate::sources::state(&app)?;
+    publish_standup_protocol_again_in_background(&state, day).await
 }
 
 /// Where standup protocols are published, or `null` until somebody has said

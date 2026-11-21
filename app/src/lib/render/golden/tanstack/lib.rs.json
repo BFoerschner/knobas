@@ -1,0 +1,21 @@
+[
+  ["com://! The app's commands."],
+  ["kw:use",": std","op:::",":collections","op:::","ty:HashMap",":;"],
+  [],
+  ["attr:#[derive",":(","ty:Debug",":, ","ty:Clone",":)]"],
+  ["kw:pub",": ","kw:struct",": ","ty:Batch","op:<","attr:'a","op:>",": {"],
+  [":    ","kw:pub",": id: ","op:&","attr:'a",": ","ty:str",":,"],
+  [":    tries: ","ty:u32",":,"],
+  [":}"],
+  [],
+  ["kw:impl","op:<","attr:'a","op:>",": ","ty:Batch","op:<","attr:'a","op:>",": {"],
+  [":    ","kw:pub",": ","kw:fn",": ","fn:settle",":(","op:&","kw:mut",": ","kw:self",":) ","op:->",": ","ty:Result","op:<","ty:String",":, ","ty:String","op:>",": {"],
+  [":        ","kw:let",": ","kw:mut",": seen: ","ty:HashMap","op:<&","ty:str",":, ","ty:u32","op:>",": ","op:=",": ","ty:HashMap","op:::","fn:new",":();"],
+  [":        ","kw:self",":.","prop:tries",": ","op:+=",": ","num:1",":;"],
+  [":        ","kw:if",": ","kw:self",":.","prop:tries",": ","op:>",": ","num:3",": { ","kw:return",": ","ty:Err",":(","fn:format!",":(","str:\"parked {}\"",":, ","kw:self",":.","prop:id",":)); }"],
+  [":        seen.","fn:insert",":(","kw:self",":.","prop:id",":, ","kw:self",":.","prop:tries",":);"],
+  [":        ","ty:Ok",":(","ty:String","op:::","fn:from",":(","str:\"sent\\n\"",":))"],
+  [":    }"],
+  [":}"],
+  []
+]

@@ -60,7 +60,7 @@ function record(at: Date, bytes: number): BackupRecord {
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
 const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
-  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "warn"], ["maintenance", "muted"]]],
+  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "info"], ["maintenance", "muted"]]],
   ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
   ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
 ];
@@ -91,6 +91,59 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
   });
 }
 
+/** `?fake-long-paths`' renderers: long names, and programs deep under folders with spaces, quoted as a person writes them. */
+export const LONG_RENDERERS: UserRenderer[] = [
+  {
+    id: "orchestra",
+    name: "Orchestra score renderer for the payments team's sequence diagrams",
+    command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" --format svg --width 1600 --height 900 --theme "payments team dark" --font "C:\Windows\Fonts\Cascadia Code.ttf"`,
+    // Ten patterns and five fences (the renderers-columns pass, 2026-11-20): Settings › Renderers holds each list to one line.
+    patterns: ["*.rs", "*.orchestra", "*.orc", "*.orc.json", "*.score.yaml", "docs/sequence/*.seq", "docs/architecture/payments team/*.puml", "*.mscgen", "*.msc", "flows/**/*.flow"],
+    fences: ["orchestra", "orchestra-score", "sequence-diagram", "payments-sequence", "msc"],
+    input: "text",
+    output: "svg",
+    timeout_secs: 10,
+    diff: false,
+  },
+  {
+    id: "orchestra-mac",
+    name: "Orchestra on the Mac",
+    command: `"/Users/someone with a long name/Library/Application Support/Orchestra Renderer/2026/bin/orchestra-render" --theme "/Users/someone with a long name/Library/Application Support/Orchestra Renderer/themes/a long theme name.json"`,
+    patterns: ["*.rs"],
+    fences: [],
+    input: "text",
+    output: "svg",
+    timeout_secs: 10,
+    diff: false,
+  },
+];
+
+const LONG_STEP: CommandStep = {
+  id: "orchestra-decode",
+  name: "Orchestra decode",
+  command: String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-decode.exe" --profile "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json"`,
+  timeout_secs: 10,
+};
+
+/**
+ * `?fake-long-paths`' defaults and pipeline (the renderers-columns pass, 2026-11-20): a pattern that is a deep path with
+ * spaces, through a pipeline with a long name and five steps, the default for eight patterns, none of them a file in the
+ * fixture, so no file opens differently.
+ */
+const LONG_PIPELINE: NamedPipeline = {
+  id: "orchestra-scores",
+  name: "Decode, unpack and prettify the payments team's orchestra scores",
+  steps: [{ step: "base64_decode" }, { step: "gunzip" }, { step: "command", id: "orchestra-decode" }, { step: "pretty", format: "json" }, { step: "command", id: "upper" }],
+};
+const LONG_DEFAULTS: RendererDefault[] = [
+  { pattern: "docs/architecture/sequence diagrams/payments team/**/*.orchestra.json", renderer: "command:orchestra", pipeline: "orchestra-scores" },
+  ...["*.orc.b64", "*.orc.gz", "*.score.b64", "scores/**/*.b64", "flows/**/*.orc.gz", "docs/scores/*.gz", "archive/2025/**/*.orc.b64"].map((pattern) => ({
+    pattern,
+    renderer: "",
+    pipeline: "orchestra-scores",
+  })),
+];
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
@@ -99,6 +152,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   if (params.has("fake-tone-override")) toneOverrides.set("ticket\u0000Blocked", "warn");
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
+  /** *Smooth scrolling on 120 Hz displays*: offered here as on the Mac, on until set. */
+  let smooth = true;
   let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
@@ -130,11 +185,17 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     { id: "cat", name: "Cat", command: "cat", patterns: ["*.cat.html"], fences: ["cat"], input: "text", output: "html", timeout_secs: 10, diff: false },
   ];
 
+  // `?fake-long-paths` (the render-as pass, 2026-11-19): two renderers of `*.rs` whose names and programs are long, one on
+  // Windows and one on a Mac, with spaces, so a layout check holds *Render as*, the file view and Settings › Renderers to
+  // their boxes. The fake runs neither, so each fails with its command line on stderr.
+  if (params.has("fake-long-paths")) renderers.push(...LONG_RENDERERS);
+
   // The default renderer per file pattern (#2263): none until one is made.
   let defaults: RendererDefault[] = [];
 
   // #2265: one command step, `tr a-z A-Z`, and no named pipeline until one is saved.
   let steps: CommandStep[] = [{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }];
+  if (params.has("fake-long-paths")) steps.push(LONG_STEP);
   let pipelines: NamedPipeline[] = [];
   // *Run pipelines on diffs* (#2270): on until set.
   let diffPipelinesOn = true;
@@ -142,6 +203,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   if (params.has("fake-diff-pipeline")) {
     pipelines = [{ id: "base64-json", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }];
     defaults = [{ pattern: "*.json.b64", renderer: "", pipeline: "base64-json" }];
+  }
+  if (params.has("fake-long-paths")) {
+    pipelines = [...pipelines, LONG_PIPELINE];
+    defaults = [...defaults, ...LONG_DEFAULTS];
   }
   const idOf = (name: string, i: number, kind: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `${kind}-${i + 1}`;
 
@@ -197,6 +262,21 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       keptOpen = Math.min(15, Math.max(0, Math.round(Number(args["count"]))));
       return keptOpen;
     },
+    smooth_scrolling: () => smooth,
+    // A machine's families: the monospace ones first, as the backend sorts them, among them an installed Cascadia Mono
+    // that is not the bundled one (2026-11-21: listed as "Cascadia Mono (installed)" with its version).
+    installed_fonts: () => [
+      { family: "Cascadia Mono", monospace: true, serif: false, narrows: false, x_height: 0.518, version: "2407.024" },
+      { family: "Fira Code", monospace: true, serif: false, narrows: false, x_height: 0.537, version: "6.002" },
+      { family: "Menlo", monospace: true, serif: false, narrows: false, x_height: 0.547, version: "6.0d1e1" },
+      { family: "Arial", monospace: false, serif: false, narrows: false, x_height: 0.519, version: null },
+      { family: "Georgia", monospace: false, serif: true, narrows: false, x_height: 0.481, version: null },
+      { family: "Skia", monospace: false, serif: false, narrows: true, x_height: 0.531, version: null },
+    ],
+    set_smooth_scrolling: (args) => {
+      smooth = args["on"] === true;
+      return smooth;
+    },
     passive_attribution: () => passive,
     set_passive_attribution: (args) => {
       passive = args["enabled"] === true;
@@ -218,8 +298,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     monitoring_settings: () => monitoring,
     set_monitoring_settings: (args) => {
       const next = args["settings"] as MonitoringSettings;
-      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 1)) {
-        throw { code: "invalid", message: "both numbers must be at least 1", source_id: null };
+      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 0)) {
+        throw { code: "invalid", message: "retention must be at least 1 day", source_id: null };
       }
       monitoring = next;
       return monitoring;

@@ -18,6 +18,7 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
+import { SCALE_HISTORY } from "../fake-scale";
 import type {
   ChainStepRow,
   JobPipeline,
@@ -37,6 +38,7 @@ import type {
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
+import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { dayKey } from "../../../time/day";
 
@@ -107,6 +109,13 @@ const CONFIGURATIONS: Record<string, string[]> = {
 
 /** prototype-6's `S.pins`: pinned until the session unpins them (#849). */
 const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"].map((c) => `${SOURCE}:buildType:${c}`));
+/** The runs marked read (ux18): none at load, as on a database before `0098`. */
+const readRuns = new Set<string>();
+
+/** Whether a fixture run is a finished failure, the only kind that can be unread. */
+function failedFake(run: RunRow): boolean {
+  return run.finished !== null && run.state?.tone === "err";
+}
 
 /**
  * prototype-6's `realCfg[...].job`: the configurations each job's pull
@@ -279,8 +288,23 @@ let built: { day: string; runs: Map<string, RunRow[]> } | null = null;
 /** How many times {@link history} has built a history: a test's witness that reads reuse it. */
 export let historyBuilds = 0;
 
+/**
+ * `?fake-hooks`' `runNew` (the still-rows trips, 2026-11-11): every configuration gets a run newer than its last, as a sync
+ * that saw builds finish brings them.
+ */
+export function addFakeRuns(now: Date = new Date()): void {
+  history(now);
+  if (built === null) return;
+  for (const [config, runs] of built.runs) {
+    if (runs.length === 0) continue;
+    const no = Math.max(...runs.map((run) => Number(run.number ?? 0))) + 1;
+    runs.unshift(runRow(config, no, "success", "main", new Date(now.getTime() - 60_000), 120));
+  }
+}
+
 onFakeReset(() => {
   built = null;
+  longPaths = false;
 });
 
 /** {@link history} built from scratch, from the seed, for the day of `now`. */
@@ -329,7 +353,7 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
       configs.map((config) => ({
         entity_id: `${SOURCE}:buildType:${config}`,
         source_id: SOURCE,
-        source_name: SOURCE_NAME,
+        source_name: longPaths ? LONG_SOURCE_NAME : SOURCE_NAME,
         name: config,
         group: path.split("/").at(-1) ?? path,
         path: path.split("/"),
@@ -341,7 +365,11 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-/** `job_pipelines`: *your branch* first, then *PR check*, as the read orders them. */
+/**
+ * `job_pipelines`: *your branch* first, then *PR check*, as the read orders them.
+ * The crate's read starts from the job's reach, as the card's Builds count does, so
+ * only a configuration the job reaches (`job.checks`, `job-reach.ts`) has a reason.
+ */
 export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobPipeline[] {
   const job = JOBS[keyOf(entityId)];
   if (job === undefined) return [];
@@ -351,8 +379,9 @@ export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobP
       const config = pipeline.name;
       const reasons: PipelineReason[] = [];
       const built = new Set((runs.get(config) ?? []).map((run) => run.branch));
+      if (!job.checks.includes(config)) return { pipeline_id: pipeline.entity_id, reasons };
       for (const branch of job.branches) if (built.has(branch)) reasons.push({ kind: "branch", branch });
-      if (job.checks.includes(config)) reasons.push({ kind: "pr_check", pr: job.pr });
+      reasons.push({ kind: "pr_check", pr: job.pr });
       return { pipeline_id: pipeline.entity_id, reasons };
     })
     .filter((row) => row.reasons.length > 0);
@@ -366,7 +395,7 @@ const OLDER_DEPTH = 200;
  * history the way it was filled, from a seed of the run it starts from, so
  * two scrolls agree. A history ends {@link OLDER_DEPTH} runs before the story.
  */
-export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number): RunRow[] {
+export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number, depth = OLDER_DEPTH): RunRow[] {
   const random = seeded(Number(before.number ?? 1) * 31 + config.length);
   const base = before.duration_seconds ?? 180;
   const out: RunRow[] = [];
@@ -374,7 +403,7 @@ export function fakeOlderRuns(config: string, before: RunRow, limit: number, sto
   let at = new Date(before.started ?? before.updated_at ?? Date.now()).getTime();
   while (out.length < limit) {
     no -= 1 + Math.floor(random() * 2);
-    if (no <= story - OLDER_DEPTH) break;
+    if (no <= story - depth) break;
     at -= (60 + Math.floor(random() * 700)) * 60_000;
     const st = random() < 0.05 ? "failed" : "success";
     const branch = /Prod/.test(config) || random() < 0.55 ? "main" : "feature/cleanup-87";
@@ -476,7 +505,7 @@ function artifactRows(config: string, no: number) {
     chip: null,
     url: file ? `https://ci.tidewater.example/repository/download/${config}/${no}:id/${title}` : null,
   });
-  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 files", false)];
+  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 file", false)];
   if (/Build|Docker|Release/.test(config))
     return [
       row("payout-service-1.9.0-rc1-x86_64.tar.gz", "6.2 MB", true),
@@ -588,6 +617,14 @@ export function runView(id: string, section: string | null): SourceView | undefi
   return { sections: section === null ? sections : sections.filter((s) => s.id === section), actions: [] };
 }
 
+/** The fixture's open pull requests by the branch each is opened from (`views/repos.ts`' branches). */
+const PULL_HEADS: Record<string, { branch: string; entity_id: string; cell: string | null }[]> = {
+  "payout-service": [
+    { branch: "feat/PAY-231-idempotent-retry", entity_id: "mock:payout-service#142", cell: "#142" },
+    { branch: "feature/csv-export", entity_id: "mock:payout-service#150", cell: "#150" },
+  ],
+};
+
 /** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */
 function repositoryOf(config: string): string | null {
   if (/^(Payout_|Dashboard_)/.test(config)) return "payout-service";
@@ -603,14 +640,16 @@ export function fakeSettings(config: string): PipelineSettings {
     repositories:
       repo === null
         ? []
-        : [
-            {
-              name: repo,
-              url: `http://gitea.example/tidewater/${repo}.git`,
-              default_branch: "refs/heads/main",
-              entity_id: `mock:tidewater/${repo}`,
-            },
-          ],
+        : longPaths
+          ? longRepositories(repo)
+          : [
+              {
+                name: repo,
+                url: `http://gitea.example/tidewater/${repo}.git`,
+                default_branch: "refs/heads/main",
+                entity_id: `mock:tidewater/${repo}`,
+              },
+            ],
     triggers: [
       {
         name: "VCS",
@@ -632,7 +671,7 @@ export function fakeSettings(config: string): PipelineSettings {
     parameters: parameters(config),
     parameter_write_op: "set_parameter",
     parameter_specs: parameterSpecs(config),
-    chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${step}`, name: step })),
+    chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${stepId(step)}`, name: step })),
     steps: stepNames(config),
   };
 }
@@ -656,7 +695,41 @@ const CHAINS = [
 ];
 
 function chainOf(config: string): string[] {
-  return CHAINS.find((chain) => chain.includes(config)) ?? [];
+  return (longPaths ? [LONG_CHAIN, ...CHAINS.slice(1)] : CHAINS).find((chain) => chain.includes(config)) ?? [];
+}
+
+/**
+ * `?fake-long-paths` (the build-header pass, 2026-11-20: Björn's "Teamcity configuration, builds <huge repo link> step
+ * 64 of the chain x > y > z > foo > bar > etc."): the payouts chain seventy steps long, `Payout_Docker` its 64th, the
+ * steps around it with long names, and each repository a VCS root named as TeamCity names one by default, by its whole
+ * address and branch, with a second root the mirror does not hold.
+ */
+let longPaths = false;
+/** `?fake-long-paths`' display name: *Open in ⟨source⟩* and the header's line cut it, whole in their titles. */
+const LONG_SOURCE_NAME = "Tidewater TeamCity for the payments team's release trains, EU data centre";
+const LONG_STEP_WORDS = [
+  "reconcile the payments team's ledger snapshots against the settlement bank's end-of-day statement",
+  "publish the payments team's signed release candidate to the artifact repository for the audit trail",
+  "run the payments team's contract tests against every carrier and payment service provider sandbox",
+];
+const longStep = (no: number) => `Release_Train_${String(no).padStart(2, "0")}: ${LONG_STEP_WORDS[no % LONG_STEP_WORDS.length]}`;
+const LONG_CHAIN = [
+  "Payout_Build",
+  ...Array.from({ length: 62 }, (_, i) => longStep(i + 2)),
+  "Payout_Docker",
+  "Payout_Deploy_Staging",
+  ...Array.from({ length: 4 }, (_, i) => longStep(i + 66)),
+  "Payout_Deploy_Prod",
+];
+/** A long step's configuration id: its name up to the colon. */
+const stepId = (step: string) => step.split(":")[0]!;
+function longRepositories(repo: string): PipelineSettings["repositories"] {
+  const address = `https://git.tidewater.example/payments-platform/${repo}-repository-name-that-is-long.git`;
+  const scripts = "ssh://git@git.tidewater.example:7999/payments-platform/shared-build-scripts-repository-name-that-is-long.git";
+  return [
+    { name: `${address}#refs/heads/main`, url: address, default_branch: "refs/heads/main", entity_id: `mock:tidewater/${repo}` },
+    { name: `${scripts}#refs/heads/main`, url: scripts, default_branch: "refs/heads/main", entity_id: null },
+  ];
 }
 
 /**
@@ -669,7 +742,7 @@ export function fakeRunChain(runId: string, now: Date = new Date()): ChainStepRo
   if (config === undefined) return [];
   const run = runs.get(config)!.find((r) => r.entity_id === runId)!;
   return chainOf(config).map((step) => ({
-    pipeline_id: `${SOURCE}:buildType:${step}`,
+    pipeline_id: `${SOURCE}:buildType:${stepId(step)}`,
     name: step,
     run: step === config ? run : ((runs.get(step) ?? []).find((r) => r.branch === run.branch) ?? null),
   }));
@@ -719,6 +792,9 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
+  // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
+  const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
+  longPaths = params.has("fake-long-paths");
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));
@@ -727,7 +803,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const mirrored = history(new Date()).get(config) ?? [];
       // The whole history beyond the mirror, continued from its oldest run:
       // the same chain on every call, so pages join up.
-      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, OLDER_DEPTH, Number(mirrored[0]?.number ?? 0))];
+      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, depth, Number(mirrored[0]?.number ?? 0), depth)];
       const at = all.findIndex((run) => run.entity_id === before);
       return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
     },
@@ -760,6 +836,29 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
       return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk];
     },
+    // Mark builds as read (ux18): the fixture's own set, as `knobas.run_read` holds them.
+    read_runs: () => [...readRuns],
+    mark_runs_read: (args) => {
+      const runs = (args["runs"] as string[] | undefined) ?? [];
+      const pipelines = (args["pipelines"] as string[] | undefined) ?? [];
+      const all = history(new Date());
+      const failed = pipelines.flatMap((id) => [...(all.get(configOf(id)) ?? []), ...(bulkById.get(id)?.recent ?? [])].filter(failedFake).map((run) => run.entity_id));
+      const wrote = [...new Set([...runs, ...failed])].filter((id) => !readRuns.has(id));
+      for (const id of wrote) readRuns.add(id);
+      return wrote;
+    },
+    mark_runs_unread: (args) => {
+      const gone = ((args["runs"] as string[] | undefined) ?? []).filter((id) => readRuns.has(id));
+      for (const id of gone) readRuns.delete(id);
+      return gone;
+    },
+    unread_failing_builds: () => {
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk].filter((pipeline) => {
+        const latest = pipeline.recent[0];
+        return latest !== undefined && failedFake(latest) && !readRuns.has(latest.entity_id);
+      }).length;
+    },
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
       if (args["pinned"] === true) pins.add(id);
@@ -767,6 +866,37 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return pins.has(id);
     },
     job_pipelines: (args) => fakeJobPipelines(String(args["entityId"] ?? "")),
+    // The repository's Builds tab: the pipelines that build it (prototype-6's `repoOfCfg`), each with its newest run per
+    // branch, as the server reads the runs of the repository's commits. A queued run has built no commit yet.
+    repo_pipelines: (args) => {
+      const repo = String(args["repoId"] ?? "").replace(/^mock:tidewater\//, "");
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      const runs = history(new Date());
+      const pipelines = fakePipelines()
+        .filter((pipeline) => fillers.has(pipeline.source_id) && repositoryOf(configOf(pipeline.entity_id)) === repo)
+        .map(({ recent: _recent, pinned: _pinned, ...pipeline }) => {
+          const seen = new Set<string>();
+          const latest: RunRow[] = [];
+          for (const run of runs.get(configOf(pipeline.entity_id)) ?? []) {
+            if (run.branch === null || run.started === null || seen.has(run.branch)) continue;
+            seen.add(run.branch);
+            latest.push(run);
+          }
+          return { ...pipeline, latest };
+        });
+      return { pipelines, pull_requests: PULL_HEADS[repo] ?? [] };
+    },
+    // The header's *New pull request*: the fixture's mirror says nothing of its branches, so the header reads each branch's
+    // view as it did before the mirror could answer (the forge-rounds pass, 2026-11-15).
+    // `?fake-branch-pulls` answers it as the real mirror does (`payoutBranchPulls`, the compare-first-open pass).
+    repo_branch_pulls: (args) =>
+      new URLSearchParams(globalThis.location?.search).has("fake-branch-pulls") ? payoutBranchPulls(String(args["repoId"] ?? "")) : [],
+    // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
+    commit_repositories: (args) =>
+      ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {
+        const repo = /^mock:(tidewater\/[^@]+)@/.exec(commitId)?.[1];
+        return repo === undefined ? [] : [{ commit_id: commitId, repo_id: `mock:${repo}`, repo_title: repo }];
+      }),
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const bulkRow = bulkById.get(id);
@@ -782,4 +912,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(pins, presets);
+keepSeed(pins, presets, readRuns);

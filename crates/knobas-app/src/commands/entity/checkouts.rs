@@ -19,12 +19,19 @@ use super::*;
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
 /// fails.
 #[tauri::command]
-pub async fn set_clones_root(
+pub async fn set_clones_root<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     path: Option<String>,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::set_clones_root(&pool, path.as_deref()).await
+    crate::checkout::set_clones_root(&pool, path.as_deref()).await?;
+    // Generated folders are kept beside the clones unless a folder is set
+    // (ADR-0046): a new root moves them.
+    if let Some(profile) = tauri::Manager::try_state::<crate::profile::Profile>(&app) {
+        crate::folder_render::made::place_store(&pool, &profile.dir).await;
+    }
+    Ok(())
 }
 
 /// The checkout a repo or branch detail draws -- the override, else the scan,
@@ -48,6 +55,27 @@ pub async fn entity_checkout(
 ) -> Result<crate::checkout::CheckoutView, IpcError> {
     let pool = lifecycle.pool()?;
     crate::checkout::view(&pool, &entity_id).await
+}
+
+/// [`entity_checkout`] for many repos or branches in one call, in the order
+/// asked, leaving out an id it refuses (the scale pass, PR #2479,
+/// 2026-11-10): what Code asks of every repository it lists each time it is
+/// shown. The clones root is walked once, and a working tree nothing touched
+/// since its last read answers that read without git
+/// ([`crate::checkout::views`]).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the clones
+/// root cannot be read.
+#[tauri::command]
+pub async fn entity_checkouts(
+    lifecycle: State<'_, Lifecycle>,
+    entity_ids: Vec<String>,
+) -> Result<Vec<crate::checkout::CheckoutOf>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::views(&pool, &entity_ids).await
 }
 
 /// Set this repository's checkout path by hand, or clear it back to the scan.
@@ -232,6 +260,35 @@ pub async fn open_object(
     .await
 }
 
+/// Run an application on a folder of this entity's repository as it runs on
+/// the repository (2026-11-16, a right-click's *Open in…* on a folder): its
+/// own command, with the folder in the checkout's place, so `{path}`,
+/// `{file}` and `{name}` are the folder's. `folder` is relative to the
+/// checkout and must be a folder inside it on disk. Answers the argument
+/// vector it started.
+///
+/// # Errors
+///
+/// As `open_checkout`, and [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// for a folder that is not inside the checkout.
+#[tauri::command]
+pub async fn open_folder(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    application: Option<String>,
+    folder: String,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::open_folder(
+        &pool,
+        Some(lifecycle.registry()),
+        &entity_id,
+        application.as_deref(),
+        &folder,
+    )
+    .await
+}
+
 /// The page a code object of this entity's repository has at its source
 /// (#2274): what *Open in › Browser* hands the opener. Built from the
 /// source's typed base URL and the pages its adapter declares, never from a
@@ -395,4 +452,155 @@ pub async fn clone_repo<R: tauri::Runtime>(
     }
     let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app));
     crate::checkout::clone::start(&pool, lifecycle.registry(), &clones, events, &entity_id).await
+}
+
+/// `entity_id`'s whole tree read at its checkout, at the commit the mirror
+/// names for its branch (ADR-0041, the smoothness pass of PR #2479): what
+/// *Files* draws before the source answers. `null` where there is no
+/// checkout, no tip in the mirror, or a checkout that lacks that commit; the
+/// last starts a fetch of it behind the answer, told on `checkout:fetched`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_tree`] refuses with.
+#[tauri::command]
+pub async fn entity_local_tree(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Option<crate::checkout::local::LocalTree>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let fetches = crate::checkout::fetch::Fetches::global();
+    crate::checkout::local_tree(&pool, lifecycle.registry(), Some(&fetches), &entity_id).await
+}
+
+/// One directory of `entity_id`'s tree read at its checkout (the big-folder
+/// pass of PR #2479, 2026-11-13): with no `commit` at the commit the mirror
+/// names for the branch (the tab's top, which fetches a missing tip behind
+/// it, as `entity_local_tree`), with one at that commit. What *Files* reads
+/// for each folder it opens, so the page holds what it draws and a folder
+/// past twenty thousand entries is drawn whole. `null` where the checkout
+/// cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_dir`] refuses with.
+#[tauri::command]
+pub async fn entity_local_dir(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: Option<String>,
+    dir: String,
+) -> Result<Option<crate::checkout::local::LocalDir>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let fetches = crate::checkout::fetch::Fetches::global();
+    crate::checkout::local_dir(
+        &pool,
+        lifecycle.registry(),
+        Some(&fetches),
+        &entity_id,
+        commit.as_deref(),
+        &dir,
+    )
+    .await
+}
+
+/// Every file of `entity_id`'s tree at `commit` (a sha `entity_local_dir`
+/// answered), read at its checkout (the big-folder pass): what *Go to file*
+/// filters. `null` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_paths`] refuses with.
+#[tauri::command]
+pub async fn entity_local_paths(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: String,
+) -> Result<Option<crate::checkout::local::LocalPaths>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_paths(&pool, &entity_id, &commit).await
+}
+
+/// The file at `path` in `entity_id`'s tree at `commit` (a sha
+/// `entity_local_tree` answered), read at its checkout (ADR-0041), drawn as
+/// the source's file block is; `null` where the checkout cannot answer.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::local_file`] refuses with.
+#[tauri::command]
+pub async fn entity_local_file(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: String,
+    path: String,
+) -> Result<Option<knobas_source::view::Block>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_file(&pool, &entity_id, &commit, &path).await
+}
+
+/// What *Clone all* would clone now (the smoothness pass, PR #2479): how
+/// many repositories, from which sources, which are already here and which
+/// cannot be cloned and why. Reads the mirror and the disk only.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn clone_all_plan(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::checkout::clone_all::Plan, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::clone_all::plan(
+        &pool,
+        lifecycle.registry(),
+        &knobas_core::checkout::clone::PROTOCOLS,
+    )
+    .await
+    .map(|(plan, _)| plan)
+}
+
+/// Start *Clone all*, or answer the run already going (the smoothness pass,
+/// PR #2479): every repository [`clone_all_plan`] names, cloned two at a time
+/// in the background, told on `clone:all` and each clone's own
+/// `clone:progress`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) with no clones
+/// root, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn clone_all<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    clones: State<'_, std::sync::Arc<crate::checkout::clone::Clones>>,
+) -> Result<crate::checkout::clone_all::State, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app.clone()));
+    let told = app.clone();
+    crate::checkout::clone_all::start(
+        &state.pool,
+        std::sync::Arc::clone(&state.registry),
+        &clones,
+        &crate::checkout::clone_all::CloneAll::global(),
+        events,
+        std::sync::Arc::new(move |run| {
+            crate::events::emit(&told, None, crate::events::CLONE_ALL, run);
+        }),
+    )
+    .await
+}
+
+/// Where *Clone all* is, or where its last run ended; `null` before the
+/// first run (the smoothness pass, PR #2479).
+#[tauri::command]
+pub fn clone_all_state() -> Option<crate::checkout::clone_all::State> {
+    crate::checkout::clone_all::state(&crate::checkout::clone_all::CloneAll::global())
 }

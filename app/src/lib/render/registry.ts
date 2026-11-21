@@ -17,11 +17,13 @@
  * the worker's tokens, never markup from outside, so nothing needs the
  * sanitizer or the sandboxed frame that HTML and SVG output go through.
  *
- * The engines behind a renderer (Shiki, Mermaid, D2, Graphviz, pdf.js)
+ * The engines behind a renderer (the highlighters, Mermaid, D2, Graphviz, pdf.js)
  * sit behind the one renderer port (`port.ts`), so jsdom tests use a fake.
  * How to add one: `notes/renderer-registry.md` on the spec's branch, and
  * `register` below.
  */
+
+import { isOpenApi } from "./openapi-sniff";
 
 export type RendererInput = "text" | "bytes";
 export type RendererOutput = "svg" | "html" | "image" | "lines";
@@ -36,6 +38,12 @@ export interface Renderer {
   readonly input: RendererInput;
   readonly output: RendererOutput;
   readonly diff: boolean;
+  /**
+   * What the file must hold besides a name its patterns take (ux18): a renderer that recognises its files by content
+   * (an OpenAPI spec is any YAML or JSON with a top-level `openapi` key) takes a file only when this answers `true`
+   * for its text, and never where no text is at hand (a binary file, a diff's file list).
+   */
+  readonly sniff?: (text: string) => boolean;
 }
 
 /** Image: drawn from the file's bytes as an `<img>`, which runs no script even for SVG. */
@@ -124,6 +132,39 @@ export const PDF: Renderer = {
   diff: true,
 };
 
+/**
+ * OpenAPI (ux18, `docs/decisions/2026-11-17-an-api-spec-is-drawn-as-its-endpoints.md`): an OpenAPI 3.0 or 3.1 or
+ * Swagger 2.0 spec, YAML or JSON, at any path and name, recognised by its top-level `openapi` or `swagger` key
+ * (`openapi-sniff.ts`). Drawn by knobas's own view (`tf/render/TfOpenApi.svelte`), its parse in a worker; both load
+ * with the first spec opened.
+ */
+export const OPENAPI: Renderer = {
+  id: "openapi",
+  name: "OpenAPI",
+  patterns: ["*"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: false,
+  sniff: isOpenApi,
+};
+
+/**
+ * JAR (ux19, `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`): a Java archive drawn as what it holds,
+ * its manifest, its Maven coordinates, its classes outlined and its nested JARs (`tf/render/TfJar.svelte`). It reads
+ * no bytes here: the backend reads and lists the archive (`archive_open`) and hands the view one entry at a time. A
+ * binary file, so *Source* is not offered; the view offers *Save to Downloads*.
+ */
+export const JAR: Renderer = {
+  id: "jar",
+  name: "JAR",
+  patterns: ["*.jar", "*.war", "*.ear", "*.aar"],
+  fences: [],
+  input: "bytes",
+  output: "html",
+  diff: false,
+};
+
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
 export const BYTES_CAP = 50 * 1024 * 1024;
 
@@ -138,8 +179,16 @@ export const SOURCE: Renderer = {
   diff: true,
 };
 
-/** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, SOURCE];
+/**
+ * Page (ADR-0046): an HTML file drawn as `TfHtmlPage` draws a folder renderer's page, sanitized, in a frame that runs no
+ * script and makes no request. After Source, so a repository's own `.html` opens as Source and *Render as* offers
+ * Page; in a generated folder it is the default (two default rows the Code page appends there). A comparison draws it on
+ * both sides, two such frames (ux26, the stage pass).
+ */
+export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
+
+/** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, SOURCE, HTML];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
@@ -167,13 +216,20 @@ export function accepts(pattern: string, path: string): boolean {
 }
 
 /**
+ * Whether `renderer` can draw `file` by what it holds: a binary file only by a renderer that reads bytes, and a
+ * renderer with a `sniff` only a text file whose text it recognises.
+ */
+export function fits(renderer: Renderer, file: { binary: boolean; text?: string }): boolean {
+  if (file.binary && renderer.input !== "bytes") return false;
+  return renderer.sniff === undefined || (!file.binary && file.text !== undefined && renderer.sniff(file.text));
+}
+
+/**
  * Every renderer that accepts the file, the default first. A binary file
  * (no text) is accepted only by renderers that read bytes.
  */
-export function renderersFor(file: { path: string; binary: boolean }): Renderer[] {
-  return renderers.filter(
-    (r) => (!file.binary || r.input === "bytes") && r.patterns.some((pattern) => accepts(pattern, file.path)),
-  );
+export function renderersFor(file: { path: string; binary: boolean; text?: string }): Renderer[] {
+  return renderers.filter((r) => fits(r, file) && r.patterns.some((pattern) => accepts(pattern, file.path)));
 }
 
 /** Every renderer registered, in the default order (the switcher's and Settings' list, #2263). */

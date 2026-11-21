@@ -15,7 +15,7 @@
 
 use knobas_source::view::{ActionField, ChoiceOption, FieldKind, ViewAction};
 
-use super::{Pull, login};
+use super::{Pull, login, name_of};
 use crate::model::UserRef;
 
 /// The field the picked logins go under, which the shell sends as
@@ -38,13 +38,17 @@ pub(super) fn action(
     if !own && !pull.may_push() {
         return None;
     }
+    // Sent by login, shown by the name Gitea gives the account (F-107).
     let options: Vec<ChoiceOption> = candidates
         .iter()
-        .filter_map(|user| login(Some(user)))
-        .filter(|who| {
+        .filter_map(|user| Some((login(Some(user))?, user)))
+        .filter(|(who, _)| {
             Some(who) != author.as_ref() && Some(who.as_str()) != viewer && !requested.contains(who)
         })
-        .map(|who| ChoiceOption::new(who.clone(), who))
+        .map(|(who, user)| {
+            let shown = name_of(Some(user)).unwrap_or_else(|| who.clone());
+            ChoiceOption::new(who, shown)
+        })
         .collect();
     if options.is_empty() {
         return None;

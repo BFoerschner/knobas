@@ -17,7 +17,7 @@
  *   the file's old path, so a rename that changes the language highlights
  *   each side in its own.
  */
-import type { DiffFile, DiffLine, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
+import type { DiffFile, DiffLine, Hunk, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
 import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { wordMarks, type Range } from "./words";
 
@@ -48,6 +48,45 @@ export interface DiffContext {
   piped?(file: DiffFile, side: "old" | "new", steps: PipeStep[]): Promise<PipeRun | null>;
 }
 
+/**
+ * A diff read a file at a time (the compare pass, 2026-11-13; `entity_range_files`, `entity_range_file`): the view is
+ * handed the files without their lines, and asks each file's here, a page at a time, as its card comes near the view.
+ */
+export interface DiffFill {
+  /** Page `from` of `file`'s lines, read under the name `read`, which `cancelRead` calls off. */
+  page(file: DiffFile, from: number, read: string): Promise<FilePage>;
+  /** Calls off the read named `read` at the backend (`cancel_read`): the view went before it answered. */
+  stop?(read: string): void;
+  /**
+   * The first page of each of `files` in one read (the big-compare pass, 2026-11-16): `null` for a file it could not
+   * answer, which `page` then reads alone. Absent: one read a file.
+   */
+  pages?(files: readonly DiffFile[], read: string): Promise<(FilePage | null)[]>;
+  /** Page `from` of `file`, where it was read before and kept: drawn at once, read no second time. */
+  cached?(file: DiffFile, from: number): FilePage | undefined;
+  /** The view may read ahead the files it has not drawn (`pages`, kept by `cached`): a local read, cheap to make. */
+  ahead?: boolean;
+}
+
+/** One page of one file's lines (`RangeFilePage`): `continues` puts its first hunk's lines at the end of the last page's last hunk. */
+export interface FilePage {
+  hunks: Hunk[];
+  continues: boolean;
+  next: number | null;
+  truncated: boolean;
+}
+
+/** The most lines one page of a file holds (`checkout::range_files::PAGE_LINES`). */
+export const FILL_PAGE = 2_000;
+
+/**
+ * How many rows a file whose lines are still to be read holds room for: its changed lines and a hunk's context, up to
+ * a page. Close to what it draws, so the files below it move little when its lines come.
+ */
+export function waitingRows(file: DiffFile): number {
+  return Math.min(file.additions + file.deletions + 7, FILL_PAGE);
+}
+
 /** *Viewed* per file: which are, and how to change one. */
 export interface DiffViewed {
   paths: readonly string[];
@@ -75,13 +114,37 @@ export interface DiffReview {
  */
 export type DrawnFile = DiffFile & {
   label?: string;
+  /** Which of *Local changes*' halves it is in (ux26): staged is `HEAD` against the index, not staged the index against the working tree. */
+  half?: "staged" | "unstaged";
   /** Worked out here (`lineDiff`) with a changed middle too long to match line by line: drawn removed whole, then added whole. */
   coarse?: true;
+  /**
+   * What tells it apart where its label and path may repeat (ux26): a generated file of a folder's generated compare is
+   * `<folder>\u0000<generated path>`, so two folders' `index.md` do not collide.
+   */
+  key?: string;
+  /**
+   * A generated file of a folder's generated compare (ux26, ruling 7): its two sides are read from the two generated
+   * folders by their tokens (`null`: not on that side), or, for a renderer that draws one output, the two outputs.
+   */
+  made?: MadeSides;
 };
 
-/** What tells a drawn file apart from the others: its label, else its path. */
+/** Where a generated file's two sides are read (ux26): each side's token, and whether it is a renderer's single output. */
+export interface MadeSides {
+  /** The folder whose generated compare it is in. */
+  folder: string;
+  old: string | null;
+  new: string | null;
+  /** A single-output renderer's drawing (`folder_render_output`), not a file of a generated folder. */
+  single: boolean;
+  /** Each side's size, where the compare said it. */
+  sizes: { old: number | null; new: number | null };
+}
+
+/** What tells a drawn file apart from the others: its key, else its label, else its path. */
 export function keyOf(file: DrawnFile): string {
-  return file.label ?? file.path;
+  return file.key ?? file.label ?? file.path;
 }
 
 /**
@@ -230,6 +293,44 @@ export function changedWords(file: DiffFile): Map<number, Range[]> {
     if (nu.length > 0) marks.set(row.new.at, nu);
   }
   return marks;
+}
+
+/** A file's changed words by line (`at`), each pair's worked out as one of its lines is asked for. */
+export interface ChangedWords {
+  get(at: number): Range[] | undefined;
+}
+
+/**
+ * {@link changedWords}, asked line by line: the lines are paired at once, but a pair's words are matched only when one of
+ * its lines is drawn (the compare-jump-speed pass, 2026-11-18). A jump that draws a screen of a 400-line file matched
+ * every changed pair of it first, 6 ms of a quarter-speed main thread in the frame the reader waits on.
+ */
+export function changedWordsOf(file: DiffFile): ChangedWords {
+  let pairs: Map<number, readonly [DrawnLine, DrawnLine]> | null = null;
+  const done = new Map<number, Range[]>();
+  return {
+    get(at) {
+      if (pairs === null) {
+        pairs = new Map();
+        for (const row of splitRows(file)) {
+          if (row.kind !== "pair" || row.old === null || row.new === null || row.old === row.new) continue;
+          const pair = [row.old, row.new] as const;
+          pairs.set(row.old.at, pair);
+          pairs.set(row.new.at, pair);
+        }
+      }
+      let got = done.get(at);
+      if (got === undefined) {
+        const pair = pairs.get(at);
+        if (pair === undefined) return undefined;
+        const [old, nu] = wordMarks(pair[0].line.text, pair[1].line.text);
+        done.set(pair[0].at, old);
+        done.set(pair[1].at, nu);
+        got = done.get(at)!;
+      }
+      return got.length > 0 ? got : undefined;
+    },
+  };
 }
 
 /** One side's text to highlight, and the file name its language comes from. */

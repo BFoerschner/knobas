@@ -25,6 +25,9 @@ const MAY_NAME_IT: &[&str] = &[
     "knobas-db/src/console.rs",
     "knobas-app/src/checkout/open.rs",
     "knobas-db/src/test_util.rs",
+    // An update's installer (ADR-0052): a GUI program, started detached as knobas leaves, whose own progress window is
+    // the point, as an editor's is for `checkout/open.rs`.
+    "knobas-update/src/install/windows.rs",
 ];
 
 /// `source` without its test module and its comment lines.
@@ -32,7 +35,13 @@ fn production(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
     let end = lines
         .windows(2)
-        .position(|pair| pair[0].trim() == "#[cfg(test)]" && pair[1].starts_with("mod tests"))
+        .position(|pair| {
+            // `#[cfg(test)]`, or a test module kept to some platforms,
+            // `#[cfg(all(test, unix))]`: test code either way.
+            let gate = pair[0].trim();
+            (gate == "#[cfg(test)]" || gate.starts_with("#[cfg(all(test,"))
+                && pair[1].starts_with("mod tests")
+        })
         .unwrap_or(lines.len());
     lines[..end]
         .iter()
@@ -91,6 +100,19 @@ fn the_rule_rejects_a_bare_start_and_spares_tests() {
     assert!(!offends(
         "knobas-app/src/checkout/working_tree.rs",
         in_tests
+    ));
+
+    // A test module kept to some platforms is test code too.
+    let in_unix_tests = in_tests.replace("#[cfg(test)]", "#[cfg(all(test, unix))]");
+    assert!(!offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        &in_unix_tests
+    ));
+    // And a module only built when not testing is not.
+    let not_tests = in_tests.replace("#[cfg(test)]", "#[cfg(not(test))]");
+    assert!(offends(
+        "knobas-app/src/checkout/working_tree.rs",
+        &not_tests
     ));
 
     let commented = "// std::process::Command::new(\"git\") would open a window\nfn read() {}";

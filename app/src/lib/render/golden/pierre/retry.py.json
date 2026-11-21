@@ -1,0 +1,21 @@
+[
+  ["str:\"\"\"Retry a batch, then park it.\"\"\""],
+  ["kw:from ",":dataclasses ","kw:import ",":dataclass"],
+  [],
+  ["con:MAX_TRIES ","op:= ","num:3"],
+  [],
+  [],
+  ["attr:@dataclass"],
+  ["kw:class ","ty:Batch","punct::"],
+  ["punct:    ",":id","punct:: ","ty:str"],
+  ["ty:    ",":tries","punct:: ","ty:int ","op:= ","num:0"],
+  [],
+  ["num:    ","kw:def ","fn:settle","punct:(","kw:self","punct:, ","var:gateway","punct:) ","op:-> ","ty:bool","punct::"],
+  ["punct:        ","kw:while self","punct:.","prop:tries ","op:< ","con:MAX_TRIES","punct::"],
+  ["punct:            ","kw:self","punct:.","prop:tries ","op:+= ","num:1"],
+  ["num:            ","kw:if ",":gateway","punct:.","fn:send","punct:(","kw:self","punct:.","prop:id","punct:):"],
+  ["punct:                ","kw:return ","con:True"],
+  ["con:        ","fn:print","punct:(","str:f\"parked ","esc:{","str:self.id!r","esc:}\\n","str:\"","punct:)"],
+  ["punct:        ","kw:return ","con:False"],
+  []
+]

@@ -439,10 +439,48 @@
         },
         "attachment": [],
         "comment": {
-          "comments": [],
-          "maxResults": 0,
+          "comments": [
+            {
+              "author": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=jonas.becker",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=jonas.becker",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=jonas.becker",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=jonas.becker"
+                },
+                "displayName": "Jonas Becker",
+                "emailAddress": "jonas.becker@tidewater.example",
+                "key": "JIRAUSER10101",
+                "name": "jonas.becker",
+                "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
+                "timeZone": "Europe/Berlin"
+              },
+              "body": "The drift starts where ledger-gateway hands the batch on: SettleBridgeServer still rounds each line before it sums.",
+              "created": "2026-08-21T17:40:00.000+0200",
+              "id": "20002",
+              "self": "http://mockd.test/rest/api/2/issue/10002/comment/20002",
+              "updateAuthor": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=jonas.becker",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=jonas.becker",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=jonas.becker",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=jonas.becker"
+                },
+                "displayName": "Jonas Becker",
+                "emailAddress": "jonas.becker@tidewater.example",
+                "key": "JIRAUSER10101",
+                "name": "jonas.becker",
+                "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
+                "timeZone": "Europe/Berlin"
+              },
+              "updated": "2026-08-21T17:40:00.000+0200"
+            }
+          ],
+          "maxResults": 1,
           "startAt": 0,
-          "total": 0
+          "total": 1
         },
         "created": "2026-08-07T18:05:00.000+0200",
         "customfield_10008": "PAY-200",

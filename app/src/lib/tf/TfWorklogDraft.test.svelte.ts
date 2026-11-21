@@ -10,6 +10,8 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { drafts } from "./drafts.svelte";
+
 import type { Candidate, DayRecord, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
 import { createLayers, type Layers } from "./layers.svelte";
 import TfWorklogDraft from "./TfWorklogDraft.svelte";
@@ -134,6 +136,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  drafts.reset();
   if (app) unmount(app);
   app = undefined;
   target.remove();
@@ -148,12 +151,30 @@ test("it shows the key, the ticket, the duration and the intervals it came from"
   expect(target.textContent).toContain("from 2 blocks");
 });
 
-test("each candidate is a ticked box with its time and source", async () => {
+test("Enter in From or Minutes presses Log, and with nothing to log it sends nothing (F-363)", async () => {
+  const { sent } = render({ stopped: false });
+  const from = target.querySelector<HTMLInputElement>("#tf-log-from")!;
+  const minutes = target.querySelector<HTMLInputElement>("#tf-log-minutes")!;
+  minutes.value = "";
+  minutes.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  minutes.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await Promise.resolve();
+  expect(sent).toHaveLength(0);
+  minutes.value = "30";
+  minutes.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  from.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await waitFor(() => expect(sent).toHaveLength(1));
+});
+
+test("each candidate is a ticked box with its time alone: the row's own words say what it was (F-158)", () => {
   render();
-  await waitFor(() => expect(target.textContent).toContain("10:02, Gitea"));
   expect(boxes().map((box) => box.checked)).toEqual([true, true]);
   expect(target.textContent).toContain("commit a41f2c PAY-231 backoff jitter");
-  expect(target.textContent).toContain("10:20, you wrote");
+  const times = [...target.querySelectorAll(".tf-cand .tf-dim")].map((time) => time.textContent);
+  expect(times.length).toBe(2);
+  for (const time of times) expect(time).toMatch(/^\d\d:\d\d$/);
 });
 
 test("the comment follows the boxes until it is edited", () => {
@@ -173,35 +194,63 @@ test("it says where the worklog goes, and quotes ADR-0012", async () => {
   render();
   await waitFor(() =>
     expect(text()).toContain(
-      "Goes to Jira through the write queue. The comment follows the boxes you tick until you edit it.",
+      "Goes to Jira through the write queue. A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.",
     ),
   );
-  expect(text()).toContain(
-    "A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.",
-  );
+  expect(text()).toContain("The comment follows the boxes you tick until you edit it.");
 });
 
-test("opened by a stop it offers Stop, log later, Keep running, Discard and Log", () => {
+test("opened by a stop it offers Stop, don't log, Stop, log later, Cancel, keep running and Log", () => {
   render({ stopped: true });
   expect(button("Stop, log later")).toBeDefined();
-  expect(button("Keep running")).toBeDefined();
-  expect(button("Discard")).toBeDefined();
+  expect(button("Cancel, keep running")).toBeDefined();
+  expect(button("Stop, don't log")).toBeDefined();
   expect(button("Log 2h 44m to PAY-231")).toBeDefined();
 });
 
-test("opened without a stop it offers Discard and Log, and nothing about a clock", () => {
+test("opened without a stop it offers Cancel and Log, and nothing about a clock", () => {
   render({ stopped: false });
-  expect(button("Discard")).toBeDefined();
+  expect(button("Cancel")).toBeDefined();
   expect(button("Stop, log later")).toBeUndefined();
-  expect(button("Keep running")).toBeUndefined();
+  expect(button("Cancel, keep running")).toBeUndefined();
 });
 
 test("each button answers with its outcome", () => {
   const { outcomes } = render();
-  button("Keep running")!.click();
+  button("Cancel, keep running")!.click();
   button("Stop, log later")!.click();
-  button("Discard")!.click();
+  button("Stop, don't log")!.click();
   expect(outcomes).toEqual(["keep", "later", "discard"]);
+});
+
+test("an edited comment outlives Esc, for that ticket and day, until Log or an explicit discard", async () => {
+  const typed = "Wrote the retry window";
+  const edit = () => {
+    comment().value = typed;
+    comment().dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  render();
+  edit();
+  comment().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  unmount(app!);
+  render();
+  expect(comment().value, "Esc keeps the words").toBe(typed);
+  button("Stop, log later")!.click();
+  unmount(app!);
+  render();
+  expect(comment().value, "so does Stop, log later").toBe(typed);
+  button("Stop, don't log")!.click();
+  unmount(app!);
+  render();
+  expect(comment().value, "Stop, don't log drops them").not.toBe(typed);
+  edit();
+  unmount(app!);
+  render({ stopped: false });
+  button("Cancel")!.click();
+  unmount(app!);
+  render({ stopped: false });
+  expect(comment().value, "Cancel is the explicit discard").not.toBe(typed);
 });
 
 test("Log sends the work for the reader's day and answers logged", async () => {
@@ -263,7 +312,7 @@ test("a clock that will not stop is said, and nothing is sent", async () => {
   await waitFor(() => expect(target.textContent).toContain("no timer to stop"));
   expect(order).toEqual(["stop"]);
   expect(outcomes).toEqual([]);
-  expect(button("Keep running")?.disabled).toBe(false);
+  expect(button("Cancel, keep running")?.disabled).toBe(false);
 });
 
 test("over a running clock the open stretch is one of the blocks, and it runs to now", async () => {
@@ -286,8 +335,8 @@ test("a refused log is said, and the draft stays open", async () => {
   expect(outcomes).toEqual([]);
 });
 
-test("Esc closes it as a layer: a stop's draft leaves the clock stopped, any other is discarded", () => {
-  for (const [stopped, expected] of [[true, "later"], [false, "discard"]] as const) {
+test("Esc closes it as a layer: a stop's draft keeps the clock running, reversing #896 (Björn, 2026-11-06), any other is discarded", () => {
+  for (const [stopped, expected] of [[true, "keep"], [false, "discard"]] as const) {
     const layers = createLayers();
     const { outcomes } = render({ stopped, layers });
     expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);

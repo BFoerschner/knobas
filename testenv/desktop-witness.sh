@@ -365,7 +365,7 @@ note "one instance"
 
 # A tiling window manager gives the window whatever share of the screen is
 # left, and below WITNESS_MIN_WIDTH a breakpoint hides what a driver reaches
-# for (#2056: Tickets' preview, beside a terminal under AeroSpace). Sized, or
+# for (#2056: Tickets' preview then, gone since ux18; the side rails now). Sized, or
 # refused naming the size, before the driver's first step.
 step "giving the window a known size (at least $WITNESS_MIN_WIDTH points wide)"
 witness_window_size "$ax" "$app_pid" | sed 's/^/desktop-witness:   /' ||

@@ -1,0 +1,530 @@
+/**
+ * The application page (PR #2479, 2026-11-13, in place of #844's dialog): the
+ * fields and placeholders, *It will run* filled from a repository picked on
+ * this disk, *Try it* (only a saved template runs, ADR-0016, #1643) and its
+ * take-back on leaving, *Save*, *Remove* and the way back.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import type { CheckoutApplicationDraft, CheckoutSettings, EntityRow, OpenObject } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
+import { toasts } from "../../shell/toasts.svelte";
+import { pageContext } from "../kept-pages.svelte";
+import { backStepContext } from "../page-name.svelte";
+import { PRESS_HOLD_MS } from "../press-hold.svelte";
+import { appPagePlace, LAST_TRIED_KEY } from "./app-page";
+import { createApps, type Apps } from "./apps.svelte";
+import { forgetAppDrafts } from "./app-drafts.svelte";
+import TfAppPage from "./TfAppPage.svelte";
+import { takeLanding } from "../settings/landing";
+import type { TryReads } from "./try-reads";
+
+const PAYOUT = "gitea:tidewater/payout-service";
+const LEDGER = "gitea:tidewater/ledger";
+const ROOT = "C:\\Users\\Tëst Üser\\src";
+
+function settings(): CheckoutSettings {
+  return {
+    clones_root: ROOT,
+    git: { status: "found", path: "/usr/bin/git" },
+    default_application: "vscode",
+    applications: [
+      { id: "terminal", name: "Terminal", command: "wt -d {path}", file_command: null },
+      { id: "vscode", name: "VS Code", command: "code.cmd {path}", file_command: "code.cmd --goto {file}:{line}" },
+    ],
+  };
+}
+
+const row = (entityId: string): EntityRow => ({ entity_id: entityId, title: entityId.slice("gitea:".length), source_id: "gitea" }) as EntityRow;
+
+let target: HTMLElement;
+let app: ReturnType<typeof mount> | null = null;
+let stored: CheckoutSettings;
+let saved: [CheckoutApplicationDraft[], string | null][];
+let opened: [string, string, OpenObject][];
+let left: number;
+let shown: boolean;
+let checkouts: Record<string, string | null>;
+let holdSave: Promise<void> | null;
+let apps: Apps;
+
+const reads: TryReads = {
+  repos: () => Promise.resolve([row(PAYOUT), row(LEDGER), row("gitea:tidewater/not-here")]),
+  checkouts: (ids) => Promise.resolve(ids.map((entityId) => ({ entityId, path: checkouts[entityId] ?? null, clonesRoot: ROOT }))),
+  files: () => Promise.resolve(["Cargo.toml", "README.md", "src/lib.rs"]),
+  commits: () =>
+    Promise.resolve([
+      { sha: "c90d11e4a7b2", title: "Retry the payout once" },
+      { sha: "7be0e4f15c60", title: "Read the ledger" },
+    ]),
+  prs: () => Promise.resolve([{ id: `${PAYOUT}#142`, number: 142, title: "Idempotent retry window" }]),
+  prEnds: () => Promise.resolve({ base: "main", head: "feature/retry" }),
+  page: () => Promise.resolve(null),
+};
+
+/** The window's storage, which this test environment has none of. */
+function memoryStorage(): Storage {
+  const items = new Map<string, string>();
+  return {
+    get length() {
+      return items.size;
+    },
+    clear: () => items.clear(),
+    getItem: (key) => items.get(key) ?? null,
+    key: (index) => [...items.keys()][index] ?? null,
+    removeItem: (key) => void items.delete(key),
+    setItem: (key, value) => void items.set(key, String(value)),
+  };
+}
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", memoryStorage());
+  stored = settings();
+  saved = [];
+  opened = [];
+  left = 0;
+  shown = true;
+  holdSave = null;
+  checkouts = { [PAYOUT]: `${ROOT}\\payout-service`, [LEDGER]: `${ROOT}\\ledger` };
+  toasts.items = [];
+  forgetAppDrafts();
+  apps = createApps({
+    checkoutSettings: () => Promise.resolve(stored),
+    setCheckoutApplications: async (drafts, defaultApplication) => {
+      saved.push([drafts, defaultApplication]);
+      if (holdSave) await holdSave;
+      stored = {
+        ...stored,
+        default_application: defaultApplication,
+        applications: drafts.map((draft) => ({
+          id: draft.id ?? draft.name.toLowerCase(),
+          name: draft.name,
+          command: draft.command,
+          file_command: draft.file_command ?? null,
+          ...(draft.commit_command ? { commit_command: draft.commit_command } : {}),
+          ...(draft.pull_request_command ? { pull_request_command: draft.pull_request_command } : {}),
+        })),
+      };
+      return stored;
+    },
+    openCheckout: () => Promise.resolve([]),
+    openObject: (entityId, application, object) => {
+      opened.push([entityId, application ?? "", object]);
+      return Promise.resolve(["ran"]);
+    },
+  });
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (app) unmount(app);
+  app = null;
+  target?.remove();
+  vi.unstubAllGlobals();
+});
+
+async function settle() {
+  for (let round = 0; round < 6; round += 1) {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  }
+}
+
+const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+
+async function draw(address: string) {
+  const at = appPagePlace(address.replace(/^#\/settings\//, "").split("/").map(decodeURIComponent))!;
+  app = mount(TfAppPage, { target, props: { at, apps, reads, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+}
+
+function field(id: string): HTMLInputElement {
+  return target.querySelector<HTMLInputElement>(`#tf-app-${id}`)!;
+}
+
+function type(id: string, value: string) {
+  const input = field(id);
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+function button(name: string): HTMLButtonElement {
+  const found = [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === name);
+  if (!found) throw new Error(`no button ${name}`);
+  return found;
+}
+
+/** The line under a command: what it will run, or what it waits for. */
+function line(id: string): string {
+  return text(field(id).closest(".tf-appcmd")!.querySelector(".tf-apprun code, .tf-apprun .tf-dim"));
+}
+
+function tryButton(id: string): HTMLButtonElement {
+  return field(id).closest(".tf-appcmd")!.querySelector<HTMLButtonElement>(".tf-apprun button")!;
+}
+
+test("adding: placeholders insert, It will run fills the repository it came from, the warnings speak, and Add saves the whole list and goes back", async () => {
+  await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service");
+  expect(text(target.querySelector("h1"))).toBe("Add an application");
+  expect(target.querySelector<HTMLSelectElement>("#tf-app-repo")!.value).toBe(PAYOUT);
+  const add = button("Add application");
+  expect(add.disabled).toBe(true);
+  expect(text(target.querySelector(".tf-dwhy"))).toBe("Name it, and give its command.");
+
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer");
+  expect([...target.querySelectorAll(".tf-banner[role='status']")].map(text)).toEqual([
+    "The command has no {path}, so the program won’t know which repository to open.",
+  ]);
+  field("command").focus();
+  field("command").dispatchEvent(new FocusEvent("focus"));
+  button("{path} the checkout folder").click();
+  await settle();
+  expect(field("command").value).toBe("MyGitViewer {path}");
+  // Filled as the backend runs it: the Windows checkout is one argument, in double quotes.
+  expect(line("command")).toBe('MyGitViewer "C:\\Users\\Tëst Üser\\src\\payout-service"');
+  expect(target.querySelectorAll(".tf-banner[role='status']")).toHaveLength(0);
+
+  add.click();
+  await settle();
+  expect(saved).toHaveLength(1);
+  expect(saved[0]![0].map((draft) => [draft.id, draft.name, draft.command])).toEqual([
+    ["terminal", "Terminal", "wt -d {path}"],
+    ["vscode", "VS Code", "code.cmd {path}"],
+    [null, "MyGitViewer", "MyGitViewer {path}"],
+  ]);
+  expect(saved[0]![1]).toBe("vscode");
+  expect(toasts.items.map((toast) => toast.text)).toContain("Added MyGitViewer. It is in every Open in… menu.");
+  expect(left).toBe(1);
+});
+
+test("Try it saves the draft and runs it by the id the save gave it; pressed twice it runs once; a later try and Save write over that entry", async () => {
+  await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service");
+  type("command", "MyGitViewer {path}");
+  expect(tryButton("command").disabled).toBe(true);
+  type("name", "MyGitViewer");
+  expect(tryButton("command").disabled).toBe(false);
+
+  tryButton("command").click();
+  await settle();
+  // The same press again at once is the hold's, not a second run (the press rule).
+  tryButton("command").click();
+  await settle();
+  expect(opened).toHaveLength(1);
+  await new Promise((resolve) => setTimeout(resolve, PRESS_HOLD_MS + 50));
+  type("command", "MyGitViewer --new {path}");
+  tryButton("command").click();
+  await settle();
+  expect(saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
+    ["terminal", "vscode", null],
+    ["terminal", "vscode", "mygitviewer"],
+  ]);
+  expect(opened).toEqual([
+    [PAYOUT, "mygitviewer", { kind: "repository" }],
+    [PAYOUT, "mygitviewer", { kind: "repository" }],
+  ]);
+  // The chip names the repository it was tried on (ux21).
+  expect(acks.item?.text).toBe("Opening payout-service in MyGitViewer");
+  expect(localStorage.getItem(LAST_TRIED_KEY)).toBe(PAYOUT);
+
+  button("Add application").click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
+    ["terminal", "wt -d {path}"],
+    ["vscode", "code.cmd {path}"],
+    ["mygitviewer", "MyGitViewer --new {path}"],
+  ]);
+  expect(saved).toHaveLength(3);
+});
+
+test("leaving after a try takes back only the tried entry: a default made meanwhile stays (#1643)", async () => {
+  await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service");
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  tryButton("command").click();
+  await settle();
+  // Settings' *Make default* elsewhere, while the page stood.
+  await apps.save(stored.applications, "terminal");
+  unmount(app!);
+  app = null;
+  await settle();
+  const [restored, defaultApplication] = saved.at(-1)!;
+  expect(restored.map((draft) => draft.id)).toEqual(["terminal", "vscode"]);
+  expect(defaultApplication).toBe("terminal");
+});
+
+test("the page hidden while a try is saving takes it back after the save, and starts nothing", async () => {
+  let release!: () => void;
+  holdSave = new Promise((resolve) => (release = resolve));
+  await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service");
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  tryButton("command").click();
+  await settle();
+  // Leave: another address shows another page, and this one is hidden.
+  button("Cancel").click();
+  holdSave = null;
+  release();
+  await settle();
+  expect(saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
+    ["terminal", "vscode", null],
+    ["terminal", "vscode"],
+  ]);
+  expect(opened).toEqual([]);
+  expect(left).toBe(1);
+});
+
+test("editing: Try it saves the edit over the entry, runs it by its id, and leaving puts the entry back as it was", async () => {
+  await draw("#/settings/checkouts/app/terminal");
+  expect(text(target.querySelector("h1"))).toBe("Terminal");
+  expect(field("name").value).toBe("Terminal");
+  type("command", "wt -d {path} --title {name}");
+  expect(line("command")).toBe('wt -d "C:\\Users\\Tëst Üser\\src\\payout-service" --title payout-service');
+  tryButton("command").click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
+    ["terminal", "wt -d {path} --title {name}"],
+    ["vscode", "code.cmd {path}"],
+  ]);
+  expect(opened.at(-1)!.slice(0, 2)).toEqual([PAYOUT, "terminal"]);
+  shown = false;
+  // A kept page hidden by a move elsewhere: the effect reads `visible()` again on the next change it tracks.
+  unmount(app!);
+  app = null;
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
+    ["terminal", "wt -d {path}"],
+    ["vscode", "code.cmd {path}"],
+  ]);
+});
+
+test("words typed and left stay for the session; Cancel drops them", async () => {
+  await draw("#/settings/checkouts/app/vscode");
+  type("commit", "code.cmd --commit {sha}");
+  expect(text(target.querySelector(".tf-stg-pend"))).toBe("Not saved");
+  unmount(app!);
+  app = null;
+  await draw("#/settings/checkouts/app/vscode");
+  expect(field("commit").value).toBe("code.cmd --commit {sha}");
+  button("Cancel").click();
+  unmount(app!);
+  app = null;
+  await draw("#/settings/checkouts/app/vscode");
+  expect(field("commit").value).toBe("");
+  expect(saved).toEqual([]);
+});
+
+test("Remove takes it out at once, with Undo on its toast, and goes back", async () => {
+  await draw("#/settings/checkouts/app/vscode");
+  button("Remove").click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => draft.id)).toEqual(["terminal"]);
+  const toast = toasts.items.find((item) => item.text === "Removed VS Code")!;
+  expect(toast.action?.label).toBe("Undo");
+  expect(left).toBe(1);
+  toast.action!.run();
+  await settle();
+  expect(saved.at(-1)).toEqual([
+    [
+      { id: "terminal", name: "Terminal", command: "wt -d {path}", file_command: null, commit_command: null, range_command: null, pull_request_command: null },
+      { id: "vscode", name: "VS Code", command: "code.cmd {path}", file_command: "code.cmd --goto {file}:{line}", commit_command: null, range_command: null, pull_request_command: null },
+    ],
+    "vscode",
+  ]);
+});
+
+test("the repository is the one it came from, else the last one tried, else the first with a checkout; others aren't offered", async () => {
+  localStorage.setItem(LAST_TRIED_KEY, LEDGER);
+  await draw("#/settings/checkouts/add");
+  const pick = target.querySelector<HTMLSelectElement>("#tf-app-repo")!;
+  expect(pick.value).toBe(LEDGER);
+  expect([...pick.options].map((option) => option.textContent)).toEqual(["tidewater/ledger", "tidewater/payout-service"]);
+  unmount(app!);
+  localStorage.removeItem(LAST_TRIED_KEY);
+  await draw("#/settings/checkouts/add");
+  expect(target.querySelector<HTMLSelectElement>("#tf-app-repo")!.value).toBe(PAYOUT);
+});
+
+test("with no checkout on this disk the rows drawn while reading stay and say so, and how to get one (2026-11-17)", async () => {
+  // The saved scale database, where no repository is cloned: Try it on's rows gave way to one line once the checkouts
+  // answered, and the Commands section rose 175 px.
+  checkouts = {};
+  stored = { ...stored, applications: [...stored.applications, { id: "tig", name: "Tig", command: "tig -C {path}", file_command: "tig -C {path} {file}", commit_command: "tig -C {path} show {sha}", pull_request_command: "tig -C {path} log {base}..{head}" }] };
+  const batches: (() => void)[] = [];
+  const late: TryReads = { ...reads, checkouts: (ids) => new Promise((resolve) => batches.push(() => resolve(ids.map((entityId) => ({ entityId, path: null, clonesRoot: ROOT }))))) };
+  const at = appPagePlace(["checkouts", "app", "tig"])!;
+  app = mount(TfAppPage, { target, props: { at, apps, reads: late, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+  const rows = () => [...target.querySelectorAll(".tf-stg-row :is(input, select), .tf-apprun-box")].map((el) => el.id || el.getAttribute("aria-label"));
+  const link = () => target.querySelector<HTMLAnchorElement>(".tf-stg-more a[href='#/code']")!;
+  const before = rows();
+  expect(before.slice(0, 5)).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr"]);
+  // The way to a checkout is in its room from the first frame, unseen until the answer says there is none.
+  expect(link().parentElement!.classList.contains("tf-stg-done")).toBe(true);
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+  }
+  expect(rows()).toEqual(before);
+  const pick = target.querySelector<HTMLSelectElement>("#tf-app-repo")!;
+  expect(pick.disabled).toBe(true);
+  expect([...pick.options].map((option) => option.textContent)).toEqual(["No repository is cloned on this computer"]);
+  expect(link().parentElement!.classList.contains("tf-stg-done")).toBe(false);
+  expect(line("command")).toBe("No repository is cloned on this computer. Clone one (a repository’s Clone, or Code’s Clone all…) to try this on it.");
+  expect(line("commit")).toBe(line("command"));
+  expect(text(target.querySelector("#tf-app-trycommit"))).toBe("");
+});
+
+test("a list of repositories that can't be read says so in the same rows", async () => {
+  const failing: TryReads = { ...reads, repos: () => Promise.reject({ code: "io", message: "the database is locked" }) };
+  app = mount(TfAppPage, { target, props: { at: appPagePlace(["checkouts", "add"])!, apps, reads: failing, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+  type("name", "Tig");
+  type("command", "tig -C {path}");
+  expect(text(target.querySelector("#tf-app-repo"))).toBe("Could not read the repositories");
+  expect(line("command")).toMatch(/^Could not read the repositories: .*locked/);
+  // The way to a clone isn't the fix for a list that can't be read.
+  expect(target.querySelector(".tf-stg-more a")!.parentElement!.classList.contains("tf-stg-done")).toBe(true);
+});
+
+test("a commit from Open in… is the one tried; a range is it and the one before; a pull request runs in its worktree", async () => {
+  await draw("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service/commit/7be0e4f15c60");
+  type("name", "Tig");
+  type("command", "tig -C {path}");
+  type("commit", "tig -C {path} show {sha}");
+  await settle();
+  expect(target.querySelector<HTMLSelectElement>("#tf-app-trycommit")!.value).toBe("7be0e4f15c60");
+  expect(line("commit")).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\payout-service" show 7be0e4f15c60');
+  type("range", "git -C {path} difftool -d {base} {head}");
+  // 7be0e4f15c60 is the oldest of the two, so it has no commit before it here.
+  expect(line("range")).toBe("A range needs two commits; the repository has fewer.");
+  const pick = target.querySelector<HTMLSelectElement>("#tf-app-trycommit")!;
+  pick.value = "c90d11e4a7b2";
+  pick.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(line("range")).toBe('git -C "C:\\Users\\Tëst Üser\\src\\payout-service" difftool -d 7be0e4f15c60 c90d11e4a7b2');
+
+  type("pr", "tig -C {path} log {base}..{head}");
+  await settle();
+  expect(line("pr")).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\pull-requests\\tidewater\\payout-service-142" log main..feature/retry');
+  tryButton("pr").click();
+  await settle();
+  expect(opened.at(-1)).toEqual([PAYOUT, "tig", { kind: "pull_request", number: 142, base: "main", head: "feature/retry", branch: "feature/retry", item: `${PAYOUT}#142` }]);
+});
+
+test("an application the list doesn't hold says so, with the way to the list", async () => {
+  await draw("#/settings/checkouts/app/gone");
+  expect(text(target)).toContain("Open in… has no such application.");
+  expect(target.querySelector("#tf-app-name")).toBeNull();
+});
+
+test("while later batches of checkouts come in, the picked repository and what it draws stay as they were: its files, commits and pull requests are read once (2026-11-17)", async () => {
+  // Björn, on v3.2.9-ux17: "Clicking on edit for checkouts and open in on an application keeps spazzing around for the first few
+  // seconds running through the repositories". 65 checkouts among many more repositories on the forge: the checkouts come in
+  // batches, and each batch drew the picked repository's objects again, from *Reading…*.
+  const many = [PAYOUT, ...Array.from({ length: 120 }, (_, n) => `gitea:tidewater/on-the-forge-${n}`), LEDGER];
+  const batches: (() => void)[] = [];
+  const asked = { files: 0, commits: 0, prs: 0 };
+  const late: TryReads = {
+    ...reads,
+    repos: () => Promise.resolve(many.map(row)),
+    checkouts: (ids) => new Promise((resolve) => batches.push(() => resolve(ids.map((entityId) => ({ entityId, path: checkouts[entityId] ?? null, clonesRoot: ROOT }))))),
+    // A read asked again never answers, so a page that reads again stands on *Reading…*, as it did between batches.
+    files: (repo) => (asked.files++ === 0 ? reads.files(repo) : new Promise(() => {})),
+    commits: (repo) => (asked.commits++ === 0 ? reads.commits(repo) : new Promise(() => {})),
+    prs: (repo) => (asked.prs++ === 0 ? reads.prs(repo) : new Promise(() => {})),
+  };
+  stored = { ...stored, applications: [...stored.applications, { id: "tig", name: "Tig", command: "tig -C {path}", file_command: "tig -C {path} {file}", commit_command: "tig -C {path} show {sha}", pull_request_command: "tig -C {path} log {base}..{head}" }] };
+  const at = appPagePlace(["checkouts", "app", "tig"])!;
+  app = mount(TfAppPage, { target, props: { at, apps, reads: late, leave: () => (left += 1) }, context: pageContext(() => shown) });
+  await settle();
+  /** What the page draws: each row's control and the line under each command. */
+  const drawn = () => ({
+    rows: [...target.querySelectorAll(".tf-stg-row :is(input, select)")].map((el) => el.id),
+    lines: ["command", "file", "commit", "pr"].map(line),
+    picks: ["#tf-app-repo", "#tf-app-tryfile", "#tf-app-trycommit", "#tf-app-trypr"].map((sel) => target.querySelector<HTMLInputElement>(sel)?.value ?? null),
+  });
+  // Before any checkout has answered, every row the page will have is drawn already: an answer fills them in and moves nothing.
+  const before = drawn().rows;
+  expect(before).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr", "tf-app-command", "tf-app-file", "tf-app-commit", "tf-app-range", "tf-app-pr"]);
+  batches.shift()!();
+  await settle();
+  const first = drawn();
+  expect(first.rows).toEqual(before);
+  expect(first.picks[0]).toBe(PAYOUT);
+  expect(first.lines[2]).toBe('tig -C "C:\\Users\\Tëst Üser\\src\\payout-service" show c90d11e4a7b2');
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+    expect(drawn()).toEqual(first);
+  }
+  expect(target.querySelectorAll("#tf-app-repo option")).toHaveLength(2);
+  expect(asked).toEqual({ files: 1, commits: 1, prs: 1 });
+});
+
+test("each way back to the list names the entry it lands on: Add the new one, Save the one edited, Remove the one that took its place, Cancel the one opened (2026-11-17)", async () => {
+  // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
+  takeLanding("checkouts");
+  await draw("#/settings/checkouts/add");
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  button("Add application").click();
+  await settle();
+  expect(left).toBe(1);
+  expect(takeLanding("checkouts"), "Add lands on the new entry").toBe("mygitviewer");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/terminal");
+  type("command", "wt -d {path} --new");
+  button("Save").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Save lands on the entry edited").toBe("terminal");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/terminal");
+  button("Remove").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Remove lands on the entry that took its place").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/mygitviewer");
+  button("Remove").click();
+  await settle();
+  expect(takeLanding("checkouts"), "the last one removed lands on the one before it").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/app/vscode");
+  button("Cancel").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Cancel lands on the entry it was opened on").toBe("vscode");
+  unmount(app!);
+
+  await draw("#/settings/checkouts/add");
+  button("Cancel").click();
+  await settle();
+  expect(takeLanding("checkouts"), "Cancel on Add lands on Add an application").toBe("add");
+  app = null;
+});
+
+test("opened from a repository's Open in…, Save goes back to the repository and the list lands nowhere", async () => {
+  takeLanding("checkouts");
+  const steps: [string, boolean][] = [];
+  const at = appPagePlace(["checkouts", "add", PAYOUT])!;
+  const context = pageContext(() => shown);
+  app = mount(TfAppPage, {
+    target,
+    props: { at, apps, reads, back: { name: "payout-service", hash: "#/repo/gitea%3Atidewater%2Fpayout-service", opened: true } },
+    context: new Map([...context, ...backStepContext((to, opened) => void steps.push([to, opened]))]),
+  });
+  await settle();
+  type("name", "MyGitViewer");
+  type("command", "MyGitViewer {path}");
+  button("Add application").click();
+  await settle();
+  expect(steps).toEqual([["#/repo/gitea%3Atidewater%2Fpayout-service", true]]);
+  expect(takeLanding("checkouts")).toBeNull();
+});

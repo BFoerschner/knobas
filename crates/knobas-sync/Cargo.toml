@@ -13,6 +13,9 @@ async-trait.workspace = true
 # own timestamps stay in the database and are never read back here.
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
+# The files index the files pass writes (`code_files`, the everything-search
+# decisions, D7).
+knobas-files = { path = "../knobas-files" }
 # The scheduler builds an adapter from a stored configuration plus its
 # credential, so it holds the store behind its trait. The trait, never a
 # concrete store: `just check` must never reach a real keychain.
@@ -46,5 +49,8 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # A real send the local rate limit holds past a shortened budget (#1729).
 knobas-http = { path = "../knobas-http", features = ["test-util"] }
 knobas-source-mock = { path = "../knobas-source-mock" }
+# The files pass's index in a temporary folder (`tests/it/code_files.rs`).
+knobas-files = { path = "../knobas-files" }
+tempfile = "3"
 tokio = { workspace = true }
 uuid.workspace = true

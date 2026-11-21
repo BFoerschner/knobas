@@ -206,8 +206,12 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
         // Gitea writes `merged_at` on every pull request, `null` until it is
         // merged; the pull-request view reads its merge time from there.
         "draft": false, "merged": false, "merged_at": null, "comments": comments,
-        "requested_reviewers": [{ "login": "tom", "id": 8 }],
-        "user": { "login": "mara", "id": 7 },
+        "requested_reviewers": [{ "login": "tom", "id": 8, "full_name": "" }],
+        // Gitea's `User` always carries `full_name`, blank where the profile
+        // has none; the descriptor names a pull request's opener by it.
+        "user": { "login": "mara", "id": 7, "full_name": "Mara Lindqvist" },
+        // A pull request's labels, as an issue's (`[]` for none).
+        "labels": [],
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
         // `sha` is the head commit, where the descriptor declares a pull
         // request's commit (#710).
@@ -240,7 +244,8 @@ pub fn issue(number: u64, title: &str, state: &str, labels: &[&str], updated: &s
     json!({
         "id": 100 + number, "number": number, "title": title, "body": "",
         "state": state, "comments": 0, "is_locked": false, "pull_request": null,
-        "user": { "login": "mara", "id": 7 }, "assignee": null, "assignees": null,
+        "user": { "login": "mara", "id": 7, "full_name": "Mara Lindqvist" },
+        "assignee": null, "assignees": null,
         "labels": labels.iter().map(|name| json!({ "id": 1, "name": name, "exclusive": true })).collect::<Vec<_>>(),
         "milestone": null,
         "html_url": format!("https://gitea.example/tidewater/payout-service/issues/{number}"),

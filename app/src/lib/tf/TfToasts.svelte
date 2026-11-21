@@ -4,25 +4,60 @@
   here, drawn as prototype-6 draws one: ink on the page, the words of the
   button that caused it, and at most its actions as underlined words.
 
-  Text only: a toast often carries a source's own error message (gotcha 7).
+  Text only: a toast often carries a source's own error message (gotcha 7). One line, at most 680 px wide (ux21): a
+  line that doesn't fit gives up its middle (`toastLine`), and its title is the whole line.
 -->
 <script lang="ts">
-  import { dismiss, toasts } from "../shell/toasts.svelte";
+  import { dismiss, hold, release, toastLine, toasts, type ToastAction } from "../shell/toasts.svelte";
+  import TfKeyed from "./TfKeyed.svelte";
+  import { modals } from "./modals.svelte";
+
+  /**
+   * What held focus before a toast took it. A pressed toast goes away with the button in it, and a dialog under it
+   * keeps `Tab` only while focus is inside it, so focus goes back there.
+   */
+  let before: HTMLElement | null = null;
+  let stack = $state<HTMLElement | null>(null);
+
+  function press(id: number, action: ToastAction | null) {
+    action?.run();
+    dismiss(id);
+    const active = document.activeElement;
+    if (before?.isConnected && (active === null || active === document.body || stack?.contains(active))) before.focus({ preventScroll: true });
+    before = null;
+  }
 </script>
 
-<div class="tf-toasts" role="status" aria-live="polite">
+<div
+  class="tf-toasts"
+  class:tf-over-modal={modals.open > 0}
+  role="status"
+  aria-live="polite"
+  bind:this={stack}
+  onfocusin={(event) => {
+    if (event.relatedTarget instanceof HTMLElement && !stack?.contains(event.relatedTarget)) before = event.relatedTarget;
+  }}
+>
   {#each toasts.items as toast (toast.id)}
-    <div class="tf-toast {toast.tone === 'err' ? 'tf-err' : ''}">
-      <span>{toast.text}</span>
+    {@const line = toastLine(toast.text)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="tf-toast {toast.tone === 'err' ? 'tf-err' : ''}"
+      onmouseenter={() => hold(toast.id, "hover")}
+      onmouseleave={() => release(toast.id, "hover")}
+      onfocusin={() => hold(toast.id, "focus")}
+      onfocusout={(event) => {
+        if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) release(toast.id, "focus");
+      }}
+    >
+      <span class="tf-toast-line" title={line.tail !== "" ? toast.text : undefined}
+        ><span class="tf-toast-head"><TfKeyed text={line.head} /></span
+        >{#if line.tail !== ""}<span class="tf-toast-tail"><TfKeyed text={line.tail} /></span>{/if}</span
+      >
       {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action, index (index)}
-        <button
-          onclick={() => {
-            action.run();
-            dismiss(toast.id);
-          }}>{action.label}</button
-        >
+        <button onclick={() => press(toast.id, action)}>{action.label}</button>
       {/each}
-      <button class="tf-x" aria-label="Dismiss" onclick={() => dismiss(toast.id)}>✕</button>
+      <button class="tf-x" aria-label="Dismiss" onclick={() => press(toast.id, null)}>✕</button>
     </div>
   {/each}
 </div>

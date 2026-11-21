@@ -5,10 +5,13 @@
  */
 import { expect, test } from "vitest";
 
-import type { DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
+import type { BranchPull, DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
 import {
+  mirrorStanding,
   ancestors,
   branchOptions,
+  buildsHash,
+  withMade,
   readAllRows,
   branchStanding,
   type BranchRow,
@@ -32,6 +35,9 @@ import {
   headLine,
   lineHash,
   pickDefaultFile,
+  pickMadeDefault,
+  knowsRepoTab,
+  renderedHash,
   readRepoRoute,
   repoHash,
   repoPrs,
@@ -47,7 +53,7 @@ import {
 const REPO = "gitea:tidewater/payout-service";
 
 test("an address names the repository, its tab and what the tab has selected", () => {
-  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null });
+  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null });
   expect(readRepoRoute([REPO, "files", "src", "sepa", "retry.rs"])).toMatchObject({ tab: "files", path: "src/sepa/retry.rs" });
   expect(readRepoRoute([REPO, "commits"])).toMatchObject({ tab: "commits", commit: null });
   expect(readRepoRoute([REPO, "commits", `${REPO}@c90d11`])).toMatchObject({ tab: "commits", commit: `${REPO}@c90d11` });
@@ -71,6 +77,7 @@ test("a link to a line of a file is the Files tab at that line (#2251)", () => {
     commit: null,
     branch: null,
     base: null,
+    pipeline: null,
   });
   expect(readRepoRoute([REPO, "files", "line", "7"])).toMatchObject({ path: "line/7", line: null });
   // No line number, or none worth one, is the file at its top.
@@ -138,6 +145,39 @@ test("the dropdown offers the default branch first and every branch the mirror h
   expect(branchOptions(section([{ entity_id: null, title: "main", chip: "default" }]))).toEqual([
     { name: "main", entityId: null, isDefault: true },
   ]);
+});
+
+test("a branch the source lists and the mirror has not synced is offered at the id the source named, the cut note still not", () => {
+  const listed = section([
+    { entity_id: `${REPO}@refs/heads/main`, title: "main", chip: "default", tone: "muted" },
+    { entity_id: null, title: "spike/y" },
+    { entity_id: null, title: "More branches on Gitea", tone: "muted" },
+  ]);
+  const unsynced = [
+    { section: "branches", title: "spike/y", entity_id: `${REPO}@refs/heads/spike/y` },
+    // Another section's row of the same name is not this list's.
+    { section: "overview", title: "More branches on Gitea", entity_id: `${REPO}@refs/heads/x` },
+  ];
+  expect(branchOptions(listed, unsynced)).toEqual([
+    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true },
+    { name: "spike/y", entityId: `${REPO}@refs/heads/spike/y`, isDefault: false, unsynced: true },
+  ]);
+});
+
+test("a branch this session made is offered after the listed ones until a read lists it, once per name", () => {
+  const listed = [
+    { name: "main", entityId: "m", isDefault: true },
+    { name: "feature/x", entityId: "x", isDefault: false },
+  ];
+  expect(
+    withMade(listed, [
+      { text: "feature/new", state: "queued" },
+      { text: "feature/x", state: "sent" },
+      // A commit to a new branch, then *New branch…* of the same name: one branch.
+      { text: "feature/new", state: "sent" },
+    ]),
+  ).toEqual([...listed, { name: "feature/new", entityId: null, isDefault: false, made: "queued" }]);
+  expect(withMade(listed, [])).toEqual(listed);
 });
 
 const file = (path: string, old_path: string | null = null): DiffFile => ({
@@ -551,4 +591,75 @@ test("readAllRows hands each page over as it arrives, the rows so far appended, 
   expect(handed[2]![2499]).toBe("o/r2499");
   // Whoever awaits the whole list still gets it in one piece.
   expect(rows.length).toBe(2500);
+});
+
+test("Builds' address names the branch and the pipeline, each one segment however many slashes it holds", () => {
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const hash = buildsHash(REPO, "feature/x", "tc:buildType:Payout_Build");
+  expect(readRepoRoute(segments(hash))).toMatchObject({ tab: "builds", branch: "feature/x", pipeline: "tc:buildType:Payout_Build" });
+  expect(readRepoRoute(segments(buildsHash(REPO, "main")))).toMatchObject({ tab: "builds", branch: "main", pipeline: null });
+});
+
+test("a branch's standing from the mirror: its open pull request, and none offered at the default branch's tip (the forge-rounds pass)", () => {
+  const tip = "c".repeat(40);
+  const row = (name: string, sha: string | null, pull: number | null = null): BranchPull => ({
+    entity_id: `gitea:o/r@refs/heads/${name}`,
+    name,
+    tip: sha,
+    is_default: name === "main",
+    pull: pull === null ? null : { branch: name, entity_id: `gitea:o/r#${pull}`, cell: `#${pull}` },
+  });
+  const pulls = [row("main", tip), row("open", "a".repeat(40), 7), row("even", tip), row("ahead", "b".repeat(40)), row("bare", null)];
+  expect(mirrorStanding(pulls, "open")).toEqual({ pr: { entityId: "gitea:o/r#7", number: "#7", state: "open", tone: null }, canOpenPr: false });
+  expect(mirrorStanding(pulls, "even")).toEqual({ pr: null, canOpenPr: false });
+  expect(mirrorStanding(pulls, "ahead")).toEqual({ pr: null, canOpenPr: true });
+  expect(mirrorStanding(pulls, "bare")?.canOpenPr, "no tip held: nothing said ahead").toBe(false);
+  expect(mirrorStanding(pulls, "main")?.canOpenPr).toBe(false);
+  expect(mirrorStanding(pulls, "gone"), "a branch the mirror lacks is read as before").toBeUndefined();
+});
+
+test("a generated folder's addresses read back: its landing, a file, a line and a place (ADR-0046)", () => {
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const landing = renderedHash(REPO, "site", "apps/order-flow");
+  expect(landing).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/rendered/site/apps%2Forder-flow");
+  expect(readRepoRoute(segments(landing))).toEqual({
+    repoId: REPO,
+    tab: "files",
+    path: null,
+    line: null,
+    commit: null,
+    branch: null,
+    base: null,
+    pipeline: null,
+    rendered: { renderer: "site", folder: "apps/order-flow" },
+  });
+  // The top folder is `.`.
+  expect(renderedHash(REPO, "site", "")).toMatch(/\/rendered\/site\/\.$/);
+  expect(readRepoRoute(segments(renderedHash(REPO, "site", ""))).rendered).toEqual({ renderer: "site", folder: "" });
+  // A file with a space and a `%`, nested: the folder stops where its segment ends.
+  const file = renderedHash(REPO, "site", "apps/order-flow", "docs/a b%.md");
+  expect(file).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/rendered/site/apps%2Forder-flow/files/docs/a%20b%25.md");
+  expect(readRepoRoute(segments(file))).toMatchObject({ tab: "files", path: "docs/a b%.md", rendered: { renderer: "site", folder: "apps/order-flow" } });
+  const line = renderedHash(REPO, "site", "a/b", "c.md", { line: 12 });
+  expect(readRepoRoute(segments(line))).toMatchObject({ path: "c.md", line: 12, rendered: { folder: "a/b" } });
+  const place = renderedHash(REPO, "site", "a", "openapi.yaml", { place: "get /pets/{id}" });
+  expect(readRepoRoute(segments(place))).toMatchObject({ path: "openapi.yaml", place: "get /pets/{id}", rendered: { folder: "a" } });
+  // `rendered/x` with no folder is the Files landing; a rendering inside a rendering is the generated landing.
+  expect(readRepoRoute([REPO, "rendered", "x"])).toMatchObject({ tab: "files", path: null });
+  expect(readRepoRoute([REPO, "rendered", "x"]).rendered).toBeUndefined();
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "rendered", "y", "b", "files", "c.md"])).toMatchObject({ path: null, rendered: { renderer: "x", folder: "a" } });
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "render", "y", "b"])).toMatchObject({ path: null, rendered: { renderer: "x", folder: "a" } });
+  expect(readRepoRoute([REPO, "rendered", "x", "a", "commits"])).toMatchObject({ tab: "files", path: null });
+  expect(knowsRepoTab([REPO, "rendered", "x", "a"])).toBe(true);
+});
+
+test("a generated folder's landing opens its README, then an index page, then its one file (ADR-0046)", () => {
+  const file = (name: string) => ({ name, kind: "file" as const, size: 1, section: `file:${name}` });
+  const dir = (name: string) => ({ name, kind: "dir" as const, size: null, section: `files:${name}` });
+  expect(pickMadeDefault([file("index.html"), file("index.md"), file("README.md")])).toBe("README.md");
+  expect(pickMadeDefault([file("index.html"), file("index.md")])).toBe("index.md");
+  expect(pickMadeDefault([file("a.txt"), file("Index.HTM")])).toBe("Index.HTM");
+  expect(pickMadeDefault([file("out.png")])).toBe("out.png");
+  expect(pickMadeDefault([dir("img")])).toBeNull();
+  expect(pickMadeDefault([file("a.txt"), file("b.txt")])).toBeNull();
 });

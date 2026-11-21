@@ -154,19 +154,19 @@ test("the empty box draws one Favourites block, lists and entities in their orde
   await settle();
   expect(board()).toEqual([
     "# Favourites",
-    "Backoff",
+    "#142 Backoff",
     "SEPA payouts",
     "Retry failed SEPA payouts",
     "# Recent",
     "Retry failed SEPA payouts",
-    "Backoff",
+    "#142 Backoff",
   ]);
 });
 
 test("no favourites, no Favourites heading", async () => {
   mountIt();
   await settle();
-  expect(board()).toEqual(["# Recent", "Retry failed SEPA payouts", "Backoff"]);
+  expect(board()).toEqual(["# Recent", "Retry failed SEPA payouts", "#142 Backoff"]);
 });
 
 test("Favourite on a recent row writes it and the empty box redraws at once", async () => {
@@ -183,7 +183,7 @@ test("Favourite on a recent row writes it and the empty box redraws at once", as
   await settle();
   expect(store.add).toHaveBeenCalledWith({ entity: PR.entity_id });
   expect(toasts.items.at(-1)?.text).toBe("Favourited Backoff");
-  expect(board()).toEqual(["# Favourites", "SEPA payouts", "Backoff", "# Recent", "Retry failed SEPA payouts", "Backoff"]);
+  expect(board()).toEqual(["# Favourites", "SEPA payouts", "#142 Backoff", "# Recent", "Retry failed SEPA payouts", "#142 Backoff"]);
 });
 
 test("Unfavourite on a favourite takes it out of the block, and the last one takes the heading", async () => {
@@ -198,7 +198,7 @@ test("Unfavourite on a favourite takes it out of the block, and the last one tak
   await settle();
   expect(store.remove).toHaveBeenCalledWith({ entity: TICKET.entity_id });
   expect(toasts.items.at(-1)?.text).toBe("Unfavourited PAY-231");
-  expect(board()).toEqual(["# Recent", "Retry failed SEPA payouts", "Backoff"]);
+  expect(board()).toEqual(["# Recent", "Retry failed SEPA payouts", "#142 Backoff"]);
 });
 
 test("a saved list found by its words is favourited as a list, and sits in the block", async () => {
@@ -213,7 +213,7 @@ test("a saved list found by its words is favourited as a list, and sits in the b
   await settle();
   expect(store.add).toHaveBeenCalledWith({ list: LIST.entity_id });
   await type("");
-  expect(board()).toEqual(["# Favourites", "SEPA payouts", "# Recent", "Retry failed SEPA payouts", "Backoff"]);
+  expect(board()).toEqual(["# Favourites", "SEPA payouts", "# Recent", "Retry failed SEPA payouts", "#142 Backoff"]);
   // Tab on it in the block offers Unfavourite among the list's own actions.
   press("Tab");
   await settle();

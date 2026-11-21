@@ -55,6 +55,8 @@ use knobas_source::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod files;
+
 /// The dataset, compiled in: the mock is used from tests and from the packaged
 /// app, neither of which can rely on a file being next to the binary.
 const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json");
@@ -74,8 +76,13 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// configuration, a daily protocol page and two monitors. `v5` is #2403: a
 /// ticket gained its reporter, its created date, its time spent and its
 /// worklog entries' seconds. `v6` is #2455: a comment's text sits under its
-/// author's line in `body_text`, as the real adapters write it.
-const CURSOR: &str = "tidewater-v6";
+/// author's line in `body_text`, as the real adapters write it. `v7` is the
+/// fuzzy-search pass (2026-11-19): two repositories named as Björn's real
+/// misses were, `ADProxy` and `abcMappingService`. `v8` is the everything
+/// search's fixture (2026-11-20, D16): the renamed repository
+/// `ledger-gateway`, the default branches of the repositories with files at
+/// their head, and a comment on `PAY-228` that names the old name.
+const CURSOR: &str = "tidewater-v8";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
@@ -524,6 +531,13 @@ impl MockSource {
         world
     }
 
+    /// The fixture's files of the repository `entity` (an entity id of this
+    /// instance's), where it has any (D16).
+    fn files_of(&self, entity: &str) -> Option<&'static files::Tree> {
+        let name = entity.strip_prefix(&self.id)?.strip_prefix(':')?;
+        files::of(name)
+    }
+
     /// The error this instance should report instead of doing the work.
     fn fault_error(&self) -> Option<SourceError> {
         match self.fault {
@@ -853,7 +867,13 @@ fn branch_payload(b: &Branch) -> serde_json::Value {
         serde_json::to_value(b).expect("a fixture record must serialize"),
         &b.repo,
     );
-    if let Some(sha) = head_commit(&b.repo, &b.name) {
+    // A default branch the fixture records no commit on stands at its
+    // repository's files (D16), which the tree pass reads at that commit.
+    let files_head = (b.state == "default")
+        .then(|| files::of(&b.repo))
+        .flatten()
+        .map(|tree| tree.commit.as_str());
+    if let Some(sha) = head_commit(&b.repo, &b.name).or(files_head) {
         payload["head_sha"] = serde_json::Value::from(sha);
     }
     if let Some(default) = fixture()
@@ -1254,7 +1274,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 values: vec![
                     StateValue::of("up", Tone::Ok),
                     StateValue::of("down", Tone::Err),
-                    StateValue::of("pending", Tone::Warn),
+                    StateValue::of("pending", Tone::Info),
                 ],
             }],
             monitor_type: vec![PayloadPath::of(["type"])],
@@ -1573,6 +1593,77 @@ impl Source for MockSource {
             "the mock adapter has no workflow -- its fixture has statuses, not a set of moves -- \
              so there are no reachable transitions to read for {entity:?}"
         )))
+    }
+
+    /// The fixture's files (D16): a repository's default branch and the
+    /// commit it stands at, which the stored-trees pass and the files pass
+    /// read.
+    fn tree_shape(&self) -> Option<knobas_source::tree::TreeShape> {
+        Some(knobas_source::tree::TreeShape {
+            repository: "repo",
+            default_branch: &["default_branch"],
+            branch: "branch",
+            branch_name: &["name"],
+            branch_commit: &["head_sha"],
+            pull: None,
+        })
+    }
+
+    /// The repository's one tree, at whatever commit of it is asked: every
+    /// branch holds the fixture's files. A repository with none answers an
+    /// error, which skips the branch.
+    async fn read_tree(
+        &self,
+        repository: &str,
+        _commit: &str,
+        held: &dyn knobas_source::tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<knobas_source::tree::TreeRead>, SourceError> {
+        if let Some(error) = self.fault_error() {
+            return Err(error);
+        }
+        let tree = self
+            .files_of(repository)
+            .ok_or_else(|| SourceError::protocol(format!("{repository} holds no files")))?;
+        Ok(Some(tree.read(held, cap)))
+    }
+
+    async fn read_blob(
+        &self,
+        repository: &str,
+        _commit: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        if let Some(error) = self.fault_error() {
+            return Err(error);
+        }
+        Ok(self
+            .files_of(repository)
+            .and_then(|tree| tree.files.get(path))
+            .filter(|bytes| bytes.len() as u64 <= cap)
+            .map(|bytes| bytes.to_vec()))
+    }
+
+    /// One request a repository, as Gitea's archive of a commit.
+    async fn read_archive(
+        &self,
+        repository: &str,
+        _commit: &str,
+        wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+        each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+    ) -> Result<Option<u32>, SourceError> {
+        if let Some(error) = self.fault_error() {
+            return Err(error);
+        }
+        if let Some(tree) = self.files_of(repository) {
+            for (path, bytes) in &tree.files {
+                if wanted(path) {
+                    each((*path).to_owned(), bytes.to_vec());
+                }
+            }
+        }
+        Ok(Some(1))
     }
 
     /// No source view (ADR-0020): the mock draws nothing for any kind, so the

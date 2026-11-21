@@ -1,0 +1,94 @@
+{
+ "_": "Lines for testenv/perf/monitors.mjs --check (just monitors-budget --real <port>), per moment and CPU throttle, at every size it runs (1440x868@1, 2560x1440@1.25, 5120x1440@1), from the monitors-page pass of PR #2479 (2026-11-19; docs/decisions/2026-11-19-monitors-is-a-quiet-board.md). Björn's targets are the opens': a page usable within 100, 200 and 300 ms at 1x, 4x and 6x, a press within 100, 100 and 200; and his frame: near 240 frames a second at 1x on his 239 Hz display, no frame over 4.2 ms of main-thread work, no dropped frame in a scroll. Measured in headless Chrome on Björn's PC (the WSL box) over a copy of the saved scale database with a day of beats in it: first opens 41 to 53, 60 to 72 and 75 to 84 ms at 1x, 4x and 6x, a monitor opened in 32 to 49, 66 to 93 and 95 to 123, a beat's longest task 3.7 to 4.2 ms at 1x with one row drawn again (every row as the half hour turns), a scroll's main thread 1.1 to 1.9 ms a frame at 1x, a hover's 1.5 to 2.7. The lines are the targets where Björn set them, and the measures with room for a loaded machine where he set none; usefulMs is from the press to five monitors' rows drawn, or to the open monitor's name. An idle page is held by its work less V8's garbage collection (workMs), which falls where it falls: what the open before it left.",
+ "lines": {
+  "open": {
+   "1": {
+    "usefulMs": 100
+   },
+   "4": {
+    "usefulMs": 200
+   },
+   "6": {
+    "usefulMs": 300
+   }
+  },
+  "return": {
+   "1": {
+    "usefulMs": 100
+   },
+   "4": {
+    "usefulMs": 200
+   },
+   "6": {
+    "usefulMs": 300
+   }
+  },
+  "monitor": {
+   "1": {
+    "usefulMs": 100
+   },
+   "4": {
+    "usefulMs": 100
+   },
+   "6": {
+    "usefulMs": 200
+   }
+  },
+  "idle": {
+   "1": {
+    "workMs": 5
+   },
+   "4": {
+    "workMs": 10
+   },
+   "6": {
+    "workMs": 15
+   }
+  },
+  "beat": {
+   "1": {
+    "maxTaskMs": 10,
+    "over4": 2,
+    "rowsTouched": 30
+   },
+   "4": {
+    "rowsTouched": 30
+   },
+   "6": {
+    "rowsTouched": 30
+   }
+  },
+  "beats": {
+   "1": {
+    "maxTaskMs": 12,
+    "rowsTouched": 30
+   }
+  },
+  "scroll": {
+   "1": {
+    "perFrameMs": 3,
+    "dropped": 0
+   },
+   "4": {
+    "perFrameMs": 8,
+    "dropped": 0
+   },
+   "6": {
+    "perFrameMs": 12,
+    "dropped": 2
+   }
+  },
+  "hover": {
+   "1": {
+    "perFrameMs": 4.2,
+    "over4": 2
+   },
+   "4": {
+    "perFrameMs": 12
+   },
+   "6": {
+    "perFrameMs": 16
+   }
+  }
+ }
+}

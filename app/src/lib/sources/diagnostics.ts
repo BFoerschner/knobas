@@ -71,15 +71,6 @@ export function runDuration(startedAt: string, finishedAt: string | null): numbe
   return Math.max(0, to - from);
 }
 
-/** A duration as the run log prints it: `840 ms`, `4.2 s`, `1:12`. */
-export function formatDuration(ms: number | null): string {
-  if (ms === null) return "—";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const seconds = Math.round(ms / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
 /** How often a source syncs, as a sentence fragment: `every 15 min`. */
 export function formatInterval(secs: number): string {
   if (!Number.isFinite(secs) || secs <= 0) return "—";

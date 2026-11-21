@@ -1,0 +1,208 @@
+/**
+ * A folder renderer in a comparison (ux26, `docs/decisions/2026-11-20-a-comparison-is-drawn-rendered-and-may-end-at-the-
+ * working-tree.md` rulings 7 and 8; the decision list's sections 8 to 10): with *Rendered* on, a changed folder a
+ * renderer takes is listed as its group, the generated files that differ under its bar; only *Run* runs; the answer
+ * lands in one flush with the bar's node kept; *Run N folder renders* takes at most 20 folders a press.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import type { FolderRenderer } from "../../ipc/app";
+import type { DiffFile } from "../../ipc/entity";
+import { laneOf } from "../../render/folder-compare.svelte";
+import { fakeCompareBackend } from "../../render/folder-compare.test-support";
+import { createDiffLayout } from "./diff-layout.svelte";
+import { createDiffRendered, type DiffRenderedChoice } from "./diff-rendered.svelte";
+import TfDiffView from "./TfDiffView.svelte";
+
+const SHA = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
+const WT = "~working-tree";
+const SITE: FolderRenderer = { id: "site", name: "Low-code site", command: "lowcode {path} --out {outdir}", holds: [], folders: ["docs"], output: "folder", timeout_secs: 30 };
+const file = (path: string): DiffFile => ({
+  path,
+  old_path: null,
+  change: "modified",
+  additions: 1,
+  deletions: 1,
+  hunks: [{ header: "@@ -1 +1 @@", lines: [{ kind: "del", old: 1, new: null, text: "a" }, { kind: "add", old: null, new: 1, text: "b" }] }],
+  truncated: false,
+  threads: [],
+});
+const DIFFERS = {
+  files: [
+    { path: "index.md", change: "modified" as const, before_size: 10, after_size: 12, binary: false },
+    { path: "steps/04-alert.md", change: "added" as const, before_size: null, after_size: 30, binary: false },
+  ],
+  same: 9,
+  eol_only: 0,
+  before_files: 11,
+  after_files: 12,
+};
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+let rendering: DiffRenderedChoice;
+beforeEach(() => {
+  target = document.createElement("div");
+  document.body.appendChild(target);
+  rendering = createDiffRendered(() => null);
+});
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+  vi.useRealTimers();
+});
+
+function draw(files: DiffFile[], fake: ReturnType<typeof fakeCompareBackend>, more: Record<string, unknown> = {}) {
+  const saved = (more["saved"] as FolderRenderer[] | undefined) ?? [SITE];
+  view = mount(TfDiffView, {
+    target,
+    props: {
+      files,
+      context: { text: () => Promise.resolve(null), bytes: () => Promise.resolve(new TextEncoder().encode("x")) },
+      rendering,
+      layout: createDiffLayout(() => null),
+      defaults: { list: [] },
+      folders: { entityId: "repo", before: SHA, after: WT },
+      folderPorts: fake.ports,
+      folderSaved: { list: saved, ensure: () => Promise.resolve() },
+      picks: { of: () => null, set: () => Promise.resolve(), ensure: () => Promise.resolve() },
+      madeBytes: (token: string, path: string) => Promise.resolve(new TextEncoder().encode(`${token} ${path}\n`)),
+      ...more,
+    } as never,
+  });
+  flushSync();
+}
+const settle = async () => {
+  for (let n = 0; n < 12; n += 1) await Promise.resolve();
+  flushSync();
+};
+const rail = () =>
+  [...target.querySelectorAll<HTMLElement>(".tf-flist > :not(.tf-wgap)")].map((row) =>
+    row.classList.contains("tf-dgdir") ? `<${row.textContent!.trim()}>` : row.classList.contains("tf-dgband") ? `band: ${row.textContent}` : row.classList.contains("tf-fdir") ? `[${row.textContent!.trim()}]` : `${row.classList.contains("tf-dmade") ? "made " : ""}${row.querySelector(".tf-fname")!.textContent}`,
+  );
+const bar = () => target.querySelector<HTMLElement>(".tf-dfolder .tf-madebar")!;
+const barButton = (name: string) => [...bar().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name);
+const runAll = () => target.querySelector<HTMLButtonElement>(".tf-drun button")!;
+
+test("with Rendered on and both sides kept, the rail lists the folder, its band and only the generated files that differ", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("lib/x.rs"), file("docs/index.md"), file("docs/steps/03-retry.md")], fake);
+  await settle();
+  expect(rail()).toEqual(["<docs>", "band: Made by Low-code siteReal files", "made index.md", "made steps/04-alert.md", "[lib]", "x.rs"]);
+  expect(target.querySelector('.tf-diff[data-file="docs/index.md"]'), "no real file of the folder").toBeNull();
+  expect(bar().querySelector("[role=status]")!.textContent).toBe("Low-code site made 11 files before and 12 after from 4f2a91c and your working tree: 2 differ.");
+  expect(target.querySelector(".tf-dfend")!.textContent!.trim()).toBe("9 generated files are the same on both sides and are not listed.");
+  expect(target.querySelectorAll(".tf-dunder .tf-diff").length).toBe(2);
+  expect(fake.asked.every((a) => a.ask === "look"), "a look starts nothing").toBe(true);
+});
+
+test("without a checkout no folder is offered: no glyph, no group", async () => {
+  const fake = fakeCompareBackend();
+  rendering.set(true);
+  draw([file("docs/index.md")], fake, { folders: null });
+  await settle();
+  expect(target.querySelector(".tf-dfmark, .tf-dgdir, .tf-dfolder, .tf-drun")).toBeNull();
+  expect(fake.asked).toEqual([]);
+});
+
+test("the toggle starts no run; Run runs both sides, and their answer lands in one flush with the bar's node kept", async () => {
+  const fake = fakeCompareBackend();
+  fake.answers.set("t1\nt2", DIFFERS);
+  draw([file("docs/index.md"), file("src/a.rs")], fake);
+  await settle();
+  expect(target.querySelector(".tf-dfolder")).toBeNull();
+  rendering.set(true);
+  flushSync();
+  target.querySelector<HTMLButtonElement>(".tf-drendered")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-drendered")!.click();
+  await settle();
+  expect(fake.asked.filter((a) => a.ask !== "look"), "the pill is a way of looking").toEqual([]);
+  expect(bar().querySelector("[role=status]")!.textContent).toBe("Not rendered yet for both sides.");
+  expect(barButton("Run")!.classList.contains("tf-primary")).toBe(true);
+  expect(target.querySelector(".tf-dfolder .tf-dfnote")!.textContent).toBe("Its generated files show here when both sides are made.");
+  barButton("Run")!.click();
+  await settle();
+  expect(fake.asked.filter((a) => a.ask === "again").map((a) => a.lane)).toEqual([laneOf(SHA), laneOf(WT)]);
+  expect(barButton("Stop")).toBeDefined();
+  const node = target.querySelector(".tf-dfolder");
+  fake.land(laneOf(SHA), "t1");
+  await settle();
+  expect(target.querySelector(".tf-dfnote"), "half an answer lists nothing").not.toBeNull();
+  fake.land(laneOf(WT), "t2");
+  await settle();
+  expect(target.querySelector(".tf-dfolder")).toBe(node);
+  expect(target.querySelector(".tf-dfnote")).toBeNull();
+  expect(target.querySelectorAll(".tf-dunder .tf-diff").length).toBe(2);
+});
+
+test("a side that failed before turns the bar red, and What it said opens its stderr on the press", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.slot(laneOf(WT)).failure = { why: "failed", status: 2, stderr: "lowcode: no project file\n" };
+  rendering.set(true);
+  draw([file("docs/index.md")], fake);
+  await settle();
+  expect(bar().classList.contains("tf-err")).toBe(true);
+  expect(bar().querySelector("[role=status]")!.textContent).toBe("After: the command exited with status 2.");
+  expect(target.querySelector(".tf-dffail"), "a look's answer moves nothing under the bar").toBeNull();
+  barButton("What it said")!.click();
+  flushSync();
+  expect(target.querySelector(".tf-dffail pre")!.textContent).toBe("lowcode: no project file\n");
+  expect(barButton("Run again")).toBeDefined();
+});
+
+test("Run N folder renders presses at most 20 folders, and Stop all stops every lane asked", async () => {
+  vi.useFakeTimers();
+  const fake = fakeCompareBackend();
+  const many: FolderRenderer = { ...SITE, folders: ["docs/*"] };
+  const files = Array.from({ length: 21 }, (_, n) => file(`docs/f${String(n).padStart(2, "0")}/a.md`));
+  rendering.set(true);
+  draw(files, fake, { saved: [many] });
+  await settle();
+  expect(target.querySelector(".tf-drun-n")!.textContent).toBe("0 of 21 folders rendered");
+  expect(runAll().textContent).toBe("Run 20 of 21 folder renders");
+  runAll().click();
+  await settle();
+  const pressed = new Set(fake.asked.filter((a) => a.ask === "again").map((a) => a.folder));
+  expect(pressed.size).toBe(20);
+  expect(runAll().textContent).toBe("Stop all");
+  vi.advanceTimersByTime(2100);
+  runAll().click();
+  await settle();
+  expect(fake.stopped.length).toBe(40);
+});
+
+test("Real files puts the folder's files back, and the pill clears it", async () => {
+  const fake = fakeCompareBackend();
+  rendering.set(true);
+  draw([file("docs/index.md")], fake);
+  await settle();
+  barButton("Real files")!.click();
+  flushSync();
+  expect(target.querySelector(".tf-dfolder")).toBeNull();
+  expect(target.querySelector('.tf-diff[data-file="docs/index.md"]')).not.toBeNull();
+  // The glyph groups it again.
+  target.querySelector<HTMLButtonElement>(".tf-dfmark")!.click();
+  await settle();
+  expect(target.querySelector(".tf-dfolder")).not.toBeNull();
+});
+
+test("a renderer with no glob is never applied by the toggle, and its glyph groups the folder by hand", async () => {
+  const fake = fakeCompareBackend();
+  const any: FolderRenderer = { ...SITE, id: "any", name: "Any", folders: [] };
+  rendering.set(true);
+  draw([file("lib/x.rs")], fake, { saved: [any] });
+  await settle();
+  expect(target.querySelector(".tf-dfolder")).toBeNull();
+  const glyph = target.querySelector<HTMLButtonElement>(".tf-dfmark")!;
+  expect(glyph.title).toBe("Compare lib as Any makes it");
+  glyph.click();
+  await settle();
+  expect(target.querySelector(".tf-dfolder")?.getAttribute("data-folder")).toBe("lib");
+});

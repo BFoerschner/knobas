@@ -1,28 +1,69 @@
 <!--
   Settings › Performance (#2247, spec #2234 step 3): *Pages kept open*, over
-  `pages_kept_open` and `set_pages_kept_open`. The field saves when it is
-  left, and what the backend stored goes to the page host at once
+  `pages_kept_open` and `set_pages_kept_open`. The field saves on `Enter` or
+  when it is left, says *Saved*, and `Esc` puts the stored value back
+  (`saved-field.svelte.ts`). What the backend stored goes to the page host at once
   (`kept-pages.svelte.ts`), so a lower number drops the surplus hidden pages
-  with no restart.
+  with no restart. The same rooms take the main sections the shell opens ahead of their first press (`ahead.ts`), and
+  the hint says so.
+
+  *Smooth scrolling on 120 Hz displays* (2026-11-11, `crates/knobas-app/src/frame_rate.rs`): a switch over
+  `smooth_scrolling` and `set_smooth_scrolling`, drawn only where the backend offers it (macOS; it answers
+  `null` elsewhere). The window changes at once.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { push } from "../../shell/toasts.svelte";
   import { KEPT_PAGES_MAX, KEPT_PAGES_MIN, keptPages, type KeptPagesSetting } from "../kept-pages.svelte";
   import type { SectionPorts } from "./ports";
-  import { boundedNumber } from "./sections";
+  import { SavedWord, savedField } from "./saved-field.svelte";
+  import { boundedNumber, clampNote } from "./sections";
+  import { setSitesKept, sitesKept } from "../../ipc/site";
+
+  /** *Sites kept open* (ADR-0050): 1 to 6, 2 until set. */
+  const SITES_MIN = 1;
+  const SITES_MAX = 6;
 
   let {
     ports,
     kept = keptPages,
+    sitePorts = { kept: sitesKept, setKept: setSitesKept },
   }: {
-    ports: Pick<SectionPorts, "pagesKeptOpen" | "setPagesKeptOpen">;
+    /** *Sites kept open*'s read and write; the bridge's when omitted. */
+    sitePorts?: { kept: () => Promise<number>; setKept: (count: number) => Promise<number> };
+    ports: Pick<SectionPorts, "pagesKeptOpen" | "setPagesKeptOpen" | "smoothScrolling" | "setSmoothScrolling">;
     /** The page host's setting; the window's when omitted. */
     kept?: Pick<KeptPagesSetting, "set">;
   } = $props();
 
+  /** `null` until the read answers, and for good where the platform has no switch. */
+  let smoothOn = $state<boolean | null>(null);
+  let smoothBusy = $state(false);
+
+  $effect(() => {
+    void ports
+      .smoothScrolling()
+      .then((on) => (smoothOn = on))
+      .catch((cause) => push({ text: `Could not read Smooth scrolling: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  });
+
+  async function flipSmooth() {
+    if (smoothOn === null || smoothBusy) return;
+    smoothBusy = true;
+    try {
+      // What the backend stored, not what the click asked for.
+      smoothOn = await ports.setSmoothScrolling(!smoothOn);
+    } catch (cause) {
+      push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      smoothBusy = false;
+    }
+  }
+
   /** `null` until the read answers. */
   let stored = $state<number | null>(null);
+  /** Why the field holds something other than what was typed (F-613). */
+  let why = $state<string | null>(null);
 
   $effect(() => {
     void ports
@@ -34,28 +75,64 @@
       .catch((cause) => push({ text: `Could not read Pages kept open: ${ipcErrorMessage(cause)}`, tone: "err" }));
   });
 
-  async function save(input: HTMLInputElement) {
-    if (stored === null) return;
+  const said = new SavedWord();
+
+  /** *Sites kept open*, `null` until the read answers. */
+  let sitesStored = $state<number | null>(null);
+  let sitesWhy = $state<string | null>(null);
+  const sitesSaid = new SavedWord();
+  $effect(() => {
+    void sitePorts
+      .kept()
+      .then((read) => (sitesStored = read))
+      .catch(() => {});
+  });
+
+  async function saveSites(input: HTMLInputElement): Promise<boolean> {
+    if (sitesStored === null) return false;
+    let done = false;
+    const value = boundedNumber(input.value, SITES_MIN, SITES_MAX, sitesStored);
+    sitesWhy = clampNote(input.value, SITES_MIN, SITES_MAX, value);
+    if (value !== sitesStored) {
+      try {
+        sitesStored = await sitePorts.setKept(value);
+        done = true;
+      } catch (cause) {
+        push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
+      }
+    }
+    input.value = String(sitesStored);
+    return done;
+  }
+
+  /** Whether a new value was stored. */
+  async function save(input: HTMLInputElement): Promise<boolean> {
+    if (stored === null) return false;
+    let done = false;
     const value = boundedNumber(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, stored);
+    why = clampNote(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, value);
     if (value !== stored) {
       try {
         stored = await ports.setPagesKeptOpen(value);
         kept.set(stored);
+        done = true;
       } catch (cause) {
         push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
       }
     }
     input.value = String(stored);
+    return done;
   }
 </script>
 
-<header class="tf-stg-h"><h1>Performance</h1><p>How much knobas keeps ready, against the memory it uses.</p></header>
+<header class="tf-stg-h"><h1>Performance</h1><p>How much knobas keeps ready and how smoothly it moves, against the memory and power they use.</p></header>
 {#if stored !== null}
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-perf-kept"
       >Pages kept open<small
-        >Pages you visited recently stay loaded in the background, so going back to one is instant. 0 keeps none;
-        each one kept uses memory.</small
+        >Pages you visited recently stay loaded in the background, so going back to one is instant. Until you have
+        visited that many, knobas fills the rest with Tickets, Builds, Code, Monitors, Inbox and Docs once it is idle
+        after starting, so their first open is quick too. 0 keeps none; each page kept uses memory.</small
       ></label
     >
     <div class="tf-stg-c tf-stg-inl">
@@ -66,9 +143,61 @@
         max={KEPT_PAGES_MAX}
         class="tf-stg-in tf-stg-n70"
         value={stored}
-        onchange={(event) => void save(event.currentTarget)}
+        aria-invalid={why !== null ? "true" : undefined}
+        aria-describedby={why !== null ? "tf-perf-kept-why" : undefined}
+        {@attach savedField({ saved: () => String(stored ?? ""), save, word: said, restored: () => (why = null) })}
       />
       <span>pages</span>
+      <small class="tf-stg-saved" role="status">{said.shown ? "Saved" : ""}</small>
+      {#if why !== null}<small class="tf-stg-why" id="tf-perf-kept-why" role="alert">{why}</small>{/if}
+    </div>
+  </div>
+{/if}
+{#if sitesStored !== null}
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-perf-sites"
+      >Sites kept open<small
+        >How many sites stay alive when you look elsewhere. One past this closes the one you left longest ago, unless it
+        holds unsaved changes.</small
+      ></label
+    >
+    <div class="tf-stg-c tf-stg-inl">
+      <input
+        id="tf-perf-sites"
+        type="number"
+        min={SITES_MIN}
+        max={SITES_MAX}
+        class="tf-stg-in tf-stg-n70"
+        value={sitesStored}
+        aria-invalid={sitesWhy !== null ? "true" : undefined}
+        aria-describedby={sitesWhy !== null ? "tf-perf-sites-why" : undefined}
+        {@attach savedField({ saved: () => String(sitesStored ?? ""), save: saveSites, word: sitesSaid, restored: () => (sitesWhy = null) })}
+      />
+      <span>sites</span>
+      <small class="tf-stg-saved" role="status">{sitesSaid.shown ? "Saved" : ""}</small>
+      {#if sitesWhy !== null}<small class="tf-stg-why" id="tf-perf-sites-why" role="alert">{sitesWhy}</small>{/if}
+    </div>
+  </div>
+{/if}
+{#if smoothOn !== null}
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-perf-smooth"
+      >Smooth scrolling on 120 Hz displays<small
+        >Lists and pages move at your display's full rate, up to 120 frames a second, instead of 60. It uses more power
+        while something on screen moves.</small
+      ></label
+    >
+    <div class="tf-stg-c tf-stg-inl">
+      <button
+        id="tf-perf-smooth"
+        type="button"
+        class="tf-stg-sw"
+        role="switch"
+        aria-checked={smoothOn}
+        aria-label="Smooth scrolling on 120 Hz displays"
+        disabled={smoothBusy}
+        onclick={flipSmooth}><i></i></button
+      >
     </div>
   </div>
 {/if}

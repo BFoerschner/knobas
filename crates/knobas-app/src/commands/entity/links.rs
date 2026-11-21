@@ -319,6 +319,20 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
 /// *Showing the mirror: <message>*. An entity-list row keeps its address only
 /// where the mirror holds that entity (rule 7, `sources::crud::view`).
 ///
+/// **What knobas last read, at once** (ADR-0042): the answer is what knobas
+/// held where it holds one, with `held_at` saying when it was read, and the
+/// source is read behind it and told on `view:fresh`; only a view never read
+/// waits for the source ([`crate::sources::crud::shown`]).
+///
+/// **`behind`** (the ux16 overs pass, 2026-11-17): a view the page draws
+/// beside a read it waits on, not instead of it -- Compare's branch standing
+/// beside the compare's list. Its requests go in the background lane
+/// ([`knobas_http::Lane::Background`]), so they reach the source once the
+/// page's own are answered: on Björn's PC the standing's eight requests went
+/// out with the compare's two and Gitea answered the compare in 600 ms at 6x
+/// where it answers it in 40 to 90 alone. What knobas holds is answered at
+/// once either way. Left out, the read is a person's, as before.
+///
 /// # Errors
 ///
 /// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
@@ -330,18 +344,26 @@ pub async fn entity_view<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
     section: Option<String>,
-) -> Result<Option<knobas_source::view::SourceView>, IpcError> {
+    behind: Option<bool>,
+) -> Result<Option<crate::sources::live::ShownView>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::crud::view(
+    if behind == Some(true) {
+        crate::logging::mark_read_behind();
+    }
+    let read = crate::sources::crud::shown(
         &state.pool,
         &state.secrets,
         &state.registry,
         &state.live,
         &entity_id,
         section.as_deref(),
-    )
-    .await
-    .map_err(|error| crate::sources::to_ipc(&error, None))
+    );
+    let answer = if behind == Some(true) {
+        knobas_http::behind(read).await
+    } else {
+        read.await
+    };
+    answer.map_err(|error| crate::sources::to_ipc(&error, None))
 }
 
 /// The diff from `base` to `head` of the repository `entity_id` (#2272,
@@ -374,6 +396,246 @@ pub async fn entity_range_diff<R: tauri::Runtime>(
         ignore_whitespace,
     )
     .await
+}
+
+/// The diff from `base` to `head` of the repository `entity_id` as its
+/// source's compare answers it now, never read locally (ADR-0041): what a
+/// page that drew `entity_range_diff`'s predicted answer (`predicted_at`)
+/// asks behind it, to learn whether a branch moved since the mirror's sync.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what the source's read refuses with.
+#[tauri::command]
+pub async fn entity_source_range_diff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<crate::checkout::RangeDiff, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::checkout::source_range_diff(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &base,
+        &head,
+    )
+    .await
+}
+
+/// The files `base`...`head` of the repository `entity_id` changes, without
+/// their lines (the compare pass of PR #2479, 2026-11-13): read where
+/// [`entity_range_diff`] reads the whole diff, and answered in a fraction of
+/// its bytes, so a page lists a range of thousands of files at once and reads
+/// each file's lines with [`entity_range_file`] as it reaches it.
+///
+/// `read` names the read for [`cancel_read`], which calls it off.
+///
+/// # Errors
+///
+/// As [`entity_range_diff`];
+/// [`Conflict`](crate::IpcErrorCode::Conflict) for a read called off.
+#[tauri::command]
+pub async fn entity_range_files<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    ignore_whitespace: bool,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFiles, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_files(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            ignore_whitespace,
+        )
+        .await
+    })
+    .await
+}
+
+/// The names of the files `base`...`head` of the repository `entity_id`
+/// changes, without their counts (the stored-compare pass of PR #2479,
+/// 2026-11-14): at the checkout, between the tips the mirror holds for two
+/// branch names, as [`entity_range_files`] predicts there, in one `git diff
+/// --raw -M` that reads no file's content. `None` where the checkout cannot
+/// answer, or [`entity_range_files`] holds the list already. A page draws it
+/// while that list, read beside it, brings the counts.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn entity_range_names<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+) -> Result<Option<crate::checkout::range_files::RangeNames>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(crate::checkout::range_files::range_names(
+        &state.pool,
+        state.registry.as_ref(),
+        &entity_id,
+        &base,
+        &head,
+    )
+    .await)
+}
+
+/// One page of one file's lines in `base`...`head` of the repository
+/// `entity_id` (the compare pass of PR #2479): the ends are the `range`
+/// [`entity_range_files`] answered (the names it was asked by where it
+/// settled none), `path` and `old_path` the file as it listed it, `from` the
+/// line the page starts at (`0`, then each page's `next`).
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a file the diff does not
+/// hold; otherwise as [`entity_range_files`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_range_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    path: String,
+    old_path: Option<String>,
+    ignore_whitespace: bool,
+    from: u32,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFilePage, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_file(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            &path,
+            old_path.as_deref(),
+            ignore_whitespace,
+            from,
+        )
+        .await
+    })
+    .await
+}
+
+/// The first page of each of `files` in `base`...`head` of the repository
+/// `entity_id`, in one read (the big-compare pass of PR #2479, 2026-11-16):
+/// what [`entity_range_file`] answers for each from line 0, in the order
+/// asked, one start of git for all of them; `None` for a file it could not
+/// answer whole, which the page reads alone. At most
+/// [`PAGES_AT_ONCE`](crate::checkout::range_files::PAGES_AT_ONCE) files.
+/// `read` as there.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) past that many files;
+/// otherwise as [`entity_range_file`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn entity_range_file_pages<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    files: Vec<crate::checkout::range_files::RangeFileAsk>,
+    ignore_whitespace: bool,
+    read: Option<String>,
+) -> Result<Vec<Option<crate::checkout::range_files::RangeFilePage>>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::range_file_pages(
+            &pool,
+            &secrets,
+            &registry,
+            &live,
+            &entity_id,
+            &base,
+            &head,
+            &files,
+            ignore_whitespace,
+        )
+        .await
+    })
+    .await
+}
+
+/// The files `base`...`head` changes as the source's compare answers it now,
+/// never local, without their lines: what a page that drew
+/// [`entity_range_files`]' predicted answer asks behind it (ADR-0041), as
+/// [`entity_source_range_diff`] for the whole diff. `read` as there.
+///
+/// # Errors
+///
+/// As [`entity_source_range_diff`];
+/// [`Conflict`](crate::IpcErrorCode::Conflict) for a read called off.
+#[tauri::command]
+pub async fn entity_source_range_files<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    base: String,
+    head: String,
+    read: Option<String>,
+) -> Result<crate::checkout::range_files::RangeFiles, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (pool, secrets, registry, live) = (
+        state.pool.clone(),
+        state.secrets.clone(),
+        state.registry.clone(),
+        state.live.clone(),
+    );
+    crate::reads::run(read, async move {
+        crate::checkout::range_files::source_range_files(
+            &pool, &secrets, &registry, &live, &entity_id, &base, &head,
+        )
+        .await
+    })
+    .await
+}
+
+/// Call off the read the page named `read` (`entity_range_files`,
+/// `entity_range_file`): its work stops where it stands, a request to the
+/// source abandoned and a `git` it started killed. Whether it was still
+/// running.
+#[tauri::command]
+pub fn cancel_read(read: String) -> bool {
+    crate::reads::cancel(&read)
 }
 
 /// The change commit `commit_id` (whole or short `sha`) made, for the
@@ -459,6 +721,27 @@ pub async fn entity_file_bytes_inner(
     commit: Option<&str>,
 ) -> Result<Vec<u8>, IpcError> {
     use knobas_source::view::{BYTES_CAP, FileBytes};
+    // The working tree's or the index's file (ux26): read at the checkout, never the source.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
+        return working_bytes(pool, entity_id, end, path).await;
+    }
+    // A file at a sha the checkout holds is read there (ADR-0041): a README's
+    // images, a PDF, with no request to the source.
+    if let Some(commit) = commit {
+        match crate::checkout::local_file_bytes(pool, entity_id, commit, path, BYTES_CAP).await {
+            Some(Ok(bytes)) => return Ok(bytes),
+            Some(Err(size)) => {
+                return Err(IpcError::invalid(format!(
+                    "{path} is {}; knobas reads a file's bytes up to {}",
+                    mebibytes(size),
+                    mebibytes(BYTES_CAP)
+                )));
+            }
+            None => {}
+        }
+    }
     let read =
         crate::sources::crud::file_bytes(pool, secrets, registry, live, entity_id, path, commit)
             .await
@@ -536,6 +819,28 @@ pub async fn entity_file_piped_inner(
     steps: &[crate::file_pipeline::PipeStep],
 ) -> Result<crate::file_pipeline::PipeRun, IpcError> {
     use crate::file_pipeline::{Limits, Piped, run_on_file};
+    // A pipeline over the working tree's or the index's file (ux26): its bytes from the checkout, run here.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
+        let bytes = working_bytes(pool, entity_id, end, path).await?;
+        let commands = if steps
+            .iter()
+            .any(|step| matches!(step, crate::file_pipeline::PipeStep::Command { .. }))
+        {
+            crate::file_pipeline::saved::command_steps(pool).await?
+        } else {
+            Vec::new()
+        };
+        return Ok(crate::file_pipeline::run_bytes_with(
+            steps,
+            &commands,
+            bytes,
+            path,
+            Limits::default(),
+        )
+        .await);
+    }
     let piped = run_on_file(
         pool,
         secrets,
@@ -558,6 +863,34 @@ pub async fn entity_file_piped_inner(
         ))),
         Piped::NoBytes => Err(IpcError::invalid(format!(
             "{entity_id}'s source reads no file bytes"
+        ))),
+    }
+}
+
+/// The bytes of `path` at the working tree or the index of `entity_id`'s
+/// checkout, as [`entity_file_bytes_inner`] answers them.
+async fn working_bytes(
+    pool: &PgPool,
+    entity_id: &str,
+    end: &str,
+    path: &str,
+) -> Result<Vec<u8>, IpcError> {
+    use crate::checkout::working::Bytes;
+    let cap = knobas_source::view::BYTES_CAP;
+    match crate::checkout::working_file_bytes(pool, entity_id, end, path, cap).await? {
+        Bytes::Read(bytes) => Ok(bytes),
+        Bytes::TooLarge(size) => Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads a file's bytes up to {}",
+            mebibytes(size),
+            mebibytes(cap)
+        ))),
+        Bytes::NotThere => Err(IpcError::not_found(format!(
+            "git lists no file {path} in {}",
+            if end == crate::checkout::working::INDEX {
+                "the index"
+            } else {
+                "the working tree"
+            }
         ))),
     }
 }

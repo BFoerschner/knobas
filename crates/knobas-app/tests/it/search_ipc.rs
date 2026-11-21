@@ -129,12 +129,11 @@ async fn the_wire_shape_is_the_contract() {
     );
     assert!(v["groups"][0]["hits"][0]["row"].is_null(), "{v}");
     assert!(v["groups"][0]["hits"][0]["synced_at"].is_string(), "{v}");
-    assert!(
-        v["groups"][0]["hits"][0]["snippet"][0]["hit"].is_boolean(),
-        "{v}"
-    );
-    assert!(
-        v["groups"][0]["hits"][0]["snippet"][0]["text"].is_string(),
+    // The headline nothing drew is no longer computed (the query audit of
+    // 2026-11-12): the field keeps its place on the wire, empty.
+    assert_eq!(
+        v["groups"][0]["hits"][0]["snippet"],
+        serde_json::json!([]),
         "{v}"
     );
     // Everything's excerpts (#2431): each a place (text or null) and segments.
@@ -161,7 +160,7 @@ async fn the_wire_shape_is_the_contract() {
 /// would render it inertly and the highlight would silently disappear -- or,
 /// worse, someone would reach for `{@html}` to make it work again.
 #[tokio::test]
-async fn no_markup_reaches_the_wire_in_a_snippet() {
+async fn no_markup_reaches_the_wire_in_an_excerpt() {
     let pool = pool().await;
     let t = seed(&pool, "mkup").await;
 
@@ -172,7 +171,8 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
         .groups
         .iter()
         .flat_map(|group| group.hits.iter())
-        .flat_map(|hit| hit.snippet.iter())
+        .flat_map(|hit| hit.excerpts.iter())
+        .flat_map(|excerpt| excerpt.segments.iter())
         .collect();
 
     assert!(!segments.is_empty(), "the seeded rows have excerpts");

@@ -9,6 +9,7 @@ import type { ArtifactEntry, LogLine, LogStep, RunTest, TestOutcome } from "../.
 import type { Handlers } from "../fake-tauri";
 import { SPEC_PDF } from "../../../render/pdf-fixture";
 import { picture } from "./attachments";
+import { ASCII_AFTER, asciiArt } from "../fake-ascii";
 import { fixtureRun } from "./builds";
 
 const REPOS = ["payout-service", "ledger-core", "psp-client", "fx-rates", "batch-runner", "notify-hub", "api-gateway"];
@@ -91,6 +92,8 @@ export function fakeLog(config: string, no: number, st: string): { lines: LogLin
     add(2, "warning: unused variable: `cut`", "warn");
     add(2, "  --> src/sepa/batch.rs:3:9", "warn");
     add(2, "Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 08s");
+    // `?fake-ascii`: the test step opens on the retry states it drives (`fake-ascii.ts`).
+    if (asciiArt()) ASCII_AFTER.trimEnd().split("\n").forEach((x) => add(3, x));
     add(3, "Running tests/sepa_retry.rs (target/debug/deps/sepa_retry-3f1c9e)");
     add(3, "");
     add(3, "running 42 tests");

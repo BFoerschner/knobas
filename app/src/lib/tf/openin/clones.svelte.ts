@@ -26,9 +26,14 @@ export const realClonePorts: ClonePorts = {
   listen: (event, handler) => tauriListen(event, handler),
 };
 
-/** Where one repository's clone is, as its button draws it. */
+/**
+ * Where one repository's clone is, as its button draws it. `cloned` holds the folder of a clone that just ended until
+ * the page's own read of the checkout finds it (`forget`), so the button goes from *Cloning…* straight to *Open in…*
+ * instead of drawing *Clone* again for the read's length (about 250 ms on Björn's PC, the ux20 Windows pass).
+ */
 export type CloneMark =
   | { kind: "running"; percent: number; path: string }
+  | { kind: "cloned"; path: string }
   | { kind: "failed"; text: string };
 
 /** What the store needs to say about a repository: its name and its URL's host. */
@@ -47,7 +52,11 @@ export interface Clones {
   /** Moves each time a clone finishes, so a page re-reads its checkouts. */
   readonly finished: number;
   start(subject: CloneSubject): Promise<void>;
+  /** Hear every clone's progress, one this window started or not (*Clone all*'s, PR #2479), so rows and pages follow them. */
+  watch(): Promise<unknown>;
   stop(entityId: string): Promise<void>;
+  /** Drop a `cloned` mark: the page's checkout now names the folder itself. */
+  forget(entityId: string): void;
   /** Tests only: drop the marks, the finished count, the subjects and the progress listener (#1743). */
   reset(): void;
 }
@@ -63,15 +72,19 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
   }
 
   async function done(entityId: string, path: string) {
-    delete marks[entityId];
+    marks[entityId] = { kind: "cloned", path };
     finished += 1;
     const subject = subjects.get(entityId);
+    // A clone this window did not start (*Clone all*'s, PR #2479) ends in the run's one summary, not a toast of its own.
+    if (subject === undefined) return;
     const view = await ports.entityCheckout(entityId).catch(() => null);
+    // The checkout does not name the folder after all: the button says Clone again rather than offer a missing folder.
+    if (view?.path === null && marks[entityId]?.kind === "cloned") delete marks[entityId];
     const branch = view?.tree?.status === "read" ? view.tree.branch : null;
     await apps.ensure();
     const app = defaultApp(apps.settings);
     push({
-      text: `Cloned ${subject?.name ?? entityId} into ${path}${branch ? `, on ${branch}` : ""}`,
+      text: `Cloned ${subject.name} into ${path}${branch ? `, on ${branch}` : ""}`,
       ...(app ? { action: { label: `Open in ${app.name}`, run: () => runDefault(apps, entityId) } } : {}),
     });
   }
@@ -103,6 +116,7 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
     get finished() {
       return finished;
     },
+    watch: () => listen(),
     async start(subject) {
       subjects.set(subject.entityId, subject);
       await listen();
@@ -118,6 +132,9 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
       } catch (cause) {
         failed(subject.entityId, ipcErrorMessage(cause));
       }
+    },
+    forget(entityId) {
+      if (marks[entityId]?.kind === "cloned") delete marks[entityId];
     },
     reset() {
       for (const key of Object.keys(marks)) delete marks[key];

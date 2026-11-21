@@ -36,7 +36,7 @@ pub struct DocsTree {
     /// Ordered by source, then key.
     pub spaces: Vec<DocSpace>,
     /// The page the reader opened most recently (`visit_entity`), while it is
-    /// still a live page; `#/docs` opens it.
+    /// still a live page; the Docs home's *Continue reading* opens it.
     pub last_read: Option<String>,
     /// *For you* (#860, R-10.2): the pages whose mention of the reader is in
     /// the inbox now, newest first.
@@ -61,13 +61,23 @@ pub struct DocForYou {
 #[ts(export_to = "entity.ts")]
 pub struct DocSpace {
     pub source_id: String,
+    /// What its source is called, its id where the name is blank: how Docs
+    /// tells two spaces of one name apart, the live one and the mock's
+    /// *Engineering* (the live run on #2479).
+    pub source_name: String,
     pub key: String,
     /// The space's name, `None` where no page of it carries one knobas can
     /// read.
     pub name: Option<String>,
     /// Every live page of the space, in the source's sibling order where it
-    /// gives one, else by title (#953).
+    /// gives one, else by title (#953). An outline ([`outline`]) or a branch
+    /// ([`nodes`]) holds some of them, and every page above each it holds.
     pub pages: Vec<DocNode>,
+    /// How many live pages the space has, whether or not [`DocSpace::pages`]
+    /// holds them all (the instant-open pass, 2026-11-12).
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<u32>,
 }
 
 /// One page in a space's tree.
@@ -79,6 +89,16 @@ pub struct DocNode {
     /// The page above it, where its declared parent is a mirrored page of the
     /// same space; `None` for a page at the top of what the mirror holds.
     pub parent: Option<String>,
+    /// How many pages hang directly under it, so a fold is drawn as one
+    /// before its pages are read (the instant-open pass, 2026-11-12).
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<u32>,
+    /// Where it comes in its space's [`DocSpace::pages`] read whole: what puts
+    /// the pages read in parts back in the space's order.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ord: Option<u32>,
 }
 
 /// One page, as the reader draws it.
@@ -210,6 +230,7 @@ pub struct DocAncestor {
 /// this way (31 and 21 ms analyzed).
 const PAGES: &str = concat!(
     "select i.entity_id, i.title, p.source_id, p.key, p.name, \
+       coalesce(nullif(btrim(s.display_name), ''), s.id) as source_name, \
        (select pn.name from ",
     knobas_core::declared_parent_names!("$1"),
     " pn order by pn.pos desc, pn.name_ord limit 1) as parent \
@@ -254,7 +275,368 @@ pub async fn tree(
     project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection>,
     me: &[String],
     fillers: &[String],
+    cache: Option<&TreeCache>,
 ) -> Result<DocsTree, IpcError> {
+    let spaces = spaces(pool, declarations, fillers, cache).await?;
+    let last_read = sqlx::query_scalar(LAST_READ)
+        .bind(knobas_core::activity::VISITED)
+        .bind(fillers)
+        .fetch_optional(pool)
+        .await?;
+    let for_you = for_you(pool, declarations, project, me, fillers).await?;
+    // The tree whole, as it always read: no page counts, no orders.
+    let spaces = spaces
+        .spaces
+        .iter()
+        .map(|space| DocSpace {
+            page_count: None,
+            pages: space
+                .pages
+                .iter()
+                .map(|p| DocNode {
+                    children: None,
+                    ord: None,
+                    ..p.clone()
+                })
+                .collect(),
+            ..space.clone()
+        })
+        .collect();
+    Ok(DocsTree {
+        spaces,
+        last_read,
+        for_you,
+    })
+}
+
+/// How many pages of a space by level the Docs home's outline holds past its
+/// top: a tile lists four, after the pages its panels already list (the
+/// instant-open pass, 2026-11-12).
+pub const OUTLINE_LEVEL_PAGES: usize = 24;
+
+/// The Docs home's first screen (the instant-open pass, 2026-11-12): every
+/// space with its count, the top of its tree and its first
+/// [`OUTLINE_LEVEL_PAGES`] pages level by level, the page read last and the
+/// pages *For you* names, each with every page above it, and every page
+/// holding how many pages are under it. Never the whole tree: a fold's pages
+/// and a whole space are [`nodes`]. What it holds of a space is what
+/// [`tree`] holds of it, in the same order.
+///
+/// # Errors
+///
+/// `internal` for a query failure.
+pub async fn outline(
+    pool: &PgPool,
+    declarations: &Declarations,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection>,
+    me: &[String],
+    fillers: &[String],
+    cache: Option<&TreeCache>,
+) -> Result<DocsTree, IpcError> {
+    let held = spaces(pool, declarations, fillers, cache).await?;
+    let last_read: Option<String> = sqlx::query_scalar(LAST_READ)
+        .bind(knobas_core::activity::VISITED)
+        .bind(fillers)
+        .fetch_optional(pool)
+        .await?;
+    let for_you = for_you(pool, declarations, project, me, fillers).await?;
+    let mut named: std::collections::HashSet<&str> =
+        for_you.iter().map(|f| f.entity_id.as_str()).collect();
+    named.extend(last_read.as_deref());
+    let spaces = (0..held.spaces.len())
+        .map(|s| {
+            let space = &held.spaces[s];
+            let under = &held.under[s];
+            let mut keep = vec![false; space.pages.len()];
+            for (i, page) in space.pages.iter().enumerate() {
+                if named.contains(page.entity_id.as_str()) {
+                    keep[i] = true;
+                }
+            }
+            // The top whole, then level by level until the tile's share of
+            // pages no panel lists is held: what the home's tile takes is in.
+            let mut level: Vec<usize> = under.get(&None).cloned().unwrap_or_default();
+            let mut top = true;
+            let mut taken = 0usize;
+            while !level.is_empty() && (top || taken < OUTLINE_LEVEL_PAGES) {
+                let mut next = Vec::new();
+                for &i in &level {
+                    if !top && taken >= OUTLINE_LEVEL_PAGES {
+                        break;
+                    }
+                    keep[i] = true;
+                    if !named.contains(space.pages[i].entity_id.as_str()) {
+                        taken += 1;
+                    }
+                    next.extend(under.get(&Some(i)).into_iter().flatten().copied());
+                }
+                level = next;
+                top = false;
+            }
+            held.subset(s, keep)
+        })
+        .collect();
+    Ok(DocsTree {
+        spaces,
+        last_read,
+        for_you,
+    })
+}
+
+/// What [`nodes`] reads: pages by id, each with the path to it drawn open.
+#[derive(Debug, Clone, Default, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocsNodesAsked {
+    /// Pages whose branch is wanted: each page, every page above it, and the
+    /// pages directly under each of those, so a tree draws the way to it open.
+    #[serde(default)]
+    pub pages: Vec<String>,
+    /// Folds opened: the pages directly under each.
+    #[serde(default)]
+    pub folds: Vec<String>,
+    /// Spaces wanted whole, as `<source>/<key>` (the front end's `spaceId`).
+    #[serde(default)]
+    pub spaces: Vec<String>,
+}
+
+/// The pages [`DocsNodesAsked`] names, as the spaces holding them, each with
+/// every page above each it holds, in the space's order (the instant-open
+/// pass, 2026-11-12). A space none of them is in is left out; an id the tree
+/// does not hold is ignored.
+///
+/// # Errors
+///
+/// `internal` for a query failure.
+pub async fn nodes(
+    pool: &PgPool,
+    declarations: &Declarations,
+    fillers: &[String],
+    asked: &DocsNodesAsked,
+    cache: Option<&TreeCache>,
+) -> Result<Vec<DocSpace>, IpcError> {
+    let held = spaces(pool, declarations, fillers, cache).await?;
+    let mut keep: Vec<Vec<bool>> = held
+        .spaces
+        .iter()
+        .map(|s| vec![false; s.pages.len()])
+        .collect();
+    let mut any = vec![false; held.spaces.len()];
+    let mut mark = |s: usize, i: usize, keep: &mut Vec<Vec<bool>>| {
+        keep[s][i] = true;
+        any[s] = true;
+    };
+    for id in &asked.pages {
+        let Some(&(s, i)) = held.at.get(id.as_str()) else {
+            continue;
+        };
+        mark(s, i, &mut keep);
+        for &c in held.under[s].get(&Some(i)).into_iter().flatten() {
+            mark(s, c, &mut keep);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut up = held.parent_of(s, i);
+        while let Some(p) = up {
+            if !seen.insert(p) {
+                break;
+            }
+            for &c in held.under[s].get(&Some(p)).into_iter().flatten() {
+                mark(s, c, &mut keep);
+            }
+            up = held.parent_of(s, p);
+        }
+        for &c in held.under[s].get(&None).into_iter().flatten() {
+            mark(s, c, &mut keep);
+        }
+    }
+    for id in &asked.folds {
+        let Some(&(s, i)) = held.at.get(id.as_str()) else {
+            continue;
+        };
+        mark(s, i, &mut keep);
+        for &c in held.under[s].get(&Some(i)).into_iter().flatten() {
+            mark(s, c, &mut keep);
+        }
+    }
+    for wanted in &asked.spaces {
+        for (s, space) in held.spaces.iter().enumerate() {
+            if format!("{}/{}", space.source_id, space.key) == *wanted {
+                keep[s].iter_mut().for_each(|k| *k = true);
+                any[s] = true;
+            }
+        }
+    }
+    Ok(keep
+        .into_iter()
+        .zip(any)
+        .enumerate()
+        .filter(|(_, (_, any))| *any)
+        .map(|(s, (keep, _))| held.subset(s, keep))
+        .collect())
+}
+
+/// The spaces' trees as [`tree`] reads them, kept between reads (the
+/// instant-open pass, 2026-11-12): at Björn's size the read walks 5,032
+/// pages' payloads for each one's parent and position, 611 ms, on every
+/// open of Docs and every run's end. Kept with what it was read from, and
+/// read again when that moved: the declarations, the wiki role's fillers,
+/// and a stamp of the live pages' rows (how many, and the sum of their row
+/// versions, `xmin`, in `sync.item` and `sync.item_project`) and of what
+/// the tree reads of the sources (id, adapter, name, on or off; not their
+/// rows' versions, which every scheduled run moves), a few milliseconds. Any write to a page's row moves its
+/// row version, a sync's stamp too, so a tree held is the tree the mirror
+/// holds.
+#[derive(Default)]
+pub struct TreeCache {
+    held: std::sync::Mutex<Option<(TreeStamp, std::sync::Arc<Spaces>)>>,
+}
+
+/// What a kept tree was read from: [`TreeCache`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TreeStamp {
+    declarations: String,
+    fillers: Vec<String>,
+    rows: (i64, i64, i64, i64),
+}
+
+/// The live pages' rows and the sources', stamped: `$1` the fillers.
+const TREE_STAMP: &str = concat!(
+    "select count(*)::bigint as pages, \
+            coalesce(sum(i.xmin::text::bigint), 0)::bigint as items, \
+            coalesce(sum(p.xmin::text::bigint), 0)::bigint as projects, \
+            (select coalesce(sum(hashtext(c.id || '/' || c.kind || '/' || coalesce(c.display_name, '') \
+                || '/' || c.enabled::text)), 0)::bigint from knobas.source_config c) as sources \
+       from sync.item i \
+       join sync.item_project p on p.entity_id = i.entity_id \
+       join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind \
+      where i.kind = 'page' and i.source_id = any($1::text[]) and ",
+    knobas_core::live_by_exclusion!("i")
+);
+
+/// The spaces with every page, indexed for the parts [`outline`] and
+/// [`nodes`] cut from them.
+pub struct Spaces {
+    /// As [`DocsTree::spaces`], with each page's `children` and `ord` and
+    /// each space's `page_count`.
+    spaces: Vec<DocSpace>,
+    /// Per space, the pages under each page (`None`: the top), by index.
+    under: Vec<HashMap<Option<usize>, Vec<usize>>>,
+    /// Each page's space and index.
+    at: HashMap<String, (usize, usize)>,
+}
+
+impl Spaces {
+    fn new(spaces: Vec<DocSpace>) -> Self {
+        let mut spaces = spaces;
+        let mut under = Vec::with_capacity(spaces.len());
+        let mut at = HashMap::new();
+        for (s, space) in spaces.iter_mut().enumerate() {
+            let index: HashMap<String, usize> = space
+                .pages
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.entity_id.clone(), i))
+                .collect();
+            let mut by: HashMap<Option<usize>, Vec<usize>> = HashMap::new();
+            for (i, page) in space.pages.iter().enumerate() {
+                let parent = page.parent.as_ref().and_then(|id| index.get(id).copied());
+                by.entry(parent).or_default().push(i);
+                at.insert(page.entity_id.clone(), (s, i));
+            }
+            for (i, page) in space.pages.iter_mut().enumerate() {
+                page.children =
+                    Some(u32::try_from(by.get(&Some(i)).map_or(0, Vec::len)).unwrap_or(u32::MAX));
+                page.ord = Some(u32::try_from(i).unwrap_or(u32::MAX));
+            }
+            space.page_count = Some(u32::try_from(space.pages.len()).unwrap_or(u32::MAX));
+            under.push(by);
+        }
+        Self { spaces, under, at }
+    }
+
+    fn parent_of(&self, s: usize, i: usize) -> Option<usize> {
+        let parent = self.spaces[s].pages[i].parent.as_ref()?;
+        self.at.get(parent.as_str()).map(|&(_, p)| p)
+    }
+
+    /// Space `s` holding the pages `keep` marks and every page above each.
+    fn subset(&self, s: usize, mut keep: Vec<bool>) -> DocSpace {
+        let space = &self.spaces[s];
+        for i in 0..keep.len() {
+            if !keep[i] {
+                continue;
+            }
+            let mut seen = std::collections::HashSet::new();
+            let mut up = self.parent_of(s, i);
+            while let Some(p) = up {
+                if keep[p] || !seen.insert(p) {
+                    break;
+                }
+                keep[p] = true;
+                up = self.parent_of(s, p);
+            }
+        }
+        DocSpace {
+            pages: space
+                .pages
+                .iter()
+                .zip(keep)
+                .filter(|(_, k)| *k)
+                .map(|(p, _)| p.clone())
+                .collect(),
+            ..space.clone()
+        }
+    }
+}
+
+/// The spaces with every page: the kept ones while the stamp has not moved,
+/// else read and kept (with no `cache`, read).
+async fn spaces(
+    pool: &PgPool,
+    declarations: &Declarations,
+    fillers: &[String],
+    cache: Option<&TreeCache>,
+) -> Result<std::sync::Arc<Spaces>, IpcError> {
+    let stamp = match cache {
+        None => None,
+        Some(_) => {
+            let row = sqlx::query(TREE_STAMP)
+                .bind(fillers)
+                .fetch_one(pool)
+                .await?;
+            Some(TreeStamp {
+                declarations: declarations.as_json().to_string(),
+                fillers: fillers.to_vec(),
+                rows: (
+                    row.get("pages"),
+                    row.get("items"),
+                    row.get("projects"),
+                    row.get("sources"),
+                ),
+            })
+        }
+    };
+    if let (Some(cache), Some(stamp)) = (cache, &stamp)
+        && let Ok(held) = cache.held.lock()
+        && let Some((at, spaces)) = held.as_ref()
+        && at == stamp
+    {
+        return Ok(spaces.clone());
+    }
+    let read = std::sync::Arc::new(Spaces::new(read_spaces(pool, declarations, fillers).await?));
+    if let (Some(cache), Some(stamp)) = (cache, stamp)
+        && let Ok(mut held) = cache.held.lock()
+    {
+        *held = Some((stamp, read.clone()));
+    }
+    Ok(read)
+}
+
+/// Every space with every page, read from the pages' payloads.
+async fn read_spaces(
+    pool: &PgPool,
+    declarations: &Declarations,
+    fillers: &[String],
+) -> Result<Vec<DocSpace>, IpcError> {
     let rows = sqlx::query(PAGES)
         .bind(declarations.as_param())
         .bind(fillers)
@@ -272,9 +654,11 @@ pub async fn tree(
         if !same {
             spaces.push(DocSpace {
                 source_id,
+                source_name: row.get("source_name"),
                 key,
                 name: None,
                 pages: Vec::new(),
+                page_count: None,
             });
             parents.push(Vec::new());
         }
@@ -286,6 +670,8 @@ pub async fn tree(
             entity_id: row.get("entity_id"),
             title: row.get("title"),
             parent: None,
+            children: None,
+            ord: None,
         });
         parents
             .last_mut()
@@ -305,17 +691,7 @@ pub async fn tree(
         }
         break_loops(&mut space.pages);
     }
-    let last_read = sqlx::query_scalar(LAST_READ)
-        .bind(knobas_core::activity::VISITED)
-        .bind(fillers)
-        .fetch_optional(pool)
-        .await?;
-    let for_you = for_you(pool, declarations, project, me, fillers).await?;
-    Ok(DocsTree {
-        spaces,
-        last_read,
-        for_you,
-    })
+    Ok(spaces)
 }
 
 /// The rows *For you* reads its pages from. `$1` the ids, `$2` the wiki
@@ -956,6 +1332,198 @@ pub async fn forget_run_embedded_html(pool: &PgPool, source_id: &str) -> Result<
     Ok(())
 }
 
+// -- where Docs opens, and the spaces it hides (PR #2479, 2026-11-17) --------
+//
+// Björn: "change in the docs area the default open page", and "hide areas
+// that I'm not using? I still want it to be searchable, just not visible".
+// Both are the reader's choices about their own screen, stored as
+// `knobas.setting` rows like *Run embedded HTML*: no migration, a backup
+// carries them and a share export does not (`backup/share.rs`). A hidden
+// space is a row of its own, so hiding one is one write and never a
+// read-modify-write of a list another press could race.
+
+/// The `knobas.setting` key holding where Docs opens.
+pub const DOCS_HOME_KEY: &str = "docs.home";
+
+/// The prefix of a hidden space's `knobas.setting` key, followed by the
+/// space as the front end's `spaceId` names it, `<source>/<key>`.
+pub const HIDDEN_SPACE_PREFIX: &str = "docs.hidden_space.";
+
+/// What Docs' home is: a space's own page, or one page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum DocsHomeKind {
+    Space,
+    Page,
+}
+
+/// Where Docs opens when nothing in it is chosen: the nav entry's first press,
+/// after a restart too, and the launcher's *Docs* row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocsHome {
+    pub kind: DocsHomeKind,
+    /// A space as `<source>/<key>`, or a page's entity id.
+    pub id: String,
+    /// What it was called when it was chosen, so Settings names it after the
+    /// mirror lost it.
+    pub title: String,
+}
+
+/// The reader's choices about Docs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct DocsChoices {
+    /// Where Docs opens; `None` opens its home, `#/docs`.
+    pub home: Option<DocsHome>,
+    /// The spaces hidden from Docs' browsing, as `<source>/<key>`, sorted.
+    /// Search still finds their pages and links into them still open.
+    pub hidden: Vec<String>,
+}
+
+/// Whether `id` names a space as `<source>/<key>`: a source id holds no `/`
+/// or `:`, and neither part is empty.
+fn space_named(id: &str) -> bool {
+    id.split_once('/')
+        .is_some_and(|(source, key)| !source.is_empty() && !key.is_empty() && !source.contains(':'))
+}
+
+/// Whether `id` names a page: an entity id is `<source>:<id>`.
+fn page_named(id: &str) -> bool {
+    id.split_once(':')
+        .is_some_and(|(source, rest)| !source.is_empty() && !rest.is_empty())
+}
+
+/// The choices as stored. A `docs.home` row that does not read as a home
+/// reads as none.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn choices(pool: &PgPool) -> Result<DocsChoices, IpcError> {
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "select key, value from knobas.setting
+          where key = $1 or left(key, length($2)) = $2
+          order by key",
+    )
+    .bind(DOCS_HOME_KEY)
+    .bind(HIDDEN_SPACE_PREFIX)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let mut out = DocsChoices::default();
+    for (key, value) in rows {
+        if key == DOCS_HOME_KEY {
+            out.home = serde_json::from_value(value).ok();
+        } else if let Some(space) = key.strip_prefix(HIDDEN_SPACE_PREFIX)
+            && value.as_bool() == Some(true)
+        {
+            out.hidden.push(space.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+/// Store where Docs opens, or forget it with `None`, and answer the choices.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that names no space or
+/// page as its kind says, [`Internal`](crate::IpcErrorCode::Internal) if the
+/// write fails.
+pub async fn set_home(pool: &PgPool, home: Option<DocsHome>) -> Result<DocsChoices, IpcError> {
+    match home {
+        None => {
+            sqlx::query("delete from knobas.setting where key = $1")
+                .bind(DOCS_HOME_KEY)
+                .execute(pool)
+                .await
+                .map_err(IpcError::internal)?;
+        }
+        Some(home) => {
+            let named = match home.kind {
+                DocsHomeKind::Space => space_named(&home.id),
+                DocsHomeKind::Page => page_named(&home.id),
+            };
+            if !named {
+                return Err(IpcError::invalid(format!(
+                    "{} names no {} Docs can open",
+                    home.id,
+                    match home.kind {
+                        DocsHomeKind::Space => "space",
+                        DocsHomeKind::Page => "page",
+                    }
+                )));
+            }
+            let value = serde_json::to_value(&home).map_err(IpcError::internal)?;
+            crate::settings::write_value(pool, DOCS_HOME_KEY, &value).await?;
+        }
+    }
+    choices(pool).await
+}
+
+/// Hide space `space` (`<source>/<key>`) from Docs' browsing, or show it
+/// again, and answer the choices. Nothing is deleted: the sync keeps
+/// mirroring it and search keeps finding it.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a `space` that is not
+/// `<source>/<key>`, [`Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+pub async fn set_space_hidden(
+    pool: &PgPool,
+    space: &str,
+    hidden: bool,
+) -> Result<DocsChoices, IpcError> {
+    if !space_named(space) {
+        return Err(IpcError::invalid(format!(
+            "{space} names no space: a space is <source>/<key>"
+        )));
+    }
+    let key = format!("{HIDDEN_SPACE_PREFIX}{space}");
+    if hidden {
+        crate::settings::write_value(pool, &key, &serde_json::Value::Bool(true)).await?;
+    } else {
+        sqlx::query("delete from knobas.setting where key = $1")
+            .bind(&key)
+            .execute(pool)
+            .await
+            .map_err(IpcError::internal)?;
+    }
+    choices(pool).await
+}
+
+/// Drop `source_id`'s hidden spaces and a home in it, when the source is
+/// deleted: a source added again under its id shows every space, as every
+/// new source does.
+///
+/// # Errors
+///
+/// The database's error if the delete fails.
+pub async fn forget_docs_choices(pool: &PgPool, source_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "delete from knobas.setting
+          where left(key, length($1)) = $1
+             or (key = $2 and (value->>'id' like $3 escape '\\' or value->>'id' like $4 escape '\\'))",
+    )
+    .bind(format!("{HIDDEN_SPACE_PREFIX}{source_id}/"))
+    .bind(DOCS_HOME_KEY)
+    .bind(format!("{}/%", like_escaped(source_id)))
+    .bind(format!("{}:%", like_escaped(source_id)))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// `text` with `LIKE`'s wildcards and escape taken literally.
+fn like_escaped(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 // -- the Docs search (#860) -------------------------------------------------
 
 /// How many hits the Docs search draws. The header counts every match.
@@ -1077,9 +1645,9 @@ pub async fn search(
             let title = &hit.row.title;
             let adapter_kind: String = row.get("adapter_kind");
             let payload: serde_json::Value = row.get("payload");
+            // The editor alone: the page is not drawn to name them.
             let editor_name = project(&adapter_kind)
-                .and_then(|projection| projection.project(PAGE_KIND, &payload))
-                .and_then(|c| c.editor_name);
+                .and_then(|projection| projection.editor_name(PAGE_KIND, &payload));
             Some(DocHit {
                 entity_id: hit.row.entity_id.clone(),
                 title: title.clone(),

@@ -119,7 +119,100 @@ pub async fn search(
     lifecycle: State<'_, Lifecycle>,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    search_inner(&lifecycle.pool()?, lifecycle.registry(), query).await
+    search_picked(
+        &lifecycle.pool()?,
+        lifecycle.registry(),
+        lifecycle.picker(),
+        &lifecycle.files(),
+        query,
+    )
+    .await
+}
+
+/// The files of `repository` that `raw`'s words find (the everything-search
+/// decisions, 2026-11-20, D11): what the pane lists under the file the
+/// answer carried, asked once the selection rests on a repository the files
+/// found. `raw` is the box's text, parsed as `search` parses it.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn search_files(
+    lifecycle: State<'_, Lifecycle>,
+    repository: String,
+    raw: String,
+) -> Result<knobas_search::FilesInRepo, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(searcher(&pool, lifecycle.registry())
+        .await?
+        .with_files(lifecycle.files())
+        .files_in_repo(&repository, &raw)
+        .await?)
+}
+
+/// Settings › Search (the everything-search decisions, 2026-11-20, D13):
+/// what *Everything* matches beyond names and keys, and how much of the
+/// mirror each box covers.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn search_settings(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    crate::search_settings::settings(&lifecycle.pool()?).await
+}
+
+/// Store what *Everything* matches, and answer the page as it now stands:
+/// the next key matches what was set. Nothing kept changes.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn set_search_everything(
+    lifecycle: State<'_, Lifecycle>,
+    matches: knobas_search::EverythingMatches,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::set_everything(&pool, matches).await?;
+    crate::search_settings::settings(&pool).await
+}
+
+/// Store *Keep at most* (the everything-search decisions, D13), `mb` of file
+/// text kept on this computer, `0` for *None*, and answer the page.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn set_search_files_kept(
+    lifecycle: State<'_, Lifecycle>,
+    mb: u32,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::set_files_kept(&pool, mb).await?;
+    crate::search_settings::settings(&pool).await
+}
+
+/// *Read every repository again* (D13): every repository's files are read
+/// whole by the next files pass. Answers the page.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the write or a read
+/// fails.
+#[tauri::command]
+pub async fn reread_files(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::search_settings::SearchSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::search_settings::reread_files(&pool).await?;
+    crate::search_settings::settings(&pool).await
 }
 
 /// What the launcher shows before anything is typed: the newest items, and
@@ -300,7 +393,12 @@ pub async fn bind_action_key(
 pub async fn ticket_views(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::ticket_views::TicketViewRow>, IpcError> {
-    crate::ticket_views::list(&lifecycle.pool()?, lifecycle.registry()).await
+    crate::ticket_views::list(
+        &lifecycle.pool()?,
+        lifecycle.registry(),
+        Some(lifecycle.picker()),
+    )
+    .await
 }
 
 /// Save a ticket view (#812): a new one, or over the view the draft names,
@@ -449,11 +547,15 @@ pub async fn searcher(
     // (#940, R-13a.6, D10): the one primary-key read of `knobas.setting` that
     // every command's searcher makes, so the launcher, the lists and the
     // suggestions all agree. The notes stay in the database.
-    let notes_shown = crate::capture::shown(pool).await?;
+    // The same read says what *Everything* matches (Settings › Search, the
+    // everything-search decisions, D13): one statement by the table's key.
+    let (notes_shown, everything) = crate::search_settings::for_searcher(pool).await?;
     Ok(
         knobas_search::Searcher::declaring(pool.clone(), registry.descriptors())
             .await?
-            .with_notes_shown(notes_shown),
+            .with_notes_shown(notes_shown)
+            .with_everything(everything)
+            .planned_as_windows(knobas_db::embedded::plans_as_windows()),
     )
 }
 
@@ -481,6 +583,31 @@ pub async fn search_inner(
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
     Ok(searcher(pool, registry).await?.search(query).await?)
+}
+
+/// [`search_inner`] with the names `picker` holds joining the answer (the
+/// fuzzy-search decisions, 2026-11-19): what the `search` command answers.
+/// Dropping the `with_picker` call here is the launcher as it was.
+///
+/// # Errors
+///
+/// See [`search`].
+pub async fn search_picked(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    picker: &knobas_search::picker::Picker,
+    files: &knobas_files::FileIndex,
+    query: knobas_search::SearchQuery,
+) -> Result<knobas_search::SearchResponse, IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .with_picker(picker.clone())
+        // A repository found by its files under *Everything* (the
+        // everything-search decisions, D8): an index that holds nothing
+        // answers as before.
+        .with_files(files.clone())
+        .search(query)
+        .await?)
 }
 
 /// [`launcher_home`], against a pool and a registry.
@@ -764,5 +891,65 @@ mod tests {
             IpcError::from(knobas_search::SearchError::Db(sqlx::Error::PoolClosed)).code,
             IpcErrorCode::Internal
         );
+    }
+}
+
+/// One row of a list a page holds, as [`fuzzy_rank`] ranks it: its index in
+/// the list sent, whether it is held by its letters in order rather than in
+/// one piece, and its matched letters as pairs of start and end in UTF-16
+/// code units of the text sent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FuzzyRanked {
+    pub index: u32,
+    pub loose: bool,
+    pub marks: Vec<u32>,
+}
+
+/// Most texts one [`fuzzy_rank`] reads: more repositories or spaces than an
+/// installation holds, and about 30 kB a key at a thousand.
+const MOST_RANKED: usize = 20_000;
+
+/// A list a page holds, ranked by what was typed (the fuzzy-search
+/// decisions, 2026-11-19, D12): the launcher's rules for names
+/// (`knobas_search::picker::rank`), best first, with one difference: one to
+/// three typed letters keep a row that holds them anywhere, as the page
+/// filters always have. Code's repository filter and Docs' spaces filter
+/// send the texts they hold and draw the rows in this order. Nothing for a
+/// text the picker reads as nothing (`or`, left-out words only), and nothing
+/// past [`MOST_RANKED`] texts or the launcher's length of typed text.
+#[tauri::command]
+#[must_use]
+pub fn fuzzy_rank(text: String, haystacks: Vec<String>) -> Vec<FuzzyRanked> {
+    if haystacks.len() > MOST_RANKED || text.chars().count() > 512 {
+        return Vec::new();
+    }
+    knobas_search::picker::rank(&text, &haystacks)
+        .into_iter()
+        .map(|ranked| FuzzyRanked {
+            index: ranked.index,
+            loose: ranked.loose,
+            marks: ranked.marks,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod fuzzy_rank_tests {
+    use super::fuzzy_rank;
+
+    #[test]
+    fn a_list_is_ranked_by_the_pickers_rules() {
+        let list = vec![
+            "acme/auth-proxy".to_owned(),
+            "acme/ADProxy".to_owned(),
+            "acme/routing".to_owned(),
+        ];
+        let ranked = fuzzy_rank("proxy".to_owned(), list.clone());
+        assert_eq!(ranked.iter().map(|r| r.index).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(ranked[1].marks, [7, 12]);
+        // One letter, anywhere, as the page filters had it.
+        assert_eq!(fuzzy_rank("u".to_owned(), list.clone()).len(), 2);
+        assert!(fuzzy_rank("or".to_owned(), list).is_empty());
     }
 }

@@ -13,11 +13,12 @@
 -->
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { minutesLabel } from "../../time/format";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { getEntity as realGetEntity } from "../../ipc/entity";
+  import { entityBriefs as realEntityBriefs } from "../../ipc/entity";
   import { pendingWrites as realPendingWrites } from "../../ipc/sources";
   import { weekTimesheet as realWeekTimesheet, type Week } from "../../ipc/time";
   import { targetReading } from "../../shell/timer";
@@ -26,13 +27,15 @@
   import { MONTHS, dayKey, shiftDay } from "../../time/day";
   import { columnHeading, mondayOf, weekWindows } from "../../time/week";
   import { entityAddress } from "../address";
+  import { goAcross } from "../opener";
+  import { namePage } from "../page-name.svelte";
   import { heldNotes, weekView, type WeekCellView } from "./week-view";
 
   interface WeekPorts {
     weekTimesheet: typeof realWeekTimesheet;
     pendingWrites: typeof realPendingWrites;
-    /** Reads a target's kind, which the week's rows do not carry. */
-    getEntity: typeof realGetEntity;
+    /** Reads the targets' kinds, which the week's rows do not carry: every new one in one read. */
+    entityBriefs: typeof realEntityBriefs;
   }
 
   let {
@@ -59,7 +62,7 @@
 
   // svelte-ignore state_referenced_locally
   // Read once, as the Day tab's ports are.
-  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, getEntity: realGetEntity, ...ports };
+  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, entityBriefs: realEntityBriefs, ...ports };
 
   /** The clock, moved every thirty seconds so the running timer's minutes move. */
   // svelte-ignore state_referenced_locally
@@ -108,21 +111,31 @@
    * carries an entity id and no kind, and the address is the kind's (a ticket
    * by its entity id, a page at its page). Until the read answers, or when it
    * fails, the key is drawn as plain text rather than as a link that may open
-   * the wrong thing.
+   * the wrong thing. Every id not asked yet goes in one read (the query audit,
+   * 2026-11-12: one `get_entity` a row, 8 KB each); an id the mirror does not
+   * hold is asked again with the next.
    */
   let kinds = $state<Record<string, string>>({});
   const asked = new Set<string>();
   $effect(() => {
+    const ids: string[] = [];
     for (const row of shown?.rows ?? []) {
       if (row.target === null || row.target.kind !== "entity") continue;
       const id = row.target.entity_id;
-      if (asked.has(id)) continue;
-      asked.add(id);
-      io.getEntity(id).then(
-        (detail) => (kinds[id] = detail.row.kind),
-        () => asked.delete(id),
-      );
+      if (asked.has(id) || ids.includes(id)) continue;
+      ids.push(id);
     }
+    if (ids.length === 0) return;
+    for (const id of ids) asked.add(id);
+    io.entityBriefs(ids).then(
+      (briefs) => {
+        for (const brief of briefs) kinds[brief.entity_id] = brief.kind;
+        for (const id of ids) if (!(id in kinds)) asked.delete(id);
+      },
+      () => {
+        for (const id of ids) asked.delete(id);
+      },
+    );
   });
 
   function heading(key: string): string {
@@ -132,6 +145,19 @@
 
   const weekAfter = $derived(shiftDay(monday, 7));
   const after = $derived(weekAfter === thisMonday ? "#/time/week" : `#/time/week/${weekAfter}`);
+
+  // So the day it opens says *Back to Week*, not the section's name.
+  namePage(() => "Week");
+
+  /**
+   * A day opened from the week is opened to come back from: the two are one page by their address, so this says so,
+   * and `Esc` and the bar's *Back to* return here (F-345). ⌘-click and the like stay the browser's.
+   */
+  function openDay(event: MouseEvent, day: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    goAcross(`#/time/${day}`);
+  }
 
   /** The bar's three shares, as percentages of the cell's whole. */
   function shares(cell: WeekCellView): [number, number, number] {
@@ -143,13 +169,13 @@
 </script>
 
 <div class="tf-tm-nav">
-  <a class="tf-btn tf-sm tf-ghost" href="#/time/week/{shiftDay(monday, -7)}" aria-label="Week before">‹</a>
+  <a class="tf-btn tf-sm tf-ghost" href="#/time/week/{shiftDay(monday, -7)}" aria-label="Week before"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg></a>
   <h2>{heading(monday)}</h2>
   {#if monday < thisMonday}
-    <a class="tf-btn tf-sm tf-ghost" href={after} aria-label="Week after">›</a>
+    <a class="tf-btn tf-sm tf-ghost" href={after} aria-label="Week after"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></a>
     <a class="tf-btn tf-sm" href="#/time/week">This week</a>
   {:else}
-    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">›</span>
+    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></span>
   {/if}
 </div>
 
@@ -168,7 +194,7 @@
   {#each ready.held as note (note)}
     <div class="tf-tm-held">
       <span class="tf-dot tf-warn"></span>
-      <span>{note} <button class="tf-btn tf-sm" onclick={() => onqueue()}>Open the queue</button></span>
+      <span><TfKeyed text={note} /> <button class="tf-btn tf-sm" onclick={() => onqueue()}>Open the queue</button></span>
     </div>
   {/each}
 
@@ -176,11 +202,11 @@
     <table class="tf-tbl tf-tm-week">
       <thead>
         <tr>
-          <th>On</th>
+          <th>Ticket or label</th>
           {#each ready.week.days as day, index (day)}
-            <th class={index > 4 ? "tf-tm-we" : ""}><a href="#/time/{day}">{columnHeading(day, index)}</a></th>
+            <th class={[index > 4 && "tf-tm-we", day === dayKey(clock) && "tf-tm-today"]} aria-current={day === dayKey(clock) ? "date" : undefined}><a href="#/time/{day}" onclick={(event) => openDay(event, day)}>{columnHeading(day, index)}</a></th>
           {/each}
-          <th>Week</th>
+          <th class="tf-tm-tot">Week</th>
         </tr>
       </thead>
       <tbody>
@@ -203,12 +229,12 @@
               {/if}
             </td>
             {#each row.cells as cell (cell.day)}
-              <td class="tf-tm-c {cell.weekend ? 'tf-tm-we' : ''}">
+              <td class={["tf-tm-c", cell.weekend && "tf-tm-we", cell.day === dayKey(clock) && "tf-tm-today"]}>
                 {#if cell.tracked === 0 && cell.note === null}
                   <span class="tf-dim">–</span>
                 {:else}
                   {@const [logged, held, toLog] = shares(cell)}
-                  <a href="#/time/{cell.day}">
+                  <a href="#/time/{cell.day}" onclick={(event) => openDay(event, cell.day)}>
                     <b>{minutesLabel(cell.tracked)}</b>
                     {#if cell.bar}
                       <svg class="tf-tm-bar" width="72" height="4" aria-hidden="true">
@@ -216,6 +242,7 @@
                         <rect class="tf-tm-bar-lg" width="{logged}%" height="100%" />
                         <rect class="tf-tm-bar-hd" x="{logged}%" width="{held}%" height="100%" />
                         <rect class="tf-tm-bar-un" x="{logged + held}%" width="{toLog}%" height="100%" />
+                        {#if held > 0 && toLog > 0}<rect class="tf-tm-bar-seam" x="{logged + held}%" width="1" height="100%" />{/if}
                       </svg>
                     {/if}
                     {#if cell.note !== null}<small>{cell.note}</small>{/if}
@@ -227,9 +254,9 @@
           </tr>
         {/each}
         <tr class="tf-tm-total">
-          <td>Every day</td>
+          <td>Total</td>
           {#each shown.dayTotals as total, index (index)}
-            <td class="tf-tm-c {index > 4 ? 'tf-tm-we' : ''}"><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
+            <td class={["tf-tm-c", index > 4 && "tf-tm-we", ready.week.days[index] === dayKey(clock) && "tf-tm-today"]}><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
           {/each}
           <td class="tf-tm-c tf-tm-tot"><b>{minutesLabel(shown.figures.tracked)}</b></td>
         </tr>

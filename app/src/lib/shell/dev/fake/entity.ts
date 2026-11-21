@@ -6,8 +6,13 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
+import { fakeWorkingBytes } from "./checkouts";
+import { CORPUS, bodyShown, fakeEpicEntry, fakePersonName, mirrorRow } from "./corpus";
+import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
+import { FAKE_ATTACHED, isFakeMonitor } from "./monitors";
+import { fakeStateOf } from "./link-sets";
+import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
@@ -140,7 +145,7 @@ function linkEnd(id: string): { kind: string; title: string; deleted_at: string 
   const entity = CORPUS.find((candidate) => candidate.entity_id === id);
   if (entity) return entity;
   const asset = FIXTURE_ESTATE.find((candidate) => candidate.id === id);
-  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : null;
+  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : docPageEnd(id);
 }
 
 /** One link's far end from `id`, resolved against the corpus and the estate. */
@@ -148,7 +153,17 @@ function entryFor(id: string, link: LinkRow): LinkEntry | null {
   const otherId = link.from_id === id ? link.to_id : link.from_id;
   const other = linkEnd(otherId);
   if (!other) return null;
-  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
+  const state = fakeStateOf(otherId);
+  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at, ...(state === null ? {} : { state }) } };
+}
+
+/** The tickets linked to `id`, for a page's *Work it belongs to*. */
+export function linkedTickets(id: string): { entity_id: string; key: string; title: string; status: string | null }[] {
+  return linksOf(id).flatMap(({ other }) =>
+    other.kind === "ticket"
+      ? [{ entity_id: other.entity_id, key: keyOf(other.entity_id), title: other.title, status: null }]
+      : [],
+  );
 }
 
 /** The confirmed links on an entity, newest first, from either end. */
@@ -182,11 +197,11 @@ const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "
  * The kinds those adapters' refresh answers *not offered*, as their
  * descriptors declare them (`KindInfo::refreshes`, #2146): `get_entity`
  * answers `refreshes` for the row's kind, not the adapter. Held to the
- * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`.
+ * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`. Gitea reads every kind since
+ * ADR-0047: a repository, a branch and a commit by walking their repository.
  */
 const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
   teamcity: new Set(["build_config"]),
-  gitea: new Set(["repo", "branch", "commit"]),
   jira: new Set(["jira_view"]),
 };
 
@@ -267,6 +282,8 @@ function getEntity(args: Record<string, unknown>) {
     kind_info: null,
     body_text: bodyShown(entry.body_text),
     author: entry.author,
+    // The name the source keeps beside the account, on a ticket (F-107).
+    ...(entry.kind === "ticket" && fakePersonName(entry.author) !== null ? { author_name: fakePersonName(entry.author)! } : {}),
     payload: entry.payload,
     web_url: entry.web_url,
     deleted_at: entry.deleted_at,
@@ -320,7 +337,7 @@ function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
 }
 
 /** The card's Reporter and Logged facts (#2403) from the mock's flat record: the worklog summed per author, by author. */
-function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "created" | "time_spent_seconds" | "logged_by"> {
+function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "reporter_name" | "created" | "time_spent_seconds" | "logged_by"> {
   const reporter = fakeText(payload["reporter"]);
   const created = fakeText(payload["created"]);
   const spent = payload["time_spent_seconds"];
@@ -331,6 +348,7 @@ function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "repor
   }
   return {
     ...(reporter === null ? {} : { reporter }),
+    ...(fakePersonName(reporter) === null ? {} : { reporter_name: fakePersonName(reporter)! }),
     ...(created === null ? {} : { created }),
     ...(typeof spent === "number" ? { time_spent_seconds: spent } : {}),
     ...(entries === null ? {} : { logged_by: [...byAuthor].sort(([a], [b]) => a.localeCompare(b)).map(([author, seconds]) => ({ author, seconds })) }),
@@ -570,6 +588,7 @@ function visitEntity(args: Record<string, unknown>): string | null {
 export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
+    entity_head: (args) => ({ ...getEntity(args), body_text: "", payload: null }),
     refresh_entity: (args) => refreshEntity(args),
     // A reload starts the fixture over, so nothing filed before it is owed (#1953).
     owed_tickets: () => [],
@@ -578,6 +597,9 @@ export function handlers(): Handlers {
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
     entity_file_bytes: (args) => {
+      // The fixture's working tree and the base it is compared with (ux26).
+      const working = fakeWorkingBytes(String(args["path"]), (args["commit"] as string | null | undefined) ?? null);
+      if (working !== undefined) return working;
       const read = repoFileBytes(String(args["entityId"]), String(args["path"]));
       if (read === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
       return read;
@@ -594,6 +616,17 @@ export function handlers(): Handlers {
     create_link: (args) => {
       const from = String(args["fromId"]);
       const to = String(args["toId"]);
+      // An asset to a monitor (2026-11-19, the open monitor's *Link an asset…*): the roster's monitors are no mirror
+      // rows here, so the link is kept where the roster reads it, as the real roster reads every confirmed link.
+      const relation = String(args["relation"] ?? "related");
+      const pair = isFakeMonitor(to) ? { asset: from, monitor: to } : isFakeMonitor(from) ? { asset: to, monitor: from } : null;
+      if (relation === "monitored-by" && pair !== null && FIXTURE_ESTATE.some((asset) => asset.id === pair.asset)) {
+        if (FAKE_ATTACHED.some((made) => made.asset === pair.asset && made.monitor === pair.monitor)) {
+          throw { code: "conflict", message: "these two are already linked", source_id: null };
+        }
+        FAKE_ATTACHED.push(pair);
+        return linkRow(from, to, relation, "manual", null);
+      }
       for (const end of [from, to]) {
         if (linkEnd(end) === null) {
           throw { code: "not_found", message: `${end} is not in the mirror`, source_id: null };

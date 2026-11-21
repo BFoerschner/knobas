@@ -6,11 +6,23 @@
  * nowhere else. The `invoke` functions stay hand-written, pinned to the Rust
  * by a test in that module which `include_str!`s this file.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
+import type { ViewBlock } from "./generated/entity";
 import type {
   AppStatus,
   CommandStep,
   CommandStepDraft,
+  FolderMarks,
+  FolderPick,
+  MadeCompare,
+  FolderRenderer,
+  FolderRendererDraft,
+  FolderRenderView,
+  Ask,
+  InstalledFont,
+  MadeStore,
+  MadeTree,
+  JavaRuntime,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -26,6 +38,29 @@ export type {
   CommandStep,
   CommandStepDraft,
   DbState,
+  Ask,
+  DrawnKind,
+  FolderDrawn,
+  FolderFailure,
+  FolderMarks,
+  FolderOutput,
+  FolderPick,
+  MadeCompare,
+  FolderRenderer,
+  FolderRendererDraft,
+  FolderRenderMoved,
+  FolderRenderView,
+  FolderRunState,
+  MadeFile,
+  MadeLeftOut,
+  MadeLeftOutWhy,
+  MadePlace,
+  MadeStore,
+  MadeTree,
+  ReadFrom,
+  InstalledFont,
+  JavaRuntime,
+  FoundJava,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,
@@ -106,6 +141,28 @@ export function setPagesKeptOpen(count: number): Promise<number> {
   return invoke<number>("set_pages_kept_open", { count });
 }
 
+/**
+ * *Smooth scrolling on 120 Hz displays*, Settings › Performance: whether the
+ * window draws at the display's rate rather than WebKit's 60. On until set.
+ * `null` where the platform has no such cap (Windows, Linux), so no switch is drawn.
+ */
+export function smoothScrolling(): Promise<boolean | null> {
+  return invoke<boolean | null>("smooth_scrolling");
+}
+
+/** Store *Smooth scrolling on 120 Hz displays*, applied to the window at once; answers what is now stored. */
+export function setSmoothScrolling(on: boolean): Promise<boolean | null> {
+  return invoke<boolean | null>("set_smooth_scrolling", { on });
+}
+
+/**
+ * The font families installed on this machine, monospace ones first, for
+ * Settings › Appearance › *Code font*. Read once a run; needs no database.
+ */
+export function installedFonts(): Promise<InstalledFont[]> {
+  return invoke<InstalledFont[]>("installed_fonts");
+}
+
 /** *Run pipelines on diffs* (#2270): on until set in Settings › Renderers. */
 export function diffPipelines(): Promise<boolean> {
   return invoke<boolean>("diff_pipelines");
@@ -132,6 +189,130 @@ export function setUserRenderers(renderers: UserRendererDraft[]): Promise<UserRe
  */
 export function runRenderer(id: string, content: RenderContent): Promise<RenderRun> {
   return invoke<RenderRun>("run_renderer", { id, content });
+}
+
+/** The folder renderers saved in Settings › Renderers (ADR-0044), in order. */
+export function folderRenderers(): Promise<FolderRenderer[]> {
+  return invoke<FolderRenderer[]>("folder_renderers");
+}
+
+/** Save the whole list of folder renderers; answers it as stored (ids, trimmed globs, held timeouts). */
+export function setFolderRenderers(renderers: FolderRendererDraft[]): Promise<FolderRenderer[]> {
+  return invoke<FolderRenderer[]>("set_folder_renderers", { renderers });
+}
+
+/** The folder renderer picked for each folder of each repository (ux26, `render.folder_picks`). */
+export function folderRenderPicks(): Promise<FolderPick[]> {
+  return invoke<FolderPick[]>("folder_render_picks");
+}
+
+/** Picks `renderer` for `folder` of the repository `entityId` names (`null` takes the pick away); answers the picks as stored. */
+export function setFolderRenderPick(entityId: string, folder: string, renderer: string | null): Promise<FolderPick[]> {
+  return invoke<FolderPick[]>("set_folder_render_pick", { entityId, folder, renderer });
+}
+
+/** Where a folder render is asked for: the repository or branch, the renderer, the folder and its reads. */
+export interface FolderAsk {
+  entityId: string;
+  renderer: string;
+  folder: string;
+  /** The commit the page shows; `null` reads at the mirror's tip. */
+  commit: string | null;
+  /** The section the source lists every path in, for a repository with no clone. */
+  paths: string | null;
+  ask: Ask;
+  /** The run's lane (ux26): absent or `""` for the Files tab; a side of a comparison otherwise, so both sides run. */
+  lane?: string;
+}
+
+/**
+ * Saved folder renderer `renderer` on `folder` (ADR-0044): what is kept and
+ * the run's state, at once. `ask` says whether a run may start; the run is
+ * told on `folder-render:moved`.
+ */
+export function folderRender(at: FolderAsk): Promise<FolderRenderView> {
+  return invoke<FolderRenderView>("folder_render", {
+    entityId: at.entityId,
+    renderer: at.renderer,
+    folder: at.folder,
+    commit: at.commit,
+    paths: at.paths,
+    ask: at.ask,
+    lane: at.lane ?? null,
+  });
+}
+
+/** Stop a folder render's run, waiting or going. */
+export function folderRenderStop(entityId: string, renderer: string, folder: string, lane?: string): Promise<void> {
+  return invoke<void>("folder_render_stop", { entityId, renderer, folder, lane: lane ?? null });
+}
+
+/** The page showing a folder render left: a run still waiting for its place is dropped. */
+export function folderRenderLeave(entityId: string, renderer: string, folder: string, lane?: string): Promise<void> {
+  return invoke<void>("folder_render_leave", { entityId, renderer, folder, lane: lane ?? null });
+}
+
+/**
+ * Two generated folders compared by their tokens (ux26, `folder_render_compare`): the generated files that differ, the
+ * rest counted; line endings set aside where a side is the working tree. `null` for a side with no folder.
+ */
+export function folderRenderCompare(before: string | null, after: string | null, eolAside: boolean, read?: string): Promise<MadeCompare> {
+  return invoke<MadeCompare>("folder_render_compare", { before, after, eolAside, read: read ?? null });
+}
+
+/** What `folder_render_output` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
+type RawBytes = ArrayBuffer | ArrayLike<number>;
+
+/** The bytes a folder render drew, by its token: raw from the bridge, as `entity_file_bytes` answers. */
+export async function folderRenderOutput(token: string): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("folder_render_output", { token });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** Keep a sanitized HTML document for a folder render's frame; answers the token the frame loads it by. */
+export function folderRenderFrame(document: string): Promise<string> {
+  return invoke<string>("folder_render_frame", { document });
+}
+
+/** Which folders of a tree the folder renderers holding a file glob take, per renderer. */
+export function folderRenderMarks(entityId: string, commit: string | null, paths: string | null): Promise<FolderMarks[]> {
+  return invoke<FolderMarks[]>("folder_render_marks", { entityId, commit, paths });
+}
+
+/** A generated folder's whole tree by its token (ADR-0046); `NotFound` for a token the backend no longer holds. */
+export function folderRenderTree(token: string): Promise<MadeTree> {
+  return invoke<MadeTree>("folder_render_tree", { token });
+}
+
+/** A generated file, as `entity_local_file` answers a file; `path` from the generated folder's top. */
+export function folderRenderFile(token: string, path: string): Promise<ViewBlock> {
+  return invoke<ViewBlock>("folder_render_file", { token, path });
+}
+
+/** A generated file's bytes, raw, as `entity_file_bytes` answers. */
+export async function folderRenderFileBytes(token: string, path: string): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("folder_render_file_bytes", { token, path });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** Run an *Open in…* application on a generated folder, or a file in it; `null` the default. Answers the arguments run. */
+export function folderRenderOpen(application: string | null, token: string, file: string | null, line: number | null): Promise<string[]> {
+  return invoke<string[]>("folder_render_open", { application, token, file, line });
+}
+
+/** Where generated folders are kept, and how much. */
+export function folderRenderStore(): Promise<MadeStore> {
+  return invoke<MadeStore>("folder_render_store");
+}
+
+/** Keep generated folders in `path`, or `null` for the default; what was kept at the old place is removed. */
+export function setFolderRenderStore(path: string | null): Promise<MadeStore> {
+  return invoke<MadeStore>("set_folder_render_store", { path });
+}
+
+/** Remove every generated folder. */
+export function clearFolderRenderStore(): Promise<MadeStore> {
+  return invoke<MadeStore>("clear_folder_render_store");
 }
 
 /** The default renderer per file pattern (#2263), in order. */
@@ -162,4 +343,17 @@ export function namedPipelines(): Promise<NamedPipeline[]> {
 /** Save the whole list of named pipelines; answers it as stored (ids made from new names). */
 export function setNamedPipelines(pipelines: NamedPipelineDraft[]): Promise<NamedPipeline[]> {
   return invoke<NamedPipeline[]>("set_named_pipelines", { pipelines });
+}
+
+/**
+ * What *Decompile* in the JAR view stands at — `knobas_app::commands::app::java_runtime` (ux19): the Java found here,
+ * the bundled decompiler, why not where it cannot run. Looked for once a run; `again` looks again.
+ */
+export function javaRuntime(again: boolean): Promise<JavaRuntime> {
+  return invoke<JavaRuntime>("java_runtime", { again });
+}
+
+/** Settings' Java for *Decompile* — `set_java_path`: an absolute path to a `java` or a Java home, `null` to look by itself. */
+export function setJavaPath(path: string | null): Promise<JavaRuntime> {
+  return invoke<JavaRuntime>("set_java_path", { path });
 }

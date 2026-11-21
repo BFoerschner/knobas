@@ -440,6 +440,10 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
         return Err(ExportError::NoSuchArchive(file.to_owned()));
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
+    // No site session came with the archive (ADR-0050): no *Kept since*.
+    if let Err(error) = crate::site::clear_kept_since(&state.pool).await {
+        tracing::warn!(%error, "the restore finished, but the sites' sign-in dates stayed");
+    }
     settle_restored_sources(state).await;
     reinstall_restored_adapters(state).await;
     Ok(())

@@ -7,13 +7,15 @@
 //! at the kind's open candidates, each with the tone its items fall back to
 //! (Jira's status category, #2468).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use knobas_core::activity::ActivityRow;
 use knobas_core::state_colours::{self, ToneChoice, ToneOverride};
 use knobas_core::tone::Tone;
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
+use tokio::sync::watch;
 
 use crate::IpcError;
 
@@ -92,6 +94,7 @@ pub struct KindStateColours {
 pub async fn read(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
+    counter: &SeenCounter,
 ) -> Result<Vec<KindStateColours>, IpcError> {
     let sources = knobas_sync::config::list(pool)
         .await
@@ -99,29 +102,248 @@ pub async fn read(
     let overrides = state_colours::overrides(pool)
         .await
         .map_err(IpcError::internal)?;
-    let templates: BTreeMap<String, Vec<knobas_source::KindPaths>> = registry
+    let templates = templates_of(&sources, registry);
+    let counted = counted(&sources, &templates);
+    // A source never counted, or counted under other declarations, waits for
+    // the one count that is filling it (bring-up's, or the one this asks for),
+    // never a second scan beside it. A count that failed is made here, so its
+    // error is this read's.
+    if !state_colours::uncounted(pool, &counted)
+        .await
+        .map_err(IpcError::internal)?
+        .is_empty()
+    {
+        counter.wait(counter.request(pool, Owed::Stale)).await;
+        for source in state_colours::uncounted(pool, &counted)
+            .await
+            .map_err(IpcError::internal)?
+        {
+            state_colours::count_seen_words(pool, source)
+                .await
+                .map_err(IpcError::internal)?;
+        }
+    }
+    let seen = state_colours::stored_seen_words(pool, &counted)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(offered(&templates, &seen, &overrides))
+}
+
+/// Each configured adapter kind's own declarations, by adapter kind.
+fn templates_of(
+    sources: &[knobas_sync::config::SourceConfigRow],
+    registry: &dyn AdapterRegistry,
+) -> BTreeMap<String, Vec<knobas_source::KindPaths>> {
+    registry
         .descriptors()
         .into_iter()
         .filter(|d| sources.iter().any(|s| s.adapter_kind == d.adapter_kind))
         .map(|d| (d.adapter_kind, d.payload_paths))
-        .collect();
-    // Each configured source with its adapter's declarations.
-    let declaring = || {
-        sources
+        .collect()
+}
+
+/// The enabled sources whose words are seen, with what they are counted
+/// under: a turned-off source's items are not live, as the walk over the
+/// mirror left them out.
+fn counted(
+    sources: &[knobas_sync::config::SourceConfigRow],
+    templates: &BTreeMap<String, Vec<knobas_source::KindPaths>>,
+) -> Vec<state_colours::SourceWords> {
+    sources
+        .iter()
+        .filter(|s| s.enabled)
+        .filter_map(|s| state_colours::SourceWords::of(&s.id, templates.get(&s.adapter_kind)?))
+        .collect()
+}
+
+/// What a count is asked for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Owed {
+    /// Every counted source that has no count under its declarations now:
+    /// bring-up's, and a read's that met one.
+    Stale,
+    /// This source again, whatever its count says: a run of it wrote to the
+    /// mirror, or a write to one of its items landed.
+    Source(String),
+}
+
+/// The process's one counter of seen words (`knobas_core::state_colours::
+/// count_seen_words`), as [`crate::suggestion_pass::SuggestionPass`] is its
+/// one pass: at most one count runs, every request that arrives meanwhile is
+/// answered by the next, and a request is answered by a count that started
+/// after it. Held by [`crate::commands::app::Lifecycle`], so the read, bring-up
+/// and the scheduler's events share it.
+#[derive(Clone)]
+pub struct SeenCounter {
+    inner: Arc<CounterInner>,
+}
+
+struct CounterInner {
+    registry: Arc<dyn AdapterRegistry>,
+    queue: Mutex<CountQueue>,
+    answered: watch::Sender<u64>,
+}
+
+#[derive(Default)]
+struct CountQueue {
+    requested: u64,
+    running: bool,
+    stale: bool,
+    owed: BTreeSet<String>,
+}
+
+impl SeenCounter {
+    /// A counter over `registry`'s declarations.
+    #[must_use]
+    pub fn new(registry: Arc<dyn AdapterRegistry>) -> SeenCounter {
+        SeenCounter {
+            inner: Arc::new(CounterInner {
+                registry,
+                queue: Mutex::new(CountQueue::default()),
+                answered: watch::channel(0).0,
+            }),
+        }
+    }
+
+    /// Ask for a count over `pool`; answers the request's number, which
+    /// [`Self::wait`] takes. Starts a count if none runs, and never waits.
+    pub fn request(&self, pool: &PgPool, owed: Owed) -> u64 {
+        let mut queue = self.lock();
+        queue.requested += 1;
+        match owed {
+            Owed::Stale => queue.stale = true,
+            Owed::Source(id) => {
+                queue.owed.insert(id);
+            }
+        }
+        if !queue.running {
+            queue.running = true;
+            tokio::spawn(Arc::clone(&self.inner).drive(pool.clone()));
+        }
+        queue.requested
+    }
+
+    /// Until a count that started after request `asked` has ended, whatever
+    /// it found.
+    pub async fn wait(&self, asked: u64) {
+        let mut answered = self.inner.answered.subscribe();
+        let _ = answered.wait_for(|done| *done >= asked).await;
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, CountQueue> {
+        self.inner
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl CounterInner {
+    /// Count until every request is answered, then stop.
+    async fn drive(self: Arc<Self>, pool: PgPool) {
+        loop {
+            let (through, stale, owed) = {
+                let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+                if *self.answered.borrow() >= queue.requested {
+                    queue.running = false;
+                    return;
+                }
+                (
+                    queue.requested,
+                    std::mem::take(&mut queue.stale),
+                    std::mem::take(&mut queue.owed),
+                )
+            };
+            if let Err(error) = self.count(&pool, stale, &owed).await {
+                tracing::warn!(%error, "the seen state words could not be counted");
+            }
+            self.answered.send_replace(through);
+        }
+    }
+
+    async fn count(
+        &self,
+        pool: &PgPool,
+        stale: bool,
+        owed: &BTreeSet<String>,
+    ) -> Result<(), knobas_core::CoreError> {
+        let sources = knobas_sync::config::list(pool).await?;
+        let templates = templates_of(&sources, self.registry.as_ref());
+        let counted = counted(&sources, &templates);
+        let mut due: Vec<&state_colours::SourceWords> = counted
             .iter()
-            .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
-    };
-    let open: Vec<state_colours::OpenPath> = declaring()
-        .flat_map(|(id, kinds)| state_colours::open_paths(id, kinds).collect::<Vec<_>>())
-        .collect();
-    let fallback = declaring().fold(
-        knobas_core::payload::Declarations::empty(),
-        |d, (id, kinds)| d.with(id, state_colours::fallback(kinds)),
-    );
-    let seen = state_colours::seen_words(pool, &open, &fallback)
-        .await
-        .map_err(IpcError::internal)?;
-    Ok(offered(&templates, &seen, &overrides))
+            .filter(|s| owed.contains(&s.source_id))
+            .collect();
+        if stale {
+            for source in state_colours::uncounted(pool, &counted).await? {
+                if !due.iter().any(|d| d.source_id == source.source_id) {
+                    due.push(source);
+                }
+            }
+        }
+        for source in due {
+            let started = std::time::Instant::now();
+            state_colours::count_seen_words(pool, source).await?;
+            tracing::debug!(source = %source.source_id, ms = started.elapsed().as_millis(), "seen state words counted");
+        }
+        Ok(())
+    }
+}
+
+/// The scheduler's events, and a count of a source's seen words asked for
+/// when a run of it ends OK having written to the mirror (or not saying), as
+/// [`crate::suggestion_pass::SuggestOnSync`] asks for its pass; and when a
+/// write to one of its items lands. Every event is passed on unchanged.
+pub struct CountOnSync<E> {
+    inner: E,
+    counter: SeenCounter,
+    pool: PgPool,
+}
+
+impl<E> CountOnSync<E> {
+    /// `inner`'s events, and counts asked of `counter` over `pool`.
+    pub fn new(inner: E, counter: SeenCounter, pool: PgPool) -> CountOnSync<E> {
+        CountOnSync {
+            inner,
+            counter,
+            pool,
+        }
+    }
+}
+
+impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents for CountOnSync<E> {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        if !status.running
+            && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok)
+            && status.last_changed != Some(false)
+        {
+            self.counter
+                .request(&self.pool, Owed::Source(status.source_id.clone()));
+        }
+        self.inner.sync_state(status);
+    }
+    fn source_health(&self, health: knobas_sync::CredentialHealth) {
+        self.inner.source_health(health);
+    }
+    fn activity_new(&self, row: ActivityRow) {
+        self.inner.activity_new(row);
+    }
+    fn write_landed(&self, write: &knobas_core::write_queue::QueuedWrite) {
+        self.counter
+            .request(&self.pool, Owed::Source(write.source_id.clone()));
+        self.inner.write_landed(write);
+    }
+    fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
+        self.inner.refresh_ended(ended);
+    }
+    // The files pass's index and progress, passed on wherever this wrapper
+    // sits in the stack (`tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
+    }
 }
 
 /// A kind's declared words in declared order, each with its adapter's tone.

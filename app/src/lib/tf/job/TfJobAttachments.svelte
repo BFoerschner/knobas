@@ -20,11 +20,14 @@
   let {
     previews,
     onopen,
+    held = false,
   }: {
     /** The page's previews, which hold the list. */
     previews: Previews;
     /** Opens one file's preview. */
     onopen: (attachmentId: string) => void;
+    /** Held unseen in its room while the description above it waits for an image's size (`TfMarkdown`'s `onheld`). */
+    held?: boolean;
   } = $props();
 
   const files = $derived(previews.files);
@@ -42,7 +45,7 @@
   }
 </script>
 
-<section aria-labelledby="tf-tkatt">
+<section aria-labelledby="tf-tkatt" class:tf-heldbelow={held}>
   <details class="tf-tkfold" ontoggle={(event) => event.currentTarget.open && previews.fetchImages()}>
     <summary>
       <h2 id="tf-tkatt">Attachments</h2>

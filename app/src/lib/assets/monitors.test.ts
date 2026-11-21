@@ -54,6 +54,8 @@ function monitor(name: string, state: string | null, tombstoned = false): Monito
     hidden: false,
     assets: [],
     samples: [],
+    bar: "",
+    down_since: null,
   };
 }
 

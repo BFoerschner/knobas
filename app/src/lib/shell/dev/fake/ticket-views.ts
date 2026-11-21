@@ -94,6 +94,7 @@ interface View {
   card_fields: CardField[];
   list_columns: ListColumn[];
   list_sort: ListSort | null;
+  show_all: boolean;
   saved_view: string | null;
 }
 
@@ -101,7 +102,7 @@ const CARD: CardField[] = ["type", "signals", "comments", "assignee"];
 const LIST: ListColumn[] = ["key", "summary", "status", "priority", "signals", "assignee", "updated"];
 
 function seeded(id: string, name: string, group: string, query: string, layout: "board" | "list" = "list"): View {
-  return { id, name, group, position: 0, query, layout, columns: [], lanes: "none", card_fields: CARD, list_columns: LIST, list_sort: null, saved_view: null };
+  return { id, name, group, position: 0, query, layout, columns: [], lanes: "none", card_fields: CARD, list_columns: LIST, list_sort: null, show_all: false, saved_view: null };
 }
 
 /** prototype-6's views, in its order and words. */

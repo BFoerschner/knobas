@@ -16,6 +16,8 @@
  * touches no DOM, so its race is tested on fake ports (`job-reader.test.ts`).
  */
 import type {
+  CardRows,
+  ContextRow,
   EntityDetail,
   EntityRow,
   JobLinkSets,
@@ -24,26 +26,28 @@ import type {
 } from "../../ipc/entity";
 import { ipcErrorMessage } from "../../ipc";
 import {
-  assetTone,
+  isEntityId,
   isMine,
   keyOf,
   offersStartWork,
   resolveJob,
+  segmentKey,
   type AssetLine,
   type FrameKinds,
   type SourceFacts,
 } from "./job";
 import { bridgeTicketBoard, type JobPorts } from "./ports";
 import { entityCheckout } from "../../ipc/entity";
-import { isDone } from "../tickets/tickets";
 import { parentOf } from "../sets/apply";
-import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
+import { countSubtasks, readAssetLines, readUnpushed } from "./card-sections";
+import { reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
 /** The reads the reader makes: the job's own ports, without its writes. */
 export type JobReaderPorts = Pick<
   JobPorts,
   | "listSources"
   | "getEntity"
+  | "entityBriefs"
   | "promoteContext"
   | "listEntities"
   | "visitEntity"
@@ -53,6 +57,7 @@ export type JobReaderPorts = Pick<
   | "getAsset"
   | "ticketBoard"
   | "entityCheckout"
+  | "cardReads"
 >;
 
 /** The ticket's sub-tasks as the card's row counts them (#2401). */
@@ -60,9 +65,6 @@ export interface Subtasks {
   total: number;
   open: number;
 }
-
-/** How many of a ticket's branches have their checkout read for Code's *not pushed* (#2401). */
-export const UNPUSHED_LIMIT = 10;
 
 /** One repository *Start work*'s dropdown offers. */
 export interface RepoChoice {
@@ -86,6 +88,11 @@ export interface JobReader {
    * while it is read, or when it cannot be.
    */
   readonly parentTitle: string | null;
+  /**
+   * Whether the parent's title read has answered (or there is no parent to read): the epic chip draws once it has, so it
+   * doesn't widen from the key to the key and title under the reader (the nothing-moves pass, 2026-11-17).
+   */
+  readonly parentRead: boolean;
   /** Why the job could not be read, or `null`. */
   readonly failure: string | null;
   /** Every configured source, for which ticket is the person's own. */
@@ -136,12 +143,22 @@ export interface JobReader {
   close(): void;
 }
 
+/** How recent a context must be, against the promotion's send, to be one it made. */
+const MADE_WITHIN_MS = 60_000;
+
+/** Whether a promotion answered an epic's context it may have just made (`created_at` within {@link MADE_WITHIN_MS}). */
+function madeEpic(row: ContextRow, sent: number): boolean {
+  const made = Date.parse(row.created_at);
+  return row.kind === "epic" && Number.isFinite(made) && made >= sent - MADE_WITHIN_MS;
+}
+
 /** Every slot as it is before a job answers. */
 function fresh() {
   return {
     detail: undefined as EntityDetail | null | undefined,
     others: [] as EntityDetail[],
     parentTitle: null as string | null,
+    parentRead: false,
     code: null as EntityRow[] | null,
     failure: null as string | null,
     thread: null as Thread | null,
@@ -170,11 +187,16 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
   let token = 0;
 
   async function readJob(wanted: string, mine: number) {
+    // An address that names the ticket's id (every press does) names the ticket it opens, or none: the card's read goes
+    // with the press, beside the three reads that find the ticket, rather than after them (ux19).
+    const early = ports.cardReads !== undefined && isEntityId(wanted) ? askCard(wanted) : null;
+    // The sub-tasks are the board under the key, which every address names, whichever source's ticket it opens.
+    const subtasks = askSubtasks(segmentKey(wanted));
     try {
       const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
       if (mine !== token) return;
       state.sources = listed;
-      const job = await resolveJob(wanted, listed, ports.getEntity);
+      const job = await resolveJob(wanted, listed, ports.getEntity, ports.entityBriefs);
       if (mine !== token) return;
       state.others = job?.others ?? [];
       const found = job?.ticket ?? null;
@@ -183,15 +205,30 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const id = found.row.entity_id;
       void readConversation(id, mine);
       void readParent(found, mine);
-      void readSubtasks(id, mine);
+      void readSubtasks(id, mine, keyOf(id) === segmentKey(wanted) ? subtasks : null);
       void readInherited(id, mine);
-      // The reach starts from the ticket's context, so the context first.
-      await ports.promoteContext(id);
-      if (mine !== token) return;
+      // The reach seeds from the ticket's context's adds, and a context promotion makes is born with none, so the
+      // reach, the sections and Code need not wait for it (the query audit, 2026-11-12: three round trips in a row
+      // before anything below the card was asked). An epic's is the exception, read again below.
+      const promoted = ports.promoteContext(id);
+      if (ports.cardReads !== undefined) {
+        // An epic's context reaches its sub-tasks, and the card's walk may run before the promotion commits one it
+        // makes: read the card again once it has.
+        const sent = Date.now();
+        void promoted.then((row) => {
+          if (madeEpic(row, sent) && mine === token) void readCard(id, mine);
+        }, () => {});
+        // The reach and the four sections in one read over one walk (ux19): five round trips were five chances to be
+        // the slowest, and the card holds its sections until the last has answered.
+        const card = readCard(id, mine, id === wanted ? early : null);
+        if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
+        await Promise.all([promoted, card]);
+        return;
+      }
       void readReach(id, mine);
       void readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
-      await readCode(id, mine);
+      await Promise.all([promoted, readCode(id, mine)]);
     } catch (cause) {
       if (mine === token) state.failure = ipcErrorMessage(cause);
     }
@@ -208,6 +245,36 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
+  /**
+   * The reach and Code, Builds, Docs and Monitors in one read (`card_reads`), each section's rows as its own reach-scoped
+   * `list_entities` answers them; then the reached assets and Code's *not pushed*. A read that fails draws every section
+   * as having nothing, as a failed section read does alone.
+   */
+  async function readCard(id: string, mine: number, asked: Promise<CardRows | null> | null = null) {
+    void registry.load();
+    const answer = await (asked ?? askCard(id));
+    if (mine !== token) return;
+    const rows = (at: number) => answer?.sections[at] ?? [];
+    const reached = answer?.reached ?? [];
+    state.reached = new Map(reached.map((row) => [row.entity_id, row]));
+    state.code = rows(0);
+    state.builds = rows(1);
+    state.pages = rows(2);
+    state.monitors = rows(3);
+    await Promise.all([
+      readAssetLines(ports.getAsset, reached).then((lines) => {
+        if (mine === token) state.assets = lines;
+      }),
+      readUnpushedOf(rows(0), mine),
+    ]);
+  }
+
+  /** The card's read for `id`; `null` when it fails: nothing reached, and no section has anything in it. */
+  function askCard(id: string): Promise<CardRows | null> {
+    const order = [SECTION_READS.code, SECTION_READS.builds, SECTION_READS.pages, SECTION_READS.monitors];
+    return ports.cardReads!(id, order.map((read) => reachFilter(id, read.kinds, read.order, read.role)), SECTION_LIMIT).catch(() => null);
+  }
+
   /** The reach itself, for the labels, and the reached assets for their section. */
   async function readReach(id: string, mine: number) {
     let rows: Reached[] = [];
@@ -218,23 +285,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
     if (mine !== token) return;
     state.reached = new Map(rows.map((row) => [row.entity_id, row]));
-    const ids = rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT);
-    const read = await Promise.allSettled(ids.map((row) => ports.getAsset(row.entity_id)));
-    if (mine !== token) return;
-    state.assets = read.flatMap((answer) =>
-      answer.status === "fulfilled"
-        ? [
-            {
-              id: answer.value.asset.id,
-              name: answer.value.asset.name,
-              type: answer.value.asset.type_label,
-              environment: answer.value.effective_environment?.value ?? null,
-              on: answer.value.held_by.at(-1)?.name ?? null,
-              tone: assetTone(answer.value.asset.health),
-            },
-          ]
-        : [],
-    );
+    const lines = await readAssetLines(ports.getAsset, rows);
+    if (mine === token) state.assets = lines;
   }
 
   /** The link sets that apply and the parent; nothing of either when the read fails. */
@@ -277,12 +329,17 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
   /** The parent's title for the epic chip; a parent that cannot be read keeps the path line alone. */
   async function readParent(ticket: EntityDetail, mine: number) {
     const parent = parentOf(ticket.row);
-    if (parent === null) return;
     try {
-      const read = await ports.getEntity(parent);
-      if (mine === token) state.parentTitle = read.row.title;
+      if (parent === null) return;
+      const title = ports.entityBriefs
+        ? (await ports.entityBriefs([parent]))[0]?.title
+        : (await ports.getEntity(parent)).row.title;
+      if (title === undefined) return;
+      if (mine === token) state.parentTitle = title;
     } catch {
       // The chip says the key alone.
+    } finally {
+      if (mine === token) state.parentRead = true;
     }
   }
 
@@ -318,6 +375,10 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
 
   /** The link sets, the reach, the sub-tasks and every section again; settles once all have answered. */
   async function readReachAgain(id: string, mine: number) {
+    if (ports.cardReads !== undefined) {
+      await Promise.allSettled([readInherited(id, mine), readSubtasks(id, mine), readCard(id, mine)]);
+      return;
+    }
     await Promise.allSettled([
       readInherited(id, mine),
       readSubtasks(id, mine),
@@ -326,7 +387,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       readRows(id, SECTION_READS.code, mine).then((rows) => {
         if (mine !== token || !rows) return;
         state.code = rows;
-        return readUnpushed(rows, mine);
+        return readUnpushedOf(rows, mine);
       }),
     ]);
   }
@@ -335,7 +396,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
     state.code = rows;
-    void readUnpushed(rows, mine);
+    void readUnpushedOf(rows, mine);
   }
 
   /**
@@ -343,39 +404,23 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
    * counted by its columns' totals, a column that is not *Done* open. A read
    * that fails draws no Sub-tasks row.
    */
-  async function readSubtasks(id: string, mine: number) {
-    try {
-      const board = await (ports.ticketBoard ?? bridgeTicketBoard)(`under:${keyOf(id)}`);
-      if (mine !== token) return;
-      const total = board.columns.reduce((sum, column) => sum + column.total, 0);
-      const open = board.columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
-      state.subtasks = { total, open };
-    } catch {
-      if (mine === token) state.subtasks = { total: 0, open: 0 };
-    }
+  async function readSubtasks(id: string, mine: number, asked: Promise<Subtasks> | null = null) {
+    const counted = await (asked ?? askSubtasks(keyOf(id)));
+    if (mine === token) state.subtasks = counted;
   }
 
-  /**
-   * Code's *not pushed* (#2401): a branch counts when its checkout on this
-   * machine stands on that branch with commits ahead of its upstream. The
-   * mirror's branches are the forge's, so only the checkout knows. A branch
-   * with no checkout, or one standing elsewhere, counts nothing.
-   */
-  async function readUnpushed(rows: readonly EntityRow[], mine: number) {
-    const read = ports.entityCheckout ?? entityCheckout;
-    const branches = rows.filter((row) => row.kind === "branch").slice(0, UNPUSHED_LIMIT);
-    const answers = await Promise.allSettled(branches.map(async (row) => read(row.entity_id)));
-    if (mine !== token) return;
-    state.unpushed = new Set(
-      branches
-        .filter((row, at) => {
-          const answer = answers[at]!;
-          if (answer.status !== "fulfilled") return false;
-          const tree = answer.value.tree;
-          return tree !== null && tree.status === "read" && tree.branch === row.title && tree.ahead > 0;
-        })
-        .map((row) => row.entity_id),
+  /** The sub-tasks under `key`; none when the board cannot be read. */
+  function askSubtasks(key: string): Promise<Subtasks> {
+    return (ports.ticketBoard ?? bridgeTicketBoard)(`under:${key}`).then(
+      (board) => countSubtasks(board, key),
+      () => ({ total: 0, open: 0 }),
     );
+  }
+
+  /** Code's *not pushed* (#2401). */
+  async function readUnpushedOf(rows: readonly EntityRow[], mine: number) {
+    const unpushed = await readUnpushed(ports.entityCheckout ?? entityCheckout, rows);
+    if (mine === token) state.unpushed = unpushed;
   }
 
   return {
@@ -387,6 +432,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get parentTitle() {
       return state.parentTitle;
+    },
+    get parentRead() {
+      return state.parentRead;
     },
     get failure() {
       return state.failure;

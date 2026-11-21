@@ -1,0 +1,16 @@
+[
+  ["com:-- The reviewers a pull request names."],
+  ["kw:create",": ","kw:table",": ","fn:if",": ","kw:not",": ","kw:exists",": reviewers ("],
+  [":  id ","kw:bigserial",": ","kw:primary key",":,"],
+  [":  pr ","kw:text",": ","kw:not null",":,"],
+  [":  ","kw:login",": ","kw:text",": ","kw:not null",": ","kw:default",": ","str:''"],
+  [":);"],
+  [],
+  ["kw:CREATE OR REPLACE",": ","kw:FUNCTION",": ","fn:reviewers_of",":(p ","kw:text",":) ","kw:RETURNS",": jsonb ","kw:AS",": $fn$"],
+  [":  ","kw:SELECT",": ","fn:coalesce",":(jsonb_agg(","kw:login",": ","kw:order by",": ","kw:login",":), ","str:'[]'",":::jsonb)"],
+  [":  ","kw:FROM",": reviewers ","kw:WHERE",": pr ","op:=",": p ","kw:AND",": ","kw:login",": ","op:<>",": ","str:''",":;"],
+  [":$fn$ ","kw:LANGUAGE",": ","kw:sql",": IMMUTABLE;"],
+  [],
+  ["kw:insert into",": reviewers (pr, ","kw:login",":) ","kw:values",": (","str:'mock#142'",":, ","str:'bjorn'",":);"],
+  []
+]

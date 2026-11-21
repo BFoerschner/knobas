@@ -7,15 +7,19 @@
 
 pub mod crud;
 pub mod demo;
+pub mod files_on_sync;
+pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
 pub mod paths;
+pub mod pick_on_sync;
 pub mod progress;
 pub mod refresh;
 pub mod registry;
 pub mod remote;
 pub mod state_colours;
+pub(crate) mod stored_tree;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
@@ -611,9 +615,10 @@ pub struct BringUp {
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
-    /// The process's one suggestion pass, requested after every run that
-    /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
-    /// #1485): the one bring-up built, never one of the scheduler's own.
+    /// The process's one suggestion pass, requested after a run that ends
+    /// OK and wrote to the mirror
+    /// ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync), #1485):
+    /// the one bring-up built, never one of the scheduler's own.
     pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 
@@ -647,14 +652,68 @@ pub async fn bring_up<R: tauri::Runtime>(
             secrets: Arc::clone(&deps.secrets),
             // The owed links of #1050 resolved after every run (`ArrivalLinks`),
             // and a suggestion pass requested after every OK one (#1485).
-            events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
-                write_queue::ArrivalLinks::new(
-                    TauriEvents::new(app.clone()),
+            // And the state words a run's source shows counted again after
+            // a run that wrote (the state-colours bug, 2026-11-17).
+            // Outermost, the files pass's index and its progress (the
+            // everything-search decisions, D7): no pass for a test app that
+            // manages no lifecycle, or an index bring-up could not open.
+            events: Arc::new(files_on_sync::FilesOnSync::new(
+                pick_on_sync::PickOnSync::new(
+                    state_colours::CountOnSync::new(
+                        crate::suggestion_pass::SuggestOnSync::new(
+                            write_queue::ArrivalLinks::new(
+                                TauriEvents::new(app.clone()),
+                                deps.pool.clone(),
+                                Arc::clone(&registry),
+                                background.clone(),
+                            ),
+                            deps.suggestions,
+                        ),
+                        // The process's counter, which the read waits on; a test app
+                        // that manages no lifecycle counts on one of its own.
+                        {
+                            use tauri::Manager as _;
+                            app.try_state::<crate::Lifecycle>().map_or_else(
+                                || state_colours::SeenCounter::new(Arc::clone(&registry)),
+                                |lifecycle| lifecycle.seen_words().clone(),
+                            )
+                        },
+                        deps.pool.clone(),
+                    ),
+                    // And the launcher's names read again after a run that wrote, a
+                    // write that landed and an item's refresh (the fuzzy-search
+                    // decisions, 2026-11-19, D3); a test app with no lifecycle reads
+                    // into a picker nobody asks.
+                    {
+                        use tauri::Manager as _;
+                        app.try_state::<crate::Lifecycle>()
+                            .map_or_else(knobas_search::picker::Picker::default, |lifecycle| {
+                                lifecycle.picker().clone()
+                            })
+                    },
                     deps.pool.clone(),
-                    Arc::clone(&registry),
-                    background.clone(),
                 ),
-                deps.suggestions,
+                {
+                    use tauri::Manager as _;
+                    app.try_state::<crate::Lifecycle>()
+                        .map(|lifecycle| lifecycle.files())
+                        .filter(knobas_files::FileIndex::is_open)
+                        .map(|index| knobas_sync::code_files::Files {
+                            index,
+                            // A blob from a checkout here before the forge (D3).
+                            clones: Some(Arc::new(
+                                crate::checkout::files_from_clones::FromClones::new(
+                                    deps.pool.clone(),
+                                ),
+                            )),
+                        })
+                },
+                {
+                    let to = app.clone();
+                    move |progress: &knobas_sync::code_files::FilesProgress| {
+                        crate::events::emit(&to, None, crate::events::CODE_FILES, progress);
+                    }
+                },
             )),
             timing: SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
@@ -663,6 +722,8 @@ pub async fn bring_up<R: tauri::Runtime>(
     )
     .await?;
     let live = live::LiveSources::default();
+    // Pages show what knobas last read, from the session before too (ADR-0042).
+    live.hold_in(deps.pool.clone());
     let fresh_to = app.clone();
     live.on_fresh(move |fresh| {
         crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);

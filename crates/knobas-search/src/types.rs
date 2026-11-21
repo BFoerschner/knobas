@@ -102,6 +102,14 @@ pub struct ParsedQuery {
     /// mirror both know them. Empty unless the launcher's answer is.
     #[serde(default)]
     pub left_out_tokens: Vec<String>,
+    /// The text with a ticket key typed with a space or no separator read as
+    /// the key (`pay 123` as `PAY-123`, [`crate::typed_key`]), whose answer
+    /// leads: the launcher then lists the tickets first, as it does for a
+    /// key typed with its `-`. Added to a frozen type (§10.8): optional on
+    /// the wire and left out when nothing was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub keyed: Option<String>,
 }
 
 /// The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and
@@ -131,7 +139,12 @@ pub enum Prefix {
 pub struct SearchResponse {
     pub interpreted: ParsedQuery,
     pub groups: Vec<ResultGroup>,
-    /// Matches across every kind, before `limit` was applied.
+    /// Matches across every kind, before `limit` was applied. For one, two
+    /// or three typed characters that names answer, and for a query more
+    /// than 2,000 rows hold, the rows the answer holds: such an answer reads
+    /// each kind's first rows and counts no match (the one-letter pass,
+    /// 2026-11-15, the two-letters pass and the long-words pass,
+    /// 2026-11-16).
     pub total: u32,
     pub took_ms: u32,
     /// Which sources could answer the filters this query narrowed by, for the
@@ -260,7 +273,10 @@ pub struct ResultGroup {
     pub label: String,
     pub plural: String,
     pub monogram: String,
-    /// Matches of this kind, before `limit` was applied.
+    /// Matches of this kind, before `limit` was applied. For one, two or
+    /// three typed characters that names answer, and for a query more than
+    /// 2,000 rows hold, at most the rows a kind may contribute: see
+    /// [`SearchResponse::total`].
     pub total: u32,
     pub hits: Vec<SearchHit>,
 }
@@ -328,13 +344,21 @@ pub struct EntityRow {
     pub cell: Option<String>,
 }
 
-/// One result: a row, its rank, and the excerpt with the match marked.
+/// One result: a row, its rank, and where the words appear in its text.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 pub struct SearchHit {
     #[serde(flatten)]
     pub row: EntityRow,
     pub rank: f32,
+    /// Empty from every command since 2026-11-12 (the query audit, PR
+    /// #2479). It held a `ts_headline` of the row, which no screen drew and
+    /// which cost a quarter of a common word's keystroke, so no command asks
+    /// its statement for one any more
+    /// ([`EffectiveFilters::headline`](crate::query::EffectiveFilters::headline)).
+    /// The field keeps its place on the wire, so a reader written before that
+    /// decodes a hit as it did. What a reader sees of the match is
+    /// [`Self::excerpts`].
     pub snippet: Vec<Segment>,
     /// Where the words appear in the row's text, each with its place
     /// (#2431): what the launcher's preview draws under *Everything*, so the
@@ -347,6 +371,126 @@ pub struct SearchHit {
     /// (migration `0067`), a ticket's, pull request's or note's text.
     #[serde(default)]
     pub excerpts: Vec<Excerpt>,
+    /// The letters of [`EntityRow::title`] what was typed matched (the
+    /// fuzzy-search decisions, 2026-11-19, D9): pairs of start and end in
+    /// UTF-16 code units, ascending and never overlapping, which the launcher
+    /// paints over the title's text. Empty for a row only the words found,
+    /// and from a searcher with no picker.
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// empty, so a reader written before it decodes a hit as it did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<u32>>", optional)]
+    pub marks: Vec<u32>,
+    /// Under *Everything*, a repository's files that hold the words (the
+    /// everything-search decisions, 2026-11-20, D10): how many by their text
+    /// and how many by their names. The file it is shown by is its first
+    /// excerpt ([`Excerpt::file`]).
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub files: Option<FilesFound>,
+}
+
+/// How many of a repository's files hold the words (D10).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FilesFound {
+    /// Files whose text holds them.
+    pub by_text: u32,
+    /// Files whose path holds them.
+    pub by_name: u32,
+    /// The branch they are read on, the repository's default: what the pane
+    /// names (D11). Empty where it is not known.
+    pub branch: String,
+}
+
+/// What the pane draws of the repository it shows (D11, `search_files`):
+/// the first files the words find, each an excerpt as the answer's first is,
+/// and how many there are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FilesInRepo {
+    /// Up to eight: those the path found first, then the shortest path.
+    pub files: Vec<Excerpt>,
+    pub by_text: u32,
+    pub by_name: u32,
+    /// More files than `files` hold the words.
+    pub more: bool,
+    /// The branch, as [`FilesFound::branch`].
+    pub branch: String,
+}
+
+/// The file an excerpt quotes (D10, D11): its path in the repository, and
+/// where its text holds the words, the line and the lines around it. A file
+/// found by its name alone has no line.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct FileAt {
+    pub path: String,
+    /// The line's number, from 1.
+    pub line: Option<u32>,
+    /// The line before it, or empty.
+    pub before: String,
+    /// The line after it, or empty.
+    pub after: String,
+}
+
+/// **What *Everything* matches** beyond names and keys, a box each in
+/// Settings › Search (the everything-search decisions, 2026-11-20, D13).
+/// *Titles* matches names and keys whatever this says. A box filters what
+/// the next key matches and changes nothing kept: everything stays synced
+/// and indexed. A field left out on the wire is `true`, so every box starts
+/// on and a later box reads as on from an older setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(default)]
+#[ts(export_to = "search.ts")]
+#[allow(clippy::struct_excessive_bools)]
+pub struct EverythingMatches {
+    /// A ticket's description and comments.
+    pub ticket_text: bool,
+    /// A pull request's description and comments.
+    pub pr_text: bool,
+    /// A Docs page's text and comments.
+    pub page_text: bool,
+    /// The end of each pipeline's last finished run's log.
+    pub build_logs: bool,
+    /// The names of a repository's files.
+    pub file_names: bool,
+    /// The text of a repository's files.
+    pub file_text: bool,
+}
+
+impl Default for EverythingMatches {
+    fn default() -> Self {
+        Self {
+            ticket_text: true,
+            pr_text: true,
+            page_text: true,
+            build_logs: true,
+            file_names: true,
+            file_text: true,
+        }
+    }
+}
+
+impl EverythingMatches {
+    /// The kinds a cleared box leaves to their names and keys
+    /// ([`crate::query::EffectiveFilters::names_only_kinds`]).
+    #[must_use]
+    pub fn names_only_kinds(&self) -> Vec<String> {
+        [
+            (self.ticket_text, "ticket"),
+            (self.pr_text, "pr"),
+            (self.page_text, "page"),
+        ]
+        .into_iter()
+        .filter(|(on, _)| !on)
+        .map(|(_, kind)| kind.to_owned())
+        .collect()
+    }
 }
 
 /// One place the words appear in a hit's text (#2431).
@@ -355,15 +499,26 @@ pub struct SearchHit {
 pub struct Excerpt {
     /// Where in the row it sits, as the reader finds it there: a page's
     /// section heading, `Heading` for that heading's own words,
-    /// `Comment by <name>`, a run log's `line <n>`. `None` for text the index
-    /// keeps no place for (a page's lead, a ticket's, pull request's or note's
-    /// text), for a comment's author line, whose text says
-    /// `Comment by <name>` itself (#2481), and for a page link's line, whose
-    /// text says `Links to <title> in <space>` itself (#2491).
+    /// `Comment by <name>`, a run log's `Log line <n>`, `Description` for a
+    /// ticket's or a pull request's own text (the everything-search
+    /// decisions, 2026-11-20, D10). `None` for text the index keeps no place
+    /// for (a page's lead, a note's text), for a comment's author line, whose
+    /// text says `Comment by <name>` itself (#2481), and for a page link's
+    /// line, whose text says `Links to <title> in <space>` itself (#2491).
     pub place: Option<String>,
     /// The text around the words, the words flagged (raw source text, as
     /// [`Segment`] says).
     pub segments: Vec<Segment>,
+    /// The file it quotes, for a repository found by its files (the
+    /// everything-search decisions, 2026-11-20, D10): `place` is then
+    /// `<path>:<line>`, or the path where its name found it, and `segments`
+    /// the line or the path, the matched letters flagged.
+    ///
+    /// Added to a frozen type (§10.8): optional on the wire and left out when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub file: Option<FileAt>,
 }
 
 /// A run of excerpt text, and whether it is part of the match.

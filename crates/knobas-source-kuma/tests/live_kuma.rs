@@ -352,6 +352,13 @@ async fn a_full_sync_mirrors_every_seeded_monitor() {
             item.title
         );
 
+        // The seeded monitors' types, counted over those alone: another
+        // estate on this Kuma (`just seed-scale kuma`'s 200 `scale-*`
+        // monitors, keyword, port and group ones among them) is not this
+        // estate.
+        if !SEEDED.contains(&item.title.as_str()) {
+            continue;
+        }
         match payload["type"].as_str() {
             Some("ping") => {
                 pings += 1;

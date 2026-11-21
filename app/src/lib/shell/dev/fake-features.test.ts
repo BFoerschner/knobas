@@ -8,7 +8,8 @@ import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
-import { demoHandlers, holdBack } from "./fake-tauri";
+import { COMPOSED, demoHandlers, holdBack } from "./fake-tauri";
+import { expandScale, scaleForge, scalePages, scaleTickets } from "./fake-scale";
 import { historyBuilds } from "./fake/builds";
 import { CORPUS, corpusListBuilds, fakeRoleScope } from "./fake/corpus";
 import { estateScans } from "./fake/estate";
@@ -31,7 +32,8 @@ test("no two features answer one command, and none answers nothing", () => {
   );
   expect(counts).not.toContain(0);
   const counted = counts.reduce((sum, count) => sum + count, 0);
-  expect(Object.keys(demoHandlers(params))).toHaveLength(counted);
+  // And the reads the fixture answers from its other reads.
+  expect(Object.keys(demoHandlers(params))).toHaveLength(counted + COMPOSED.length);
 });
 
 // -- the TF2-TF6 fixture fill (#921) ----------------------------------------
@@ -44,11 +46,16 @@ test("the inbox: snooze moves a row to the other shelf, done removes it, the cou
   const stream = h["inbox_items"]!({ shelf: "stream" }) as { item: { key: string } }[];
   expect(h["inbox_count"]!({})).toBe(stream.length);
   const [first, second] = stream;
-  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: "2026-09-01T07:00:00Z" });
+  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: new Date(Date.now() + 86_400_000).toISOString() });
   h["complete_inbox_item"]!({ itemKey: second!.item.key });
   expect(h["inbox_count"]!({})).toBe(stream.length - 2);
   const later = h["inbox_items"]!({ shelf: "snoozed" }) as { item: { key: string; snoozed_until: string } }[];
   expect(later[0]!.item.key).toBe(first!.item.key);
+  // A snooze until now wakes it, from the shelf as the backend's upsert does (*Wake*, *Undo*).
+  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: new Date().toISOString() });
+  expect(h["inbox_count"]!({})).toBe(stream.length - 1);
+  const shelf = h["inbox_items"]!({ shelf: "snoozed" }) as { item: { key: string } }[];
+  expect(shelf.some((row) => row.item.key === first!.item.key)).toBe(false);
   expect(() => h["complete_inbox_item"]!({ itemKey: "nope" })).toThrow();
 });
 
@@ -417,6 +424,41 @@ test("docs: ?fake-docs-long=<n> repeats the SEPA design page's body and comments
   expect(JSON.stringify(long.blocks.filter((b) => b.type === "heading"))).toContain("Rollout 3");
 });
 
+test("?fake-scale is Björn's mirror, the same on every load: 20,000 tickets, 5,000 pages with an 800-child parent, 10,000 forge rows", () => {
+  const tickets = scaleTickets(20_000);
+  expect(tickets).toHaveLength(20_000);
+  expect(new Set(tickets.map((t) => t.entity_id)).size).toBe(20_000);
+  expect(scaleTickets(20_000)).toEqual(tickets);
+  // A board of eleven columns, over eight projects.
+  expect(new Set(tickets.map((t) => t.payload["status"])).size).toBe(11);
+  expect(new Set(tickets.map((t) => (t.payload["fields"] as { project: { key: string } }).project.key)).size).toBe(8);
+  // No key the demo corpus already holds.
+  const demo = new Set(CORPUS.map((row) => row.entity_id));
+  expect(tickets.filter((t) => demo.has(t.entity_id))).toEqual([]);
+
+  const pages = scalePages(5_000);
+  expect(pages).toHaveLength(5_000);
+  expect(new Set(pages.map((p) => p.id)).size).toBe(5_000);
+  const children = new Map<string, number>();
+  for (const page of pages) if (page.parent) children.set(page.parent, (children.get(page.parent) ?? 0) + 1);
+  expect([...children.values()].sort((a, b) => b - a).slice(0, 2)).toEqual([800, 300]);
+  const byId = new Map(pages.map((p) => [p.id, p]));
+  const depth = (p: { parent: string | null }): number => (p.parent ? 1 + depth(byId.get(p.parent)!) : 0);
+  expect(Math.max(...pages.map(depth))).toBe(7);
+
+  const forge = scaleForge(10_000);
+  expect(forge).toHaveLength(10_000);
+  expect(new Set(forge.map((row) => row.kind))).toEqual(new Set(["repo", "branch", "pr", "commit"]));
+
+  // The per-area switches it stands for, where the address leaves them out.
+  expect(expandScale(new URLSearchParams("fake-scale&fake-monitors=7")).get("fake-monitors")).toBe("7");
+  expect(expandScale(new URLSearchParams("fake-scale")).get("fake-pipelines")).toBe("300");
+  expect(expandScale(new URLSearchParams("")).has("fake-pipelines")).toBe(false);
+  // Docs draws its pages as three spaces of their own.
+  const keys = ((demoHandlers(new URLSearchParams("fake-scale")) as Calls)["docs_tree"]!({}) as { spaces: { key: string }[] }).spaces.map((s) => s.key);
+  expect(keys.slice(-3)).toEqual(["HB", "RUN", "DSGN"]);
+});
+
 test("docs: ?fake-docs-pages=<n> adds a BULK space of n pages folded under each other, searched by title (#2200)", () => {
   const h = demoHandlers(new URLSearchParams("fake-docs-pages=100")) as Calls;
   type Node = { entity_id: string; title: string; parent: string | null };
@@ -569,7 +611,8 @@ test("link sets: a monitor row draws its type and its dot, a repository its team
   const roster = h["monitor_roster"]!({}) as { entity_id: string; monitor_type: string }[];
   const kind = roster.find((row) => row.entity_id === "kuma:5")?.monitor_type;
   expect(kind).toBeTruthy();
-  expect(of("kuma:5")).toMatchObject({ line: kind, state: { text: "up", tone: "ok" } });
+  // gitea's monitor is the fixture's paused one, which Monitors says too (F-540).
+  expect(of("kuma:5")).toMatchObject({ line: kind, state: { text: "paused", tone: "muted" } });
   expect(of("mock:tidewater/payout-service")).toMatchObject({ line: "Payments", state: null });
 });
 
@@ -895,4 +938,53 @@ test("with fake-tone-override, the fixture starts with Blocked moved to warn, so
     );
   expect(yours(demoHandlers() as Calls)).toEqual([]);
   expect(yours(demoHandlers(new URLSearchParams("fake-tone-override")) as Calls)).toEqual([["ticket", "Blocked", "warn"]]);
+});
+
+// ---- the asset tree agrees with itself (the asset-tree shots, 2026-11-19) ----
+
+type Hits = { groups: { hits: { entity_id: string; kind: string; title: string }[] }[] };
+const treeSearch = (h: Calls, raw: string) =>
+  (h["search"]!({ query: { raw, limit: 50, titles: false, filters: { sources: [], kinds: ["asset"], updated_within_days: null, mine: false, authors: [] } } }) as Hits).groups.flatMap((group) => group.hits);
+
+test("the Tree's search answers plain words from the estate, assets only", () => {
+  const h = demoHandlers() as Calls;
+  for (const words of ["kno", "dock", "forg", "uptime", "db"]) {
+    const hits = treeSearch(h, words);
+    expect(hits.length, words).toBeGreaterThan(0);
+    expect(hits.every((hit) => hit.kind === "asset" && hit.title.toLowerCase().includes(words)), words).toBe(true);
+  }
+});
+
+test("an asset's pane, its row and the Monitors roster are one statement about what watches it", () => {
+  const h = demoHandlers() as Calls;
+  type Roster = { entity_id: string; name: string; state: string | null; tombstoned: boolean; assets: { id: string }[] }[];
+  const roster = h["monitor_roster"]!({ withSamples: false }) as Roster;
+  const jira = roster.find((row) => row.name === "jira")!;
+  const asset = jira.assets[0]!.id;
+  const detail = h["get_asset"]!({ assetId: asset }) as { asset: { health: string }; monitors: string[]; monitoring: { entity_id: string; name: string; state: string | null }[] };
+  expect(detail.monitoring.map((watch) => watch.entity_id)).toEqual(roster.filter((row) => row.assets.some((a) => a.id === asset)).map((row) => row.entity_id));
+  expect(detail.monitoring.find((watch) => watch.name === "jira")?.state).toBe(jira.state);
+  // Its monitor's state is its health, and the column it sits in says so too.
+  const health = jira.state === "down" ? "down" : jira.state === "warn" ? "warn" : null;
+  if (health !== null) {
+    expect(detail.asset.health).toBe(health);
+    const parent = (h["get_asset"]!({ assetId: asset }) as { asset: { parent_id: string | null } }).asset.parent_id;
+    const row = (h["asset_tree"]!({ parentId: parent }) as { id: string; health: string }[]).find((candidate) => candidate.id === asset)!;
+    expect(row.health).toBe(health);
+  }
+});
+
+test("a monitored-by link made from an open monitor is read back by the roster and the asset's pane", () => {
+  const h = demoHandlers() as Calls;
+  type Roster = { entity_id: string; name: string; assets: { id: string }[] }[];
+  const canary = (h["monitor_roster"]!({ withSamples: false }) as Roster).find((row) => row.name === "canary")!;
+  expect(canary.assets).toEqual([]);
+  const asset = (h["asset_tree"]!({}) as { id: string }[])[0]!.id;
+  h["create_link"]!({ fromId: asset, toId: canary.entity_id, relation: "monitored-by", note: null });
+  const after = (h["monitor_roster"]!({ withSamples: false }) as Roster).find((row) => row.entity_id === canary.entity_id)!;
+  expect(after.assets.map((watched) => watched.id)).toEqual([asset]);
+  const detail = h["get_asset"]!({ assetId: asset }) as { monitoring: { entity_id: string }[] };
+  expect(detail.monitoring.map((watch) => watch.entity_id)).toContain(canary.entity_id);
+  // The same pair twice is refused, as the backend refuses a link it holds.
+  expect(() => h["create_link"]!({ fromId: asset, toId: canary.entity_id, relation: "monitored-by", note: null })).toThrow();
 });

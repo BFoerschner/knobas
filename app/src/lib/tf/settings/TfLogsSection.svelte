@@ -9,6 +9,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { DbStats } from "../../ipc/sources";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged } from "../../shell/ack.svelte";
   import type { SectionPorts } from "./ports";
   import { databaseWords } from "./sections";
 
@@ -32,7 +33,7 @@
 
   async function openLogs() {
     try {
-      await ports.openLogs();
+      await acknowledged("Opening the log folder", () => ports.openLogs());
     } catch (cause) {
       push({ text: `Could not open the log folder: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

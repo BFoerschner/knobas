@@ -18,7 +18,7 @@ Archived (§2): M0 to M4, v1.5 and its follow-ups, all closed.
 
 | Layer | Choice | Why (short) |
 |---|---|---|
-| DB | **PostgreSQL 18.6 via `postgresql_embedded` 0.21**, download-on-first-run, TCP 127.0.0.1; "existing PG URL" setting | 0.12 s start, 21 MB idle, ships `pg_dump`/`pg_restore` (export = free), proven (Retrom); sidesteps the open Tauri macOS `externalBin` notarization bug |
+| DB | **PostgreSQL 18.6 via `postgresql_embedded` 0.21**, carried by each installer and unpacked on a machine's first start (a build without it downloads; 2026-11-14), TCP 127.0.0.1; "existing PG URL" setting | 0.12 s start, 21 MB idle, ships `pg_dump`/`pg_restore` (export = free), proven (Retrom); sidesteps the open Tauri macOS `externalBin` notarization bug |
 | DB access | **sqlx 0.9** (`runtime-tokio`, explicit features), embedded `migrate!` at startup | compile-checked raw SQL is right for FTS; diesel only wins on typed tsvector, not enough |
 | App shell | **Tauri 2.11**, `tauri::async_runtime::spawn` for the scheduler, events for state changes, `ipc::Channel` for sync progress | events are explicitly not for high throughput |
 | Secrets | **`keyring` crate 4.x directly** | `tauri-plugin-stronghold` is deprecated; `tauri-plugin-store` is unencrypted |

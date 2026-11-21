@@ -176,7 +176,7 @@ test("runs group by the local day they started, Today and Yesterday by name", ()
   expect(groups.map((g) => [g.label, g.runs.map((r) => r.entity_id.split(":").at(-1))])).toEqual([
     ["Today", ["1191", "1190"]],
     ["Yesterday", ["1189", "1188"]],
-    ["2026-08-19", ["1187"]],
+    ["Wed 19 Aug", ["1187"]],
   ]);
 });
 
@@ -249,12 +249,12 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
   ];
   expect(staleLine(pipeline, health("unauthorized"), sync("unauthorized"), now)).toEqual({
     text: "TeamCity data is 1 h old: sign-in failing. Runs you start wait in the queue until it works again.",
-    fix: { href: "#/settings/source/teamcity", words: "Re-enter password", secret: "password" },
+    fix: { href: "#/settings/source/teamcity/reenter", words: "Re-enter password…", secret: "password" },
   });
   // A token source is told to re-enter its token (#1405).
   expect(staleLine(pipeline, health("missing_secret", "Pat"), sync("ok"), now)).toEqual({
     text: "TeamCity data is 38 min old: no token stored. Runs you start wait in the queue until it works again.",
-    fix: { href: "#/settings/source/teamcity", words: "Re-enter token", secret: "token" },
+    fix: { href: "#/settings/source/teamcity/reenter", words: "Enter token…", secret: "token" },
   });
   expect(staleLine(pipeline, health("missing_secret"), sync("ok"), now)?.text).toContain("no password stored");
   expect(staleLine(pipeline, health("ok"), sync("unreachable"), now)).toEqual({

@@ -1,0 +1,9 @@
+# The PostgreSQL archive each release installer carries, one per target
+# `release.yml` builds: `<sha256>  <asset>` of
+# https://github.com/theseus-rs/postgresql-binaries/releases/tag/<version>.
+# `scripts/fetch-postgres.sh` downloads the one for its target and refuses a
+# file that does not match. The version is `knobas-db`'s `PG_VERSION_REQ`
+# (`crates/knobas-app/src/postgres.rs` has the test), so the two move together.
+a257bcdb8aa3301a13d6a5bcec48f8c9517045b7cbae71e50788b2615539e95b  postgresql-18.6.0-aarch64-apple-darwin.tar.gz
+7da44c2dbcda3b49688ea08ce8cf99cfe677adf565f53a9145bf9002c74db7d5  postgresql-18.6.0-x86_64-pc-windows-msvc.tar.gz
+bb3d09f876b2383e25a8c9ce09e32d185a03656a23d074f5195542b1b1b3ca61  postgresql-18.6.0-x86_64-unknown-linux-gnu.tar.gz

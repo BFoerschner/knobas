@@ -1,0 +1,19 @@
+[
+  ["com:#!/usr/bin/env bash"],
+  ["com:# Starts the live products and waits for them."],
+  ["fn:set ",":-euo pipefail"],
+  [],
+  [":RETRY_LIMIT","op:=","esc:${",":RETRY_LIMIT:-3","esc:}"],
+  [],
+  ["fn:wait_for","punct:() {"],
+  ["punct:  ","kw:local ",":url","op:=",":$1 tries","op:=","num:0"],
+  ["num:  ","kw:until ","fn:curl ",":-fsS ","str:\"",":$url","str:\" ","op:>",":/dev/null","op:; ","kw:do"],
+  ["kw:    ",":tries","op:=","esc:$((",":tries + ","num:1","punct:))"],
+  ["punct:    [ ","str:\"",":$tries","str:\" ",":-ge ","str:\"",":$RETRY_LIMIT","str:\" ","punct:] ","op:&& ","punct:{ ","fn:echo ","str:\"gave up on ",":$url","str:\" ","op:>&","num:2","op:; ","kw:return ","num:1","op:; ","punct:}"],
+  ["punct:    ","fn:sleep ","num:2"],
+  ["num:  ","kw:done"],
+  ["punct:}"],
+  [],
+  ["fn:wait_for ","str:\"http://127.0.0.1:3000/api/healthz\" ","op:&& ","fn:echo ",":ok"],
+  []
+]

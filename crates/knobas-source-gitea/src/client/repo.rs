@@ -7,6 +7,9 @@ use knobas_source::SourceError;
 
 use super::{API_ROOT, GiteaClient, page_params, segment};
 
+/// The most bytes of one repository's archive spooled: past it the read stops.
+pub(crate) const ARCHIVE_STOP: u64 = 4 << 30;
+
 /// Generic over the record, so each view keeps its own partial projection
 /// beside the code that reads it.
 impl GiteaClient {
@@ -16,11 +19,9 @@ impl GiteaClient {
         owner: &str,
         repo: &str,
     ) -> Result<T, SourceError> {
-        self.get_json(
-            &format!("/repos/{}/{}", segment(owner)?, segment(repo)?),
-            &[],
-        )
-        .await
+        // Shared by the reads asking it at once: each section's (#2479).
+        self.get_json_shared(&format!("/repos/{}/{}", segment(owner)?, segment(repo)?))
+            .await
     }
 
     /// One page of fifty of `GET /repos/{o}/{r}/labels`, the repository's
@@ -67,8 +68,24 @@ impl GiteaClient {
         escaped_path(path).map(drop)
     }
 
-    /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
-    pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
+    /// `GET /repos/{o}/{r}`, read now and for this caller alone: what a write
+    /// checks before it acts must not be an answer read before it was asked
+    /// ([`Self::repo_as`] shares a read under way).
+    pub(crate) async fn repo_fresh_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!("/repos/{}/{}", segment(owner)?, segment(repo)?),
+            &[],
+        )
+        .await
+    }
+
+    /// A branch's record, read now and for this caller alone, for a write
+    /// ([`Self::branch_as`] shares a read under way).
+    pub(crate) async fn branch_fresh_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
         repo: &str,
@@ -83,6 +100,24 @@ impl GiteaClient {
             ),
             &[],
         )
+        .await
+    }
+
+    /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
+    pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<T, SourceError> {
+        // Shared by the reads asking it at once: a landing's tree, README and
+        // commits each learn the tip (#2479).
+        self.get_json_shared(&format!(
+            "/repos/{}/{}/branches/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped(branch)?
+        ))
         .await
     }
 
@@ -346,6 +381,35 @@ impl GiteaClient {
         .await
     }
 
+    /// One page of `GET /repos/{o}/{r}/git/trees/{sha}`, not recursive (the
+    /// big-folder pass, 2026-11-13): one directory's entries by the sha of its
+    /// tree (a commit's sha is its top), `per_page` of them, with
+    /// `total_count`. What a directory past the recursive tree's cut is read
+    /// by: Gitea answers it by the tree alone, with no last commit per entry,
+    /// where `contents` works one out for each.
+    pub(crate) async fn git_tree_level_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        page: u32,
+        per_page: usize,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/git/trees/{}",
+                segment(owner)?,
+                segment(repo)?,
+                super::object_id(sha)?
+            ),
+            &[
+                ("page", page.to_string()),
+                ("per_page", per_page.to_string()),
+            ],
+        )
+        .await
+    }
+
     /// The newest `limit` commits of `branch`, the listing projections off,
     /// with Gitea's `X-Total-Count` beside them: how many
     /// commits the branch has in all (#2311, the last-commit strip's *N
@@ -523,6 +587,49 @@ impl GiteaClient {
     /// The same read for a file wanted whole or not at all (#2256): an
     /// answer whose length is already over `cap` is cut before any of its
     /// body is read, so a refused file costs its headers.
+    /// The `.tar.gz` of `repo`'s tree at `commit`, written to `spool` as it
+    /// arrives (the everything-search decisions, 2026-11-20, D3): one
+    /// request, never held in memory. Stops past [`ARCHIVE_STOP`] bytes.
+    ///
+    /// # Errors
+    ///
+    /// What Gitea's answer maps to; a protocol error past the stop or where
+    /// the spool cannot be written.
+    pub(crate) async fn archive_to(
+        &self,
+        owner: &str,
+        repo: &str,
+        commit: &str,
+        spool: &mut std::fs::File,
+    ) -> Result<u64, SourceError> {
+        use std::io::Write as _;
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/archive/{}.tar.gz",
+            segment(owner)?,
+            segment(repo)?,
+            segment(commit)?
+        );
+        let request = self.http.request(Method::GET, &path);
+        let mut response = self.http.send(request).await?;
+        let mut written = 0_u64;
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            SourceError::protocol(format!(
+                "gitea: {path} answered an unreadable body: {error}"
+            ))
+        })? {
+            written += chunk.len() as u64;
+            if written > ARCHIVE_STOP {
+                return Err(SourceError::protocol(format!(
+                    "gitea: {path} is larger than {ARCHIVE_STOP} bytes"
+                )));
+            }
+            spool.write_all(&chunk).map_err(|error| {
+                SourceError::protocol(format!("gitea: {path} could not be spooled: {error}"))
+            })?;
+        }
+        Ok(written)
+    }
+
     pub(crate) async fn raw_whole(
         &self,
         owner: &str,

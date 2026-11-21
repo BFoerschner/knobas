@@ -10,9 +10,12 @@
 //! - **The URL is built, never taken from the mirror.** It is the source's
 //!   address, which a person typed, plus a full name that matches
 //!   [`FullName::parse`]'s pattern. A mirrored `web_url` never reaches git.
-//! - **Only https and ssh**, twice: the address's scheme is checked here, and
-//!   git is told `protocol.allow=never` with only [`PROTOCOLS`] allowed, so a
-//!   redirect cannot take it anywhere else.
+//! - **Only https and ssh, and http from an http address** ([`PROTOCOLS`],
+//!   [`admits`]), twice: the address's scheme is checked here, and git is told
+//!   `protocol.allow=never` with only those allowed ([`protocol_args`]), so a
+//!   redirect cannot take it anywhere else. Plain http is allowed only for a
+//!   URL that is http already: an https source is never moved down to it
+//!   (ADR-0023 as amended, the ux19 overs pass).
 //! - **No shell, and `--` before the URL and the folder**, so neither can be
 //!   read as an option.
 //! - **No submodules.**
@@ -21,8 +24,44 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::Path;
 
-/// The protocols git may use for a clone knobas starts.
+/// The protocols git may use for a clone knobas starts, for any address. An
+/// address that is plain http admits http as well ([`admits`]).
 pub const PROTOCOLS: [&str; 2] = ["https", "ssh"];
+
+/// Whether `scheme` (lowercase) is one git may clone over, given `protocols`:
+/// one of them, or http where they hold https, the production rule (a source
+/// the person typed as `http://`; the ux19 Windows pass's loopback Gitea and
+/// a LAN Gitea alike). Its token already crosses that address in clear on
+/// every sync, and a person refused clones the same URL by hand.
+#[must_use]
+pub fn admits(scheme: &str, protocols: &[&str]) -> bool {
+    protocols.contains(&scheme) || (scheme == "http" && protocols.contains(&"https"))
+}
+
+/// Whether `url` is plain http.
+fn is_http(url: &str) -> bool {
+    url.get(..7)
+        .is_some_and(|head| head.eq_ignore_ascii_case("http://"))
+}
+
+/// git's `-c` arguments for a command that reaches `url`: every protocol
+/// refused, then `protocols` allowed, and http too when `url` is plain http
+/// and [`admits`] it. A URL that is not http never gets http, so no redirect
+/// takes an https clone down to it. The clone, the fetch of a missing commit
+/// and a pull request's worktree fetch all build theirs here.
+#[must_use]
+pub fn protocol_args(url: &str, protocols: &[&str]) -> Vec<OsString> {
+    let mut allowed: Vec<&str> = protocols.to_vec();
+    if is_http(url) && !allowed.contains(&"http") && admits("http", protocols) {
+        allowed.push("http");
+    }
+    let mut args: Vec<OsString> = vec!["-c".into(), "protocol.allow=never".into()];
+    for protocol in allowed {
+        args.push("-c".into());
+        args.push(format!("protocol.{protocol}.allow=always").into());
+    }
+    args
+}
 
 /// Why a clone is refused before git is started.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,10 +156,17 @@ pub fn clone_url(
         ))
     })?;
     let scheme = scheme.to_ascii_lowercase();
-    if !protocols.contains(&scheme.as_str()) {
+    if !admits(&scheme, protocols) {
+        let mut named: Vec<&str> = protocols.to_vec();
+        if admits("http", protocols) && !named.contains(&"http") {
+            named.push("http");
+        }
+        let said = match named.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => named.join(""),
+        };
         return Err(CloneRefusal::BadAddress(format!(
-            "the source's address '{base_url}' is {scheme}, and knobas clones over {} only",
-            protocols.join(" or ")
+            "the source's address '{base_url}' is {scheme}, and knobas clones over {said} only"
         )));
     }
     let host = rest.split('/').next().unwrap_or_default();
@@ -147,11 +193,7 @@ pub fn clone_url(
 /// `protocols` is [`PROTOCOLS`] in production; see [`clone_url`].
 #[must_use]
 pub fn clone_args(url: &str, dir: &Path, protocols: &[&str]) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec!["-c".into(), "protocol.allow=never".into()];
-    for protocol in protocols {
-        args.push("-c".into());
-        args.push(format!("protocol.{protocol}.allow=always").into());
-    }
+    let mut args = protocol_args(url, protocols);
     args.extend(
         [
             "-c",
@@ -355,10 +397,9 @@ mod tests {
     }
 
     #[test]
-    fn an_address_outside_https_and_ssh_is_refused() {
+    fn an_address_outside_https_ssh_and_http_is_refused() {
         let n = name("tidewater/payout-service");
         for bad in [
-            "http://127.0.0.1:3000",
             "file:///tmp/x",
             "ext::sh -c touch% /tmp/pwned",
             "git://git.example.com",
@@ -375,8 +416,85 @@ mod tests {
                 "{bad:?} was accepted"
             );
         }
+        assert_eq!(
+            clone_url("git://git.example.com", &n, &PROTOCOLS),
+            Err(CloneRefusal::BadAddress(
+                "the source's address 'git://git.example.com' is git, and knobas clones over \
+                 https, ssh or http only"
+                    .to_owned()
+            ))
+        );
         // And what a test admits on purpose is admitted.
         assert!(clone_url("http://127.0.0.1:3000", &n, &["http"]).is_ok());
+    }
+
+    /// The ux19 Windows pass: a Gitea the person typed as plain http, on loopback or on the LAN, clones from that
+    /// address; git may then use http for it, and only for it.
+    #[test]
+    fn a_source_typed_as_plain_http_clones_over_http() {
+        let n = name("tidewater/payout-service");
+        for (address, url) in [
+            (
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3000/tidewater/payout-service.git",
+            ),
+            (
+                "HTTP://gitea.lan:3000/",
+                "http://gitea.lan:3000/tidewater/payout-service.git",
+            ),
+        ] {
+            assert_eq!(clone_url(address, &n, &PROTOCOLS).unwrap(), url);
+            let args = protocol_args(url, &PROTOCOLS);
+            let args: Vec<&str> = args.iter().map(|a| a.to_str().unwrap()).collect();
+            assert_eq!(
+                args,
+                [
+                    "-c",
+                    "protocol.allow=never",
+                    "-c",
+                    "protocol.https.allow=always",
+                    "-c",
+                    "protocol.ssh.allow=always",
+                    "-c",
+                    "protocol.http.allow=always",
+                ]
+            );
+        }
+    }
+
+    /// An https or ssh URL never gets http, so a redirect cannot take its clone, fetch or worktree down to it; and a
+    /// test's own list gets nothing it did not name.
+    #[test]
+    fn http_is_allowed_only_for_a_url_that_is_http() {
+        for url in [
+            "https://git.example.com/o/r.git",
+            "ssh://git@git.example.com/o/r.git",
+        ] {
+            let args = protocol_args(url, &PROTOCOLS);
+            assert!(
+                !args
+                    .iter()
+                    .any(|a| a.to_str().unwrap().starts_with("protocol.http.")),
+                "{url}"
+            );
+        }
+        let args = protocol_args("http://127.0.0.1:3000/o/r.git", &["file"]);
+        let args: Vec<&str> = args.iter().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(
+            args,
+            [
+                "-c",
+                "protocol.allow=never",
+                "-c",
+                "protocol.file.allow=always"
+            ]
+        );
+        assert!(
+            admits("http", &PROTOCOLS)
+                && admits("ssh", &PROTOCOLS)
+                && !admits("git", &PROTOCOLS)
+                && !admits("http", &["ssh"])
+        );
     }
 
     /// The whole list, spelled out: the flags are ADR-0023's rules, and a

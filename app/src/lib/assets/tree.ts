@@ -33,7 +33,10 @@ import { hashFor, type Route } from "../shell/router";
  */
 export interface AssetsNav {
   readonly route: Route;
+  /** A walk: the columns' own moves, which keep how the tree was opened. */
   go(hash: string): void;
+  /** A jump from the asset being read to another place, which `Esc` comes back from (`opener.ts`); a walk where it is left out. */
+  jump?(hash: string): void;
 }
 
 /** The top of the estate: the column whose parent is nobody. */
@@ -290,7 +293,30 @@ export function focusedColumn(path: ColumnPath): number {
  * takes it back to the room, and a Tree that swallowed every Escape would be
  * the one view a reader cannot leave with the keyboard.
  */
-export type Step = { go: "asset"; id: string } | { go: "top" } | { go: "nowhere" };
+export type Step = { go: "asset"; id: string } | { go: "nowhere" };
+
+/**
+ * An asset's kind as a tag: two letters written like an element's symbol (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), in sentence
+ * case as every label is. The word itself is the tag's title and heads the pane.
+ */
+export function kindTag(monogram: string): string {
+  return monogram.charAt(0).toUpperCase() + monogram.slice(1).toLowerCase();
+}
+
+/**
+ * A *Depends on this* row's path, without the part the pane already says: the
+ * steps it shares with the selected asset's own path, which every row near it
+ * would repeat. `null` when nothing is left to say. A row with nothing in common
+ * keeps its whole path, because that is the news.
+ */
+export function pathBelow(detail: AssetDetail, path: string | null): string | null {
+  if (path === null) return null;
+  const here = heldByPath(detail);
+  const steps = path.split(" / ");
+  let shared = 0;
+  while (shared < steps.length && steps[shared] === here[shared]) shared += 1;
+  return shared === steps.length ? null : steps.slice(shared).join(" / ");
+}
 
 /** The press did nothing here. */
 const NOWHERE: Step = { go: "nowhere" };
@@ -322,8 +348,8 @@ const NOWHERE: Step = { go: "nowhere" };
  * @param path the layout, from {@link columnPathFor}.
  * @param columns what each column holds, aligned with `path.parents`.
  */
-export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step {
-  const focused = focusedColumn(path);
+export function walk(key: string, path: ColumnPath, columns: AssetRow[][], from: number = focusedColumn(path)): Step {
+  const focused = from;
 
   if (key === "ArrowDown" || key === "ArrowUp") {
     const column = Math.max(0, focused);
@@ -341,22 +367,19 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step
 
   if (key === "ArrowRight" || key === "Enter") {
     // `focused + 1` reads the same on a bare tree, where the cursor is in
-    // front of the top column and the column "under the selection" is it.
+    // front of the top column and the column "under the selection" is it. From a
+    // column `Tab` reached, the next column's own step of the path comes first.
     const rows = columns[focused + 1] ?? [];
-    const first = rows[0];
+    const onward = selectionIn(path, focused + 1);
+    const first = rows.find((row) => row.id === onward) ?? rows[0];
     if (first === undefined) return NOWHERE;
     return { go: "asset", id: first.id };
   }
 
-  if (key === "ArrowLeft" || key === "Escape") {
-    if (focused > 0) {
-      const holder = selectionIn(path, focused - 1);
-      return holder === null ? NOWHERE : { go: "asset", id: holder };
-    }
-    // The rung the two keys do not share. `←` is a move between columns and
-    // there is no column left of the first; `Esc` is an unwind, and the step
-    // above a top-level asset is the estate with nothing selected.
-    return key === "Escape" && focused === 0 ? { go: "top" } : NOWHERE;
+  if (key === "ArrowLeft") {
+    if (focused <= 0) return NOWHERE;
+    const holder = selectionIn(path, focused - 1);
+    return holder === null ? NOWHERE : { go: "asset", id: holder };
   }
 
   return NOWHERE;
@@ -373,7 +396,7 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step
  * and not the `ol` inside it because #429 gave the column a header: what the
  * strip lays out is the wrapper, and the rows scroll under it.
  */
-export const COLUMN_WIDTH = 220;
+export const COLUMN_WIDTH = 216;
 
 /** How wide a collapsed column is drawn — `.spine`'s width. */
 export const SPINE_WIDTH = 30;
@@ -424,6 +447,68 @@ export function stripFor(columns: number, available: number, anchor: number | nu
   return { from, to: from + fits };
 }
 
+
+/**
+ * The strip after a walk by `↑` or `↓`, which holds still (F-556): the fold stays
+ * where it stood, so the column under the hand and the pane's edge don't move.
+ *
+ * The next level draws if it fits beside the fold as it stands. If it doesn't, `to`
+ * stops short of it, and that level waits for `→`, `Enter` or a press: the holder has
+ * its chevron, and the pane its detail.
+ *
+ * `null` when the selection's own column wouldn't be drawn in that fold, because a walk
+ * must stay in sight, and when nothing has been measured. The strip then folds as
+ * {@link stripFor} says.
+ *
+ * @param columns how many columns the layout has, the next level included.
+ * @param column the selection's own column.
+ * @param available the strip's width in pixels.
+ * @param from the first full column when the key was pressed.
+ */
+export function heldStrip(columns: number, column: number, available: number, from: number): Strip | null {
+  if (available <= 0) return null;
+  const fits = Math.max(1, Math.floor((available - from * SPINE_WIDTH) / COLUMN_WIDTH));
+  if (column < from || column >= from + fits) return null;
+  return { from, to: Math.min(columns, from + fits) };
+}
+
+/**
+ * Does a press on a row keep the strip as it stands (F-560)? A press in the selection's own column does, as `↓` does, so
+ * the list stays under the hand. The next level still opens on a press: if it doesn't fit beside the fold, the strip
+ * folds, once, and every press in that column after it finds room. A press in another column is a level change, and folds.
+ *
+ * @param column the pressed row's column.
+ * @param selected the selection's own column.
+ * @param holds the pressed row has a next level.
+ * @param available the strip's width in pixels.
+ * @param from the first full column when the row was pressed.
+ */
+export function pressKeepsStrip(column: number, selected: number, holds: boolean, available: number, from: number): boolean {
+  if (column !== selected) return false;
+  const needs = column + (holds ? 2 : 1);
+  const held = heldStrip(needs, column, available, from);
+  return held !== null && held.to >= needs;
+}
+
+/**
+ * What the strip leaves that no further column could use, which the pane takes
+ * (F-534, F-548) rather than a band of grey beside it. Room for a whole column
+ * stays where it is: it is where the next level opens.
+ *
+ * That room is counted whether or not the selection has a next level (F-556), so a
+ * row that holds nothing and one that does give the pane the same width.
+ *
+ * The anchor doesn't move it: a strip is as wide wherever its window stands.
+ *
+ * @param columns how many columns are drawn.
+ * @param nextDrawn a column stands after the selection's own, or nothing is selected.
+ */
+export function spareWidth(columns: number, available: number, strip: Strip, nextDrawn: boolean = true): number {
+  const full = strip.to - strip.from;
+  const left = available - full * COLUMN_WIDTH - (columns - full) * SPINE_WIDTH;
+  const spare = !nextDrawn && left >= COLUMN_WIDTH ? left - COLUMN_WIDTH : left;
+  return available > 0 && spare > 0 && spare < COLUMN_WIDTH ? spare : 0;
+}
 
 /**
  * One wire drawn from a route's row in the pane to the columns — story 31.

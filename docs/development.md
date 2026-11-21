@@ -14,7 +14,8 @@ quickstart. `testenv/README.md` covers the live suites against real products.
   `cargo install just`.
 
 The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
-`~/.theseus/postgresql/<version>` and runs `initdb`. Later runs reuse it.
+`~/.theseus/postgresql/<version>` and runs `initdb`. Later runs reuse it. A
+release installer does not download: it carries the archive (see *Releases*).
 
 ## The gate
 
@@ -119,6 +120,18 @@ gh workflow run release.yml --ref main -f tag=v1.2.0 -f platforms=all
 Name one platform when only one is in question. macOS minutes cost ten times
 Linux minutes.
 
+Each installer carries PostgreSQL, so a first start needs no network
+(`docs/decisions/2026-11-14-knobas-ships-its-postgresql.md`). Before
+`tauri build`, `scripts/fetch-postgres.sh` downloads the upstream archive for
+the runner's platform, checks it against
+`crates/knobas-app/postgresql/archives.sha256` and puts it in that folder,
+which `tauri.conf.json` bundles whole. After the build,
+`scripts/check-bundled-postgres.sh` (`.ps1` on Windows) opens every bundle and
+fails the run if one lacks the archive. To build a bundle by hand, run the
+fetch script first; without it the bundle still works and downloads on a
+machine's first start. Moving to another PostgreSQL version is
+`PG_VERSION_REQ` in `knobas-db` plus the three lines of `archives.sha256`.
+
 The workflow creates the release as a draft. Its body is only the note on
 unsigned bundles; the patch notes are written by hand. Before publishing, put
 a `## What's new in vX.Y.Z` section above that note, with a `---` between
@@ -132,6 +145,31 @@ signed. macOS reports the app as damaged until
 you run `xattr -dr com.apple.quarantine /Applications/knobas.app`, and Windows
 shows a SmartScreen warning. The Linux artifacts carry the runner's glibc
 floor.
+
+### Update signing
+
+knobas updates itself from its releases (ADR-0052, `docs/decisions/2026-11-21-knobas-updates-itself.md`). A release
+it offers carries one minisign `.sig` beside each artifact, the Mac bundle as `knobas_<version>_aarch64.app.tar.gz`,
+and a `latest.json`, all written into the draft by `release.yml`: `scripts/pack-mac-update.sh`,
+`scripts/sign-update-artifacts.sh` (the Tauri CLI's signer, then `knobas-update-verify` against the two committed
+public keys) and the `manifest` job (`scripts/update-manifest.sh`). Those steps run only when the repository has the
+secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; without them a release builds and
+publishes as before and is never offered as an update.
+
+Publishing is what offers an update: a draft's files answer 404 without a token. `--draft=false --latest` reaches
+everyone on *Releases*, `--draft=false --prerelease --latest=false` everyone on *Pre-release builds*. A pre-release not
+meant for that channel stays a draft. A release published without `latest.json` is never offered.
+
+The two key pairs are Björn's, made by hand (`node app/node_modules/@tauri-apps/cli/tauri.js signer generate -w
+<file>`); the primary's private half and password are the two secrets, the spare's stays in his password manager, and
+both public halves are `crates/knobas-update/keys/primary.pub` and `spare.pub`. Until both are committed a build
+trusts no key and says updates aren't set up. A leaked or lost primary: put the spare into the two secrets, cut a
+release, and make a new spare for the next one.
+
+A release build started by hand or by an agent with a scratch `HOME` runs with `KNOBAS_UPDATE=off`, so it never spends
+the address's GitHub API allowance. `KNOBAS_UPDATE_WEB` and `KNOBAS_UPDATE_API` point the client at a local feed
+(https, or http to a loopback address), and `KNOBAS_UPDATE_EXTRA_PUBKEY` at compile time adds a test key to a local
+build; the release run refuses a build that trusts any key but the two committed ones.
 
 ## README screenshots
 
@@ -215,7 +253,7 @@ retrying a rejected credential on a timer can lock the account.
 Queued writes follow the same rules. A write to a source that did not answer
 is tried again on the same ladder. A write whose credential was rejected
 waits until a credential is saved for that source, its address or
-configuration is edited, or the reader presses *Flush now*.
+configuration is edited, or the reader presses *Retry waiting writes*.
 
 ## Shutting down
 
@@ -225,7 +263,7 @@ and stops the embedded server, also while the boot screen is still up. Every
 step is bounded, so a quit does not wait out a slow remote call.
 
 A write knobas is sending when you quit gets up to three seconds to finish, so
-it is marked sent. This includes the write you wait on after *Flush now*, *Send
+it is marked sent. This includes the write you wait on after *Retry waiting writes*, *Send
 mine anyway* or *Edit and send*. A write you make after the quit began is
 queued and not sent; the next start sends it. If a send is still going after
 three seconds, knobas abandons it and holds the write, because the source may
@@ -277,7 +315,10 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-db` | Embedded PostgreSQL lifecycle (start, adopt, stop), the connection pool and the migrations. |
 | `knobas-source` | The adapter SPI: the `Source` trait, the contract battery and the serde data adapters exchange. It has no database dependency. |
 | `knobas-spi-types` | The types the adapter SPI shares with the core: payload declarations, entity references, tones and how a write is delivered. No database, no async runtime: it and `knobas-source` build for `wasm32-wasip2`, so an external adapter can depend on them. `knobas-core` re-exports it under the old paths (#1234). |
+| `knobas-files` | The files index *Everything* finds a repository by (ADR-0050): one tantivy document a file of each mirrored repository's default branch, its path's and its text's words from `knobas_core::code_text`, asked by a word's start and counted by repository. No other crate names a tantivy type. |
+| `knobas-git` | A clone read in knobas's own process (gitoxide): a commit, a tree, a file, a merge base, a log and a diff, each as the bytes the `git` command prints, or "ask git" (ADR-0043). Also the stamp that says nothing in a working tree changed. |
 | `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. The write queue in `knobas-sync` also reads its local-quota mark (#1729). |
+| `knobas-jar` | A Java archive read for the Code page's JAR view, without Java: a zip listed from its central directory and read an entry at a time (zip bombs and names that leave the archive refused), the manifest and Maven files, nested JARs, and a class file outlined as `javap` would. |
 | `knobas-source-jira` | Jira Data Center adapter, with status, comment and create writes. |
 | `knobas-source-confluence` | Confluence Data Center adapter, with page writes. |
 | `knobas-source-gitea` | Gitea adapter: repositories, branches, pull requests, commits. |
@@ -290,7 +331,9 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
 | `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
 | `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
+| `knobas-site` | A source's own website shown inside knobas (ADR-0050): which addresses a site may show, the keys knobas takes from it and Esc twice, a site's states and lifetime, its session's place, the one script knobas runs in it, and the native view itself, made with raw wry as a child of the main window and given no IPC, scheme or script. Pure parts tested everywhere; the view on macOS and Windows. |
 | `knobas-search` | The launcher's read side: full-text search over the mirror in the `SearchQuery` to `SearchResponse` shape. |
+| `knobas-update` | knobas updates itself (ADR-0052): its own order of versions, the official updater's `latest.json`, the two compiled-in public keys and the minisign check, the *Releases* and *Pre-release builds* channels over `knobas-http`, the schedule, the download, the two files beside the profile and the Windows, Mac and AppImage installers. No Tauri; `knobas-app`'s `update.rs` wires it. Its bin `knobas-update-verify` is the release run's check. |
 | `knobas-sync` | The sync engine and scheduler: one run per transaction, cursors, backoff, credential health, the run log, and the write queue. |
 | `knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles and the IPC commands. |
 
@@ -308,7 +351,7 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `app/src/lib/detail/` | Link helpers and dialogs for an item's detail (`LinksPanel`, `LinkDialog`, `links.ts`, `relations.ts`) and the `view/` folder; there is no slide-over component. |
 | `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
-| `app/src/lib/render/` | The renderer registry (`registry.ts`: what each renderer declares, which accept a file or a fence) and the renderer port (`port.ts`) over the engines; Shiki highlights in a worker (`highlight.worker.ts`, `highlight-core.ts`). `markdown.ts` is the Markdown component's engine (markdown-it, DOMPurify, links, fences to the registry; drawn by `tf/markdown/TfMarkdown.svelte`); `image.ts` turns a relative image's bytes into a blob, an SVG sanitized first; `defaults.ts` decides which renderer a file opens with from the default per file pattern (stored backend-side, `defaults.svelte.ts` holds the copy; the switcher is `tf/render/TfRendererSwitch.svelte`). The user's command renderers are `command.ts` (ADR-0033), run on the backend (`crates/knobas-app/src/renderers.rs`) and drawn sanitized in a sandboxed frame (`tf/render/TfCommandOutput.svelte`). Diagrams go through `diagram.ts` into the same frame (`frame.ts`): Mermaid (`mermaid.ts`) on the main thread; Graphviz (`graphviz.ts`, WASM) in `diagram.worker.ts`, because Tauri sends the CSP with `.html` assets only, so WASM runs there without loosening the document's `script-src`; D2 (`d2.ts`), whose Go WASM overflows a WebKit worker's stack, on the main thread of a hidden `sandbox="allow-scripts"` frame of its own (`d2-frame.html`, `d2-frame.ts`, held by `port.ts`'s `frameWorker`), served on the `knobas-render` scheme under `renderers::ENGINE_CSP` (#2381). PDFs are `pdf-core.ts` (pdf.js with scripting and form actions off; links by the Markdown rules) bound to pdf.js's own worker in `pdf.ts`, drawn page by page into canvases in the document by `tf/render/TfPdf.svelte`; a binary image is `tf/render/TfBytesImage.svelte`. |
+| `app/src/lib/render/` | The renderer registry (`registry.ts`: what each renderer declares, which accept a file or a fence) and the renderer port (`port.ts`) over the engines; code is highlighted in a worker (`highlight.worker.ts`, `highlight-core.ts`) by the highlighter Settings › Appearance › Code colours chooses, Pierre Highlights, TanStack Highlight or Shiki, each in `engines/` and imported when a job needs it, by `engines.ts`'s order over `languages.ts` (generated by `scripts/gen-languages.mjs`); a token carries a role (`roles.ts`, ADR-0051). `markdown.ts` is the Markdown component's engine (markdown-it, DOMPurify, links, fences to the registry; drawn by `tf/markdown/TfMarkdown.svelte`); `image.ts` turns a relative image's bytes into a blob, an SVG sanitized first; `defaults.ts` decides which renderer a file opens with from the default per file pattern (stored backend-side, `defaults.svelte.ts` holds the copy; the switcher is `tf/render/TfRendererSwitch.svelte`). The user's command renderers are `command.ts` (ADR-0033), run on the backend (`crates/knobas-app/src/renderers.rs`) and drawn sanitized in a sandboxed frame (`tf/render/TfCommandOutput.svelte`). Diagrams go through `diagram.ts` into the same frame (`frame.ts`): Mermaid (`mermaid.ts`) on the main thread; Graphviz (`graphviz.ts`, WASM) in `diagram.worker.ts`, because Tauri sends the CSP with `.html` assets only, so WASM runs there without loosening the document's `script-src`; D2 (`d2.ts`), whose Go WASM overflows a WebKit worker's stack, on the main thread of a hidden `sandbox="allow-scripts"` frame of its own (`d2-frame.html`, `d2-frame.ts`, held by `port.ts`'s `frameWorker`), served on the `knobas-render` scheme under `renderers::ENGINE_CSP` (#2381). PDFs are `pdf-core.ts` (pdf.js with scripting and form actions off; links by the Markdown rules) bound to pdf.js's own worker in `pdf.ts`, drawn page by page into canvases in the document by `tf/render/TfPdf.svelte`; a binary image is `tf/render/TfBytesImage.svelte`. |
 | `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module in `crates/knobas-app/src/commands/`. |
 | `app/src/lib/{assets,capture,inbox,standup,start-work,time}/` | Feature views. Notes and settings are pages under `tf/` (`tf/note/`, `tf/settings/`). |
 

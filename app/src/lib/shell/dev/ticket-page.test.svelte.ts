@@ -3,7 +3,8 @@
  * mount over the whole fake IPC (`?fake-ipc`'s handlers): `#/ticket/<entity
  * id>` draws the page in its reading mood, on a sheet, and chooses nothing;
  * `#/job/<entity id>` chooses the ticket and lands on its page, on the
- * yellow; a bare `#/job` draws the chosen job's page, or the empty state. The
+ * yellow; a bare `#/job` draws the chosen job's page, or with none chosen
+ * lands on All tickets, as it does when that job is no longer held. The
  * card's foot holds the one decision, and the nav has no Job entry. It lives
  * under `dev/` because only the harness may import the harness
  * (`house-rules.test.ts`).
@@ -148,7 +149,7 @@ function key(name: string, options: KeyboardEventInit = {}): void {
 }
 
 function crumbs(): (string | undefined)[] {
-  return [...(shown(".tf-crumbs")?.querySelectorAll("a, strong") ?? [])].map((part) => part.textContent?.trim());
+  return [...(shown(".tf-crumbs")?.querySelectorAll("a:not(.tf-esc), strong") ?? [])].map((part) => part.textContent?.trim());
 }
 
 function hint(): string | null {
@@ -183,9 +184,11 @@ test("#/job/<tab>, an old tab's address, lands on the ticket's own address: the 
   expect(chosenJob.id).toBe("mock:PAY-231");
 });
 
-test("a bare #/job draws the chosen job's page, and says how to choose one when none is", async () => {
-  await openOn("#/job", "No job is chosen yet");
+test("a bare #/job draws the chosen job's page, and with none chosen lands on All tickets (2026-11-20)", async () => {
+  await openOn("#/job", "All tickets");
+  expect(location.hash, "no chosen job: home is All tickets").toBe("#/tickets");
   expect(pageCard()).toBeNull();
+  expect(target.textContent).not.toContain("No job is chosen yet");
   unmount(app!);
   app = undefined;
 
@@ -194,6 +197,42 @@ test("a bare #/job draws the chosen job's page, and says how to choose one when 
   const page = await pageOf("PAY-231");
   expect(mood(page)).toBe("pinned");
   expect(location.hash, "home keeps its address").toBe("#/job");
+});
+
+test("a chosen job knobas no longer holds is forgotten at home, which lands on All tickets (2026-11-20)", async () => {
+  chosenJob.choose("mock:PAY-99999");
+  await openOn("#/job", "All tickets");
+  await until(() => location.hash === "#/tickets", `home on a gone job stayed at ${location.hash}`);
+  expect(chosenJob.id, "the gone job is no longer chosen").toBeNull();
+  expect(target.textContent).not.toContain("knobas does not hold this ticket");
+});
+
+test("a window opened on no address with a chosen job lands on home, #/job, drawing that job (2026-11-20)", async () => {
+  chosenJob.choose("mock:PAY-231");
+  await openOn("", "Retry failed SEPA payouts");
+  expect(location.hash).toBe("#/job");
+  expect(mood(await pageOf("PAY-231"))).toBe("pinned");
+});
+
+test("the chosen job's own ticket page, not held, says so and forgets nothing: only home does", async () => {
+  chosenJob.choose("mock:PAY-99999");
+  await openOn("#/ticket/mock%3APAY-99999", "knobas does not hold this ticket");
+  expect(location.hash).toBe("#/ticket/mock%3APAY-99999");
+  expect(chosenJob.id).toBe("mock:PAY-99999");
+});
+
+test("home whose chosen job could not be read says why and keeps the job: a failed read is not a gone ticket", async () => {
+  installFakeTauri(
+    recorded({
+      ...demoHandlers(),
+      get_entity: () => Promise.reject({ code: "db_unavailable", message: "the database is not answering" }),
+      entity_briefs: () => Promise.reject({ code: "db_unavailable", message: "the database is not answering" }),
+    }),
+  );
+  chosenJob.choose("mock:PAY-231");
+  await openOn("#/job", "could not be opened");
+  expect(location.hash).toBe("#/job");
+  expect(chosenJob.id).toBe("mock:PAY-231");
 });
 
 test("the nav has no Job entry, and Tickets is current on a ticket page in both moods", async () => {
@@ -282,18 +321,23 @@ test("Resume work chooses the ticket and starts the timer on it; the foot then s
   await until(() => sent.some((call) => call.cmd === "start_timer"), "the timer never started");
   const started = sent.find((call) => call.cmd === "start_timer")!.args["target"] as { entity_id?: string };
   expect(started.entity_id).toBe("mock:PAY-231");
-  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
+  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log…", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
   expect(pageCard()!.querySelector(".tf-clock"), "the running time is the chip's alone").toBeNull();
 });
 
-test("Start work chooses the ticket and runs the stepper", async () => {
+test("Start work shows the stepper and chooses nothing, and running its steps chooses the ticket (F-130)", async () => {
   await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
   const page = await pageOf("PAY-240");
   expect(shown(".tf-steps"), "reading runs no stepper").toBeNull();
   await until(() => foot(page)?.textContent?.trim() === "Start work", "Start work never offered");
   foot(page)!.click();
-  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   await until(() => shown(".tf-steps") !== null, "the stepper never ran");
+  expect(chosenJob.id, "a look at the steps chooses nothing").toBeNull();
+  expect(mood(pageCard()!)).not.toBe("pinned");
+  const run = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-steps footer button")].find((button) => button.textContent === "Run all steps");
+  await until(() => run() !== undefined && run()!.getAttribute("aria-disabled") !== "true", "Run all steps never offered");
+  run()!.click();
+  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   expect(mood(pageCard()!)).toBe("pinned");
 });
 
@@ -346,10 +390,10 @@ test("on a ticket page, Link to targets that ticket, not the chosen job", async 
   await search("PAY-231");
   inLauncher("Tab");
   const rows = [...target.querySelectorAll('[aria-label="Actions on the selected result"] .tf-ln-nm')].map((row) => row.textContent?.trim());
-  expect(rows[0]).toBe("Link to PAY-240");
+  expect(rows).toContain("Link to PAY-240");
 });
 
-test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Tickets", async () => {
+test("a ticket result in ⌘K opens the ticket page, and Esc there goes back to the page it was pressed over (F-047)", async () => {
   await openOn("#/builds", "Builds");
   await search("PAY-240");
   inLauncher("Enter");
@@ -357,7 +401,7 @@ test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Ticke
   await pageOf("PAY-240");
   await until(() => launcher() === null, "the launcher stayed open");
   key("Escape");
-  await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
+  await until(() => location.hash.startsWith("#/builds"), `Esc went to ${location.hash}`);
 });
 
 test("a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
@@ -366,7 +410,7 @@ test("a bare #/ticket lands on Tickets, and an unreadable id says it was not fou
   expect(lit()).toBe("Tickets");
 
   location.hash = "#/ticket/mock%3ANOPE-1";
-  await until(() => shown(".tf-empty")?.textContent?.includes("No ticket NOPE-1 in the mirror") ?? false, "an unreadable ticket never said so");
+  await until(() => shown(".tf-empty")?.textContent?.includes("knobas does not hold this ticket.") ?? false, "an unreadable ticket never said so");
 });
 
 /** A failed run of the fixture, and its address (`runHash`). */
@@ -540,11 +584,11 @@ test("PAY-231's card: the key with its copy button, the status chip, then Epic, 
 
   expect(page.querySelector(".tf-tkhead .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(page.querySelector(".tf-tkhead button.tf-tkcopy")?.getAttribute("aria-label")).toBe("Copy the key and the title");
-  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In Progress");
+  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In progress");
   expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Reporter", "Assignee", "Type", "Priority", "Labels", "Logged"]);
   expect(facts(page)[1]).toEqual(["Reporter", "LH Lena Hoffmann"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me"), "somebody else's report is not in full ink").toBe(false);
-  expect(facts(page)[2]![1]).toBe("MA mara (you)");
+  expect(facts(page)[2]![1]).toBe("ML Mara Lindqvist (you)");
   expect(avatar(page, "Assignee")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
   expect(facts(page).slice(3)).toEqual([
     ["Type", "Story"],
@@ -609,7 +653,7 @@ test("a ticket with no estimate draws the time alone and no meter; my own report
   await until(() => facts(page).some(([label]) => label === "Logged"), `the facts read ${JSON.stringify(facts(page))}`);
   expect(facts(page).find(([label]) => label === "Logged")).toEqual(["Logged", "3h 40m"]);
   expect(meter(page)).toBeNull();
-  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "MA mara (you)"]);
+  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "ML Mara Lindqvist (you)"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me")).toBe(true);
 });
 
@@ -637,7 +681,7 @@ test("OPS-77's card draws no row its source leaves empty: no Epic, no Reporter, 
   const page = await pageOf("OPS-77");
   await until(() => facts(page).length > 0, "no facts drawn");
   expect(facts(page)).toEqual([
-    ["Assignee", "PR priya"],
+    ["Assignee", "PN Priya Nair"],
     ["Priority", "Low"],
     ["Labels", "on-call"],
   ]);
@@ -775,6 +819,73 @@ test("PAY-231's description draws its inline screenshot where the wiki put it, a
     ["Done", "Retry only the transient codes (AC04 is final)"],
     ["Not done", "Cap the retry budget"],
   ]);
+});
+
+// The ux21 README-image pass (2026-11-19): an image never seen drew from nothing and pushed what stood under it down.
+test("while PAY-231's inline screenshot is read, what stands from it down waits unseen, the conversation too; it draws at its size", async () => {
+  onTestFinished(seeEverything());
+  const { forgetImageSizes } = await import("../../tf/markdown/image-sizes");
+  forgetImageSizes();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const handlers = withTicketSearch(demoHandlers());
+  const bytes = handlers["attachment_bytes"]!;
+  installFakeTauri(recorded({ ...handlers, attachment_bytes: async (args) => (await gate, bytes(args)) }));
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const desc = () => reading()?.querySelector(".tf-tkdesc .tf-md");
+  const talk = () => reading()?.querySelector('section[aria-labelledby="tf-tktalk"]');
+  await until(() => desc()?.querySelector("img.tf-md-att") != null && talk() != null, "the description never drew");
+  // Held unseen in its room: `tf-heldbelow` (`visibility: hidden`) on it or round it.
+  const unseen = (el: Element | null | undefined) => el?.closest(".tf-heldbelow") != null;
+  const blocks = [...desc()!.children];
+  expect(blocks.map((block) => unseen(block)), "the first paragraph reads; the image's and all under it wait").toEqual(blocks.map((_, at) => at >= 1));
+  expect(unseen(talk()), "the conversation under the description waits with it").toBe(true);
+  release();
+  await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline image never drew");
+  const img = desc()!.querySelector("img.tf-md-att")!;
+  expect([img.getAttribute("width"), img.getAttribute("height")], "the fake's 480x180 picture, sized before it loads").toEqual(["480", "180"]);
+  expect([...desc()!.children].some((block) => unseen(block))).toBe(false);
+  expect(unseen(talk())).toBe(false);
+});
+
+test("a comment's inline screenshot holds the comments after it and the box unseen while it is read, not the ones before", async () => {
+  onTestFinished(seeEverything());
+  const { forgetImageSizes } = await import("../../tf/markdown/image-sizes");
+  forgetImageSizes();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const handlers = withTicketSearch(demoHandlers());
+  const bytes = handlers["attachment_bytes"]!;
+  const threadOf = handlers["entity_thread"]!;
+  installFakeTauri(
+    recorded({
+      ...handlers,
+      // The description draws no image here, so only the comment's waits.
+      get_entity: async (args) => ({ ...((await handlers["get_entity"]!(args)) as object), description: "No picture here." }),
+      entity_thread: async (args) => {
+        const thread = (await threadOf(args)) as { comments: { body: string; markup: string }[] };
+        const at = Math.max(0, thread.comments.length - 2);
+        const shot = { ...thread.comments[at]!, body: "See the trace.\n\n!psp-409-trace.png!", markup: "jira_wiki" };
+        return { ...thread, comments: [...thread.comments.slice(0, at), shot, ...thread.comments.slice(at)] };
+      },
+      attachment_bytes: async (args) => (await gate, bytes(args)),
+    }),
+  );
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const shot = () => comments().find((c) => c.querySelector("img.tf-md-att") != null);
+  await until(() => shot() != null, "the comment's screenshot never drew");
+  const unseen = (el: Element | null | undefined) => el?.closest(".tf-heldbelow") != null;
+  const all = comments();
+  const at = all.indexOf(shot()!);
+  expect(at).toBeGreaterThan(0);
+  expect(all.map((c) => unseen(c)), "the comments after the screenshot's wait").toEqual(all.map((_, n) => n > at));
+  expect(unseen(reading()!.querySelector(".tf-compose")), "and the box").toBe(true);
+  release();
+  await until(() => shot()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the screenshot never loaded");
+  expect(comments().some((c) => unseen(c))).toBe(false);
+  expect(unseen(reading()!.querySelector(".tf-compose"))).toBe(false);
 });
 
 test("with the fake's attachment read failing, PAY-231's inline screenshot is the placeholder with a link to the ticket in the source", async () => {

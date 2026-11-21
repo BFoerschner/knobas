@@ -4,13 +4,15 @@
  * tables are read out of `docs/specs/2026-10-15-ticket-first-design-system.md`,
  * so a token that drifts from the spec fails here.
  */
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
-import { EMBED_FRAME_BORDER, READER_DRAWER, READER_NARROW } from "./docs/docs";
+import { ROLES } from "../render/roles";
+import { EMBED_FRAME_BORDER, OUTLINE_ROOM, READER_DRAWER } from "./docs/docs";
 
 const APP = process.cwd();
 /**
@@ -35,6 +37,19 @@ function block(source: string, selector: string): string {
   return source.slice(at, source.indexOf("}", at));
 }
 
+test("a field is on `--field`: `--paper` and `--sheet` read as disabled", () => {
+  const onPage = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(([, selectors, body]) => {
+    if (!/background:\s*var\(--(paper|sheet)\)/.test(body!)) return [];
+    return selectors!
+      .split(",")
+      .map((selector) => selector.trim())
+      .filter((selector) => /(^|[\s>+~])(input|textarea|select)\b[^\s>+~]*$/.test(selector) && !/checkbox|radio/.test(selector))
+      // The branch box is a select in a row of buttons, so it is a button, on the button's fill (2026-11-21, the focus pass).
+      .filter((selector) => selector !== ".tf-bsel select");
+  });
+  expect(onPage).toEqual([]);
+});
+
 /** `--token` → [light, dark], from the spec's colour table. */
 const COLOURS: [string, string, string][] = [...spec.matchAll(/^\| `(--[a-z0-9-]+)`(?: \/ `(--[a-z0-9-]+)`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \|/gm)].flatMap(
   (row) => {
@@ -43,6 +58,56 @@ const COLOURS: [string, string, string][] = [...spec.matchAll(/^\| `(--[a-z0-9-]
     return pairs;
   },
 );
+
+test("a held header's subline keeps its line both held and shown, so an empty one moves nothing as the header shows (2026-11-17)", () => {
+  expect(css).toMatch(/\.tf-fhead\.tf-unread \.tf-sub, \.tf-fhead\.tf-holds \.tf-sub \{ min-height: 1lh; \}/);
+});
+
+test("Settings › Renderers › Decompiler stacks its cell and holds two lines for the Java line and its reason, so a late answer moves nothing (ux19 gate, 2026-11-19)", () => {
+  expect(block(code, ".tf-stg-c.tf-dec-c")).toMatch(/flex-direction:\s*column/);
+  const room = block(code, ".tf-dec-st");
+  expect(room).toMatch(/line-height:\s*1\.5/);
+  expect(room).toMatch(/[^-]height:\s*3em/);
+  expect(room).toMatch(/overflow:\s*hidden/);
+  expect(block(code, ".tf-dec-line")).toMatch(/line-clamp:\s*2/);
+  expect(block(code, ".tf-dec-line.tf-dec-one")).toMatch(/line-clamp:\s*1/);
+  expect(block(code, ".tf-dec-why")).toMatch(/white-space:\s*nowrap/);
+});
+
+test("a held view's line stays one line, the room it keeps, so a narrow column's tree does not move as it comes and goes (ux20 Windows pass, 2026-11-19)", () => {
+  const line = block(code, ".tf-heldnote.tf-held1");
+  expect(line).toMatch(/white-space:\s*nowrap/);
+  expect(line).toMatch(/overflow:\s*hidden/);
+  expect(line).toMatch(/text-overflow:\s*ellipsis/);
+});
+
+test("a toast is one line at most 680 px wide that gives up its middle, so no path or command line grows it (ux21, 2026-11-19)", () => {
+  expect(block(code, ".tf-toast")).toMatch(/max-width:\s*min\(680px, calc\(100vw - 32px\)\)/);
+  const line = block(code, ".tf-toast-line");
+  expect(line).toMatch(/white-space:\s*pre/);
+  expect(line).toMatch(/min-width:\s*0/);
+  const head = block(code, ".tf-toast-head");
+  expect(head).toMatch(/flex:\s*0 1 auto/);
+  expect(head).toMatch(/overflow:\s*hidden/);
+  expect(head).toMatch(/text-overflow:\s*ellipsis/);
+  expect(block(code, ".tf-toast-tail")).toMatch(/flex:\s*none/);
+});
+
+test("an opening's chip floats where the press was, one line, nothing to press, and stills under reduced motion (ux21, 2026-11-19)", () => {
+  const chip = block(code, ".tf-ack");
+  expect(chip).toMatch(/position:\s*fixed/);
+  expect(chip).toMatch(/max-width:\s*360px/);
+  expect(chip).toMatch(/white-space:\s*nowrap/);
+  expect(chip).toMatch(/pointer-events:\s*none/);
+  expect(block(code, ".tf-acks")).toMatch(/pointer-events:\s*none/);
+  // The layer takes no room: a fixed box over the whole window made WebView2 scroll the board and a Docs space on the
+  // main thread (the ux21 Windows pass).
+  const layer = block(code, ".tf-acks");
+  expect(layer).not.toMatch(/inset:/);
+  expect(layer).toMatch(/width:\s*0;/);
+  expect(layer).toMatch(/height:\s*0;/);
+  expect(code).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.tf-ack \{ animation: none; transition: none; \}/);
+});
 
 test("the spec's colour table was read, so the next two tests check something", () => {
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
@@ -134,14 +199,78 @@ test("every text token clears 4.5:1 on paper, sheet and sheet-2, light and dark"
   expect(failing).toEqual([]);
 });
 
-test("width comes from font-variation-settings only, never font-stretch", () => {
-  expect(code).not.toMatch(/font-stretch/);
-  expect(block(code, ".tf-jobkey")).toMatch(/font-variation-settings: "wdth" 62/);
+/*
+ * Width is `font-variation-settings: "wdth" N`, with `font-stretch: N%` beside it since Settings › Fonts (2026-11-18):
+ * a chosen Headings face narrows through its own width axis or condensed members, which only `font-stretch` reaches.
+ * The bundled Inter has neither and draws both at its normal width (2026-11-20).
+ * Every `font-stretch` is a `"wdth"`'s twin, at the same width (`code-face.test.ts` holds that every narrowed rule has one).
+ */
+test("width comes from font-variation-settings, and font-stretch only as its twin at the same width", () => {
+  expect(block(code, ".tf-jobkey")).toMatch(/font-variation-settings: "wdth" 62; font-stretch: 62%/);
+  const stretches = [...code.matchAll(/font-stretch:\s*([^;}]+)/g)].map((m) => m[1]!.trim());
+  const widths = [...code.matchAll(/font-variation-settings:\s*"wdth"\s*([\d.]+)\s*;\s*font-stretch:\s*([\d.]+)%/g)];
+  expect(stretches.length).toBeGreaterThan(20);
+  expect(widths).toHaveLength(stretches.length);
+  for (const [, wdth, stretch] of widths) expect(stretch).toBe(wdth);
 });
 
 test("focus is 2px --focus, and --card-ink on a card surface", () => {
-  expect(block(code, ".tf :focus-visible")).toMatch(/outline: 2px solid var\(--focus\)/);
-  expect(code).toMatch(/\.tf \.tf-card:focus-visible, \.tf \.tf-card :focus-visible \{ outline-color: var\(--card-ink\); \}/);
+  expect(code).toMatch(/:root \{ --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; \}/);
+  expect(code).toMatch(/\.tf \{ --focus-c: var\(--focus\); --focus-o: var\(--focus-off\); \}/);
+  expect(block(code, ".tf :focus-visible")).toMatch(/outline: var\(--focus-w\) solid var\(--focus-c\); outline-offset: var\(--focus-o\);/);
+  expect(block(code, ".tf .tf-card")).toMatch(/--focus-c: var\(--card-ink\)/);
+});
+
+/**
+ * The ring takes the shape of what it rings (2026-11-21; Björn: "the blue selection outline around elements might seem
+ * weird"): the focus rule set `border-radius: 3px`, so a focused pill or switch went square and a square tab went round.
+ */
+test("no focus rule changes a control's shape: none sets a radius", () => {
+  const focusRules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => /:focus(-visible|-within)?\b/.test(selectors!));
+  expect(focusRules.length).toBeGreaterThan(20);
+  for (const [, selectors, body] of focusRules) expect(body, selectors!.trim()).not.toMatch(/border-radius/);
+});
+
+/**
+ * One place: a component sets `--focus-o` or `--focus-c`, and never writes the ring's literal width and colour. Every
+ * stylesheet is read, those a component imports itself (`jar.css`, `openapi.css`) too, and every component's `<style>`.
+ */
+test("no component writes a ring of its own: every focus outline is drawn from the tokens", () => {
+  const sheets = readdirSync(join(APP, "src/lib/tf/css"))
+    .filter((name) => name.endsWith(".css"))
+    .map((name) => [name, readFileSync(join(APP, "src/lib/tf/css", name), "utf8")] as const);
+  const components = (readdirSync(join(APP, "src/lib"), { recursive: true }) as string[])
+    .filter((name) => name.endsWith(".svelte"))
+    .map((name) => [name, readFileSync(join(APP, "src/lib", name), "utf8").match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ""] as const);
+  expect(sheets.length).toBeGreaterThan(30);
+  for (const [name, text] of [...sheets, ...components]) {
+    const body = text.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(body, name).not.toMatch(/outline:\s*2px solid var\(--focus\)/);
+    const focusRules = [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => /:focus(-visible|-within)?\b/.test(selectors!));
+    for (const [, selectors, rule] of focusRules) expect(rule, `${name}: ${selectors!.trim()}`).not.toMatch(/outline(-offset|-width)?:[^;]*\dpx/);
+  }
+});
+
+test("a field rings inside, as its own border; a box that clips gives what it holds the inside ring", () => {
+  expect(code).toMatch(/\.tf :is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\]\)\):focus-visible \{ outline-color: var\(--focus\); outline-offset: var\(--focus-in\); \}/);
+  const clippers = /:is\(([^)]*)\) \{ --focus-o: var\(--focus-in\); \}/.exec(code);
+  expect(clippers).not.toBeNull();
+  for (const box of [".tf-nav", ".tf-tabs", ".tf-seg", ".tf-menu", ".tf-flist", ".tf-fence", ".tf-ftree", ".tf-tbl"]) expect(clippers![1]!.split(", ")).toContain(box);
+});
+
+test("a select pressed with the mouse draws no ring (`data-input`, input-modality.ts)", () => {
+  expect(code).toMatch(/:root\[data-input="pointer"\] \.tf select:focus-visible \{ outline: none; \}/);
+});
+
+/** The branch box is a button that opens a list (2026-11-21; Björn: "the box from branch switching … different sized than the button above"). */
+test("the branch box wears the button's face: height, fill, border, radius, padding, and as wide as its name", () => {
+  const box = block(code, ".tf-bsel select");
+  expect(box).toMatch(/appearance: none; height: var\(--control-h\); max-width: 282px; padding: 0 29px 0 33px;/);
+  expect(box).toMatch(/border: 1px solid var\(--rule\); border-radius: 4px; background: var\(--sheet\)/);
+  expect(box).toMatch(/font: 500 calc\(var\(--t-sm\) \* var\(--fs\)\) var\(--mono\)/);
+  expect(box).toMatch(/field-sizing: content/);
+  expect(block(code, ".tf-btn")).toMatch(/height: var\(--control-h\); padding: 0 11px; border: 1px solid var\(--rule\); border-radius: 4px;\s*background: var\(--sheet\)/);
+  expect(block(code, ".tf .tf-bsel select:focus-visible")).toMatch(/outline-offset: var\(--focus-off\)/);
 });
 
 test("a disabled icon-only button is dimmed like a disabled button (#2288)", () => {
@@ -154,32 +283,61 @@ test("reduced motion stops the pulse and every other animation in the shell", ()
   expect(reduced).toMatch(/\.tf \*[^{]*\{ transition: none !important; animation: none !important; \}/);
 });
 
-test("the three families are vendored from npm, Archivo from its width-axis file", () => {
-  expect(code).toMatch(/@import "@fontsource-variable\/archivo\/wdth\.css";/);
-  expect(code).toMatch(/@import "@fontsource-variable\/source-serif-4\//);
-  expect(code).toMatch(/@import "@fontsource\/jetbrains-mono\//);
-  expect(code).not.toMatch(/https?:/);
+/**
+ * The faces are the app's own files (2026-11-20, `fonts/fonts.css`): imported once, before every rule, never fetched,
+ * and every file a face names is in its folder beside its licence (`OFL.txt`) and its `SOURCE.md`, whose SHA-256 is
+ * the file's. Cascadia Code's licence reserves its name for Microsoft's files as they are, so a changed byte there is a
+ * licence breach as much as a different font; Inter's is held the same way, so a new version is a deliberate change.
+ */
+test("the faces are the app's own files, each beside its licence, as SOURCE.md says they are", () => {
+  expect(css).toMatch(/^@import "\.\/fonts\/fonts\.css";$/m);
+  expect(code).not.toMatch(/@fontsource|https?:/);
+  const fonts = join(APP, "src/lib/tf/fonts");
+  const faces = readFileSync(join(fonts, "fonts.css"), "utf8");
+  expect(faces).not.toMatch(/https?:/);
+  const files = [...faces.matchAll(/url\("\.\/([\w-]+)\/([\w-]+\.woff2)"\)/g)].map(([, folder, file]) => ({ folder: folder!, file: file! }));
+  expect(files.map(({ folder }) => folder).filter((folder, i, all) => all.indexOf(folder) === i)).toEqual(["inter", "cascadia-mono", "cascadia-code", "cascadia-2009"]);
+  expect(files).toHaveLength(13);
+  for (const { folder, file } of files) {
+    const bytes = readFileSync(join(fonts, folder, file));
+    expect(bytes.subarray(0, 4).toString("latin1"), file).toBe("wOF2");
+    const source = readFileSync(join(fonts, folder, "SOURCE.md"), "utf8");
+    expect(source, `${folder}/SOURCE.md names ${file}`).toContain(`| \`${file}\` |`);
+    expect(source.split("\n").find((line) => line.includes(`\`${file}\``)), file).toContain(createHash("sha256").update(bytes).digest("hex"));
+    const licence = readFileSync(join(fonts, folder, "OFL.txt"), "utf8");
+    expect(licence, `${folder}/OFL.txt`).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  }
+  // The copyright notice above the licence's text, where a reserved name is declared.
+  const notice = (folder: string) => readFileSync(join(fonts, folder, "OFL.txt"), "utf8").split("This Font Software is licensed")[0]!;
+  expect(notice("cascadia-code")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("cascadia-mono")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("cascadia-2009")).toMatch(/Microsoft Corporation,\s+with Reserved Font Name Cascadia Code\./);
+  expect(notice("inter")).toMatch(/The Inter Project Authors/);
+  expect(notice("inter")).not.toMatch(/Reserved Font Name/);
 });
 
 /**
- * The axis is in the font file, not synthesised: the latin Archivo the
- * stylesheet imports has an `fvar` axis record `wdth` whose minimum is 62.0.
+ * The axes are in the font files, not synthesised: Inter's `opsz` (14 to 32), which draws headings in its display cut
+ * by itself, and its `wght`; Cascadia Mono's and Code's `wght` (200 to 700), which code's 400 and 600 take.
  *
- * WOFF2 keeps its table data in one Brotli stream after a variable-length
- * table directory; an `fvar` axis record is the tag followed by min, default
- * and max as 16.16 fixed. The default-only file (`index.css`) carries `wght`
- * alone and fails this.
+ * WOFF2 keeps its table data in one Brotli stream after a variable-length table directory; an `fvar` axis record is
+ * the tag followed by min, default and max as 16.16 fixed.
  */
-test("the vendored Archivo carries a wdth axis from 62", () => {
-  const face = readFileSync(join(APP, "node_modules/@fontsource-variable/archivo/wdth.css"), "utf8");
-  const latin = face.match(/archivo-latin-wdth-normal \*\/[\s\S]*?url\(\.\/(files\/[^)]+)\)/);
-  expect(latin, "no latin face in wdth.css").not.toBeNull();
-  const font = readFileSync(join(APP, "node_modules/@fontsource-variable/archivo", latin![1]!));
-  expect(font.subarray(0, 4).toString("latin1")).toBe("wOF2");
-  expect(axes(font)).toContainEqual({ tag: "wdth", min: 62 });
+test("the bundled Inter has its optical size and weight axes, Cascadia Mono and Code their weight axis", () => {
+  const font = (path: string) => readFileSync(join(APP, "src/lib/tf/fonts", path));
+  const inter = font("inter/inter-latin-opsz-normal.woff2");
+  expect(axes(inter, "opsz")).toContainEqual({ tag: "opsz", min: 14, max: 32 });
+  expect(axes(inter, "wght")).toContainEqual({ tag: "wght", min: 100, max: 900 });
+  expect(axes(font("cascadia-code/CascadiaCode.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-code/CascadiaCodeItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-mono/CascadiaMono.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-mono/CascadiaMonoItalic.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  // The older release, 2009.22 (2026-11-21): its two upright files, the same axis.
+  expect(axes(font("cascadia-2009/CascadiaMono.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
+  expect(axes(font("cascadia-2009/CascadiaCode.woff2"), "wght")).toContainEqual({ tag: "wght", min: 200, max: 700 });
 });
 
-function axes(woff2: Buffer): { tag: string; min: number }[] {
+function axes(woff2: Buffer, tag: string): { tag: string; min: number; max: number }[] {
   const tables = woff2.readUInt16BE(12);
   const compressed = woff2.readUInt32BE(20);
   let at = 48;
@@ -202,9 +360,9 @@ function axes(woff2: Buffer): { tag: string; min: number }[] {
     if (transformed) base128();
   }
   const data = brotliDecompressSync(woff2.subarray(at, at + compressed));
-  const found: { tag: string; min: number }[] = [];
-  for (let index = data.indexOf("wdth"); index !== -1; index = data.indexOf("wdth", index + 1)) {
-    if (index + 16 <= data.length) found.push({ tag: "wdth", min: data.readInt32BE(index + 4) / 65536 });
+  const found: { tag: string; min: number; max: number }[] = [];
+  for (let index = data.indexOf(tag); index !== -1; index = data.indexOf(tag, index + 1)) {
+    if (index + 16 <= data.length) found.push({ tag, min: data.readInt32BE(index + 4) / 65536, max: data.readInt32BE(index + 12) / 65536 });
   }
   return found;
 }
@@ -234,7 +392,8 @@ test("the top bar's timer target is capped with an ellipsis, a label is sans and
   expect(band).toMatch(/\.tf-search \.tf-label, \.tf-search kbd\s*\{[^}]*display:\s*none/);
   expect(band).toMatch(/\.tf-timer-key\s*\{[^}]*max-width:\s*12ch/);
   expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
-  expect(band).toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
+  // A count is a state to act on (R-1.3): Inbox and Monitors keep theirs in the band.
+  expect(band).not.toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
 });
 
 /**
@@ -259,13 +418,22 @@ test("the launcher's rules are a part of tf.css, and its components have no styl
   }
 });
 
-test("the launcher sets mono on a ticket's key cell and nowhere else (#1422, #2421)", () => {
+test("the launcher sets mono on a ticket's key cell, a code evidence line and the pane's files, and nowhere else (#1422, #2421, D10, D11)", () => {
   const mono = launcherRules.filter(([, body]) => /var\(--mono\)/.test(body)).map(([selector]) => selector);
-  expect(mono).toEqual([".tf-ln-k.tf-ln-mono"]);
+  expect(mono).toEqual([".tf-ln-file-at", ".tf-ln-file-code", ".tf-ln-k.tf-ln-mono", ".tf-ln-why.tf-ln-code .tf-ln-why-t"]);
   // The key cell is drawn by the row, and only there.
   const row = LAUNCHER[6]!;
-  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\}>\{cell\}<\/span>/);
+  // A forge's issue key is cut to its repository and number there, the whole in its title (the live run, 2026-11-09).
+  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\} title=\{[^}]*\}>\{mono \? shortKey\(cell\) : cell\}<\/span>/);
   expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|mono)\b/);
+});
+
+test("the launcher's dialog does not clip to its rounded corners, so a wheel over its list scrolls on the compositor (2026-11-20)", () => {
+  // `overflow: hidden` with `border-radius` on the dialog made Chromium hit-test each wheel over the list on the main thread.
+  const rules = (selector: string) => launcherRules.filter(([s]) => s === selector).map(([, body]) => body).join(";");
+  expect(rules(".tf-dialog.tf-launch")).toMatch(/overflow:\s*visible/);
+  // Its footer's fill keeps to the corners the dialog no longer clips.
+  expect(rules(".tf-launch > footer")).toMatch(/border-radius:\s*0 0 7px 7px/);
 });
 
 test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 17px box, no capitals and no rooms tokens (#1422)", () => {
@@ -273,7 +441,7 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
   expect(selected).toMatch(/background:\s*var\(--sheet-2\)/);
   expect(selected).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--ink\)/);
   const box = launcherRules.find(([selector]) => selector === ".tf .tf-ln-q input")?.[1] ?? "";
-  expect(box).toMatch(/font-size:\s*var\(--t-xl\)/);
+  expect(box).toMatch(/font-size:\s*calc\(var\(--t-xl\) \* var\(--fs\)\)/);
   expect(box).toMatch(/border:\s*0/);
   expect(launcherRules.find(([selector]) => selector === ".tf-ln-q")?.[1]).toMatch(/border-bottom:\s*1px solid var\(--rule\)/);
   expect(launcherCode).not.toMatch(/text-transform/);
@@ -287,22 +455,24 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
  * #1445: JetBrains Mono's contextual ligatures draw `->`, `=>`, `<=` and `==`
  * as single glyphs, so source text would show characters the file does not
  * hold. A `font:` shorthand resets `font-variant-ligatures`, so the property
- * has to sit in the same rule, after the shorthand.
+ * has to sit in the same rule, after the shorthand. Since 2026-11-16 it is
+ * `var(--mono-ligatures)`, `none` until *Ligatures in code* is turned on in
+ * Settings › Appearance (`code-face.svelte.ts`).
  */
-test("code, diff, editor and the mono token class draw without ligatures", () => {
+test("code, diff, editor and the mono token class draw ligatures only as Settings says", () => {
   for (const selector of [".tf-code", ".tf-diff", ".tf-editor", ".tf .tf-mono"]) {
-    expect(block(code, selector), selector).toMatch(/font-variant-ligatures: none/);
+    expect(block(code, selector), selector).toMatch(/font-variant-ligatures: var\(--mono-ligatures\)/);
   }
 });
 
-test("every rule that takes the mono font variable turns ligatures off after its font declaration", () => {
+test("every rule that takes the mono font variable sets the ligature switch after its font declaration", () => {
   const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[2]!.includes("var(--mono)"));
   expect(rules.length).toBeGreaterThan(30);
   const bare = rules
     .filter((m) => {
       const body = m[2]!;
       const lastFont = Math.max(body.lastIndexOf("font:"), body.lastIndexOf("font-family:"));
-      return body.lastIndexOf("font-variant-ligatures: none") < lastFont;
+      return body.lastIndexOf("font-variant-ligatures: var(--mono-ligatures)") < lastFont;
     })
     .map((m) => m[1]!.trim());
   expect(bare).toEqual([]);
@@ -320,25 +490,30 @@ test("the asset tree page is viewport-high, so its pane scrolls and the page doe
 });
 
 test("the Docs reader: tree and page, the outline the page's sticky right column, folded on the component's own threshold (#2081)", () => {
-  expect(block(code, ".tf-rd")).toMatch(/grid-template-columns:\s*300px minmax\(0, 1fr\);/);
-  expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) 268px;/);
+  expect(block(code, ".tf-rd")).toMatch(/grid-template-columns:\s*var\(--side-docs-tree, 300px\) minmax\(0, 1fr\);/);
+  expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) var\(--side-docs-outline, 268px\);/);
   const outline = block(code, ".tf-rd-outline");
   expect(outline).toMatch(/position:\s*sticky/);
-  expect(outline).toMatch(/top:\s*0/);
-  // The band the component reads through `matchMedia` is the stylesheet's own.
-  const at = code.indexOf(`@media ${READER_NARROW} {`);
-  expect(at, `no rule band for ${READER_NARROW}`).toBeGreaterThan(-1);
-  const band = code.slice(at, code.indexOf("\n}", at));
-  expect(band).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
-  expect(band).toMatch(/\.tf-rd-sheet\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  // Where it starts, under the pinned crumb row and the sheet's padding, so its heading does not move as the page scrolls (F-443).
+  expect(outline).toMatch(/top:\s*60px/);
+  // The outline folds by the sheet's own width (`readerFit`), and no window width in the stylesheet decides it.
+  expect(block(code, ".tf-rd-sheet")).toContain("column-gap: 56px");
+  expect(OUTLINE_ROOM).toBe(268 + 56);
+  expect(block(code, ".tf-rd-sheet.tf-rd-solo")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  expect(code).not.toMatch(/@media \(max-width: 13\d\dpx\) \{\s*\.tf-rd-sheet/);
+  // The tree narrows at the shell's own 1240px breakpoint.
+  const rail = code.indexOf("@media (max-width: 1240px) {\n  .tf-rd {");
+  expect(rail, "no 1240px band for the tree").toBeGreaterThan(-1);
+  expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*var\(--side-docs-tree, 220px\) minmax\(0, 1fr\)/);
 });
 
-test("nothing in the Docs reader's page is capped in width (#2081)", () => {
+test("beside the outline nothing in the Docs reader's page is capped in width, and folded its body stops at 730 px (#2081, F-432)", () => {
   const capped = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
     .filter(([, selector]) => /\.tf-(rd-page|rd-sheet|doc|cmts|sec-edit|compose|pre|callout|macro|rd-foot)\b/.test(selector!))
     .filter(([, , body]) => /max-width/.test(body!))
     .map(([, selector]) => selector!.trim());
-  expect(capped).toEqual([]);
+  expect(capped).toEqual([".tf-rd-solo :is(.tf-doc, .tf-rd-fold)"]);
+  expect(block(code, ".tf-rd-solo :is(.tf-doc, .tf-rd-fold)")).toMatch(/max-width:\s*730px/);
   expect(code).not.toContain("74ch");
 });
 
@@ -377,7 +552,20 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar"];
+test("no page's scroller reserves room for its bar: the page is as wide as the window, and a rail's own list may keep its room", () => {
+  const gutters = [...code.matchAll(/([^{}]*)\{[^}]*scrollbar-gutter[^}]*\}/g)].map(([, selector]) => selector!.trim().split("\n").at(-1)!.trim());
+  // Builds' scroller keeps a gutter only to take it back with its clip (builds at 6x, 2026-11-15): the page keeps no
+  // room for its bar, and its host is no size container.
+  expect(gutters).toEqual([".tf-shost > .tf-bmain"]);
+  // Tickets' views list keeps its bar's room by scrolling always, not by a kept gutter: with LCD text (Windows, Linux)
+  // the gutter made Chromium hit-test each wheel over it on the main thread (`scrollers.mjs --strict`, 2026-11-20).
+  expect(block(code, ".tf-vfind + .tf-vlist")).toMatch(/overflow-y:\s*scroll/);
+  expect(code).toMatch(/\.tf-shost > \.tf-bmain > \.tf-sclip \{\s*margin-right:\s*-8px;\s*\}/);
+  expect(block(code, ".tf-main")).toMatch(/overflow:\s*hidden auto/);
+  expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);
+});
+
+const STICKY_BARS = [".tf-mon-gaps thead th", ".tf-mon-head", ".tf-fbar", ".tf-findbar", ".tf-findhold", ".tf-rd-crumbrow", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap.tf-lanes .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(.tf-lanes) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap.tf-lanes > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more", ".tf-newruns", ".tf-dtool.tf-dband", ".tf-prfiles.tf-with-tool > .tf-pickbar"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
@@ -389,11 +577,15 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
     expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline"]),
   );
   // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
-  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };
+  const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree", ".tf-rbv > .tf-rbrail": ".tf-pl-list", ".tf-dstick": ".tf-flist" };
   const scrolls = (selector: string, body: string) =>
     INNER[selector] === undefined
       ? /overflow(-y)?:\s*auto/.test(body)
-      : /overflow:\s*hidden/.test(body) && /display:\s*flex/.test(body) && /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
+      : // The column clips, or (the file tree's, 2026-11-20: a rounded clip around its scroller put every wheel's hit test on
+        // the main thread) lets its inner box shrink to the room left (`min-height: 0`), which bounds it as well.
+        (/overflow:\s*hidden/.test(body) || /min-height:\s*0/.test(block(code, INNER[selector]!))) &&
+        /display:\s*flex/.test(body) &&
+        /overflow(-y)?:\s*auto/.test(block(code, INNER[selector]!));
   const unbounded = columns
     .filter(([selector, body]) => !/max-height:\s*calc\(100vh - \d+px\)/.test(body) || !scrolls(selector, body))
     .map(([selector]) => selector);
@@ -421,24 +613,45 @@ test("the Tickets page's row is bounded by the page, so a preview change does no
   expect(block(narrow, "  .tf-tickets")).toMatch(/grid-template-rows:\s*none;[^}]*height:\s*auto;/);
 });
 
-test("the highlighting themes are the Code area mockup's --hl-* tokens, light on :root and dark in both dark blocks (#2254)", () => {
+test("each role's colour reads its slot's variable in the right block, with knobas's own as the fallback (ADR-0051)", () => {
   const mockup = readFileSync(join(APP, "../mockups/code-area/base.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  /** Each `--hl-*` token a theme sets: light on `:root`, dark by the OS and when forced. */
-  const themes = (source: string) => {
+  /** Each `--hl-*` token a block sets, as written: light on `:root`, dark by the OS and when forced. */
+  const blocks = (source: string) => {
     const media = source.slice(source.indexOf("@media (prefers-color-scheme: dark)"));
-    const hl = (body: string) => Object.fromEntries([...body.matchAll(/(--hl-[a-z]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+    const hl = (body: string) => Object.fromEntries([...body.matchAll(/(--hl-[a-z-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
     return {
       light: hl(block(source, ":root")),
       os: hl(block(media, ':root:not([data-theme="light"])')),
       forced: hl(block(source, ':root[data-theme="dark"]')),
     };
   };
-  const ours = themes(code);
-  expect(Object.keys(ours.light).sort()).toEqual(["--hl-com", "--hl-fn", "--hl-kw", "--hl-num", "--hl-str", "--hl-ty"]);
-  expect(ours).toEqual(themes(mockup));
-  // The two literal colours differ by theme; the rest follow --ok, --warn, --muted and --info.
-  expect(ours.os["--hl-kw"]).not.toBe(ours.light["--hl-kw"]);
-  expect(ours.os["--hl-ty"]).not.toBe(ours.light["--hl-ty"]);
+  const ours = blocks(code);
+  expect(Object.keys(ours.light).sort()).toEqual([...ROLES.map((role) => `--hl-${role}`), "--hl-com-style"].sort());
+  expect(ours.os).toEqual(ours.forced);
+  const read = (value: string, side: string, role: string) => {
+    const m = new RegExp(`^var\\(--hl-${role}-${side}, (.+)\\)$`).exec(value);
+    expect(m, `--hl-${role} reads --hl-${role}-${side}`).not.toBeNull();
+    return m![1]!;
+  };
+  // The fallbacks are the mockup's six colours, spread over the seventeen roles: nothing drawn today changes colour
+  // but what the new roles split off.
+  const before = blocks(mockup);
+  for (const [side, now, was] of [["light", ours.light, before.light], ["dark", ours.os, before.os]] as const) {
+    const fallback = Object.fromEntries(ROLES.map((role) => [role, read(now[`--hl-${role}`]!, side, role)]));
+    const old = (role: string) => was[`--hl-${role}`] ?? before.light[`--hl-${role}`];
+    for (const role of ["kw", "str", "num", "com", "fn", "ty"]) expect(fallback[role]).toBe(old(role));
+    for (const role of ["esc", "con", "attr"]) expect(fallback[role]).toBe(old("num"));
+    for (const role of ["key", "tag"]) expect(fallback[role]).toBe(old("ty"));
+    expect(fallback.head).toBe(old("kw"));
+    expect(fallback.link).toBe(old("fn"));
+    for (const role of ["prop", "var", "op", "punct"]) expect(fallback[role]).toBe("var(--ink)");
+    expect(now["--hl-com-style"]).toBe(`var(--hl-com-style-${side}, italic)`);
+  }
+});
+
+test("every role is a class that draws in its variable through --hl (ADR-0051)", () => {
+  for (const role of ROLES) expect(block(code, `.tf-hl-${role}`)).toMatch(new RegExp(`--hl:\\s*var\\(--hl-${role}\\);\\s*color:\\s*var\\(--hl\\)`));
+  expect(block(code, ".tf-hl-com")).toMatch(/font-style:\s*var\(--hl-com-style\)/);
 });
 
 /** `--control-*` → px, from the Controls section's token table (#2238). */
@@ -488,13 +701,13 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
     .map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }))
     .filter(({ selector }) => /\.tf-(tcard|row)\b/.test(selector));
   const yellow = rules.filter(({ body }) => /var\(--card(-2)?\)/.test(body)).map(({ selector }) => selector);
-  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf-row.tf-card td"]);
+  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf .tf-tcard.tf-card:hover", ".tf-row.tf-card td"]);
   const lifted = rules.filter(({ body }) => body.includes("var(--shadow)")).map(({ selector }) => selector);
   expect(lifted).toEqual([".tf-tcard.tf-sel", ".tf-tcard.tf-card.tf-sel"]);
 
   // The outline is a ring, not `outline`, so the focus ring (`.tf :focus-visible`) never replaces it.
   expect(block(code, ".tf-tcard.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--ink\), var\(--shadow\);/);
-  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), 0 0 0 4px var\(--sel-halo\), var\(--shadow\);/);
   expect(block(code, ".tf-tcard.tf-card")).not.toContain("box-shadow");
   // A row's outline is drawn inside its cells, two pixels on each edge of the row; on the yellow row, in its ink.
   expect(block(code, ".tf-row.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--ink\);[^}]*box-shadow:\s*inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
@@ -530,12 +743,11 @@ test("a description without markup keeps its line breaks in the reading column's
   expect(block(code, ".tf-tkdesc p.tf-asks")).toMatch(/white-space:\s*pre-line;/);
 });
 
-test("the ticket page's columns take the card's width, and below 900px they stack with the handle gone (#2402)", () => {
-  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr)");
+test("the ticket page's columns take the card's width, and below 900px they stack (#2402)", () => {
+  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--side-ticket-card, 320px) minmax(0, 1fr)");
   const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-ticketpage {"));
   const body = narrow.slice(0, narrow.indexOf("\n}"));
   expect(body).toContain(".tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }");
-  expect(body).toContain(".tf-tkhandle { display: none; }");
 });
 
 test("an embed's frame has the border its height counts, inside a border-box (#2459)", () => {
@@ -545,4 +757,109 @@ test("an embed's frame has the border its height counts, inside a border-box (#2
   expect(rule).toMatch(new RegExp(`(^|[;{\\s])border: ${EMBED_FRAME_BORDER}px solid `));
   expect(rule).not.toMatch(/box-sizing|(^|[;{\s])(border-width|border-top|border-bottom|padding)\b/);
   expect(code).toMatch(/^\* \{ box-sizing: border-box;/m);
+});
+
+// The Windows pass on ux13 (2026-11-15): Builds' scroller keeps its bar's gutter (`scrollbar-gutter: stable`), and with
+// it WebView2 judged the scroller not opaque and scrolled it on the main thread: its runs and a pipeline's history
+// moved at 73 and 47 pictures a second under a wheel at 4x on Björn's PC, 26 and 27 at 6x, where ux12 held 229 and 222.
+// Painting the clip inside it in the page's colour gives the compositor the scroll back (235 at 4x) and keeps ClearType.
+test("a scroller that keeps its bar's gutter paints its clip in --paper, so WebView2 scrolls it on the compositor", () => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: selector!.split(",").map((s) => s.trim()), body: body! }));
+  // `TfScroller`'s scrollers, whose body sits in a clip (`.tf-sclip`): Tickets' views rail keeps a gutter with no clip.
+  const clips = (scroller: string) => rules.filter((rule) => rule.selectors.includes(`${scroller} > .tf-sclip`));
+  const gutters = rules
+    .filter((rule) => /scrollbar-gutter:\s*stable/.test(rule.body))
+    .flatMap((rule) => rule.selectors)
+    .filter((scroller) => clips(scroller).length > 0);
+  expect(gutters, "Builds' scroller keeps a gutter, so this test checks something").toContain(".tf-shost > .tf-bmain");
+  for (const scroller of gutters) {
+    expect(clips(scroller).some((rule) => /background(-color)?:\s*var\(--paper\)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
+  }
+});
+
+// The Windows pass on ux16 (2026-11-17): every clip became positioned for its own paint layer (#2508), and Builds'
+// painted clip under a kept gutter, positioned, made WebView2 hit-test each wheel event on the main thread
+// (`FindScrollTargetOnMainThread` for 40 of 40): its runs and a pipeline's history moved at 71 and 81 pictures a
+// second under a wheel at 4x on Björn's PC, 30 and 31 at 6x. Unpositioned, 0 of 40, and 236 and 237 at 4x again.
+test("a scroller that keeps its bar's gutter keeps its painted clip unpositioned, so WebView2 hit-tests its wheel off the main thread", () => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: selector!.split(",").map((s) => s.trim()), body: body! }));
+  const clips = (scroller: string) => rules.filter((rule) => rule.selectors.includes(`${scroller} > .tf-sclip`));
+  const gutters = rules
+    .filter((rule) => /scrollbar-gutter:\s*stable/.test(rule.body))
+    .flatMap((rule) => rule.selectors)
+    .filter((scroller) => clips(scroller).length > 0);
+  expect(gutters, "Builds' scroller keeps a gutter, so this test checks something").toContain(".tf-shost > .tf-bmain");
+  // The rule that positions every clip is less specific than a scroller's own, so the scroller's own decides.
+  expect(rules.some((rule) => rule.selectors.includes(".tf-sclip") && /position:\s*relative/.test(rule.body)), "clips are positioned elsewhere").toBe(true);
+  for (const scroller of gutters) {
+    expect(clips(scroller).some((rule) => /(^|;)\s*position:\s*static\s*(;|$)/.test(rule.body)), `${scroller} > .tf-sclip`).toBe(true);
+  }
+});
+
+/** A selector list split at its top-level commas, not those inside `:not(…)`. */
+function topLevel(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i] === "(") depth += 1;
+    else if (list[i] === ")") depth -= 1;
+    else if (list[i] === "," && depth === 0) {
+      out.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(list.slice(start));
+  return out;
+}
+
+/** Every rule of the sheet whose selector names `data-diff-unchanged`, as selector and body. */
+function quietRules(): { selector: string; body: string }[] {
+  const flat = code.replace(/@supports[^{]*\{([\s\S]*?\})\s*\}/g, "");
+  return [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectors]) => selectors!.includes("data-diff-unchanged"))
+    .flatMap(([, selectors, body]) => topLevel(selectors!).map((s) => ({ selector: s.trim(), body: body!.trim() })))
+    .filter(({ selector }) => selector !== "");
+}
+
+test("a diff's unchanged lines draw quiet, grey or in full; changed lines and word marks never change (ADR-0051)", () => {
+  const rules = quietRules();
+  expect(rules.length).toBeGreaterThan(0);
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML =
+    '<div class="tf-diff"><div class="tf-ln" id="ctx"><span class="tf-hl-kw" id="ctx-kw">if</span></div>' +
+    '<div class="tf-ln tf-add" id="add"><span class="tf-hl-kw" id="add-kw">if</span><span class="tf-wd"><span class="tf-hl-str" id="wd">x</span></span></div>' +
+    '<div class="tf-ln tf-del" id="del"><span class="tf-hl-kw" id="del-kw">if</span></div></div>';
+  const colourOf = (mode: string, id: string) => {
+    doc.documentElement.setAttribute("data-diff-unchanged", mode);
+    const el = doc.getElementById(id)!;
+    const hit = rules.filter(({ selector }) => el.matches(selector));
+    return hit.length === 0 ? "own" : /color:\s*([^;]+)/.exec(hit.at(-1)!.body)![1]!.trim();
+  };
+  expect(colourOf("quiet", "ctx-kw")).toBe("color-mix(in oklab, var(--hl) 40%, var(--ink-2))");
+  expect(colourOf("grey", "ctx-kw")).toBe("var(--ink-2)");
+  expect(colourOf("full", "ctx-kw")).toBe("own");
+  expect(colourOf("quiet", "ctx")).toBe("var(--ink-2)");
+  for (const mode of ["full", "quiet", "grey"])
+    for (const id of ["add", "add-kw", "del", "del-kw", "wd"]) expect(colourOf(mode, id), `${mode} ${id}`).toBe("own");
+  // The tints are the diff's own tokens, which a theme may set.
+  expect(block(code, ".tf-diff .tf-add")).toMatch(/background:\s*var\(--diff-add\)/);
+  expect(block(code, ".tf-diff .tf-del")).toMatch(/background:\s*var\(--diff-del\)/);
+});
+
+test("the preview's side classes re-declare the other side's surface and ink tokens as tokens.css writes them (ADR-0051)", () => {
+  const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
+  const decls = (body: string) => Object.fromEntries([...body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+  const light = decls(block(code, ":root"));
+  const dark = decls(block(media, ':root:not([data-theme="light"])'));
+  for (const [cls, side] of [[".tf-as-light", light], [".tf-as-dark", dark]] as const) {
+    const own = decls(block(code, cls));
+    for (const [name, value] of Object.entries(own)) {
+      if (name === "--diff-add" || name === "--diff-del" || name === "--add-word" || name === "--del-word") continue;
+      expect(value, `${cls} ${name}`).toBe(side[name]);
+    }
+    expect(Object.keys(own)).toEqual(expect.arrayContaining(["--paper", "--sheet", "--sheet-2", "--ink", "--ink-2", "--ok-bg", "--err-bg", "--diff-add", "--diff-del"]));
+  }
 });

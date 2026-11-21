@@ -1,0 +1,14 @@
+# The gateway and its queue.
+services:
+  gateway:
+    image: tidewater/gateway:3.2.9
+    environment:
+      RETRY_LIMIT: 3
+      RETRY_BACKOFF: "250ms"  # doubles each try
+      ENABLED: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - gitea-data:/data
+    command: ["serve", "--port", "8080"]
+    restart: unless-stopped

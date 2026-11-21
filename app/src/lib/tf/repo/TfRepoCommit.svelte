@@ -11,18 +11,27 @@
   read-only git when the repository's checkout holds the commit, with
   *Ignore whitespace* on offer; otherwise the commit's own `diff` section, the
   one source read it always was (the whole view defers it).
+
+  An address that names no commit knobas holds draws the "nothing here" block
+  under the repository's header and tabs, and a read that broke the same block
+  with *Try again*.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
   import { clockLabel } from "../../time/format";
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { ChoiceOption, DiffFile, DiffReadAt, EntityDetail, RangeDiff, SourceView } from "../../ipc/entity";
   import { commitContext, parentOf } from "../diff/context";
   import TfDiffView from "../diff/TfDiffView.svelte";
-  import { shaOfCommit } from "../diff/address";
+  import TfWhitespaceBox from "../diff/TfWhitespaceBox.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import { diffHash, shaOfCommit, WORKING_TREE } from "../diff/address";
+  import { clonedHere } from "./cloned-here.svelte";
+  import { endWords } from "../diff/rendered";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { onViewFresh } from "./view-fresh.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
 
   let {
@@ -33,7 +42,7 @@
     onNewBranch,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "fileBytes" | "piped" | "commitDiff">;
+    ports: Pick<RepoPorts, "entityView" | "behindView" | "getEntity" | "fileBytes" | "piped" | "commitDiff">;
     repoId: string;
     commitId: string;
     now: Date;
@@ -51,19 +60,23 @@
   /** The first parent's address, for the old side of expanded context. */
   let parent = $state<string | null>(null);
   let failed = $state<string | null>(null);
+  /** The read failed because the address names no commit knobas holds, not because the read broke. */
+  let missing = $state(false);
+  /** Bumped by *Try again*. */
+  let attempt = $state(0);
   /** Where the drawn diff was read; whitespace is ignored only at the checkout. */
   let readAt = $state<DiffReadAt | null>(null);
   let ignoreWhitespace = $state(false);
-  const uid = $props.id();
-  const why = `${uid}-ws-why`;
 
   $effect(() => {
     const id = commitId;
+    void attempt;
     let live = true;
     detail = null;
     files = null;
     start = null;
     failed = null;
+    missing = false;
     readAt = null;
     ignoreWhitespace = false;
     // Only a new commit reads it all again; Ignore whitespace re-reads the diff alone.
@@ -122,18 +135,50 @@
     const fail = (error: unknown) => {
       if (mine() && !again) failed = ipcErrorMessage(error);
     };
-    const rowRead = ports.getEntity(id).then((answer) => {
-      if (mine()) detail = answer;
-    }, fail);
-    const viewRead = ports.entityView(id, null).then((view) => {
-      if (!mine()) return;
-      parent = parentOf(view);
-      start = branchFrom(view);
-    }, fail);
+    const rowRead = ports.getEntity(id).then(
+      (answer) => {
+        if (mine()) detail = answer;
+      },
+      (error: unknown) => {
+        fail(error);
+        // The commit's own row is what says it is held: only its answer means the address names nothing.
+        if (mine() && !again) missing = isIpcError(error) && (error.code === "not_found" || error.code === "invalid");
+      },
+    );
+    // The view adds the parent and *New branch from here…* to what the mirror
+    // and the checkout draw: a source that does not answer leaves the page as
+    // drawn, without them (ADR-0042).
+    const viewRead = readView(id, mine);
     const ws = ignoreWhitespace;
     const diffRead = readDiff(id, ws, () => mine() && ignoreWhitespace === ws, again);
     return Promise.all([rowRead, viewRead, diffRead]);
   }
+
+  /**
+   * The commit's view: its parent and *New branch from here…*; a failed read draws neither. Behind the diff the page
+   * waits on (`behindView`, the ux16 overs pass, 2026-11-17): its three requests to the source went out with the diff's
+   * one and slowed it.
+   */
+  function readView(id: string, mine: () => boolean): Promise<unknown> {
+    return (ports.behindView ?? ports.entityView)(id, null).then(
+      (view) => {
+        if (!mine()) return;
+        parent = parentOf(view);
+        start = branchFrom(view);
+      },
+      () => {},
+    );
+  }
+
+  // The view knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => commitId,
+    null,
+    () => {
+      const id = commitId;
+      void readView(id, () => commitId === id);
+    },
+  );
 
   const sha = $derived(shaOf(commitId));
   /** The whole sha, for *Open in…*: a merge commit opens as any commit does. */
@@ -144,6 +189,17 @@
   }
 </script>
 
+{#snippet whitespace()}
+  <TfWhitespaceBox
+    checked={readAt === "checkout" && ignoreWhitespace}
+    why={readAt === "checkout" ? null : "Read at the source, which can't leave whitespace out. A checkout holding this commit can."}
+    onchange={toggleWhitespace}
+  />
+{/snippet}
+
+{#if missing}
+  <TfNothingHere message="knobas does not hold this commit. It may not have synced yet." href={repoHash(repoId, "commits")} action="All commits" />
+{:else}
 <h2 class="tf-cgroup-h">
   {#if sha !== null}<span class="tf-mono">{sha}</span>{/if}
   {detail?.row.title ?? ""}
@@ -161,37 +217,30 @@
         title={start.disabled ?? undefined}
         onclick={branchHere}>New branch from here…</button>
     {/if}
+    {#if whole !== null && clonedHere(repoId)}
+      <!-- The working tree against this commit (ux26): only where the repository is cloned here. The trail ends at the
+           row's right, so it grows to the left and moves nothing drawn beside it. -->
+      <a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, whole, WORKING_TREE)}>Compare with working tree</a>
+    {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
     {#if whole !== null}<TfOpenObject entityId={repoId} object={{ kind: "commit", sha: whole }} />{/if}
   </span>
 </h2>
-{#if readAt !== null && failed === null}
-  <div class="tf-diffws">
-    <label class="tf-ck">
-      <input
-        type="checkbox"
-        checked={readAt === "checkout" && ignoreWhitespace}
-        onchange={(event) => toggleWhitespace(event.currentTarget.checked)}
-        disabled={readAt !== "checkout"}
-        aria-describedby={readAt === "checkout" ? undefined : why} />
-      Ignore whitespace
-    </label>
-    {#if readAt !== "checkout"}
-      <span class="tf-cnote" id={why} data-testid="ws-why"
-        >Read from the source, whose API cannot leave whitespace out. A checkout holding this commit can.</span
-      >
-    {/if}
-  </div>
-{/if}
 {#if failed !== null}
-  <p class="tf-cfail">{failed}</p>
+  <TfNothingHere message="This commit could not be read: {failed}" onretry={() => attempt++} />
 {:else if files !== null && files.length === 0}
+  <!-- With no diff drawn there is no toolbar, and a tick that left nothing to draw must still come off. -->
+  {#if ignoreWhitespace}<div class="tf-diffws">{@render whitespace()}</div>{/if}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
   <TfDiffView
     {files}
     {cut}
     context={commitContext(ports.entityView, commitId, parent, ports.fileBytes, ports.piped)}
+    sideNames={() => ({ old: parent === null ? "the parent" : endWords(shaOfCommit(parent) ?? "the parent"), new: whole === null ? "this commit" : endWords(whole) })}
     openAt={whole === null ? null : { entityId: repoId, at: whole }}
+    folders={readAt === "checkout" && whole !== null && parent !== null && shaOfCommit(parent) !== null ? { entityId: repoId, before: shaOfCommit(parent)!, after: whole } : null}
+    tools={readAt === null ? null : whitespace}
   />
+{/if}
 {/if}

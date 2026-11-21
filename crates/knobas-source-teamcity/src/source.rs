@@ -315,6 +315,17 @@ impl Source for TeamCitySource {
         )))
     }
 
+    /// A credential's grants change when an administrator changes them,
+    /// rarely: kept, answered from memory, and asked again behind (ADR-0032's
+    /// moving reads, the second smoothness pass on PR #2479), as Gitea's are.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
+    }
+
     /// The asks the user's TeamCity permissions refuse (#2040), read from
     /// `/app/rest/users/current/permissions` and never probed: see
     /// [`crate::grants`]. An entity of another source is not answered.

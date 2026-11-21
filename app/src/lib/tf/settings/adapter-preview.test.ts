@@ -35,7 +35,7 @@ test("an update that narrows says what it no longer reaches or claims, and a dea
     "It no longer reaches api.example.com.",
     "It newly claims wasm-fixture:survey-desk.",
     "It no longer claims CI.",
-    "Each call may take 30 s, was 10 m 00 s.",
+    "Each call may take 30s, was 10m.",
   ]);
 });
 
@@ -44,9 +44,9 @@ test("a claim whose reads change is the same role", () => {
 });
 
 test("the limits say which the manifest asks for and which are the default", () => {
-  expect(limitsLine(release().limits)).toBe("10 m 00 s per call (the default), 256 MiB of memory (the default)");
+  expect(limitsLine(release().limits)).toBe("10m per call (the default), 256 MiB of memory (the default)");
   expect(limitsLine({ deadline_secs: 600, deadline_asked: false, memory_mib: 512, memory_asked: true })).toBe(
-    "10 m 00 s per call (the default), 512 MiB of memory (asked for)",
+    "10m per call (the default), 512 MiB of memory (asked for)",
   );
 });
 

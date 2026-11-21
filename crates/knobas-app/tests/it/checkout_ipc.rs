@@ -25,12 +25,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
-use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open, open_object, page};
+use knobas_app::checkout::open::{
+    APPLICATIONS_KEY, GitFound, legacy_key, open, open_folder, open_object, page,
+};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
     CheckoutView, FoundBy, clones_root, local_changes, set_applications, set_clones_root,
-    set_override, settings, view,
+    set_override, settings, view, views,
 };
 use knobas_core::checkout::open::{Draft, Object, shipped};
 use sqlx::PgPool;
@@ -1078,6 +1080,112 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
     assert!(!record.exists(), "nothing may have run");
 }
 
+/// A folder opens as the repository does, with the folder in the checkout's
+/// place (2026-11-16, a right-click's *Open in…* on a folder): the
+/// application's own command, `{path}`, `{file}` and `{name}` the folder's,
+/// the file command never.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_opens_with_the_repository_command_at_the_folder() {
+    let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(checkout.join("src/sepa retry")).unwrap();
+    set_applications(
+        &pool,
+        &[app(
+            Some("term"),
+            "Terminal",
+            &format!("{} --cwd {{path}} {{name}} {{file}}", stub.display()),
+            Some(&format!("{} --goto {{file}}", stub.display())),
+        )],
+        None,
+    )
+    .await
+    .unwrap();
+    let folder = checkout
+        .join("src/sepa retry")
+        .to_string_lossy()
+        .into_owned();
+    let expected = [
+        "--cwd".to_owned(),
+        folder.clone(),
+        "sepa retry".to_owned(),
+        folder.clone(),
+    ];
+
+    let argv = open_folder(&pool, None, &repo.id, Some("term"), "src/sepa retry")
+        .await
+        .unwrap();
+    assert_eq!(recorded(&record).await, expected);
+    assert_eq!(argv[1..], expected, "the answer is the argv it started");
+}
+
+/// A folder is opened only when it is a folder inside the checkout on disk:
+/// not by `..`, a root, a symlink out of it, a file, one not there, the
+/// checkout itself or git's own folder. Nothing runs for any of them.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_outside_the_checkout_is_refused_and_nothing_runs() {
+    let pool = pool().await;
+    let (repo, root, stub, record, workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(workshop.path().join("elsewhere")).unwrap();
+    fs::create_dir_all(checkout.join(".git/hooks")).unwrap();
+    std::os::unix::fs::symlink(workshop.path().join("elsewhere"), checkout.join("out")).unwrap();
+    fs::write(checkout.join("README.md"), "# pay\n").unwrap();
+    set_applications(
+        &pool,
+        &[app(
+            None,
+            "Terminal",
+            &format!("{} {{path}}", stub.display()),
+            None,
+        )],
+        None,
+    )
+    .await
+    .unwrap();
+
+    for path in [
+        "../elsewhere",
+        "/etc",
+        "out",
+        "README.md",
+        "missing",
+        ".",
+        ".git",
+        ".git/hooks",
+    ] {
+        let error = open_folder(&pool, None, &repo.id, None, path)
+            .await
+            .expect_err(path);
+        assert_eq!(error.code, IpcErrorCode::Invalid, "{path}");
+        assert!(
+            error.message.contains("not a folder inside"),
+            "{path}: {}",
+            error.message
+        );
+    }
+    let started = running(&stub);
+    assert!(started.is_empty(), "a refused folder started {started:?}");
+    assert!(!record.exists(), "nothing may have run");
+}
+
+/// A folder of a repository with no clone on this machine is refused as the
+/// repository is, naming it: there is no folder to open.
+#[tokio::test]
+async fn a_folder_of_a_repo_with_no_checkout_refuses_and_names_it() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let error = open_folder(&pool, None, &repo.id, None, "src")
+        .await
+        .expect_err("there is nothing to open");
+    assert_eq!(error.code, IpcErrorCode::NotFound);
+    assert!(error.message.contains(&repo.id), "{}", error.message);
+    assert!(error.message.contains("no checkout"), "{}", error.message);
+}
+
 /// The processes running `stub`, by `ps`'s command column. A program `open`
 /// started is listed from the moment `open` returned, its `exec` done, until
 /// it exits, and the stub has written its record before it exits.
@@ -1554,4 +1662,157 @@ async fn an_object_the_application_does_not_accept_or_a_refused_value_runs_nothi
     assert!(error.message.contains("--no-index"), "{error:?}");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!record.exists(), "nothing ran");
+}
+
+/// Many checkouts in one call answer what one call each answers, in the
+/// order asked, an id the single read refuses left out (the scale pass,
+/// 2026-11-10): a clone the scan finds, a branch, an override, a repo with
+/// no clone, and a ticket.
+#[tokio::test]
+async fn many_checkouts_in_one_call_answer_what_one_call_each_answers() {
+    let pool = pool().await;
+    let scanned = repo(&pool).await;
+    let overridden = repo(&pool).await;
+    let uncloned = repo(&pool).await;
+    let root = clones_root_with(&scanned);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    set_override(&pool, &overridden.id, Some("/Users/mara/work/elsewhere"))
+        .await
+        .unwrap();
+    let branch = branch_of(&pool, &scanned, "topic").await;
+    let ticket = item(
+        &pool,
+        &scanned.source,
+        "ticket",
+        &format!("T-{}", unique()),
+        None,
+    )
+    .await;
+    let asked = vec![
+        uncloned.id.clone(),
+        branch.clone(),
+        ticket.clone(),
+        scanned.id.clone(),
+        overridden.id.clone(),
+    ];
+    let mut one_each = Vec::new();
+    for id in &asked {
+        if let Ok(answer) = view(&pool, id).await {
+            one_each.push((id.clone(), answer));
+        }
+    }
+    let together: Vec<(String, CheckoutView)> = views(&pool, &asked)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|of| (of.entity_id, of.checkout))
+        .collect();
+    assert_eq!(together, one_each);
+    assert_eq!(together.len(), 4, "the ticket is left out");
+    let found: Vec<FoundBy> = together.iter().map(|(_, view)| view.found_by).collect();
+    assert_eq!(
+        found,
+        [
+            FoundBy::Nothing,
+            FoundBy::Scan,
+            FoundBy::Scan,
+            FoundBy::Override
+        ],
+        "the uncloned repo, the branch, the clone, the override"
+    );
+    assert_eq!(path_of(&together[2].1), root.path().join(&scanned.name));
+}
+
+/// **Every repository's checkout from one statement** (the query audit of
+/// PR #2479, 2026-11-12: Code's 65 repositories cost 262 statements, two or
+/// three a repository). [`views`] answers, id for id and in the order asked,
+/// what [`view`] answers alone: a repo the scan finds, one an override
+/// names, a branch under the longest repo id it starts with, a branch with
+/// no repository, a repo with no clone; and it leaves out what `view`
+/// refuses: an id the mirror does not hold, one of another kind, one that is
+/// not an id. An id asked twice answers twice.
+#[tokio::test]
+async fn views_answer_what_view_answers_one_by_one() {
+    let pool = pool().await;
+    let found = repo(&pool).await;
+    let root = clones_root_with(&found);
+    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+        .await
+        .unwrap();
+    let held = repo(&pool).await;
+    set_override(&pool, &held.id, Some("/Users/mara/work/held"))
+        .await
+        .unwrap();
+    let bare = repo(&pool).await;
+    let branch = branch_of(&pool, &found, "feature/x").await;
+    let held_branch = branch_of(&pool, &held, "main").await;
+    let orphan = item(
+        &pool,
+        &bare.source,
+        "branch",
+        "elsewhere/gone@refs/heads/main",
+        None,
+    )
+    .await;
+    let pr = item(
+        &pool,
+        &found.source,
+        "pr",
+        &format!("{}/{}#1", found.owner, found.name),
+        None,
+    )
+    .await;
+    let asked: Vec<String> = vec![
+        held_branch.clone(),
+        found.id.clone(),
+        "not an id".to_owned(),
+        pr,
+        branch.clone(),
+        format!("{}:nobody/nothing", found.source),
+        held.id.clone(),
+        orphan.clone(),
+        bare.id.clone(),
+        found.id.clone(),
+    ];
+
+    let mut one_by_one = Vec::new();
+    for id in &asked {
+        if let Ok(alone) = view(&pool, id).await {
+            one_by_one.push((id.clone(), alone));
+        }
+    }
+    let together: Vec<_> = views(&pool, &asked)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|answer| (answer.entity_id, answer.checkout))
+        .collect();
+    assert_eq!(together, one_by_one);
+    assert_eq!(
+        together
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            held_branch.as_str(),
+            found.id.as_str(),
+            branch.as_str(),
+            held.id.as_str(),
+            orphan.as_str(),
+            bare.id.as_str(),
+            found.id.as_str()
+        ]
+    );
+    assert_eq!(
+        together[0].1.found_by,
+        FoundBy::Override,
+        "the branch reads its repository's override"
+    );
+    assert_eq!(together[1].1.found_by, FoundBy::Scan);
+    assert_eq!(
+        together[4].1.repo_entity_id, None,
+        "a branch with no repository"
+    );
 }

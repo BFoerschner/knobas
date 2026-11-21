@@ -11,7 +11,8 @@ use knobas_source::SourceError;
 use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::rows::{self, ListedCommit};
-use super::{fact, login, when_of};
+use super::{fact, login, name_of, person_fact, when_of};
+use crate::client::GiteaClient;
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
@@ -47,7 +48,6 @@ pub(super) async fn draw(
     let mut actions = Vec::new();
     let sections = match section {
         None => {
-            let pull = at.pull().await?;
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
@@ -58,15 +58,26 @@ pub(super) async fn draw(
             // label…* offers (#1194, #1235).
             // And who a review can be requested from (#2303), for
             // *Request…*.
-            let (reviews, commits, comments, viewer, landing, statuses, labels, candidates) = tokio::try_join!(
+            //
+            // In two rounds, not three (the priority lane, 2026-11-13): the
+            // reads that need nothing of the record go beside it, and those
+            // that need the record or the reviews, the reviews' line
+            // comments among them, beside each other. A round is a forge's
+            // answer, and a forge a sync is loading takes hundreds of
+            // milliseconds over each.
+            let (pull, reviews, comments, viewer, labels) = tokio::try_join!(
+                at.pull(),
                 at.reviews(),
-                at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
+                at.labels(),
+            )?;
+            let (commits, landing, statuses, candidates, said) = tokio::try_join!(
+                at.commits(Some(&pull)),
                 at.landing(&pull),
                 at.statuses(&pull),
-                at.labels(),
                 at.candidates(&pull),
+                async { Ok(at.line_comments(&reviews).await) },
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -88,13 +99,12 @@ pub(super) async fn draw(
                 overview(&pull, &reviews, &landing, checks),
                 files_stub(&pull),
                 commits,
-                conversation(&reviews, &comments, &at.line_comments(&reviews).await),
+                conversation(&reviews, &comments, &said),
             ]
         }
         Some(OVERVIEW) => {
-            let pull = at.pull().await?;
-            let (reviews, landing, statuses) =
-                tokio::try_join!(at.reviews(), at.landing(&pull), at.statuses(&pull))?;
+            let (pull, reviews) = tokio::try_join!(at.pull(), at.reviews())?;
+            let (landing, statuses) = tokio::try_join!(at.landing(&pull), at.statuses(&pull))?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
             vec![overview(&pull, &reviews, &landing, checks)]
@@ -115,6 +125,54 @@ pub(super) async fn draw(
     Ok(SourceView { sections, actions })
 }
 
+/// A pull request's whole view from its record as the mirror holds it
+/// (ADR-0042), reading nothing: *Overview*'s state, author, branches, times
+/// and description, and *Files*' count. What only Gitea's other reads hold --
+/// reviews, checks, whether it can be merged, its commits and conversation --
+/// is left out, the two tabs saying so in a muted line, and no action is
+/// offered. `None` for a record that is not a pull request.
+pub(crate) fn from_record(payload: &serde_json::Value) -> Option<SourceView> {
+    // Every field of [`Pull`] is optional: a record is one that names its
+    // number and its head.
+    payload.get("number")?.as_u64()?;
+    payload.get("head")?.as_object()?;
+    let pull: Pull = serde_json::from_value(payload.clone()).ok()?;
+    let mut blocks = vec![Block::Facts {
+        facts: overview_facts(&pull, Vec::new()),
+    }];
+    let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
+    if !body.trim().is_empty() {
+        blocks.push(Block::Text {
+            text: body.to_owned(),
+            markdown: true,
+        });
+    }
+    let waiting = |id: &str, title: &str, what: &str| ViewSection {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        count: None,
+        deferred: false,
+        blocks: vec![super::rows::muted_line(format!(
+            "The {what} are read from Gitea; the last sync holds none."
+        ))],
+    };
+    Some(SourceView {
+        sections: vec![
+            ViewSection {
+                id: OVERVIEW.to_owned(),
+                title: "Overview".to_owned(),
+                count: None,
+                deferred: false,
+                blocks,
+            },
+            files_stub(&pull),
+            waiting(COMMITS, "Commits", "commits"),
+            waiting(CONVERSATION, "Conversation", "reviews and comments"),
+        ],
+        actions: Vec::new(),
+    })
+}
+
 /// The pull request one view is about.
 struct PullView<'a> {
     source: &'a GiteaSource,
@@ -125,17 +183,7 @@ struct PullView<'a> {
 
 impl PullView<'_> {
     async fn pull(&self) -> Result<Pull, SourceError> {
-        let raw = self
-            .source
-            .client
-            .pull(self.owner, self.repo, self.number)
-            .await?;
-        serde_json::from_value(raw).map_err(|error| {
-            SourceError::protocol(format!(
-                "gitea: {}/{}#{} is not a pull request record: {error}",
-                self.owner, self.repo, self.number
-            ))
-        })
+        record(&self.source.client, self.owner, self.repo, self.number).await
     }
 
     /// Every review Gitea lists, oldest first; one it cannot read as a review
@@ -197,12 +245,36 @@ impl PullView<'_> {
     /// from, not the diff: a failed read of them lists none and fails nothing.
     ///
     /// The `.diff` is read after the commits, and not at all where one is
-    /// kept at the head they end on (`diffs`, #2321).
+    /// kept at the head they end on (`diffs`, #2321); on the source's first
+    /// read of this pull request, where nothing can be kept, beside them:
+    /// what it read is not kept, and a keeping read is left behind it
+    /// ([`diffs::PullDiffs::first_read`], [`Self::keep_behind`]), which a
+    /// later read waits for before it asks whether a diff is kept.
     async fn files(&self) -> Result<ViewSection, SourceError> {
+        let first = self
+            .source
+            .pull_diffs
+            .first_read(self.owner, self.repo, self.number);
         let (pull, (commits, fetched), reviews, resolves, viewer) = tokio::try_join!(
             self.pull(),
             async {
+                if first.is_some() {
+                    let (listed, diff) = tokio::join!(
+                        self.listed(),
+                        self.source
+                            .client
+                            .pull_diff(self.owner, self.repo, self.number)
+                    );
+                    let commits = listed.map(|(c, _, _)| c).unwrap_or_default();
+                    return Ok((commits, Some(diff?)));
+                }
                 let commits = self.listed().await.map(|(c, _, _)| c).unwrap_or_default();
+                // What the keeping read behind a first read keeps decides
+                // whether the `.diff` is read: done long since, as a rule.
+                self.source
+                    .pull_diffs
+                    .kept_behind(self.owner, self.repo, self.number)
+                    .await;
                 let kept = commits.first().is_some_and(|tip| {
                     self.source.pull_diffs.holds_at(
                         self.owner,
@@ -228,6 +300,15 @@ impl PullView<'_> {
             self.viewer(),
         )?;
         let (text, unpinned) = self.diff(&pull, &commits, fetched).await?;
+        // Read beside the listing, the `.diff` may stand before its head: it
+        // is kept by the read left behind this one.
+        let unpinned = match first {
+            Some(keeping) => {
+                self.keep_behind(&pull, keeping);
+                None
+            }
+            None => unpinned,
+        };
         let reviewed = range::reviewed(&reviews, viewer.as_deref());
         let range = range::of(
             &self.source.id,
@@ -277,9 +358,9 @@ impl PullView<'_> {
         })
     }
 
-    /// The diff *Files* draws: `fetched`, read after `commits` was, or the
-    /// one kept at the merge base the record names and the head `commits`
-    /// ends on. A diff read here comes with the key it is kept under once
+    /// The diff *Files* draws: `fetched`, read after `commits` was (beside
+    /// them on a first read), or the one kept at the merge base the record
+    /// names and the head `commits` ends on. A diff read here comes with the key it is kept under once
     /// [`Self::keep`] has pinned it; a kept one, or one with nothing to say
     /// what it stands at, comes with none.
     async fn diff(
@@ -328,6 +409,65 @@ impl PullView<'_> {
         }
     }
 
+    /// Keep this pull request's diff behind its first *Files* read, which
+    /// read the `.diff` beside the commits and kept nothing: on a task of its
+    /// own, holding `keeping` until it ends, the listing, then the `.diff`,
+    /// then the record, kept as [`Self::keep`] keeps a read in order. Kept
+    /// when the listing ends on the head `pull` (the first read's record)
+    /// names and the record read after the `.diff` names the same head and
+    /// merge base; anything else, a failed read too, keeps nothing, and the
+    /// next read reads in order and keeps. Nothing is read where `pull` names
+    /// no whole merge base and head, since nothing could be kept.
+    ///
+    /// Not behind a read on the background lane: those are the sync's (the
+    /// held-files pass, 2026-11-15), through an instance that ends with its
+    /// run, so nothing kept would be read again and the three requests would
+    /// be spent for nothing. A page's read behind a drawn answer is in that
+    /// lane too since the ux16 overs pass (2026-11-17), through the app's
+    /// kept instance, and keeps as before ([`knobas_http::is_behind`]). The
+    /// read left behind waits in its caller's lane: a task spawned starts
+    /// outside it.
+    fn keep_behind(&self, pull: &Pull, keeping: diffs::Keeping) {
+        let lane = knobas_http::current_lane();
+        if lane == knobas_http::Lane::Background && !knobas_http::is_behind() {
+            return;
+        }
+        let head = pull.head.as_ref().and_then(|h| h.sha.clone());
+        let (Some(base), Some(head)) = (pull.merge_base.clone(), head) else {
+            return;
+        };
+        if diffs::DiffKey::of(self.owner, self.repo, self.number, &base, &head).is_none() {
+            return;
+        }
+        let client = std::sync::Arc::clone(&self.source.client);
+        let kept = std::sync::Arc::clone(&self.source.pull_diffs);
+        let (owner, repo, number) = (self.owner.to_owned(), self.repo.to_owned(), self.number);
+        tokio::spawn(knobas_http::on_lane(lane, async move {
+            let _keeping = keeping;
+            let Ok((commits, _, _)) = listed(&client, &owner, &repo, number).await else {
+                return;
+            };
+            // The listing lags the record, or the head moved: not this read's.
+            if !commits
+                .first()
+                .is_some_and(|tip| tip.record.sha.eq_ignore_ascii_case(&head))
+            {
+                return;
+            }
+            let Ok(text) = client.pull_diff(&owner, &repo, number).await else {
+                return;
+            };
+            let Ok(after) = record(&client, &owner, &repo, number).await else {
+                return;
+            };
+            let same = after.merge_base.as_deref() == Some(base.as_str())
+                && after.head.as_ref().and_then(|h| h.sha.as_deref()) == Some(head.as_str());
+            if same && let Some(key) = diffs::DiffKey::of(&owner, &repo, number, &base, &head) {
+                kept.put(key, text.into());
+            }
+        }));
+    }
+
     /// The pull request's commits, at most [`rows::COMMIT_CAP`], ending on
     /// a note where Gitea has more (#678).
     async fn commits(&self, pull: Option<&Pull>) -> Result<ViewSection, SourceError> {
@@ -365,32 +505,7 @@ impl PullView<'_> {
     /// them the server's own count, where it sent one, counting the records
     /// read where they outnumber it, and whether the cap cut the walk.
     async fn listed(&self) -> Result<(Vec<ListedCommit>, Option<usize>, bool), SourceError> {
-        let mut records = Vec::new();
-        let mut total = None;
-        let mut cut = true;
-        for page in 1..=rows::COMMIT_PAGES {
-            let (batch, count) = self
-                .source
-                .client
-                .pull_commits(self.owner, self.repo, self.number, page)
-                .await?;
-            total = count.or(total);
-            // Ends on an empty page or on the server's own count, never on a
-            // short page (`client::PAGE_SIZE`'s rule).
-            let done = batch.is_empty();
-            records.extend(batch);
-            if done || total.is_some_and(|t| records.len() >= t) {
-                cut = false;
-                break;
-            }
-        }
-        let read = records.len();
-        let total = total.map(|t| t.max(read));
-        let records = records
-            .into_iter()
-            .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
-            .collect();
-        Ok((records, total, cut))
+        listed(&self.source.client, self.owner, self.repo, self.number).await
     }
 
     /// The discussion Gitea keeps on the issue of the same index, oldest
@@ -464,6 +579,53 @@ impl PullView<'_> {
     }
 }
 
+/// The pull request's record, through `client` (a read behind one that
+/// outlives the [`PullView`] holds its own).
+async fn record(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<Pull, SourceError> {
+    let raw = client.pull(owner, repo, number).await?;
+    serde_json::from_value(raw).map_err(|error| {
+        SourceError::protocol(format!(
+            "gitea: {owner}/{repo}#{number} is not a pull request record: {error}"
+        ))
+    })
+}
+
+/// [`PullView::listed`], through `client`.
+async fn listed(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<(Vec<ListedCommit>, Option<usize>, bool), SourceError> {
+    let mut records = Vec::new();
+    let mut total = None;
+    let mut cut = true;
+    for page in 1..=rows::COMMIT_PAGES {
+        let (batch, count) = client.pull_commits(owner, repo, number, page).await?;
+        total = count.or(total);
+        // Ends on an empty page or on the server's own count, never on a
+        // short page (`client::PAGE_SIZE`'s rule).
+        let done = batch.is_empty();
+        records.extend(batch);
+        if done || total.is_some_and(|t| records.len() >= t) {
+            cut = false;
+            break;
+        }
+    }
+    let read = records.len();
+    let total = total.map(|t| t.max(read));
+    let records = records
+        .into_iter()
+        .filter_map(|r| serde_json::from_value::<ListedCommit>(r).ok())
+        .collect();
+    Ok((records, total, cut))
+}
+
 /// The discussion: each comment and each review, in time order, as its
 /// author and time -- a review's verdict beside them -- and then its text
 /// (issue #705).
@@ -522,14 +684,17 @@ fn conversation(
     let mut blocks = Vec::with_capacity(said.len() * 2 + 1);
     blocks.extend(unread.map(|reason| super::rows::muted_line(reason.clone())));
     for entry in &said {
-        let who = login(entry.user).unwrap_or_else(|| "someone".to_owned());
+        // Named as a ticket's comments name their authors (F-107), the
+        // login beside the name for the reader's own.
+        let who = name_of(entry.user).unwrap_or_else(|| "someone".to_owned());
         let when = entry.at.map(when_of).unwrap_or_default();
-        let mut facts = vec![fact(&who, when)];
+        let mut facts = vec![person_fact(&who, when, entry.user)];
         if let Some((value, tone)) = &entry.verdict {
             facts.push(Fact {
                 label: "Review".to_owned(),
                 value: value.clone(),
                 tone: *tone,
+                account: None,
             });
         }
         blocks.push(Block::Facts { facts });
@@ -648,10 +813,11 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
             label: "State".to_owned(),
             value: state.clone(),
             tone,
+            account: None,
         });
     }
-    if let Some(author) = login(pull.user.as_ref()) {
-        facts.push(fact("Author", author));
+    if let Some(author) = name_of(pull.user.as_ref()) {
+        facts.push(person_fact("Author", author, pull.user.as_ref()));
     }
     if let (Some(head), Some(base)) = (pull.head.as_ref(), pull.base.as_ref())
         && let (Some(head_ref), Some(base_ref)) = (head.r#ref.as_deref(), base.r#ref.as_deref())
@@ -674,7 +840,7 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
     if pull.merged
         && let Some(at) = pull.merged_at.as_deref()
     {
-        let value = match login(pull.merged_by.as_ref()) {
+        let value = match name_of(pull.merged_by.as_ref()) {
             Some(by) => format!("{} by {by}", when_of(at)),
             None => when_of(at),
         };
@@ -691,28 +857,32 @@ fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
 /// a reviewer's latest review), and a plain comment after a verdict does not
 /// take it back.
 fn verdicts(reviews: &[Review]) -> Vec<Fact> {
-    let mut standing: Vec<(String, String)> = Vec::new();
+    // By login, as Gitea counts a reviewer, each with the review's account.
+    let mut standing: Vec<(String, String, Option<&UserRef>)> = Vec::new();
     for review in reviews {
         let Some(who) = login(review.user.as_ref()) else {
             continue;
         };
         let state = review.state.as_deref().unwrap_or_default();
         if review.dismissed {
-            standing.retain(|(name, _)| *name != who);
+            standing.retain(|(name, _, _)| *name != who);
             continue;
         }
         if state.is_empty() || state == "PENDING" {
             continue;
         }
-        match standing.iter_mut().find(|(name, _)| *name == who) {
+        match standing.iter_mut().find(|(name, _, _)| *name == who) {
             Some(_) if state == "COMMENT" => {}
-            Some((_, verdict)) => state.clone_into(verdict),
-            None => standing.push((who, state.to_owned())),
+            Some((_, verdict, _)) => state.clone_into(verdict),
+            None => standing.push((who, state.to_owned(), review.user.as_ref())),
         }
     }
     standing
         .into_iter()
-        .map(|(who, state)| {
+        .map(|(login, state, user)| {
+            // Named as a ticket names its people (F-107); the login stays
+            // the fact's account.
+            let who = name_of(user).unwrap_or(login);
             let (value, tone) = match state.as_str() {
                 "APPROVED" => (format!("approved by {who}"), Some(Tone::Ok)),
                 "REQUEST_CHANGES" => (format!("changes requested by {who}"), Some(Tone::Warn)),
@@ -724,9 +894,8 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
                 ),
             };
             Fact {
-                label: "Review".to_owned(),
-                value,
                 tone,
+                ..person_fact("Review", value, user)
             }
         })
         .collect()

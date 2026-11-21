@@ -86,3 +86,11 @@ test("the Diff tool's ends are the Files diff's range, or nothing without one (#
   expect(rangeOf(viewOf(null))).toBeNull();
   expect(rangeOf(null)).toBeNull();
 });
+
+test("a file with no thread places nothing and reads none of its lines (the ux19 overs pass)", () => {
+  const lines = Array.from({ length: 1500 }, (_, i) => add(i + 1));
+  const placed = placeThreads({ ...file([]), hunks: [{ header: "@@ -0,0 +1,1500 @@", lines }] });
+  expect(placed.under).toEqual([]);
+  expect(placed.apart).toEqual([]);
+  expect(placeThreads(file([]))).toBe(placed);
+});

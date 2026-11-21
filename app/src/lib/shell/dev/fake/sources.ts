@@ -7,7 +7,8 @@ import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, S
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fills } from "../../../tf/roles.svelte";
-import { CORPUS, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
+import { CORPUS, fakeEmpty, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
+import { signInFails } from "../../health.svelte";
 
 /** The sources *Run embedded HTML* is off for (#2440): `fake/docs.ts` reads it for a page's `run_embeds`. */
 export const EMBEDS_OFF = new Set<string>();
@@ -335,10 +336,19 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
   }),
 ];
 
+/**
+ * The sources as they answer: under `?fake-empty=wiki` no source holds pages, so Docs draws what it draws with no wiki
+ * source set up, on a built app as on a dev server.
+ */
+function answeredSources(): SourceSummary[] {
+  if (!fakeEmpty("wiki")) return FIXTURE_SOURCES;
+  return FIXTURE_SOURCES.map((source) => ({ ...source, roles: source.roles.filter((claim) => claim.role !== "wiki") }));
+}
+
 // The role a faked read asks for (#1294) is answered from these sources'
 // claims and misses, and from the frames their adapter declares kinds on.
 ROLE_CLAIMERS.push(() =>
-  FIXTURE_SOURCES.map((source) => {
+  answeredSources().map((source) => {
     const adapter = FIXTURE_ADAPTERS.find((entry) => entry.adapter_kind === source.adapter_kind);
     return { ...source, payload_paths: adapter && "payload_paths" in adapter ? adapter.payload_paths : [] };
   }),
@@ -577,6 +587,20 @@ onFakeReset(() => {
   bridge = null;
 });
 
+let changedRun = 900;
+
+/**
+ * Every enabled source's run ends having changed something, as a scheduled run that brought new rows does
+ * (`?fake-hooks`' `endRuns`, for the still-rows trips, 2026-11-11): a role view shown reads again, a hidden one on its
+ * return.
+ */
+export function endRunsChanged(): void {
+  for (const source of FIXTURE_SOURCES.filter((row) => row.enabled)) {
+    changedRun += 1;
+    bridge?.emit("sync:state", { ...fakeStatus(source), run_id: changedRun, last_changed: true });
+  }
+}
+
 /**
  * `sync_role` (#2106): one run per enabled fixture source that fills `role`
  * (claims it and missed none of its paths), id order, as the mirror answers.
@@ -601,6 +625,23 @@ function syncRole(args: Record<string, unknown>): { source_id: string; run_id: n
 }
 
 /**
+ * `sync_all`, by `trigger_all`'s rule: each enabled source runs, for long enough to look at, but one only a person can make
+ * answer gets no run. `?fake-sync-held` keeps them going, as for `sync_role`.
+ */
+function syncAll(): number[] {
+  const on = FIXTURE_SOURCES.filter((source) => source.enabled && !signInFails(source.health.state));
+  // Past every fixture's last run, which `sync_status` answers: a press must wait for each run's own ending.
+  const runs = on.map((source, index) => ({ source, run_id: 291 + index }));
+  for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), running: true, run_id });
+  if (!new URLSearchParams(location.search).has("fake-sync-held")) {
+    setTimeout(() => {
+      for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), run_id });
+    }, 4000);
+  }
+  return runs.map((run) => run.run_id);
+}
+
+/**
  * Reads `?fake-sources-healthy` before the bridge is installed: no source needs
  * the reader. The README's screenshots (`docs/screenshots/shots.txt`) ask for it,
  * because the refusing TeamCity and the missing Kuma token draw in err tone at
@@ -622,7 +663,7 @@ export function handlers(): Handlers {
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
-    list_sources: () => FIXTURE_SOURCES,
+    list_sources: () => answeredSources(),
     list_adapters: () => FIXTURE_ADAPTERS,
     preview_install_adapter: (args) => previewFor(String(args["manifest"] ?? "")),
     install_adapter: (args) => installAdapter(args),
@@ -640,7 +681,8 @@ export function handlers(): Handlers {
     // No fixture source is running (`fakeStatus`), so there is no run to join
     // and the channel hears nothing, as on an idle source (#1384).
     watch_sync: () => null,
-    sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
+    // As the scheduler does: a running `sync:state` before it answers, and its end a moment later (F-645).
+    sync_all: () => syncAll(),
     sync_role: (args) => syncRole(args),
     reindex_fts: () => null,
     delete_source: () => null,

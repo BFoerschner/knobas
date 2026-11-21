@@ -1,0 +1,1 @@
+(function(){try{var e=document.createEvent('BeforeUnloadEvent');e.initEvent('beforeunload',false,true);window.dispatchEvent(e);return !!(e.defaultPrevented||(e.returnValue!==undefined&&e.returnValue!==''&&e.returnValue!==true&&e.returnValue!==null));}catch(x){return null;}})()

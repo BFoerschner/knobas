@@ -9,8 +9,8 @@
  * Prototype-6 has more first segments than nav entries: a pull request lives
  * under Code, a run under Builds, a page under Docs. {@link SECTION_OF} is that
  * mapping, copied from the prototype's `renderNav`, so the nav lights the place
- * a deep address belongs to. The asset tree is a section with no nav entry since
- * Dependencies went (`docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md`).
+ * a deep address belongs to. The asset tree is *Assets*, a section with its own entry after Monitors
+ * (Björn, 2026-11-19: `docs/decisions/2026-11-19-assets-has-a-nav-entry-again.md`).
  */
 import { repoHash } from "./repo/repo";
 
@@ -37,7 +37,7 @@ export const SECTION_NAME: Record<Section, string> = {
   builds: "Builds",
   docs: "Docs",
   monitors: "Monitors",
-  assets: "Asset tree",
+  assets: "Assets",
   sets: "Link sets",
   time: "Time",
   settings: "Settings",
@@ -54,7 +54,7 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
   build: "Run",
   pr: "Pull request",
   repo: "Repository",
-  assets: "Asset tree",
+  assets: "Assets",
   asset: "Asset",
   route: "Route",
   branch: "Branch",
@@ -65,15 +65,16 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
 /**
  * The main navigation, left to right (R-1.1). Settings is the cog, not a tab.
  * Job has no entry (spec #2396): the job is a ticket's page, under Tickets.
- * The asset tree has none either: a row, an alert or a search opens it at an asset.
+ * Assets, the asset tree, follows Monitors, whose monitors watch what it holds (2026-11-19).
  */
-export const NAV: readonly Exclude<Section, "job" | "assets">[] = [
+export const NAV: readonly Exclude<Section, "job">[] = [
   "tickets",
   "inbox",
   "code",
   "builds",
   "docs",
   "monitors",
+  "assets",
   "sets",
   "time",
 ];
@@ -149,6 +150,8 @@ export type TfRoute =
     }
   | { view: "item"; id: string }
   | { view: "note"; id: string }
+  /** A source's own website inside knobas (ADR-0050): `#/site/<source id>`. No nav entry, no parent. */
+  | { view: "site"; source: string }
   | { view: "unknown"; hash: string };
 
 /** Read an address. Total: every string is some route. */
@@ -159,6 +162,7 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
+  if (head === "site" && segments[1]) return { view: "site", source: segments[1] };
   // A ticket's own page (spec #2227); with no id it is Tickets, so a cut-off address still lands.
   if (head === "ticket") {
     return segments[1] ? { view: "ticket", id: segments[1], tab: segments[2] || null } : { view: "tickets", rest: [] };
@@ -218,6 +222,55 @@ export function ticketHash(entityId: string, tab: string | null = null): string 
   return `#/ticket/${encodeURIComponent(entityId)}${tab === null ? "" : `/${tab}`}`;
 }
 
+/** The word in Monitors' address that opens it at one monitor: {@link monitorHash}. */
+export const MONITOR_AT = "at";
+
+/**
+ * Monitors opened at one monitor, its row marked: what a row or link that means
+ * that monitor opens (an inbox alert, a set's member). The page's own, like a tab.
+ */
+export function monitorHash(entityId: string): string {
+  return `#/monitors/${MONITOR_AT}/${encodeURIComponent(entityId)}`;
+}
+
+/**
+ * The section whose nav entry should come back to `route`, or `null`: a saved
+ * view on Tickets, the tabs of Code, Monitors and Time, a pipeline on Builds,
+ * so the address says what the page shows, a search on Docs, and a section of
+ * Settings, which the cog comes back to. A deeper address (a set, a Docs space,
+ * a marked monitor, a source's page) is a place, and the entry is the way to the section's own page.
+ */
+export function sectionTabOf(route: TfRoute): Section | null {
+  if (route.view === "tickets") return "tickets";
+  if (route.view !== "full" || route.head !== route.section) return null;
+  if (route.section === "code" || route.section === "time" || route.section === "builds") return route.section;
+  if (route.section === "docs") return route.rest[0] === undefined || route.rest[0] === "search" ? "docs" : null;
+  // A source's page, an application's (`#/settings/checkouts/add`, PR #2479) and a folder renderer's are places, not the section's tab.
+  if (route.section === "settings") return route.rest[0] === "source" || (route.rest[0] === "checkouts" && route.rest.length > 1) || (route.rest[0] === "renderers" && route.rest[1] === "folder") ? null : "settings";
+  return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
+}
+
+/**
+ * The run, pull request or repository `route` stands on, as its address with no tab, or `null`: the items a section
+ * remembers when one is left by a nav press, so its row can bring it back. A ticket and a Docs page have no such place:
+ * a ticket has no tab to lose, and Docs has *Continue reading*.
+ */
+export function itemOf(route: TfRoute): string | null {
+  if (route.view !== "full") return null;
+  const [id, run] = route.rest;
+  if (id === undefined) return null;
+  if (route.head === "build") return run === undefined ? null : `#/build/${encodeURIComponent(id)}/${encodeURIComponent(run)}`;
+  if (route.head === "pr" || route.head === "repo") return `#/${route.head}/${encodeURIComponent(id)}`;
+  return null;
+}
+
+/** Whether `to` is the bare address of the item the address `left` stands on: the one link that reopens it. A link that names a tab is not. */
+export function reopens(left: string, to: string): boolean {
+  const route = parseTfHash(to);
+  const item = itemOf(route);
+  return item !== null && item === itemOf(parseTfHash(left)) && route.view === "full" && route.rest.length === (route.head === "build" ? 2 : 1);
+}
+
 /**
  * Whether `route` is a section's top page (spec #2227): the address its nav
  * entry or the Settings cog links to. Tickets with a saved view open
@@ -237,11 +290,12 @@ export function isTopPage(route: TfRoute): boolean {
  * address, which have none. Listed first, the pages whose parent is not their
  * section's top page; everything else inside a section goes to that top page.
  *
- * - a run (`#/build/…`) → Builds;
- * - a pull request or a repository, any tab of it → Code;
+ * - a run (`#/build/<pipeline>/<run>`) → its pipeline;
+ * - a pipeline, a section's own tab → none: they are the section's page;
+ * - a pull request or a repository, any tab of it → Code (a pull request's page says its repository, `parentPage`);
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → the asset tree's top page;
+ * - a doc page → Docs; an asset or a route → Assets' own page (an asset's page says its holder);
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the
@@ -257,8 +311,23 @@ export function parentOf(route: TfRoute): string | null {
   if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
     return repoHash(route.rest[0]);
   }
+  // A run sits under its pipeline. A bare run's address names none yet.
+  if (route.head === "build" && route.rest[0] && route.rest[1]) return `#/builds/${encodeURIComponent(route.rest[0])}`;
+  // A monitor's mark sits on Monitors' own page: leaving it is the page with no mark.
+  if (route.head === "monitors" && route.rest[0] === MONITOR_AT) return sectionHash("monitors");
+  // A section's own tabs, and a pipeline picked on Builds, are the section's page: its parent would be a sibling.
+  if (TABBED_HEADS.has(route.head)) return null;
+  // A source's page sits under Sources, an application's under Checkouts, a folder renderer's under Renderers; every other section of Settings is a tab of it.
+  if (route.head === "settings") {
+    if (route.rest[0] === "source") return "#/settings/sources";
+    if (route.rest[0] === "renderers" && route.rest[1] === "folder") return "#/settings/renderers";
+    return route.rest[0] === "checkouts" && route.rest.length > 1 ? "#/settings/checkouts" : null;
+  }
   return sectionHash(route.section);
 }
+
+/** The sections whose deeper addresses are their own page's tabs or a pick in its rail. */
+const TABBED_HEADS: ReadonlySet<string> = new Set(["builds", "code", "time", "monitors", "inbox"]);
 
 function decode(segment: string): string {
   try {

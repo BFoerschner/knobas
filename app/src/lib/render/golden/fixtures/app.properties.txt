@@ -1,0 +1,8 @@
+# The payout service's settings.
+payout.retry.limit=3
+payout.retry.backoff = 250ms
+payout.gateway.url=http://localhost:8080/api
+! a bang comment
+spring.datasource.password=${DB_PASSWORD}
+multi.line=first \
+  second

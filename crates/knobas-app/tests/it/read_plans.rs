@@ -29,9 +29,18 @@ use crate::responsiveness_probe::Synthetic;
 /// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
 /// the labels and a build's or pull request's state (#939); `assignee_paths`
 /// the inbox's assignee candidates (#1164), and `pipeline_paths` its failed
-/// build's pipeline candidates (#2364).
+/// build's pipeline candidates (#2364); `card_keys`, one row per declared
+/// source, the key its tickets' stored cards are read under (migration
+/// `0075`).
 const SMALL: &[&str] = &[
     "source_config",
+    "card_keys",
+    // The sources with a ticket, whether each the scope admits is whole, and
+    // the table that says so (migration `0089`): one row a source, one row,
+    // and one row a source and key.
+    "ticket_sources",
+    "whole",
+    "card_whole",
     "grouped",
     "status_paths",
     "lane_paths",
@@ -44,6 +53,10 @@ const SMALL: &[&str] = &[
     // user's views times the projects one view spans, never the members,
     // which are read once.
     "view_projects",
+    // The board's columns, one row a status of its scope, and a page's marks,
+    // one row a status its column gathers (ux18, the ux18 Windows pass).
+    "columns",
+    "marks",
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
@@ -320,14 +333,43 @@ async fn explain<'q>(
     >,
 ) -> serde_json::Value {
     let explain: &'q str = Box::leak(format!("explain (format json) {sql}").into_boxed_str());
-    bind(sqlx::query_scalar(sqlx::AssertSqlSafe(explain)).persistent(false))
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    let plan: serde_json::Value =
+        bind(sqlx::query_scalar(sqlx::AssertSqlSafe(explain)).persistent(false))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    // Every plan a test planned under [`PLANNED`]'s scope, for the workers'
+    // check to read each one.
+    let _ = PLANNED.try_with(|planned| {
+        planned
+            .lock()
+            .unwrap()
+            .push((sql.chars().take(120).collect(), plan.clone()));
+    });
+    plan
+}
+
+tokio::task_local! {
+    /// The plans [`explain`] made inside its scope, each with the start of
+    /// its statement: [`on_windows_no_read_a_person_waits_on_plans_a_parallel_worker`]
+    /// reads every read [`assert_reads_plan_without_estimates`] plans.
+    static PLANNED: std::sync::Mutex<Vec<(String, serde_json::Value)>>;
 }
 
 async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     let (pool, declarations) = mirror(analyzed).await;
+    assert_reads_plan_without_estimates(&pool, &declarations, analyzed).await;
+}
+
+/// [`assert_every_read_plans_without_estimates`] on `pool`, a pool on the
+/// mirror [`mirror`] made: the workers' check plans the same reads on a pool
+/// opened as the app's is on Windows.
+async fn assert_reads_plan_without_estimates(
+    pool: &PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    analyzed: bool,
+) {
+    let pool = pool.clone();
     let declared = declarations.as_param();
     let mut wrong = Vec::new();
 
@@ -351,6 +393,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                     .bind(None::<Vec<String>>)
                     .bind(project.map(str::to_owned))
                     .bind(declared.clone())
+                    // No parent named: the statement's ninth bind since the
+                    // list read learnt `parent` (the query audit, item 2).
+                    .bind(None::<String>)
             },
         )
         .await;
@@ -383,10 +428,10 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                 );
             }
             if category == knobas_core::inbox::Category::Mention
-                && !reads_body_index(&plan[0]["Plan"])
+                && !reads_stored_names(&plan[0]["Plan"])
             {
                 wrong.push(format!(
-                    "{name}: reads every item's body, not {BODY_INDEX} (#1170)"
+                    "{name}: reads every item's body, not {NAMES_INDEX} (#1170)"
                 ));
             }
             if category == knobas_core::inbox::Category::NewAssignment {
@@ -404,15 +449,19 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         RESHAPED_RULES.len(),
         "every reshaped rule was planned"
     );
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
-        q.bind(None::<Vec<String>>)
-            .bind(None::<Vec<String>>)
-            .bind(None::<String>)
-            .bind(declared.clone())
-            .bind(Some(50_i64))
-            .bind(None::<String>)
-            .bind(None::<i64>)
-    })
+    let plan = explain(
+        &pool,
+        knobas_core::mini_board::planned_statement_unlaned(),
+        |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(50_i64))
+                .bind(None::<String>)
+                .bind(None::<i64>)
+        },
+    )
     .await;
     wrong.extend(shapes("mini_board", &plan));
     // In lanes (#939): by epic, the costliest lane read, its first ten.
@@ -427,6 +476,37 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     })
     .await;
     wrong.extend(shapes("mini_board in lanes", &plan));
+    // Off the cards alone (migration `0089`), the mirror's sources whole:
+    // without lanes, and in lanes by epic.
+    knobas_core::item_card::mark_whole(&pool).await.unwrap();
+    for (name, statement, per_column, lane, first) in [
+        (
+            "mini_board off the cards",
+            knobas_core::mini_board::planned_statement_unlaned_carded(),
+            50_i64,
+            None,
+            None,
+        ),
+        (
+            "mini_board off the cards in lanes",
+            knobas_core::mini_board::planned_statement_carded(),
+            8,
+            Some("epic".to_owned()),
+            Some(10_i64),
+        ),
+    ] {
+        let plan = explain(&pool, statement, |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(per_column))
+                .bind(lane.clone())
+                .bind(first)
+        })
+        .await;
+        wrong.extend(shapes(name, &plan));
+    }
     // Narrowed to a third of the tickets (#1149), as `has:blocker` narrows
     // the probe's: the ids are a set probed per ticket, never an index
     // search per id.
@@ -437,15 +517,19 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     .await
     .unwrap();
     assert!(matched.len() > 1_000, "{} tickets matched", matched.len());
-    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
-        q.bind(Some(matched.clone()))
-            .bind(None::<Vec<String>>)
-            .bind(None::<String>)
-            .bind(declared.clone())
-            .bind(Some(8_i64))
-            .bind(None::<String>)
-            .bind(None::<i64>)
-    })
+    let plan = explain(
+        &pool,
+        knobas_core::mini_board::planned_statement_unlaned(),
+        |q| {
+            q.bind(Some(matched.clone()))
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(8_i64))
+                .bind(None::<String>)
+                .bind(None::<i64>)
+        },
+    )
     .await;
     wrong.extend(shapes("mini_board narrowed", &plan));
     wrong.extend(
@@ -453,6 +537,76 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             .into_iter()
             .map(|f| format!("mini_board narrowed: {f}")),
     );
+    // Past a page (ux18, the ux18 Windows pass): a view's column that gathers
+    // two statuses, read past each one's mark, joined and off the cards,
+    // without lanes and in a lane; and a list's page sorted by key.
+    let some_ids: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item where kind = 'ticket' order by entity_id limit 2",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let column_page = sqlx::types::Json(serde_json::json!({
+        "after": 0,
+        "statuses": ["To Do", "In Progress"],
+        "frontier": [
+            { "status": "To Do", "id": some_ids[0] },
+            { "status": "In Progress", "id": some_ids[1] },
+        ],
+    }));
+    let sorted_page = sqlx::types::Json(serde_json::json!({
+        "after": 200, "sort": "key", "direction": "ascending",
+    }));
+    for (name, statement, lane, first, page) in [
+        (
+            "mini_board, a column's page",
+            knobas_core::mini_board::planned_statement_unlaned_paged(),
+            None,
+            None,
+            &column_page,
+        ),
+        (
+            "mini_board, a list's sorted page",
+            knobas_core::mini_board::planned_statement_unlaned_paged(),
+            None,
+            None,
+            &sorted_page,
+        ),
+        (
+            "mini_board off the cards, a column's page",
+            knobas_core::mini_board::planned_statement_unlaned_carded_paged(),
+            None,
+            None,
+            &column_page,
+        ),
+        (
+            "mini_board off the cards in lanes, a column's page",
+            knobas_core::mini_board::planned_statement_carded_paged(),
+            Some("epic".to_owned()),
+            Some(1_000_000_i64),
+            &column_page,
+        ),
+        (
+            "mini_board in lanes, a column's page",
+            knobas_core::mini_board::planned_statement_paged(),
+            Some("epic".to_owned()),
+            Some(1_000_000_i64),
+            &column_page,
+        ),
+    ] {
+        let plan = explain(&pool, statement, |q| {
+            q.bind(None::<Vec<String>>)
+                .bind(None::<Vec<String>>)
+                .bind(None::<String>)
+                .bind(declared.clone())
+                .bind(Some(200_i64))
+                .bind(lane.clone())
+                .bind(first)
+                .bind(page.clone())
+        })
+        .await;
+        wrong.extend(shapes(name, &plan));
+    }
     // The statuses the board offers (#1149): its sources' whole corpora,
     // live by the tombstones read once, never by a probe per ticket.
     let plan = explain(
@@ -946,6 +1100,12 @@ fn searches_per_id(node: &serde_json::Value) -> Vec<String> {
 
 /// Every index read of `knobas.entity` (#1149): liveness as a probe per row,
 /// `sync.live_item`'s join, where the tombstones read once is a hashed set.
+///
+/// But for `entity_withdrawn_idx` (migration `0095`): it holds the withdrawn
+/// entities and no other, so a read of it is the tombstones read, the set
+/// itself, off 291 index entries where the set was a scan of every entity.
+/// A set probed a row at a time would be an unhashed subplan, which
+/// [`item_scans_filtered_per_row`] reports.
 fn entity_probes(node: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     let probes = matches!(
@@ -955,7 +1115,7 @@ fn entity_probes(node: &serde_json::Value) -> Vec<String> {
     if probes
         && node["Index Name"]
             .as_str()
-            .is_some_and(|index| index.starts_with("entity_"))
+            .is_some_and(|index| index.starts_with("entity_") && index != "entity_withdrawn_idx")
     {
         found.push(format!(
             "probes knobas.entity by {}",
@@ -992,21 +1152,53 @@ fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
     found
 }
 
-/// The trigram index over the prose kinds' bodies (migration `0049`).
-const BODY_INDEX: &str = "item_body_trgm_idx";
+/// The key of `sync.item_mention` (migration `0079`): the names each prose
+/// body writes at somebody, by name.
+const NAMES_INDEX: &str = "item_mention_pkey";
 
-/// Whether the plan finds its items through [`BODY_INDEX`] (#1170). The
-/// mention rule read every prose item's body for the reader's name: 12 ms of
-/// the stream on the probe's 18,500, for every reader, the one rule left that
-/// cost the same whoever reads it. Through the index it reads the bodies that
-/// hold the name's trigrams, which for a name nobody wrote is none.
-fn reads_body_index(node: &serde_json::Value) -> bool {
-    node["Node Type"] == "Bitmap Index Scan" && node["Index Name"] == BODY_INDEX
+/// Whether the plan finds its items through `sync.item_mention`, by
+/// [`NAMES_INDEX`] or, on a table of a few pages, by reading it whole, and
+/// matches no body the names did not lead to. The mention
+/// rule read every prose item's body for the reader's name (12 ms of the
+/// stream on the probe's 18,500, #1170), then the bodies holding the name's
+/// trigrams (`0049`), which for a username that is also a word was thousands
+/// of them (the query audit of 2026-11-12). Through the stored names it
+/// reads the items that write the name at somebody, which for a name nobody
+/// wrote is none.
+fn reads_stored_names(node: &serde_json::Value) -> bool {
+    scans_names(node) && !matches_bodies_in_a_scan(node)
+}
+
+/// Whether the plan reads `sync.item_mention` at all.
+fn scans_names(node: &serde_json::Value) -> bool {
+    node["Relation Name"] == "item_mention"
+        || node["Index Name"] == NAMES_INDEX
         || node["Plans"]
             .as_array()
             .into_iter()
             .flatten()
-            .any(reads_body_index)
+            .any(scans_names)
+}
+
+/// Whether a scan of `sync.item` matches bodies on rows the stored names did
+/// not lead it to: any scan testing `body_text` but a probe of the primary
+/// key by an id, which reads one row for each item storing the name.
+fn matches_bodies_in_a_scan(node: &serde_json::Value) -> bool {
+    let tests_bodies = ["Filter", "Recheck Cond", "Index Cond"].iter().any(|at| {
+        node[*at]
+            .as_str()
+            .is_some_and(|text| text.contains("body_text"))
+    });
+    let probed_by_id = node["Index Name"] == "item_pkey"
+        && node["Index Cond"]
+            .as_str()
+            .is_some_and(|cond| cond.contains("entity_id = "));
+    (node["Relation Name"] == "item" && tests_bodies && !probed_by_id)
+        || node["Plans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(matches_bodies_in_a_scan)
 }
 
 /// Every node type in a plan, subplans included.
@@ -1017,4 +1209,460 @@ fn node_types(node: &serde_json::Value, out: &mut Vec<String>) {
     for child in node["Plans"].as_array().into_iter().flatten() {
         node_types(child, out);
     }
+}
+
+/// Twenty Gitea repositories over the mirror's builds (the repo-builds pass):
+/// each build's revision is a commit of one of them, so a repository's commits
+/// are 75 of the 1,500 builds' shas, and every repository's commits name it as
+/// Gitea's records do. What `repo_pipelines` is planned over.
+async fn repositories(pool: &PgPool) {
+    crate::support::source_config(pool, "git", "gitea", "Gitea", &serde_json::json!({})).await;
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'git:repo:acme/r' || k, 'repo', 'acme/r' || k from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || (payload #>> '{revisions,revision,0,version}'), 'commit', entity_id
+           from sync.item where source_id = 'ci' and kind = 'build'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         select 'git:repo:acme/r' || k, 'git', 'repo', 'acme/r' || k, '',
+                jsonb_build_object('full_name', 'acme/r' || k, 'name', 'r' || k, 'default_branch', 'main'), now()
+           from generate_series(0, 19) k
+         union all
+         select 'git:commit:' || b.sha, 'git', 'commit', b.sha, '',
+                jsonb_build_object('sha', b.sha, 'repository',
+                  jsonb_build_object('full_name', 'acme/r' || (b.n % 20), 'name', 'r' || (b.n % 20))), now()
+           from (select payload #>> '{revisions,revision,0,version}' as sha,
+                        row_number() over (order by entity_id) as n
+                   from sync.item where source_id = 'ci' and kind = 'build') b",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// **A repository's Builds tab reads the repository's, not the mirror's**
+/// (the repo-builds pass): its commits by their stored parent, the runs of
+/// their shas by `item_revision_revision_idx`, each run's pipeline and branch
+/// by its stored row. No link table is read whole and no item is filtered per
+/// row, on tables never analyzed and analyzed; the time it takes is printed.
+async fn assert_repo_pipelines_read_the_repositorys_rows(analyzed: bool) {
+    let (pool, declarations) = mirror(false).await;
+    repositories(&pool).await;
+    if analyzed {
+        sqlx::query("analyze").execute(&pool).await.unwrap();
+    }
+    let registry = Registry::for_process();
+    let answered =
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+    assert!(
+        !answered.pipelines.is_empty(),
+        "the repository's builds are found"
+    );
+    assert!(
+        answered.pipelines.iter().all(|p| !p.latest.is_empty()),
+        "each pipeline with its newest run per branch"
+    );
+    let fillers = vec!["ci".to_owned()];
+    let plan = explain(&pool, knobas_core::builds::REPO_PIPELINES, |q| {
+        q.bind(declarations.as_param())
+            .bind("git:repo:acme/r3")
+            .bind(fillers.clone())
+    })
+    .await;
+    let name = "repo pipelines";
+    let mut wrong = corpus_shapes(name, &plan);
+    wrong.extend(
+        knobas_db::plan_shape::filtered_per_row(&plan, "item")
+            .into_iter()
+            .chain(
+                ["item_pipeline", "item_revision", "item_parent"]
+                    .iter()
+                    .flat_map(|t| whole_reads(&plan[0]["Plan"], t)),
+            )
+            .map(|f| format!("{name}: {f}")),
+    );
+    // *By repository*'s read: the repositories of a repository's commits, by
+    // the commits' stored parents, never every parent read whole.
+    let commits: Vec<String> = sqlx::query_scalar(
+        "select i.entity_id from sync.item i
+          where i.kind = 'commit' and i.payload #>> '{repository,full_name}' = 'acme/r3'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let plan = explain(&pool, knobas_core::builds::COMMIT_REPOSITORIES, |q| {
+        q.bind(commits.clone())
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("commit repositories: {f}")),
+    );
+    // The tab's open pull requests: the repository's children by their stored parent, never every parent read whole.
+    let plan = explain(&pool, knobas_core::builds::REPO_PULL_HEADS, |q| {
+        q.bind(declarations.as_param()).bind("git:repo:acme/r3")
+    })
+    .await;
+    wrong.extend(
+        whole_reads(&plan[0]["Plan"], "item_parent")
+            .into_iter()
+            .map(|f| format!("repo pull heads: {f}")),
+    );
+    let named = knobas_app::commands::entity::commit_repositories_inner(&pool, &commits)
+        .await
+        .unwrap();
+    assert_eq!(
+        named.len(),
+        commits.len(),
+        "each commit names its repository"
+    );
+    let state = if analyzed {
+        "analyzed"
+    } else {
+        "never analyzed"
+    };
+    assert!(wrong.is_empty(), "tables {state}: {wrong:#?}");
+
+    let mut fastest = std::time::Duration::MAX;
+    for _ in 0..5 {
+        let at = std::time::Instant::now();
+        knobas_app::commands::entity::repo_pipelines_inner(&pool, &registry, "git:repo:acme/r3")
+            .await
+            .unwrap();
+        fastest = fastest.min(at.elapsed());
+    }
+    let (analysis,): (serde_json::Value,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, format json) {}",
+        knobas_core::builds::REPO_PIPELINES
+    )))
+    .bind(declarations.as_param())
+    .bind("git:repo:acme/r3")
+    .bind(&fillers)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    println!(
+        "repo_pipelines, tables {state}: {} pipelines in {fastest:?} (fastest of five), the statement {} ms",
+        answered.pipelines.len(),
+        analysis[0]["Execution Time"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_tables_never_analyzed() {
+    assert_repo_pipelines_read_the_repositorys_rows(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_pipelines_read_the_repositorys_rows_on_analyzed_tables() {
+    assert_repo_pipelines_read_the_repositorys_rows(true).await;
+}
+
+/// The settings a parallel worker is made to look worth starting under, for
+/// any scan of any table: no charge to start one or to pass a row up, and no
+/// table or index too small to share.
+const WORKERS_FREE: [(&str, &str); 4] = [
+    ("parallel_setup_cost", "0"),
+    ("parallel_tuple_cost", "0"),
+    ("min_parallel_table_scan_size", "0"),
+    ("min_parallel_index_scan_size", "0"),
+];
+
+/// A pool on `pool`'s database whose connections are opened as the app's
+/// are, on Windows where `windows` says so
+/// (`knobas_db::embedded::app_session_settings`), and then with a worker
+/// made to look free ([`WORKERS_FREE`]).
+async fn opened_as(pool: &PgPool, windows: bool) -> PgPool {
+    let mut settings: Vec<(&str, String)> = knobas_db::embedded::app_session_settings(windows);
+    settings.extend(WORKERS_FREE.iter().map(|(k, v)| (*k, (*v).to_owned())));
+    let options = (*pool.connect_options()).clone().options(settings);
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .unwrap()
+}
+
+/// The search's statements a person waits on, each built over `declarations`
+/// and named, with how each is planned before it runs: the launcher's one
+/// character read whole (before bring-up's fill of the names is done, and
+/// in the Docs search where no page's name holds it), a word's first
+/// characters off the names, the Docs search's one character off the
+/// pages' names with and without a space, the count and the bounded answers
+/// of a word, a word ranked whole (the Docs search's, and the launcher's
+/// with an author, which planned two workers on Björn's PC), and the
+/// Tickets views' text counts.
+fn search_statements(
+    declarations: &knobas_core::payload::Declarations,
+) -> Vec<(
+    &'static str,
+    knobas_search::sql::SearchSql,
+    knobas_search::sql::Planned,
+)> {
+    use knobas_search::corpus::{LIVE_ITEM, LIVE_ITEM_FILLED};
+    use knobas_search::query::{EffectiveFilters, FieldFilter, FieldKey};
+    use knobas_search::sql::{self, Names, Planned};
+    let every = EffectiveFilters {
+        declarations: declarations.clone(),
+        ..EffectiveFilters::default()
+    };
+    let pages = EffectiveFilters {
+        kinds: vec!["page".to_owned()],
+        ..every.clone()
+    };
+    let in_a_space = EffectiveFilters {
+        sources: vec!["wiki".to_owned()],
+        fields: vec![FieldFilter {
+            key: FieldKey::Project,
+            negated: false,
+            values: vec!["ENG".to_owned()],
+            within_days: None,
+            me: Vec::new(),
+        }],
+        ..pages.clone()
+    };
+    let authored = EffectiveFilters {
+        named_authors: vec!["mara".to_owned()],
+        ..every.clone()
+    };
+    let tickets = EffectiveFilters {
+        kinds: vec!["ticket".to_owned()],
+        ..every.clone()
+    };
+    let filled: &[&knobas_search::corpus::Corpus] = &[&LIVE_ITEM_FILLED];
+    let unfilled: &[&knobas_search::corpus::Corpus] = &[&LIVE_ITEM];
+    let mut built = vec![
+        (
+            "one character read whole",
+            sql::search_sql(filled, Some("p"), true, &every, 10, 40),
+            Planned::ByALetter,
+        ),
+        (
+            "one character read whole, before the search copies are filled",
+            sql::search_sql(unfilled, Some("p"), true, &every, 10, 40),
+            Planned::ByALetter,
+        ),
+        (
+            "the Docs search's character no name holds, read whole",
+            sql::search_sql(filled, Some("p"), true, &pages, 50, 50),
+            Planned::ByALetter,
+        ),
+        (
+            "a Docs word ranked whole",
+            sql::search_sql(filled, Some("payout"), true, &pages, 50, 50),
+            Planned::Matched,
+        ),
+        (
+            "a launcher word with an author, ranked whole",
+            sql::search_sql(filled, Some("payout"), true, &authored, 10, 40),
+            Planned::Matched,
+        ),
+    ];
+    let optional = [
+        (
+            "a word's first characters off the names",
+            sql::letter_sql(filled, "pa", &every, 10, 40),
+            Planned::Named,
+        ),
+        (
+            "the Docs search's one character off the names",
+            sql::page_letter_sql(filled, "p", &pages, 50, 50),
+            Planned::Named,
+        ),
+        (
+            "the Docs search's one character off the names, in a space",
+            sql::page_letter_sql(filled, "p", &in_a_space, 50, 50),
+            Planned::Named,
+        ),
+        (
+            "a word's count",
+            sql::probe_sql("payout", true, &every, 2_000),
+            Planned::Kept,
+        ),
+        (
+            "few matches ranked",
+            sql::kept_search_sql(filled, "payout", true, &every, 10, 40),
+            Planned::Kept,
+        ),
+        (
+            "a word many rows hold, its names ranked",
+            sql::broad_sql(filled, "payout", true, &every, 10, 40, Names::Ranked, 500),
+            Planned::Kept,
+        ),
+        (
+            "a word many rows hold, its newest names",
+            sql::broad_sql(filled, "payout", true, &every, 10, 40, Names::Newest, 500),
+            Planned::Kept,
+        ),
+        (
+            "the Tickets views' text counts",
+            sql::ids_counts_sql(&[(&[], &tickets), (&[], &tickets), (&[], &tickets)]),
+            Planned::AsBuilt,
+        ),
+    ];
+    for (name, statement, planned) in optional {
+        built.push((
+            name,
+            statement.unwrap_or_else(|| panic!("{name}: built")),
+            planned,
+        ));
+    }
+    built
+}
+
+/// **On Windows no read a person waits on plans a parallel worker** (the
+/// workers pass, 2026-11-16;
+/// `docs/decisions/2026-11-16-no-read-a-person-waits-on-starts-a-worker-on-windows.md`).
+/// A worker is a process PostgreSQL starts for the one query; on Windows
+/// that is a process start, and none can be kept.
+///
+/// Every read this file plans ([`assert_reads_plan_without_estimates`]),
+/// every inbox rule, and the search's statements ([`search_statements`])
+/// are planned on a pool opened as the app's is on Windows, under each
+/// statement's own settings as on Windows, with a worker made to look free
+/// for any scan after them, on the mirror analyzed and never analyzed. None
+/// holds a `Gather`. The same pool opened as elsewhere plans the Tickets
+/// views' text counts and the one character read whole on workers: the
+/// mirror is one a worker would be started for.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_windows_no_read_a_person_waits_on_plans_a_parallel_worker() {
+    use knobas_search::sql::{Planned, explain_with_workers_free};
+    let gathers = |plan: &str| plan.contains("Gather");
+    for analyzed in [false, true] {
+        let (pool, declarations) = mirror(analyzed).await;
+        let windows = opened_as(&pool, true).await;
+        let planned = PLANNED
+            .scope(std::sync::Mutex::new(Vec::new()), async {
+                assert_reads_plan_without_estimates(&windows, &declarations, analyzed).await;
+                let declared = declarations.as_param();
+                for (_, sql) in knobas_core::inbox::planned_statements() {
+                    explain(&windows, sql, |q| {
+                        q.bind(vec!["mara".to_owned()])
+                            .bind(chrono::Utc::now())
+                            .bind(false)
+                            .bind(declared.clone())
+                    })
+                    .await;
+                }
+                PLANNED.with(|planned| std::mem::take(&mut *planned.lock().unwrap()))
+            })
+            .await;
+        assert!(planned.len() > 30, "{} reads planned", planned.len());
+        let mut wrong: Vec<String> = planned
+            .iter()
+            .filter(|(_, plan)| gathers(&plan.to_string()))
+            .map(|(sql, _)| format!("a page's read: {sql}"))
+            .collect();
+        for (name, built, how) in search_statements(&declarations) {
+            let plan = explain_with_workers_free(&windows, built, how, true)
+                .await
+                .unwrap();
+            if gathers(&plan) {
+                wrong.push(format!("{name}:\n{plan}"));
+            }
+        }
+        // The instrument: elsewhere the same reads go on workers.
+        let elsewhere = opened_as(&pool, false).await;
+        for (name, built, how) in search_statements(&declarations) {
+            if !matches!(how, Planned::ByALetter | Planned::AsBuilt)
+                || name.contains("before the search copies")
+                || name.contains("no name holds")
+            {
+                continue;
+            }
+            let plan = explain_with_workers_free(&elsewhere, built, how, false)
+                .await
+                .unwrap();
+            assert!(gathers(&plan), "elsewhere, {name} goes on workers:\n{plan}");
+        }
+        elsewhere.close().await;
+        windows.close().await;
+        let state = if analyzed {
+            "analyzed"
+        } else {
+            "never analyzed"
+        };
+        assert!(wrong.is_empty(), "tables {state}: {wrong:#?}");
+    }
+}
+
+/// **Who may set the worker cap is a closed list.** On Windows every
+/// connection of the app's pool plans no worker unless a statement sets the
+/// cap itself, so a statement that does is the one way a read escapes
+/// [`on_windows_no_read_a_person_waits_on_plans_a_parallel_worker`]: each
+/// place in the crates' source that sets `max_parallel_workers_per_gather`
+/// is listed here with what it sets, and only the search's two plans for
+/// other platforms ask for any.
+#[test]
+fn only_the_listed_statements_set_the_worker_cap() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut found: Vec<(String, String)> = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if !["target", "tests", "benches", "examples", "node_modules"]
+                    .contains(&name.as_str())
+                    && !name.starts_with('.')
+                {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let file = path
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            for line in text.lines() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                for (at, _) in code.match_indices("max_parallel_workers_per_gather") {
+                    let after = &code[at + "max_parallel_workers_per_gather".len()..];
+                    let value: String = after
+                        .chars()
+                        .skip_while(|c| !c.is_ascii_digit())
+                        .take_while(char::is_ascii_digit)
+                        .collect();
+                    found.push((file.clone(), value));
+                }
+            }
+        }
+    }
+    found.sort();
+    let listed: Vec<(String, String)> = [
+        // `app_session_settings`: Windows' connections, none.
+        ("knobas-db/src/embedded.rs", "0"),
+        // `picker::LOAD_PLANNING`: the names' load, which nobody waits on,
+        // none (the fuzzy-search pass, 2026-11-19, D14).
+        ("knobas-search/src/picker.rs", "0"),
+        // `MATCHED_PLANNING` and `LETTER_PLANNING`, elsewhere; their Windows
+        // twins; `KEPT_PLANNING` and `NAMED_PLANNING`, every platform.
+        ("knobas-search/src/sql.rs", "0"),
+        ("knobas-search/src/sql.rs", "0"),
+        ("knobas-search/src/sql.rs", "0"),
+        ("knobas-search/src/sql.rs", "0"),
+        ("knobas-search/src/sql.rs", "3"),
+        ("knobas-search/src/sql.rs", "3"),
+    ]
+    .iter()
+    .map(|(f, v)| ((*f).to_owned(), (*v).to_owned()))
+    .collect();
+    assert_eq!(found, listed);
 }

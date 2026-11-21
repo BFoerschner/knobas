@@ -52,6 +52,11 @@ function createNote(args: Record<string, unknown>) {
   return noteDetail(id);
 }
 
+/** A note's body as this session's store holds it, `null` for none. **Fixture only.** */
+export function noteBody(id: string): string | null {
+  return NOTES.get(id)?.body_md ?? null;
+}
+
 /**
  * Put a note in this session's store unless it is there already: the
  * backend's get-or-create for a note another command owns (the standup

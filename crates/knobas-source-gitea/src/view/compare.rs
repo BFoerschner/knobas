@@ -17,13 +17,18 @@
 //! Beside the diff, the compare's commits are read (#2310) for the two whole
 //! shas the diff is between ([`between`]), which the diff block names as its
 //! range so a reader can read either side's file whole at a fixed commit. A
-//! failed or unclear read of them names no range and fails nothing.
+//! failed or unclear read of them names no range and fails nothing. The range
+//! lists those commits too, newest first and at most [`rows::COMMIT_CAP`]
+//! (2026-11-13): Compare draws them for a pull request from the default
+//! branch, which the branch's own view measures against nothing.
 
 use knobas_source::SourceError;
 use std::collections::HashSet;
 
-use knobas_source::view::{Block, DiffRange, ViewSection};
+use knobas_source::view::{Block, DiffRange, RangeCommit, ViewSection};
 
+use super::rows;
+use crate::model::Commit;
 use crate::source::GiteaSource;
 
 /// The section's prefix.
@@ -67,16 +72,15 @@ pub(super) async fn read(
             .client
             .compare_commits::<Listing>(owner, repo, base, head),
     );
-    let range = listing
-        .ok()
-        .and_then(|listing| between(&listing, base, head))
-        .map(|(base, head)| DiffRange {
+    let range = listing.ok().and_then(|listing| {
+        between(&listing, base, head).map(|(base, head)| DiffRange {
             repository: entity.to_owned(),
             base,
             head,
-            commits: Vec::new(),
+            commits: carried(&source.id, owner, repo, &listing),
             reviewed: None,
-        });
+        })
+    });
     let text = match text {
         Ok(text) => text,
         Err(error) if error.status() == Some(404) => {
@@ -144,9 +148,30 @@ struct Listing {
 
 #[derive(Debug, serde::Deserialize)]
 struct Listed {
-    sha: String,
+    /// The commit as Gitea lists it: its sha, subject and author.
+    #[serde(flatten)]
+    record: Commit,
     #[serde(default)]
     parents: Vec<Parent>,
+}
+
+/// The compare's commits as a range lists them: newest first, as Gitea
+/// lists a compare's, each titled and dated as a commit row is, at most
+/// [`rows::COMMIT_CAP`].
+fn carried(source_id: &str, owner: &str, repo: &str, listing: &Listing) -> Vec<RangeCommit> {
+    listing
+        .commits
+        .iter()
+        .take(rows::COMMIT_CAP)
+        .map(|c| {
+            let row = rows::commit_row(source_id, owner, repo, &c.record);
+            RangeCommit {
+                sha: c.record.sha.clone(),
+                title: row.title,
+                meta: row.meta,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -171,14 +196,18 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
     if commits.is_empty() || listing.total_commits.is_some_and(|t| t != commits.len()) {
         return None;
     }
-    let inside: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+    let inside: HashSet<&str> = commits.iter().map(|c| c.record.sha.as_str()).collect();
     let parents: HashSet<&str> = commits
         .iter()
         .flat_map(|c| c.parents.iter().map(|p| p.sha.as_str()))
         .collect();
-    let mut tips = commits.iter().filter(|c| !parents.contains(c.sha.as_str()));
+    let mut tips = commits
+        .iter()
+        .filter(|c| !parents.contains(c.record.sha.as_str()));
     let tip = tips.next()?;
-    if tips.next().is_some() || (super::is_full_sha(head) && !tip.sha.eq_ignore_ascii_case(head)) {
+    if tips.next().is_some()
+        || (super::is_full_sha(head) && !tip.record.sha.eq_ignore_ascii_case(head))
+    {
         return None;
     }
     let mut outside: Vec<&str> = Vec::new();
@@ -195,7 +224,7 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
         base.strip_suffix('^').and_then(|child| {
             commits
                 .iter()
-                .find(|c| c.sha.eq_ignore_ascii_case(child))
+                .find(|c| c.record.sha.eq_ignore_ascii_case(child))
                 .and_then(|c| c.parents.first())
                 .map(|p| p.sha.as_str())
         })
@@ -205,7 +234,7 @@ fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)
         _ if outside.len() == 1 => outside[0],
         _ => return None,
     };
-    super::is_full_sha(merge_base).then(|| (merge_base.to_owned(), tip.sha.clone()))
+    super::is_full_sha(merge_base).then(|| (merge_base.to_owned(), tip.record.sha.clone()))
 }
 
 #[cfg(test)]
@@ -223,7 +252,13 @@ mod tests {
             commits: commits
                 .iter()
                 .map(|&(c, parents)| Listed {
-                    sha: sha(c),
+                    record: Commit {
+                        sha: sha(c),
+                        created: None,
+                        html_url: None,
+                        author: None,
+                        commit: None,
+                    },
                     parents: parents.iter().map(|&p| Parent { sha: sha(p) }).collect(),
                 })
                 .collect(),

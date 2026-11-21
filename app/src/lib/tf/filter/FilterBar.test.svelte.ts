@@ -173,3 +173,19 @@ test("a view's filter is kept for the session: a second bar for it opens where t
   expect(field().value).toBe("p");
   expect(sessionFilter("tickets-other").text).toBe("");
 });
+
+test("the count holds the room its longest text needs, and stays with the bar's selects when the row wraps", () => {
+  mountBar(sessionFilter("tail-with-selects"));
+  const count = target.querySelector<HTMLElement>(".tf-fcount")!;
+  expect(count.dataset.room).toBe("74 of 75 tickets");
+  expect(count.closest(".tf-ftail")?.querySelector("select[aria-label=Assignee]")).not.toBeNull();
+  expect(target.querySelector(".tf-ftail .tf-fchips"), "pills stay ahead of a select").toBeNull();
+});
+
+test("with no select, the last pills keep the count company, so it never wraps alone", () => {
+  const pills: FilterConfig = { ...config, id: "tail-with-pills", dropdowns: [] };
+  bar = mount(FilterBar, { target, props: { config: pills, filter: sessionFilter(pills.id), shown: 1, total: 2 } });
+  flushSync();
+  expect(target.querySelector(".tf-ftail .tf-fchips")?.getAttribute("aria-label")).toBe("Type");
+  expect(target.querySelectorAll(".tf-fchips")).toHaveLength(1);
+});

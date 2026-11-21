@@ -1,0 +1,158 @@
+/*
+  The OpenAPI view (ux18, `tf/render/TfOpenApi.svelte`, the design system's *Layout*: an API spec on the Code page).
+  Loaded with the view, never at start-up: the view imports it, so it is in the view's chunk.
+
+  The page's grammar, nothing new to learn: hairline rows on the sheet, the code face for paths, names and media
+  types, the interface face for words. One thing is loud, the way the job key is: the HTTP method, in the headings face's narrowest,
+  heaviest cut, in a column of its own, so a list of 5,000 endpoints is scanned by verb and path. No tone: a method
+  is not a state, so GET and DELETE are the same ink. Deprecated is a state: `--warn`, and its path dims.
+*/
+
+/* The file view clips without making a scroller, so the band sticks to the page's (overflow: hidden would hold it). */
+.tf-fileview.tf-fv-oas { overflow: clip; }
+
+.tf-oas { padding: 16px 18px 28px; min-width: 0; }
+.tf-oas-wait { min-height: 120px; }
+.tf-oas-wait p { margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
+
+.tf-oas-bad { max-width: 760px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-bad p { margin: 0 0 8px; }
+.tf-oas-bad pre {
+  margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--rule-2); border-left: 3px solid var(--err); border-radius: 4px;
+  background: var(--err-bg); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+  --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures);
+}
+
+/* The head: the API's name is the page's one title. */
+.tf-oas-head { max-width: 920px; margin-bottom: 14px; }
+.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; line-height: 1.2; overflow-wrap: anywhere; }
+.tf-oas-vers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-hdesc { margin-top: 10px; }
+/* A spec's Markdown (its description, an operation's) sits in the view's column at body size, not as a README's page. */
+.tf-oas .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); max-width: 820px; }
+.tf-oas-desc { margin: 0 0 8px; font-size: calc(var(--t-md) * var(--fs)); white-space: pre-line; overflow-wrap: anywhere; }
+.tf-oas-servers { margin: 12px 0 0; display: grid; gap: 3px; }
+.tf-oas-servers dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-servers code { --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-oas-problems { margin-top: 10px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--warn); }
+.tf-oas-problems summary { cursor: pointer; }
+.tf-oas-problems ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); }
+
+/* A group's label inside a section: the design system's step, `--t-xs` 600 `--ink-2`. */
+.tf-oas-glabel { display: flex; gap: 8px; align-items: center; margin: 0 0 6px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+
+/* The band: the filter, the count, and Back to / Schemas at its end, stuck under the page's tabs as a diff's is. */
+.tf-oas-band {
+  position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--control-gap);
+  padding: 8px 0; background: var(--sheet); border-bottom: 1px solid var(--rule);
+}
+.tf-oas-band .tf-minif { max-width: 300px; }
+/* The count holds the room its longest text needs, so the trail beside it never moves as it changes. */
+.tf-oas-count { min-width: 11ch; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tf-oas-none { margin: 14px 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+
+.tf-oas-list { display: flex; flex-direction: column; min-width: 0; }
+.tf-oas-list > [data-k] { scroll-margin-top: 52px; }
+
+.tf-oas-group { display: flex; align-items: baseline; gap: 10px; padding: 18px 6px 6px; border-bottom: 1px solid var(--rule); min-width: 0; }
+.tf-oas-group h3 { margin: 0; flex: none; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-oas-group h3.tf-oas-gcode { --fs: var(--size-code); font: 600 calc(var(--t-md) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-oas-gdesc { flex: 1; min-width: 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-oas-gcount { margin-left: auto; flex: none; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* An endpoint's row: method, path, summary; one line, its height fixed so the list never reflows as it scrolls. */
+.tf-oas-opbtn {
+  display: grid; grid-template-columns: 62px minmax(0, max-content) minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px;
+  width: 100%; min-height: 33px; box-sizing: border-box; padding: 6px 6px; border: 0; border-bottom: 1px solid var(--rule-2);
+  background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit;
+}
+.tf-oas-opbtn:hover { background: var(--sheet-2); }
+.tf-oas-opbtn[aria-expanded="true"] { background: var(--sheet-2); border-bottom-color: transparent; }
+.tf-oas-opbtn { --focus-o: var(--focus-in); }
+.tf-oas-m { font-size: calc(var(--t-sm) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; letter-spacing: calc(.02em + var(--ls-head, 0em)); color: var(--ink); }
+.tf-oas-path {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
+}
+.tf-oas-pp { color: var(--ink-2); }
+.tf-oas-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-oas-dep { color: var(--ink-2); }
+.tf-oas-deplab { font-size: calc(var(--t-xs) * var(--fs)); color: var(--warn); white-space: nowrap; }
+.tf-oas-sbtn { grid-template-columns: minmax(0, 1fr); }
+.tf-oas-sname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An endpoint opened: inset on the row's ground, with the fill's edge marking what it belongs to. */
+.tf-oas-detail { padding: 10px 14px 16px 18px; background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); box-shadow: inset 2px 0 0 var(--fill); min-width: 0; }
+.tf-oas-op { display: flex; flex-direction: column; gap: 14px; max-width: 1100px; }
+.tf-oas-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-opid { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+.tf-oas-sec { min-width: 0; }
+.tf-oas-subop + .tf-oas-subop { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.tf-oas-subhead { display: grid; grid-template-columns: 62px minmax(0, max-content) minmax(0, 1fr); column-gap: 12px; align-items: baseline; margin: 0 0 8px; }
+
+/* Parameters: name and where, then the type and words. */
+.tf-oas-params { display: flex; flex-direction: column; border-top: 1px solid var(--rule-2); }
+.tf-oas-param { display: grid; grid-template-columns: minmax(140px, 220px) 64px minmax(0, 1fr); column-gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-pcell { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; min-width: 0; }
+.tf-oas-pwhere { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-pbody { min-width: 0; }
+
+/* Responses: the status in a column, its words and content beside it. */
+.tf-oas-resp { display: grid; grid-template-columns: 56px minmax(0, 1fr); column-gap: 12px; padding: 8px 0; border-top: 1px solid var(--rule-2); }
+.tf-oas-status { font-size: calc(var(--t-md) * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tf-oas-rbody { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tf-oas-rdesc { margin: 0; font-size: calc(var(--t-sm) * var(--fs)); overflow-wrap: anywhere; }
+.tf-oas-media { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tf-oas-mtype { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+.tf-oas-types { flex-wrap: wrap; }
+.tf-oas-types button { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+
+/* A schema: its line, then its properties under a hairline guide, one indent a level. */
+.tf-oas-top { font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-type { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-oas-null { color: var(--ink-2); }
+.tf-oas-props { margin-top: 4px; min-width: 0; }
+.tf-oas-in { margin-left: 7px; padding-left: 10px; border-left: 1px solid var(--rule); }
+.tf-oas-prop { padding: 3px 0; min-width: 0; }
+.tf-oas-pline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-pname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-oas-anykey { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-oas-pnum { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-oas-req { flex: none; }
+.tf-oas-pdesc { margin: 2px 0 0 22px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; white-space: pre-line; }
+.tf-oas-param .tf-oas-pdesc, .tf-oas-hline .tf-oas-pdesc { margin-left: 0; }
+/* A schema's own words under its line start where its line does; a property's sit under its name. */
+.tf-oas-top ~ .tf-oas-pdesc, .tf-oas-top ~ .tf-oas-enum { margin-left: 0; }
+.tf-oas-enum { margin: 2px 0 0 22px; font-size: calc(var(--t-xs) * var(--fs)); overflow-wrap: anywhere; }
+.tf-oas-param .tf-oas-enum { margin-left: 0; }
+.tf-oas-enum code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 3px; border-radius: 3px; background: var(--sheet); }
+.tf-oas-note { margin: 2px 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+
+.tf-oas-caret {
+  display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px;
+  background: none; color: var(--ink-2); cursor: pointer; align-self: center;
+}
+.tf-oas-caret svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.tf-oas-caret[aria-expanded="true"] svg { transform: rotate(90deg); }
+.tf-oas-caret:hover { color: var(--ink); background: var(--rule-2); }
+.tf-oas-nocaret { cursor: default; }
+
+/* A ref: the schema's name in the code face, a link to it. */
+.tf-oas-ref {
+  padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule);
+  text-underline-offset: 2px; --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
+}
+.tf-oas-ref:hover { text-decoration-color: currentColor; }
+.tf-oas-ref.tf-oas-plain, .tf-oas-ref.tf-oas-far { cursor: default; text-decoration: none; }
+.tf-oas-far { color: var(--ink-2); }
+.tf-oas-read { align-self: flex-start; margin-top: 4px; }
+
+.tf-oas-ex summary { cursor: pointer; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+.tf-oas-ex pre {
+  margin: 6px 0 0; padding: 8px 10px; max-height: 360px; overflow: auto; border: 1px solid var(--rule-2); border-radius: 4px;
+  background: var(--sheet); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tf-oas-caret svg { transition: transform .12s ease-out; }
+}

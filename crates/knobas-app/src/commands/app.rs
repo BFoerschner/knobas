@@ -42,7 +42,57 @@ pub enum DbState {
     Failed {
         /// Why, shown to the user as text.
         message: String,
+        /// What the boot screen's *Copy details* copies (ux28): the step
+        /// that failed, what the data folder held, every connection tried
+        /// with its OS error, the machine and its security products. Absent
+        /// for a failure that has no start behind it (a server that died
+        /// after `ready`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        details: Option<String>,
+        /// Set when the operating system refused knobas its own server for
+        /// permissions (Windows' WSAEACCES, 10013): a firewall rule or
+        /// security software. The boot screen then says so in plain words.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        blocked: Option<Blocked>,
+        /// What the server wrote to its log when it failed to start, each
+        /// line from its severity label on (the Windows pass on ux28): the
+        /// cause PostgreSQL names before its `FATAL` summary. The boot screen
+        /// draws the last few under the message. Absent when the server
+        /// wrote nothing or no start failed.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        said: Option<Vec<String>>,
     },
+}
+
+impl DbState {
+    /// A failure with `message` alone: no start behind it to report on.
+    #[must_use]
+    pub fn failed(message: impl Into<String>) -> DbState {
+        DbState::Failed {
+            message: message.into(),
+            details: None,
+            blocked: None,
+            said: None,
+        }
+    }
+}
+
+/// What the boot screen tells someone whose machine blocks knobas from its
+/// own database (ux28): what knobas tried, and what an administrator can
+/// allow.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct Blocked {
+    /// The cause in plain words, for the line under the heading.
+    pub cause: String,
+    /// Each address or socket path tried and refused: `tcp 127.0.0.1:54321`.
+    pub tried: Vec<String>,
+    /// The programs to allow, by their full paths: `knobas-app` and the
+    /// `postgres` it starts.
+    pub allow: Vec<String>,
 }
 
 /// What the shell needs to decide what to draw.
@@ -108,6 +158,20 @@ pub struct Lifecycle {
     /// Here rather than on `AppState`, because the reads that answer before
     /// the database is up (the Add-source form's adapter list) need it too.
     registry: Arc<dyn AdapterRegistry>,
+    /// The one counter of the state words the mirror has seen (the
+    /// state-colours bug, 2026-11-17): the *State colours* read, bring-up and
+    /// the scheduler's events share it, so a source is counted once.
+    seen_words: crate::sources::state_colours::SeenCounter,
+    /// Every name of the mirror in memory, read by the launcher's picker (the
+    /// fuzzy-search decisions, 2026-11-19, D2): loaded at bring-up, read
+    /// again after a sync that wrote (`sources::pick_on_sync`), and handed to
+    /// the launcher's and the Docs search's searchers. Holds nothing before
+    /// the first load, and a searcher given it answers as before then.
+    picker: knobas_search::picker::Picker,
+    /// The files index (the everything-search decisions, 2026-11-20, D6):
+    /// [`knobas_files::FileIndex::none`] until bring-up opens the profile's
+    /// `files-1/`, and a searcher given that answers as before.
+    files: Mutex<knobas_files::FileIndex>,
 }
 
 impl Default for Lifecycle {
@@ -137,6 +201,9 @@ impl Lifecycle {
             generation: AtomicU64::new(0),
             suspended: Mutex::new(None),
             restart_gate: tokio::sync::Mutex::new(()),
+            seen_words: crate::sources::state_colours::SeenCounter::new(Arc::clone(&registry)),
+            picker: knobas_search::picker::Picker::default(),
+            files: Mutex::new(knobas_files::FileIndex::none()),
             registry,
         }
     }
@@ -145,6 +212,32 @@ impl Lifecycle {
     #[must_use]
     pub fn registry(&self) -> &dyn AdapterRegistry {
         self.registry.as_ref()
+    }
+
+    /// The counter of seen state words ([`SeenCounter`](crate::sources::state_colours::SeenCounter)).
+    #[must_use]
+    pub fn seen_words(&self) -> &crate::sources::state_colours::SeenCounter {
+        &self.seen_words
+    }
+
+    /// The names the launcher's picker holds ([`knobas_search::picker::Picker`]).
+    #[must_use]
+    pub fn picker(&self) -> &knobas_search::picker::Picker {
+        &self.picker
+    }
+
+    /// The files index ([`knobas_files::FileIndex`]): one index, cheap to clone.
+    #[must_use]
+    pub fn files(&self) -> knobas_files::FileIndex {
+        self.files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The files index bring-up opened.
+    pub fn set_files(&self, index: knobas_files::FileIndex) {
+        *self.files.lock().unwrap_or_else(PoisonError::into_inner) = index;
     }
 
     /// Where bring-up has got to.
@@ -159,6 +252,25 @@ impl Lifecycle {
     /// Record a transition. The caller emits `db:state` after it.
     pub fn set(&self, state: DbState) {
         *self.db.lock().unwrap_or_else(PoisonError::into_inner) = state;
+    }
+
+    /// Give the failure that says `message` its full *Copy details* (ux28):
+    /// the machine's facts arrive after the failure is on screen. False, and
+    /// nothing changes, when the window has moved on (a *Retry*, another
+    /// failure); the caller emits the new state when this answers true.
+    pub(crate) fn refine_failure(&self, message: &str, details: String) -> bool {
+        let mut db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+        match &mut *db {
+            DbState::Failed {
+                message: failed,
+                details: shown,
+                ..
+            } if failed == message => {
+                *shown = Some(details);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Claim a retry: move `Failed` back to `Starting`, and say whether this
@@ -230,7 +342,7 @@ impl Lifecycle {
             .suspended
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = state;
-        *db = DbState::Failed { message };
+        *db = DbState::failed(message);
         true
     }
 
@@ -302,8 +414,8 @@ impl Lifecycle {
     fn not_ready(&self) -> IpcError {
         IpcError::not_ready(match self.get() {
             // It did start, and then stopped (#1779): the message says so.
-            DbState::Failed { message } if self.server_is_down() => message,
-            DbState::Failed { message } => format!("the database did not start: {message}"),
+            DbState::Failed { message, .. } if self.server_is_down() => message,
+            DbState::Failed { message, .. } => format!("the database did not start: {message}"),
             _ => "the database is still starting".to_owned(),
         })
     }
@@ -468,6 +580,92 @@ pub async fn set_pages_kept_open<R: tauri::Runtime>(
     crate::settings::set_pages_kept_open(&pool, count).await
 }
 
+/// *Smooth scrolling on 120 Hz displays* (`crate::frame_rate`): whether the
+/// main window draws at the display's rate rather than WebKit's 60, on until
+/// set. `None` where the platform has no such cap, so Settings draws no switch.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn smooth_scrolling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<bool>, IpcError> {
+    if !crate::frame_rate::offered() {
+        return Ok(None);
+    }
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::frame_rate::stored(&pool).await.map(Some)
+}
+
+/// Store *Smooth scrolling on 120 Hz displays*, set the main window to it at
+/// once, and answer what is now stored. `None`, and nothing stored, where the
+/// platform has no such cap.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_smooth_scrolling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    on: bool,
+) -> Result<Option<bool>, IpcError> {
+    if !crate::frame_rate::offered() {
+        return Ok(None);
+    }
+    let pool = app.state::<Lifecycle>().pool()?;
+    let stored = crate::frame_rate::store(&pool, on).await?;
+    crate::frame_rate::apply(&app, stored);
+    Ok(Some(stored))
+}
+
+/// The font families installed on this machine, monospace ones first, for
+/// Settings › Appearance › *Code font* (`crate::code_font`). Read once a run,
+/// needing no database.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn installed_fonts() -> Result<Vec<crate::code_font::InstalledFont>, IpcError> {
+    crate::code_font::installed().await
+}
+
+/// What *Decompile* in the JAR view stands at (ux19): the Java found here, the bundled decompiler, and why not where
+/// it cannot run. Looked for once a run; `again` looks again (Settings' *Look again*).
+///
+/// # Errors
+///
+/// None in practice: a Java not found is an answer.
+#[tauri::command]
+pub async fn java_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    again: bool,
+) -> Result<crate::archive::java::JavaRuntime, IpcError> {
+    let pool = app.state::<Lifecycle>().pool().ok();
+    let dirs = crate::archive::java::decompiler_dirs(app.path().resource_dir().ok());
+    Ok(crate::archive::java::runtime(pool.as_ref(), &dirs, again).await)
+}
+
+/// Settings' Java for *Decompile* (ux19): an absolute path to a `java` or a Java home, `null` to look by itself.
+/// Answers what decompiling stands at with it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a path that is not absolute,
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn set_java_path<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: Option<String>,
+) -> Result<crate::archive::java::JavaRuntime, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let dirs = crate::archive::java::decompiler_dirs(app.path().resource_dir().ok());
+    crate::archive::java::set_java_path(&pool, &dirs, path.as_deref()).await
+}
+
 /// The command renderers saved in Settings › Renderers (#2262), in order.
 ///
 /// # Errors
@@ -518,6 +716,348 @@ pub async fn run_renderer<R: tauri::Runtime>(
 ) -> Result<crate::renderers::RenderRun, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     crate::renderers::run(&pool, &id, content).await
+}
+
+/// The folder renderers saved in Settings › Renderers (ADR-0044), in order.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::folder_render::FolderRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::list(&pool).await
+}
+
+/// Save the whole list of folder renderers and answer it as stored.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an entry with no
+/// name, a command that cannot be run, or a placeholder other than `{path}`
+/// and `{out}`,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_folder_renderers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    renderers: Vec<crate::folder_render::FolderRendererDraft>,
+) -> Result<Vec<crate::folder_render::FolderRenderer>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::save(&pool, &renderers).await
+}
+
+/// The folder renderer picked for each folder (ux26): `render.folder_picks`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_render_picks<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::folder_render::FolderPick>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::picks(&pool).await
+}
+
+/// Pick `renderer` for `folder` of the repository `entity_id` names (`None` takes the pick away), and answer the
+/// picks as stored (ux26). Every place a person chooses a folder's renderer writes it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_folder_render_pick<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    folder: String,
+    renderer: Option<String>,
+) -> Result<Vec<crate::folder_render::FolderPick>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::set_pick(&pool, &entity_id, &folder, renderer.as_deref()).await
+}
+
+/// Two generated folders compared, by their tokens (ux26): the generated files that differ, the rest counted; line
+/// endings set aside where a side is the working tree (`eol_aside`). `read` names the read for `cancel_read`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token no longer kept.
+#[tauri::command]
+pub async fn folder_render_compare(
+    before: Option<String>,
+    after: Option<String>,
+    eol_aside: bool,
+    read: Option<String>,
+) -> Result<crate::folder_render::made::MadeCompare, IpcError> {
+    crate::reads::run(read, async move {
+        crate::folder_render::made::compare(before.as_deref(), after.as_deref(), eol_aside).await
+    })
+    .await
+}
+
+/// The forge reads a folder render needs where there is no clone: `None`
+/// before the sources are up, when only a clone can be read.
+fn forge_of<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<crate::folder_render::resolve::Forge> {
+    let state = crate::sources::state(app).ok()?;
+    Some(crate::folder_render::resolve::Forge {
+        pool: state.pool.clone(),
+        secrets: state.secrets.clone(),
+        registry: state.registry.clone(),
+        live: state.live.clone(),
+    })
+}
+
+/// Saved folder renderer `renderer` on `folder` of `entity_id` (a repository
+/// or a branch) at `commit`, the mirror's tip when `None` (ADR-0044):
+/// answered at once with what is kept and the run's state; `ask` says whether
+/// a run may start. `paths` is the section the source lists every path in,
+/// for a repository with no clone. Runs are told on `folder-render:moved`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a renderer that
+/// is not saved, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for
+/// a query failure.
+#[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command's arguments, one each"
+)]
+pub async fn folder_render<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    commit: Option<String>,
+    paths: Option<String>,
+    ask: crate::folder_render::runs::Ask,
+    lane: Option<String>,
+) -> Result<crate::folder_render::runs::FolderRenderView, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let forge = forge_of(&app);
+    crate::folder_render::ask(
+        &pool,
+        forge.as_ref(),
+        &entity_id,
+        &renderer,
+        &folder,
+        commit.as_deref(),
+        paths.as_deref(),
+        ask,
+        lane.as_deref().unwrap_or(""),
+    )
+    .await
+}
+
+/// Stop the run of `renderer` on `folder` of `entity_id` in `lane` (absent: the Files tab's), waiting or going.
+#[tauri::command]
+pub fn folder_render_stop(
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    lane: Option<String>,
+) {
+    crate::folder_render::runs::Runs::global().stop(&crate::folder_render::slot(
+        &entity_id,
+        &renderer,
+        &folder,
+        lane.as_deref().unwrap_or(""),
+    ));
+}
+
+/// The page showing `folder`'s render left: a run still waiting for its
+/// place is dropped, one that started finishes into the cache.
+#[tauri::command]
+pub fn folder_render_leave(
+    entity_id: String,
+    renderer: String,
+    folder: String,
+    lane: Option<String>,
+) {
+    crate::folder_render::runs::Runs::global().leave(&crate::folder_render::slot(
+        &entity_id,
+        &renderer,
+        &folder,
+        lane.as_deref().unwrap_or(""),
+    ));
+}
+
+/// The bytes a folder render drew, by its token, raw (an `ArrayBuffer` in the
+/// shell, not a JSON array).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token no
+/// longer kept.
+#[tauri::command]
+pub fn folder_render_output(token: String) -> Result<tauri::ipc::Response, IpcError> {
+    crate::folder_render::runs::Runs::global()
+        .output(&token)
+        .map(|bytes| tauri::ipc::Response::new(bytes.as_ref().clone()))
+        .ok_or_else(|| {
+            IpcError::not_found("that drawing is no longer kept: run the renderer again".to_owned())
+        })
+}
+
+/// A generated folder's whole tree, by its token (ADR-0046), files sorted by
+/// path bytes.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held in memory: the shell asks `folder_render` with `look`, then again.
+#[tauri::command]
+pub fn folder_render_tree(token: String) -> Result<crate::folder_render::made::MadeTree, IpcError> {
+    crate::folder_render::made::tree(&token)
+}
+
+/// A generated file as `entity_local_file` answers a file, `path` from the
+/// generated folder's top.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held or a path its manifest does not hold.
+#[tauri::command]
+pub async fn folder_render_file(
+    token: String,
+    path: String,
+) -> Result<knobas_source::view::Block, IpcError> {
+    crate::folder_render::made::file(&token, &path).await
+}
+
+/// A generated file's bytes, raw, refused past the view's byte cap.
+///
+/// # Errors
+///
+/// As [`folder_render_file`]; [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// past the cap.
+#[tauri::command]
+pub async fn folder_render_file_bytes(
+    token: String,
+    path: String,
+) -> Result<tauri::ipc::Response, IpcError> {
+    crate::folder_render::made::file_bytes(&token, &path)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+/// Run a saved *Open in…* application on a generated folder, or a file in it
+/// (ADR-0046); the default when `application` is `None`. Answers the argument
+/// vector started.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a token not
+/// held; [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) as
+/// `checkout::open::open_made` says.
+#[tauri::command]
+pub async fn folder_render_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    application: Option<String>,
+    token: String,
+    file: Option<String>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let made = crate::folder_render::made::made(&token)?;
+    crate::checkout::open::open_made(&pool, application.as_deref(), &made, file.as_deref(), line)
+        .await
+}
+
+fn profile_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<std::path::PathBuf, IpcError> {
+    app.try_state::<Profile>()
+        .map(|p| p.dir.clone())
+        .ok_or_else(|| IpcError::not_ready("knobas is still starting".to_owned()))
+}
+
+/// Where generated folders are kept, and how much (Settings › Renderers).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::store_view(&pool, &profile_dir(&app)?).await
+}
+
+/// Keep generated folders in `path` (`None`: beside the clones, or the
+/// profile). What was kept at the old place is removed.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a path that is
+/// not absolute, inside a checkout, or cannot be made, in words.
+#[tauri::command]
+pub async fn set_folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: Option<String>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::set_store(&pool, &profile_dir(&app)?, path.as_deref()).await
+}
+
+/// Remove every generated folder, and answer the store as it is then.
+///
+/// # Errors
+///
+/// As [`folder_render_store`].
+#[tauri::command]
+pub async fn clear_folder_render_store<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::folder_render::store::MadeStore, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::folder_render::made::clear_store(&pool, &profile_dir(&app)?).await
+}
+
+/// Keep the shell's sanitized document of a folder render's HTML and answer
+/// the token its frame loads it by (`knobas-render://localhost/folder.<token>`),
+/// served under the file renderers' policy, no script.
+#[tauri::command]
+pub fn folder_render_frame(document: String) -> String {
+    crate::folder_render::runs::Runs::global().frame(document.into_bytes())
+}
+
+/// Which folders of `entity_id`'s tree at `commit` the folder renderers that
+/// hold a file glob take, per renderer: what the Code page's tree marks.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn folder_render_marks<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    commit: Option<String>,
+    paths: Option<String>,
+) -> Result<Vec<crate::folder_render::FolderMarks>, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let forge = forge_of(&app);
+    crate::folder_render::resolve::marks(
+        &pool,
+        forge.as_ref(),
+        &entity_id,
+        commit.as_deref(),
+        paths.as_deref(),
+    )
+    .await
 }
 
 /// The default renderer per file pattern (#2263), in order.
@@ -672,10 +1212,7 @@ mod tests {
             serde_json::json!({ "state": "ready" })
         );
         assert_eq!(
-            serde_json::to_value(DbState::Failed {
-                message: "port 5432 in use".into()
-            })
-            .unwrap(),
+            serde_json::to_value(DbState::failed("port 5432 in use")).unwrap(),
             serde_json::json!({ "state": "failed", "message": "port 5432 in use" })
         );
     }
@@ -697,7 +1234,7 @@ mod tests {
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 16);
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 17);
     }
 
     /// The mirror sends each argument by its Rust name (#2262).
@@ -743,6 +1280,17 @@ mod tests {
         );
     }
 
+    /// The mirror sends `on` to `set_smooth_scrolling`, the argument's name.
+    #[test]
+    fn the_mirror_sends_whether_scrolling_is_smooth() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+        let invocation = crate::commands::mirror::invocation(mirror, "set_smooth_scrolling");
+        assert!(
+            crate::commands::mirror::keys(invocation).contains(&"on"),
+            "the mirror calls set_smooth_scrolling without passing on: {invocation}"
+        );
+    }
+
     #[test]
     fn lifecycle_starts_starting_and_remembers_the_last_set() {
         let life = Lifecycle::new();
@@ -781,9 +1329,7 @@ mod tests {
         // the same data directory is the failure this prevents.
         assert!(!life.begin_retry(), "a starting database is not retried");
 
-        life.set(DbState::Failed {
-            message: "port 5432 in use".to_owned(),
-        });
+        life.set(DbState::failed("port 5432 in use"));
         assert!(life.begin_retry(), "a failure can be retried");
         assert_eq!(
             life.get(),
@@ -799,14 +1345,39 @@ mod tests {
         assert!(!life.begin_retry(), "a live database is not restarted");
     }
 
+    /// ux28: the machine's facts reach the failure they were read for, and
+    /// not one a *Retry* has replaced.
+    #[test]
+    fn a_failures_details_are_refined_only_while_it_is_shown() {
+        let life = Lifecycle::new();
+        life.set(DbState::Failed {
+            message: "blocked".to_owned(),
+            details: Some("quick".to_owned()),
+            blocked: None,
+            said: None,
+        });
+        assert!(!life.refine_failure("another", "full".to_owned()));
+        assert!(life.refine_failure("blocked", "full".to_owned()));
+        assert_eq!(
+            life.get(),
+            DbState::Failed {
+                message: "blocked".to_owned(),
+                details: Some("full".to_owned()),
+                blocked: None,
+                said: None,
+            }
+        );
+        assert!(life.begin_retry());
+        assert!(!life.refine_failure("blocked", "late".to_owned()));
+        assert_eq!(life.get(), DbState::Starting { detail: None });
+    }
+
     /// ...and a bring-up that *failed* says so, rather than repeating "still
     /// starting" for the rest of the session.
     #[test]
     fn a_failed_bring_up_says_why_in_the_refusal() {
         let life = Lifecycle::new();
-        life.set(DbState::Failed {
-            message: "port 5432 in use".to_owned(),
-        });
+        life.set(DbState::failed("port 5432 in use"));
         let error = life.pool().expect_err("there is no pool");
         assert_eq!(error.code, crate::IpcErrorCode::NotReady);
         assert!(

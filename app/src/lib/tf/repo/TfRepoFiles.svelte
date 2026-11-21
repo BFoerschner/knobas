@@ -23,6 +23,19 @@
   branch's last commit (`TfRepoLastCommit`, #2257): the landing is the tree,
   the last commit and the README, with no second listing of the top.
 
+  **Read from the checkout first** (ADR-0041, the smoothness pass of PR
+  #2479): where the repository has a checkout that holds the commit the
+  mirror names for the branch, the whole tree is read there at once
+  (`entity_local_tree`) and drawn before the source answers, its files read
+  there too (`entity_local_file`), under section ids the tab makes itself
+  (`LOCAL`), never the source's. The source's top is still read behind it:
+  where it stands at the same commit nothing moves and the tree says it was
+  checked; where the branch moved since the last sync the source's tree
+  replaces the checkout's in place, the open directories and the file kept,
+  and a file whose text changed says so. A checkout that lacks the commit is
+  fetched into behind the read (`checkout:fetched`), so the next open is
+  local.
+
   **Read at a commit** (#2241): the source reads the tree at the branch's tip
   and the sections its listings name stand at that commit, so a file opened
   from them costs the source its own two reads, and the app keeps it. Whether
@@ -32,7 +45,7 @@
   where the tip moved its sections are new, and the tree and the file are read
   at the new commit, the file drawn kept, dimmed, meanwhile.
 
-  A file over 2,000 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
+  A file over 300 lines is a windowed list (#2251, `shell/windowed.svelte.ts`):
   only the lines near the viewport are drawn, the rest are room above and
   below. A line link (`line/<n>/<path>`) draws its line, marks it and scrolls
   it to the middle. Copying a selection across lines copies their text from
@@ -65,18 +78,26 @@
   read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
 <script lang="ts">
-  import { flushSync, tick, untrack } from "svelte";
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
+  import { filterKeys } from "../filter-keys";
+  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { folderPicks } from "../../render/folder-picks.svelte";
+  import { heldWrite } from "../../shell/held-write";
+  import TfFolderPickMenu from "../render/TfFolderPickMenu.svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
+  import { openLink } from "../../shell/external-links";
+  import type { CheckoutView, Fetched, LocalDir, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { codeRows } from "../fonts.svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { allRenderers, BYTES_CAP, type Renderer } from "../../render/registry";
-  import { defaultPipeline, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
+  import { defaultPipeline, MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -100,8 +121,11 @@
   } from "../../render/pipelines.svelte";
   import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
+  import type { JarPorts } from "../render/TfJar.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { ago } from "../../shell/time";
   import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
+  import { drawnFile, forgetDrawnFiles, hasDrawnFile, keepDrawnFile } from "./drawn-files";
   import {
     REPO_FILES,
     ancestors,
@@ -110,6 +134,7 @@
     fileHash,
     fileLines,
     lineHash,
+    placeHash,
     likelySections,
     pickDefaultFile,
     repoHash,
@@ -117,13 +142,46 @@
     sourceName,
     type TextPlace,
   } from "./repo";
+  import { LANDING_README, landingGuess } from "./hover-reads";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
   import { layers } from "../layers.svelte";
-  import { fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
+  import {
+    BAND,
+    bandFolder,
+    checkoutListing,
+    diskListings,
+    fileMeta,
+    goToFile,
+    graftedListings,
+    graftedPaths,
+    madeIndex,
+    treeKey,
+    treeRows,
+    underFolder,
+    type MadeIndex,
+  } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
+  import TfFindBar from "../TfFindBar.svelte";
+  import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
+  import TfHtmlPage from "../render/TfHtmlPage.svelte";
+  import TfMadeBar from "../render/TfMadeBar.svelte";
+  import TfMadeOpenIn from "../openin/TfMadeOpenIn.svelte";
+  import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
+  import { failureLines, markSets, rendererFor, renderersFor } from "../../render/folder";
+  import type { FolderRenderer } from "../../ipc/app";
+  import { folderRenderMarks, type FolderMarks, type MadeTree } from "../../ipc/app";
+  import { ipcMadePorts, type MadePorts } from "../../render/made-ports";
+  import { folderRenderHash, pickMadeDefault, renderedHash, type FolderRenderAt } from "./repo";
+  import { FolderRun } from "../../render/folder-run.svelte";
+  import { bytesKey, changedUnder, fileReadAt, renderFrom } from "../../render/read-at";
+  import { thousands } from "../counted";
+  import { WORKING_TREE } from "../diff/address";
+  import type { WorkingMark } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -133,13 +191,15 @@
     repoId,
     at,
     branch,
-    path,
+    path: addressPath,
     line = null,
+    place = null,
     changed,
     editing = false,
     job = null,
     checkoutBranch = null,
     checkout = undefined,
+    checkoutRead = true,
     title = "",
     refreshed = 0,
     refusal = null,
@@ -149,8 +209,16 @@
     pipelines = appPipelines,
     stepCommands = appCommandSteps,
     treeSections = null,
+    ondrew,
+    folderRender = null,
+    rendered: renderedAt = null,
+    folders = appFolderRenderers,
+    folderMarks = folderRenderMarks,
+    folderPorts = ipcFolderRenderPorts,
+    madePorts = ipcMadePorts,
+    disk = null,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "piped">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "archive" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -162,6 +230,8 @@
     path: string | null;
     /** The line a line link marks, from 1; `null` for none. */
     line?: number | null;
+    /** A place inside a rendered file the address names (an OpenAPI spec's operation or schema, ux18); `null` for none. */
+    place?: string | null;
     /** The paths the local checkout changed. */
     changed: ReadonlySet<string>;
     /** The address is the file's edit (`edit/<path>`). */
@@ -172,6 +242,11 @@
     checkoutBranch?: string | null;
     /** The repository's checkout, for *Open in…*; `undefined` while it is read. */
     checkout?: CheckoutView | undefined;
+    /**
+     * Whether the checkout's read has answered, or failed: until then the file's actions wait unseen in their room, so
+     * *Clone* or *Open in…* landing beside *Render as* and *Pipeline* pushes neither (the ux21 pass: 59 px at 4x).
+     */
+    checkoutRead?: boolean;
     /** The repository's `owner/name`. */
     title?: string;
     /** The page's refreshes (#2135): each reads the open directories and the file again over what the tab drew. */
@@ -190,10 +265,67 @@
     stepCommands?: CommandSteps;
     /** How the source names the tree's sections by path (#2298, the repository's `EntityDetail.tree`); `null` asks a deep link's sections only once its listings name them. */
     treeSections?: TreeSections | null;
+    /** Told once the tree has drawn, or could not be: the header holds its first look until then (the inner-pages pass). */
+    ondrew?: () => void;
+    /** A folder drawn by a folder renderer in the file's place (`render/<id>/<folder>`, ADR-0044); `null` for none. */
+    folderRender?: FolderRenderAt | null;
+    /**
+     * Inside a folder's generated folder (`rendered/<id>/<folder>/…`, ADR-0046); `null` for none. With it, `path` is the
+     * generated file's, from the generated folder's top.
+     */
+    rendered?: FolderRenderAt | null;
+    /** The folder renderers (ADR-0044): the app's copy, a fresh one in tests. */
+    folders?: FolderRenderers;
+    /** Which folders the renderers holding a file glob take: the IPC, a fake in tests. */
+    folderMarks?: (entityId: string, commit: string | null, paths: string | null) => Promise<FolderMarks[]>;
+    /** What the folder's pane reaches the backend through: the IPC, a fake in tests. */
+    folderPorts?: FolderRenderPorts;
+    /** A generated folder's tree and files by its token (ADR-0046): the IPC, a fake in tests. */
+    madePorts?: MadePorts;
+    /**
+     * The working tree chosen in the branch box (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`):
+     * the checkout's tree at `head`, read from the checkout and never from the source, with `marks` (git's uncommitted
+     * list, ADR-0026) laid over it; a changed or added file read as it is on disk (ADR-0049). `stamp` is the list's,
+     * so a file read from disk is read again when it moves. `null` on a branch.
+     */
+    disk?: { head: string; marks: ReadonlyMap<string, WorkingMark>; stamp: string; branch: string | null; standing: string | null } | null;
   } = $props();
 
-  /** Each directory read so far at `at`, by its path (`""` the top). */
-  let listings = $state<Record<string, TreeEntry[]>>({});
+  /** The real file the address names; `null` inside a generated folder, whose path is its own (ADR-0046). */
+  const path = $derived(renderedAt === null ? addressPath : null);
+
+  $effect(() => {
+    if (listings[""] !== undefined || treeFailed !== null) untrack(() => ondrew?.());
+  });
+
+  /**
+   * Each directory read so far at `at`, by its path (`""` the top). Replaced whole, never written into: a clone's tree
+   * is every directory at once, and a deep proxy over ten thousand entries cost a folder's press more than its rows
+   * (the big-folder pass, 2026-11-13).
+   */
+  let listings = $state.raw<Record<string, TreeEntry[]>>({});
+  /**
+   * The checkout's tree at the mirror's tip (ADR-0041), while the listings are its: the commit it was read at, each
+   * folder read when it opens (the big-folder pass, 2026-11-13); `checked` once the source's top stood at the same commit.
+   */
+  let local = $state<{ commit: string; checked: boolean; asOf: string | null } | null>(null);
+  /** A folder the source listed past the whole tree it reads at once, one at a time (`read_alone`): the tree says so. */
+  let readAlone = $state(false);
+  /**
+   * When knobas read the top the tree draws, where that was earlier than now (`held_at`: the sync's stored tree, or a
+   * read held from before), and why the read behind it failed: the held line over the tree (the stored-trees pass,
+   * 2026-11-14).
+   */
+  let topHeld = $state<string | null>(null);
+  let topFailed = $state<string | null>(null);
+  /** The branch's tree is past what knobas keeps (`tree_unkept`): how many entries it holds. */
+  let unkept = $state<number | null>(null);
+  /** Folders the source cut at its cap, by path: how many entries it shows, and its page there. */
+  let cutDirs = $state.raw<Record<string, { shown: number; url: string | null }>>({});
+  /** The branch moved past the checkout's copy, and the file the reader had open changed with it. */
+  let movedNote = $state<string | null>(null);
+  /** The file drawn from the checkout when the source's newer tree replaced it: its path and blob. */
+  let movedFrom: { path: string; sha: string | null } | null = null;
   let treeFailed = $state<string | null>(null);
   /** The section the top listing names for every file at its commit (#2311), `null` where the source has none. */
   let pathsSection = $state<string | null>(null);
@@ -202,8 +334,36 @@
   let fileFailed = $state<string | null>(null);
   /** The file shown is being read: the one drawn before stays, dimmed, until it answers (#2246). */
   let fileReading = $state(false);
+  /** The commit the source's top directory named when it answered, at the current `at`; `null` before, or where it named none. */
+  let sourceTop: string | null = null;
+  /** When knobas read that top, where it was what knobas held (`held_at`, ADR-0042); `null` for a read made now. */
+  let sourceTopHeld: string | null = null;
+  /**
+   * The file drawn stands at a commit before the tree's, and its read at the tree's commit is on its way (the forge-waits
+   * pass, 2026-11-13: after a sync moved the branch, the file waited 2.1 s on Gitea, dimmed): drawn undimmed meanwhile,
+   * its header saying from when it is, and replaced in place when the clone or the source answers. `failed` where the
+   * source did not.
+   */
+  let fileBehind = $state<{ heldAt: string; failed: string | null } | null>(null);
+  /** When knobas read each answer of the source's this tab drew: `held_at` where it was held, else when it came. */
+  const readAtOf = new WeakMap<ViewSection, string>();
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
+  // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
+  /** The read the file drawn came from, which a listing's section can stand for once it names it. */
+  let drawnRead: ViewSection | undefined;
+  /**
+   * Keeps the file `read` drew under `section`, where the section names where the file stands: a listing's, at a commit.
+   * A file read by its path alone may have changed by the next look, so that is read again, as before.
+   */
+  function keepFile(section: string, read: ViewSection | undefined, path: string) {
+    // A generated file never changes under its token (ADR-0046).
+    if (section.startsWith(MADE)) return void keepDrawnFile(at, section, read);
+    if (section === GUESSED || section.startsWith(LOCAL) || section === MISSING) return;
+    // Where the source declares no scheme there is no telling a listing's section from a read by path: none is kept.
+    if (treeSections == null || section === `${treeSections.file}${path}`) return;
+    keepDrawnFile(at, section, read);
+  }
   /**
    * Reads a deep link asked before a listing named their section (#2244), by
    * section, at the current `at`: the listing that names one takes it.
@@ -211,19 +371,256 @@
   let early = new Map<string, Promise<ViewSection | undefined>>();
   let generation = 0;
 
+  /** A tree of more rows than this draws only the rows near the view (the big-folder pass, 2026-11-13). */
+  const TREE_WINDOW_FROM = 120;
+
   const join = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
   const parentOf = (full: string) => (full.includes("/") ? full.slice(0, full.lastIndexOf("/")) : "");
   const nameOf = (full: string) => full.slice(full.lastIndexOf("/") + 1);
 
+  /** A deep link's early read of its file has failed, or there is none: nothing but the listings can draw it now. */
+  let guessGone = $state(false);
+
   /** The entry `full` names in its parent's listing, once that is read. */
   function entryOf(full: string): TreeEntry | undefined {
-    return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
+    return treeListings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
   }
 
   /** The section `section` names, read at `where`: a directory's listing or a file and its actions. */
   async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
+    if (section.startsWith(LOCAL)) return readLocalSection(section, where);
+    if (section.startsWith(MADE)) return readMadeSection(section);
     const view = await ports.entityView(where, section);
-    return view?.sections[0];
+    const read = view?.sections[0];
+    if (read !== undefined) {
+      const held = view !== null && "held_at" in view && typeof view.held_at === "string" ? view.held_at : null;
+      readAtOf.set(read, held ?? new Date().toISOString());
+      if (held !== null) heldReads.add(read);
+    }
+    if (where === at && view !== null && "tree_unkept" in view && typeof view.tree_unkept === "number") unkept = view.tree_unkept;
+    return read;
+  }
+
+  /** Whether `read` was answered from what knobas held, not read now: the backend said when (`held_at`). */
+  const heldReads = new WeakSet<ViewSection>();
+  const heldBefore = (read: ViewSection) => heldReads.has(read);
+
+  /** The source's top was what knobas held from before the sync the clone's tree stands at: the clone's is newer. */
+  function olderThanClone(heldAt: string | null, asOf: string | null): boolean {
+    return heldAt !== null && asOf !== null && Date.parse(heldAt) < Date.parse(asOf);
+  }
+
+  // ---- The checkout's copy (ADR-0041) ----
+
+  /** What begins every section id the tab makes for the checkout's tree: a control character, which no source's id holds. */
+  const LOCAL = "\u0001local\u0000";
+  const localId = (commit: string, kind: "dir" | "file" | "paths", full: string) => `${LOCAL}${commit}\u0000${kind}\u0000${full}`;
+  function parseLocal(section: string): { commit: string; kind: string; full: string } | null {
+    // A file read from disk (`diskId`) carries the uncommitted list's stamp after its path.
+    const [commit, kind, full] = section.slice(LOCAL.length).split("\u0000");
+    return commit === undefined || kind === undefined || full === undefined ? null : { commit, kind, full };
+  }
+
+  /** A file of the working tree read from disk (2026-11-21): its own kind, so its read never stands for `HEAD`'s blob. */
+  const diskId = (commit: string, full: string, stamp: string) => `${localId(commit, "disk" as "file", full)}\u0000${stamp}`;
+  /** The bytes knobas reads of a working file (ADR-0049) as the file block the tab draws: text where it is UTF-8, else binary. */
+  function diskBlock(full: string, bytes: Uint8Array): FileBlock {
+    let text = "";
+    let binary = bytes.includes(0);
+    if (!binary) {
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        binary = true;
+      }
+    }
+    return { type: "file", trail: [], path: full, text, language: null, size: bytes.length, truncated: bytes.length >= BYTES_CAP, binary, url: null, sha: null, commit: null } as FileBlock;
+  }
+
+  /** One folder of the checkout's tree as the listing the tab draws, its entries opened by sections the tab makes. */
+  const localListing = (commit: string, entries: LocalDir["entries"]) => checkoutListing(entries, (kind, full) => localId(commit, kind, full));
+
+  /**
+   * A section the tab made for the checkout's tree: a folder or every path, read from the tree the backend keeps (the
+   * big-folder pass, 2026-11-13: the page holds what it draws, not the whole tree), or a file read at the checkout. A
+   * folder the checkout's read could not hold whole (a tree past two million entries) is the source's listing.
+   */
+  async function readLocalSection(section: string, where: string): Promise<ViewSection | undefined> {
+    const named = parseLocal(section);
+    if (named === null) return undefined;
+    const wrap = (block: ViewBlock): ViewSection => ({ id: section, title: "Files", count: null, deferred: false, blocks: [block] });
+    if (named.kind === "disk") {
+      const read = ports.fileBytes;
+      if (read === undefined) throw new Error(`Your checkout could not read ${named.full}.`);
+      return wrap(diskBlock(named.full, await read(repoId, named.full, WORKING_TREE)));
+    }
+    if (named.kind === "file") {
+      const read = ports.localFile;
+      const block = read === undefined ? null : await read(where, named.commit, named.full);
+      if (block === null) throw new Error(`Your checkout could not read ${named.full}.`);
+      return wrap(block);
+    }
+    if (named.kind === "paths") {
+      const read = ports.localPaths;
+      const answer = read === undefined ? null : await read(where, named.commit);
+      if (answer === null) throw new Error("Your checkout could not list its files.");
+      const entries = answer.entries.map((entry) => ({ name: entry.path, kind: entry.kind, size: entry.size, section: localId(named.commit, "file", entry.path) }));
+      return wrap({ type: "tree", trail: [], entries, truncated: answer.truncated, url: null });
+    }
+    const read = ports.localDir;
+    // A folder only the working tree has (its files untracked or added): `HEAD` lists nothing there, and the changes laid
+    // over the listings name its files.
+    const answer = read === undefined ? null : await read(where, named.commit, named.full).catch((error: unknown) => (disk !== null && named.full !== "" ? null : Promise.reject(error)));
+    if (answer === null && disk !== null && named.full !== "") return wrap({ type: "tree", trail: [], entries: [], truncated: false, url: null });
+    if (answer === null) throw new Error(`Your checkout could not read ${named.full || "its top folder"}.`);
+    if (!answer.complete) {
+      // Past what the checkout's read holds: the source's listing of the folder, by the scheme it declares.
+      if (treeSections == null) throw new Error(`${named.full} is past what knobas reads of your checkout at once.`);
+      return readSection(`${treeSections.dir}${named.full}`, where);
+    }
+    return wrap({ type: "tree", trail: [], entries: localListing(named.commit, answer.entries), truncated: false, url: null });
+  }
+
+  /**
+   * The checkout's tree at `where` (its top, at the mirror's tip), drawn where the source has not answered yet, or
+   * taking over from the source's where it stands at the same commit.
+   */
+  function readLocal(where: string, mine: number) {
+    const read = ports.localDir;
+    if (read === undefined || disk !== null) return;
+    read(where, null, "").then(
+      (top) => (top === null ? false : land(top, where, mine)),
+      // No checkout's copy: the source's reads draw the tree, as before.
+      () => false,
+    );
+  }
+
+  /**
+   * The checkout's top `top`, at the mirror's tip, drawn as the tree: at once where nothing is drawn yet, or taking over
+   * from the source's tree drawn first. `true` where it was taken.
+   */
+  function land(top: LocalDir, where: string, mine: number, synced = false): Promise<boolean> {
+    // The clone's own read and the source's top both say a branch moved, a moment apart: the second joins the first's
+    // takeover at that commit (the hover-lag pass, 2026-11-16: each read every folder at the new commit, twice over).
+    const under = landing;
+    if (under !== null && under.commit === top.commit && under.where === where && under.mine === mine && (under.synced || !synced)) return under.done;
+    const done = landNow(top, where, mine, synced);
+    const mineNow = { commit: top.commit, where, mine, synced, done };
+    landing = mineNow;
+    void done.finally(() => {
+      if (landing === mineNow) landing = null;
+    });
+    return done;
+  }
+  /** The takeover under way (`land`), for a second ask at the same commit to join. */
+  let landing: { commit: string; where: string; mine: number; synced: boolean; done: Promise<boolean> } | null = null;
+
+  async function landNow(top: LocalDir, where: string, mine: number, synced: boolean): Promise<boolean> {
+    const read = ports.localDir;
+    if (read === undefined || !top.complete || mine !== generation || where !== at) return false;
+    // The source's top answered first (the app keeps it, so on a later open it beats `git ls-tree`): where it stands
+    // at the clone's commit, the clone draws the tree after all, and its files are read there, not on the forge (the
+    // inner-pages pass, 2026-11-12). At another commit the branch moved since the sync, and the source's tree stands;
+    // unless the source's answer was what knobas held from before the sync the clone stands at (the forge-waits pass,
+    // 2026-11-13: after a sync the page drew the old commit's tree, and read the old commit's files, until Gitea answered).
+    const first = listings[""] !== undefined;
+    // `synced`: a sync since moved the mirror's tip past the clone's tree drawn, so the clone's is the newer.
+    const newer = synced || olderThanClone(sourceTopHeld, top.as_of);
+    if (first && sourceTop !== top.commit && !newer) return false;
+    const drawn: Record<string, TreeEntry[]> = { "": localListing(top.commit, top.entries) };
+    if (first) {
+      // Every folder the source's tree has drawn is read from the clone first and swapped in with the top, so no row
+      // moves (the big-folder pass); one the clone cannot answer whole leaves the source's tree standing.
+      const dirs = Object.keys(listings).filter((dir) => dir !== "");
+      const more = await Promise.all(dirs.map((dir) => read(where, top.commit, dir).catch(() => null)));
+      if (mine !== generation || where !== at || (sourceTop !== top.commit && !newer)) return false;
+      for (const [i, dir] of dirs.entries()) {
+        const answer = more[i];
+        // A folder the newer commit no longer holds is left out; any other the clone cannot answer leaves the source's tree.
+        if (answer === null && newer) continue;
+        if (answer == null || !answer.complete) return false;
+        drawn[dir] = localListing(top.commit, answer.entries);
+      }
+      // Taking over from the source's tree: its directory reads still under way would write the source's sections
+      // over the clone's.
+      generation += 1;
+      asked = new Set(Object.keys(drawn));
+      early = new Map();
+    }
+    local = { commit: top.commit, checked: first && sourceTop === top.commit, asOf: top.as_of };
+    listings = drawn;
+    pathsSection = localId(top.commit, "paths", "");
+    // The checkout's copy draws the landing's README: the source's guess at it goes unread, and goes.
+    early.delete(fileKey(LANDING_GUESS));
+    return true;
+  }
+
+  /**
+   * The clone at the mirror's tip again, where its tree is drawn (the forge-waits pass, 2026-11-13): on a return or a
+   * refresh, and when a fetch behind lands. A sync that moved the branch moved the mirror's tip with it, and where the
+   * clone holds the new commit its tree takes over in place at once, the file read there, before the source's read
+   * behind says the branch moved (3 s on a forge that takes 1 s a request, and the file read from the forge after it).
+   * Where the clone lacks it, the read fetches it behind (ADR-0041), and `checkout:fetched` asks again.
+   */
+  function rereadLocal(): Promise<unknown> {
+    const held = local;
+    const read = ports.localDir;
+    const [where, mine] = [at, generation];
+    if (held === null || read === undefined || disk !== null) return Promise.resolve();
+    return read(where, null, "").then(
+      (top) => {
+        if (top === null || top.commit === held.commit || local?.commit !== held.commit || mine !== generation) return;
+        // A tip the mirror stored after the one drawn: the clone's tree is newer than what the tab shows.
+        if (held.asOf === null || top.as_of === null || Date.parse(top.as_of) <= Date.parse(held.asOf)) return;
+        void land(top, where, mine, true);
+      },
+      () => {},
+    );
+  }
+
+  /**
+   * The source's top, read behind the checkout's copy: at the same commit it checks it and nothing moves; at another
+   * the branch moved since the last sync, and the source's tree replaces the copy, the open directories and the file
+   * read again through its sections. `true` where it was taken.
+   */
+  function settleLocal(block: Extract<ViewBlock, { type: "tree" }>): boolean {
+    const held = local;
+    if (held === null) return false;
+    if (block.commit === undefined || block.commit === held.commit) {
+      local = { ...held, checked: block.commit !== undefined };
+      return true;
+    }
+    // What knobas held from before the sync the clone's tree stands at: older than the clone's, and read again behind.
+    if (olderThanClone(sourceTopHeld, held.asOf)) return true;
+    // The branch moved past the clone's tree. A sync since moves the mirror's tip with it (the forge-waits pass,
+    // 2026-11-13: the tab went to the source's tree here and read every file on the forge, 2.1 s for a large one): the
+    // clone is asked at the mirror's tip first, and where it stands at the source's commit it takes over in place. Where
+    // it lacks that tip the read fetches it behind (ADR-0041), and `checkout:fetched` hands the tree back to it.
+    const mine = generation;
+    const toSource = () => {
+      if (mine !== generation || local !== held) return;
+      local = null;
+      movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
+      generation += 1;
+      asked = new Set([""]);
+      early = new Map();
+      listings = { "": block.entries };
+      pathsSection = block.paths ?? null;
+    };
+    const read = ports.localDir;
+    if (read === undefined) {
+      toSource();
+      return true;
+    }
+    const where = at;
+    read(where, null, "").then(
+      async (top) => {
+        if (top !== null && top.commit === block.commit && (await land(top, where, mine))) return;
+        toSource();
+      },
+      toSource,
+    );
+    return true;
   }
 
   /**
@@ -232,14 +629,44 @@
    */
   const dirKey = (dir: string) => `dir\u0000${dir}`;
   const fileKey = (full: string) => `file\u0000${full}`;
+  /** A read of the checkout's asked early, apart from the source's guesses at the same place. */
+  const localKey = (place: string) => `local\u0000${place}`;
 
   /** The read of `place` asked early, once, else -- or where that guess was refused -- a new one of `section`. */
   function take(section: string, place: string, where = at): Promise<ViewSection | undefined> {
+    // A deep link's early guess at the source would only be slower than the checkout; the checkout's own read of a folder
+    // the pointer rested on is taken (the big-folder pass).
+    if (section.startsWith(LOCAL)) place = localKey(place);
     const read = early.get(place);
     if (read === undefined) return readSection(section, where);
     early.delete(place);
     return read.catch(() => readSection(section, where));
   }
+
+  /**
+   * The pointer resting on a row of the tree reads what a press on it opens, so the source's round trip runs while the
+   * hand is on its way to the press (the inner-pages pass, 2026-11-12): a file or a directory a press would read from
+   * the source, asked once, after the pointer has stood on it a moment, so one swept across the tree asks nothing. The
+   * press takes the read under way (`take`). A folder of the checkout's copy is read early too (the big-folder pass:
+   * the tab reads a folder when it opens, not the whole tree at once); its files need none.
+   */
+  const REST_MS = 80;
+  let resting: ReturnType<typeof setTimeout> | null = null;
+  function restOn(full: string, section: string | null, kind: "file" | "dir") {
+    unrest();
+    if (section === null || (section.startsWith(LOCAL) && kind === "file") || section.startsWith(MADE)) return;
+    const place = section.startsWith(LOCAL) ? localKey(dirKey(full)) : kind === "file" ? fileKey(full) : dirKey(full);
+    if (early.has(place) || (kind === "dir" ? asked.has(full) || listings[full] !== undefined : hasDrawnFile(at, section) || full === shown)) return;
+    resting = setTimeout(() => {
+      resting = null;
+      if (!early.has(place)) askEarly(section, place);
+    }, REST_MS);
+  }
+  function unrest() {
+    if (resting !== null) clearTimeout(resting);
+    resting = null;
+  }
+  $effect(() => unrest);
 
   /** Asks for `section` now, for the listing that names `place` later. */
   function askEarly(section: string, place: string): Promise<ViewSection | undefined> {
@@ -258,25 +685,84 @@
       (read) => {
         if (mine !== generation) return;
         const block = read?.blocks[0];
-        listings[dir] = block?.type === "tree" ? block.entries : [];
-        if (dir === "") pathsSection = block?.type === "tree" ? (block.paths ?? null) : null;
+        if (dir === "" && block?.type === "tree") {
+          sourceTop = block.commit ?? null;
+          sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
+          topHeld = sourceTopHeld;
+          topFailed = null;
+        }
+        if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
+        listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
+        if (block?.type === "tree" && block.read_alone) readAlone = true;
+        if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
+        if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
       },
       (error) => {
-        if (mine === generation) treeFailed = ipcErrorMessage(error);
+        // The checkout's copy stands where the source cannot answer.
+        if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
       },
     );
   }
 
-  // A new branch is a new tree.
+  // A new branch is a new tree, and so is the working tree at another `HEAD`.
+  const diskHead = $derived(disk?.head ?? null);
   $effect(() => {
     void at;
+    void diskHead;
     generation += 1;
+    sourceTop = null;
+    sourceTopHeld = null;
+    topHeld = null;
+    topFailed = null;
+    unkept = null;
+    fileBehind = null;
     asked = new Set();
     early = new Map();
     listings = {};
     treeFailed = null;
     pathsSection = null;
-    untrack(() => readDir("", "files"));
+    local = null;
+    readAlone = false;
+    cutDirs = {};
+    movedNote = null;
+    movedFrom = null;
+    untrack(() => {
+      // Rule 3 (ADR-0046): a new branch clears every graft; the address's comes back by rule 1.
+      grafts.clear();
+      if (disk !== null) {
+        readDir("", localId(disk.head, "dir", ""));
+        return;
+      }
+      readLocal(at, generation);
+      readDir("", "files");
+    });
+  });
+
+  // A fetch behind the checkout's read landed (ADR-0041): the checkout can draw the tree now, and where the source drew it
+  // first at the same commit, it takes over, so the next folder opens from the clone and not from the forge (the
+  // big-folder pass, 2026-11-13: a page opened while the clone was behind kept reading every folder from the forge).
+  $effect(() => {
+    const where = at;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    let live = true;
+    let stop: (() => void) | null = null;
+    void listen(EVENTS.checkoutFetched, ({ payload }) => {
+      const fetched = payload as Fetched;
+      if (!live || fetched.entity_id !== where) return;
+      const held = untrack(() => local);
+      if (held === null) readLocal(where, generation);
+      else if (held.commit !== fetched.commit) void rereadLocal();
+    }).then(
+      (unlisten) => {
+        if (live) stop = unlisten;
+        else unlisten();
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+      stop?.();
+    };
   });
 
   // The directories above the file the address names open.
@@ -284,9 +770,381 @@
     if (path !== null) for (const dir of ancestors(path)) open.add(dir);
   });
 
+  // Folder renderers (ADR-0044): the saved list, once, and which folders of this tree those holding a file glob take.
+  /** The saved list has answered: a renderer it does not name is gone, not unread. */
+  let foldersRead = $state(false);
+  $effect(() => {
+    void folders.ensure().then(
+      () => (foldersRead = true),
+      () => {},
+    );
+  });
+  /** The section the source lists every path in, where it is the source's (a clone's tree reads at the clone). */
+  const sourcePaths = $derived(pathsSection !== null && !pathsSection.startsWith(LOCAL) ? pathsSection : null);
+  let marks = $state.raw<ReadonlyMap<string, ReadonlySet<string>>>(new Map());
+  /**
+   * Where every render of this tree reads (ux29, `render/read-at.ts`): the working tree on disk where it is chosen, else
+   * the clone's commit. The folder renders, *Run again*, the marks, and (`fileReadAt`) every file's renderer read it.
+   */
+  const readFrom = $derived(renderFrom(at, repoId, disk, local?.commit ?? null, sourcePaths));
+  $effect(() => {
+    const [from, holders] = [readFrom, folders.list.some((r) => r.holds.length > 0)];
+    if (!holders || (from.commit === null && from.paths === null)) return;
+    let live = true;
+    folderMarks(from.entityId, from.commit, from.paths).then(
+      (found) => {
+        if (!live) return;
+        marks = markSets(found);
+        noteMarks(repoId, marks);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  /**
+   * The renderer the folder at `full` gets (ux26): its pick, else the first that takes it; the tree row's link. None inside
+   * a generated folder (ADR-0046).
+   */
+  const folderRendererOf = (full: string) => (inGraft(full) ? undefined : rendererFor(full, folders.list, marks, folderPicks.of(repoId, full)));
+  /** Several renderers take the folder and none was picked: its glyph opens a menu to pick one (ux26, ruling 10). */
+  const folderAsks = (full: string) => folderPicks.of(repoId, full) === null && renderersFor(full, folders.list, marks).length > 1;
+  /** The glyph's menu, open for one folder. */
+  let pickFor = $state<{ folder: string; opener: HTMLElement } | null>(null);
+  let pickOpen = $state(false);
+  /** Choosing in the glyph's menu: the pick is kept for this folder, and the folder opens drawn by it. */
+  function pickRenderer(folder: string, by: FolderRenderer) {
+    pickOpen = false;
+    void folderPicks.set(repoId, repoId, folder, by.id).catch(() => {});
+    location.hash = renderLink(by, folder);
+  }
+  onMount(() => void folderPicks.ensure().catch(() => {}));
+  const savedRenderer = (id: string) => folders.list.find((r) => r.id === id) ?? null;
+  /** A folder's glyph and *Render with*: the generated folder's address for a folder kind, the drawing's for the rest. */
+  const renderLink = (by: { id: string; output: string }, folder: string) =>
+    by.output === "folder" ? renderedHash(repoId, by.id, folder) : folderRenderHash(repoId, by.id, folder);
+
+  // ---- Generated folders in the tree: a graft (ADR-0046) ----
+
+  /**
+   * The address's generated folder, normalised (no redirect, no history entry): a `render/` address whose renderer
+   * makes a folder of files is its `rendered` landing, and a `rendered/` one whose renderer does not is the drawing's.
+   * A renderer not read yet is taken as the address says; one the saved list no longer names is the drawing's, which
+   * says so.
+   */
+  const renderedNow = $derived.by((): FolderRenderAt | null => {
+    if (renderedAt !== null) {
+      const by = savedRenderer(renderedAt.renderer);
+      if (by !== null ? by.output !== "folder" : foldersRead) return null;
+      return renderedAt;
+    }
+    if (folderRender !== null) return savedRenderer(folderRender.renderer)?.output === "folder" ? folderRender : null;
+    return null;
+  });
+  /** The folder drawn in the file's place by a single-output renderer (ADR-0044), as before. */
+  const singleNow = $derived(renderedNow !== null ? null : (folderRender ?? renderedAt));
+  const renderedBy = $derived(singleNow === null ? null : savedRenderer(singleNow.renderer));
+  /** The renderers the folder drawn offers to switch to: those that take it, and the one drawing it. */
+  const folderChoices = $derived.by(() => {
+    if (singleNow === null || renderedBy === null) return [];
+    const taking = renderersFor(singleNow.folder, folders.list, marks);
+    return taking.some((r) => r.id === renderedBy.id) ? taking : [renderedBy, ...taking];
+  });
+  // The folder drawn opens in the tree, with the folders above it.
+  $effect(() => {
+    if (singleNow === null || singleNow.folder === "") return;
+    for (const dir of ancestors(singleNow.folder)) open.add(dir);
+    open.add(singleNow.folder);
+  });
+
+  /** A real folder shown with a generated folder's rows in place of its own: tab state, by folder. */
+  interface Graft {
+    folder: string;
+    renderer: string;
+    token: string | null;
+    index: MadeIndex | null;
+    state: "made" | "running" | "none" | "failed";
+  }
+  const grafts = new SvelteMap<string, Graft>();
+  /** The generated folders this tab has read, by token (the last four), and the last token of each renderer and folder. */
+  const madeKept = new Map<string, MadeIndex>();
+  const lastMade = new Map<string, string>();
+  const graftKey = (renderer: string, folder: string) => `${renderer}\u0000${folder}`;
+  function keepMade(index: MadeIndex) {
+    madeKept.delete(index.token);
+    madeKept.set(index.token, index);
+    while (madeKept.size > 4) madeKept.delete(madeKept.keys().next().value!);
+  }
+  /** Whether `full` is inside a graft's generated rows (the grafted folder's own row is not). */
+  const inGraft = (full: string) => grafts.size > 0 && [...grafts.keys()].some((folder) => full !== folder && underFolder(full, folder));
+  /** The graft holding `full` and its path there, where its generated folder holds that file. */
+  function madeAt(full: string): { graft: Graft; rel: string } | null {
+    for (const graft of grafts.values()) {
+      if (graft.index === null || !underFolder(full, graft.folder) || full === graft.folder) continue;
+      const rel = graft.folder === "" ? full : full.slice(graft.folder.length + 1);
+      if (graft.index.has(rel)) return { graft, rel };
+    }
+    return null;
+  }
+  /** A file's address: the generated one where a graft holds it, else the repository's. */
+  const hrefOf = (full: string) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? fileHash(repoId, full) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel);
+  };
+  const lineHrefOf = (full: string, n: number) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? lineHash(repoId, full, n) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel, { line: n });
+  };
+  const placeHrefOf = (full: string, at: string) => {
+    const made = grafts.size === 0 ? null : madeAt(full);
+    return made === null ? placeHash(repoId, full, at) : renderedHash(repoId, made.graft.renderer, made.graft.folder, made.rel, { place: at });
+  };
+
+  // Rule 1: the address's generated folder turns its graft on, and opens it and the folders above it. Rule 3: a new
+  // branch clears every graft first (`at` is read here, after the new-branch effect). A graft never sits under another.
+  $effect(() => {
+    void at;
+    const now = renderedNow;
+    if (now === null) return;
+    untrack(() => {
+      for (const folder of [...grafts.keys()]) {
+        if (folder !== now.folder && (underFolder(folder, now.folder) || underFolder(now.folder, folder))) grafts.delete(folder);
+      }
+      const had = grafts.get(now.folder);
+      if (had === undefined || had.renderer !== now.renderer) {
+        const token = lastMade.get(graftKey(now.renderer, now.folder)) ?? null;
+        const index = token === null ? null : (madeKept.get(token) ?? null);
+        grafts.set(now.folder, { folder: now.folder, renderer: now.renderer, token, index, state: index === null ? "running" : "made" });
+      }
+      for (const dir of ancestors(now.folder)) open.add(dir);
+      if (now.folder !== "") open.add(now.folder);
+    });
+  });
+  // Rule 2: an address inside a grafted folder's real tree turns that graft off: a real file under it, or a rendering
+  // of a real folder under it.
+  $effect(() => {
+    const real = path;
+    const drawnFolder = singleNow?.folder ?? null;
+    untrack(() => {
+      for (const folder of [...grafts.keys()]) {
+        if ((real !== null && underFolder(real, folder)) || (drawnFolder !== null && underFolder(drawnFolder, folder))) grafts.delete(folder);
+      }
+    });
+  });
+  // A generated file's folders open, as a real file's do.
+  $effect(() => {
+    if (madePath !== null) for (const dir of ancestors(madePath)) open.add(dir);
+  });
+
+  /** The address's run (ADR-0046): asked while shown, as `TfFolderRender` asks for a drawing. */
+  const madeRun = new FolderRun(
+    () =>
+      renderedNow === null
+        ? null
+        : { ...readFrom, renderer: renderedNow.renderer, command: "", folder: renderedNow.folder, start: shownPage() },
+    untrack(() => folderPorts),
+  );
+  /** The address's run asked again with `look`, once: a token the backend no longer held is read back from its store. */
+  async function lookOnce(): Promise<void> {
+    const now = renderedNow;
+    if (now === null) return;
+    const from = readFrom;
+    await folderPorts
+      .render({ entityId: from.entityId, renderer: now.renderer, folder: now.folder, commit: from.commit, paths: from.paths, ask: "look", ...(from.lane ? { lane: from.lane } : {}) })
+      .catch(() => {});
+  }
+  const notHeld = (cause: unknown) => typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "not_found";
+
+  /** A generated folder's tree as the tab's index: kept by token, read once, and once more after a `look`. */
+  async function readMade(token: string): Promise<MadeIndex> {
+    const kept = madeKept.get(token);
+    if (kept !== undefined) return kept;
+    let tree: MadeTree;
+    try {
+      tree = await madePorts.tree(token);
+    } catch (cause) {
+      if (!notHeld(cause)) throw cause;
+      await lookOnce();
+      tree = await madePorts.tree(token);
+    }
+    const index = madeIndex(tree, token, (kind, rel) => madeId(token, kind, rel));
+    keepMade(index);
+    return index;
+  }
+
+  // The run answered: the graft takes its state, and a new generated folder's rows (read first, then swapped in one
+  // write with the scroll held on a row that stays, ADR-0046's re-run).
+  $effect(() => {
+    const view = madeRun.view;
+    const now = renderedNow;
+    if (now === null || view === null) return;
+    untrack(() => {
+      const graft = grafts.get(now.folder);
+      if (graft === undefined || graft.renderer !== now.renderer) return;
+      const drawn = view.drawn !== null && view.drawn.kind.kind === "folder" ? view.drawn : null;
+      const state: Graft["state"] = view.running !== null ? "running" : view.failure !== null && view.failure.why !== "stopped" ? "failed" : drawn !== null ? "made" : "none";
+      if (drawn === null) {
+        // Nothing kept any more (evicted, cleared): the rows go once no run is going.
+        const gone = view.running === null;
+        grafts.set(now.folder, { ...graft, state, ...(gone ? { token: null, index: null } : {}) });
+        return;
+      }
+      if (graft.token === drawn.token && graft.index !== null) {
+        if (graft.state !== state) grafts.set(now.folder, { ...graft, state });
+        return;
+      }
+      const folder = now.folder;
+      readMade(drawn.token).then(
+        (index) => {
+          const held = grafts.get(folder);
+          if (held === undefined || held.renderer !== now.renderer) return;
+          lastMade.set(graftKey(now.renderer, folder), index.token);
+          swapIn(folder, { ...held, token: index.token, index, state });
+        },
+        () => {
+          const held = grafts.get(folder);
+          if (held !== undefined && held.index === null) grafts.set(folder, { ...held, state: "none" });
+        },
+      );
+    });
+  });
+
+  /**
+   * Put `next` in the tree in one write. The first row in view outside the graft (else the first inside it the new tree
+   * holds, else the band) keeps its place, on a first landing as on a re-run (Fable, 2026-11-20: rows above the band
+   * never move, and with the band scrolled above the view nothing in view does): rows are keyed by path, so a file both
+   * runs made keeps its node, and the scroll is set so the anchor's top is where it was.
+   */
+  function swapIn(folder: string, next: Graft) {
+    const box = tree;
+    if (box === null || !box.isConnected) {
+      grafts.set(folder, next);
+      return;
+    }
+    const inside = (p: string) => p !== folder && underFolder(p, folder);
+    const relOf = (p: string) => (folder === "" ? p : p.slice(folder.length + 1));
+    const rowsNow = () => [...box.querySelectorAll<HTMLElement>("[data-path]")];
+    heldWrite(() => grafts.set(folder, next), {
+      rows: rowsNow,
+      top: () => box.getBoundingClientRect().top,
+      choose: (drawnRows) =>
+        drawnRows.find((el) => !inside(el.dataset["path"]!)) ??
+        drawnRows.find((el) => {
+          const p = el.dataset["path"]!;
+          return !p.endsWith(BAND) && (next.index!.has(relOf(p)) || next.index!.listingOf(relOf(p)) !== undefined);
+        }) ??
+        drawnRows.find((el) => el.dataset["path"] === `${folder}${BAND}`),
+      idOf: (row) => row.dataset["path"]!,
+      same: (path) => {
+        const find = () => rowsNow().find((el) => el.dataset["path"] === path);
+        const row = find();
+        if (row !== undefined) return row;
+        treeWin.reveal(rows.findIndex((r) => r.path === path));
+        flushSync();
+        return find();
+      },
+      scrollBy: (_row, px) => (box.scrollTop += px),
+    });
+  }
+
+  /** *Real files*: the graft goes; at its own address, the folder's README or the repository's landing opens. */
+  function realFiles(folder: string) {
+    grafts.delete(folder);
+    const now = renderedNow;
+    if (now !== null && now.folder === folder) {
+      const readme = pickDefaultFile(listings[folder] ?? []);
+      location.hash = readme === null ? repoHash(repoId) : fileHash(repoId, join(folder, readme));
+    }
+    flushSync();
+    if (folder !== "") [...(tree?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find((el) => el.dataset["path"] === folder)?.focus();
+  }
+
+  /** A generated row's classes: the rail down the rows at its grafted folder's icon (`tf-mrtop` for the top folder). */
+  const madeClass = (made: number | undefined) => (made === undefined ? "" : `tf-made tf-mr${made < 0 ? "top" : Math.min(made, 8)}`);
+
+  /** The grafts as the tree reads them: a graft whose run has made nothing yet holds no rows, its band alone. */
+  const grafted = $derived(
+    [...grafts.values()].map((graft) => ({
+      folder: graft.folder,
+      dirs: graft.index?.dirs ?? [""],
+      listingOf: (dir: string) => (graft.index === null ? (dir === "" ? [] : undefined) : graft.index.listingOf(dir)),
+      files: graft.index?.files ?? [],
+    })),
+  );
+  /** The working tree's changes laid over `HEAD`'s listings (`diskListings`): a new list re-lays them, nothing read again. */
+  const realListings = $derived(
+    disk === null ? listings : diskListings(listings, disk.marks, (full) => diskId(disk.head, full, disk.stamp), (full) => localId(disk.head, "dir", full)),
+  );
+  /**
+   * The listings the tree draws: the real ones, with each graft's rows in its folder's place. The graft goes over the
+   * working tree's changes, never under them (ux29): a changed file of a grafted folder is no row among its generated
+   * ones, which pushed every row under it down when the run's files landed.
+   */
+  const treeListings = $derived(grafts.size === 0 ? realListings : graftedListings(realListings, grafted));
+  /** How a path stands in the working tree, or `M` for a file the checkout changed while a branch is shown. */
+  const markOf = (full: string): WorkingMark | undefined => (disk !== null ? disk.marks.get(full) : changed.has(full) ? "M" : undefined);
+  const MARK_WORDS: Record<WorkingMark, string> = { M: "Changed in your checkout", A: "Added in your working tree", D: "Deleted in your working tree" };
+  const bands = $derived(grafts.size === 0 ? undefined : new Set(grafts.keys()));
+
+  // ---- A generated file (ADR-0046) ----
+
+  /** What begins every section id the tab makes for a generated folder: as `LOCAL`, a control character. */
+  const MADE = "\u0001made\u0000";
+  const madeId = (token: string, kind: "dir" | "file", rel: string) => `${MADE}${token}\u0000${kind}\u0000${rel}`;
+  function parseMade(section: string): { token: string; kind: string; rel: string } | null {
+    const [token, kind, rel] = section.slice(MADE.length).split("\u0000");
+    return token === undefined || kind === undefined || rel === undefined ? null : { token, kind, rel };
+  }
+  /** The generated file a section names, read by its token; its path in the block is the tree's, so its links resolve there. */
+  async function readMadeSection(section: string): Promise<ViewSection | undefined> {
+    const named = parseMade(section);
+    if (named === null || named.kind !== "file") return undefined;
+    const graft = [...grafts.values()].find((g) => g.token === named.token);
+    const full = graft === undefined ? named.rel : join(graft.folder, named.rel);
+    let block: ViewBlock;
+    try {
+      block = await madePorts.file(named.token, named.rel);
+    } catch (cause) {
+      if (!notHeld(cause)) throw cause;
+      await lookOnce();
+      block = await madePorts.file(named.token, named.rel);
+    }
+    const placed = block.type === "file" ? { ...block, path: full } : block;
+    return { id: section, title: "Files", count: null, deferred: false, blocks: [placed] };
+  }
+  /** The generated file drawn: its token, its graft's folder and its path there; `null` for a repository's file. */
+  let fileMade = $state<{ token: string; folder: string; rel: string } | null>(null);
+  const madePath = $derived(renderedNow !== null && addressPath !== null ? join(renderedNow.folder, addressPath) : null);
+  /** The address's generated folder in the made bar: its maker's name, the renderers that take the folder. */
+  const madeName = $derived(renderedNow === null ? "" : (savedRenderer(renderedNow.renderer)?.name ?? renderedNow.renderer));
+  const madeChoices = $derived.by(() => {
+    if (renderedNow === null) return [];
+    const by = savedRenderer(renderedNow.renderer);
+    const taking = renderersFor(renderedNow.folder, folders.list, marks);
+    return by === null || taking.some((r) => r.id === by.id) ? taking : [by, ...taking];
+  });
+  const madeShown = $derived(renderedNow === null ? null : (grafts.get(renderedNow.folder)?.index ?? null));
+  /** The address's run goes, or the generated folder it answered is not in the tree yet. */
+  const madeBusy = $derived.by(() => {
+    const view = madeRun.view;
+    if (renderedNow === null || view === null || view.running !== null) return renderedNow !== null;
+    const drawn = view.drawn?.kind.kind === "folder" ? view.drawn : null;
+    return drawn !== null && grafts.get(renderedNow.folder)?.token !== drawn.token;
+  });
+  /** The landing's file: a README, an index page, the only file (`pickMadeDefault`). */
+  const madeDefault = $derived.by(() => {
+    if (renderedNow === null) return null;
+    const top = grafts.get(renderedNow.folder)?.index?.listingOf("");
+    const pick = top === undefined ? null : pickMadeDefault(top);
+    return pick === null ? null : join(renderedNow.folder, pick);
+  });
+
   // Every open directory is read once its parent is.
   $effect(() => {
     for (const dir of open) {
+      // A generated folder's listings are in its index: nothing is read (ADR-0046).
+      if (inGraft(dir)) continue;
       const entry = entryOf(dir);
       if (entry?.kind === "dir" && entry.section !== null) readDir(dir, entry.section);
     }
@@ -303,8 +1161,12 @@
     if (target === null) return;
     return untrack(() => {
       if (listings[parentOf(target)] !== undefined) return;
+      guessGone = false;
       const likely = likelySections(target, declared);
-      if (likely === null) return;
+      if (likely === null) {
+        guessGone = true;
+        return;
+      }
       for (const [dir, section] of Object.entries(likely.dirs))
         if (!asked.has(dir) && listings[dir] === undefined && !early.has(dirKey(dir))) askEarly(section, dirKey(dir));
       let live = true;
@@ -320,8 +1182,11 @@
           if (file !== null && file.path === target) return;
           drawFile(read, fileSection ?? GUESSED);
         },
-        // Its directory's listing says whether there is such a file.
-        spent,
+        // Its directory's listing says whether there is such a file; one no listing holds has no directory to say so.
+        () => {
+          spent();
+          if (live && where === at && shown === target) guessGone = true;
+        },
       );
       return () => {
         live = false;
@@ -329,7 +1194,37 @@
     });
   });
 
-  const shown = $derived(path ?? pickDefaultFile(listings[""] ?? []));
+  // The landing names no file: its README is asked of the source beside the top listing and the checkout's read, as a
+  // deep link's file is (the inner-6x pass, 2026-11-15: asked once the listing had named it, it was a second round of the
+  // forge, 130 ms of a landing's 330 at 6x; the ux14 Windows pass, 2026-11-16: asked once the checkout had said it holds
+  // no copy, a second round of IPC, about 90 ms of a landing's 372 at 6x on the PC). Where the checkout holds a copy, the
+  // copy draws the README and the guess goes unread: one read of the store, and the read behind it, spent for the round.
+  // A Markdown README is the default `pickDefaultFile` takes first; where the listing names another file, or none, the
+  // guess goes unread and the listing's own section is read.
+  // A press on the repository's link asked the same guess before the page was built (`readLandingAhead`, the ux16 overs
+  // pass): taken where the listing came first and names it, so the README draws with the listing, not a round after it.
+  const LANDING_GUESS = LANDING_README;
+  $effect(() => {
+    const declared = treeSections;
+    if (path !== null || renderedNow !== null) return;
+    if (listings[""] !== undefined) {
+      // The listing names its own default: a guess it did not take goes, so no later open of that file takes a read from now.
+      untrack(() => {
+        if (shown !== LANDING_GUESS) early.delete(fileKey(LANDING_GUESS));
+        else if (!early.has(fileKey(LANDING_GUESS))) {
+          const pressed = landingGuess(at);
+          if (pressed !== null && !hasDrawnFile(at, pressed)) askEarly(pressed, fileKey(LANDING_GUESS));
+        }
+      });
+      return;
+    }
+    untrack(() => {
+      const likely = likelySections(LANDING_GUESS, declared);
+      if (likely !== null && !early.has(fileKey(LANDING_GUESS)) && !hasDrawnFile(at, likely.file)) askEarly(likely.file, fileKey(LANDING_GUESS));
+    });
+  });
+
+  const shown = $derived(renderedNow !== null ? (madePath ?? madeDefault) : (path ?? pickDefaultFile(listings[""] ?? [])));
 
   const MISSING = "\u0000missing";
 
@@ -338,7 +1233,12 @@
    * `missing` where the directory holds no such file.
    */
   const fileSection = $derived.by((): string | null => {
-    if (shown === null || listings[parentOf(shown)] === undefined) return null;
+    if (shown === null) return null;
+    // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
+    for (const dir of ancestors(shown)) {
+      if (dir !== "" && guessGone && treeListings[dir] === undefined && treeListings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+    }
+    if (treeListings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
@@ -350,8 +1250,20 @@
   function drawFile(read: ViewSection | undefined, section: string) {
     const block = read?.blocks[0];
     file = block?.type === "file" ? block : null;
+    const was = movedFrom;
+    movedFrom = null;
+    movedNote =
+      was !== null && file !== null && file.path === was.path && was.sha !== null && file.sha !== was.sha
+        ? `${branch ?? "This branch"} moved on ${sourceName(source)} since the last sync, and this file changed with it: the newest is shown.`
+        : null;
     drawnSection = section;
+    drawnRead = read;
+    const made = section.startsWith(MADE) ? parseMade(section) : null;
+    const madeIn = made === null ? undefined : [...grafts.values()].find((g) => g.token === made.token);
+    fileMade = made === null || madeIn === undefined ? null : { token: made.token, folder: madeIn.folder, rel: made.rel };
+    if (file !== null) keepFile(section, read, file.path);
     fileReading = false;
+    fileBehind = null;
     fileFailed = null;
     draft = null;
     settleCommit(file);
@@ -362,20 +1274,35 @@
   $effect(() => {
     const section = fileSection;
     const where = at;
-    // Drawn already, by a deep link's early read or before a step away and back.
+    // Drawn already, by a deep link's early read or before a step away and back; or the checkout's tree took over from
+    // the source's at the commit the file was read at, so it is the same file (the big-folder pass, 2026-11-13).
+    const named = section?.startsWith(LOCAL) ? parseLocal(section) : null;
+    const held = untrack(() => file);
+    if (named !== null && named.kind === "file" && held !== null && held.path === named.full && held.commit === named.commit) {
+      drawnSection = section;
+      fileReading = false;
+      fileFailed = null;
+      return;
+    }
     if (section !== null && section === untrack(() => drawnSection) && untrack(() => file) !== null) {
       fileReading = false;
       fileFailed = null;
       return;
     }
-    // A deep link's guess drew this file before its listing named the section: it stands for it.
+    // A deep link's guess drew this file before its listing named the section: it stands for it, where it stands at the
+    // tree's commit. A guess read at the commit before a sync does not stand for the clone's tree at the commit after it
+    // (the forge-waits pass, 2026-11-13: a page opened after a sync kept the file before it).
+    const guessed = untrack(() => file);
+    const guessAt = untrack(() => local?.commit ?? null) ?? sourceTop;
     if (
       section !== null &&
       section !== MISSING &&
       drawnSection === GUESSED &&
-      untrack(() => file)?.path === untrack(() => shown)
+      guessed?.path === untrack(() => shown) &&
+      !(typeof guessed?.commit === "string" && guessAt !== null && guessed.commit !== guessAt)
     ) {
       drawnSection = section;
+      keepFile(section, drawnRead, untrack(() => shown) ?? "");
       fileReading = false;
       fileFailed = null;
       return;
@@ -383,7 +1310,23 @@
     fileFailed = null;
     // Waiting for the directory that says which section opens the file; with no file to show, nothing is drawn.
     const showing = untrack(() => shown) !== null;
-    fileReading = showing;
+    // The file drawn is this one at a commit before the tree's (a sync or a push moved the branch): it stays drawn,
+    // undimmed, saying from when it is, until the read at the new commit replaces it (the forge-waits pass, 2026-11-13).
+    const before = untrack(() => file);
+    const treeAt = untrack(() => local?.commit ?? null) ?? sourceTop;
+    const behind =
+      section !== null &&
+      section !== MISSING &&
+      before !== null &&
+      before.path === untrack(() => shown) &&
+      typeof before.commit === "string" &&
+      treeAt !== null &&
+      before.commit !== treeAt;
+    // A re-run's new generated folder (ADR-0046): the file drawn stays, undimmed, until its new read replaces it in place.
+    const madeAgain = section !== null && section.startsWith(MADE) && (untrack(() => drawnSection)?.startsWith(MADE) ?? false) && before?.path === untrack(() => shown);
+    fileReading = showing && !behind && !madeAgain;
+    // The clone answers in a few milliseconds: only a read of the source is said to be waited on.
+    fileBehind = behind && !section.startsWith(LOCAL) ? { heldAt: (drawnRead && readAtOf.get(drawnRead)) ?? new Date().toISOString(), failed: null } : null;
     if (!showing) {
       file = null;
       drawnSection = null;
@@ -397,6 +1340,11 @@
       return;
     }
     let live = true;
+    const drawnBefore = drawnFile(where, section);
+    if (drawnBefore !== undefined) {
+      drawFile(drawnBefore, section);
+      return;
+    }
     take(section, fileKey(untrack(() => shown) ?? ""), where).then(
       (read) => {
         if (live && !(file !== null && drawnSection === section)) drawFile(read, section);
@@ -404,6 +1352,11 @@
       (error) => {
         if (!live) return;
         fileReading = false;
+        // The file knobas drew stays, saying the source did not answer; nothing is read again until the next look.
+        if (fileBehind !== null) {
+          fileBehind = { ...fileBehind, failed: ipcErrorMessage(error) };
+          return;
+        }
         file = null;
         drawnSection = null;
         fileFailed = ipcErrorMessage(error);
@@ -413,6 +1366,13 @@
       live = false;
     };
   });
+
+  /** What the header says of a file drawn from a commit before the tree's: from when it is, and what is being read. */
+  function behindLine(behind: { heldAt: string; failed: string | null }, commit: string | null): string {
+    const when = ago(behind.heldAt, new Date());
+    const read = `As knobas read it ${when === "just now" ? "a moment ago" : when}${commit === null ? "" : `, at ${commit.slice(0, 7)}`}.`;
+    return behind.failed === null ? `${read} Checking ${sourceName(source)}…` : `${read} ${sourceName(source)} did not answer: ${behind.failed}`;
+  }
 
   /**
    * A directory read failed before the file's section was known: no answer is
@@ -432,8 +1392,20 @@
    * The named pipeline the file's pattern opens it through (#2265, `defaultPipeline`), read from the app's copy
    * each time: an edit in Settings changes what runs. Edited in the bar, the edit (in `pipes`) stands instead.
    */
-  const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
+  const fromDefault = $derived(file === null || editing || fileMade !== null ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
   const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
+  /** What a closed bar held, by path: *Pipeline* brings the steps back, as the reader built them. */
+  const closedPipes = new SvelteMap<string, PipeStep[]>();
+  /** The panel the reader opened on this file, which *Close* or `Esc` puts away before `Esc` leaves the page. */
+  const pipeOpened = $derived(file !== null && !editing && pipes.has(file.path) ? file.path : null);
+  let pipeFace = $state<HTMLButtonElement | null>(null);
+  let suggestFace = $state<HTMLButtonElement | null>(null);
+
+  function closePipe(at: string) {
+    const held = pipes.get(at);
+    if (held !== undefined && held.length > 0) closedPipes.set(at, held);
+    pipes.delete(at);
+  }
   const shownDefault = $derived(
     file !== null && fromDefault !== null && !pipes.has(file.path) ? { name: fromDefault.pipeline.name, pattern: fromDefault.pattern } : null,
   );
@@ -477,7 +1449,7 @@
     };
   });
   const suggested = $derived.by(() => {
-    if (file === null || editing || steps !== null || ports.piped === undefined || notNow.has(file.path)) return null;
+    if (file === null || editing || fileMade !== null || steps !== null || ports.piped === undefined || notNow.has(file.path)) return null;
     const head = file.binary && sniffed !== null && sniffed.key === bytesAt ? sniffed.head : null;
     return suggestion(file, head);
   });
@@ -497,7 +1469,7 @@
     if (untrack(() => piped?.path) !== read.path) piped = null;
     let live = true;
     piping = true;
-    run(at, read.path, read.commit ?? null, $state.snapshot(chain)).then(
+    run(at, read.path, fileReadAt(untrack(() => disk), read.path, read.commit ?? null), $state.snapshot(chain)).then(
       (answer) => {
         if (!live) return;
         piped = { path: read.path, run: answer };
@@ -524,18 +1496,22 @@
    * windowed viewer draws all of it. Until the bytes answer, or where they cannot be read, the cut stands and says so.
    */
   const wholeAt = $derived(
-    file === null || file.binary || !file.truncated || file.size > BYTES_CAP || ports.fileBytes === undefined
+    file === null || file.binary || !file.truncated || file.size > BYTES_CAP || (ports.fileBytes === undefined && fileMade === null)
       ? null
-      : JSON.stringify([at, file.path, file.commit ?? null]),
+      : fileMade !== null
+        ? JSON.stringify(["made", fileMade.token, fileMade.rel])
+        : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk),
   );
   let whole = $state<{ key: string; text: string } | null>(null);
   $effect(() => {
     const key = wholeAt;
     const read = ports.fileBytes;
-    if (key === null || read === undefined || untrack(() => whole?.key) === key) return;
+    if (key === null || untrack(() => whole?.key) === key) return;
     const [entityId, path, commit] = JSON.parse(key) as [string, string, string | null];
+    const reading = entityId === "made" ? madePorts.fileBytes(path, commit ?? "") : read === undefined ? null : read(entityId, path, commit);
+    if (reading === null) return;
     let live = true;
-    read(entityId, path, commit).then(
+    reading.then(
       (bytes) => {
         if (live) whole = { key, text: new TextDecoder().decode(bytes) };
       },
@@ -557,14 +1533,29 @@
 
   const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
 
-  /** Files of more lines than this draw only the lines in view and a margin (#2251). */
-  const WHOLE_UP_TO = 2_000;
-  // A line is 13 px at 1.6.
-  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
+  /**
+   * Files of more lines than this draw only the lines in view and a margin (#2251), as every windowed list does past 300
+   * rows: drawn whole, a 400-line file was 90 ms of a return's build at 6x, and its tokens landing as much again (the
+   * inner-6x pass, 2026-11-15). Copying, a line link and *Find in file* reach the lines not drawn.
+   */
+  const WHOLE_UP_TO = 300;
+  // A line is 13 px at its code row height (`fonts.svelte.ts`, `codeRows`): 16 px Joined, 20.8 Open.
+  const rowsOf = codeRows(13, 1.6);
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: rowsOf.estimate, from: WHOLE_UP_TO + 1, textSize: rowsOf.textSize });
   let code = $state<HTMLElement | null>(null);
+  /** A rendered file's words (a README, a diagram, a command's output), for ⌘F's find bar: a person reading it means words, not *Go to file*'s names (Round 17). */
+  let rendered = $state<HTMLElement | null>(null);
 
   /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
-  const opened = $derived(drawn === null ? null : openWith(drawn, allRenderers(), defaults.list));
+  const opened = $derived.by(() => {
+    if (drawn === null) return null;
+    if (fileMade === null) return openWith(drawn, allRenderers(), defaults.list);
+    // A generated file (ADR-0046): a page opens as one after the person's own defaults; no JAR view, which reads a
+    // repository's file in the backend (a v1 limit).
+    const made = openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
+    const offered = made.offered.filter((r) => r.id !== "jar");
+    return { ...made, offered, renderer: made.renderer?.id === "jar" ? (offered[0] ?? null) : made.renderer };
+  });
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();
   /** What draws the file now: the one picked, else the default. */
@@ -674,9 +1665,20 @@
     const view = untrack(() => fileview);
     const main = view?.closest(".tf-main");
     if (!view || !main || untrack(() => line) !== null || !shownPage()) return;
-    // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
-    const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
-    if (above < 0) main.scrollTop += above;
+    const toTop = () => {
+      // The tree's sticky top (`code.css`, `.tf-ftreebox`): the file's top comes to rest beside the tree's.
+      const above = view.getBoundingClientRect().top - main.getBoundingClientRect().top - 12;
+      if (above < 0) main.scrollTop += above;
+    };
+    if (typeof ResizeObserver === "undefined") return void toTop();
+    // After the frame's layout, before its paint (an observer's first call): read in the task that builds the file, it laid
+    // the page out half built, and the rest of the build laid it all out again (the inner-6x pass, 2026-11-15).
+    // It ends itself: a cleanup on the effect's next run (the same file read again) would drop the scroll it is owed.
+    const once = new ResizeObserver(() => {
+      once.disconnect();
+      if (view.isConnected && shownPage()) toTop();
+    });
+    once.observe(view);
   });
 
   /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
@@ -724,6 +1726,8 @@
   const notEditable = $derived(
     file === null
       ? null
+      : disk !== null
+        ? `Edit commits to ${sourceName(source)}. Open the file in your editor to change it here`
       : file.binary
         ? "A binary file is not edited here"
         : file.truncated
@@ -756,7 +1760,7 @@
 
   /** The file's commit echo, while the file read is still the blob it was made against. */
   const queued = $derived.by(() => {
-    if (file === null || branch === null) return null;
+    if (file === null || branch === null || fileMade !== null) return null;
     const echo = echoOn(repoId, commitKind(branch, file.path));
     return echo !== null && echo.base === file.sha ? echo : null;
   });
@@ -770,19 +1774,29 @@
 
   // The refresh after the commit, or a run of its source's end, reads the
   // file again (#2105); what the reader typed stays.
-  $effect(() => untrack(() => watchEchoes(REPO_FILES, rereadFile, { listen: ports.listen })));
+  $effect(() => untrack(() => watchEchoes(REPO_FILES, () => void rereadFile(), { listen: ports.listen })));
 
-  function rereadFile(): Promise<unknown> {
+  /** `top`: read the top too; `false` where the tree's own read of it is on its way (a refresh reads it once, not twice). */
+  function rereadFile(top = true): Promise<unknown> {
     const section = fileSection;
     const where = at;
     if (section === null || section === MISSING) return Promise.resolve();
     // The file a commit made is at the branch's new tip: the top says which.
-    void rereadTop();
+    if (top) void rereadTop();
+    // A file kept under the section that names its commit (`keepFile`) cannot have changed: a branch that moved names
+    // another section in the top read again, and the file is read there. Reading it again here asked the source on every
+    // run's end, and a page opened meanwhile waited on it (the WSL block, 2026-11-14: 0.2 to 2.2 s on Gitea).
+    if (hasDrawnFile(where, section)) return Promise.resolve();
+    // Nor can the clone's file at its commit (the hover-lag pass, 2026-11-16): read again on every run's end and every
+    // return, it was drawn again whole, its lines coloured again and a README's every image read again. Nor a generated one.
+    if (section.startsWith(LOCAL) || section.startsWith(MADE)) return Promise.resolve();
+    forgetDrawnFiles(where);
     return readSection(section, where).then(
       (read) => {
         if (section !== fileSection || where !== at) return;
         const block = read?.blocks[0];
         if (block?.type !== "file") return;
+        keepFile(section, read, block.path);
         file = block;
         settleCommit(block);
       },
@@ -795,7 +1809,7 @@
   // over what the tab drew; what the reader typed stays.
   onRefreshed(
     () => refreshed,
-    () => Promise.all([rereadTree(), rereadFile()]),
+    () => Promise.all([rereadTree(), rereadFile(false)]),
   );
 
   /**
@@ -806,17 +1820,30 @@
    */
   function rereadTop(): Promise<unknown> {
     const mine = generation;
+    // The working tree is the checkout's `HEAD` and git's list over it: no source's top to read; a new list re-lays it.
+    if (disk !== null) return Promise.resolve();
     return readSection("files").then(
       (read) => {
         const block = read?.blocks[0];
         if (mine !== generation || block?.type !== "tree") return;
+        // The commit the source's tree stands at now, which a clone's tree must stand at to take over (the big-folder
+        // pass, 2026-11-13: the first answer can be the app's kept read at the commit before a push).
+        const was = sourceTop;
+        sourceTop = block.commit ?? null;
+        sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
+        topHeld = sourceTopHeld;
+        topFailed = null;
+        if (settleLocal(block)) return;
         const before = (listings[""] ?? []).map((entry) => entry.section).join("\u0000");
-        if (block.entries.map((entry) => entry.section).join("\u0000") === before) return;
-        generation += 1;
-        asked = new Set([""]);
-        early = new Map();
-        listings = { "": block.entries };
-        pathsSection = block.paths ?? null;
+        if (block.entries.map((entry) => entry.section).join("\u0000") !== before) {
+          generation += 1;
+          asked = new Set([""]);
+          early = new Map();
+          listings = { "": block.entries };
+          pathsSection = block.paths ?? null;
+        }
+        // The clone may hold the new commit already (a fetch behind an earlier read): its tree takes over if so.
+        if (sourceTop !== was) readLocal(at, generation);
       },
       // The tree keeps what it drew.
       () => {},
@@ -831,7 +1858,9 @@
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
       const fresh = payload as ViewFresh;
-      if (live && fresh.entity_id === where && fresh.section === "files") void rereadTop();
+      if (!live || fresh.entity_id !== where || fresh.section !== "files") return;
+      if (fresh.failed) topFailed = fresh.failed;
+      else void rereadTop();
     }).then(
       (unlisten) => {
         if (live) stop = unlisten;
@@ -846,23 +1875,56 @@
     };
   });
 
+  /**
+   * Whether `section` names where the folder `dir` stands: the clone's at a commit, or a listing's of the source at
+   * one. A folder read through it cannot have changed, as a file kept by such a section cannot (`keepFile`); one read
+   * by its path alone may have.
+   */
+  function standsAt(section: string, dir: string): boolean {
+    if (section.startsWith(LOCAL)) return true;
+    return treeSections != null && section !== `${treeSections.dir}${dir}`;
+  }
+
+  const sameEntries = (a: readonly TreeEntry[], b: readonly TreeEntry[]) =>
+    a.length === b.length && a.every((entry, i) => entry.name === b[i]!.name && entry.kind === b[i]!.kind && entry.section === b[i]!.section && entry.size === b[i]!.size);
+
+  /**
+   * A refresh's read of the tree: its top, which is where a branch that moved shows (`rereadLocal`, `rereadTop`), and
+   * nothing under it that stands at a commit (the hover-lag pass, 2026-11-16). Every folder read so far was read
+   * again, one read each, and each answer drew the whole tree again, on every run's end of the repository's source
+   * and every return to the page: with 300 folders opened over an hour that was 301 reads and 301 walks of 4,000
+   * rows, 2.3 s of a sixth-speed main thread, and a pointer on the tree waited 1.5 s for its hover (9.8 s at 600
+   * folders). A folder read by its path alone (a source that names no commit) is still read again, and the answers
+   * are drawn once, together, and only where one differs from what is drawn.
+   */
   function rereadTree(): Promise<unknown> {
     const mine = generation;
-    const reads: Promise<unknown>[] = [rereadTop()];
+    if (disk !== null) return Promise.resolve();
+    const reads: Promise<unknown>[] = [rereadLocal(), rereadTop()];
+    const byPath: Promise<readonly [string, TreeEntry[]] | null>[] = [];
     for (const dir of Object.keys(listings)) {
-      if (dir === "") continue;
+      if (dir === "" || inGraft(dir)) continue;
       const section = entryOf(dir)?.section;
-      if (section == null) continue;
-      const read = readSection(section).then(
-        (read) => {
-          const block = read?.blocks[0];
-          if (mine === generation && block?.type === "tree") listings[dir] = block.entries;
-        },
-        // The directory keeps what it drew.
-        () => {},
+      if (section == null || standsAt(section, dir)) continue;
+      byPath.push(
+        readSection(section).then(
+          (read) => {
+            const block = read?.blocks[0];
+            return block?.type === "tree" ? ([dir, block.entries] as const) : null;
+          },
+          // The directory keeps what it drew.
+          () => null,
+        ),
       );
-      reads.push(read);
     }
+    if (byPath.length > 0)
+      reads.push(
+        Promise.all(byPath).then((answers) => {
+          if (mine !== generation) return;
+          const moved = answers.filter((answer) => answer !== null && !sameEntries(listings[answer[0]] ?? [], answer[1]));
+          if (moved.length > 0) listings = { ...listings, ...Object.fromEntries(moved as (readonly [string, TreeEntry[]])[]) };
+        }),
+      );
     return Promise.all(reads);
   }
 
@@ -870,8 +1932,19 @@
   const imageRead = $derived.by(() => {
     const read = ports.fileBytes;
     const entityId = at;
-    const commit = file?.commit ?? null;
-    return read === undefined ? null : (path: string) => read(entityId, path, commit);
+    const fileAt = file?.commit ?? null;
+    // On the working tree a changed or added image is read from disk (ux29).
+    const onDisk = disk;
+    const commitOf = (path: string) => fileReadAt(onDisk, path, fileAt);
+    // A generated file's images: its siblings' bytes by the token, else the repository's (ADR-0046).
+    if (fileMade !== null) {
+      return (path: string) => {
+        const made = madeAt(path);
+        if (made !== null && made.graft.token !== null) return madePorts.fileBytes(made.graft.token, made.rel);
+        return read === undefined ? Promise.reject(new Error(`${path} cannot be read`)) : read(entityId, path, commitOf(path));
+      };
+    }
+    return read === undefined ? null : (path: string) => read(entityId, path, commitOf(path));
   });
   /**
    * A file's bytes, at the commit it was read at (#2256), for the renderer that reads bytes (an image, a PDF,
@@ -880,16 +1953,46 @@
    * renderer the same function and it reads nothing again.
    */
   const bytesAt = $derived(
-    file === null || !(file.binary || renderer?.input === "bytes") ? null : JSON.stringify([at, file.path, file.commit ?? null]),
+    file === null || !(file.binary || renderer?.input === "bytes")
+      ? null
+      : fileMade !== null
+        ? JSON.stringify(["made", fileMade.token, fileMade.rel])
+        : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk),
   );
   const bytesRead = $derived.by(() => {
     const read = ports.fileBytes;
+    if (bytesAt !== null && fileMade !== null) {
+      const [, token, rel] = JSON.parse(bytesAt) as [string, string, string];
+      return () => madePorts.fileBytes(token, rel);
+    }
     if (bytesAt === null || read === undefined) return null;
     const [entityId, path, commit] = JSON.parse(bytesAt) as [string, string, string | null];
     return () => read(entityId, path, commit);
   });
+  /**
+   * The JAR view's reads for the archive shown (ux19), bound to where it was read: keyed by what they read, so a
+   * re-read of the same file hands the view the same reads and it reads nothing again.
+   */
+  const jarAt = $derived(file === null || drawAs !== "jar" ? null : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk));
+  const jarPorts = $derived.by((): JarPorts | null => {
+    const reads = ports.archive;
+    if (jarAt === null || reads === undefined) return null;
+    const [entityId, path, commit] = JSON.parse(jarAt) as [string, string, string | null];
+    return { ...reads, open: () => reads.open(entityId, path, commit) };
+  });
   /** A relative link in a Markdown file: the file here, at its line where it names one. */
-  const fileLink = (to: string, at: number | null) => (at === null ? fileHash(repoId, to) : lineHash(repoId, to, at));
+  const fileLink = (to: string, at: number | null) => (at === null ? hrefOf(to) : lineHrefOf(to, at));
+  /** A file of the repository at a place inside it (ux18): where an OpenAPI spec's ref into another file opens. */
+  const placeLink = (to: string, at: string | null) => (at === null ? hrefOf(to) : placeHrefOf(to, at));
+  /** *Copy link* on an operation of a spec (ux18): the address that opens the file at it. */
+  async function copyPlace(path: string, at: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(placeHrefOf(path, at));
+      push({ text: `Copied link to ${label}`, subject: "copy-place" });
+    } catch (cause) {
+      push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
 
   function toggle(dir: string) {
     if (open.has(dir)) open.delete(dir);
@@ -939,12 +2042,15 @@
     Object.entries(listings).flatMap(([dir, entries]) => entries.filter((entry) => entry.kind !== "dir" && entry.section !== null).map((entry) => join(dir, entry.name))),
   );
   const searched = $derived(every !== null && every.section === pathsSection ? every : null);
-  const goFound = $derived(goToFile(searched?.paths ?? known, goTyped));
+  const goFound = $derived.by(() => {
+    const paths = searched?.paths ?? known;
+    return goToFile(grafts.size === 0 ? paths : graftedPaths(paths, grafted), goTyped);
+  });
   const going = $derived(goTyped.trim() !== "");
 
   function openPath(full: string) {
     goTyped = "";
-    location.hash = fileHash(repoId, full);
+    location.hash = hrefOf(full);
   }
 
   function goKeys(event: KeyboardEvent) {
@@ -955,10 +2061,6 @@
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       tree?.querySelector<HTMLElement>(going ? "a.tf-gotof" : "[data-path]")?.focus();
-    } else if (event.key === "Escape" && goTyped !== "") {
-      event.preventDefault();
-      event.stopPropagation();
-      goTyped = "";
     }
   }
 
@@ -974,18 +2076,57 @@
       else links[event.key === "ArrowDown" ? Math.min(links.length - 1, here + 1) : here - 1]?.focus();
       return;
     }
-    const from = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? null) : null;
-    const move = treeKey(treeRows(listings, open), from, event.key);
+    // On the tree itself: the row that had focus left the window, and the keys go on from it.
+    const from =
+      event.target === tree ? focusedPath : event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? null) : null;
+    const move = treeKey(rows, from, event.key);
     if (move === null) return;
     event.preventDefault();
     if ("fold" in move) open.delete(move.fold);
     else if ("unfold" in move) open.add(move.unfold);
     else {
+      // A row past the window is drawn first.
+      treeWin.reveal(rows.findIndex((row) => row.path === move.focus));
+      flushSync();
       const row = [...(tree?.querySelectorAll<HTMLElement>("[data-path]") ?? [])].find((el) => el.dataset["path"] === move.focus);
       row?.focus();
       row?.scrollIntoView?.({ block: "nearest" });
     }
   }
+
+  /**
+   * The tree's rows, flat (every listing read, an open directory's entries after it), drawn through a windowed list
+   * (the big-folder pass, 2026-11-13): the rows in view and a screenful each side, the rest room above and below, so
+   * a folder of ten thousand entries opens in a frame. A row is 24 px (`code.css`, `.tf-ftree a`).
+   */
+  const rows = $derived(treeRows(treeListings, open, bands));
+  const treeWin = new Windowed<string>({ count: () => (going ? 0 : rows.length), key: (i) => rows[i]!.path, estimate: 24, from: TREE_WINDOW_FROM });
+  /** The row that last had focus, while focus is in the tree. */
+  let focusedPath: string | null = null;
+  function treeFocus(event: FocusEvent) {
+    focusedPath = event.target instanceof HTMLElement ? (event.target.closest<HTMLElement>("[data-path]")?.dataset["path"] ?? focusedPath) : focusedPath;
+  }
+  function treeBlur(event: FocusEvent) {
+    // Focus left the tree; a row the window took out of the DOM keeps it (`treeRow`). Chrome tells a focused row's removal
+    // as a `focusout` while it is still connected, so whether it went is asked once this task's DOM work is over.
+    const to = event.relatedTarget;
+    const from = event.target;
+    if (to instanceof Node && tree?.contains(to)) return;
+    queueMicrotask(() => {
+      if (from instanceof Node && from.isConnected && !(document.activeElement !== null && tree?.contains(document.activeElement))) focusedPath = null;
+    });
+  }
+  /** On each drawn row: measured by the window, and where it held focus when the window took it, the tree keeps focus. */
+  const treeRow = (path: string) => (node: HTMLElement) => {
+    const measured = treeWin.row(path)(node);
+    return () => {
+      measured();
+      // The DOM goes before the teardown. Chrome fixes focus up only at its next rendering update, so the row may still
+      // be the active element here; jsdom has dropped it to the body already.
+      const active = document.activeElement;
+      if (focusedPath === path && (active === node || active === document.body) && tree?.isConnected) tree.focus({ preventScroll: true });
+    };
+  };
 
   // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
   $effect(() => {
@@ -996,7 +2137,7 @@
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
       // A dialog or the launcher over the page keeps its keys and its focus.
-      if (layers.open.length > 0 || goField === null) return;
+      if (layers.open.some((layer) => layer.kind !== "panel") || goField === null) return;
       event.preventDefault();
       goField.focus();
     };
@@ -1013,36 +2154,89 @@
   >
 {/snippet}
 
-{#snippet listing(dir: string, depth: number)}
-  {#each listings[dir] ?? [] as entry (entry.name)}
-    {@const full = join(dir, entry.name)}
-    {#if entry.kind === "dir"}
-      <button
-        type="button"
-        class="tf-fdir tf-d{Math.min(depth, 8)}"
-        data-path={full}
-        aria-expanded={open.has(full)}
-        onclick={() => toggle(full)}>{@render icon(open.has(full) ? "open" : "dir")}{entry.name}</button
-      >
-      {#if open.has(full)}
-        {@render listing(full, depth + 1)}
+{#snippet listing()}
+  <div class="tf-ftrows" {@attach treeWin.list}>
+    {#each treeWin.slice(rows) as row (row.path)}
+      {@const full = row.path}
+      {#if row.kind === "dir"}
+        <button
+          type="button"
+          class="tf-fdir tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}"
+          data-path={full}
+          data-made={row.made === undefined ? undefined : ""}
+          aria-expanded={row.open}
+          onpointerenter={() => restOn(full, row.section, "dir")}
+          onpointerleave={unrest}
+          class:tf-frmarked={folderRendererOf(full) !== undefined}
+          aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
+          onclick={() => toggle(full)}
+          {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
+        >
+        {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}
+          <!-- A folder a folder renderer takes (ADR-0044): its drawing, or its generated folder (ADR-0046), a link of its own beside the row.
+               Several renderers take it and none was picked (ux26): a button that opens the menu to pick one. -->
+          <span class="tf-frmark"
+            >{#if folderAsks(full)}<button
+                type="button"
+                title="Render {row.name} with…"
+                aria-label="Render {row.name} with…"
+                aria-haspopup="menu"
+                aria-expanded={pickOpen && pickFor?.folder === full}
+                onclick={(event) => {
+                  pickFor = { folder: full, opener: event.currentTarget };
+                  pickOpen = true;
+                }}
+                ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></button
+              >{:else}<a
+              href={renderLink(by, full)}
+              title="Render with {by.name}"
+              aria-label="Render {row.name} with {by.name}"
+              class:tf-on={by.output === "folder" && grafts.get(full)?.renderer === by.id}
+              ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg></a
+            >{/if}</span
+          >
+        {/each}
+      {:else if row.kind === "file"}
+        <a
+          href={row.made === undefined ? fileHash(repoId, full) : hrefOf(full)}
+          data-path={full}
+          data-made={row.made === undefined ? undefined : ""}
+          class="tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}"
+          class:tf-changed={row.made === undefined && markOf(full) === "M"}
+          class:tf-added={row.made === undefined && markOf(full) === "A"}
+          class:tf-deleted={row.made === undefined && markOf(full) === "D"}
+          aria-current={full === shown && singleNow === null ? "true" : undefined}
+          onpointerenter={() => restOn(full, row.section, "file")}
+          onpointerleave={unrest}
+          title={row.made === undefined && markOf(full) !== undefined ? MARK_WORDS[markOf(full)!] : undefined}
+          {@attach treeRow(full)}>{@render icon("file")}{row.name}</a
+        >
+      {:else if row.kind === "band"}
+        {@const folder = bandFolder(full)}
+        {@const graft = grafts.get(folder)}
+        {@const by = graft === undefined ? null : savedRenderer(graft.renderer)}
+        {@const name = by?.name ?? graft?.renderer ?? ""}
+        <!-- A generated folder's band (ADR-0046): who made the rows below, and the way back to the real ones. One button. -->
+        <button
+          type="button"
+          class="tf-fband"
+          data-path={full}
+          title="Show the real files of {folder || title || 'the top folder'}"
+          onclick={() => realFiles(folder)}
+          {@attach treeRow(full)}
+          ><span title={name}
+            >{#if graft?.index != null}Made by {name}{:else if graft?.state === "running"}{name} is running…{:else}{name} made nothing{/if}</span
+          ><span>Real files</span></button
+        >
+      {:else}
+        <span class="tf-fsub tf-d{Math.min(row.depth, 8)} {madeClass(row.made)}" data-path={full} tabindex="-1" {@attach treeRow(full)}>{@render icon("file")}{row.name}</span>
       {/if}
-    {:else if entry.section !== null}
-      <a
-        href={fileHash(repoId, full)}
-        data-path={full}
-        class="tf-d{Math.min(depth, 8)}"
-        class:tf-changed={changed.has(full)}
-        aria-current={full === shown ? "true" : undefined}
-        title={changed.has(full) ? "Changed in your checkout" : undefined}>{@render icon("file")}{entry.name}</a
-      >
-    {:else}
-      <span class="tf-fsub tf-d{Math.min(depth, 8)}" data-path={full} tabindex="-1">{@render icon("file")}{entry.name}</span>
-    {/if}
-  {/each}
+    {/each}
+  </div>
 {/snippet}
 
-<div class="tf-repo">
+<div class="tf-repo" {@attach sideWidth("repo-tree")}>
+  <TfSideEdge side="repo-tree" />
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
     <header>
@@ -1059,6 +2253,7 @@
           }}
           onfocus={readEvery}
           onkeydown={goKeys}
+          {@attach filterKeys({ aside: true })}
         />
         {#if !going}<kbd>T</kbd>{/if}
       </label>
@@ -1066,14 +2261,16 @@
         ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
       >
     </header>
+    <!-- A tree drawn from what knobas holds (the sync's stored tree, a read held from before) says from when (ADR-0042). -->
+    {#if local === null && !going}<TfHeldNote heldAt={topHeld} source={sourceName(source)} failed={topFailed} />{/if}
     <!-- The rows are the links and buttons; the arrow keys move between them (#2311). -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <nav class="tf-ftree" aria-label="Files" bind:this={tree} onkeydown={treeKeys}>
+    <nav class="tf-ftree" aria-label="Files" tabindex="-1" bind:this={tree} onkeydown={treeKeys} onfocusin={treeFocus} onfocusout={treeBlur}>
       {#if going}
         <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
         {#each goFound as found (found)}
           {@const cut = found.lastIndexOf("/") + 1}
-          <a class="tf-gotof" href={fileHash(repoId, found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
+          <a class="tf-gotof" href={hrefOf(found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
             >{@render icon("file")}<span>{#if cut > 0}<span class="tf-pdir">{found.slice(0, cut)}</span>{/if}{found.slice(cut)}</span></a
           >
         {/each}
@@ -1085,31 +2282,134 @@
           <p class="tf-gonote">The source lists no whole tree: searched the directories opened so far.</p>
         {/if}
         {#if goFound.length === 0 && !everyReading}
-          <p class="tf-gonote">No file matches “{goTyped.trim()}”.</p>
+          <p class="tf-gonote">No file matches “{goTyped.trim()}”. <button type="button" class="tf-linkish" onclick={() => (goTyped = "")}>Clear</button></p>
         {/if}
         {#if searched?.truncated}
-          <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {searched.paths.length.toLocaleString("en-US")} files.</p>
+          <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {thousands(searched.paths.length)} files.</p>
         {/if}
       {:else}
         {#if treeFailed !== null}
           <p class="tf-cfail">{treeFailed}</p>
         {/if}
         <TfWaiting phase={waitPhase({ drawn: listings[""] !== undefined || treeFailed !== null, reading: false, failed: false })} columns={1} count={8}>
-          {@render listing("", 0)}
+          {@render listing()}
         </TfWaiting>
       {/if}
     </nav>
+    {#if local !== null && !going}
+      <p class="tf-gonote">
+        From your clone at <span class="tf-mono">{local.commit.slice(0, 7)}</span>{local.checked ? `, the same as on ${sourceName(source)}` : ", as of the last sync"}.
+      </p>
+    {/if}
+    <!-- What the source could not list at once says so under the tree, never among its rows (the big-folder pass, 2026-11-13). -->
+    {#if unkept !== null && local === null && !going}
+      <p class="tf-gonote">This branch holds {thousands(unkept)} entries, more than knobas keeps: its folders are read from {sourceName(source)} as they open.</p>
+    {/if}
+    {#if readAlone && local === null && !going}
+      <p class="tf-gonote">Folders past this repository's first 20,000 entries are read one at a time.</p>
+    {/if}
+    {#if !going}
+      {#each Object.entries(cutDirs).filter(([dir]) => dir === "" || open.has(dir)) as [dir, cut] (dir)}
+        <p class="tf-gonote">
+          <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {thousands(cut.shown)} entries; the rest are
+          {#if cut.url}<a href={cut.url} onclick={openLink}>on {sourceName(source)}</a>{:else}on {sourceName(source)}{/if}.
+        </p>
+      {/each}
+    {/if}
     {#if listings[""] !== undefined}
       <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
     {/if}
   </aside>
   <div class="tf-fcol">
-  {#if path === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
-  <div class="tf-fileview" bind:this={fileview}>
-    {#if file !== null && editing && editable && branch !== null && !fileReading}
+  {#if path === null && singleNow === null && renderedNow === null && disk !== null}
+    <!-- The working tree's line in the last commit's room (2026-11-21): the source's last commit may not be `HEAD`'s. -->
+    <div class="tf-lastc tf-wtline">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 3.75h4.5l1.5 1.5h6.5v7h-12.5z" /></svg>
+      <span class="tf-wtwords">Working tree{#if disk.branch !== null}{" "}on <code class="tf-mono">{disk.branch}</code>{/if}{" "}at <code class="tf-mono">{disk.head.slice(0, 7)}</code>{#if disk.standing}, {disk.standing}{/if}</span>
+      <a class="tf-btn tf-sm tf-ghost tf-lastc-all" href={repoHash(repoId, "local")}>Local changes</a>
+    </div>
+  {:else if path === null && singleNow === null && renderedNow === null}<TfRepoLastCommit {ports} {repoId} {at} {refreshed} />{/if}
+  {#if singleNow !== null}
+    {#if renderedBy !== null}
+      <TfFolderRender
+        entityId={readFrom.entityId}
+        renderer={renderedBy}
+        renderers={folderChoices}
+        folder={singleNow.folder}
+        onpick={(id) => void folderPicks.set(repoId, repoId, singleNow!.folder, id).catch(() => {})}
+        commit={readFrom.commit}
+        paths={readFrom.paths}
+        lane={readFrom.lane}
+        stamp={readFrom.stamp}
+        start={shownPage()}
+        changedInside={disk === null && [...changed].some((p) => singleNow.folder === "" || p.startsWith(`${singleNow.folder}/`))}
+        working={disk === null ? null : changedUnder(disk.marks, singleNow.folder)}
+        switchTo={(id) => renderLink(savedRenderer(id) ?? { id, output: "text" }, singleNow.folder)}
+        {fileLink}
+        {title}
+        ports={folderPorts}
+        {render}
+      />
+    {:else if folders.list.length > 0 || listings[""] !== undefined}
+      <TfNothingHere message="There is no folder renderer named “{singleNow.renderer}”." href={repoHash(repoId)} action="All files" />
+    {/if}
+  {:else}
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
+    {#if renderedNow !== null}
+      {@const graftFolder = renderedNow.folder}
+      <TfMadeBar
+        folder={graftFolder}
+        onpick={(id) => void folderPicks.set(repoId, repoId, graftFolder, id).catch(() => {})}
+        {title}
+        renderer={renderedNow.renderer}
+        name={madeName}
+        renderers={madeChoices}
+        switchTo={(id) => renderLink(savedRenderer(id) ?? { id, output: "folder" }, graftFolder)}
+        view={madeRun.view}
+        refused={madeRun.refused}
+        elapsed={madeRun.elapsed}
+        made={madeShown === null ? null : { files: madeShown.files.length, bytes: madeShown.bytes, leftOut: madeShown.leftOut, leftOutTotal: madeShown.leftOutTotal }}
+        changedInside={disk === null && [...changed].some((p) => underFolder(p, graftFolder))}
+        working={disk === null ? null : changedUnder(disk.marks, graftFolder)}
+        busy={madeBusy}
+        onpress={() => madeRun.press()}
+        onreal={() => realFiles(graftFolder)}
+      >
+        {#snippet openIn()}
+          <TfMadeOpenIn
+            token={madeShown?.token ?? null}
+            dir={madeShown?.dir ?? null}
+            file={fileMade !== null && fileMade.token === madeShown?.token ? fileMade.rel : null}
+            line={fileMade !== null ? line : null}
+          />
+        {/snippet}
+      </TfMadeBar>
+    {/if}
+    {#if renderedNow !== null && madeShown === null}
+      {@const view = madeRun.view}
+      {@const fault = view?.failure ?? null}
+      <!-- No generated folder to show yet (ADR-0046): the run's wait, its failure, or a way to start it. -->
+      {#if view === null || view.running !== null}
+        <div class="tf-empty"><p>Its files show here and in the tree when it ends.</p></div>
+      {:else if fault !== null && fault.why !== "stopped"}
+        {@const said = failureLines(fault)}
+        <div class="tf-fpad">
+          <div class="tf-stepfail" role="alert">
+            <b>{madeName} could not make this folder.</b>
+            <span>{said.line}</span>
+            {#if said.stderr !== ""}<pre>{said.stderr}</pre>{/if}
+          </div>
+        </div>
+      {:else}
+        <div class="tf-empty">
+          <p>{fault?.why === "stopped" ? `${madeName} was stopped.` : `${madeName} has not made this folder yet.`}</p>
+          <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => madeRun.press()}>Run {madeName}</button>
+        </div>
+      {/if}
+    {:else if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
-        <span class="tf-chip tf-warn">editing on {branch}</span>
+        <span class="tf-chip tf-warn">Editing on <span class="tf-mono">{branch}</span></span>
         <span class="tf-trail">
           <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, file.path)}>Cancel</a>
           <button type="button" class="tf-btn tf-sm tf-primary" onclick={openCommit}>Commit change…</button>
@@ -1130,14 +2430,27 @@
       </div>
     {:else if shown === null && listings[""] !== undefined}
       <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else if fileSection === MISSING && renderedNow !== null}
+      <TfNothingHere
+        message="{savedRenderer(renderedNow.renderer)?.name ?? renderedNow.renderer} made no file at this path."
+        href={renderedHash(repoId, renderedNow.renderer, renderedNow.folder)}
+        action="The folder"
+      />
+    {:else if fileSection === MISSING}
+      <TfNothingHere message="{branch ?? 'This branch'} has no file at this path." href={repoHash(repoId)} action="All files" />
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
       {@const cut = file.path.lastIndexOf("/") + 1}
       <header>
         <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
-        <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
-        <span class="tf-trail">
+        {#if fileBehind !== null}
+          <!-- The held line (ADR-0042) in the meta's own place, so nothing under the header moves when it comes or goes. -->
+          <span class="tf-dim tf-small tf-fmeta" role="status">{behindLine(fileBehind, file.commit ?? null)}</span>
+        {:else}
+          <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
+        {/if}
+        <span class="tf-trail" class:tf-heldbelow={!checkoutRead}>
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch
@@ -1148,12 +2461,14 @@
               onmakedefault={(r) => void makeDefault(at, r)}
             />
           {/if}
-          {#if steps === null && ports.piped !== undefined && suggested === null}
+          {#if steps === null && ports.piped !== undefined && suggested === null && fileMade === null}
             {@const at = file.path}
-            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
+            <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
-          <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
-          <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />
+          {#if fileMade === null}
+            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
+            <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
+          {/if}
         </span>
       </header>
       {#if queued !== null}
@@ -1161,7 +2476,15 @@
           A commit of this file {queued.state === "sent" ? "was sent" : "is queued"}: “{queued.text}”. It shows here once {sourceName(source)} has it.
         </div>
       {/if}
-      {#if changed.has(file.path)}
+      {#if movedNote !== null}
+        <div class="tf-banner tf-info" role="status">{movedNote}</div>
+      {/if}
+      {#if fileMade === null && disk !== null && markOf(file.path) !== undefined}
+        <div class="tf-banner tf-info">
+          {#if markOf(file.path) === "D"}Deleted in your working tree. This is the file at {disk.head.slice(0, 7)}.{:else}Shown as it is on disk, with your uncommitted change.{/if}
+          <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
+        </div>
+      {:else if fileMade === null && disk === null && changed.has(file.path)}
         <div class="tf-banner tf-warn">
           Your checkout has an uncommitted change to this file.
           <span class="tf-trail"><a class="tf-btn tf-sm" href={repoHash(repoId, "local")}>See local changes</a></span>
@@ -1170,7 +2493,7 @@
       {#if shownFile?.truncated}
         <div class="tf-banner tf-info">
           The file is longer than knobas shows.
-          {#if file.url}<span class="tf-trail"><a class="tf-btn tf-sm" href={file.url}>The rest on the source</a></span>{/if}
+          {#if file.url}<span class="tf-trail"><a class="tf-btn tf-sm" href={file.url} onclick={openLink}>The rest on the source</a></span>{/if}
         </div>
       {/if}
       {#if suggested !== null}
@@ -1180,8 +2503,16 @@
           <b>These bytes look {chip.kind}.</b>
           <span>Nothing has been applied; you see the file as it is.</span>
           <span class="tf-trail">
-            <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow.add(at)}>Not now</button>
+            <button type="button" class="tf-btn tf-sm tf-primary" bind:this={suggestFace} onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost"
+              onclick={() => {
+                notNow.add(at);
+                // The line goes with the press, and *Pipeline* takes its place.
+                void tick().then(() => pipeFace?.focus());
+              }}>Not now</button
+            >
           </span>
         </div>
       {/if}
@@ -1199,7 +2530,15 @@
           failedAt={pipeFailure?.index ?? null}
           running={piping}
           onchange={(next) => pipes.set(at, next)}
-          onreset={() => pipes.delete(at)}
+          onreset={() => {
+            closedPipes.delete(at);
+            // Back to the default where there is one, else an empty bar for new steps.
+            if (fromDefault !== null) pipes.delete(at);
+            else pipes.set(at, []);
+          }}
+          onclose={pipeOpened !== null && fromDefault === null && shownPage() ? () => closePipe(at) : null}
+          closeTo={() => pipeFace ?? suggestFace}
+          edited={pipes.has(at)}
         />
         {#if pipeFailure !== null}
           <div class="tf-stepfail" role="alert">
@@ -1217,23 +2556,51 @@
         <TfPdf read={bytesRead} size={file.size} {render} />
       {:else if drawn === file && file.binary && bytesRead !== null && drawAs === "image"}
         <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
+      {:else if drawAs === "jar" && jarPorts !== null}
+        <!-- A Java archive (ux19): its view loads with the first archive opened, never at start-up. -->
+        {#await import("../render/TfJar.svelte") then { default: TfJar }}
+          <TfJar path={file.path} ports={jarPorts} {render} />
+        {/await}
       {:else if drawn === null || drawn.binary}
         <div class="tf-empty"><p>A binary file, not drawn.</p></div>
       {:else if image !== null}
         <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
+      {:else if drawAs === "openapi"}
+        <!-- An OpenAPI spec (ux18): its view and its worker load with the first spec opened, never at start-up. -->
+        {@const spec = drawn}
+        {#snippet oasProse(words: string)}
+          <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} imagesOf={at} />
+        {/snippet}
+        {#await import("../render/TfOpenApi.svelte") then { default: TfOpenApi }}
+          <TfOpenApi
+            text={spec.text}
+            path={spec.path}
+            read={imageRead}
+            at={path === spec.path ? place : null}
+            fileHref={placeLink}
+            oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
+            onsource={() => picks.set(spec.path, "source")}
+            prose={oasProse}
+          />
+        {/await}
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
+        <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} imagesOf={at} /></div>
+        <TfFindBar root={() => rendered} within="in this file" />
+      {:else if drawAs === "html"}
+        <!-- A page (ADR-0046): sanitized, in the frame that runs no script and makes no request. -->
+        <TfHtmlPage html={drawn.text} title="{drawn.path.slice(drawn.path.lastIndexOf('/') + 1)}, drawn as a page" frame={(doc) => folderPorts.frame(doc)} room=".tf-fileview" />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
         <TfDiagram engine={drawAs} code={drawn.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
-        <TfCommandOutput {renderer} text={drawn.text} {commands} />
+        <div class="tf-rendered" bind:this={rendered}><TfCommandOutput {renderer} text={drawn.text} {commands} /></div>
+        <TfFindBar root={() => rendered} within="in this file" />
       {:else}
         <div class="tf-findbar">
           <label class="tf-fsearch">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
               ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
             >
-            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} />
+            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} {@attach filterKeys()} />
             <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
           </label>
           <span class="tf-nav2">
@@ -1250,8 +2617,16 @@
       </TfWaiting>
     {/if}
   </div>
+  {/if}
   </div>
 </div>
+
+{#if pickFor !== null}
+  {@const at = pickFor.folder}
+  {@const taking = renderersFor(at, folders.list, marks)}
+  <!-- The glyph's menu (ux26): the renderers that take the folder, a name over its program; the choice is kept for it. -->
+  <TfFolderPickMenu bind:open={pickOpen} opener={pickFor.opener} folder={at} {taking} onpick={(r) => pickRenderer(at, r)} />
+{/if}
 
 {#if committing && file !== null && file.sha !== null && branch !== null}
   <TfCommitFile

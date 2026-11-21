@@ -2,8 +2,10 @@
  * `?fake-ipc`: The launcher (#504): its home board, the Tree's search box (#430), the
  * `>` palette (#1417) and the query box's suggestions (#601).
  */
-import type { SearchResponse } from "../../../ipc/search";
+import type { EverythingMatches, SearchResponse, SearchSettings } from "../../../ipc/search";
+import { SYNTAX } from "../../../launcher/syntax";
 import type { Handlers } from "../fake-tauri";
+import { onFakeReset } from "../fake-seed";
 import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
@@ -15,6 +17,7 @@ import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { fuzzyRank } from "../../../tf/filter/fuzzy";
 import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
 /**
@@ -85,20 +88,26 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
     titles?: boolean;
     filters?: { kinds?: string[] };
   };
+  // The Tree's own search names its kind in the filters, not in the words: answered from the estate before the launcher's
+  // word search, which knows no asset and answered every word with nothing (the asset-tree shots, 2026-11-19).
+  const kinds = query.filters?.kinds ?? [];
+  const treeOnly = kinds.length > 0 && kinds.every((kind) => kind === "asset");
   // `#l` and `#i` (#2423): the saved lists, and the kind the launcher
   // answers from the shell's inbox store.
-  const listed = fakeListSearch(query.raw ?? "");
+  const listed = treeOnly ? null : fakeListSearch(query.raw ?? "");
   if (listed !== null) return listed;
-  const palette = actionPalette((query.raw ?? "").trim());
-  if (palette !== null) return palette;
-  const help = helpCard((query.raw ?? "").trim());
-  if (help !== null) return help;
-  const leftOut = leftOutAnswer((query.raw ?? "").trim());
-  if (leftOut !== null) return leftOut;
-  const byKey = ticketsByKey((query.raw ?? "").trim());
-  if (byKey !== null) return byKey;
-  const words = wordSearch(query.raw ?? "", query.titles !== false);
-  if (words !== null) return words;
+  if (!treeOnly) {
+    const palette = actionPalette((query.raw ?? "").trim());
+    if (palette !== null) return palette;
+    const help = helpCard((query.raw ?? "").trim());
+    if (help !== null) return help;
+    const leftOut = leftOutAnswer((query.raw ?? "").trim());
+    if (leftOut !== null) return leftOut;
+    const byKey = ticketsByKey((query.raw ?? "").trim());
+    if (byKey !== null) return byKey;
+    const words = wordSearch(query.raw ?? "", query.titles !== false);
+    if (words !== null) return words;
+  }
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",
@@ -187,8 +196,11 @@ type Hit = SearchResponse["groups"][number]["hits"][number];
  * fixture-only**: the engine's are `knobas_search::excerpt`'s, witnessed over
  * PostgreSQL.
  */
-function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
+function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null, lead: string | null = null): Hit["excerpts"] {
   const out: Hit["excerpts"] = [];
+  // The engine's order (D10): the excerpt marking the most distinct words first, the rest as they stand.
+  const marked = (excerpt: Hit["excerpts"][number]) => new Set(excerpt.segments.filter((one) => one.hit).map((one) => one.text.toLowerCase())).size;
+  const ordered = () => out.map((excerpt, index) => [excerpt, index] as const).sort((a, b) => marked(b[0]) - marked(a[0]) || a[1] - b[1]).map(([excerpt]) => excerpt);
   const marks = (piece: string) => {
     const lower = piece.toLowerCase();
     const segments: Hit["snippet"] = [];
@@ -220,7 +232,7 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
     }
   };
   const links: [string, string][] = [];
-  let place: string | null = null;
+  let place: string | null = lead;
   const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
   lines.forEach((line, index) => {
     if (line.startsWith("\u001e")) {
@@ -239,7 +251,7 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
     for (const piece of pieces) {
       const lower = piece.toLowerCase();
       if (out.length >= 8 || !words.some((word) => lower.includes(word))) continue;
-      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments: marks(piece) });
+      out.push({ place: firstLine === null ? place : `Log line ${firstLine + index}`, segments: marks(piece) });
     }
   });
   // A link's line, once no other place shows the word (#2491).
@@ -252,6 +264,23 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
       place: null,
       segments: [{ text: "Links to ", hit: false }, ...marks(title), { text: " in ", hit: false }, ...marks(space)],
     });
+  }
+  return ordered();
+}
+
+/** The title's letters the words match, as the picker's marks are (UTF-16 pairs, ascending, never overlapping): a row its name explains draws no evidence line. */
+function fixtureMarks(title: string, words: string[]): number[] {
+  const lower = title.toLowerCase();
+  const spans = words
+    .map((word) => [lower.indexOf(word), word.length] as const)
+    .filter(([at]) => at >= 0)
+    .map(([at, length]) => [at, at + length] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const out: number[] = [];
+  for (const [start, end] of spans) {
+    const last = out.length - 1;
+    if (last > 0 && start <= out[last]!) out[last] = Math.max(out[last]!, end);
+    else out.push(start, end);
   }
   return out;
 }
@@ -302,32 +331,267 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
  * **A substring match, fixture-only**, like the estate search below: it
  * answers the shape and not the engine's question. The ranking, the excerpt
  * and the grammar are the engine's, witnessed over a real PostgreSQL in
- * `knobas-search`'s integration tests. A query with a prefix or a `:` token
- * is not answered here.
+ * `knobas-search`'s integration tests. A leading `#` filter narrows to its
+ * kinds (`SYNTAX`'s letters), so a section's search can be looked at too, and a
+ * `#` word that is no filter is the word, hash dropped (#2420). Any other
+ * prefix or a `:` token is not answered here.
  */
+/** Settings › Search's boxes (the everything-search decisions, D13), as the fixture keeps them: every one on until set. */
+const EVERY_BOX: EverythingMatches = { ticket_text: true, pr_text: true, page_text: true, build_logs: true, file_names: true, file_text: true };
+let everything: EverythingMatches = EVERY_BOX;
+/** *Keep at most* (D13), in MB. */
+let kept = 2048;
+/** `?fake-long-paths`: the repositories' files under a deep folder with a long name (`long-paths.mjs`). */
+let longFiles = false;
+onFakeReset(() => {
+  everything = EVERY_BOX;
+  kept = 2048;
+  longFiles = false;
+});
+
+/**
+ * The fixture's repositories found by their files (the everything-search decisions, D16):
+ * `fixtures/tidewater/files/<owner>/<name>/…`, the files the mock source compiles in (`knobas-source-mock`'s `files.rs`),
+ * read here as text. The renamed `ledger-gateway`, whose classes and image still say its old name `SettleBridge` while
+ * its name, README and pom do not, `ledger-api`, which only imports it, and `payout-service` with a file for each rule
+ * that leaves a file's text out. The engine's read is `knobas-files`', witnessed in `knobas-search`'s ranking table.
+ */
+// `exhaustive`: a glob passes `node_modules` by otherwise, and the fixture has one for the rule that leaves a folder out.
+const FIXTURE_FILES = import.meta.glob<string>("../../../../../../fixtures/tidewater/files/**/*", { query: "?raw", import: "default", eager: true, exhaustive: true });
+const FIXTURE_ROOT = "fixtures/tidewater/files/";
+
+/** A repository of the fixture: every file by its path, and whether the engine keeps its text. */
+export interface FakeFileRepo {
+  entity_id: string;
+  title: string;
+  files: readonly (readonly [string, string])[];
+  /** The files whose text the rules leave out, counted by rule (`knobas_core::code_text::LeftOut::word`). */
+  left_out: Readonly<Record<string, number>>;
+}
+
+/** `knobas_core::code_text`'s rules in miniature: why a file's text is not read, or `null` to read it. */
+const SKIP_FOLDERS = new Set([".git", "node_modules", "vendor", "third_party", "third-party", "target", "build", "dist", "out", ".gradle", ".idea", ".vscode", "__pycache__", ".venv", "venv", "bower_components", "Pods", ".next", ".nuxt", "coverage", ".terraform", ".mvn"]);
+const LOCK_FILES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "Gemfile.lock", "poetry.lock", "composer.lock", "go.sum", "Pipfile.lock", "gradle.lockfile", "packages.lock.json", "flake.lock", "uv.lock", "bun.lock"]);
+const MADE_SUFFIXES = [".min.js", ".min.css", ".map", ".svg", ".snap", ".pb.go", ".g.dart", ".designer.cs", ".generated.cs", "_pb2.py", ".pbxproj", ".ipynb", ".csv", ".tsv"];
+const GENERATED_MARKS = ["@generated", "do not edit", "automatically generated", "auto-generated"];
+export function fakeLeftOut(path: string, text: string): string | null {
+  const parts = path.split("/");
+  const name = parts.pop() ?? path;
+  if (parts.some((folder) => SKIP_FOLDERS.has(folder))) return "folder";
+  if (LOCK_FILES.has(name) || name.endsWith(".lock")) return "lock_file";
+  if (MADE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix))) return "made_file";
+  if (text.length === 0) return "empty";
+  if (text.includes("\0")) return "binary";
+  if (text.split("\n").some((line) => line.length > 2_000)) return "long_line";
+  const head = text.slice(0, 600).toLowerCase();
+  if (GENERATED_MARKS.some((mark) => head.includes(mark))) return "generated";
+  return null;
+}
+
+/** The fixture's repositories, as `mock:<owner>/<name>`. */
+export const FAKE_FILE_REPOS: readonly FakeFileRepo[] = (() => {
+  const byRepo = new Map<string, [string, string][]>();
+  for (const [key, text] of Object.entries(FIXTURE_FILES)) {
+    const [owner, name, ...path] = key.slice(key.indexOf(FIXTURE_ROOT) + FIXTURE_ROOT.length).split("/");
+    if (owner === undefined || name === undefined || path.length === 0) continue;
+    const files = byRepo.get(`${owner}/${name}`) ?? [];
+    files.push([path.join("/"), text]);
+    byRepo.set(`${owner}/${name}`, files);
+  }
+  return [...byRepo].map(([repo, files]) => {
+    const left_out: Record<string, number> = {};
+    for (const [path, text] of files) {
+      const why = fakeLeftOut(path, text);
+      if (why !== null) left_out[why] = (left_out[why] ?? 0) + 1;
+    }
+    return { entity_id: `mock:${repo}`, title: repo, files, left_out };
+  });
+})();
+
+/**
+ * `?fake-long-paths` (the everything-search build, 2026-11-20): each file under a deep folder with a long name, so the
+ * evidence line and the pane hold a long path to its box. The folder holds none of the words, so the answers are the same.
+ */
+const LONG_FILE_FOLDER = "services/the-repository-name-that-is-long/modules/with/folders/nested/very/deep/inside/it/";
+
+/** The fixture's file repositories as the switches draw them. */
+function fileRepos(): typeof FAKE_FILE_REPOS {
+  if (!longFiles) return FAKE_FILE_REPOS;
+  return FAKE_FILE_REPOS.map((repo) => ({ ...repo, files: repo.files.map(([path, text]) => [LONG_FILE_FOLDER + path, text] as const) }));
+}
+
+/** A file's text as the index keeps it: none where the rules leave it out (`fakeLeftOut`). */
+function keptText([path, text]: readonly [string, string]): string {
+  return fakeLeftOut(path.startsWith(LONG_FILE_FOLDER) ? path.slice(LONG_FILE_FOLDER.length) : path, text) === null ? text : "";
+}
+
+/** An identifier's words as the engine reads them, cut down: lower-cased runs and their capital parts, each to the run's end. */
+function fileWords(text: string): string[] {
+  const out: string[] = [];
+  for (const run of text.match(/[\p{L}\p{N}_-]+/gu) ?? []) {
+    const bare = run.replace(/[_-]/g, "");
+    out.push(bare.toLowerCase());
+    for (const at of [...bare.matchAll(/(?<=[a-z0-9])[A-Z]|(?<=[A-Z])[A-Z](?=[a-z])/g)].map((m) => m.index)) out.push(bare.slice(at).toLowerCase());
+  }
+  return out;
+}
+
+/** The fixture's files answer to `words` (D8 in miniature): each repository whose files hold every word of four letters and more. */
+export function fakeFilesFound(words: readonly string[]) {
+  const asked = words.filter((word) => word.length >= 3).map((word) => word.replace(/[_-]/g, ""));
+  if (asked.length === 0) return [];
+  const holds = (text: string) => {
+    const said = fileWords(text);
+    return asked.every((term) => said.some((word) => (term.length <= 3 ? word === term : word.startsWith(term))));
+  };
+  return fileRepos().flatMap((repo) => {
+    const byName = repo.files.filter(([path]) => holds(path));
+    const byText = repo.files.filter((file) => holds(keptText(file)));
+    const shown = [...byName, ...byText].sort((a, b) => Number(!byName.includes(a)) - Number(!byName.includes(b)) || a[0].length - b[0].length)[0];
+    if (!shown) return [];
+    const lines = shown[1].split("\n");
+    const at = lines.findIndex((line) => holds(line) && /class |record |interface /.test(line));
+    const line = at >= 0 ? at : lines.findIndex((line) => holds(line));
+    return [{ repo, byName: byName.length, byText: byText.length, path: shown[0], lines, line: line >= 0 && byText.includes(shown) ? line : null }];
+  });
+}
+
+/** The letters of `text` the words cover, as segments: a run whose word begins with one, marked over the word's length. */
+function fileMarks(text: string, words: readonly string[]): Hit["snippet"] {
+  const asked = words.filter((word) => word.length >= 3);
+  const out: Hit["snippet"] = [];
+  let at = 0;
+  const lower = text.toLowerCase();
+  while (at < text.length) {
+    let found: [number, number] | null = null;
+    for (const word of asked) {
+      for (let i = at; i < text.length; i++) {
+        let j = i;
+        let k = 0;
+        while (j < text.length && k < word.length) {
+          if (lower[j] === "_" || lower[j] === "-") j++;
+          else if (lower[j] === word[k]) (j++, k++);
+          else break;
+        }
+        if (k === word.length && (i === 0 || !/[a-z0-9]/.test(lower[i - 1]!) || /[A-Z]/.test(text[i]!))) {
+          if (found === null || i < found[0]) found = [i, j];
+          break;
+        }
+      }
+    }
+    if (found === null) break;
+    if (found[0] > at) out.push({ text: text.slice(at, found[0]), hit: false });
+    out.push({ text: text.slice(found[0], found[1]), hit: true });
+    at = found[1];
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+  return out;
+}
+
+/** A found repository's first excerpt, as `knobas_search::files::excerpt` makes it. */
+export function fakeFileExcerpt(found: ReturnType<typeof fakeFilesFound>[number], words: readonly string[]): Hit["excerpts"][number] {
+  if (found.line === null) return { place: null, segments: fileMarks(found.path, words), file: { path: found.path, line: null, before: "", after: "" } };
+  const text = found.lines[found.line] ?? "";
+  return {
+    place: `${found.path}:${found.line + 1}`,
+    segments: fileMarks(text.trim(), words),
+    file: { path: found.path, line: found.line + 1, before: found.lines[found.line - 1] ?? "", after: found.lines[found.line + 1] ?? "" },
+  };
+}
+
+/** What a box covers, read off the fixture as the backend counts the mirror. */
+function searchSettingsAnswer(): SearchSettings {
+  const live = CORPUS.filter((entry) => entry.deleted_at === null);
+  const count = (kind: string) => live.filter((entry) => entry.kind === kind).length;
+  const files = fileRepos().flatMap((repo) => repo.files);
+  const kept_files = files.filter((file) => keptText(file) !== "");
+  const textBytes = kept_files.reduce((all, [, text]) => all + new TextEncoder().encode(text).length, 0);
+  const corpusRepos = new Set(live.filter((entry) => entry.kind === "repo").map((entry) => entry.entity_id));
+  const left_out: Record<string, number> = {};
+  for (const repo of FAKE_FILE_REPOS) for (const [why, n] of Object.entries(repo.left_out)) left_out[why] = (left_out[why] ?? 0) + n;
+  return {
+    everything,
+    tickets: count("ticket"),
+    pull_requests: count("pr"),
+    pages: count("page"),
+    pipelines: fakePipelines().length,
+    files: files.length,
+    text_files: kept === 0 ? 0 : kept_files.length,
+    kept_mb: kept,
+    text_bytes: kept === 0 ? 0 : textBytes,
+    repositories_read: FAKE_FILE_REPOS.length,
+    repositories: corpusRepos.size + FAKE_FILE_REPOS.filter((repo) => !corpusRepos.has(repo.entity_id)).length,
+    left_out,
+  };
+}
+
+/** Whether a cleared box leaves `kind` to its names (D13). */
+const namesOnly = (kind: string) => (kind === "ticket" && !everything.ticket_text) || (kind === "pr" && !everything.pr_text) || (kind === "page" && !everything.page_text);
+
 function wordSearch(raw: string, titles: boolean): SearchResponse | null {
-  const text = raw.trim();
-  if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
-  const words = text.toLowerCase().split(/\s+/);
+  const typed = raw.trim();
+  const named = /^#([a-z]+)(?:\s+(.*))?$/i.exec(typed);
+  const lettersOf = [...(named?.[1]?.toLowerCase() ?? "")];
+  const kindsOf = lettersOf.flatMap((letter) => SYNTAX.find((row) => row.token === `#${letter}`)?.kind ?? []);
+  const filter = kindsOf.length === lettersOf.length ? named : null;
+  const kinds = filter ? kindsOf : [];
+  const asked = filter ? typed : typed.replace(/^#(?=[^\s])/, "");
+  const text = filter ? (filter[2] ?? "").trim() : asked;
+  if ((text === "" && filter === null) || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
   const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  const wanted = (kind: string) => filter === null || kinds.includes(kind);
   for (const { haystack, hit, log } of launcherKindHits()) {
-    // Everything (#2431): a pipeline is found by its newest run's log too.
-    const body = titles ? "" : (log ?? "");
+    if (!wanted(hit.kind)) continue;
+    // Everything (#2431): a pipeline is found by its newest run's log too, while *Build logs* is set (D13).
+    const body = titles || !everything.build_logs ? "" : (log ?? "");
     if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
     const hits = byKind.get(hit.kind) ?? [];
     hits.push({ ...hit, rank: 1 - hits.length / 100, excerpts: titles ? [] : fixtureExcerpts("", body, words, 1) });
     byKind.set(hit.kind, hits);
   }
   for (const entry of CORPUS) {
-    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
+    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind) || !wanted(entry.kind)) continue;
     const row = mirrorRow(entry);
-    const body = titles ? "" : entry.body_text;
+    const body = titles || namesOnly(entry.kind) ? "" : entry.body_text;
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
-    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words);
-    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts });
+    const lead = entry.kind === "ticket" || entry.kind === "pr" ? "Description" : null;
+    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words, null, lead);
+    const marks = fixtureMarks(entry.title, words);
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts, ...(marks.length > 0 ? { marks } : {}) });
     byKind.set(entry.kind, hits);
+  }
+  // Everything finds a repository by its files too (D8): named by them before only said, after the corpus's own rows.
+  if (!titles && wanted("repo") && (everything.file_names || everything.file_text)) {
+    const found = fakeFilesFound(words).filter((one) => (everything.file_names && one.byName > 0) || (everything.file_text && one.byText > 0));
+    found.sort((a, b) => b.byName - a.byName || b.byText - a.byText);
+    for (const one of found) {
+      const hits = byKind.get("repo") ?? [];
+      // A repository the corpus holds and its words found too: one row, its files' evidence on it.
+      const own = hits.find((hit) => hit.entity_id === one.repo.entity_id);
+      if (own) {
+        own.excerpts = [...own.excerpts, fakeFileExcerpt(one, words)];
+        own.files = { by_text: one.byText, by_name: one.byName, branch: "main" };
+        continue;
+      }
+      hits.push({
+        entity_id: one.repo.entity_id,
+        kind: "repo",
+        source_id: "mock",
+        title: one.repo.title,
+        updated_at: SYNCED_AT,
+        synced_at: SYNCED_AT,
+        path: null,
+        state: null,
+        rank: one.byName > 0 ? 0.5 : -2,
+        snippet: [],
+        excerpts: [fakeFileExcerpt(one, words)],
+        files: { by_text: one.byText, by_name: one.byName, branch: "main" },
+      });
+      byKind.set("repo", hits);
+    }
   }
   const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
   const groups = [...byKind]
@@ -344,7 +608,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     interpreted: {
       text,
       prefix: null,
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
       left_out_tokens: [],
     },
@@ -380,8 +644,44 @@ function leftOutAnswer(raw: string): SearchResponse | null {
 }
 
 /** This feature's commands. */
-export function handlers(): Handlers {
+/**
+ * `?fake-projects=<n>`: `n` more projects among the ticket keys' values, to
+ * look at the view editor's Project condition at a real Jira's size
+ * (`&fake-projects=40`), where its values are a list to search.
+ */
+function manyProjects(): { key: string; value: string; detail: string }[] {
+  const count = Number(new URLSearchParams(globalThis.location?.search).get("fake-projects") ?? 0) || 0;
+  const areas = ["Billing", "Customs", "Tracking", "Warehouse", "Fleet", "Partner", "Returns", "Pricing", "Identity", "Analytics"];
+  const kinds = ["Platform", "Mobile", "Integrations", "Support", "Data", "Web"];
+  return Array.from({ length: count }, (_, at) => {
+    const area = areas[at % areas.length]!;
+    const kind = kinds[Math.floor(at / areas.length) % kinds.length]!;
+    return { key: "project", value: `${area.slice(0, 2)}${kind.slice(0, 1)}${at >= 60 ? at : ""}`.toUpperCase(), detail: `${area} ${kind}` };
+  });
+}
+
+/**
+ * `fuzzy_rank` (the fuzzy-search pass, 2026-11-19): the view editor's letters-in-order ranking
+ * (`tf/filter/fuzzy.ts`) over the texts sent, its marks as UTF-16 pairs. **Fixture-only**: the
+ * backend's rules are `knobas_search::picker::rank`'s, witnessed in its tests.
+ */
+export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
+  const indexed = haystacks.map((haystack, index) => ({ haystack, index }));
+  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => {
+    const marks: number[] = [];
+    let at = 0;
+    for (const run of runs) {
+      if (run.hit) marks.push(at, at + run.text.length);
+      at += run.text.length;
+    }
+    return { index: option.index, loose: false, marks };
+  });
+}
+
+export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
+  longFiles = params.has("fake-long-paths");
   return {
+    fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
     // The launcher board (#504): the recent items alone since #2421 and
     // #2423. **Fixture-only**; the rules are witnessed at the IPC seam over a
     // real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
@@ -411,6 +711,35 @@ export function handlers(): Handlers {
     // everything with assets would make a QA pass over the launcher look like
     // it worked.
     search: (args) => estateSearch(args),
+    // The pane's files of a repository the fixture's files found (D11).
+    search_files: (args) => {
+      const words = String(args["raw"] ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      const found = fakeFilesFound(words).find((one) => one.repo.entity_id === args["repository"]);
+      if (!found) return { files: [], by_text: 0, by_name: 0, more: false, branch: "main" };
+      const files = found.repo.files.flatMap(([path]) => {
+        const one = fakeFilesFound(words).find((each) => each.repo === found.repo);
+        return one ? [{ ...one, path, lines: (found.repo.files.find(([p]) => p === path)?.[1] ?? "").split("\n") }] : [];
+      });
+      const shown = files
+        .map((one) => {
+          const at = one.lines.findIndex((line) => words.some((word) => line.toLowerCase().replace(/[_-]/g, "").includes(word)));
+          const named = words.some((word) => one.path.toLowerCase().replace(/[_-]/g, "").includes(word));
+          return at < 0 && !named ? null : fakeFileExcerpt({ ...one, line: at < 0 ? null : at }, words);
+        })
+        .filter((one) => one !== null);
+      return { files: shown.slice(0, 8), by_text: found.byText, by_name: found.byName, more: shown.length > 8, branch: "main" };
+    },
+    // Settings › Search (D13): the boxes, kept for the session, which the word search above honours.
+    search_settings: () => searchSettingsAnswer(),
+    set_search_files_kept: (args) => {
+      kept = Number(args["mb"]);
+      return searchSettingsAnswer();
+    },
+    reread_files: () => searchSettingsAnswer(),
+    set_search_everything: (args) => {
+      everything = { ...everything, ...(args["matches"] as Partial<EverythingMatches>) };
+      return searchSettingsAnswer();
+    },
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be
     // looked at under `?fake-ipc`; no parents, because this corpus declares
@@ -430,6 +759,7 @@ export function handlers(): Handlers {
       fields: [
         { key: "project", value: "PAY", detail: "Payments" },
         { key: "project", value: "OPS", detail: "Operations" },
+        ...manyProjects(),
         ...["In Progress", "To Do", "In Review", "Done"].map((value) => ({
           key: "status",
           value,
@@ -438,7 +768,7 @@ export function handlers(): Handlers {
         ...["Story", "Bug", "Task"].map((value) => ({ key: "issuetype", value, detail: "" })),
         ...["High", "Medium", "Low"].map((value) => ({ key: "priority", value, detail: "" })),
         { key: "assignee", value: "@me", detail: "you" },
-        { key: "assignee", value: "jonas.becker", detail: "" },
+        { key: "assignee", value: "jonas", detail: "" },
         { key: "label", value: "sepa", detail: "" },
         { key: "sprint", value: "current", detail: "the active sprint" },
         { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },

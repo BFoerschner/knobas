@@ -11,6 +11,7 @@ import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { KindStateColours, SourceSummary, ToneChoice } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { acks } from "../../shell/ack.svelte";
 import { keptPages } from "../kept-pages.svelte";
 import { createLayers } from "../layers.svelte";
 import { createTheme, type Theme } from "../theme.svelte";
@@ -95,6 +96,8 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
     setPagesKeptOpen: vi.fn((count: number) => Promise.resolve(Math.min(15, count))),
+    smoothScrolling: vi.fn((): Promise<boolean | null> => Promise.resolve(true)),
+    setSmoothScrolling: vi.fn((on: boolean): Promise<boolean | null> => Promise.resolve(on)),
     passiveAttribution: vi.fn(() => Promise.resolve(true)),
     setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
     notify: vi.fn(() => Promise.resolve()),
@@ -216,10 +219,24 @@ function rowValue(label: string): string {
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
 
-test("Appearance draws State colours below Theme, one section per kind with a state (#2466)", async () => {
+test("Appearance draws Zoom, then State colours, below Theme, one section per kind with a state (#2466)", async () => {
   await open("appearance");
-  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.textContent?.trim());
-  expect(heads).toEqual(["Theme", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+  // A row's label without its hint.
+  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.firstChild?.textContent?.trim());
+  expect(heads).toEqual(["Theme", "Zoom", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+});
+
+test("Fonts draws the four roles and code's ligatures before the database is up (2026-11-18)", async () => {
+  view = mount(TfSettings, {
+    target,
+    context: hiddenable,
+    props: { rest: ["fonts"], job: null, ready: false, ports: sourcePorts, sectionPorts: sectionPorts(), layers: createLayers(), now: () => NOW, theme: createTheme() },
+  });
+  await settle();
+  // A row's label without its hint.
+  const heads = [...body().querySelectorAll(".tf-stg-l")].map((el) => el.firstChild?.textContent?.trim());
+  expect(heads).toEqual(["Interface", "Headings", "Reading", "Code", "Ligatures in code"]);
+  expect(target.querySelector('.tf-stg-nav a[aria-current="page"]')?.textContent?.trim()).toBe("Fonts");
 });
 
 test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
@@ -232,6 +249,8 @@ test("Appearance's State colours waits for the database; Theme does not (#2466)"
   });
   await settle();
   expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  // Zoom is the webview's own setting: it needs no database either.
+  expect(target.querySelector('[aria-label="Zoom"]')).not.toBeNull();
   expect(target.querySelector(".tf-sc")).toBeNull();
   expect(read).not.toHaveBeenCalled();
 });
@@ -281,6 +300,25 @@ test("Performance: Pages kept open writes set_pages_kept_open and hands the page
   expect(p.setPagesKeptOpen).toHaveBeenLastCalledWith(15);
   expect(field.value).toBe("15");
   expect(keptPages.value).toBe(15);
+});
+
+test("Performance: Smooth scrolling writes set_smooth_scrolling and draws what came back", async () => {
+  const p = await open("performance");
+  const smooth = body().querySelector<HTMLButtonElement>("#tf-perf-smooth")!;
+  expect(smooth.getAttribute("role")).toBe("switch");
+  expect(body().querySelector('label[for="tf-perf-smooth"]')?.textContent).toContain("Smooth scrolling on 120 Hz displays");
+  expect(smooth.getAttribute("aria-checked")).toBe("true");
+  smooth.click();
+  await settle();
+  expect(p.setSmoothScrolling).toHaveBeenCalledWith(false);
+  expect(smooth.getAttribute("aria-checked")).toBe("false");
+});
+
+test("Performance: no Smooth scrolling switch where the platform has no frame-rate cap", async () => {
+  await open("performance", sectionPorts({ smoothScrolling: vi.fn(() => Promise.resolve(null)) }));
+  await settle();
+  expect(body().querySelector("#tf-perf-kept")).not.toBeNull();
+  expect(body().querySelector("#tf-perf-smooth")).toBeNull();
 });
 
 test("Desktop notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {
@@ -350,6 +388,27 @@ test("Monitoring: a field left with a new value saves both settings", async () =
   slow.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   expect(p.setMonitoringSettings).toHaveBeenCalledWith({ sample_retention_days: 30, response_time_warn_ms: 1500 });
+});
+
+test("A typed value: Esc restores it and keeps focus, Enter saves once and says so (F-641)", async () => {
+  const p = await open("monitoring");
+  const slow = target.querySelector<HTMLInputElement>("#tf-mon-slow")!;
+  slow.focus();
+  slow.value = "20009";
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  expect(slow.value).toBe("2000");
+  expect(document.activeElement).toBe(slow);
+  slow.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setMonitoringSettings).not.toHaveBeenCalled();
+
+  slow.value = "1500";
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.setMonitoringSettings).toHaveBeenCalledTimes(1);
+  expect(slow.closest(".tf-stg-c")?.querySelector(".tf-stg-saved")?.textContent).toBe("Saved");
 });
 
 test("Backup: the last backup, the schedule and keep, and Back up now", async () => {
@@ -426,6 +485,18 @@ test("an action's key with no saved list draws the same tick, and the part goes 
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("the ticks draw once all four of their reads have answered, so a late one's tick can't push the others right (the nothing-moves pass)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  await open("backup", sectionPorts({ ticketViews: vi.fn(async () => (await late, [{ id: "my-work" }])) }));
+  const checks = target.querySelector(".tf-stg-checks")!;
+  expect(checks.classList.contains("tf-hidden"), "held while the ticket views are read").toBe(true);
+  answer();
+  await settle();
+  expect(checks.classList.contains("tf-hidden")).toBe(false);
+  expect([...checks.querySelectorAll("label")].map((el) => el.textContent?.trim())).toContain("Ticket views");
 });
 
 test("a ticket view draws its tick, on by default (#812)", async () => {
@@ -520,6 +591,8 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   button("Restore from a file…").click();
   await settle();
   expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas"]);
+  pickFor("knobas-20261015-020000.knobas").click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenCalledWith("knobas-20261015-020000.knobas");
@@ -529,6 +602,8 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   await settle();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Import a share export");
   expect(listedFiles()).toEqual(["knobas-share-20261012-101500.knobas"]);
+  pickFor("knobas-share-20261012-101500.knobas").click();
+  flushSync();
   button("Import").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
@@ -579,6 +654,8 @@ test("a restore puts the sources it brought in the health store the status bar f
   expect(store.all).toEqual([]);
   button("Restore from a file…").click();
   await settle();
+  target.querySelector<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input')!.click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(store.all.map((row) => row.source_id)).toEqual(["jira"]);
@@ -596,6 +673,8 @@ test("a restore into a knobas that holds data is refused: the dialog stays and s
   expect(p.restoreBackup).not.toHaveBeenCalled();
   // The toast store is the app's one, so count only what this press adds.
   const before = toasts.items.length;
+  target.querySelector<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input')!.click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenCalledOnce();
@@ -688,6 +767,7 @@ test("Open the backup folder: beside Export… and Import…, and in both dialog
   await settle();
   expect(p.openBackupFolder).toHaveBeenCalledOnce();
   expect(p.openBackupFolder, "no path: the command opens the running profile's folder (#1704)").toHaveBeenLastCalledWith();
+  expect(acks.item?.text, "a chip where the press was (ux21)").toBe("Opening the backup folder");
 
   for (const [press, calls] of [["Restore from a file…", 2], ["Import…", 3]] as const) {
     button(press).click();
@@ -710,22 +790,27 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
   expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
     ["err", "Could not open the backup folder: not allowed by scope"],
   ]);
+  expect(acks.item).toBeNull();
 });
 
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(11);
+  expect(rows).toHaveLength(30);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
-    "Search everything, from an empty box",
+    "Search, from an empty box",
   ]);
+  const said = rows.map((row) => row.querySelector("td")?.textContent?.trim());
+  for (const key of ["⌘D", "Tab", "⌘?", "⌘B", "⌘Enter", "J K", "N P", "V", "C", "S"]) expect(said, "F-062, F-633").toContain(key);
+  expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",
     "Anywhere; / outside a field",
     "Search this section: the launcher with its filter",
   ]);
+  expect(said, "F-662").toContain("⌘F");
   expect([...rows[3]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent), "history, #1086").toEqual([
     "⌘[",
     "⌘]",
@@ -737,7 +822,7 @@ test("Keyboard lists the fixed shortcuts", async () => {
     "A detail or a role view",
     "Refresh, or Sync now",
   ]);
-  expect([...rows[10]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
+  expect([...rows.at(-1)!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
 });
 
 test("Logs and database: size, items and version; the folder and the re-index", async () => {
@@ -748,6 +833,7 @@ test("Logs and database: size, items and version; the folder and the re-index", 
   button("Re-index search").click();
   await settle();
   expect(p.openLogs).toHaveBeenCalledOnce();
+  expect(acks.item?.text).toBe("Opening the log folder");
   expect(p.reindexFts).toHaveBeenCalledOnce();
 });
 
@@ -838,13 +924,15 @@ test("Standup's Change… and Backup's Restore from a file… draw Cancel as a g
 const pickFor = (file: string) =>
   target.querySelector<HTMLInputElement>(`[role="dialog"] [role="radiogroup"] input[type="radio"][value="${file}"]`)!;
 
-test("Restore from a file… is a pick and a footer primary: the first file is picked, another can be (#2343)", async () => {
+test("Restore from a file… is a pick and a footer primary, newest first with nothing picked: restoring replaces what is stored (Björn, 2026-11-06, reversing #2343's first pick)", async () => {
   const p = await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve(statusWith("knobas-20261014-020000.knobas", false))) }));
   button("Restore from a file…").click();
   await settle();
   expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Backups");
   expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261014-020000.knobas"]);
-  expect(pickFor("knobas-20261015-020000.knobas").checked).toBe(true);
+  expect(listedFiles().map((file) => pickFor(file).checked)).toEqual([false, false]);
+  expect(button("Restore").disabled).toBe(true);
+  expect(target.querySelector('[role="dialog"] .tf-dwhy')?.textContent).toBe("Pick a file.");
   expect(
     [...target.querySelectorAll('[role="dialog"] button')].filter((b) => b.textContent!.trim() === "Restore"),
     "one Restore, the footer's, none per row",
@@ -878,7 +966,24 @@ test("Standup puts a failed read's Try again on the title line (#2284)", async (
   expect(loneRows()).toBe(0);
 });
 
-test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "checkouts"])(
+test("a number Monitoring did not take marks its field and says why, under it (F-613)", async () => {
+  const refusal = { code: "invalid", message: "no", source_id: null };
+  await open("monitoring", sectionPorts({ setMonitoringSettings: vi.fn(() => Promise.reject(refusal)) }));
+  const field = target.querySelector<HTMLInputElement>("#tf-mon-keep")!;
+  field.value = "5000";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  expect(target.querySelector("#tf-mon-keep-why")?.textContent).toContain("Not saved");
+  expect(field.value).toBe("30");
+
+  field.value = "90";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(target.querySelector("#tf-mon-keep-why")?.textContent).toContain("Not saved");
+});
+
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "fonts", "performance", "renderers", "keyboard", "logs", "checkouts"])(
   "Settings › %s draws no action row of its own under the title (#2284)",
   async (section) => {
     await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});
@@ -898,7 +1003,7 @@ const bodyButtonsAtDefault = () =>
     .map((b) => b.textContent!.trim());
 
 // Renderers and Checkouts draw their bodies in their own files' fixtures, and are checked there.
-test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "keyboard", "logs", "notes"])(
+test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "fonts", "performance", "keyboard", "logs", "notes"])(
   "Settings › %s draws its body buttons small (#2343)",
   async (section) => {
     await open(section, sectionPorts(), section === "notifications" ? { notifications: notificationsStub([]) } : {});

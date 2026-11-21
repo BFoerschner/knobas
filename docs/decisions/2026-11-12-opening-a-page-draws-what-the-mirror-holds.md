@@ -1,0 +1,33 @@
+# 2026-11-12: Opening a page draws what the mirror holds
+
+**Asked (Björn, on PR #2479):** "We're already syncing everything into the mirror, why isn't opening code, docs, etc. just like instant? why does it take so long still?" Then: "why is docs slow even without a chosen job filter. just displaying 'everything' is slow." And: "it's fast after the first load. but some sites take some time to load again. Since everything is inside the mirror it should be instant."
+
+**Measured.** Every nav page and the common detail pages, pressed with real input in headless Chrome over the windowless backend (`crates/knobas-app/examples/headless_ipc.rs`, release build) on an APFS clone of the saved scale database (20,007 tickets, 5,032 pages, 1,707 pull requests, 2,620 builds, 218 monitors), at CPU 1x and 4x, in four rounds: the first press after start, a return from one other page, a return after every other section (`late`), and a return after every source ended a run that changed something (`synced`). `testenv/perf/open.mjs` times the press to the first frame with the page's own rows and nothing waiting, to settled, and lists every IPC call on the way; `--timings` on the backend gives each command's own time and bytes, and statement logging on the clone each SQL statement's.
+
+**Why opening was not instant, page by page.**
+
+- **Docs** read every page of every space before it drew its home: one read, `docs_tree`, 627 KB, which walked all 5,032 pages' stored payloads for each one's parent and position (611 ms of SQL) and ran the inbox's mention rule for *For you* (122 ms). 762 to 824 ms to the first useful frame on every first open and every return the kept pages had dropped; after a sync it read all of it again behind the page. Nothing deliberate about it: the tree was read whole because the rail once drew it whole.
+- **Code** waits, on purpose, for the reads that decide its order (`2026-11-11-rows-stay-where-they-drew.md`): the open pull requests, which at this size are several `list_entities` reads of 140 to 230 ms each, at most six at once. 239 ms.
+- **Builds** read the pipeline list, 571 KB, 150 ms of SQL, and drew nothing before it: 296 to 343 ms.
+- **Tickets** waits up to 1.5 s for its filter chips, on purpose (the same ruling); on this database `mini_board` and the chips' reads answer in about 130 ms.
+- **A run** read its ten reads again on every return, about 100 ms.
+- **Every page the kept pages dropped** (five are kept by default, there are eight sections and their detail pages) mounted afresh and read everything again: Tickets 130 ms, Code 247 ms, Builds 296 ms, Docs 777 ms. This is "some sites take some time to load again".
+- **A pull request** opened for the first time reads its view from the forge (ADR-0042): with the forge down it says so at once, with it up it waits on the network. Not changed here.
+- Pages whose reads answer in a few milliseconds (Inbox, Monitors, Time, Settings, a page, a space, a pipeline) drew in the second frame after the press, about 30 ms: the press, then the page shown.
+
+**Taken.**
+
+1. **The answer cache** (`app/src/lib/ipc/answer-cache.ts`, CONTEXT.md *Answer cache*). The window keeps the last answer to each read that is a function of the mirror and the settings, in front of the bridge's own `invoke`, so every module's reads pass through it. A page drawn again, or mounted again after the kept pages dropped it, draws from memory in the frame after the press. An answer goes the moment the mirror may have moved under it: a run that changed something drops what a source of its roles could change (a Kuma run keeps Docs' and Code's answers), and any write, any refresh of an item or view, drops everything; a visit keeps the reads that never read visits. A read answered while answers were dropped is not kept. Same answers by construction: it holds what the backend answered and stops holding it when the mirror moves, as a kept page holds what it drew.
+2. **Warmed before the press.** A moment after start the cache asks again, one at a time at idle, the reads the last session made (kept in `localStorage`, at most 120) and a few every session makes (Docs' outline, the pipelines, the monitor roster, the alerts, the views, the inbox); after a run drops answers it asks again the ones it dropped. So a page's first open after start finds its answer too.
+3. **Docs reads what it draws** (`tf/docs/tree-store.ts`). The home's first screen is `docs_outline`: every space with its count, the top of its tree and the first pages its tile takes, the page read last and *For you*, 30 KB. A fold reads the pages under it when it opens, a page the way to it, a space's page the whole space (`docs_nodes`, 1 to 400 KB, about 15 ms). What was read is kept outside the component, so Docs drawn again draws it at once. Only the job's pages, the new-page dialog and a queued page's settling read the tree whole, as before.
+4. **The backend keeps the computed tree** (`docs::TreeCache`), stamped by the live pages' row versions and what the tree reads of the sources, a few milliseconds to check, and reads it once in the background after start, so neither the outline, a fold nor the whole tree walks the payloads again until a page changed.
+
+**Ruling: a page draws what the window holds of the mirror, then reads behind it.** How it feels wins over the order of the reads: a page opened again shows what it last showed at once, and a newer answer arrives in place under the rules of `2026-11-11-rows-stay-where-they-drew.md` (rows hold their places; a new one waits behind *Show N new*). The deliberate waits stay, and now answer from memory: Code's order and Tickets' chips are in the cache when the press comes.
+
+**What still is not instant, and why.**
+
+- The first open in a profile no session has read in, before the warm has run (the first second or two after start): the reads go to the backend. Docs' outline is then about 150 ms, 120 of them the inbox's mention rule behind *For you*, which tests a regular expression against the 3,835 bodies the trigram index finds for the reader's name.
+- A pull request never opened before waits on the forge for its view (ADR-0042's "only a read knobas has never made waits for the source").
+- A page that reads past the mirror (a repository's checkout, `git` status, a source's view) is not in the answer cache: those change without a sync.
+
+**Reversing it** is `enableAnswerCache` not called in `App.svelte` (every read goes to the backend again), and `TfDocs`' ports without `docsOutline` and `docsNodes` (Docs reads the tree whole, as its tests still do). The budget is `testenv/perf/budget-open.json` (`just open-budget --real <port>`).

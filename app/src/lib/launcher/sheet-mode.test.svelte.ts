@@ -126,7 +126,7 @@ test("it opens on the selected row, says what the box asks, and gives the box it
   sheet.open();
   expect(sheet.current?.rowId).toBe(TICKET.id);
   expect(sheet.label).toBe("Actions");
-  expect(sheet.placeholder).toBe("narrow the actions");
+  expect(sheet.placeholder).toBe("Narrow the actions");
   expect(sheet.text).toBe("");
   expect(sheet.onActions).toBe(true);
   expect(host.focus).toHaveBeenCalledOnce();
@@ -234,7 +234,8 @@ test("a write that lands is said and closes; one that fails says why and keeps t
 test("← → walk the link's relation round the list, and Enter writes it against the job the host names", async () => {
   const { sheet, io, host } = setUp(OTHER, { job: { entityId: "jira:PAY-9", label: "PAY-9" } });
   sheet.open();
-  expect(labels(sheet)[0]).toBe("Link to PAY-9");
+  expect(labels(sheet)).toContain("Link to PAY-9");
+  sheet.hover(labels(sheet).indexOf("Link to PAY-9"));
   sheet.key(press("ArrowLeft"));
   expect(sheet.current?.relation).toBe(5);
   sheet.key(press("ArrowRight"));
@@ -261,7 +262,7 @@ test("a flow reads each step, steps back without a read, and its last pick goes 
   sheet.open();
   choose(sheet, "Create pull request…");
   expect(sheet.label).toBe("From branch");
-  expect(sheet.placeholder).toBe("narrow the choices");
+  expect(sheet.placeholder).toBe("Narrow the choices");
   expect(sheet.onActions).toBe(false);
   expect(sheet.shown).toEqual([]);
   expect(sheet.active).toBeNull();
@@ -377,7 +378,7 @@ test("⌘B opens the panel on the selected action; it takes no text, hears key-u
   const panel = sheet.current?.panel;
   expect(panel?.target).toEqual({ kind: "action", on: "ticket", actionId: "copy", label: "Copy key" });
   expect(sheet.label).toBe("Keys");
-  expect(sheet.placeholder).toBe("press the keys");
+  expect(sheet.placeholder).toBe("Press the keys");
   expect(sheet.text).toBe("");
   expect(sheet.onActions).toBe(false);
   sheet.type("x");
@@ -467,8 +468,7 @@ test("an action's chord on the link opens the sheet on that row, for ← → to 
   await keys.load();
   sheet.runChord(CHORD());
   await landed();
-  expect(sheet.current?.selected).toBe(0);
-  expect(labels(sheet)[0]).toBe("Link to PAY-9");
+  expect(labels(sheet)[sheet.current?.selected ?? -1]).toBe("Link to PAY-9");
   expect(io.createLink).not.toHaveBeenCalled();
 });
 

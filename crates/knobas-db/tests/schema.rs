@@ -1976,6 +1976,305 @@ async fn zero_twenty_seven_reaches_a_row_mirrored_before_it() {
     assert_eq!(synced_after, synced_before, "and nothing wrote it again");
 }
 
+/// An existing install (the long-words pass, 2026-11-16): `0093` and `0094`
+/// write no row of `sync.item_initial` themselves any more, and bring-up's
+/// fill (`0095`, `sync.fill_item_initial_beside`) gives an item mirrored
+/// before them every start of its names, the empty one among them, without a
+/// sync writing it again. Three installs it meets: one that predates `0093`
+/// (no row), one that ran `0093` as it was (the single characters), one that
+/// ran `0094` as it was (three lengths and no empty start). An item that has
+/// its row under the empty start is left as it is. The table is marked
+/// whole once no item is without that row, and not before.
+#[tokio::test]
+async fn the_fill_gives_an_item_mirrored_before_it_every_start_of_its_names() {
+    let pool = knobas_db::test_util::scratch_database("initial95-fill")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    // `payout` and `servic`: `The` is no lexeme.
+    mirror_row(&pool, "gitea:acme/a-none", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/b-single", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/c-three", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/d-whole", "The payout service", "ledger").await;
+    for statement in [
+        "delete from sync.item_initial_whole",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/a-none'",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/b-single' and length(initial) <> 1",
+        "delete from sync.item_initial where entity_id = 'gitea:acme/c-three' and initial = ''",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+    let stored = async |pool: &sqlx::PgPool, id: &str| -> Vec<(String, bool, String)> {
+        sqlx::query_as(
+            "select initial, leads, ctid::text from sync.item_initial
+              where entity_id = $1 order by initial",
+        )
+        .bind(id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    };
+    let named = |rows: &[(String, bool, String)]| -> Vec<(String, bool)> {
+        rows.iter()
+            .map(|(initial, leads, _)| (initial.clone(), *leads))
+            .collect()
+    };
+    let every: Vec<(String, bool)> = [
+        ("", true),
+        ("p", true),
+        ("pa", true),
+        ("pay", true),
+        ("s", false),
+        ("se", false),
+        ("ser", false),
+    ]
+    .iter()
+    .map(|(initial, leads)| ((*initial).to_owned(), *leads))
+    .collect();
+    let whole_before = stored(&pool, "gitea:acme/d-whole").await;
+    assert_eq!(named(&whole_before), every, "a new item's own trigger");
+    let marked = async |pool: &sqlx::PgPool| -> bool {
+        sqlx::query_scalar("select exists (select from sync.item_initial_whole)")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+
+    // Not whole while an item is without its row: the mark refuses.
+    let whole: bool = sqlx::query_scalar("select sync.mark_item_initial_whole()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !whole && !marked(&pool).await,
+        "three items have no row yet"
+    );
+
+    // Two items a batch: the first batch reaches `a` and `b` and no further.
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last.as_deref(), skipped), (Some("gitea:acme/b-single"), 0));
+    assert_eq!(named(&stored(&pool, "gitea:acme/a-none").await), every);
+    assert_eq!(named(&stored(&pool, "gitea:acme/b-single").await), every);
+    assert_eq!(
+        named(&stored(&pool, "gitea:acme/c-three").await),
+        every[1..],
+        "the batch stopped before it"
+    );
+
+    let (last, _): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/b-single")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(last.as_deref(), Some("gitea:acme/d-whole"));
+    assert_eq!(named(&stored(&pool, "gitea:acme/c-three").await), every);
+    assert_eq!(
+        stored(&pool, "gitea:acme/d-whole").await,
+        whole_before,
+        "an item that has its row under the empty start is not written again"
+    );
+    // Past the last item: nothing looked at.
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/d-whole")
+            .bind(2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last, skipped), (None, 0));
+
+    // Every other item of the scratch database, then the mark.
+    let mut after = String::new();
+    loop {
+        let (last, _): (Option<String>, i32) =
+            sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+                .bind(&after)
+                .bind(500)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let Some(last) = last else { break };
+        after = last;
+    }
+    let whole: bool = sqlx::query_scalar("select sync.mark_item_initial_whole()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(whole && marked(&pool).await, "every item has its row");
+
+    // The foreign key still takes an item's rows with the item.
+    sqlx::query("delete from sync.item where entity_id like 'gitea:acme/_-%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(stored(&pool, "gitea:acme/a-none").await.is_empty());
+}
+
+/// The fill steps past an item a running sync holds and says so, and the
+/// item's own write then stands (`0091`'s shape): the batch never waits on
+/// the run, and never writes under it.
+#[tokio::test]
+async fn the_fill_steps_past_an_item_a_sync_holds() {
+    let pool = knobas_db::test_util::scratch_database("initial95-beside")
+        .await
+        .pool(3)
+        .await
+        .expect("a pool on the scratch database");
+    mirror_row(&pool, "gitea:acme/held", "The payout service", "ledger").await;
+    mirror_row(&pool, "gitea:acme/free", "The payout service", "ledger").await;
+    sqlx::query("delete from sync.item_initial where entity_id like 'gitea:acme/%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut run = pool.begin().await.unwrap();
+    sqlx::query("update sync.item set synced_at = now() where entity_id = 'gitea:acme/held'")
+        .execute(&mut *run)
+        .await
+        .unwrap();
+    let (last, skipped): (Option<String>, i32) =
+        sqlx::query_as("select last, skipped from sync.fill_item_initial_beside($1, $2)")
+            .bind("gitea:acme/")
+            .bind(10)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((last.as_deref(), skipped), (Some("gitea:acme/held"), 1));
+    run.commit().await.unwrap();
+
+    let rows = async |id: &str| -> i64 {
+        sqlx::query_scalar("select count(*) from sync.item_initial where entity_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(rows("gitea:acme/free").await, 7);
+    assert_eq!(
+        rows("gitea:acme/held").await,
+        0,
+        "stepped past, not written"
+    );
+    sqlx::query("delete from sync.item where entity_id like 'gitea:acme/%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// The app's pool keeps a connection for as long as the pool lives (the
+/// long-words pass, 2026-11-16): no age and no idle time closes one, where
+/// sqlx's defaults close it after 30 minutes and after 10 idle. The
+/// launcher's statements are planned once a connection
+/// (`knobas_search::sql::fetch_kept`), and a connection replaced took its
+/// plans with it. A pool a test or a tool opens keeps sqlx's defaults.
+#[tokio::test]
+async fn the_app_pool_keeps_its_connections_for_its_life() {
+    let connector = knobas_db::test_util::scratch_database("app_pool_kept").await;
+    let app = connector.app_pool().await.unwrap();
+    assert_eq!(app.options().get_max_lifetime(), None);
+    assert_eq!(app.options().get_idle_timeout(), None);
+    // A statement prepared on a connection is there the next time the
+    // connection is handed out: one connection, asked for twice.
+    let prepared = async || -> i64 {
+        sqlx::query_scalar("select count(*) from pg_prepared_statements")
+            .fetch_one(&app)
+            .await
+            .unwrap()
+    };
+    let first = prepared().await;
+    assert!(first >= 1, "the count's own statement is prepared");
+    assert_eq!(prepared().await, first, "and kept");
+    app.close().await;
+
+    let other = connector.pool(1).await.unwrap();
+    assert!(other.options().get_max_lifetime().is_some());
+    assert!(other.options().get_idle_timeout().is_some());
+    other.close().await;
+}
+
+/// On Windows the app's connections plan no parallel worker (the long-words
+/// pass, 2026-11-16): a worker is a process started for one query, 31 to 37
+/// ms there, and the Tickets views' counts started two on every opening.
+/// Elsewhere the server's own rule stands. Both are the settings a
+/// connection of the pool is opened with, and a connection opened with
+/// Windows' plans no worker however cheap one is made to look.
+#[tokio::test]
+async fn on_windows_the_apps_connections_plan_no_parallel_worker() {
+    use knobas_db::embedded::app_session_settings;
+    let named = |windows: bool| -> Vec<(&'static str, String)> { app_session_settings(windows) };
+    assert_eq!(
+        named(true),
+        [
+            ("statement_timeout", "30000ms".to_owned()),
+            ("max_parallel_workers_per_gather", "0".to_owned())
+        ]
+    );
+    assert_eq!(named(false), [("statement_timeout", "30000ms".to_owned())]);
+
+    let connector = knobas_db::test_util::scratch_database("app_pool_workers").await;
+    let seeded = connector.pool(1).await.unwrap();
+    sqlx::query("create table public.wide as select g as n, repeat('x', 200) as pad from generate_series(1, 20000) g")
+        .execute(&seeded)
+        .await
+        .unwrap();
+    sqlx::query("analyze public.wide")
+        .execute(&seeded)
+        .await
+        .unwrap();
+    seeded.close().await;
+    // A scan made to look worth every worker there is.
+    let plan = async |windows: bool| -> String {
+        let options = (*connector.pool(1).await.unwrap().connect_options())
+            .clone()
+            .options(app_session_settings(windows));
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "select set_config('parallel_setup_cost', '0', true), \
+                    set_config('parallel_tuple_cost', '0', true), \
+                    set_config('min_parallel_table_scan_size', '0', true)",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let lines: Vec<String> = sqlx::query_scalar(
+            "explain (costs off) select count(*) from public.wide where pad <> ''",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+        drop(tx);
+        pool.close().await;
+        lines.join("\n")
+    };
+    let elsewhere = plan(false).await;
+    assert!(
+        elsewhere.contains("Gather"),
+        "the server's rule:\n{elsewhere}"
+    );
+    let windows = plan(true).await;
+    assert!(!windows.contains("Gather"), "on Windows:\n{windows}");
+    let cleanup = connector.pool(1).await.unwrap();
+    sqlx::query("drop table public.wide")
+        .execute(&cleanup)
+        .await
+        .unwrap();
+    cleanup.close().await;
+}
+
 /// The app's pool cancels a statement that runs past thirty seconds (#745).
 ///
 /// Every connection of [`knobas_db::embedded::Connector::app_pool`] carries
@@ -3063,4 +3362,208 @@ async fn zero_sixty_one_leaves_a_payload_without_a_changelog_alone() {
         xmins_once,
         "a second run rewrites no row"
     );
+}
+
+/// Line endings and the recorded checksums (2026-11-11). A Windows build made
+/// from a CRLF checkout recorded the SHA-384 of every migration with CRLF line
+/// endings, and a Mac or Linux build refused that database as "previously
+/// applied but has been modified". These pin both directions: a database
+/// either build migrated opens under the other.
+mod line_endings {
+    use knobas_db::migrate;
+    use sqlx::migrate::{MigrateError, Migration, MigrationType, Migrator};
+
+    fn sha384(sql: &str) -> Vec<u8> {
+        Migration::new(
+            0,
+            "".into(),
+            MigrationType::Simple,
+            sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(sql.to_owned())),
+            false,
+        )
+        .checksum
+        .into_owned()
+    }
+
+    fn crlf(sql: &str) -> String {
+        sql.replace("\r\n", "\n").replace('\n', "\r\n")
+    }
+
+    /// The migrations as a build from a CRLF checkout embeds them.
+    async fn crlf_build() -> (Migrator, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "sql") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                std::fs::write(dir.path().join(path.file_name().unwrap()), crlf(&text)).unwrap();
+            }
+        }
+        let migrator = Migrator::new(dir.path()).await.unwrap();
+        (migrator, dir)
+    }
+
+    async fn recorded(pool: &sqlx::PgPool) -> Vec<(i64, Vec<u8>)> {
+        sqlx::query_as("select version, checksum from public._sqlx_migrations order by version")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    fn checksums_of(migrator: &Migrator) -> Vec<(i64, Vec<u8>)> {
+        migrator
+            .iter()
+            .map(|m| (m.version, m.checksum.to_vec()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_database_a_crlf_build_migrated_opens_under_this_build() {
+        let connector = knobas_db::test_util::scratch_database("crlf-to-lf").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        // What a Windows build before the fix left: every checksum the CRLF one.
+        for migration in this_build.iter() {
+            sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+                .bind(sha384(&crlf(migration.sql.as_str())))
+                .bind(migration.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let (crlf_build, _dir) = crlf_build().await;
+        assert_eq!(recorded(&pool).await, checksums_of(&crlf_build));
+
+        // The cause, as sqlx alone sees it. Without its lock: a refused run
+        // returns before it unlocks, and the lock would stay with the pool's
+        // connection and hold up the run below for good.
+        let mut unlocked = sqlx::migrate!("./migrations");
+        unlocked.set_locking(false);
+        let refused = unlocked.run(&pool).await.unwrap_err();
+        assert!(
+            matches!(refused, MigrateError::VersionMismatch(1)),
+            "{refused}"
+        );
+
+        migrate::run(&pool)
+            .await
+            .expect("a Windows database opens under this build");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        // And again, with nothing left to rewrite.
+        migrate::run(&pool).await.unwrap();
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_database_this_build_migrated_opens_under_a_crlf_build() {
+        let connector = knobas_db::test_util::scratch_database("lf-to-crlf").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        let (crlf_build, _dir) = crlf_build().await;
+        assert_ne!(checksums_of(&crlf_build), checksums_of(&this_build));
+
+        migrate::run_with(&crlf_build, &pool)
+            .await
+            .expect("this build's database opens under a CRLF build");
+        assert_eq!(recorded(&pool).await, checksums_of(&crlf_build));
+
+        // Back, so the scratch database is handed on as it came.
+        migrate::run(&pool).await.unwrap();
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+        pool.close().await;
+    }
+
+    fn unhex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// A profile PR #2479's draft was run on recorded `0093` and `0094` as
+    /// they were before the long-words pass (2026-11-16) took their one pass
+    /// over the mirror out. It opens under this build, its two rows now
+    /// naming the files as they are; the same checksum under another
+    /// version is refused as any edited migration is.
+    #[tokio::test]
+    async fn a_database_that_ran_0093_and_0094_as_they_were_opens_under_this_build() {
+        const FIRST_0093: &str = "98f277a00a18f76889eaac08383995e0a45b862e80d63cadc502aa4ce8b0e3e807259738b0e9f2ad248f7e08e5a7e455";
+        const FIRST_0094: &str = "3aea0a6a5ad23c1c09d03acef89f7b89f4707eb5f2096e206901f261717e89d4969202f024f68cfa95fa24f016eea737";
+        let connector = knobas_db::test_util::scratch_database("superseded").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        for (version, first) in [(93_i64, FIRST_0093), (94, FIRST_0094)] {
+            sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+                .bind(unhex(first))
+                .bind(version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert_ne!(recorded(&pool).await, checksums_of(&this_build));
+
+        migrate::run(&pool)
+            .await
+            .expect("a profile of the draft opens under this build");
+        assert_eq!(recorded(&pool).await, checksums_of(&this_build));
+
+        // `0093`'s first checksum recorded for `0092` names no file `0092` ever was.
+        let ninety_two = this_build.iter().find(|m| m.version == 92).unwrap();
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = 92")
+            .bind(unhex(FIRST_0093))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let refused = migrate::run(&pool).await.unwrap_err();
+        assert!(
+            matches!(
+                &refused,
+                knobas_db::DbError::Migrate(MigrateError::VersionMismatch(92))
+            ),
+            "{refused}"
+        );
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = 92")
+            .bind(ninety_two.checksum.as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    /// Only line endings: a migration edited in any other way is refused as
+    /// before, and its recorded checksum is left as it was.
+    #[tokio::test]
+    async fn a_migration_changed_beyond_its_line_endings_is_still_refused() {
+        let connector = knobas_db::test_util::scratch_database("edited").await;
+        let pool = connector.pool(2).await.unwrap();
+        let this_build = sqlx::migrate!("./migrations");
+        let first = this_build.iter().next().unwrap();
+        let edited = sha384(&format!("{}\n-- edited\n", first.sql.as_str()));
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+            .bind(&edited)
+            .bind(first.version)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let refused = migrate::run(&pool).await.unwrap_err();
+        assert!(
+            matches!(
+                &refused,
+                knobas_db::DbError::Migrate(MigrateError::VersionMismatch(v)) if *v == first.version
+            ),
+            "{refused}"
+        );
+        assert_eq!(recorded(&pool).await[0], (first.version, edited));
+
+        sqlx::query("update public._sqlx_migrations set checksum = $1 where version = $2")
+            .bind(first.checksum.as_ref())
+            .bind(first.version)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
 }

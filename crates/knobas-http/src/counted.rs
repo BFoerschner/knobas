@@ -1,6 +1,8 @@
 //! The request counter (#2239): how many requests one piece of work put on
 //! the wire, for the tests that hold a read to a round-trip budget (spec
-//! #2234, *Step 1*). Behind `test-util`, so no shipped build carries it.
+//! #2234, *Step 1*), and for the sync's held-sections pass, which holds the
+//! reads it makes after a run to a request cap (2026-11-15). Outside
+//! [`counted`] a request costs one failed task-local lookup.
 //!
 //! The count is the work's own: a task-local the attempt loop of
 //! [`HttpClient::send`](crate::HttpClient::send) adds to, one per attempt

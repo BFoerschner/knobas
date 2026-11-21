@@ -15,10 +15,12 @@ import {
   kindOf,
   opener,
   rowActions,
+  named,
   sentence,
-  snoozedLine,
+  backLabel,
   untilLabel,
   visible,
+  fixOf,
 } from "./inbox";
 
 function item(over: Partial<InboxItem>): InboxItem {
@@ -42,23 +44,26 @@ function entry(over: Partial<InboxItem>, actions: string[] = []): InboxEntry {
 }
 
 describe("a row's sentence", () => {
-  test("is the backend's reason, capitalised, then the item", () => {
+  test("leads with its subject, then why it is here (F-115)", () => {
     expect(sentence(item({ category: "new_assignment", reason: "assigned to you", title: "Payout dashboard latency" }))).toBe(
-      "Assigned to you: Payout dashboard latency",
+      "Payout dashboard latency: assigned to you",
     );
+    expect(sentence(item({}))).toBe("Idempotent retry window: jonas asked for your review");
+    expect(sentence(item({ reason: "somebody asked for your review" }))).toBe("Idempotent retry window: somebody asked for your review");
   });
 
   test("keeps a source's word as the source spells it", () => {
-    expect(sentence(item({}))).toBe("jonas asked for your review: Idempotent retry window");
-    expect(sentence(item({ category: "alert", reason: "knobas test estate / knobas-jira is down", title: "jira" }))).toBe(
-      "knobas test estate / knobas-jira is down",
-    );
+    expect(sentence(item({ category: "alert", reason: "knobas-jira is down", title: "jira" }))).toBe("knobas-jira is down");
+    expect(sentence(item({ category: "failed_build", reason: "x #1 failed", title: "x #1" }))).toBe("x #1 failed");
   });
 
-  test("capitalises the backend's stand-in for a review with no author", () => {
-    expect(sentence(item({ reason: "somebody asked for your review" }))).toBe(
-      "Somebody asked for your review: Idempotent retry window",
-    );
+  test("a monitor named apart from its asset leads, and the asset says the trouble", () => {
+    expect(sentence(item({ category: "alert", reason: "knobas-jira is down", title: "HTTP health" }))).toBe("HTTP health: knobas-jira is down");
+  });
+
+  test("a toast names the subject alone, or the sentence where the reason holds it", () => {
+    expect(named(item({ category: "new_assignment", reason: "assigned to you", title: "Payout dashboard latency" }))).toBe("Payout dashboard latency");
+    expect(named(item({ category: "alert", reason: "knobas-jira is down", title: "jira" }))).toBe("knobas-jira is down");
   });
 
   test("is the reason alone when the reason already names the item", () => {
@@ -104,7 +109,10 @@ describe("where a row opens", () => {
       href: "#/build/tc%3APayout%231187",
     });
   });
-  test("an alert opens Monitors", () => {
+  test("an alert opens Monitors at its monitor's row, named by its key", () => {
+    expect(opener(item({ category: "alert", key: "alert:kuma:3", entity_id: "asset:gitea", kind: "asset" }))?.href).toBe("#/monitors/at/kuma%3A3");
+  });
+  test("an alert whose key names no monitor opens Monitors", () => {
     expect(opener(item({ category: "alert", entity_id: "asset:gitea", kind: "asset" }))).toEqual({
       label: "Open monitor",
       href: "#/monitors",
@@ -136,13 +144,13 @@ describe("where a row opens", () => {
   });
   test("a failed sign-in opens its source's settings, where Re-enter is", () => {
     expect(opener(item({ category: "failed_sign_in", source_id: "teamcity", entity_id: null, kind: null }))).toEqual({
-      label: "Open source",
+      label: "Source settings",
       href: "#/settings/source/teamcity",
     });
   });
   test("a credential expiry opens its source's settings", () => {
     expect(opener(item({ category: "credential_expiry", source_id: "jira", entity_id: null, kind: null }))).toEqual({
-      label: "Open source",
+      label: "Source settings",
       href: "#/settings/source/jira",
     });
   });
@@ -213,15 +221,19 @@ describe("the filter", () => {
   });
 });
 
-test("the snoozed line names each item and its return date", () => {
-  const shelf = [
-    entry({ category: "credential_expiry", entity_id: null, kind: null, title: "Jira", reason: "the Jira credential expires on Monday 7 Sep 2026", snoozed_until: new Date(2026, 7, 29, 9).toISOString() }),
-    entry({ title: "Idempotent retry window", snoozed_until: new Date(2026, 8, 1, 9).toISOString() }),
-  ];
-  expect(snoozedLine(shelf)).toBe(
-    "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29), jonas asked for your review: Idempotent retry window (back 2026-09-01).",
-  );
-  expect(snoozedLine([])).toBeNull();
+test("a snoozed row says when it comes back in the words a credential's sentence dates itself in", () => {
+  expect(backLabel({ snoozed_until: new Date(2026, 7, 29, 9).toISOString() })).toBe("Saturday 29 Aug 2026");
+  expect(backLabel({ snoozed_until: null })).toBeNull();
+});
+
+test("a credential row says its fix once the sources are read, and opens the prompt", () => {
+  const row = item({ category: "failed_sign_in", source_id: "kuma", entity_id: null, kind: null });
+  expect(fixOf(row, () => "Enter token")).toEqual({ label: "Enter token…", href: "#/settings/source/kuma/reenter" });
+  expect(fixOf(row, () => null)).toBeNull();
+  // The sentence is the link, and it opens the source's page whatever the fix is called.
+  expect(opener(row)).toEqual({ label: "Source settings", href: "#/settings/source/kuma" });
+  // Only a credential row has a fix.
+  expect(fixOf(item({ category: "failed_build" }), () => "Enter token")).toBeNull();
 });
 
 test("a snooze's toast names the day within a week, the date beyond", () => {

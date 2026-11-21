@@ -1,0 +1,77 @@
+/* ---------- a source's own website inside knobas (ADR-0050, decisions §16, `tf/site/`) ----------
+   The site's page is one bar and the site. The bar sits where a page's breadcrumb sits, on the sheet, 40 px, so the
+   site reads as one more knobas page whose body someone else draws. It says loudly only whose site this is, which is
+   also whose sign-in the view carries. Everything else is small ghost buttons and one line in the code face. State is
+   a tone: `warn` when the address is not the source's own, `warn` when the bar asks. No yellow: yellow is the ticket. */
+.tf-site { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tf-sitebar {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; box-sizing: border-box;
+  background: var(--sheet); border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); min-width: 0; overflow: hidden;
+}
+.tf-site-hist { display: flex; gap: 2px; flex: none; }
+/* The nameplate: whose site this is. A page title's cut, small. */
+.tf-site-name {
+  flex: none; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-md) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 85; font-stretch: 85%; color: var(--ink);
+  padding: 0 10px 0 4px; border-right: 1px solid var(--rule); line-height: 20px; white-space: nowrap;
+}
+/* The address: text, not a field. The host in ink, the rest cut at its end. */
+.tf-site-at {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap;
+  overflow: hidden; padding-left: 4px; cursor: text; user-select: text; font-variant-ligatures: var(--mono-ligatures);
+}
+.tf-site-plain { color: var(--ink-2); flex: none; }
+.tf-site-host { color: var(--ink); font-weight: 600; flex: none; }
+.tf-site-path { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-site-at.tf-foreign .tf-site-host { color: var(--warn); }
+.tf-site-at .tf-chip { margin-left: 8px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
+.tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); padding: 1px 7px; border-radius: 3px; font-size: calc(var(--t-xs) * var(--fs)); flex: none; }
+.tf-site-acts { display: flex; align-items: center; gap: var(--control-gap); flex: none; }
+/* What the bar says, where the address is: one line, cut at the end. */
+.tf-site-says {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: calc(var(--t-sm) * var(--fs));
+  padding-left: 4px; white-space: nowrap; overflow: hidden;
+}
+.tf-site-says-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-site-says .tf-mono { --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-xs) * var(--fs)); font-variant-ligatures: var(--mono-ligatures); flex: none; }
+.tf-sitebar .tf-esc { display: inline-flex; align-items: baseline; gap: 5px; color: var(--ink-2); white-space: nowrap; padding-left: 8px; }
+.tf-sitebar .tf-esc .tf-esc-t { text-decoration: underline; text-underline-offset: 2px; margin-right: 2px; }
+.tf-sitebar .tf-esc:hover { color: var(--ink); }
+/* The first Esc: its cap is down while the second still counts. No fade in; a short fade out. */
+.tf-sitebar kbd { transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out; }
+.tf-sitebar kbd.tf-kbd-down { background: var(--fill); color: var(--sheet); border-color: var(--fill); transition: none; }
+@media (prefers-reduced-motion: reduce) { .tf-sitebar kbd { transition: none; } }
+.tf-site .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The bar asks: one sentence and its answers in its own row, so the page under it stays in view. */
+.tf-sitebar.tf-asks { background: var(--warn-bg); border-bottom-color: color-mix(in srgb, var(--warn) 30%, var(--rule-2)); }
+.tf-sitebar.tf-asks .tf-site-says { color: var(--warn); font-weight: 500; }
+.tf-sitebar.tf-asks .tf-btn { background: var(--sheet); }
+
+/* The rectangle the native view covers. Its words are what the site's state says, so hiding the view never uncovers a
+   blank. */
+.tf-site-room { position: relative; flex: 1 1 auto; min-height: 0; background: var(--paper); overflow: hidden; }
+.tf-veil { position: absolute; inset: 0; display: grid; place-items: center; background: var(--paper); text-align: center; padding: 24px; }
+.tf-veil-in { max-width: 560px; }
+.tf-veil h2 { margin: 0 0 6px; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 700; font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); overflow-wrap: anywhere; }
+.tf-veil-at { --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-sm) * var(--fs)); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); overflow-wrap: anywhere; }
+.tf-veil-big { --fs: var(--size-code); font-family: var(--mono); font-weight: 600; font-size: calc(var(--t-xl) * var(--fs)); font-variant-ligatures: var(--mono-ligatures); margin: 10px 0 12px; color: var(--ink); overflow-wrap: anywhere; }
+.tf-veil p { margin: 8px 0 0; color: var(--ink-2); }
+.tf-veil-acts { display: flex; gap: var(--control-gap); justify-content: center; margin-top: 16px; }
+.tf-veil small { display: block; margin-top: 12px; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+
+/* While a site is shown, three things that float and are no layer stand out of its rectangle (decisions §7): a toast
+   over the site's bar for its seconds, the zoom plate over the top bar. The opening chip places itself in the top
+   bar's band (`ack.svelte.ts`, `bandPlace`). */
+.tf.tf-site-shown .tf-toasts { top: 53px; bottom: auto; }
+.tf.tf-site-shown .tf-zoomlevel { top: 4px; }
+
+/* Quitting with unsaved changes (`TfSiteQuit.svelte`): a row per site, its nameplate, its page's title, *Show*. */
+.tf-site-quit-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tf-site-quit-list li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tf-site-quit-list .tf-site-name { border-right: 0; padding: 0; }
+.tf-site-quit-title { color: var(--ink-2); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Settings › Sources › ⟨source⟩ › Site: the addresses it may show, one a line, its own marked. */
+.tf-site-origins ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tf-site-origins li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tf-site-origins .tf-mono { overflow-wrap: anywhere; }
+.tf-site-origins .tf-site-suggested .tf-mono { color: var(--ink-2); }

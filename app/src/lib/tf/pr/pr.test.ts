@@ -6,7 +6,11 @@
 import { expect, test } from "vitest";
 
 import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
+import { stampLabel } from "../../time/format";
 import {
+  chipAct,
+  chipWords,
+  checkReading,
   checksLine,
   conversationOf,
   headerOf,
@@ -152,7 +156,7 @@ test("the tab counts are the sections' own: conversation, files changed, commits
 test("Ready to merge? reads prototype-6's three lines from the declared Approvals, the checks and Conflicts (#994)", () => {
   expect(readyLines(VIEW)).toEqual([
     { text: "Approvals: 1 of 2", tone: "warn" },
-    { text: "Checks: Payout_IntegrationTests #1187 failure, Payout_Build #1188 pending", tone: "err" },
+    { text: "Checks: Payout_IntegrationTests #1187 failed, Payout_Build #1188 pending", tone: "err" },
     { text: "No conflicts with main", tone: "ok" },
   ]);
 });
@@ -226,9 +230,9 @@ test("the checks line: every check passing, else each one that is not, the loude
 
 test("the conversation is one message per facts block: who, when, the review's verdict, then the words", () => {
   expect(conversationOf(VIEW)).toEqual([
-    { who: "jonas", at: "2026-08-22 09:30", verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
-    { who: "mara", at: "2026-08-22 10:20", verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
-    { who: "priya", at: "2026-08-22 11:00", verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
+    { who: "jonas", account: "jonas", at: stampLabel("2026-08-22T09:30:00"), verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
+    { who: "mara", account: "mara", at: stampLabel("2026-08-22T10:20:00"), verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
+    { who: "priya", account: "priya", at: stampLabel("2026-08-22T11:00:00"), verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
   ]);
   expect(conversationOf(null)).toEqual([]);
 });
@@ -326,14 +330,18 @@ test("the rail's checks stand where the source's required check says: a required
 test("Ready to merge? reads the required checks from the source, saying which ones stand in the way", () => {
   expect(readyLines(RAIL(null))).toEqual([
     { text: "Approvals: 2 of 2", tone: "ok" },
-    { text: "Required checks: 1 of 3 pass", tone: "err", why: "ci/test failure, deploy not reported" },
+    { text: "Required checks: 1 of 3 pass", tone: "err", why: "ci/test failed, deploy not reported" },
     { text: "No conflicts with main", tone: "ok" },
   ]);
 });
 
 test("readiness: not ready while a line is unmet or Merge is refused, ready only when both are clear", () => {
   const blocked = action("merge_pull_request", "Merge…", { disabled: "required check ci/test failed" });
-  expect(readiness(RAIL(blocked)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: "required check ci/test failed" });
+  // The row says what the source says, so the box does not repeat it.
+  expect(readiness(RAIL(blocked)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: null });
+  // A reason no row gives stays in the box, and one a row gives does not.
+  const twoReasons = action("merge_pull_request", "Merge…", { disabled: "required check ci/test failed; the head is behind main" });
+  expect(readiness(RAIL(twoReasons)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: "The head is behind main" });
   const passing = RAIL(blocked).sections[0]!;
   const allMet: SourceView = {
     actions: [action("merge_pull_request", "Merge…")],
@@ -371,7 +379,7 @@ test("readiness: not ready while a line is unmet or Merge is refused, ready only
   expect(readiness(passed).verdict).toEqual({ text: "Ready: 3 of 3 met", tone: "ok", why: null });
   // Every line met, Merge still refused (a head behind a protected base): not ready, saying why.
   const behind: SourceView = { ...allMet, actions: [action("merge_pull_request", "Merge…", { disabled: "the head is behind main" })] };
-  expect(readiness(behind).verdict).toEqual({ text: "Not yet: 2 of 2 met", tone: "warn", why: "the head is behind main" });
+  expect(readiness(behind).verdict).toEqual({ text: "Can't merge from here", tone: "warn", why: "The head is behind main" });
   // No Merge offered (merged, closed): no verdict, the lines alone.
   expect(readiness(RAIL(null)).verdict).toBeNull();
   expect(readiness(RAIL(null)).lines).toHaveLength(3);
@@ -379,15 +387,59 @@ test("readiness: not ready while a line is unmet or Merge is refused, ready only
 
 test("the reviewers and their state, from the source's standing verdicts", () => {
   expect(reviewersOf(RAIL(null))).toEqual([
-    { who: "sven", state: "Approved", tone: "ok" },
-    { who: "jonas", state: "Changes requested", tone: "warn" },
-    { who: "priya", state: "Review requested", tone: "muted" },
+    { who: "sven", account: "sven", state: "Approved", tone: "ok" },
+    { who: "jonas", account: "jonas", state: "Changes requested", tone: "warn" },
+    { who: "priya", account: "priya", state: "Review requested", tone: "muted" },
   ]);
   expect(reviewersOf(null)).toEqual([]);
+});
+
+test("a person the source names by display name keeps the account it carries (F-107)", () => {
+  const named = (label: string, value: string, account: string, tone: Tone | null = null) => ({ ...fact(label, value, tone), account });
+  const view: SourceView = {
+    sections: [
+      { id: "overview", title: "Overview", count: null, deferred: false, blocks: [{ type: "facts", facts: [named("Review", "approved by Priya Nair", "priya.nair", "ok")] }] },
+      { id: "conversation", title: "Conversation", count: 1, deferred: false, blocks: [{ type: "facts", facts: [named("Mara Lindqvist", "2026-08-22T10:20:00", "mara")] }] },
+    ],
+    actions: [],
+  } as unknown as SourceView;
+  expect(reviewersOf(view)).toEqual([{ who: "Priya Nair", account: "priya.nair", state: "Approved", tone: "ok" }]);
+  expect(conversationOf(view).map(({ who, account }) => ({ who, account }))).toEqual([{ who: "Mara Lindqvist", account: "mara" }]);
 });
 
 test("conflicts: none, or the base it conflicts with; nothing while the source has not said", () => {
   expect(conflictsOf(RAIL(null))).toEqual({ conflicts: false, text: "No conflicts with main" });
   expect(conflictsOf(overviewOf(fact("Conflicts", "conflicts with main", "warn")))).toEqual({ conflicts: true, text: "Conflicts with main" });
   expect(conflictsOf(overviewOf(fact("State", "open", "info")))).toBeNull();
+});
+
+test("a check that counts its tests reads as Builds says it, failed first, and the counts stand for the state (F-010)", () => {
+  const row = (chip: string | null, meta: string | null): ViewRow => ({ entity_id: null, title: "x", meta, tone: null, chip, url: null });
+  expect(checkReading(row("failure", "41 passed, 1 failed · 2 h ago"))).toBe("1 failed, 41 passed · 2 h ago");
+  expect(checkReading(row("success", "42 passed, 0 failed"))).toBe("42 passed");
+  expect(checkReading(row("pending", "step 3 of 5 · 6 min ago"))).toBe("Pending, step 3 of 5 · 6 min ago");
+  expect(checkReading(row("success", null))).toBe("Passed");
+  expect(checkReading(row(null, "7 min ago"))).toBe("7 min ago");
+});
+
+test("a review's chip says what it is doing while queued and what it did once sent; other chips keep their words (F-262)", () => {
+  const review = (text: string, state: string) => ({ kind: "review", text, state });
+  expect(chipWords(review("approve", "queued"))).toBe("Approving, queued");
+  expect(chipWords(review("approve", "sent"))).toBe("Approved, sent");
+  expect(chipWords(review("comment", "queued"))).toBe("Commenting, queued");
+  expect(chipWords(review("comment", "sent"))).toBe("Commented, sent");
+  expect(chipWords(review("request_changes", "sent"))).toBe("Changes requested, sent");
+  expect(chipWords({ kind: "merge", text: "merge", state: "sent" })).toBe("Merging, sent");
+  expect(chipWords({ kind: "source:x", text: "Pin", state: "sent" })).toBe("Pin, sent");
+});
+
+test("a chip's words are the app's own or a source's as written; nothing else reaches the row (F-261, F-236)", () => {
+  expect(chipAct({ kind: "merge", text: "merge" })).toBe("Merging");
+  expect(chipAct({ kind: "update", text: "update" })).toBe("Updating branch");
+  expect(chipAct({ kind: "review", text: "request_changes" })).toBe("Requesting changes");
+  // A source's action keeps its button's words, whatever they are.
+  for (const words of ["Add label backport", "Merge when green", "stamp release", "Pin"]) expect(chipAct({ kind: "source:x", text: words })).toBe(words);
+  // A thread's echoes, a comment, and anything a later page queues on a pull request stay out until they are listed.
+  for (const kind of ["reply\n4088", "resolve\n4088", "comment", "constructor", ""]) expect(chipAct({ kind, text: "Fixed it" })).toBeNull();
+  expect(chipAct({ kind: "review", text: "resolved" })).toBeNull();
 });

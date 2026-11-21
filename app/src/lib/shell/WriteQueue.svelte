@@ -20,8 +20,8 @@
   *which* lives in `withdrawnWorklog`, beside its reasons.
 
   **There is no timeout and there is nothing here that could become one.** No
-  auto-apply, no bulk "send everything", no timer. *Flush now* asks the queue
-  to retry what is merely waiting; it cannot release a held write, and the
+  auto-apply, no bulk "send everything", no timer. *Retry waiting writes* asks the
+  queue to retry what is merely waiting; it cannot release a held write, and the
   backend would not offer it one. `write-queue.test.svelte.ts` runs the clock
   forward over a held row and asserts it is untouched.
 
@@ -31,14 +31,16 @@
 -->
 <script lang="ts">
   import { keyOf, minutesLabel } from "../time/format";
-  import { getEntity } from "../ipc/entity";
+  import { batchedBrief } from "../ipc/entity";
   import type { QueuedWrite } from "../ipc/sources";
   import { clockReading, dayKey, dayLabel } from "../time/day";
   import { minutesOf } from "../time/week";
+  import { inlineEditor } from "../tf/inline-editor";
   import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import { patience } from "./patience.svelte";
   import { ago } from "./time";
+  import { push } from "./toasts.svelte";
   import {
     blockers,
     demandOf,
@@ -59,7 +61,8 @@
     now = new Date(),
     onclose,
     layers = sharedLayers,
-    nameOf = (entityId: string) => getEntity(entityId).then((detail) => detail.row.title || null),
+    // Every row's name in one read (the query audit, 2026-11-12: one `get_entity` a queued write).
+    nameOf = ((brief) => (entityId: string) => brief(entityId).then((found) => found?.title || null))(batchedBrief()),
   }: {
     queue: WriteQueue;
     /** Injectable clock, so "3 minutes ago" is testable rather than waited for. */
@@ -186,6 +189,16 @@
     void queue.discard(asked.id);
   }
 
+  /** The press says what it did: the rows move, but not always, and not always where the reader is looking. */
+  async function retry() {
+    // A second press while one is out sends nothing, so it has nothing to say.
+    if (queue.flushing) return;
+    await queue.flush(null);
+    if (queue.error !== null) return;
+    const left = queue.counts.pending;
+    push({ text: left === 0 ? "Nothing is waiting any more." : `Tried again. ${left} still waiting.` });
+  }
+
   /** `2 h 15 min` -- minute-granular and never rounded up (CONTEXT.md). */
   function worked(seconds: number): string {
     return minutesLabel(minutesOf(seconds));
@@ -219,6 +232,7 @@
     ? "Nothing owed"
     : `${queue.counts.pending} waiting · ${queue.counts.held + queue.counts.refused} need you`}
   className="tf-wq-dialog"
+  why={queue.answered && waiting.length === 0 ? "Nothing is waiting." : null}
   {layers}
   {onclose}
 >
@@ -340,7 +354,13 @@
             {/if}
 
             {#if editing === row.id}
-              <div class="tf-wq-edit">
+              <div
+                class="tf-wq-edit"
+                {@attach inlineEditor(() => (editing = null), {
+                  layers,
+                  back: () => document.querySelector<HTMLElement>(`[data-wq-edit="${row.id}"]`),
+                })}
+              >
                 <span class="tf-wq-side" id="wq-edit-label-{row.id}">Your write</span>
                 <textarea aria-labelledby="wq-edit-label-{row.id}" bind:value={draft} rows="4"></textarea>
               </div>
@@ -361,7 +381,7 @@
                   </button>
                 {/if}
                 {#if body !== null}
-                  <button class="tf-btn tf-sm" disabled={queue.busy} onclick={() => openEditor(row)}>
+                  <button class="tf-btn tf-sm" data-wq-edit={row.id} disabled={queue.busy} onclick={() => openEditor(row)}>
                     Edit…
                   </button>
                 {/if}
@@ -401,7 +421,7 @@
 
   {#snippet footer()}
     <!--
-      *Flush now* is impatience, not a decision: the scheduler already retries
+      *Retry waiting writes* is impatience, not a decision: the scheduler already retries
       on its own tick. It is deliberately incapable of releasing a held write,
       and the line beside it says which rows it moves so that pressing it is
       never mistaken for answering a conflict. It is still the footer's primary,
@@ -419,7 +439,7 @@
       {@render guarantee()}
     </div>
     <button class="tf-btn tf-ghost" onclick={onclose}>Close</button>
-    <button class="tf-btn tf-primary" disabled={queue.busy || queue.flushing} onclick={() => queue.flush(null)}>Flush now</button>
+    <button class="tf-btn tf-primary" disabled={queue.busy || queue.flushing || waiting.length === 0} onclick={() => void retry()}>{queue.flushing ? "Retrying…" : "Retry waiting writes"}</button>
   {/snippet}
 </TfDialog>
 

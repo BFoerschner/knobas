@@ -564,7 +564,7 @@ The job of this view is that nobody has to open Confluence. Search comes first, 
 
 ### 10a. One view: the reader, with space and search at the top left
 
-There is no separate Docs home and no separate results page. `#/docs` opens the reader on the page you read last. `#/docs/space/<key>` picks that space and opens its first page. Where two sources hold the key, the space's address names its source the way an entity id does, `#/docs/space/<source>:<key>`, and a bare key opens the first source's space (2026-10-21, #1455, the shape #1476 gave a job).
+**Superseded for `#/docs` on 2026-11-05 (Björn, `docs/decisions/2026-11-05-docs-home.md`): `#/docs` is now a Docs home, and the rest of this paragraph stands.** There is no separate Docs home and no separate results page. `#/docs` opens the reader on the page you read last. `#/docs/space/<key>` picks that space and opens its first page. Where two sources hold the key, the space's address names its source the way an entity id does, `#/docs/space/<source>:<key>`, and a bare key opens the first source's space (2026-10-21, #1455, the shape #1476 gave a job).
 
 - **R-10.1** The **left pane** starts with two controls, at the very top left:
   - a **space picker**: *All spaces (84)*, then every space with its page count. It follows the open page's space until you pick one;
@@ -612,7 +612,7 @@ There is no separate Docs home and no separate results page. `#/docs` opens the 
 
   The rest of the page's context sits at the **page foot**, after the body and before the comments, in this order, each left out when empty:
   - *Work it belongs to*, the tickets the page references or is linked to, with key, title and status, as an open list;
-  - *Linked from*, the page's backlinks, grouped by space. Each space is a fold, closed every time a page opens, showing the space key, its name and its count, and opening to a list of pages. The heading counts the pages, "50+" when the reader's limit of 50 is reached;
+  - *Linked from*, the page's backlinks, grouped by space. Each space is a fold, closed every time a page opens, showing the space key, its name and its count, and opening to a list of pages (amended 2026-11-06: up to six are listed outright, with no fold; the design system, *Layout*). The heading counts the pages, "50+" when the reader's limit of 50 is reached;
   - *Attachments*, once built.
 
   The page's history is the last edit and *Created by* in the meta line (R-10.10); there is no History section.

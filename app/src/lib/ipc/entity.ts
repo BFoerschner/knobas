@@ -8,9 +8,22 @@
  * `include_str!`s this file, and so do {@link LanesAsked} and {@link OpenAt},
  * which bundle a function's arguments rather than mirror a Rust type.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
+import { viewDate } from "../time/format";
 import type {
+  ArchiveIndex,
+  ClassOutline,
   ActionItemTicket,
+  CardRows,
+  EntityBrief,
+  CloneAllPlan,
+  CloneAllState,
+  LocalDir,
+  LocalPaths,
+  LocalTree,
+  BranchPull,
+  RepoBuilds,
+  ViewBlock,
   ArtifactEntry,
   ArtifactPreview,
   AttachmentBytes,
@@ -18,17 +31,23 @@ import type {
   CaptureShortcut,
   ChainStepRow,
   CheckoutApplicationDraft,
+  CheckoutOf,
   CheckoutSettings,
   CheckoutView,
   OpenObject,
   CloneAnswer,
   CodeFacts,
+  CommitRepository,
   ContextRow,
   DiffRead,
   DocExport,
   DocPage,
   DocsHits,
+  DocsNodesAsked,
+  DocsChoices,
+  DocsHome,
   DocsTree,
+  DocSpace,
   DownloadTarget,
   EntityDetail,
   EntityFilter,
@@ -36,9 +55,11 @@ import type {
   InboxCategory,
   InboxEntry,
   InboxShelf,
+  InboxShelves,
   JobLinkSets,
   JobPipeline,
   LaneField,
+  BoardPage,
   LinkRow,
   LinkSetDetail,
   LinkSetDraft,
@@ -63,6 +84,10 @@ import type {
   PublishTarget,
   PullRequestWorktree,
   RangeDiff,
+  RangeFileAsk,
+  RangeFilePage,
+  RangeFiles,
+  RangeNames,
   Reached,
   RefusedWrite,
   RuleTicket,
@@ -70,6 +95,7 @@ import type {
   RunPreset,
   RunRow,
   RunTests,
+  ShownView,
   SourceView,
   StandupDigest,
   StartWorkStep,
@@ -90,6 +116,24 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 import type { DayWindow } from "./time";
 
 export type {
+  ArchiveIndex,
+  ClassOutline,
+  Lib,
+  Maven,
+  Member,
+  CloneAllFailure,
+  CardRows,
+  EntityBrief,
+  CloneAllPlan,
+  CloneAllSkipped,
+  CloneAllSource,
+  CloneAllState,
+  Fetched,
+  LocalDir,
+  LocalEntry,
+  LocalPaths,
+  LocalTree,
+  MirrorTip,
   ActionField,
   ActionItemTicket,
   ActivityRow,
@@ -106,6 +150,7 @@ export type {
   CheckoutApplication,
   CheckoutApplicationDraft,
   CheckoutFoundBy,
+  CheckoutOf,
   CheckoutSettings,
   CheckoutView,
   OpenObject,
@@ -116,6 +161,7 @@ export type {
   CloneFailureCause,
   CloneState,
   CodeFacts,
+  CommitRepository,
   Commenting,
   ContextKind,
   ContextRow,
@@ -146,6 +192,10 @@ export type {
   DocWork,
   DocWrite,
   DocsHits,
+  DocsNodesAsked,
+  DocsChoices,
+  DocsHome,
+  DocsHomeKind,
   DocsTree,
   DownloadTarget,
   EntityDetail,
@@ -166,6 +216,7 @@ export type {
   InboxEntry,
   InboxItem,
   InboxShelf,
+  InboxShelves,
   JobLink,
   JobLinkSets,
   JobMember,
@@ -176,6 +227,8 @@ export type {
   KindTally,
   LaneColumn,
   LaneField,
+  BoardPage,
+  BoardPageMark,
   LineComment,
   LineComments,
   LineThread,
@@ -234,9 +287,18 @@ export type {
   PullRequestWorktree,
   RangeCommit,
   RangeDiff,
+  RangeFileAsk,
+  RangeFilePage,
+  RangeFiles,
+  RangeNames,
+  WorkingAt,
   ReachOrigin,
   Reached,
   RefusedWrite,
+  BranchPull,
+  RepoBuilds,
+  RepoPipelineRow,
+  Republication,
   RuleTicket,
   RunLog,
   RunPreset,
@@ -249,6 +311,7 @@ export type {
   SignalKind,
   SourceRef,
   SourceStatuses,
+  ShownView,
   SourceView,
   StandupDigest,
   StartWorkOutcome,
@@ -270,6 +333,7 @@ export type {
   TreeSections,
   UncommittedDiff,
   Unfilled,
+  Unsynced,
   UrlMatch,
   ViewAction,
   ViewBlock,
@@ -344,6 +408,14 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 }
 
 /**
+ * `getEntity` less the item's text: `body_text` empty and `payload` null (the extremes pass, PR #2479, 2026-11-13). For
+ * a page that draws the body from a read of its own and wants the row, source, links and banners: Docs.
+ */
+export function entityHead(entityId: string): Promise<EntityDetail> {
+  return invoke<EntityDetail>("entity_head", { entityId });
+}
+
+/**
  * Every pipeline the sources filling the CI role declare, by name (#848). The
  * read narrows itself to CI's fillers (#1295, §10.8's #1294 entry): a source
  * with a CI miss, one that claims no CI and a removed source's leftovers draw
@@ -351,6 +423,33 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
  */
 export function pipelines(): Promise<PipelineRow[]> {
   return invoke<PipelineRow[]>("pipelines");
+}
+
+/**
+ * A repository's Builds tab in one answer (the repo-builds pass, `mockups/builds/repo-builds.md`): the pipelines that
+ * built one of its mirrored commits, each with its newest run per branch, and its open pull requests by branch. The
+ * mirror alone; CI's fillers only. Rejects with `invalid` for a non-id; a repository the mirror does not hold answers
+ * none.
+ */
+export function repoPipelines(repoId: string): Promise<RepoBuilds> {
+  return invoke<RepoBuilds>("repo_pipelines", { repoId });
+}
+
+/**
+ * A repository's branches as the mirror holds them, each with its tip and the open pull request opened from it (the
+ * forge-rounds pass, 2026-11-15): what the header's *New pull request* is decided on, with no read of the source.
+ * Rejects with `invalid` for a non-id; a repository the mirror does not hold answers none.
+ */
+export function repoBranchPulls(repoId: string): Promise<BranchPull[]> {
+  return invoke<BranchPull[]>("repo_branch_pulls", { repoId });
+}
+
+/**
+ * The repositories of mirrored commits, by their stored parents: what *By repository* on the Builds list groups a
+ * pipeline by, through the commits its runs built (`RunRow.commit_id`). A commit the mirror does not hold answers none.
+ */
+export function commitRepositories(commitIds: string[]): Promise<CommitRepository[]> {
+  return invoke<CommitRepository[]>("commit_repositories", { commitIds });
 }
 
 /**
@@ -381,6 +480,29 @@ export function setPipelinePinned(pipelineId: string, pinned: boolean): Promise<
   return invoke<boolean>("set_pipeline_pinned", { pipelineId, pinned });
 }
 
+/** The live runs marked read (ux18, `read_runs`): a finished failed run not among them is unread. */
+export function readRuns(): Promise<string[]> {
+  return invoke<string[]>("read_runs");
+}
+
+/**
+ * Mark runs read (ux18, `mark_runs_read`): `runs` by id, and every finished failed run of each of `pipelines`. Answers
+ * the ids it wrote, which a run already read is not among: what *Undo* hands back to {@link markRunsUnread}.
+ */
+export function markRunsRead(runs: string[], pipelines: string[] = []): Promise<string[]> {
+  return invoke<string[]>("mark_runs_read", { runs, pipelines });
+}
+
+/** Mark runs unread (ux18, `mark_runs_unread`), taking back each one's Inbox *Done*. Answers the ids that were read. */
+export function markRunsUnread(runs: string[]): Promise<string[]> {
+  return invoke<string[]>("mark_runs_unread", { runs });
+}
+
+/** The top bar's Builds count (ux18, `unread_failing_builds`): pipelines whose newest run failed and is unread. */
+export function unreadFailingBuilds(): Promise<number> {
+  return invoke<number>("unread_failing_builds");
+}
+
 /** The pipelines on the job of a ticket, by entity id (#850). */
 export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
   return invoke<JobPipeline[]>("job_pipelines", { entityId });
@@ -389,6 +511,51 @@ export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
 /** {@link CodeFacts} for each id the mirror holds live; the others are left out (#966). */
 export function codeFacts(entityIds: string[]): Promise<CodeFacts[]> {
   return invoke<CodeFacts[]>("code_facts", { entityIds });
+}
+
+/**
+ * What each of `entityIds` is, in the order asked (the query audit of PR #2479, 2026-11-12): its kind, source, title
+ * and state chip, read as `get_entity` reads its row, for a page that wants one of them for many ids. An id the mirror
+ * does not hold, withdrawn or not, is left out, where `get_entity` rejects with `not_found`.
+ */
+export function entityBriefs(entityIds: string[]): Promise<EntityBrief[]> {
+  return invoke<EntityBrief[]>("entity_briefs", { entityIds });
+}
+
+/**
+ * One id's brief, asked of {@link entityBriefs} together with every other id asked in the same task: a list that
+ * names its rows one by one sends one read for all of them. `null` for an id the mirror does not hold; a failed read
+ * rejects every id it carried.
+ */
+export function batchedBrief(read: (entityIds: string[]) => Promise<EntityBrief[]> = entityBriefs): (entityId: string) => Promise<EntityBrief | null> {
+  let waiting: { id: string; resolve: (brief: EntityBrief | null) => void; reject: (error: unknown) => void }[] = [];
+  return (id) =>
+    new Promise((resolve, reject) => {
+      waiting.push({ id, resolve, reject });
+      if (waiting.length > 1) return;
+      queueMicrotask(() => {
+        const batch = waiting;
+        waiting = [];
+        read([...new Set(batch.map((one) => one.id))]).then(
+          (briefs) => {
+            const byId = new Map(briefs.map((brief) => [brief.entity_id, brief]));
+            for (const one of batch) one.resolve(byId.get(one.id) ?? null);
+          },
+          (error: unknown) => {
+            for (const one of batch) one.reject(error);
+          },
+        );
+      });
+    });
+}
+
+/**
+ * A ticket's card sections in one read (the query audit of PR #2479): what `entityId` reaches, as `job_reach`
+ * answers it, walked once, and each of `sections` read through it as {@link listEntities} reads the filter with
+ * `reach` set to `entityId`, at most `limit` rows each, in the order asked. A section whose read failed has no rows.
+ */
+export function cardReads(entityId: string, sections: EntityFilter[], limit: number): Promise<CardRows> {
+  return invoke<CardRows>("card_reads", { entityId, sections, limit });
 }
 
 /**
@@ -764,8 +931,80 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * naming it. Rejects with `invalid`, `not_found`, `unauthorized`,
  * `unreachable` or `internal` as {@link reachableTransitions} does.
  */
-export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
-  return invoke<SourceView | null>("entity_view", { entityId, section });
+export function entityView(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  const key = viewKey(entityId, section);
+  const ahead = readsAhead.get(key);
+  if (ahead !== undefined) {
+    // One kept after it landed is taken once: an ask after this one reads again.
+    if (landed.has(ahead)) readsAhead.delete(key);
+    return ahead.then(withDateWords);
+  }
+  return invoke<ShownView | null>("entity_view", { entityId, section }).then(withDateWords);
+}
+
+/**
+ * {@link entityView} for a view a page draws beside the read it waits on, not instead of it (the ux16 overs pass,
+ * 2026-11-17): Compare's branch standing beside the compare's list. Its requests to the source go in the background
+ * lane, once the page's own are answered; what knobas holds is answered at once as for any view. On Björn's PC the
+ * standing's eight requests went out with the compare's two, and the compare took 600 ms at 6x where it takes 40 to 90.
+ */
+export function entityViewBehind(entityId: string, section: string | null = null): Promise<ShownView | null> {
+  return invoke<ShownView | null>("entity_view", { entityId, section, behind: true }).then(withDateWords);
+}
+
+/**
+ * Views read ahead of a press (`tf/repo/hover-reads.ts`, the inner-pages pass of 2026-11-12), by entity and section,
+ * while they are out: the page's own ask after the press joins the read under way rather than asking the source a
+ * second time. Only a read started ahead is joined, so an ask made after a refresh never gets an answer from before it.
+ */
+const readsAhead = new Map<string, Promise<ShownView | null>>();
+/** The reads ahead kept after they landed (`keepMs`), each for one ask. */
+const landed = new WeakSet<Promise<ShownView | null>>();
+const viewKey = (entityId: string, section: string | null) => `${entityId}\u0000${section ?? ""}`;
+
+/** Every read ahead forgotten: a test's fresh window. */
+export function forgetReadsAhead(): void {
+  readsAhead.clear();
+}
+
+/**
+ * Reads `entityId`'s view at `section` ahead of a press, for {@link entityView} to join while it is out. `keepMs`
+ * keeps it that long after it lands for one ask to take (a press's own reads, `tf/repo/hover-reads.ts`, the ux14 pass,
+ * 2026-11-16: started at the press, they land before the page that asks them is built).
+ */
+export function readViewAhead(entityId: string, section: string | null = null, keepMs = 0): Promise<ShownView | null> {
+  const key = viewKey(entityId, section);
+  const held = readsAhead.get(key);
+  if (held !== undefined) return held;
+  const read = invoke<ShownView | null>("entity_view", { entityId, section });
+  readsAhead.set(key, read);
+  const done = () => {
+    if (readsAhead.get(key) !== read) return;
+    if (keepMs <= 0) readsAhead.delete(key);
+    else {
+      landed.add(read);
+      setTimeout(() => {
+        if (readsAhead.get(key) === read) readsAhead.delete(key);
+      }, keepMs);
+    }
+  };
+  read.then(done, done);
+  return read;
+}
+
+/** A view's rows with their meta in the one date form, read here so every list and its filter say the same (`viewDate`). */
+function withDateWords<V extends SourceView>(view: V | null): V | null {
+  if (view === null) return null;
+  const now = new Date();
+  return {
+    ...view,
+    sections: view.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) =>
+        block.type === "entities" ? { ...block, rows: block.rows.map((row) => (row.meta === null ? row : { ...row, meta: viewDate(row.meta, now) })) } : block,
+      ),
+    })),
+  };
 }
 
 /** What `entity_file_bytes` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
@@ -935,6 +1174,20 @@ export function inboxItems(shelf: InboxShelf): Promise<InboxEntry[]> {
 }
 
 /**
+ * Both shelves and the count — `inbox_shelves`, one run of the derivation
+ * (the query audit of 2026-11-12). What the inbox store asks: `stream` is
+ * {@link inboxItems} of the stream, `snoozed` of the snoozed shelf, and
+ * `count` what {@link inboxCount} answers, all decided by one statement, where
+ * the three reads ran every rule twice.
+ *
+ * Rejects with `not_ready` while the database or the sync engine is still
+ * coming up.
+ */
+export function inboxShelves(): Promise<InboxShelves> {
+  return invoke<InboxShelves>("inbox_shelves");
+}
+
+/**
  * How many items need you now — `inbox_count`. The number the top strip shows.
  *
  * **Snoozed items are not in it**, because the number means "needs me now";
@@ -1055,6 +1308,10 @@ export interface LanesAsked {
  * `lanes` (#939, #1098) puts the board in lanes on the server: `perColumn`
  * then caps each lane's column, and only the first `lanes.first` lanes are
  * sent, biggest first (`MiniBoard.lanes`, `MiniBoard.more_lanes`).
+ *
+ * `page` (ux18) reads past the first cards, for a view that shows every ticket: a column's next `perColumn`
+ * cards `after` those it holds (of the `statuses` its column gathers, in a `lane`), or the list sorted on the
+ * server by a header, its order in `MiniBoard.order`.
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "role" | "context" | "project">,
@@ -1062,6 +1319,7 @@ export function miniBoard(
   query?: string | null,
   savedView?: string | null,
   lanes?: LanesAsked | null,
+  page?: BoardPage | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
@@ -1072,6 +1330,7 @@ export function miniBoard(
     savedView: savedView ?? null,
     lanes: lanes?.by ?? null,
     lanesFirst: lanes?.first ?? null,
+    page: page ?? null,
   });
 }
 
@@ -1168,6 +1427,16 @@ export function publishStandupProtocol(
   return invoke<Protocol>("publish_standup_protocol", { day, target: target ?? null });
 }
 
+/**
+ * Send what the note says now to the date's page — `publish_standup_protocol_again`
+ * (F-327): an `UpdatePage` of the whole page, answered once queued. Nothing new, or
+ * one still on its way, queues nothing; a first publish that has not landed, or a
+ * page edited at the source since, is refused.
+ */
+export function publishStandupProtocolAgain(day: string): Promise<Protocol> {
+  return invoke<Protocol>("publish_standup_protocol_again", { day });
+}
+
 /** Where protocols are published, or `null` until somebody has said. */
 export function standupPublishTarget(): Promise<PublishTarget | null> {
   return invoke<PublishTarget | null>("standup_publish_target");
@@ -1252,6 +1521,15 @@ export function entityCheckout(entityId: string): Promise<CheckoutView> {
 }
 
 /**
+ * {@link entityCheckout} for many repos or branches in one call, in the order asked — `entity_checkouts` (the scale
+ * pass, PR #2479). An id the single read refuses is left out. The clones root is walked once, and a working tree nothing
+ * touched since its last read answers that read without running git.
+ */
+export function entityCheckouts(entityIds: readonly string[]): Promise<CheckoutOf[]> {
+  return invoke<CheckoutOf[]>("entity_checkouts", { entityIds });
+}
+
+/**
  * Set this repository's checkout path by hand, or clear it back to the scan —
  * `set_checkout_override` (#499).
  *
@@ -1323,6 +1601,16 @@ export function openObject(entityId: string, application: string | null, object:
 }
 
 /**
+ * Run an application on a folder of this entity's repository as it runs on
+ * the repository — `open_folder` (2026-11-16, a right-click's *Open in…* on a
+ * folder): its own command, the folder in the checkout's place. `folder` is
+ * relative to the checkout. Answers the argument vector it started.
+ */
+export function openFolder(entityId: string, application: string | null, folder: string): Promise<string[]> {
+  return invoke<string[]>("open_folder", { entityId, application, folder });
+}
+
+/**
  * The page a code object has at its source — `object_page` (#2274): what
  * *Open in › Browser* opens. Built from the source's typed base URL and the
  * pages its adapter declares; `null` when it declares none.
@@ -1375,6 +1663,69 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
 }
 
 /**
+ * `entityId`'s whole tree read at its checkout, at the tip the mirror holds
+ * for its branch — `entity_local_tree` (ADR-0041): what *Files* draws before
+ * the source answers. `null` with no checkout, no tip, or a checkout that
+ * lacks the commit; that last fetches it behind, told on
+ * `EVENTS.checkoutFetched`.
+ */
+export function entityLocalTree(entityId: string): Promise<LocalTree | null> {
+  return invoke<LocalTree | null>("entity_local_tree", { entityId });
+}
+
+/**
+ * One directory of `entityId`'s tree read at its checkout — `entity_local_dir` (the big-folder pass of PR #2479,
+ * 2026-11-13): with `commit` `null` at the tip the mirror holds for its branch (the tab's top; a checkout that lacks
+ * it fetches it behind, told on `EVENTS.checkoutFetched`), else at that commit. What *Files* reads for each folder it
+ * opens, so the page holds what it draws and a folder past twenty thousand entries is drawn whole. `null` where the
+ * checkout cannot answer; `complete: false` where a tree past two million entries was cut in it.
+ */
+export function entityLocalDir(entityId: string, commit: string | null, dir: string): Promise<LocalDir | null> {
+  return invoke<LocalDir | null>("entity_local_dir", { entityId, commit, dir });
+}
+
+/**
+ * Every file of `entityId`'s tree at `commit` (a sha {@link entityLocalDir} answered), read at its checkout —
+ * `entity_local_paths` (the big-folder pass): what *Go to file* filters. `null` where the checkout cannot answer.
+ */
+export function entityLocalPaths(entityId: string, commit: string): Promise<LocalPaths | null> {
+  return invoke<LocalPaths | null>("entity_local_paths", { entityId, commit });
+}
+
+/**
+ * The file `path` in `entityId`'s tree at `commit` (a sha {@link entityLocalTree}
+ * answered), read at its checkout — `entity_local_file` (ADR-0041); `null`
+ * where the checkout cannot answer.
+ */
+export function entityLocalFile(entityId: string, commit: string, path: string): Promise<ViewBlock | null> {
+  return invoke<ViewBlock | null>("entity_local_file", { entityId, commit, path });
+}
+
+/**
+ * The diff from `base` to `head` as the source's compare answers it now,
+ * never local — `entity_source_range_diff` (ADR-0041): what a page that drew
+ * a predicted {@link entityRangeDiff} asks behind it.
+ */
+export function entitySourceRangeDiff(entityId: string, base: string, head: string): Promise<RangeDiff> {
+  return invoke<RangeDiff>("entity_source_range_diff", { entityId, base, head });
+}
+
+/** What *Clone all* would clone now — `clone_all_plan`: reads the mirror and the disk only. */
+export function cloneAllPlan(): Promise<CloneAllPlan> {
+  return invoke<CloneAllPlan>("clone_all_plan");
+}
+
+/** Start *Clone all*, or the run already going — `clone_all`; its states follow on `EVENTS.cloneAll`. */
+export function cloneAll(): Promise<CloneAllState> {
+  return invoke<CloneAllState>("clone_all");
+}
+
+/** Where *Clone all* is, or where its last run ended — `clone_all_state`; `null` before the first. */
+export function cloneAllState(): Promise<CloneAllState | null> {
+  return invoke<CloneAllState | null>("clone_all_state");
+}
+
+/**
  * The uncommitted changes at a repo's or a branch's checkout —
  * `entity_checkout_diff` (#824, ADR-0026). Read when the *Local changes* tab
  * opens. Rejects with `not_found` for an entity with no checkout on this
@@ -1392,6 +1743,71 @@ export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
  */
 export function entityRangeDiff(entityId: string, base: string, head: string, ignoreWhitespace: boolean): Promise<RangeDiff> {
   return invoke<RangeDiff>("entity_range_diff", { entityId, base, head, ignoreWhitespace });
+}
+
+/**
+ * The files `base`...`head` of a repository changes, without their lines — `entity_range_files` (the compare pass,
+ * 2026-11-13): read where {@link entityRangeDiff} reads the whole diff, so a range of thousands of files lists at once;
+ * each file's lines follow with {@link entityRangeFile}. `read` names it for {@link cancelRead}.
+ */
+export function entityRangeFiles(entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string | null = null): Promise<RangeFiles> {
+  return invoke<RangeFiles>("entity_range_files", { entityId, base, head, ignoreWhitespace, read });
+}
+
+/**
+ * The names of the files `base`...`head` of a repository changes, without their counts — `entity_range_names` (the
+ * stored-compare pass, 2026-11-14): at the checkout, between the tips the mirror holds for two branch names, in one `git
+ * diff --raw -M` that reads no file's lines, compact on the wire (`namesList` makes its files); `null` where the checkout cannot answer or the counted list
+ * is kept already. A page draws it while {@link entityRangeFiles}, read beside it, brings the counts.
+ */
+export function entityRangeNames(entityId: string, base: string, head: string): Promise<RangeNames | null> {
+  return invoke<RangeNames | null>("entity_range_names", { entityId, base, head });
+}
+
+/**
+ * One page of one file's lines — `entity_range_file` (the compare pass): `base` and `head` as the list's `range` names
+ * them (the names it was asked by where it settled none), `from` the line the page starts at (`0`, then each `next`).
+ */
+export function entityRangeFile(
+  entityId: string,
+  base: string,
+  head: string,
+  path: string,
+  oldPath: string | null,
+  ignoreWhitespace: boolean,
+  from: number,
+  read: string | null = null,
+): Promise<RangeFilePage> {
+  return invoke<RangeFilePage>("entity_range_file", { entityId, base, head, path, oldPath, ignoreWhitespace, from, read });
+}
+
+/**
+ * The first page of each of `files` in one read — `entity_range_file_pages` (the big-compare pass, 2026-11-16): what
+ * {@link entityRangeFile} answers for each from line 0, in the order asked, one start of git for all of them; `null` for a
+ * file it could not answer whole, which the page reads alone. At most 200 files a read.
+ */
+export function entityRangeFilePages(
+  entityId: string,
+  base: string,
+  head: string,
+  files: RangeFileAsk[],
+  ignoreWhitespace: boolean,
+  read: string | null = null,
+): Promise<(RangeFilePage | null)[]> {
+  return invoke<(RangeFilePage | null)[]>("entity_range_file_pages", { entityId, base, head, files, ignoreWhitespace, read });
+}
+
+/**
+ * The files `base`...`head` changes as the source's compare answers it now, never local, without their lines —
+ * `entity_source_range_files` (the compare pass): what a page that drew a predicted {@link entityRangeFiles} asks behind it.
+ */
+export function entitySourceRangeFiles(entityId: string, base: string, head: string, read: string | null = null): Promise<RangeFiles> {
+  return invoke<RangeFiles>("entity_source_range_files", { entityId, base, head, read });
+}
+
+/** Call off the read named `read` — `cancel_read` (the compare pass): its work at the backend stops where it stands. Whether it was running. */
+export function cancelRead(read: string): Promise<boolean> {
+  return invoke<boolean>("cancel_read", { read });
 }
 
 /**
@@ -1507,6 +1923,44 @@ export function docsTree(): Promise<DocsTree> {
 }
 
 /**
+ * The Docs home's first screen — `docs_outline` (the instant-open pass,
+ * 2026-11-12): every space with its count and the top of its tree, the page
+ * read last and *For you*, never every page. A space's `pages` hold some of
+ * its pages and every page above each; a page's `children` says how many are
+ * under it.
+ */
+export function docsOutline(): Promise<DocsTree> {
+  return invoke<DocsTree>("docs_outline");
+}
+
+/**
+ * Part of the Docs tree — `docs_nodes` (the instant-open pass, 2026-11-12):
+ * the way to `pages` drawn open, the pages under `folds`, and whole `spaces`
+ * (`<source>/<key>`), as the spaces holding them.
+ */
+export function docsNodes(asked: DocsNodesAsked): Promise<DocSpace[]> {
+  return invoke<DocSpace[]>("docs_nodes", { asked });
+}
+
+/**
+ * Where Docs opens and the spaces hidden from its browsing — `docs_choices`
+ * (PR #2479, 2026-11-17): `knobas.setting` rows, read once the database answers.
+ */
+export function docsChoices(): Promise<DocsChoices> {
+  return invoke<DocsChoices>("docs_choices");
+}
+
+/** Store where Docs opens, `null` for its home (`#/docs`) — `set_docs_home`. Answers the choices now stored. */
+export function setDocsHome(home: DocsHome | null): Promise<DocsChoices> {
+  return invoke<DocsChoices>("set_docs_home", { home });
+}
+
+/** Hide space `space` (`<source>/<key>`) from Docs' browsing, or show it again — `set_docs_space_hidden`. Search still finds it. */
+export function setDocsSpaceHidden(space: string, hidden: boolean): Promise<DocsChoices> {
+  return invoke<DocsChoices>("set_docs_space_hidden", { space, hidden });
+}
+
+/**
  * One page drawn as blocks — `docs_page` (#859). Rejects with `invalid` for a
  * non-id and `not_found` for an id that is not a live page.
  */
@@ -1594,4 +2048,46 @@ export function linkSetHints(): Promise<LinkSetHint[]> {
 /** The link sets and the parent a ticket's job shows; an unknown id has neither. */
 export function jobLinkSets(entityId: string): Promise<JobLinkSets> {
   return invoke<JobLinkSets>("job_link_sets", { entityId });
+}
+
+/**
+ * The archive at `path` in `entityId`'s tree (a `.jar`, `.war`, `.ear`, `.aar`) listed for the JAR view —
+ * `knobas_app::commands::entity::archive_open` (ux19): its entries as columns, manifest, Maven coordinates and nested
+ * JARs, under a `handle` the other archive reads name it by. Read from the clone where it holds `commit`, else from
+ * the source, up to 1 GiB; at a whole sha a second open answers at once.
+ *
+ * Rejects with `invalid` for a file over the cap or one that is no archive (the message says why), `not_found` for no
+ * file there.
+ */
+export function archiveOpen(entityId: string, path: string, commit: string | null): Promise<ArchiveIndex> {
+  return invoke<ArchiveIndex>("archive_open", { entityId, path, commit });
+}
+
+/** A JAR inside an open archive (a fat JAR's library, a WAR's) listed — `archive_nested`. `not_found` once `handle` is no longer kept. */
+export function archiveNested(handle: string, entry: string): Promise<ArchiveIndex> {
+  return invoke<ArchiveIndex>("archive_nested", { handle, entry });
+}
+
+/** One entry's bytes, unpacked, up to 50 MiB — `archive_entry`; raw, as `entity_file_bytes` answers. */
+export async function archiveEntry(handle: string, entry: string): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("archive_entry", { handle, entry });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** A class's outline, as `javap` would give it, read without Java — `archive_class`. */
+export function archiveClass(handle: string, entry: string): Promise<ClassOutline> {
+  return invoke<ClassOutline>("archive_class", { handle, entry });
+}
+
+/**
+ * A class decompiled by the bundled Vineflower with the Java found here — `archive_decompile`; an inner class as its
+ * top-level one. Kept by the classes' hash. A newer call stops one still running (it rejects with `invalid`).
+ */
+export function archiveDecompile(handle: string, entry: string): Promise<string> {
+  return invoke<string>("archive_decompile", { handle, entry });
+}
+
+/** The archive (`entry` `null`) or one entry saved into Downloads under a free name — `archive_download`; answers its path. */
+export function archiveDownload(handle: string, entry: string | null): Promise<string> {
+  return invoke<string>("archive_download", { handle, entry });
 }

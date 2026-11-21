@@ -64,7 +64,7 @@ const MACHINE: &str = "asset:wsl";
 
 /// Where the container sits, by the names a reader sees.
 const CONTAINER_PATH: &str =
-    "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
+    "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
 
 /// The tunnelled port that reaches it, and the notebook that exposes it.
 const FORWARD: &str = "route:notebook-teamcity";

@@ -32,7 +32,7 @@ vi.mock("../ipc/entity", () => ({
   startWorkAmend: () => Promise.resolve([]),
 }));
 
-const { createStartWork, editable, edited } = await import("./start-work.svelte");
+const { createStartWork, editable, edited, runWord } = await import("./start-work.svelte");
 
 function one(id: number, outcome: StartWorkStep["outcome"]): StartWorkStep {
   return {
@@ -161,4 +161,16 @@ test("a refusal of a step that moved on re-reads the flow, so the stale row is r
   expect(sw.error).toBe("the create_branch step is succeeded now, so it cannot be retried");
   expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded"]);
   expect(sw.following).toBe(false);
+});
+
+test("the stepper's primary says where the flow is: it can be pressed only while nothing has run (F-125)", () => {
+  const steps = (...outcomes: StartWorkStep["outcome"][]) => outcomes.map((outcome, at) => ({ id: at, step: "create_branch", outcome, payload: null, detail: null }) as unknown as StartWorkStep);
+  expect(runWord([], false)).toEqual({ word: "Run all steps", can: false });
+  expect(runWord(steps("pending", "pending"), false)).toEqual({ word: "Run all steps", can: true });
+  expect(runWord(steps("pending", "pending"), true)).toEqual({ word: "Running the steps…", can: false });
+  expect(runWord(steps("running", "pending"), false)).toEqual({ word: "Running the steps…", can: false });
+  expect(runWord(steps("succeeded", "queued", "queued"), false)).toEqual({ word: "Waiting on 2 writes", can: false });
+  expect(runWord(steps("succeeded", "queued", "pending"), false)).toEqual({ word: "Waiting on 1 write", can: false });
+  expect(runWord(steps("succeeded", "failed", "pending"), false)).toEqual({ word: "Step 2 failed", can: false });
+  expect(runWord(steps("succeeded", "skipped"), false)).toEqual({ word: "All steps done", can: false });
 });

@@ -437,6 +437,7 @@ fn required_facts(landing: &Landing) -> Vec<Fact> {
         label: "Required checks".to_owned(),
         value,
         tone: Some(tone),
+        account: None,
     }];
     facts.extend(named.into_iter().map(|(name, at)| Fact {
         label: "Required check".to_owned(),
@@ -446,6 +447,7 @@ fn required_facts(landing: &Landing) -> Vec<Fact> {
             Standing::Failed => Tone::Err,
             Standing::Pending | Standing::Unreported => Tone::Info,
         }),
+        account: None,
     }));
     facts
 }
@@ -559,6 +561,7 @@ pub(super) fn mergeable_fact(pull: &Pull, reviews: &[Review], landing: &Landing)
         label: "Mergeable".to_owned(),
         value,
         tone,
+        account: None,
     })
 }
 
@@ -587,6 +590,7 @@ pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) ->
             label: "Approvals".to_owned(),
             value: "none required".to_owned(),
             tone: Some(Tone::Ok),
+            account: None,
         }
     } else {
         let given = official_approvals(reviews, landing.ignore_stale);
@@ -598,6 +602,7 @@ pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) ->
             } else {
                 Tone::Warn
             }),
+            account: None,
         }
     };
     let mut facts = vec![approvals];
@@ -610,6 +615,7 @@ pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) ->
         label: "Conflicts".to_owned(),
         value,
         tone: Some(tone),
+        account: None,
     }));
     facts.extend(required_facts(landing));
     facts

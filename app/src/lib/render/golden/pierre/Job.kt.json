@@ -1,0 +1,19 @@
+[
+  ["kw:package ",":payout"],
+  [],
+  ["kw:import ",":kotlinx","punct:.","prop:coroutines","punct:.","prop:delay"],
+  [],
+  ["attr:@Suppress","punct:(","str:\"unused\"","punct:)"],
+  ["kw:data class ","ty:Batch","punct:(","kw:val ",":id","punct:: ","ty:String","punct:, ","kw:val ",":tries","punct:: ","ty:Int ","op:= ","num:0","punct:)"],
+  [],
+  ["kw:suspend fun ","fn:settle","punct:(",":batch","punct:: ","ty:Batch","punct:): ","ty:Result","op:<","ty:String","op:> ","punct:{"],
+  ["punct:    ","kw:if ","punct:(",":batch","punct:.","prop:tries ","op:> ","num:3","punct:) ","kw:return ","ty:Result","punct:.","fn:failure","punct:(","fn:IllegalStateException","punct:(","str:\"parked\"","punct:))"],
+  ["punct:    ","fn:delay","punct:(","num:250L","punct:)"],
+  ["punct:    ","kw:val ",":name ","op:= ","str:\"batch-","esc:${",":batch","punct:.","prop:id","esc:}","str:\""],
+  ["str:    ","kw:return when ","punct:(",":batch","punct:.","prop:id","punct:) {"],
+  ["punct:        ","kw:is ","ty:String ","op:-> ","ty:Result","punct:.","fn:success","punct:(",":name","punct:)"],
+  ["punct:        ","kw:else ","op:-> ","ty:Result","punct:.","fn:failure","punct:(","fn:Exception","punct:())"],
+  ["punct:    }"],
+  ["punct:}"],
+  []
+]

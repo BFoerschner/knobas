@@ -72,6 +72,13 @@ pub struct Detail {
     /// Who filed a ticket through the declared `reporter` path (#2403), by
     /// the account's username as the assignee is.
     pub reporter: Option<String>,
+    /// The name to call [`reporter`](Self::reporter) by, through the declared
+    /// `reporter_name` path (F-107); `None` where the account is the only name.
+    pub reporter_name: Option<String>,
+    /// The name to call [`author`](Self::author) by on a ticket, its assignee,
+    /// through the declared `assignee_name` path (F-107). What a ticket's
+    /// comments call the same person, so one person reads one way on its page.
+    pub author_name: Option<String>,
     /// When a ticket was filed, through the declared `created` path (#2403);
     /// `None` on a miss and for a value that is not an ISO 8601 instant.
     pub created: Option<DateTime<Utc>>,
@@ -204,6 +211,12 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
        "#,
     crate::declared_string!("$2", "reporter"),
     r#" as reporter,
+       "#,
+    crate::declared_string!("$2", "reporter_name"),
+    r#" as reporter_name,
+       "#,
+    crate::declared_string!("$2", "assignee_name"),
+    r#" as author_name,
        "#,
     crate::declared_string!("$2", "created"),
     r#" as created,
@@ -343,6 +356,8 @@ pub async fn read(
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
         reporter: row.get("reporter"),
+        reporter_name: row.get("reporter_name"),
+        author_name: row.get("author_name"),
         created: row
             .get::<Option<String>, _>("created")
             .as_deref()

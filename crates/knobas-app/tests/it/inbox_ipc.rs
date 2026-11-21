@@ -1321,6 +1321,53 @@ async fn a_second_ack_writes_nothing_and_an_alert_that_recovered_is_refused() {
     );
 }
 
+/// *Undo* on an ack: the alert stays open, as it did, and asks again. The item
+/// is back on the stream under its own key, the ack's `done_at` no longer hides
+/// it, and the asset's history says both things happened. Knobas-local through
+/// and through: no write reaches Kuma, which has no ack to take back.
+#[tokio::test]
+async fn an_ack_taken_back_asks_again_and_says_so_in_the_history() {
+    let harness = harness().await;
+    let estate = harness.estate(now() - Duration::hours(3)).await;
+    let key = format!("alert:{}", estate.monitor);
+    let asks = |entries: Vec<InboxEntry>| entries.iter().any(|entry| entry.item.key == key);
+
+    assert!(asks(harness.stream().await), "the alert asks");
+    knobas_app::assets::ack_alert(harness.pool(), &estate.monitor, now())
+        .await
+        .expect("the ack");
+    assert!(!asks(harness.stream().await), "the ack clears the item");
+
+    let back = knobas_app::assets::unack_alert(harness.pool(), &estate.monitor)
+        .await
+        .expect("the ack taken back");
+    assert_eq!(back.value.acked_at, None);
+    assert_eq!(back.activity.len(), 1, "one line per watched asset");
+    assert!(asks(harness.stream().await), "the alert asks again");
+    let again = knobas_app::assets::unack_alert(harness.pool(), &estate.monitor)
+        .await
+        .expect("not acked is one answer, not a refusal");
+    assert!(again.activity.is_empty(), "and writes nothing");
+    assert_eq!(
+        harness.history(&estate.asset).await.len(),
+        2,
+        "the ack's line stands, and one says it was taken back"
+    );
+
+    knobas_app::assets::ack_alert(harness.pool(), &estate.monitor, now())
+        .await
+        .expect("it can be acked again");
+    assert!(!asks(harness.stream().await));
+
+    let missing = knobas_app::assets::unack_alert(harness.pool(), "kuma:404")
+        .await
+        .expect_err("no open alert on that monitor");
+    assert!(
+        format!("{missing:?}").contains("no open alert"),
+        "the refusal names what happened: {missing:?}"
+    );
+}
+
 // -- a failed sign-in, through the one writer of credential health (#1571) ---
 
 /// The whole wire: `knobas_sync::config::set_health`, the writer every

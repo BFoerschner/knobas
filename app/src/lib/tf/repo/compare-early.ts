@@ -1,0 +1,122 @@
+/**
+ * **A compare's list asked before its page** (the forge-waits pass of PR #2479, 2026-11-13,
+ * `docs/decisions/2026-11-13-a-file-after-a-sync-and-a-first-compare-wait-on-nothing.md`): without a clone,
+ * Compare's first open waited 0.65 to 2.7 s on Gitea's compare. The repository page asks the list *New pull request* would open once its own
+ * landing has drawn, and any compare whose link the pointer rests on, so the source's round trip runs while the reader
+ * looks and reaches; Compare takes the answer, or the read under way, instead of asking again.
+ *
+ * Each compare is asked early once a session: after that the backend holds its list (`held_at`), so a later open
+ * draws it at once anyway, and a page opened and left again costs the forge nothing more. An early answer is taken
+ * once, and only within {@link FRESH_MS}; one that failed is the page's own read again.
+ */
+import type { RangeFiles, RangeNames } from "../../ipc/entity";
+
+/** The list read the pages use (`RepoPorts.rangeFiles`). */
+export type ListRange = (entityId: string, base: string, head: string, ignoreWhitespace: boolean, read: string) => Promise<RangeFiles>;
+
+/** The clone's names of a range (`RepoPorts.rangeNames`): `null` where no clone can answer it. */
+export type NameRange = (entityId: string, base: string, head: string) => Promise<RangeNames | null>;
+
+/** How long an early answer stands for the page's read: past it the page reads anew. */
+export const FRESH_MS = 30_000;
+
+/** An early ask: the list, and the clone's names beside it where the ports read them. */
+export interface EarlyCompare {
+  list: Promise<RangeFiles>;
+  names: Promise<RangeNames | null> | null;
+}
+
+const early = new Map<string, { at: number; answer: Promise<RangeFiles>; names: Promise<RangeNames | null> | null }>();
+const askedOnce = new Set<string>();
+let reads = 0;
+
+const keyOf = (repoId: string, base: string, head: string) => `${repoId}\u0000${base}\u0000${head}`;
+
+/**
+ * Ask `base`...`head`'s list now, for Compare to take; once a session per compare. `ahead` is a guess nobody reached
+ * for (the landing's *New pull request*): its read is named `ahead:…`, which the backend sends in the sync's lane, so it
+ * goes to the forge only once a person's reads there are answered (the landing-rounds pass, 2026-11-16: it went out
+ * beside the landing's README). A pointer resting on a link is a reach for the press, and goes as a person's read.
+ * `names`: the clone's names of the pair, asked beside it, which Compare draws first where they land first (Fable's
+ * ruling, the compare-first-open pass, 2026-11-20): asked by Compare itself, they left only once it was built.
+ */
+export function askCompareEarly(list: ListRange | undefined, repoId: string, base: string, head: string, ahead = false, names?: NameRange): void {
+  if (list === undefined || base === "" || head === "" || base === head) return;
+  const key = keyOf(repoId, base, head);
+  if (askedOnce.has(key)) return;
+  askedOnce.add(key);
+  const answer = list(repoId, base, head, false, `${ahead ? "ahead:" : ""}compare-early-${++reads}`);
+  const named = names?.(repoId, base, head) ?? null;
+  // A failed early read is not taken: the page asks for itself.
+  answer.catch(() => {
+    if (early.get(key)?.answer === answer) early.delete(key);
+  });
+  named?.catch(() => {});
+  early.set(key, { at: Date.now(), answer, names: named });
+}
+
+/**
+ * Compare reads `base`...`head` itself: nothing asks it early after, as the backend holds its list from then. A press
+ * quicker than the pointer's rest (`COMPARE_REST_MS`) asked Gitea's compare twice, the page's read and the rest's
+ * (the WSL block, 2026-11-14).
+ */
+export function compareReads(repoId: string, base: string, head: string): void {
+  askedOnce.add(keyOf(repoId, base, head));
+}
+
+/** The early read of `base`...`head` while it stands, without taking it: settled once it answered; `null` where none is. */
+export function earlyAsked(repoId: string, base: string, head: string): Promise<unknown> | null {
+  const asked = early.get(keyOf(repoId, base, head));
+  if (asked === undefined || Date.now() - asked.at > FRESH_MS) return null;
+  return asked.answer.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** The early answer to `base`...`head` and its names, or the reads under way, once; `null` where none was asked or it is stale. */
+export function takeCompareEarly(repoId: string, base: string, head: string): EarlyCompare | null {
+  const key = keyOf(repoId, base, head);
+  const asked = early.get(key);
+  if (asked === undefined) return null;
+  early.delete(key);
+  return Date.now() - asked.at > FRESH_MS ? null : { list: asked.answer, names: asked.names };
+}
+
+/** Once the page is idle: what the landing's early compare waits for after the landing drew, so it never goes out in its round. */
+export function whenIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 2000 });
+    else setTimeout(resolve, 50);
+  });
+}
+
+/**
+ * **The lists Compare drew, by pair** (the big-compare pass, 2026-11-16): a pick of a pair drawn before this session
+ * draws its list in the frame the pick lands in, under the clone's line, while the reads go out as for any pick and fill
+ * it in place; nothing moves where it is the same. The last {@link DRAWN_KEPT} pairs, the ones Compare read ahead among them.
+ */
+const drawn = new Map<string, { list: RangeFiles; counted: boolean }>();
+export const DRAWN_KEPT = 16;
+
+/** Keeps the list Compare drew for `base`...`head`; a counted one over the names. */
+export function keepDrawnCompare(repoId: string, base: string, head: string, list: RangeFiles, counted: boolean): void {
+  const key = keyOf(repoId, base, head);
+  const had = drawn.get(key);
+  if (had?.counted && !counted) return;
+  drawn.delete(key);
+  drawn.set(key, { list, counted });
+  while (drawn.size > DRAWN_KEPT) drawn.delete(drawn.keys().next().value!);
+}
+
+/** The list Compare last drew for `base`...`head` this session, if any. */
+export function drawnCompare(repoId: string, base: string, head: string): { list: RangeFiles; counted: boolean } | undefined {
+  return drawn.get(keyOf(repoId, base, head));
+}
+
+/** Forget every early read, for a test. */
+export function forgetEarlyCompares(): void {
+  early.clear();
+  askedOnce.clear();
+  drawn.clear();
+}

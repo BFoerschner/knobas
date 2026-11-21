@@ -18,6 +18,7 @@
  * asset the reader is looking at; that unlinking re-reads rather than patching;
  * and that the column's badge draws what the backend counted.
  */
+import { toasts } from "../shell/toasts.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -215,6 +216,7 @@ let app: Record<string, unknown> | undefined;
 function render(hash: string) {
   const reads: string[] = [];
   const unlinked: string[] = [];
+  const relinked: unknown[][] = [];
   location.hash = hash;
   const nav = createTestNav();
   app = mount(AssetsView, {
@@ -242,11 +244,15 @@ function render(hash: string) {
           unlinked.push(linkId);
           return Promise.resolve();
         },
+        relink: (...args: unknown[]) => {
+          relinked.push(args);
+          return Promise.resolve({} as never);
+        },
       },
     },
   });
   flushSync();
-  return { nav, reads, unlinked };
+  return { nav, reads, unlinked, relinked };
 }
 
 beforeEach(() => {
@@ -351,7 +357,7 @@ test("Link to… opens the dialog over the open asset", async () => {
  * saying what it said before.
  */
 test("unlinking withdraws the link and re-reads the asset", async () => {
-  const { reads, unlinked } = render("#/asset/asset:postgres");
+  const { reads, unlinked, relinked } = render("#/asset/asset:postgres");
   await settle();
   const before = reads.length;
 
@@ -360,6 +366,53 @@ test("unlinking withdraws the link and re-reads the asset", async () => {
 
   expect(unlinked).toEqual(["link-deploy"]);
   expect(reads.length, "the pane read the asset again").toBeGreaterThan(before);
+  // It asks nothing, so the toast can take it back (the removal rule).
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toMatch(/^Unlinked /);
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(relinked).toHaveLength(1);
+  expect(relinked[0]![0], "the same link's own ends").toBeTypeOf("string");
+});
+
+/**
+ * `create_link` always records a link as drawn by hand (`knobas_core::link::draw`), so *Undo* could not bring back one
+ * from anywhere else as it was. The removal rule's other way: it asks first, and offers no *Undo*.
+ */
+test("a link that did not start by hand asks before it is withdrawn, and offers no Undo", async () => {
+  DEPLOYED_FROM.link.origin = "source";
+  try {
+    const { reads, unlinked, relinked } = render("#/asset/asset:postgres");
+    await settle();
+    const before = reads.length;
+    const toastsBefore = toasts.items.length;
+    const press = target.querySelectorAll<HTMLButtonElement>(".sec .row.lrow .tf-btn")[0]!;
+    expect(press.textContent?.trim(), "the label says it asks").toBe("Unlink…");
+    press.click();
+    await settle();
+    expect(unlinked, "nothing is withdrawn yet").toEqual([]);
+    const dialog = target.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("It came from the source.");
+    const button = (name: string) => [...dialog.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === name)!;
+
+    button("Cancel").click();
+    await settle();
+    expect(unlinked).toEqual([]);
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+
+    press.click();
+    await settle();
+    [...target.querySelector('[role="dialog"]')!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Unlink")!.click();
+    await settle();
+    expect(unlinked).toEqual(["link-deploy"]);
+    expect(reads.length, "the pane read the asset again").toBeGreaterThan(before);
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(toasts.items.length, "no toast offers to take it back").toBe(toastsBefore);
+    expect(relinked).toEqual([]);
+  } finally {
+    DEPLOYED_FROM.link.origin = "manual";
+  }
 });
 
 /**

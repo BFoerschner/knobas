@@ -6,7 +6,7 @@ version.workspace = true
 # The reference adapter: it serves the Tidewater Freight dataset every mockup
 # was drawn against, so the app can be built and demoed end to end before a
 # single real backend exists. It talks to nothing, so it needs nothing beyond
-# the SPI and serde.
+# the SPI and serde, and sha1 for the fixture's files.
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
@@ -14,6 +14,9 @@ knobas-core = { path = "../knobas-core" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# Git's sha of the fixture repositories' blobs and trees (D16), as
+# `knobas-source-gitea` pins it.
+sha1 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 tokio.workspace = true

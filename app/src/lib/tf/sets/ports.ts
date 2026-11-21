@@ -3,7 +3,9 @@
  * bridge; `defaultPorts` is the real IPC.
  */
 import type { DepItem, MonitorRow } from "../../ipc/assets";
-import { dependencies, monitorRoster } from "../../ipc/assets";
+import { assetTypes, dependencies, monitorRoster } from "../../ipc/assets";
+import { kindWord } from "../monitors/monitors";
+import { assetLine } from "./sets";
 import type {
   EntityPage,
   LinkSetDetail,
@@ -49,6 +51,10 @@ export interface SetPorts {
   candidates: (kind: LinkSetMemberKind) => Promise<Candidate[]>;
   /** The tickets, projects and parents a rule's value can name. */
   ruleChoices: () => Promise<RuleChoices>;
+  /** What the estate's types are called, for a member's line: *Container engine*, not `container_engine`. */
+  assetTypeNames: () => Promise<Record<string, string>>;
+  /** Monitors' roster, so a monitor member's dot reads as its chip on Monitors: a paused one is not green. */
+  monitors: () => Promise<MonitorRow[]>;
 }
 
 /** One item the picker offers: its id, its name and the line beside it. */
@@ -85,16 +91,19 @@ const fromPipelines = (rows: PipelineRow[]): Candidate[] =>
   rows.map((row) => ({ entity_id: row.entity_id, name: row.name, sub: row.path.join(" › ") }));
 
 const fromMonitors = (rows: MonitorRow[]): Candidate[] =>
-  rows.map((row) => ({ entity_id: row.entity_id, name: row.name, sub: row.monitor_type ?? "" }));
+  rows.map((row) => ({ entity_id: row.entity_id, name: row.name, sub: kindWord(row.monitor_type) }));
 
-const fromAssets = (items: DepItem[]): Candidate[] =>
+const fromAssets = (items: DepItem[], names: Record<string, string>): Candidate[] =>
   items
     .filter((item) => item.id.startsWith("asset:"))
     .map((item) => ({
       entity_id: item.id,
       name: item.name,
-      sub: [item.kind, item.environment].filter(Boolean).join(", "),
+      sub: assetLine(item.environment ? `${item.kind}, ${item.environment}` : item.kind, names),
     }));
+
+const assetTypeNames = async (): Promise<Record<string, string>> =>
+  Object.fromEntries((await assetTypes()).map((type) => [type.id, type.label]));
 
 const ticketParents = (parents: ParentSuggestion[]) =>
   parents.filter((parent) => parent.kind === "ticket").map((parent) => parent.name);
@@ -116,11 +125,13 @@ export const defaultPorts: SetPorts = {
       case "monitor":
         return fromMonitors(await monitorRoster());
       case "asset":
-        return fromAssets((await dependencies()).items);
+        return fromAssets((await dependencies()).items, await assetTypeNames());
       default:
         return fromPage(await listEntities(entityFilter(kind), MANY, 0));
     }
   },
+  assetTypeNames,
+  monitors: () => monitorRoster(),
   ruleChoices: async () => {
     const [page, suggested, projects] = await Promise.all([
       listEntities(entityFilter("ticket"), MANY, 0),

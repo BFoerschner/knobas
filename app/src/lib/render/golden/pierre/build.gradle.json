@@ -1,0 +1,19 @@
+[
+  ["fn:plugins ","punct:{"],
+  ["punct:    ","fn:id ","str:'java'"],
+  ["str:    ","fn:id ","str:\"org.springframework.boot\" ",":version ","str:'3.3.0'"],
+  ["punct:}"],
+  [],
+  ["kw:def ",":retries ","op:= ","num:3"],
+  [],
+  ["fn:dependencies ","punct:{"],
+  ["punct:    ","fn:implementation ","str:'org.springframework:spring-core:6.1.0'"],
+  ["str:    ","fn:testImplementation ","str:\"org.junit.jupiter:junit-jupiter:","esc:${",":junitVersion","esc:}","str:\""],
+  ["punct:}"],
+  [],
+  [":tasks","punct:.","fn:named","punct:(","str:'test'","punct:) {"],
+  ["punct:    ","fn:useJUnitPlatform","punct:()"],
+  ["punct:    ",":maxParallelForks ","op:= ",":retries ","op:* ","num:2"],
+  ["punct:}"],
+  []
+]

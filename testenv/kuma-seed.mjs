@@ -28,10 +28,13 @@
 // the two-argument form by sniffing for a function, but the three-argument
 // call is the one the handler is written for).
 //
-// THIS SCRIPT OWNS THE MONITOR LIST. `monitors.json` is the whole truth: an
-// entry it no longer names is deleted, an entry whose definition drifted is
-// deleted and re-added, and a matching one is left alone so that a second run
-// changes nothing. See README.md, "Monitors".
+// THIS SCRIPT OWNS THE MONITOR LIST, less another estate's. `monitors.json` is
+// the whole truth: an entry it no longer names is deleted, an entry whose
+// definition drifted is deleted and re-added, and a matching one is left alone
+// so that a second run changes nothing. A monitor named `scale-...` is not
+// this script's: `testenv/scale/kuma-scale.mjs` adds them beside the seed
+// (`just seed-scale kuma`), and the sweep never reads them. See README.md,
+// "Monitors" and "Björn's scale".
 //
 // PROTOCOL WITH THE HOST: stderr carries all progress; stdout carries exactly
 // one line, either `KEY=<api key>` or `KEEP`. seed-kuma.sh parses that. The
@@ -77,9 +80,15 @@ const HOST_KEY_AUTHENTICATED = process.env.KNOBAS_KEY_AUTHENTICATED === "1";
 const log = (...a) => console.error("kuma-seed:", ...a);
 const die = (msg) => { log("FAILED:", msg); process.exit(1); };
 
-// monitors.json is read as it is: every value in it is literal. (Until #634 it
-// carried `${VAR}` placeholders for the Hetzner servers' addresses, resolved
-// from a gitignored hosts.env; the servers are gone and so is the expansion.)
+// monitors.json is read as it is: every value in it is literal but one. (Until
+// #634 it carried `${VAR}` placeholders for the Hetzner servers' addresses,
+// resolved from a gitignored hosts.env; the servers are gone and so is the
+// expansion.) The one: the `notebook` ping's address. The repository is
+// public, so the file holds a documentation address (192.0.2.10) and the real
+// one comes from KNOBAS_LIVE_NOTEBOOK_IP in testenv/live.env; unset, a ping
+// Kuma already holds keeps the address it has, so a seed never turns a working
+// ping into one that watches nothing (Fable's ruling, 2026-11-17).
+const NOTEBOOK_IP = process.env.KNOBAS_LIVE_NOTEBOOK_IP ?? "";
 const monitors = JSON.parse(readFileSync(new URL("monitors.json", import.meta.url), "utf8"));
 
 // The guard on the connection and on every callback and push below (#1961):
@@ -229,16 +238,26 @@ log(`${rows.length} monitor(s) already configured`);
 // names. Keeping the first row of a wanted name and deleting every other row
 // makes that sentence true whatever the instance was holding.
 const wanted = new Set(monitors.map((m) => m.name));
+// Another estate's monitors (`seed-scale.sh kuma`), never this sweep's.
+const foreign = (m) => String(m.name ?? "").startsWith("scale-");
+if (monitors.some(foreign)) die("monitors.json names a scale-* monitor, the prefix the sweep leaves to seed-scale.sh");
 const byName = new Map();
 for (const m of rows) {
+  if (foreign(m)) continue;
   if (wanted.has(m.name) && !byName.has(m.name)) { byName.set(m.name, m); continue; }
   ok(await call("deleteMonitor", m.id, false), `deleteMonitor ${m.name}`);
   log("deleted", JSON.stringify(m.name),
       wanted.has(m.name) ? "-- a second monitor of that name" : "-- monitors.json no longer names it");
 }
 
-for (const m of monitors) {
-  const have = byName.get(m.name);
+for (const file of monitors) {
+  const have = byName.get(file.name);
+  const m = file.name === "notebook" && file.type === "ping"
+    ? { ...file, hostname: NOTEBOOK_IP || have?.hostname || file.hostname }
+    : file;
+  if (m.hostname === file.hostname && file.name === "notebook" && !NOTEBOOK_IP) {
+    log("notebook: no KNOBAS_LIVE_NOTEBOOK_IP in testenv/live.env, so the ping watches", file.hostname, "and stays down");
+  }
   const changed = have ? drift(have, m) : null;
   if (have && changed.length === 0) { log("keeping", JSON.stringify(m.name)); continue; }
   if (have) {

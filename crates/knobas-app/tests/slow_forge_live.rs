@@ -1,0 +1,796 @@
+//! **A slow forge, measured** (the smoothness pass on PR #2479): every read a
+//! Code page waits on, timed through a proxy that holds each request to the
+//! testenv Gitea for a set time, or forever.
+//!
+//! Nothing here asserts a budget. It prints one `SLOW` line per read and
+//! mode, `cold` (the first read in a session: a fresh [`LiveSources`]) and
+//! `warm` (the same read again at once), which is what the pull request's
+//! before-and-after table is made of. The reads are the app's own
+//! (`sources::crud::view`, `checkout::range_diff`, ...), the ones the shell's
+//! IPC commands call, so a reading is what the page would wait for, short of
+//! the bridge.
+//!
+//! # The proxy
+//!
+//! [`slow::Proxy`] (`tests/slow_proxy`, shared with `slow_sources_live.rs`)
+//! holds each request to Gitea for the mode's delay, or forever, or refuses
+//! it. It runs in this process, on loopback: nothing is installed on the WSL
+//! box.
+//!
+//! # Read-only at Gitea
+//!
+//! Every request is a read. What it writes is local: a scratch database, a
+//! clone in a temporary folder.
+//!
+//! ```text
+//! eval "$(testenv/seed --env)"
+//! cargo test -p knobas-app --test slow_forge_live -- --ignored --nocapture
+//! ```
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use knobas_app::checkout::clone::{CloneEvent, CloneEvents, CloneState, Clones};
+use knobas_app::sources::Registry;
+use knobas_app::sources::live::LiveSources;
+use knobas_secrets::{MemoryStore, Secret, SecretStore};
+use knobas_source::AuthMethod;
+use knobas_source::view::{Block, SourceView};
+use knobas_sync::scheduler::AdapterRegistry;
+use sqlx::PgPool;
+
+/// The seeded repository every read is of.
+const SEEDED: &str = "tidewater/payout-service";
+/// A seeded branch with an open pull request into `main`.
+const BRANCH: &str = "feature/PAY-231-sepa-retry";
+/// No read is waited on longer than this; past it the line says so.
+const CAP: Duration = Duration::from_secs(70);
+
+fn need(name: &str) -> String {
+    std::env::var(name)
+        .unwrap_or_else(|_| {
+            panic!("{name} is not set -- run `eval \"$(testenv/seed --env)\"` first")
+        })
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+mod slow_proxy;
+use slow_proxy as slow;
+
+#[derive(Default)]
+struct Seen(std::sync::Mutex<Vec<CloneEvent>>);
+
+impl CloneEvents for Seen {
+    fn clone_progress(&self, event: CloneEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+struct Rig {
+    pool: PgPool,
+    secrets: Arc<dyn SecretStore>,
+    registry: Arc<dyn AdapterRegistry>,
+    proxy: slow::Proxy,
+    repo: String,
+    branch: String,
+    pr: String,
+    commit: (String, String),
+    _clones: tempfile::TempDir,
+}
+
+/// A scratch database with the seeded Gitea source behind the proxy, synced
+/// once at full speed, and the repository cloned into a clones root.
+async fn rig() -> Rig {
+    let proxy = slow::start(&need("KNOBAS_GITEA_URL")).await;
+    let pool = knobas_db::test_util::scratch_database("slow_forge_live")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch database");
+    let source = format!("gitea-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let token = need("KNOBAS_GITEA_TOKEN");
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(&source),
+            &Secret::just(AuthMethod::Pat, token.clone()),
+        )
+        .expect("the token is stored");
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: source.clone(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: source.clone(),
+            base_url: proxy.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: serde_json::json!({ "repos": [SEEDED] }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let built = knobas_source_gitea::build(knobas_source::instance::SourceInstance {
+        id: source.clone(),
+        kind: "gitea".to_owned(),
+        display_name: source.clone(),
+        base_url: proxy.url.clone(),
+        auth: Some(AuthMethod::Pat),
+        secret: Some(token),
+        account: None,
+        config: serde_json::json!({ "repos": [SEEDED] }),
+    })
+    .expect("the source builds");
+    knobas_sync::run_once(&pool, built.as_ref(), None)
+        .await
+        .expect("the seeded repository syncs");
+
+    let id = |kind: &str, like: String| {
+        let pool = pool.clone();
+        let kind = kind.to_owned();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "select entity_id from sync.item where kind = $1 and entity_id like $2
+                 order by entity_id limit 1",
+            )
+            .bind(&kind)
+            .bind(&like)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("the mirror holds a {kind} like {like}"))
+        }
+    };
+    let repo = format!("{source}:{SEEDED}");
+    let branch = id("branch", format!("%{BRANCH}")).await;
+    let pr = id("pr", format!("{source}:%")).await;
+    let (sha, _) = two_commits(&proxy.url).await;
+    let commit = (format!("{repo}@{sha}"), sha);
+
+    let clones = tempfile::tempdir().unwrap();
+    let root: PathBuf = clones.path().join("code");
+    knobas_app::checkout::set_clones_root(&pool, Some(&root.to_string_lossy()))
+        .await
+        .unwrap();
+    let seen = Arc::new(Seen::default());
+    knobas_app::checkout::clone::start_admitting(
+        &pool,
+        &Registry::for_process(),
+        &Clones::global(),
+        seen.clone(),
+        &repo,
+        &["http"],
+    )
+    .await
+    .expect("the clone starts");
+    let ended = loop {
+        let last = seen.0.lock().unwrap().last().cloned();
+        if let Some(last) = last
+            && !matches!(last.state, CloneState::Progress { .. })
+        {
+            break last;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(ended.state, CloneState::Done, "{ended:?}");
+    // The clone's remote is the proxy's address and the mirror's page is
+    // Gitea's own, so the scan would not pair them: name the checkout.
+    knobas_app::checkout::set_override(&pool, &repo, Some(&ended.path))
+        .await
+        .expect("the checkout is named");
+
+    Rig {
+        pool,
+        secrets,
+        registry: Arc::new(Registry::for_process()),
+        proxy,
+        repo,
+        branch,
+        pr,
+        commit,
+        _clones: clones,
+    }
+}
+
+async fn two_commits(base: &str) -> (String, String) {
+    let listed: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base}/api/v1/repos/{SEEDED}/commits?sha=main&limit=2&stat=false&files=false"
+        ))
+        .header(
+            "Authorization",
+            format!("token {}", need("KNOBAS_GITEA_TOKEN")),
+        )
+        .send()
+        .await
+        .expect("Gitea answers")
+        .json()
+        .await
+        .expect("a commit list");
+    let shas: Vec<String> = listed
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|c| c["sha"].as_str().map(str::to_owned))
+        .collect();
+    (shas[0].clone(), shas[1].clone())
+}
+
+/// One read's outcome: how long, and whether it answered.
+struct Took(Duration, Result<(), String>);
+
+impl std::fmt::Display for Took {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ms = self.0.as_millis();
+        match &self.1 {
+            Ok(()) => write!(f, "{ms:>6} ms"),
+            Err(e) => {
+                let short: String = e.chars().take(40).collect();
+                write!(f, "{ms:>6} ms ERR {short}")
+            }
+        }
+    }
+}
+
+async fn time<T, E: std::fmt::Display>(
+    read: impl std::future::Future<Output = Result<T, E>>,
+) -> (Took, Option<T>) {
+    let started = Instant::now();
+    match tokio::time::timeout(CAP, read).await {
+        Ok(Ok(v)) => (Took(started.elapsed(), Ok(())), Some(v)),
+        Ok(Err(e)) => (Took(started.elapsed(), Err(e.to_string())), None),
+        Err(_) => (
+            Took(started.elapsed(), Err("still waiting".to_owned())),
+            None,
+        ),
+    }
+}
+
+impl Rig {
+    /// A view as a page reads it (`entity_view`): what knobas held where it
+    /// holds one, since ADR-0042.
+    async fn page(
+        &self,
+        live: &LiveSources,
+        entity: &str,
+        section: Option<&str>,
+    ) -> (Took, Option<SourceView>) {
+        let (took, view) = time(knobas_app::sources::crud::shown(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            live,
+            entity,
+            section,
+        ))
+        .await;
+        (took, view.flatten().map(|shown| shown.view))
+    }
+
+    async fn view(
+        &self,
+        live: &LiveSources,
+        entity: &str,
+        section: Option<&str>,
+    ) -> (Took, Option<SourceView>) {
+        let (took, view) = time(knobas_app::sources::crud::view(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            live,
+            entity,
+            section,
+        ))
+        .await;
+        (took, view.flatten())
+    }
+
+    /// Every read once, through `live`, as the pages make them.
+    async fn pass(&self, live: &LiveSources) -> Vec<(&'static str, Took)> {
+        let mut out = Vec::new();
+
+        // The repository page's header.
+        let (cold, _) = self.page(live, &self.repo, Some("branches")).await;
+        out.push(("header: branch list", cold));
+        let asks: Vec<_> = ["create_branch", "commit_file"]
+            .iter()
+            .map(|op| knobas_source::grants::WriteAsk {
+                entity: self.repo.clone(),
+                op: (*op).to_owned(),
+                field: None,
+            })
+            .collect();
+        let grants = || async {
+            Ok::<_, String>(
+                knobas_app::sources::crud::refused_writes(
+                    &self.pool,
+                    &self.secrets,
+                    &self.registry,
+                    live,
+                    &asks,
+                )
+                .await,
+            )
+        };
+        let (cold, _) = time(grants()).await;
+        out.push(("header: write grants", cold));
+        let checkout = || knobas_app::checkout::view(&self.pool, &self.repo);
+        let (cold, _) = time(checkout()).await;
+        out.push(("header: checkout (local)", cold));
+
+        // Files: the top, then the README it lands on, a directory, Go to file.
+        let (cold, top) = self.page(live, &self.repo, Some("files")).await;
+        out.push(("files: top directory", cold));
+        let entries = top
+            .as_ref()
+            .and_then(|v| v.sections.first())
+            .and_then(|s| s.blocks.first())
+            .and_then(|b| match b {
+                Block::Tree { entries, paths, .. } => Some((entries.clone(), paths.clone())),
+                _ => None,
+            });
+        let (readme, dir, paths) = match &entries {
+            Some((entries, paths)) => (
+                entries
+                    .iter()
+                    .find(|e| e.name == "README.md")
+                    .and_then(|e| e.section.clone()),
+                entries
+                    .iter()
+                    .find(|e| e.kind == knobas_source::view::EntryKind::Dir)
+                    .and_then(|e| e.section.clone()),
+                paths.clone(),
+            ),
+            None => (None, None, None),
+        };
+        let readme = readme.unwrap_or_else(|| "file:README.md".to_owned());
+        let dir = dir.unwrap_or_else(|| "files:src".to_owned());
+        let paths = paths.unwrap_or_else(|| "paths".to_owned());
+        let (cold, _) = self.page(live, &self.repo, Some(&readme)).await;
+        out.push(("files: README (landing)", cold));
+        // What Files draws first since PR #2479: the checkout's copy (ADR-0041).
+        let local = || {
+            knobas_app::checkout::local_tree(&self.pool, self.registry.as_ref(), None, &self.repo)
+        };
+        let (cold, tree) = time(local()).await;
+        out.push(("files: tree at the checkout", cold));
+        if let Some(Some(tree)) = &tree {
+            let file = || {
+                knobas_app::checkout::local_file(&self.pool, &self.repo, &tree.commit, "README.md")
+            };
+            let (cold, _) = time(file()).await;
+            out.push(("files: README at the checkout", cold));
+        }
+        let (cold, _) = self.page(live, &self.repo, Some(&dir)).await;
+        out.push(("files: open a directory", cold));
+        let (cold, _) = self.page(live, &self.repo, Some(&paths)).await;
+        out.push(("files: go to file", cold));
+        let (cold, _) = self.page(live, &self.repo, Some("commits")).await;
+        out.push(("commits (and last commit)", cold));
+
+        // Branches and Compare: a branch's whole view is its standing.
+        let (cold, _) = self.page(live, &self.branch, None).await;
+        out.push(("branch standing (compare)", cold));
+        let diff = || {
+            knobas_app::checkout::range_diff(
+                &self.pool,
+                &self.secrets,
+                &self.registry,
+                live,
+                &self.repo,
+                "main",
+                BRANCH,
+                false,
+            )
+        };
+        let (cold, _) = time(diff()).await;
+        out.push(("compare / new PR diff", cold));
+        let check = || {
+            knobas_app::checkout::source_range_diff(
+                &self.pool,
+                &self.secrets,
+                &self.registry,
+                live,
+                &self.repo,
+                "main",
+                BRANCH,
+            )
+        };
+        let (cold, _) = time(check()).await;
+        out.push(("compare: its check behind", cold));
+
+        // A pull request: its view, then its files.
+        let (cold, whole) = self.page(live, &self.pr, None).await;
+        out.push(("pull request view", cold));
+        let files = whole
+            .as_ref()
+            .and_then(|v| v.sections.iter().find(|s| s.deferred))
+            .map_or_else(|| "files".to_owned(), |s| s.id.clone());
+        let (cold, _) = self.page(live, &self.pr, Some(&files)).await;
+        out.push(("pull request diff", cold));
+
+        // A commit: its whole view and its diff (local-first since #2319).
+        let (cold, _) = self.page(live, &self.commit.0, None).await;
+        out.push(("commit view", cold));
+        let diff = || {
+            knobas_app::checkout::commit_diff(
+                &self.pool,
+                &self.secrets,
+                &self.registry,
+                live,
+                &self.repo,
+                &self.commit.0,
+                &self.commit.1,
+                false,
+            )
+        };
+        let (cold, _) = time(diff()).await;
+        out.push(("commit diff", cold));
+        out
+    }
+
+    /// A session as the app makes one, its reads held between sessions
+    /// (ADR-0042) in the scratch database.
+    fn session(&self) -> LiveSources {
+        let live = LiveSources::default();
+        live.hold_in(self.pool.clone());
+        live
+    }
+
+    /// Every read three times: the first ever (nothing held), in the next
+    /// session (what the first held), and again in that session (warm).
+    /// A forge that is down or hangs answered the first read at full speed,
+    /// as one that went down after knobas read it.
+    async fn measure(&self, mode: &str, ms: u64) {
+        let gone = matches!(mode, "down" | "hang");
+        self.proxy.set(if gone { 0 } else { ms });
+        sqlx::query("delete from sync.held_read")
+            .execute(&self.pool)
+            .await
+            .expect("the held reads are cleared");
+        let one = self.session();
+        let first = self.pass(&one).await;
+        one.settled().await;
+        self.proxy.set(ms);
+        let next = self.session();
+        let held = self.pass(&next).await;
+        let warm = self.pass(&next).await;
+        // Its reads behind end before the next mode clears what is held.
+        next.settled().await;
+        for (what, took) in &first {
+            let of = |list: &[(&str, Took)]| {
+                list.iter()
+                    .find(|(w, _)| w == what)
+                    .map_or_else(|| "     -".to_owned(), |(_, t)| t.to_string())
+            };
+            println!(
+                "SLOW {mode:>6} | {what:<29} | first {took} | next session {} | warm {}",
+                of(&held),
+                of(&warm)
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea: eval \"$(testenv/seed --env)\""]
+async fn every_read_a_code_page_waits_on_through_a_slow_forge() {
+    let rig = rig().await;
+    // `KNOBAS_SLOW_MODES=1s,down` measures those modes alone.
+    let only = std::env::var("KNOBAS_SLOW_MODES").unwrap_or_default();
+    for (mode, ms) in [
+        ("0s", 0),
+        ("1s", 1_000),
+        ("5s", 5_000),
+        ("down", slow::DOWN),
+        ("hang", slow::HANG),
+    ] {
+        if !only.is_empty() && !only.split(',').any(|m| m == mode) {
+            continue;
+        }
+        rig.measure(mode, ms).await;
+    }
+    rig.proxy.set(0);
+}
+
+/// **The checkout answers Files and the compare at the mirror's tips with no
+/// request to the source** (ADR-0041): the tree, the README and *New pull
+/// request*'s diff between two branch names, each read through the app's
+/// own entry point with the request counter around it, and the source's
+/// check behind the compare names the same two commits.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea: eval \"$(testenv/seed --env)\""]
+async fn the_checkout_answers_files_and_the_compare_with_no_request() {
+    use knobas_app::checkout::DiffReadAt;
+    let rig = rig().await;
+    let live = LiveSources::default();
+
+    let (tree, sent) = knobas_http::counted::counted(knobas_app::checkout::local_tree(
+        &rig.pool,
+        rig.registry.as_ref(),
+        None,
+        &rig.repo,
+    ))
+    .await;
+    let tree = tree
+        .expect("the read runs")
+        .expect("the clone holds the mirror's tip");
+    assert_eq!(sent, 0, "the tree asked the source");
+    assert!(
+        tree.entries.iter().any(|e| e.path == "README.md"),
+        "{tree:?}"
+    );
+    assert!(tree.as_of.is_some());
+    let (main, _) = two_commits(&need("KNOBAS_GITEA_URL")).await;
+    assert_eq!(tree.commit, main, "the mirror's tip of the default branch");
+
+    let (file, sent) = knobas_http::counted::counted(knobas_app::checkout::local_file(
+        &rig.pool,
+        &rig.repo,
+        &tree.commit,
+        "README.md",
+    ))
+    .await;
+    assert_eq!(sent, 0, "the README asked the source");
+    let Some(Block::File { text, sha, .. }) = file.expect("the read runs") else {
+        panic!("a file block");
+    };
+    assert!(!text.is_empty());
+    // The blob is the one the source names for it, so an edit commits against it.
+    let source = rig
+        .view(&live, &rig.repo, Some("file:README.md"))
+        .await
+        .1
+        .expect("the source reads it");
+    let Some(Block::File { sha: theirs, .. }) = source.sections[0].blocks.first() else {
+        panic!("a file block");
+    };
+    assert_eq!(&sha, theirs);
+
+    let (predicted, sent) = knobas_http::counted::counted(knobas_app::checkout::range_diff(
+        &rig.pool,
+        &rig.secrets,
+        &rig.registry,
+        &live,
+        &rig.repo,
+        "main",
+        BRANCH,
+        false,
+    ))
+    .await;
+    let predicted = predicted.expect("the compare reads");
+    assert_eq!(sent, 0, "the predicted compare asked the source");
+    assert_eq!(predicted.read_at, DiffReadAt::Checkout);
+    assert!(predicted.predicted_at.is_some());
+    assert!(!predicted.files.is_empty());
+    let checked = knobas_app::checkout::source_range_diff(
+        &rig.pool,
+        &rig.secrets,
+        &rig.registry,
+        &live,
+        &rig.repo,
+        "main",
+        BRANCH,
+    )
+    .await
+    .expect("the source's compare reads");
+    let (ours, theirs) = (
+        predicted.range.expect("settled"),
+        checked.range.expect("settled"),
+    );
+    assert_eq!(
+        (ours.base, ours.head),
+        (theirs.base, theirs.head),
+        "the same two commits"
+    );
+    let names =
+        |d: &[knobas_source::diff::DiffFile]| d.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&predicted.files), names(&checked.files));
+}
+
+/// **A repository never read draws its branches and its last commit from the
+/// mirror, with the forge holding every request** (the inner-pages pass of PR
+/// #2479, 2026-11-12, ADR-0042 as amended): the branch records the sync wrote
+/// answer the page's read at once, said to be as of the sync, and the list is
+/// the one the source answers when it can, row for row. The last commit is
+/// the default branch's tip, the source's first row.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea: eval \"$(testenv/seed --env)\""]
+async fn a_repository_never_read_draws_its_branches_and_last_commit_from_the_mirror() {
+    let rig = rig().await;
+    // The stored parents the app keeps from its adapters' declarations, as its first search writes them.
+    knobas_search::Searcher::declaring(rig.pool.clone(), rig.registry.descriptors())
+        .await
+        .expect("the declarations are stored");
+    sqlx::query("delete from sync.held_read")
+        .execute(&rig.pool)
+        .await
+        .expect("the held reads are cleared");
+    rig.proxy.set(0);
+    let source = rig
+        .view(&LiveSources::default(), &rig.repo, Some("branches"))
+        .await
+        .1
+        .expect("the source lists the branches");
+    let commits = rig
+        .view(&LiveSources::default(), &rig.repo, Some("commits"))
+        .await
+        .1
+        .expect("the source lists the commits");
+
+    rig.proxy.set(slow::HANG);
+    // A session as the app makes one: the mirror is read through the store it holds reads in.
+    let live = rig.session();
+    for (section, read) in [("branches", &source), ("commits", &commits)] {
+        let (took, shown) = time(knobas_app::sources::crud::shown(
+            &rig.pool,
+            &rig.secrets,
+            &rig.registry,
+            &live,
+            &rig.repo,
+            Some(section),
+        ))
+        .await;
+        let shown = shown
+            .flatten()
+            .unwrap_or_else(|| panic!("the mirror draws {section}: {took}"));
+        assert!(
+            took.0 < Duration::from_secs(2),
+            "{section} waited on the forge: {took}"
+        );
+        assert!(
+            shown.held_at.is_some(),
+            "{section} is said to be as of the sync"
+        );
+        let Block::Entities { rows: drawn, .. } = &shown.view.sections[0].blocks[0] else {
+            panic!("{:#?}", shown.view);
+        };
+        let Block::Entities { rows: theirs, .. } = &read.sections[0].blocks[0] else {
+            panic!("{read:#?}");
+        };
+        if section == "branches" {
+            assert_eq!(drawn, theirs, "the mirror's branch list is the source's");
+        } else {
+            assert_eq!(drawn.len(), 1);
+            assert_eq!(
+                (&drawn[0].entity_id, &drawn[0].chip),
+                (&theirs[0].entity_id, &theirs[0].chip),
+                "the last commit is the source's first row"
+            );
+        }
+    }
+    rig.proxy.set(0);
+    live.settled().await;
+}
+
+/// **A big folder with no clone, through a slow forge** (the big-folder pass
+/// of PR #2479, 2026-11-13): a folder is its own level of Gitea's tree, read by
+/// the tree's sha, not Gitea's `contents`, which works out each entry's last
+/// commit (9 s for 3,000 entries, never for 12,000). Times each folder's first
+/// read with every request held 1 s (nothing read before: the top's level and
+/// the folder's), then the next (a session of its own: the adapter kept the
+/// level, so no request), then the same at full speed, which reads what the
+/// adapter kept; prints a `SLOW` line for each, and asserts each folder is
+/// drawn with every entry.
+///
+/// It reads a repository with big folders that the seed has none of:
+/// `KNOBAS_BIG_FOLDERS_REPO` (`owner/name` on the testenv Gitea) and
+/// `KNOBAS_BIG_FOLDERS` (its folders and their entries, `huge=12000,deep/x=800`),
+/// such as the ones `testenv/perf/big-folders.mjs` makes.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the testenv Gitea and a repository with big folders: KNOBAS_BIG_FOLDERS_REPO, KNOBAS_BIG_FOLDERS"]
+async fn a_big_folder_with_no_clone_reads_its_own_level_through_a_slow_forge() {
+    let proxy = slow::start(&need("KNOBAS_GITEA_URL")).await;
+    let repo_name = need("KNOBAS_BIG_FOLDERS_REPO");
+    let folders: Vec<(String, usize)> = need("KNOBAS_BIG_FOLDERS")
+        .split(',')
+        .filter_map(|f| f.split_once('='))
+        .map(|(dir, n)| (dir.to_owned(), n.parse().expect("a count")))
+        .collect();
+    let pool = knobas_db::test_util::scratch_database("slow_forge_big_folders")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch database");
+    let source = format!("gitea-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let token = need("KNOBAS_GITEA_TOKEN");
+    let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(&source),
+            &Secret::just(AuthMethod::Pat, token.clone()),
+        )
+        .expect("the token is stored");
+    let config = serde_json::json!({ "repos": [repo_name] });
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: source.clone(),
+            adapter_kind: "gitea".to_owned(),
+            display_name: source.clone(),
+            base_url: proxy.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: config.clone(),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+    let built = knobas_source_gitea::build(knobas_source::instance::SourceInstance {
+        id: source.clone(),
+        kind: "gitea".to_owned(),
+        display_name: source.clone(),
+        base_url: proxy.url.clone(),
+        auth: Some(AuthMethod::Pat),
+        secret: Some(token),
+        account: None,
+        config,
+    })
+    .expect("the source builds");
+    knobas_sync::run_once(&pool, built.as_ref(), None)
+        .await
+        .expect("the repository syncs");
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry::for_process());
+    let repo = format!("{source}:{repo_name}");
+    let read = |live: &LiveSources, section: String| {
+        let (pool, secrets, registry, repo) = (
+            pool.clone(),
+            secrets.clone(),
+            registry.clone(),
+            repo.clone(),
+        );
+        let live = live.clone();
+        async move {
+            time(knobas_app::sources::crud::view(
+                &pool,
+                &secrets,
+                &registry,
+                &live,
+                &repo,
+                Some(&section),
+            ))
+            .await
+        }
+    };
+    for (mode, ms) in [("1s", 1_000), ("0s", 0)] {
+        proxy.set(ms);
+        // A fresh session: nothing kept by the app; the adapter's levels are kept for the process, so only the first
+        // mode reads them from the forge.
+        let live = LiveSources::default();
+        let (_, top) = read(&live, "files".to_owned()).await;
+        let top = top.flatten().expect("the top is read");
+        let Block::Tree {
+            commit: Some(sha), ..
+        } = &top.sections[0].blocks[0]
+        else {
+            panic!("{top:#?}");
+        };
+        for (dir, entries) in &folders {
+            let section = format!("files@{sha}:{dir}");
+            let (first, drawn) = read(&live, section.clone()).await;
+            let (next, _) = read(&LiveSources::default(), section.clone()).await;
+            let drawn = drawn
+                .flatten()
+                .unwrap_or_else(|| panic!("{dir} is drawn: {first}"));
+            let Block::Tree {
+                entries: listed,
+                truncated,
+                ..
+            } = &drawn.sections[0].blocks[0]
+            else {
+                panic!("{drawn:#?}");
+            };
+            println!(
+                "SLOW {mode:>6} | no clone: {dir:<24} | first {first} | next {next} | {} entries",
+                listed.len()
+            );
+            assert_eq!(listed.len(), *entries, "every entry of {dir}");
+            assert!(!truncated, "{dir} is not cut");
+        }
+    }
+    proxy.set(0);
+}

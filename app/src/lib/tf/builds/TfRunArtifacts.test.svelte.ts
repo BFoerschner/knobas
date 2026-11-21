@@ -96,9 +96,9 @@ test("the tree opens its top-level folders, counts them, sizes the files, and ea
   await settle();
   expect(drawn.read).toEqual(["", "test-report"]);
   expect(rows()).toEqual([
-    ["▾ test-report/", "2 files", "tf-ad0"],
+    ["test-report/", "2 files", "tf-ad0"],
     ["junit.xml", "14.2 KB", "tf-ad1"],
-    ["▸ html/", "1 file", "tf-ad1"],
+    ["html/", "1 file", "tf-ad1"],
     ["SHA256SUMS", "1.0 KB", "tf-ad0"],
     ["payout-service.tar.gz", "6.2 MB", "tf-ad0"],
   ]);
@@ -118,7 +118,7 @@ test("a deeper folder is read when it is opened, and folds closed again", async 
   expect(rows()[3]).toEqual(["index.html", "88.0 KB", "tf-ad2"]);
   target.querySelectorAll<HTMLButtonElement>(".tf-fold")[0]!.click();
   flushSync();
-  expect(rows().map((r) => r[0])).toEqual(["▸ test-report/", "SHA256SUMS", "payout-service.tar.gz"]);
+  expect(rows().map((r) => r[0])).toEqual(["test-report/", "SHA256SUMS", "payout-service.tar.gz"]);
 });
 
 test("every download goes through knobas: a file, a folder as a zip, and all as a zip", async () => {

@@ -28,28 +28,36 @@
   alone. The title, the description and the conversation are the reading
   column's (#2399).
 
-  The card's width (#2402, `card-width.svelte.ts`): a six-pixel separator on
-  its right edge drags the column between 240px and 720px, a double click (or
-  Enter) fits it so nothing on the card wraps, and the arrows step it. Below
-  900px the columns stack and the handle is not drawn.
+  The card's width (#2402) is the page's sidebar edge (`TfSideEdge`, drawn by
+  `TfJob` on the line beside the card): it drags the column between 240px and
+  720px, a double click (or Enter) fits it so nothing on the card wraps
+  (`naturalWidth`), and the arrows step it. Below 900px the columns stack and
+  there is no edge.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import { heldHead } from "../held-head.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import { openExternal } from "../../shell/open-external";
-  import { pressSection, type CardTable } from "./card-sections";
-  import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
+  import { routeWeb as openExternal, webPlaceName } from "../../shell/open-web";
+  import { openKey } from "../page-open.svelte";
+  import type { CardTable } from "./card-sections";
+  import TfCardRows from "./TfCardRows.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
-  import { epicLine, initials } from "../tickets/tickets";
+  import { epicLine, initials, shortKey } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
-  import { toneClass } from "../tone";
 
   let {
     detail,
     others = [],
     parentTitle = null,
+    parentRead = true,
     mine = false,
     me = null,
     pinned,
@@ -65,6 +73,8 @@
     others?: EntityDetail[];
     /** The direct parent's title, for the epic chip; `null` draws its key alone. */
     parentTitle?: string | null;
+    /** Whether the parent's title read has answered: the chip draws once it has, or once the hold is up. */
+    parentRead?: boolean;
     /** Whether the ticket is the reader's own (`isMine`): the assignee's avatar in full ink, *(you)* after the name. */
     mine?: boolean;
     /** The reader's username in the ticket's source (`username`): the reporter in full ink when it is the reader, and the reader's share of the logged time. */
@@ -85,13 +95,36 @@
   } = $props();
 
   const key = $derived(keyOf(detail.row.entity_id));
+  /**
+   * The key as a ticket card draws it: a forge's issue by its repository and number (*payout-service#37*), the whole key
+   * on hover, since its owner in a 32 px face cut a long one off at the card's edge (the Windows pass, 2026-11-14).
+   */
+  const shownKey = $derived(shortKey(key));
   const blockedBy = $derived(blockers(detail));
+  const stacked = new MediaQuery("(max-width: 900px)");
   const epicId = $derived(parentOf(detail.row));
   const epic = $derived(epicLine({ path: detail.row.path, parent_title: parentTitle }));
   const labels = $derived(detail.labels ?? []);
   const reporter = $derived(detail.reporter ?? null);
   const reporterMine = $derived(reporter !== null && me !== null && reporter === me);
+  /** What a person is called (F-107): the name the source keeps beside the account, as the Conversation below says it. */
+  const reporterName = $derived(detail.reporter_name ?? reporter);
+  const assigneeName = $derived(detail.author_name ?? detail.author);
   const logged = $derived(loggedRow(detail, me));
+  /**
+   * Nothing on the card moves once drawn (the nothing-moves pass, 2026-11-17, `held-head.svelte.ts`). The epic chip waits
+   * for its parent's title, as the key alone widened 97 px to the key and title 100 ms later; the sections and the actions
+   * under them wait together for every section's read, as each row that landed pushed *Open in* and *Link something to
+   * it* 33 px down. Each shows after the hold at the latest, with what has answered.
+   */
+  const epicHeld = heldHead(
+    () => detail.row.entity_id,
+    () => parentRead,
+  );
+  const rowsHeld = heldHead(
+    () => detail.row.entity_id,
+    () => table.settled,
+  );
   /** A meter segment's width, through the CSSOM: the app's CSP refuses `style=""` in markup, not this. */
   const width = (share: number) => (node: HTMLElement) => {
     node.style.width = `${share.toFixed(1)}%`;
@@ -113,89 +146,39 @@
   }
   $effect(() => () => clearTimeout(settle));
 
-  // ---- the card's width (#2402) ----
-  /** The window at which the columns stack and the handle goes (`narrow.css`). */
-  const NARROW = "(max-width: 900px)";
-  /** How far an arrow key moves the edge. */
-  const STEP = 16;
-  let article = $state<HTMLElement | null>(null);
-  let narrow = $state(false);
-  $effect(() => {
-    const query = typeof window.matchMedia === "function" ? window.matchMedia(NARROW) : null;
-    if (query === null) return;
-    narrow = query.matches;
-    const changed = (event: MediaQueryListEvent) => (narrow = event.matches);
-    query.addEventListener("change", changed);
-    return () => query.removeEventListener("change", changed);
-  });
-
-  /** A drag in progress: what lets go of the window's pointer listeners. */
-  let release: (() => void) | null = $state(null);
-  function startDrag(event: PointerEvent) {
-    if (event.button !== 0 || article === null) return;
-    event.preventDefault();
-    release?.();
-    const left = article.getBoundingClientRect().left;
-    const move = (at: PointerEvent) => cardWidth.set(at.clientX - left);
-    const up = () => release?.();
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    release = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      release = null;
+  /** While rows pass under the pinned foot, a line on its top edge: the rows end at it. Gone at the end of the card's scroll, where nothing is cut. */
+  const footLine = (node: HTMLElement) => {
+    if (typeof ResizeObserver === "undefined") return;
+    const measure = () => node.classList.toggle("tf-tkcut", node.scrollHeight - node.clientHeight - node.scrollTop > 1);
+    const seen = new ResizeObserver(measure);
+    seen.observe(node);
+    for (const child of node.children) seen.observe(child);
+    node.addEventListener("scroll", measure, { passive: true });
+    node.addEventListener("toggle", measure, true);
+    return () => {
+      seen.disconnect();
+      node.removeEventListener("scroll", measure);
+      node.removeEventListener("toggle", measure, true);
     };
-  }
-  $effect(() => () => release?.());
-
-  /** The width at which nothing on the card wraps, up to the cap. */
-  function fit() {
-    if (article !== null) cardWidth.set(naturalWidth(article));
-  }
-
-  function edgeKey(event: KeyboardEvent) {
-    if (event.key === "ArrowLeft") cardWidth.set(cardWidth.px - STEP);
-    else if (event.key === "ArrowRight") cardWidth.set(cardWidth.px + STEP);
-    else if (event.key === "Enter") fit();
-    else return;
-    event.preventDefault();
-  }
+  };
 
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
-    open(url).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+    acknowledged(openingWords(webPlaceName(url, { source: detail.source.id })), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
   }
 </script>
 
 <article
-  bind:this={article}
   class="tf-jobcard tf-ticketcard"
   class:tf-card={pinned}
   class:tf-sheetcard={!pinned}
-  class:tf-tkdragging={release !== null}
   aria-label={pinned ? "Job card" : "Ticket"}
+  {@attach footLine}
 >
-  {#if !narrow}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div
-      class="tf-tkhandle"
-      role="separator"
-      tabindex="0"
-      aria-orientation="vertical"
-      aria-label="Card width. Drag to resize, double-click to fit."
-      aria-valuemin={SIDE_MIN}
-      aria-valuemax={SIDE_MAX}
-      aria-valuenow={cardWidth.px}
-      title="Drag to resize, double-click to fit"
-      onpointerdown={startDrag}
-      ondblclick={fit}
-      onkeydown={edgeKey}
-    ></div>
-  {/if}
   <div>
     <div class="tf-tkhead">
-      <div class="tf-jobkey">{key}</div>
+      <div class="tf-jobkey" title={shownKey === key ? undefined : key}>{shownKey}</div>
       <button
         type="button"
         class="tf-iconbtn tf-sm tf-tkcopy"
@@ -216,28 +199,32 @@
     {/if}
   </div>
   <div class="tf-jobrow">
-    <span class="tf-chip">{detail.status ?? "No status"}</span>
+    <TfStateChip text={detail.status ?? "No status"} />
     {#each blockedBy as blocker (blocker)}
-      <span class="tf-chip tf-err">Blocked by {blocker}</span>
+      <span class="tf-chip tf-err">Blocked by <TfKey value={blocker} /></span>
     {/each}
   </div>
+  <!-- Stacked below 900 px the title follows the key, and the facts and rows fold, so the first screen is the ticket. -->
+  <p class="tf-tkcardtitle" aria-hidden="true">{detail.row.title}</p>
+  <details class="tf-tkstack" open={!stacked.current}>
+    <summary>Details and connections</summary>
   <dl class="tf-facts">
     {#if epic !== null && epicId !== null}
       <dt>Epic</dt>
-      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}>{epic}</a></dd>
+      <dd>{#if epicHeld.shown}<a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}><TfKeyed text={epic} lead /></a>{/if}</dd>
     {/if}
     {#if reporter !== null}
       <dt>Reporter</dt>
       <dd>
-        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporter)}</span><span
-          >{reporter}{reporterMine ? " (you)" : ""}</span
+        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporterName)}</span><span
+          >{reporterName}{reporterMine ? " (you)" : ""}</span
         >
       </dd>
     {/if}
     <dt>Assignee</dt>
     <dd>
-      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(detail.author)}</span><span
-        >{detail.author ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
+      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(assigneeName)}</span><span
+        >{assigneeName ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
       >
     </dd>
     {#if detail.issue_type}<dt>Type</dt><dd>{detail.issue_type}</dd>{/if}
@@ -262,33 +249,21 @@
       </dd>
     {/if}
   </dl>
-  {#if table.rows.length > 0}
-    <div class="tf-tktable tf-tksecs">
-      {#each table.rows as row (row.name)}
-        <a
-          href={row.href}
-          title={row.opens === "subtasks" ? `Tickets under ${key}. ${row.words}` : `${row.name} view, this ticket only. ${row.words}`}
-          onclick={() => pressSection(row, detail.row.entity_id)}
-          ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
-              class="tf-st"
-              class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{row.state.text}</span
-            >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
-        >
-      {/each}
-    </div>
+  {#if rowsHeld.shown && table.rows.length > 0}
+    <TfCardRows rows={table.rows} entityId={detail.row.entity_id} ticketKey={key} />
   {:else if table.settled}
     <p class="tf-tknone">Nothing connected yet.</p>
   {/if}
-  <div class="tf-tktable tf-tkacts">
+  <div class="tf-tktable tf-tkacts" class:tf-hidden={!rowsHeld.shown} inert={!rowsHeld.shown}>
     {#if detail.web_url}
       {@const url = detail.web_url}
-      <a href={url} onclick={(event) => openWeb(event, url)}
+      <a href={url} title="Open in {detail.source.display_name} (O)" onclick={(event) => openWeb(event, url)} {@attach openKey(() => ({ url, source: detail.source.id, item: key }))}
         ><span>Open in {detail.source.display_name}</span><span class="tf-chev" aria-hidden="true">›</span></a
       >
     {/if}
     <button type="button" onclick={onlink}><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></button>
   </div>
+  </details>
   {#if action !== null}
     <div class="tf-go">
       <button type="button" class="tf-btn tf-primary tf-lg" onclick={onaction}>{action.label}</button>

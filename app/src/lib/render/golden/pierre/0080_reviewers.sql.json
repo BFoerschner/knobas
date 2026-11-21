@@ -1,0 +1,16 @@
+[
+  ["com:-- The reviewers a pull request names."],
+  ["kw:create table ",":if ","kw:not exists ",":reviewers ","punct:("],
+  ["punct:  ",":id bigserial ","kw:primary ",":key","punct:,"],
+  ["punct:  ",":pr ","ty:text ","kw:not ","con:null","punct:,"],
+  ["punct:  ",":login ","ty:text ","kw:not ","con:null ","kw:default ","str:''"],
+  ["punct:);"],
+  [],
+  ["kw:CREATE OR ",":REPLACE FUNCTION ","fn:reviewers_of","punct:(",":p ","ty:text","punct:) ",":RETURNS ","ty:jsonb ","kw:AS ","str:$fn$"],
+  ["str:  SELECT coalesce(jsonb_agg(login order by login), '[]'::jsonb)"],
+  ["str:  FROM reviewers WHERE pr = p AND login <> '';"],
+  ["str:$fn$ ",":LANGUAGE sql IMMUTABLE","punct:;"],
+  [],
+  ["kw:insert into ",":reviewers ","punct:(",":pr","punct:, ",":login","punct:) ","kw:values ","punct:(","str:'mock#142'","punct:, ","str:'bjorn'","punct:);"],
+  []
+]

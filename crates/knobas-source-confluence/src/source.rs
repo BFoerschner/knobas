@@ -279,6 +279,17 @@ impl Source for ConfluenceSource {
         )))
     }
 
+    /// A credential's grants change when an administrator changes them,
+    /// rarely: kept, answered from memory, and asked again behind (ADR-0032's
+    /// moving reads, the second smoothness pass on PR #2479), as Gitea's are.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
+    }
+
     /// The writes this user's space permissions and page operations refuse
     /// (#2053, [`crate::grants`]). An ask about another source's entity, or
     /// one whose page cannot be read, is no verdict.

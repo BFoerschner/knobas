@@ -141,7 +141,7 @@ mod tests {
 monitor_status{monitor_id=\"8\",monitor_name=\"canary\",monitor_type=\"http\",monitor_url=\"http://host.docker.internal:8299/\",monitor_hostname=\"null\",monitor_port=\"null\"} 1
 monitor_response_time{monitor_id=\"8\",monitor_name=\"canary\",monitor_type=\"http\",monitor_url=\"http://host.docker.internal:8299/\",monitor_hostname=\"null\",monitor_port=\"null\"} 13
 monitor_uptime_ratio{monitor_id=\"8\",monitor_name=\"canary\",monitor_type=\"http\",monitor_url=\"http://host.docker.internal:8299/\",monitor_hostname=\"null\",monitor_port=\"null\",window=\"1d\"} 0.98
-monitor_status{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"46.224.117.158\",monitor_port=\"null\"} 0
+monitor_status{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"203.0.113.10\",monitor_port=\"null\"} 0
 monitor_status{monitor_id=\"99\",monitor_name=\"future\",monitor_type=\"http\",monitor_url=\"https://example.invalid/\",monitor_hostname=\"null\",monitor_port=\"null\"} 7
 ";
 
@@ -185,7 +185,7 @@ monitor_status{monitor_id=\"99\",monitor_name=\"future\",monitor_type=\"http\",m
         );
         assert_eq!(
             item("1").body_text,
-            "knobas-teamcity down ping 46.224.117.158"
+            "knobas-teamcity down ping 203.0.113.10"
         );
     }
 

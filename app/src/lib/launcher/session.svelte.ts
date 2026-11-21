@@ -1,10 +1,12 @@
+import type { FilesInRepo } from "../ipc";
 /**
  * The launcher's state machine: debounce, sequencing, selection.
  *
  * Everything here is a rule that a component cannot be trusted to reproduce by
  * hand, and every one of them is a bug somebody has shipped before:
  *
- * - **90 ms debounce**, so a five-letter word is one query and not five.
+ * - **90 ms debounce**, so a five-letter word is two queries and not five: the first key after the box settled is
+ *   asked at once, and the keys typed within 90 ms of a query, or while it is out, wait until they pause.
  * - **A monotonic request id**, so a slow query that lands *after* a faster,
  *   newer one is dropped rather than applied. Without it the rows under the
  *   cursor change to an older answer and the box reads as "jumping" — the
@@ -12,10 +14,17 @@
  *   enough for two queries to overtake each other.
  * - **The selection resets to the first row on every new answer**, because the
  *   row that was under the cursor is not in the new list.
+ * - **The list keeps what it drew until the answer to the box's text lands** (2026-11-16,
+ *   `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`): the board after the first
+ *   key, the answer before while a word grows. Never a wait line in the place of rows, and no line at all for a
+ *   wait under {@link WAIT_SAID_MS}. While the answer is {@link Session.owed}, the keys that act on a row wait for
+ *   it (`Launcher.svelte`), so what a row of keys opens does not depend on how fast it was typed.
  *
  * A `.svelte.ts` module: `$state` is compiler syntax, and only files with this
  * suffix are compiled by `vite-plugin-svelte`.
  */
+import { untrack } from "svelte";
+
 import {
   type FavouriteTarget,
   type FilterSuggestions,
@@ -27,6 +36,7 @@ import {
   ipcErrorMessage,
   noFilters,
 } from "../ipc";
+import { PLACEHOLDER_MS } from "../detail/view-read";
 import type { LauncherAction } from "./actions";
 import { type BoardExtras, type LauncherMode, type LauncherRow, flatten, modeOf } from "./rows";
 import { SYNTAX } from "./syntax";
@@ -35,8 +45,28 @@ import { pastedUrl } from "./url";
 /** How long the box waits after the last keystroke. */
 export const DEBOUNCE_MS = 90;
 
+/**
+ * How long the box waits in silence for an answer before it says so: the app's one threshold for a read (#703,
+ * `detail/view-read.ts`). Under it the list keeps what it drew, or its place where it drew nothing, and an answer
+ * lands with no line before it: a line drawn for the frame or two a search takes and then swapped for its rows was
+ * the flicker on the first key. Over it the rows kept are dimmed, since they answer older text, and a list that
+ * drew nothing says what it waits for. Counted from the last change of the box's text, so typing a long word at
+ * speed is no wait.
+ */
+export const WAIT_SAID_MS = PLACEHOLDER_MS;
+
 /** How many rows one answer may carry. The engine clamps to 200 anyway. */
 export const SEARCH_LIMIT = 40;
+
+/**
+ * What the engine is asked for the words in the box. A developer writes a pull request as *PR 142*, and the engine would look
+ * for the word *PR* in its titles (F-066), so that form asks for pull requests holding 142, in the grammar's own `#p`. The box
+ * keeps what was typed. Anything else goes as typed: the grammar stays the engine's.
+ */
+export function askedAs(raw: string): string {
+  const number = /^\s*(?:pr|pull request)(?:\s+#?|#)(\d+)\s*$/i.exec(raw)?.[1];
+  return number === undefined ? raw : `#p ${number}`;
+}
 
 /** The IPC the session drives. Injected so tests need no bridge. */
 export interface SessionPorts {
@@ -54,6 +84,8 @@ export interface SessionPorts {
    * draws the two outcomes.
    */
   resolveUrl?(url: string): Promise<UrlMatch | null>;
+  /** The files of a repository the words find, for the pane (the everything-search decisions, D11); none when omitted. */
+  searchFiles?(repository: string, raw: string): Promise<FilesInRepo>;
   /**
    * Save the box's current query as a list, and the two writes that keep the
    * lists tidy afterwards — `create_smart_list`, `rename_smart_list`,
@@ -108,6 +140,9 @@ export class Session {
   #debounceMs: number;
   #titles: () => boolean;
   #timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the last query was sent and the last key typed (`Date.now()`), so a key typed long after both reads at once. */
+  #sentAt = 0;
+  #keyAt = 0;
 
   /**
    * The last id handed out, and the newest id whose answer has been applied.
@@ -122,6 +157,23 @@ export class Session {
 
   raw = $state("");
   response = $state<SearchResponse | null>(null);
+  /**
+   * The text the list answers: `""` for the board, the text {@link response} was asked with, and `null` where the
+   * list has drawn nothing yet (an opening that starts on words, a search that failed). It trails {@link raw} by
+   * the answer that is owed, and is what the panel and its rows are read from: until the answer lands the list is
+   * what it was.
+   */
+  #answered = $state<string | null>("");
+  /** A query waits for the keys to pause. With {@link pending}, the answer to the box's text is {@link owed}. */
+  #scheduled = $state(false);
+  /** The board's first read is out: the empty box has nothing to draw yet. */
+  #boardOut = $state(false);
+  /**
+   * The wait has lasted {@link WAIT_SAID_MS} and may be said: the rows the list kept are dimmed, and a list that
+   * drew nothing says what it waits for.
+   */
+  late = $state(false);
+  #lateTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * The absolute URL the box currently holds, or `null` when it holds a query
    * (#496).
@@ -191,9 +243,33 @@ export class Session {
     this.actions = options.actions ?? [];
   }
 
+  /**
+   * Whether the answer to what the box holds is still to come: a query waits for the keys to pause, or one is
+   * out. The list is then what it was, and a key that acts on a row waits (`Launcher.svelte`).
+   */
+  get owed(): boolean {
+    return this.#scheduled || this.pending;
+  }
+
+  /** The text the list answers: the box's, less the answer that is {@link owed}. */
+  get answered(): string {
+    return this.#answered ?? this.raw;
+  }
+
+  /**
+   * Whether the list holds rows of an older text while the answer is {@link owed} and {@link late}: what the
+   * launcher dims. A list that drew nothing has no rows to dim, and says its wait instead.
+   */
+  get outdated(): boolean {
+    if (!this.late || !this.owed || this.mode === "url") return false;
+    return this.mode === "board" ? this.home !== null : this.response !== null;
+  }
+
   get mode(): LauncherMode {
-    if (this.url !== null) return "url";
-    return modeOf(this.raw, this.response);
+    // A pasted link takes the panel once its lookup has answered, or has been waited on long enough to say so,
+    // or where the list had drawn nothing; until then the list is what it was.
+    if (this.url !== null && (this.urlAnswer !== null || this.late || this.#answered === null)) return "url";
+    return modeOf(this.answered, this.response);
   }
 
   get rows(): LauncherRow[] {
@@ -205,6 +281,7 @@ export class Session {
       syntax: this.syntax,
       extras: this.extras,
       titles: this.#titles(),
+      raw: this.answered,
     });
   }
 
@@ -226,6 +303,7 @@ export class Session {
   type(raw: string): void {
     this.raw = raw;
     this.savedId = null;
+    this.#waitFrom();
     this.#schedule();
   }
 
@@ -233,6 +311,27 @@ export class Session {
   set(raw: string): void {
     this.raw = raw;
     this.savedId = null;
+    this.#cancel();
+    this.#waitFrom();
+    void this.run();
+  }
+
+  /**
+   * A new opening on `query`: the list holds nothing of the opening before. An empty box is the board, at once;
+   * words draw when their answer lands, and nothing until then.
+   */
+  begin(query: string): void {
+    this.response = null;
+    this.#answered = null;
+    this.set(query);
+  }
+
+  /**
+   * Ask now what the box holds, if its query still waits for the keys to pause: a key that acts on the answer
+   * says the typing is done.
+   */
+  flush(): void {
+    if (this.#timer === undefined) return;
     this.#cancel();
     void this.run();
   }
@@ -300,7 +399,7 @@ export class Session {
     const create = this.#ports.createSmartList;
     if (!create) return;
     await this.#write(async () => {
-      this.savedId = (await create(label, this.raw)).id;
+      this.savedId = (await create(label, askedAs(this.raw))).id;
     });
   }
 
@@ -409,11 +508,20 @@ export class Session {
 
   /** Load the board. Called once when the overlay opens. */
   async loadHome(): Promise<void> {
+    // Only the first read is a wait: a later one redraws a board that is on screen. Read untracked: the launcher
+    // calls this from the effect that opens it, which must not run again because the board arrived.
+    if (untrack(() => this.home === null)) {
+      this.#boardOut = true;
+      this.#waitFrom();
+    }
     try {
       this.home = await this.#ports.launcherHome();
       this.error = null;
     } catch (cause) {
       this.error = ipcErrorMessage(cause);
+    } finally {
+      this.#boardOut = false;
+      this.#settled();
     }
   }
 
@@ -424,6 +532,7 @@ export class Session {
    * neither text nor a filter is one the engine refuses anyway.
    */
   async run(): Promise<void> {
+    this.#sentAt = Date.now();
     if (this.raw.trim() === "") {
       // The clear is the newest answer (#1668): a search still in flight for
       // the text just cleared is older than it, so when it lands it is
@@ -431,6 +540,7 @@ export class Session {
       this.#applied = ++this.#issued;
       this.#clear();
       this.pending = false;
+      this.#settled();
       return;
     }
     // Before the query is sent, and never as a branch of the grammar (spec
@@ -447,10 +557,12 @@ export class Session {
     this.url = null;
     this.urlAnswer = null;
     const id = ++this.#issued;
+    const asked = this.raw;
     this.pending = true;
+    if (this.#lateTimer === undefined && !this.late) this.#waitFrom();
     try {
       const response = await this.#ports.search({
-        raw: this.raw,
+        raw: askedAs(asked),
         limit: SEARCH_LIMIT,
         // `noFilters()` rather than the literal: the shape is the bridge's, so
         // a dimension added to `SearchFilters` is one edit there and none here.
@@ -465,6 +577,7 @@ export class Session {
       if (id <= this.#applied || this.url !== null) return;
       this.#applied = id;
       this.response = response;
+      this.#answered = asked;
       this.error = null;
       this.selected = 0;
     } catch (cause) {
@@ -472,10 +585,14 @@ export class Session {
       this.#applied = id;
       this.error = ipcErrorMessage(cause);
       this.response = null;
+      this.#answered = null;
     } finally {
       // Only the newest request may clear the spinner, or an overtaken slow
       // answer would say "done" while a newer query is still in flight.
-      if (id === this.#issued) this.pending = false;
+      if (id === this.#issued) {
+        this.pending = false;
+        this.#settled();
+      }
     }
   }
 
@@ -493,6 +610,9 @@ export class Session {
    */
   dispose(): void {
     this.#cancel();
+    clearTimeout(this.#lateTimer);
+    this.#lateTimer = undefined;
+    this.late = false;
     // Read again on the next opening: the values that exist may have moved.
     this.#suggestionsFor = null;
     this.#suggestionsFailed = false;
@@ -523,22 +643,31 @@ export class Session {
     const id = ++this.#issued;
     this.url = url;
     this.urlAnswer = null;
-    this.response = null;
-    this.selected = 0;
     this.pending = true;
+    if (this.#lateTimer === undefined && !this.late) this.#waitFrom();
+    // The list keeps what it drew until the lookup answers (`mode`): its rows go with the answer, not before it.
+    const answered = () => {
+      this.#applied = id;
+      this.response = null;
+      this.#answered = null;
+      this.selected = 0;
+    };
     try {
       const match = await resolveUrl(url);
       if (this.#stale(id, url)) return;
-      this.#applied = id;
+      answered();
       this.urlAnswer = { match };
       this.error = null;
     } catch (cause) {
       if (this.#stale(id, url)) return;
-      this.#applied = id;
+      answered();
       this.error = ipcErrorMessage(cause);
       this.urlAnswer = null;
     } finally {
-      if (id === this.#issued) this.pending = false;
+      if (id === this.#issued) {
+        this.pending = false;
+        this.#settled();
+      }
     }
   }
 
@@ -560,18 +689,49 @@ export class Session {
     return id <= this.#applied || this.url !== url;
   }
 
-  /** Everything an empty box has nothing to say about. */
+  /** Everything an empty box has nothing to say about: the list is the board. */
   #clear(): void {
     this.response = null;
+    this.#answered = "";
     this.url = null;
     this.urlAnswer = null;
     this.selected = 0;
   }
 
+  /** The wait counts from now: the box's text changed, or a read began with no count running. */
+  #waitFrom(): void {
+    clearTimeout(this.#lateTimer);
+    this.late = false;
+    this.#lateTimer = setTimeout(() => {
+      this.#lateTimer = undefined;
+      if (this.owed || this.#boardOut) this.late = true;
+    }, WAIT_SAID_MS);
+  }
+
+  /** A read ended: with nothing left to wait for, the wait is over and unsaid. */
+  #settled(): void {
+    if (this.owed || this.#boardOut) return;
+    clearTimeout(this.#lateTimer);
+    this.#lateTimer = undefined;
+    this.late = false;
+  }
+
   #schedule(): void {
     this.#cancel();
+    // The first key after the box settled is asked at once (the broad-filters pass, 2026-11-13): the debounce made it
+    // wait 90 ms for keys that were not coming. One typed within the debounce of the last query, or while one is out,
+    // waits as before, so the rest of a word typed at speed is one query.
+    const at = Date.now();
+    const settled = !this.pending && at - Math.max(this.#sentAt, this.#keyAt) >= this.#debounceMs;
+    this.#keyAt = at;
+    if (settled) {
+      void this.run();
+      return;
+    }
+    this.#scheduled = true;
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
+      this.#scheduled = false;
       void this.run();
     }, this.#debounceMs);
   }
@@ -581,5 +741,6 @@ export class Session {
       clearTimeout(this.#timer);
       this.#timer = undefined;
     }
+    this.#scheduled = false;
   }
 }

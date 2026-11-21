@@ -7,7 +7,7 @@
  * {@link readOpenJobs} makes the reads, {@link jobIndex} answers from them.
  */
 import type { ContextRow, EntityDetail, Reached } from "../../ipc/entity";
-import { keyOf, resolveTicket, type SourceFacts } from "./job";
+import { keyOf, resolveTicket, type Briefs, type SourceFacts } from "./job";
 
 /** One job and what it reaches: a ticket entity id and its `job_reach` read. */
 export interface OpenJob {
@@ -65,6 +65,8 @@ export interface OpenJobPorts {
   listContexts: () => Promise<ContextRow[]>;
   listSources: () => Promise<SourceFacts[]>;
   getEntity: (entityId: string) => Promise<EntityDetail>;
+  /** What the candidates are, in one read; where left out, each is read whole. */
+  entityBriefs?: Briefs;
   jobReach: (entityId: string) => Promise<Reached[]>;
 }
 
@@ -87,7 +89,7 @@ export async function readOpenJobs(ports: OpenJobPorts, current: string | null):
     let id = ids.find((candidate) => keyOf(candidate) === current) ?? null;
     if (id === null) {
       const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
-      const found = await resolveTicket(current, sources, ports.getEntity).catch(() => null);
+      const found = await resolveTicket(current, sources, ports.getEntity, ports.entityBriefs).catch(() => null);
       id = found?.row.entity_id ?? null;
     }
     if (id !== null) ids = [id, ...ids.filter((candidate) => candidate !== id)];

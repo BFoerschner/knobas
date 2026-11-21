@@ -62,7 +62,7 @@ test("a scheme the browser would refuse is not a paste", () => {
   // `openExternal` allows `http:`/`https:` and nothing else, so recognising
   // any of these would end in a refusal the reader cannot act on.
   for (const other of [
-    "file:///Users/bjoern/notes.md",
+    "file:///Users/tester/notes.md",
     "vscode://file/tmp/x",
     "mailto:bjoern@example.com",
     "javascript:alert(1)",

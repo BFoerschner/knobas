@@ -12,6 +12,10 @@ import {
   reenterWords,
   roleMissLines,
   runRow,
+  SETTINGS_SECTIONS,
+  settingsHash,
+  settingsKnows,
+  settingsParent,
   settingsPlace,
   sourceLine,
   sourceState,
@@ -50,6 +54,9 @@ test("a source's page lights Sources; an unknown section is Sources, as in the p
   expect(settingsPlace(["source", "jira"])).toEqual({ section: "sources", source: "jira" });
   expect(settingsPlace(["standup"])).toEqual({ section: "standup" });
   expect(settingsPlace(["nonsense"])).toEqual({ section: "sources" });
+  // A child's page sits under its parent's address (the subtrees ruling, 2026-11-21).
+  expect(settingsPlace(["appearance", "code-colours"])).toEqual({ section: "code-colours" });
+  expect(settingsPlace(["appearance", "fonts"])).toEqual({ section: "fonts" });
   // *Sync WEB too* on a Jira view (#879): the page with a value added to a list field.
   expect(settingsPlace(["source", "jira", "add", "projects", "WEB"])).toEqual({
     section: "sources",
@@ -164,9 +171,9 @@ const JIRA = { id: "jira", display_name: "Jira", auth_kind: "UserPassword" as co
 test("a sync run reads as started, took and what it did", () => {
   const run = RUN;
   // The suite runs in Europe/Berlin (vite.config.ts), two hours ahead in October.
-  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", detail: null, tone: "ok" });
+  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4s", result: "12 updated", detail: null, tone: "ok" });
   expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, JIRA, NOW)).toMatchObject({
-    took: "3 m 12 s",
+    took: "3m 12s",
     result: "12 updated, backfill",
   });
   expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, JIRA, NOW)).toMatchObject({
@@ -175,7 +182,7 @@ test("a sync run reads as started, took and what it did", () => {
   });
   expect(runRow({ ...run, finished_at: null, outcome: null }, JIRA, NOW)).toMatchObject({ result: "Running…", tone: "run" });
   // CHANGED (#1986): an older run read "12 Oct 10:00" and yesterday's "14 Oct 10:00"; they read as the backup line does.
-  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("2026-10-12 10:00");
+  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("Mon 10:00");
   expect(runRow({ ...run, started_at: "2026-10-14T08:00:00Z" }, JIRA, NOW).started).toBe("yesterday 10:00");
   expect(runRow({ ...run, started_at: "not a date" }, JIRA, NOW).started).toBe("—");
 });
@@ -262,4 +269,29 @@ test("the Backfill line says it forgets where the last sync stopped, and when to
   expect(BACKFILL_HINT).toBe(
     "Reads everything again and forgets where the last sync stopped: after a knobas update reads more fields, or when a sync stopped and names Backfill. Takes a few minutes; the app stays usable.",
   );
+});
+
+test("a child's page sits under its parent's address, Fonts' old address still lands, and nothing else nests (2026-11-21)", () => {
+  expect(settingsHash("code-colours")).toBe("#/settings/appearance/code-colours");
+  expect(settingsHash("fonts")).toBe("#/settings/appearance/fonts");
+  expect(settingsHash("appearance")).toBe("#/settings/appearance");
+  expect(settingsHash("sources")).toBe("#/settings/sources");
+  expect(settingsKnows(["appearance", "code-colours"])).toBe(true);
+  expect(settingsKnows(["appearance", "fonts"])).toBe(true);
+  // Fonts' address from before it had a parent is the same place, drawn in place.
+  expect(settingsKnows(["fonts"])).toBe(true);
+  expect(settingsPlace(["fonts"])).toEqual({ section: "fonts" });
+  // The page was planned as *Themes* and never shipped there: unknown.
+  expect(settingsKnows(["themes"])).toBe(false);
+  expect(settingsKnows(["code-colours"])).toBe(false);
+  expect(settingsKnows(["appearance", "theme"])).toBe(false);
+  expect(settingsKnows(["appearance", "nonsense"])).toBe(false);
+  expect(settingsKnows(["appearance", "fonts", "more"])).toBe(false);
+  expect(settingsKnows(["time", "fonts"])).toBe(false);
+  expect(settingsParent("fonts")).toBe("appearance");
+  expect(settingsParent("appearance")).toBeNull();
+  // The tree's order: a parent, then its children.
+  const keys = SETTINGS_SECTIONS.map(([key]) => key);
+  expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 3)).toEqual(["appearance", "code-colours", "fonts"]);
+  expect(new Set(keys).size).toBe(keys.length);
 });

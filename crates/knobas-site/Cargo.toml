@@ -1,0 +1,78 @@
+[package]
+name = "knobas-site"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# A source's own website shown inside knobas (ADR-0050,
+# `docs/decisions/2026-11-20-a-sources-site-opens-inside-knobas.md`): the rules
+# a site's navigations, keys and lifetime follow, pure and tested on every
+# platform, and the native view that shows it, made with raw wry as a child of
+# knobas's main window, outside Tauri's web view manager, so the site gets no
+# IPC, no scheme and no script of knobas's. A crate of its own so the rules are
+# tested and the probe binary is built for Windows without the rest of the app.
+
+[features]
+# `fake.rs`: a platform and a shell that record, for the controller's tests
+# and `knobas-app`'s command tests.
+test-util = []
+# The probe binary (`examples/site_probe.rs`, decisions §24): needs a window,
+# so it is built only when asked for, by hand, on macOS and Windows.
+probe = []
+
+[[example]]
+name = "site_probe"
+required-features = ["probe"]
+
+[dependencies]
+# Every address a site meets is parsed, never matched as text. The copy the
+# workspace already resolves.
+url = "2"
+# A macOS data store's identifier (`session.rs`). The copy `knobas-app` uses.
+sha2 = "0.10"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ts-rs.workspace = true
+tracing = "0.1"
+# The probe's 300 ms and its answer from the main thread.
+tokio = { workspace = true, features = ["sync", "time"] }
+futures-util.workspace = true
+
+# The native view: wry, the copy Tauri's runtime resolves, pinned exactly as
+# `objc2` and `webview2-com` are, so a Tauri upgrade moves both together. MIT
+# or Apache-2.0; no new code in the binary. Not on Linux, where knobas offers
+# no site (decisions §23).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+wry = { version = "=0.55.1", default-features = false, features = ["os-webview"] }
+raw-window-handle = "0.6"
+dpi = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The key monitor, the delegate wrappers, back and forward (`mac.rs`). The
+# copies already in the lockfile through wry.
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSError", "NSURL", "NSProcessInfo", "objc2-core-foundation", "block2"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSEvent", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSAlert", "NSGraphicsContext", "NSButton", "NSControl", "NSTextField", "NSGraphics", "NSRunningApplication", "block2", "objc2-core-foundation"] }
+block2 = "=0.6.2"
+
+[target.'cfg(windows)'.dependencies]
+# The controller's settings and events wry does not expose (`windows.rs`).
+# The copies `knobas-app` already names.
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
+
+[dev-dependencies]
+knobas-site = { path = ".", features = ["test-util"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros", "test-util"] }
+# The probe binary's window and its log, the copies Tauri already resolves.
+tao = "=0.35.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[target.'cfg(any(target_os = "macos", windows))'.dev-dependencies]
+# The probe's stand-in shell has a scheme of its own, as knobas's page has.
+wry = { version = "=0.55.1", default-features = false, features = ["os-webview", "protocol"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The probe's posted keys (`examples/site_probe.rs`). The copy in the lockfile.
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }

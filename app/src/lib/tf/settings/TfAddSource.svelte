@@ -2,9 +2,12 @@
   *Add a source* in the ticket-first look (#903): prototype-6's
   `stgAddSource`, in the `TfDialog` frame.
 
-  *What is it?* is one radio per adapter, described by what it holds. Then the
-  address, the adapter's config form, **generated** from its `config_schema`
-  (spec §3a, `TfSchemaForm`, no per-adapter branch), and the credential. *Test
+  *What is it?* is one radio per adapter, described by what it holds. Then what
+  it can't connect without, in the order a person has it to hand (F-629): the
+  address, how it signs in, the fields that takes, the secret, then the name and
+  the id. The rest of the adapter's config form, **generated** from its
+  `config_schema` (spec §3a, `TfSchemaForm`, no per-adapter branch), waits in a
+  closed fold, since *Test connection* fills most of it. *Test
   connection* tests the draft and fills what it found into empty fields: the
   account into the user (#82), the ids the source reports into theirs (#297).
   *Add source* sends one `add_source` with the secret and the row, as the
@@ -13,6 +16,14 @@
 
   Settings › Sources mounts it, and so does the first-run wizard's *Connect a
   real system* (#1400), with the same ports: there is one add-source flow.
+
+  **`Esc` and × keep the adapter, the address and the name** (F-647, `newSourceDraft`), wherever it was opened, and *Cancel*
+  ends them, as a source added does. The token, the password, the account and a test's answer are this dialog's own state and
+  go with it, so a reopened dialog asks for the token and tests again.
+
+  **A pick folds the list** (F-656): a press on a kind leaves that row and *Change*, so the form fits. An arrow picks as it moves, so
+  walking keeps the list open until `Tab`, which goes on to the address. A restored draft arrives folded, and one adapter has nothing
+  to change to. A different kind takes the token, the account and its password with it: they were typed for the kind before.
 
   *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
   URL (its latest release), a manifest URL, or the path of a local
@@ -30,6 +41,9 @@
   default, and its page changes that.
 -->
 <script lang="ts">
+  import { tick, untrack } from "svelte";
+  import type { Attachment } from "svelte/attachments";
+
   import { ipcErrorMessage } from "../../ipc";
   import type { AdapterPreview, AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
   import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
@@ -37,9 +51,11 @@
   import { defaultValues, validate } from "../../sources/schema-form";
   import type { Layers } from "../layers.svelte";
   import type { SettingsPorts } from "./ports";
-  import { AUTH_LABEL, defaultIntervalFor, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
+  import { AUTH_LABEL, defaultIntervalFor, fillFound, freeSourceId, SOURCE_ID_PATTERN } from "../../sources/new-source";
   import { pageFields } from "./source-config";
+  import { IDENTITY_FIELD } from "./settings";
   import { reach } from "./adapter-preview";
+  import { newSourceDraft } from "./source-drafts.svelte";
   import TfAdapterFacts from "./TfAdapterFacts.svelte";
   import TfDialog from "./TfDialog.svelte";
   import TfSchemaForm from "./TfSchemaForm.svelte";
@@ -47,11 +63,14 @@
   let {
     ports,
     layers,
+    taken = [],
     onclose,
     onsaved,
   }: {
     ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "previewInstallAdapter" | "installAdapter">;
     layers: Layers;
+    /** The ids in use: the form offers a free one and says so as a taken one is typed, not after the test and the add (F-624). */
+    taken?: readonly string[];
     onclose: () => void;
     onsaved: (source: SourceSummary) => void;
   } = $props();
@@ -82,6 +101,13 @@
   let confirming = $state<{ input: string; preview: AdapterPreview } | null>(null);
   /** The last install's answer: what was installed, or why it was refused. */
   let installNote = $state<{ ok: boolean; text: string } | null>(null);
+  let radios = $state<HTMLElement | null>(null);
+  /** The list stands folded to the chosen kind. */
+  let folded = $state(false);
+  /** *Change* opened the list, so `Esc` folds it again before it closes the dialog. */
+  let changing = $state(false);
+  let changeButton = $state<HTMLElement | null>(null);
+  let form = $state<HTMLElement | null>(null);
 
   $effect(() => {
     let dead = false;
@@ -90,8 +116,27 @@
       .then((rows) => {
         if (dead) return;
         adapters = rows;
-        // The first one is chosen, as prototype-6 opens, so the form is there to fill.
-        if (chosen === null && rows[0]) choose(rows[0]);
+        // What `Esc` or × left here comes back; an adapter that has gone since gives nothing back.
+        const held = newSourceDraft.held();
+        const left = rows.find((adapter) => adapter.id === held?.adapter);
+        if (chosen === null && held && left) {
+          choose(left);
+          baseUrl = held.address;
+          displayName = held.name;
+          folded = true;
+          // Otherwise nothing is preselected (Controls, the enabled rule), unless there is nothing to choose between.
+        } else if (chosen === null && rows.length === 1) {
+          choose(rows[0]!);
+          folded = true;
+        }
+        // What the dialog asks first arrived after it opened, so focus goes in now.
+        void tick().then(() => {
+          if (dead) return;
+          const field = form?.querySelector<HTMLElement>("#tf-add-address");
+          (field ?? radios?.querySelector<HTMLElement>("input"))?.focus();
+          // A field means the list has folded, so the chosen row stands just above it, and stays in view (F-656).
+          field?.scrollIntoView?.({ block: "nearest" });
+        });
       })
       .catch((cause) => {
         if (!dead) adaptersError = ipcErrorMessage(cause);
@@ -101,8 +146,25 @@
     };
   });
 
+  // Held as it changes, so going by any way keeps it. These three and no other: never a field that holds a secret.
+  $effect(() => {
+    if (chosen === null) return;
+    const [adapter, address, name] = [chosen.id, baseUrl, displayName];
+    untrack(() => newSourceDraft.hold(adapter, address, name));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discard() {
+    newSourceDraft.forget();
+    onclose();
+  }
+
   const config = $derived(chosen === null ? { fields: [], error: null } : pageFields(chosen.config_schema, { keepUser: true }));
   const validated = $derived(validate(config.fields, configValues));
+  /** Up front, what it needs, and with a password the user it signs in as. With a token, *Test connection* finds the user (#82). */
+  const firstAsked = (field: { key: string; required: boolean }) => field.required || (authKind === "UserPassword" && field.key === IDENTITY_FIELD);
+  const askedFirst = $derived(config.fields.filter(firstAsked));
+  const inFold = $derived(config.fields.filter((field) => !firstAsked(field)));
   const accountHalf = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
   const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
   const secretWord = $derived(authKind === "UserPassword" ? "Password" : "Token");
@@ -110,6 +172,7 @@
   const idError = $derived.by(() => {
     if (id === "") return "An id is required.";
     if (!SOURCE_ID_PATTERN.test(id)) return "Lower-case letters, digits and hyphens, starting with a letter.";
+    if (taken.includes(id)) return `A source called ${id} already exists.`;
     return null;
   });
 
@@ -128,14 +191,35 @@
   );
   const canAdd = $derived(ready && idError === null && report?.ok === true && tested === draft && !saving);
 
+  /** What *Add source* is waiting for, in words beside the footer (Controls, the enabled rule); `null` when nothing. */
+  const missing = $derived.by((): string | null => {
+    if (canAdd || saving) return null;
+    if (chosen === null) return adapters === null ? null : "Choose what it is first.";
+    const needs = [
+      ...(baseUrl.trim() === "" ? ["the address"] : []),
+      ...config.fields.filter((field) => validated.errors[field.key]).map((field) => field.label),
+      ...(secret === "" ? [`the ${secretWord.toLowerCase()}`] : []),
+    ];
+    if (needs.length > 0) return `Still needs ${needs.length > 1 ? `${needs.slice(0, -1).join(", ")} and ${needs.at(-1)}` : needs[0]}.`;
+    if (idError !== null) return id === "" ? "Still needs an id." : "Fix the Id.";
+    if (accountHalf || config.error !== null) return "Fix what is marked above.";
+    return "Test the connection first.";
+  });
+
   /** What an adapter holds, as prototype-6 describes each one. */
   function kindsHeld(adapter: SourceDescriptor): string {
     return adapter.entity_kinds.map((kind, index) => (index === 0 ? kind.plural : kind.plural.toLowerCase())).join(", ");
   }
 
   function choose(adapter: SourceDescriptor) {
+    // A token typed for one kind must not go on to another.
+    if (chosen !== null && chosen.id !== adapter.id) {
+      secret = "";
+      accountUser = "";
+      accountPassword = "";
+    }
     chosen = adapter;
-    id = adapter.adapter_kind;
+    id = freeSourceId(adapter.adapter_kind, taken);
     displayName = adapter.name;
     // The config belongs to the adapter that declared it; nothing carries over.
     configValues = defaultValues(config.fields);
@@ -144,11 +228,82 @@
     tested = null;
   }
 
-  /** A refusal's note: the backend's reason opens with knobas' own word, so only that is capitalised. */
-  function refused(cause: unknown) {
+  /** A backend's reason opens with knobas' own word, so only that is capitalised. */
+  function sentence(cause: unknown): string {
     const reason = ipcErrorMessage(cause);
-    installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
+    return reason.charAt(0).toUpperCase() + reason.slice(1);
   }
+
+  /** A refusal's note. */
+  function refused(cause: unknown) {
+    installNote = { ok: false, text: sentence(cause) };
+  }
+
+  /** Whether the radios are being walked by key: an arrow picks as it moves, and focus must stay there to go on. */
+  let walking = false;
+
+  /**
+   * A pick opens the form below the list, which a short window would leave half cut (F-624, F-656). A pointer's pick folds
+   * the list and goes on to the first field. A key's stays on the radios, with the row it picked in view, since the next
+   * arrow goes on from there.
+   */
+  function reveal() {
+    const stay = walking;
+    walking = false;
+    if (stay) {
+      void tick().then(() => radios?.querySelector<HTMLElement>("input:checked")?.scrollIntoView?.({ block: "nearest" }));
+      return;
+    }
+    goOn();
+  }
+
+  /** Fold the list to the chosen row and go on to the first field. */
+  function goOn() {
+    folded = true;
+    changing = false;
+    void tick().then(() => {
+      const field = form?.querySelector<HTMLElement>("#tf-add-address");
+      field?.focus({ preventScroll: true });
+      field?.scrollIntoView?.({ block: "nearest" });
+    });
+  }
+
+  /** *Change*: the list again, on the chosen row, so an arrow goes on from it. What is typed stays until another kind is picked. */
+  function change() {
+    folded = false;
+    changing = true;
+    void tick().then(() => {
+      const row = radios?.querySelector<HTMLElement>("input:checked");
+      row?.focus({ preventScroll: true });
+      row?.scrollIntoView?.({ block: "nearest" });
+    });
+  }
+
+  function listKeys(event: KeyboardEvent) {
+    if (event.key === "Tab" && chosen !== null && !folded) {
+      if (event.shiftKey) folded = true;
+      else {
+        event.preventDefault();
+        goOn();
+      }
+      changing = false;
+      return;
+    }
+    if (event.key === "Escape" && changing) {
+      event.preventDefault();
+      event.stopPropagation();
+      folded = true;
+      changing = false;
+      void tick().then(() => changeButton?.focus());
+      return;
+    }
+    walking = true;
+  }
+
+  /** The dialog's answer is at the end of its body, out of sight in a short window. */
+  const inView: Attachment<HTMLElement> = (node) => {
+    node.scrollIntoView?.({ block: "nearest" });
+  };
 
   /** *Install…*: every check, nothing written; a release that passes is asked about. */
   async function check() {
@@ -233,33 +388,56 @@
       });
       secret = "";
       accountPassword = "";
+      newSourceDraft.forget();
       onsaved(source);
     } catch (cause) {
       // The dialog stays open with the draft: a name collision is not a reason to retype it.
-      saveError = ipcErrorMessage(cause);
+      saveError = sentence(cause);
     } finally {
       saving = false;
     }
   }
 </script>
 
-<TfDialog title="Add a source" {layers} {onclose}>
+<TfDialog why={missing} title="Add a source" {layers} {onclose}>
   {#snippet body()}
     <div class="tf-pane-h">What is it?</div>
     {#if adaptersError !== null}
       <p class="tf-fail">Could not read the adapters: {adaptersError}</p>
     {:else if adapters !== null}
-      <div class="tf-radio" role="radiogroup" aria-label="What is it?">
-        {#each adapters as adapter (adapter.id)}
-          <label>
-            <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => choose(adapter)} />
-            <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
-          </label>
-        {/each}
+      <div class="tf-add-kind">
+        <div
+          class="tf-radio"
+          role="radiogroup"
+          aria-label="What is it?"
+          tabindex="-1"
+          bind:this={radios}
+          onkeydown={listKeys}
+          onpointerdown={() => (walking = false)}
+        >
+          {#each folded && chosen !== null ? [chosen] : adapters as adapter (adapter.id)}
+            <label>
+              <!-- A press on the row already chosen sends no change, and goes on all the same. -->
+              <input
+                type="radio"
+                name="tf-add-adapter"
+                checked={chosen?.id === adapter.id}
+                onclick={() => { if (!walking && !folded && chosen?.id === adapter.id) goOn(); }}
+                onchange={() => { choose(adapter); reveal(); }}
+              />
+              <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
+            </label>
+          {/each}
+        </div>
+        {#if folded && chosen !== null && adapters.length > 1}
+          <button type="button" class="tf-btn tf-sm" bind:this={changeButton} onclick={change}>Change</button>
+        {/if}
       </div>
     {/if}
+    <details class="tf-add-more" open={manifest.trim() !== "" || installNote !== null}>
+      <summary>Install an adapter</summary>
     <div class="tf-formgrid">
-      <label for="tf-add-manifest">Install an adapter</label>
+      <label for="tf-add-manifest">From</label>
       <div class="tf-add-inst">
         <input
           id="tf-add-manifest"
@@ -284,17 +462,14 @@
         A GitHub repository, a manifest URL or a local manifest. Install checks it and shows what it may reach before anything is installed.
       </p>
     {/if}
+    </details>
     {#if chosen !== null}
-      <div class="tf-formgrid">
-        <label for="tf-add-address">Address</label>
-        <input id="tf-add-address" type="text" placeholder="https://" autocomplete="off" bind:value={baseUrl} />
+      <div class="tf-formgrid" bind:this={form}>
+        <label for="tf-add-address">Address <small class="tf-req">required</small></label>
+        <input id="tf-add-address" aria-label="Address" type="text" placeholder="https://" autocomplete="off" required bind:value={baseUrl} />
       </div>
-      {#if config.error !== null}
-        <p class="tf-fail">{config.error}</p>
-      {:else}
-        <TfSchemaForm fields={config.fields} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
-      {/if}
       {#if chosen.auth_methods.length > 1}
+        <div class="tf-pane-h">Sign in with</div>
         <div class="tf-radio" role="radiogroup" aria-label="Sign in with">
           {#each chosen.auth_methods as method (method)}
             <label>
@@ -304,9 +479,14 @@
           {/each}
         </div>
       {/if}
+      {#if config.error !== null}
+        <p class="tf-fail">{config.error}</p>
+      {:else if askedFirst.length > 0}
+        <TfSchemaForm fields={askedFirst} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
+      {/if}
       <div class="tf-formgrid">
-        <label for="tf-add-secret">{secretWord}</label>
-        <input id="tf-add-secret" type="password" autocomplete="off" bind:value={secret} />
+        <label for="tf-add-secret">{secretWord} <small class="tf-req">required</small></label>
+        <input id="tf-add-secret" aria-label={secretWord} type="password" autocomplete="off" required bind:value={secret} />
         {#if chosen.accepts_account}
           <label for="tf-add-account-user">Account</label>
           <input id="tf-add-account-user" type="text" autocomplete="off" placeholder="Username (optional)" bind:value={accountUser} />
@@ -316,27 +496,34 @@
         <label for="tf-add-name">Name</label>
         <input id="tf-add-name" type="text" autocomplete="off" bind:value={displayName} />
         <label for="tf-add-id">Id</label>
-        <input id="tf-add-id" type="text" autocomplete="off" aria-describedby="tf-add-id-note" bind:value={id} />
+        <input id="tf-add-id" type="text" autocomplete="off" aria-invalid={idError !== null ? "true" : undefined} aria-describedby="tf-add-id-note" bind:value={id} />
       </div>
       <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
         {idError ?? "Permanent: everything from this source is named with it."}
       </p>
+      {#if inFold.length > 0}
+        <!-- Open while something in it is wrong, so what the footer names can be reached. -->
+        <details class="tf-add-more" open={inFold.some((field) => validated.errors[field.key])}>
+          <summary>What it syncs and its field ids</summary>
+          <TfSchemaForm fields={inFold} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
+        </details>
+      {/if}
       {#if accountHalf}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if report !== null}
         {@const note = noteAfterFill(connectionNote(report), filled)}
         <!-- Text: `error` is a line an upstream server wrote. -->
-        <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
+        <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status" {@attach inView}>
           {connectionLine(report)}{note ? `. ${note}` : ""}
         </p>
       {:else}
         <p class="tf-dlg-note">Test connection fills in what it can find, such as your user and the field ids.</p>
       {/if}
-      {#if saveError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{saveError}</p>{/if}
+      {#if saveError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert" {@attach inView}>{saveError}</p>{/if}
     {/if}
   {/snippet}
   {#snippet footer()}
     <button class="tf-btn tf-first" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
-    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
   {/snippet}
 </TfDialog>

@@ -13,7 +13,7 @@
  * Called from the settings view's backup section (`#/settings`, issue #69,
  * landed in PR #102), which also drives the share export of M4.2 (#454).
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 
 import type { BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
 

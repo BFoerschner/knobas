@@ -1,7 +1,8 @@
 /**
  * Split or unified (#2266, spec #2234 story 59): one choice for every diff in
- * the app, kept across a restart, and a window too narrow for split showing
- * unified whatever was chosen (story 60).
+ * the app, kept across a restart. A diff with too little room for split shows
+ * unified whatever was chosen (story 60); the room is its own column's, which
+ * `TfDiffView` measures, not the window's.
  *
  * The choice is this viewer's, in the webview's `localStorage`
  * (`knobas.diff.layout`), as the shell switch (`knobas.shell`) and the
@@ -12,14 +13,12 @@
  * holding rubbish costs the memory, never the toggle: the choice is unified
  * then.
  */
-import { MediaQuery } from "svelte/reactivity";
-
 import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
 import type { DiffLayout } from "./diff";
 
 export const LAYOUT_KEY = "knobas.diff.layout";
-/** Below this window width split shows unified: two code columns beside the file list need about this much. */
-export const NARROW = "(max-width: 1100px)";
+/** Below this width of the diffs' own column split shows unified: two code columns need about 450 px each. */
+export const SPLIT_ROOM = 900;
 
 export interface DiffLayoutChoice {
   readonly chosen: DiffLayout;
@@ -48,9 +47,3 @@ export function createDiffLayout(storage: () => KeptStorage | null): DiffLayoutC
 
 /** The app's one choice, over this viewer's `localStorage` where there is one. */
 export const diffLayout: DiffLayoutChoice = createDiffLayout(windowStorage);
-
-/** Whether the window is too narrow for split; never where there is no `matchMedia` (jsdom). */
-export function windowNarrow(): { readonly current: boolean } {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return { current: false };
-  return new MediaQuery(NARROW, false);
-}

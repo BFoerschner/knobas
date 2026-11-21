@@ -3202,7 +3202,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
             .collect::<Vec<_>>(),
         [
             "knobas test estate",
-            "DESKTOP-QUUAHUB",
+            "TEST-PC",
             "Ubuntu 26.04 (WSL 2)",
             "Docker engine (WSL)",
             "knobas-jira-db",
@@ -3610,7 +3610,7 @@ async fn a_name_the_mirror_lacks_is_reported_by_every_preview_and_not_only_the_f
             "knobas-confluence",
             "knobas-jira",
             "knobas-teamcity",
-            "devs-MacBook-Pro",
+            "test-notebook",
         ],
         "the asset each name is waiting on, named as the tree names it"
     );
@@ -5053,7 +5053,7 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
         "knobas-teamcity",
         serde_json::json!({
             "id": "1", "name": "knobas-teamcity", "type": "port",
-            "url": null, "hostname": "46.224.117.158", "port": "8111",
+            "url": null, "hostname": "203.0.113.10", "port": "8111",
             "state": "down", "state_code": 0.0, "response_time_ms": null,
             "uptime": {}, "cert_days_remaining": null,
         }),
@@ -5061,7 +5061,7 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(
@@ -5101,7 +5101,7 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
     assert_eq!(teamcity.monitor_type.as_deref(), Some("port"));
     assert_eq!(
         teamcity.target.as_deref(),
-        Some("46.224.117.158:8111"),
+        Some("203.0.113.10:8111"),
         "a check with no URL is watched at its host and port"
     );
     assert_eq!(teamcity.response_time_ms, None);
@@ -5132,7 +5132,7 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     let drifted = row(&roster, "drifted");
@@ -5145,6 +5145,199 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     assert!(drifted.uptime.is_empty(), "an array carries no windows");
     assert_eq!(drifted.cert_days_remaining, None);
     assert_eq!(drifted.state, None, "and no state was invented either");
+}
+
+/// **The badge counts what the roster draws down** (PR #2479, the
+/// monitors-builds pass): `monitors_down` is the roster's rows and state rule
+/// without the samples, so a newest sample, the mirror's state where the
+/// window holds none, a hidden and a paused monitor all count as the tab's
+/// rows do. And the roster's samples are thinned: a steady day is about a
+/// hundred, its first and newest kept.
+#[tokio::test]
+async fn the_down_count_is_the_rosters_and_a_steady_day_crosses_thinned() {
+    let pool = pool("monitors-down-count").await;
+    let registry = Registry::for_process();
+    let sampled = kuma_monitor(
+        &pool,
+        "kuma",
+        "sampled",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sample(&pool, &sampled, 3, Some("up")).await;
+    sample(&pool, &sampled, 1, Some("down")).await;
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "mirror",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    let recovered = kuma_monitor(
+        &pool,
+        "kuma",
+        "recovered",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    sample(&pool, &recovered, 2, Some("down")).await;
+    sample(&pool, &recovered, 1, Some("up")).await;
+    let hidden = kuma_monitor(
+        &pool,
+        "kuma",
+        "hidden",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    assets::set_monitor_hidden(&pool, &hidden, true)
+        .await
+        .unwrap();
+    let paused = kuma_monitor(
+        &pool,
+        "kuma",
+        "paused",
+        serde_json::json!({ "state": "down" }),
+        None,
+    )
+    .await;
+    sample(&pool, &paused, 1, Some("down")).await;
+    tombstone(&pool, &paused).await;
+    let steady = kuma_monitor(
+        &pool,
+        "kuma",
+        "steady",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state)
+         select $1, now() - make_interval(mins => m), 'down' from generate_series(1, 1430) m",
+    )
+    .bind(&steady)
+    .execute(&pool)
+    .await
+    .expect("a day of samples");
+
+    let roster = assets::monitor_roster(&pool, &registry, true)
+        .await
+        .unwrap();
+    let drawn = roster
+        .iter()
+        .filter(|row| row.state.as_deref() == Some("down") && !row.tombstoned && !row.hidden)
+        .count();
+    assert_eq!(drawn, 3, "sampled, mirror and steady");
+    assert_eq!(assets::monitors_down(&pool, &registry).await.unwrap(), 3);
+
+    let day = &row(&roster, "steady").samples;
+    assert!(
+        day.len() <= 110,
+        "a steady day thins to about a hundred, not {}",
+        day.len()
+    );
+    assert!(
+        day.first().unwrap().taken_at < day.last().unwrap().taken_at - chrono::TimeDelta::hours(23)
+    );
+}
+
+/// **The bar is the half-hours the samples were written into** (`0099`, the
+/// monitors-page pass of PR #2479): each half-hour is the worst state sampled
+/// in it, a half-hour of misses draws as no reading, a down monitor says when
+/// its outage began, and the day of samples crosses the bridge only when asked
+/// for. One poll's sample a monitor changes only the newest half-hour.
+#[tokio::test]
+async fn the_bar_is_each_half_hours_worst_and_the_samples_come_only_when_asked() {
+    let pool = pool("monitors-roster-bar").await;
+    let registry = Registry::for_process();
+    let flaky = kuma_monitor(
+        &pool,
+        "kuma",
+        "flaky",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    let quiet = kuma_monitor(
+        &pool,
+        "kuma",
+        "quiet",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    // The half-hour 3 hours back holds one down among ups; the outage began 20 minutes ago (a miss inside it is skipped).
+    sqlx::query(
+        "insert into knobas.monitor_sample (entity_id, taken_at, state)
+         select $1, now() - make_interval(mins => m), case when m = 180 then 'down' when m <= 20 and m <> 10 then 'down' when m = 10 then null else 'up' end
+           from generate_series(1, 300) m",
+    )
+    .bind(&flaky)
+    .execute(&pool)
+    .await
+    .expect("five hours of samples");
+    sample(&pool, &quiet, 600, None).await;
+
+    let roster = assets::monitor_roster(&pool, &registry, false)
+        .await
+        .unwrap();
+    let bar = &row(&roster, "flaky").bar;
+    assert_eq!(
+        bar.chars().count(),
+        assets::BAR_HALF_HOURS,
+        "48 half-hours: {bar}"
+    );
+    assert_eq!(bar.chars().last(), Some('d'), "down now: {bar}");
+    assert!(
+        bar[..45].contains('d'),
+        "the down minute three hours back is its half-hour's worst: {bar}"
+    );
+    assert!(
+        bar.starts_with("------------------------------------"),
+        "nothing sampled before five hours ago: {bar}"
+    );
+    assert!(
+        row(&roster, "flaky").samples.is_empty(),
+        "no samples unless asked for"
+    );
+    let since = row(&roster, "flaky")
+        .down_since
+        .expect("a down monitor says since when");
+    let ago = chrono::Utc::now() - since;
+    assert!(
+        ago > chrono::TimeDelta::minutes(19) && ago < chrono::TimeDelta::minutes(21),
+        "the outage began 20 minutes ago, not {ago}"
+    );
+    assert_eq!(row(&roster, "quiet").down_since, None);
+    assert!(
+        !row(&roster, "quiet").bar.contains(['u', 'd']),
+        "a miss is no reading: {}",
+        row(&roster, "quiet").bar
+    );
+
+    let before = row(&roster, "flaky").bar.clone();
+    sample(&pool, &flaky, 0, Some("up")).await;
+    let after = assets::monitor_roster(&pool, &registry, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        row(&after, "flaky").bar,
+        before,
+        "a beat no worse than its half-hour changes nothing drawn"
+    );
+    assert_eq!(
+        row(&after, "flaky").state.as_deref(),
+        Some("up"),
+        "the newest sample is the state"
+    );
+    assert_eq!(row(&after, "flaky").down_since, None);
+    assert!(
+        !row(&after, "flaky").samples.is_empty(),
+        "the samples, asked for"
+    );
 }
 
 /// **A hidden monitor stays on the roster, flagged** -- the tab decides what
@@ -5163,11 +5356,15 @@ async fn a_hidden_monitor_is_on_the_roster_flagged_hidden() {
             .collect::<Vec<_>>()
     };
     let registry = Registry::for_process();
-    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    let roster = assets::monitor_roster(&pool, &registry, true)
+        .await
+        .unwrap();
     assert!(hidden(&roster).is_empty(), "nothing starts hidden");
 
     assets::set_monitor_hidden(&pool, &id, true).await.unwrap();
-    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    let roster = assets::monitor_roster(&pool, &registry, true)
+        .await
+        .unwrap();
     assert_eq!(
         names(&roster),
         ["noisy", "quiet"],
@@ -5176,7 +5373,9 @@ async fn a_hidden_monitor_is_on_the_roster_flagged_hidden() {
     assert_eq!(hidden(&roster), ["noisy"]);
 
     assets::set_monitor_hidden(&pool, &id, false).await.unwrap();
-    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    let roster = assets::monitor_roster(&pool, &registry, true)
+        .await
+        .unwrap();
     assert!(hidden(&roster).is_empty(), "unhidden, it reads as before");
 }
 
@@ -5192,7 +5391,7 @@ async fn a_reading_is_drawn_only_where_its_source_declares_one() {
     kuma_monitor(&pool, "kuma", "declared", payload.clone(), None).await;
     monitor_of(&pool, "unknown", "undeclared", payload, None, None).await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(row(&roster, "declared").response_time_ms, Some(13.0));
@@ -5233,7 +5432,7 @@ async fn a_monitors_state_is_its_newest_sample_and_the_mirror_only_without_one()
     sample(&pool, &slow, 5, Some("warn")).await;
     sample(&pool, &slow, 90, Some("up")).await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(
@@ -5269,7 +5468,7 @@ async fn the_bar_carries_the_last_days_samples_oldest_first_and_no_older_one() {
     sample(&pool, &watched, 60, None).await;
     sample(&pool, &watched, 1, Some("warn")).await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     let watched = row(&roster, "watched");
@@ -5310,7 +5509,7 @@ async fn a_paused_monitor_stays_on_the_roster_with_its_samples() {
     sample(&pool, &paused, 120, Some("up")).await;
     tombstone(&pool, &paused).await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(names(&roster), ["gitea"]);
@@ -5356,7 +5555,7 @@ async fn a_disabled_sources_monitors_leave_the_roster() {
     .await
     .expect("the disabled source");
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(
@@ -5409,7 +5608,7 @@ async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_inclu
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(names(&roster), ["filler paused", "filler up"]);
@@ -5483,9 +5682,10 @@ async fn a_roster_row_reads_its_state_and_type_where_its_kind_declares_them() {
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool, &KumaSpelledElsewhere(Registry::for_process()))
-        .await
-        .expect("the roster");
+    let roster =
+        assets::monitor_roster(&pool, &KumaSpelledElsewhere(Registry::for_process()), true)
+            .await
+            .expect("the roster");
     let gitea = row(&roster, "gitea");
     assert_eq!(
         (gitea.state.as_deref(), gitea.monitor_type.as_deref()),
@@ -5508,7 +5708,7 @@ async fn a_roster_row_says_whether_its_adapter_reads_one_monitor() {
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert!(
@@ -5516,7 +5716,7 @@ async fn a_roster_row_says_whether_its_adapter_reads_one_monitor() {
         "Uptime Kuma reads one monitor (#2100)"
     );
 
-    let roster = assets::monitor_roster(&pool, &KumaThatOnlySyncs(Registry::for_process()))
+    let roster = assets::monitor_roster(&pool, &KumaThatOnlySyncs(Registry::for_process()), true)
         .await
         .expect("the roster");
     assert!(
@@ -5566,7 +5766,7 @@ async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
     let not_an_asset = ticket(&pool, "PAY-9").await;
     link_as(&pool, &watching, &not_an_asset, "monitored-by").await;
 
-    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+    let roster = assets::monitor_roster(&pool, &Registry::for_process(), true)
         .await
         .expect("the roster");
     assert_eq!(
@@ -5894,7 +6094,7 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
         "a link to a monitor is an attachment whether or not the reader is reading that source"
     );
     assert!(
-        assets::monitor_roster(&pool, &Registry::for_process())
+        assets::monitor_roster(&pool, &Registry::for_process(), true)
             .await
             .expect("the roster")
             .is_empty(),
@@ -6346,7 +6546,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .path
             .as_deref(),
         Some(
-            "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / \
+            "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / \
              Docker engine (WSL) / knobas-teamcity"
         )
     );

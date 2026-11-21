@@ -15,7 +15,13 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import TfSideEdge from "../TfSideEdge.svelte";
+  import { sideWidth } from "../side-width.svelte";
+  import { tick } from "svelte";
+
   import { pageVisible } from "../kept-pages.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
@@ -29,22 +35,37 @@
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
-  import { SETTINGS_SECTIONS, settingsHash, settingsPlace, sourceState } from "./settings";
+  import { sourceDrafts } from "./source-drafts.svelte";
+  import { settingsHash, settingsKnows, settingsName, settingsParent, settingsPlace, sourceState } from "./settings";
+  import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
+  import TfFontsSection from "./TfFontsSection.svelte";
+  import TfThemesSection from "./TfThemesSection.svelte";
+  import TfSettingsNav from "./TfSettingsNav.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
+  import { appPagePlace } from "../openin/app-page";
+  import { apps as sharedApps } from "../openin/apps.svelte";
+  import TfAppPage from "../openin/TfAppPage.svelte";
+  import TfFolderRendererPage from "./TfFolderRendererPage.svelte";
+  import { folderPagePlace } from "./folder-page";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
+  import TfDocsSection from "./TfDocsSection.svelte";
+  import TfSearchSection from "./TfSearchSection.svelte";
   import TfNotesSection from "./TfNotesSection.svelte";
   import TfNotificationsSection from "./TfNotificationsSection.svelte";
   import TfStandupSection from "./TfStandupSection.svelte";
   import TfTimeSection from "./TfTimeSection.svelte";
   import TfPerformanceSection from "./TfPerformanceSection.svelte";
   import TfRenderersSection from "./TfRenderersSection.svelte";
+  import TfUpdatesSection from "./TfUpdatesSection.svelte";
+  import { updates } from "../update.svelte";
+  import { marked } from "./updates";
 
   let {
     rest,
@@ -77,10 +98,19 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "docs", "search", "notes", "backup", "logs", "checkouts", "performance", "renderers"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
+  /** Checkouts' application page (PR #2479, 2026-11-13), `null` anywhere else. */
+  const appAt = $derived(appPagePlace(rest));
+  /** Renderers' folder renderer page (ADR-0044), `null` anywhere else. */
+  const folderAt = $derived(folderPagePlace(rest));
+  const appName = $derived(
+    appAt === null ? null : appAt.app === null ? "Add an application" : (sharedApps.settings?.applications.find((app) => app.id === appAt.app)?.name ?? "An application"),
+  );
+  /** An address that names neither a section nor a source: the rail stays, so the way back is one click. */
+  const known = $derived(settingsKnows(rest));
 
   let sources = $state<SourceSummary[] | null>(null);
   let error = $state<string | null>(null);
@@ -188,33 +218,73 @@
     health.patch(next.health);
   }
 
+  /** What was typed on a source's page and left there (F-635): the rail says so from any section. */
+  const anyDraft = $derived(sources?.some((source) => sourceDrafts.has(source.id)) ?? false);
   const anyFailing = $derived(
     (sources ?? []).some((source) => sourceState(source, health.get(source.id), null).failed),
   );
   const current = $derived(sourceId === null ? null : (sources?.find((row) => row.id === sourceId) ?? null));
-  const sectionName = $derived(SETTINGS_SECTIONS.find(([key]) => key === place.section)?.[1] ?? "Sources");
-  const crumbName = $derived(sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  const sectionName = $derived(settingsName(place.section));
+  /** The section a child's page sits under: its crumb links to the parent's page. */
+  const parentSection = $derived(known && sourceId === null ? settingsParent(place.section) : null);
+  /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
+  const bareSettings = $derived(rest.length === 0);
+  const crumbName = $derived(!known ? "Nothing here" : sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  /** Below 900 px, whether the sections rail is unfolded under its bar. */
+  let railOpen = $state(false);
+  /** Which section or source is drawn: only a move between them starts the column at its top, not a dialog's own address. */
+  const shownPlace = $derived(`${place.section}/${sourceId ?? ""}/${appAt === null ? "" : (appAt.app ?? "add")}`);
+  /**
+   * The section's column is the page's scroller, so moving to another section starts it at its top (F-650). After the
+   * flush: `keepScroll` on the kept page sets back what it noted before the move, and its effect runs after this one, which
+   * a section drawn at once showed as a page opened part way down.
+   */
+  function atTopOnMove(scroller: HTMLElement) {
+    void shownPlace;
+    void tick().then(() => (scroller.scrollTop = 0));
+  }
 </script>
 
-<div class="tf-full">
-  <TfCrumbs parts={[{ name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
-  <div class="tf-stg">
-    <nav class="tf-stg-nav" aria-label="Settings">
-      {#each SETTINGS_SECTIONS as [key, label] (key)}
-        <a href={settingsHash(key)} aria-current={key === place.section ? "page" : undefined}>
-          {label}
+<div class="tf-full tf-stgpage">
+  <TfCrumbs
+    parts={[
+      bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" },
+      ...(appName !== null && known
+        ? [{ name: sectionName, href: settingsHash("checkouts") }, { name: appName }]
+        : sourceId === null
+          ? [...(parentSection === null ? [] : [{ name: settingsName(parentSection), href: settingsHash(parentSection) }]), { name: crumbName }]
+          : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }]),
+    ]}
+    {back}
+  />
+  <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
+  <div class="tf-stg" class:tf-rail-shut={!railOpen} {@attach sideWidth("settings")}>
+    <TfSideEdge side="settings" />
+    <nav id="tf-settings-rail" class="tf-stg-nav tf-rail" aria-label="Settings">
+      <TfSettingsNav current={known ? place.section : null} onpage={() => (railOpen = false)}>
+        {#snippet badge(key)}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
+          {:else if key === "sources" && anyDraft}
+            <span class="tf-dot tf-warn" role="img" aria-label="A source has changes not saved" title="A source has changes not saved"></span>
+          {:else if key === "updates" && marked(updates.state)}
+            <span class="tf-dot tf-info" role="img" aria-label="An update is waiting" title="An update is waiting"></span>
           {/if}
-        </a>
-      {/each}
+        {/snippet}
+      </TfSettingsNav>
     </nav>
+    <TfScroller class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
-      {#if place.section === "sources" && error !== null && sources !== null}
+      {#if !known}
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such section." href={settingsHash("sources")} action="Sources" />
+      {:else if place.section === "sources" && error !== null && sources !== null}
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
         <p class="tf-stg-p tf-stg-errt" role="status">Could not read the sources again: {error}</p>
       {/if}
-      {#if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
+      {#if !known}
+        <!-- Said above. -->
+      {:else if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
         <!-- Their reads wait for the database, as the source list does. -->
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
       {:else if place.section === "time"}
@@ -225,18 +295,36 @@
         <TfStandupSection ports={sectionPorts} {layers} />
       {:else if place.section === "monitoring"}
         <TfMonitoringSection ports={sectionPorts} />
+      {:else if place.section === "docs"}
+        <TfDocsSection {...sectionPorts.docsOutline ? { outline: sectionPorts.docsOutline } : {}} />
+      {:else if place.section === "search"}
+        <TfSearchSection {...sectionPorts.searchSettings ? { read: sectionPorts.searchSettings } : {}} />
       {:else if place.section === "backup"}
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
         <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
+      {:else if place.section === "code-colours"}
+        <TfThemesSection mode={theme} />
+      {:else if place.section === "fonts"}
+        <TfFontsSection {...sectionPorts.installedFonts ? { installedFonts: sectionPorts.installedFonts } : {}} />
       {:else if place.section === "performance"}
         <TfPerformanceSection ports={sectionPorts} />
+      {:else if place.section === "renderers" && folderAt !== null}
+        {#key rest.join("/")}
+          <TfFolderRendererPage at={folderAt} {back} />
+        {/key}
       {:else if place.section === "renderers"}
         <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
       {:else if place.section === "keyboard"}
         <TfKeyboardSection />
       {:else if place.section === "logs"}
         <TfLogsSection ports={sectionPorts} />
+      {:else if place.section === "updates"}
+        <TfUpdatesSection {layers} />
+      {:else if place.section === "checkouts" && appAt !== null}
+        {#key rest.join("/")}
+          <TfAppPage at={appAt} {back} />
+        {/key}
       {:else if place.section === "checkouts"}
         <TfCheckoutsSection {layers} />
       {:else if place.section === "notes"}
@@ -268,11 +356,8 @@
           onchanged={() => void loadAdapters()}
         />
       {:else if current === null}
-        <header class="tf-stg-h tf-stg-hline">
-          <h1>{sourceId}</h1>
-          <div class="tf-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
-        </header>
-        <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such source. It may have been removed." href={settingsHash("sources")} action="Sources" />
       {:else}
         {#key current.id}
           <TfSourcePage
@@ -285,6 +370,7 @@
             {ports}
             {layers}
             add={"add" in place ? place.add : undefined}
+            reenter={"reenter" in place && place.reenter === true}
             onhealth={(next) => health.patch(next)}
             onchanged={replaceRow}
             onstarted={() => markStarted(current.id)}
@@ -297,12 +383,14 @@
         {/key}
       {/if}
     </div>
+    </TfScroller>
   </div>
 </div>
 {#if adding}
   <TfAddSource
     {ports}
     {layers}
+    taken={(sources ?? []).map((source) => source.id)}
     onclose={closeAdd}
     onsaved={() => {
       closeAdd();

@@ -71,6 +71,21 @@
 //! claim is that knobas never *asks* twice, and that the one ask it cannot see
 //! is refused by the server rather than duplicated.
 //!
+//! # Publishing again -- what the note says now, onto the same page (F-327)
+//!
+//! A date still has one page. *Publish again* is an `UpdatePage` on it, composed
+//! by [`update_page_payload`] from the note's body as it stands, and
+//! [`Standing`] is the read that says whether it is owed: the note against the
+//! newest body the queue carried to that page.
+//!
+//! **The base version is the one knobas last wrote, not the mirror's.** The op
+//! replaces the whole page, so a base read off the mirror would make a
+//! colleague's edit in Confluence the version the write is "made against", and
+//! the write would silently delete it. Counted from the queue ([`Standing`]'s
+//! `base_version`) it stays what the note's last publish produced, so Confluence
+//! refuses the write when somebody got there first, and a mirror that has seen
+//! their edit says so before anything is sent ([`Standing::page_moved`]).
+//!
 //! # Where the page id comes from after a restart
 //!
 //! Not from the receipt. `WriteReceipt` lives for the length of one flush; the
@@ -129,6 +144,13 @@ pub const ACTION_ITEM_RELATION: &str = "related";
 /// The op identifier a publication is queued under.
 const CREATE_PAGE: &str = "create_page";
 
+/// The op identifier *Publish again* is queued under.
+const UPDATE_PAGE: &str = "update_page";
+
+/// The version Confluence gives a page it has just created. What
+/// [`Standing`] counts from, the source's own numbering (`version.number`).
+const FIRST_VERSION: i64 = 1;
+
 /// Who knobas records as the author of a note it made on the reader's behalf.
 ///
 /// The same actor `commands::entity` writes for everything a person did
@@ -178,6 +200,19 @@ pub struct Publication {
     pub linked: bool,
 }
 
+/// A *Publish again* that has not landed (F-327): the newest `UpdatePage` on the
+/// date's page, pending, held or refused. A sent one is simply the page.
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct Republication {
+    /// The write queue row that carries it.
+    pub write_id: i64,
+    /// The queue's own word for where the write stands.
+    pub state: WriteState,
+    /// The queue's or the source's sentence. Untrusted source text.
+    pub detail: Option<String>,
+}
+
 /// A date's protocol: the note, and what became of publishing it.
 ///
 /// `CONTEXT.md`'s **standup protocol**: a note, one per date, holding
@@ -207,6 +242,16 @@ pub struct Protocol {
     /// #1966) rather than offering *Create ticket* again; the read links
     /// each one whose ticket the mirror now holds, and names it no more.
     pub owed_tickets: Vec<crate::commands::entity::ActionItemTicket>,
+    /// Whether the note says something the page was not last sent (F-327):
+    /// [`to_storage`] of its body against the newest body the queue carried to
+    /// the page. `false` with no publication.
+    pub changed_since: bool,
+    /// Whether the mirror holds the page at a later version than knobas last
+    /// wrote, so somebody edited it at the source since (F-327). *Publish
+    /// again* would replace their edit, so it is refused while this is true.
+    pub page_moved: bool,
+    /// The newest *Publish again*, while it has not landed (F-327).
+    pub again: Option<Republication>,
 }
 
 /// What a date's protocol note is called.
@@ -603,6 +648,145 @@ pub async fn publication_of(
     }))
 }
 
+/// Where a published protocol stands against its page (F-327): what
+/// [`Protocol::changed_since`], [`Protocol::page_moved`] and [`Protocol::again`]
+/// draw, and what *Publish again* is made from.
+#[derive(Clone, Debug, Default)]
+pub struct Standing {
+    /// See [`Protocol::changed_since`].
+    pub changed_since: bool,
+    /// See [`Protocol::page_moved`].
+    pub page_moved: bool,
+    /// See [`Protocol::again`].
+    pub again: Option<Republication>,
+    /// The version the page holds as far as knobas wrote it, which is what the
+    /// next `UpdatePage` is made against: one past the newest sent update's
+    /// base, or the first version where only the create was sent. `None` until
+    /// something was sent.
+    pub base_version: Option<i64>,
+}
+
+/// One row of a page's writes, newest first in [`standing`].
+#[derive(sqlx::FromRow)]
+struct PageWrite {
+    id: i64,
+    state: WriteState,
+    detail: Option<String>,
+    payload: serde_json::Value,
+}
+
+impl PageWrite {
+    fn update(&self) -> Option<&serde_json::Value> {
+        self.payload.get("UpdatePage")
+    }
+
+    /// The storage body this write carries to the page: an update's or the create's.
+    fn body(&self) -> Option<&str> {
+        self.update()
+            .or_else(|| self.payload.get("CreatePage"))
+            .and_then(|op| op.get("body"))
+            .and_then(serde_json::Value::as_str)
+    }
+}
+
+/// What [`standing`] decides, over the rows it read: the page's writes newest
+/// first, the note's body in storage form and the version the mirror holds.
+fn standing_of(writes: &[PageWrite], storage: &str, mirrored: Option<i64>) -> Standing {
+    // A refused write left nothing behind, so the body the page is owed is
+    // compared with the newest one that was not refused. A pending or held
+    // write counts: it is the page as soon as it lands.
+    let carried = writes
+        .iter()
+        .find(|write| write.state != WriteState::Refused)
+        .and_then(PageWrite::body);
+    let base_version = writes
+        .iter()
+        .find(|write| write.state == WriteState::Sent)
+        .map(|write| match write.update() {
+            Some(update) => {
+                update
+                    .get("base_version")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    + 1
+            }
+            None => FIRST_VERSION,
+        });
+    Standing {
+        changed_since: carried.is_some_and(|body| body != storage),
+        page_moved: matches!((mirrored, base_version), (Some(at), Some(ours)) if at > ours),
+        again: writes
+            .first()
+            .filter(|write| write.update().is_some() && write.state != WriteState::Sent)
+            .map(|write| Republication {
+                write_id: write.id,
+                state: write.state,
+                detail: write.detail.clone(),
+            }),
+        base_version,
+    }
+}
+
+/// Where the date's published page stands against the note's `body_md`.
+///
+/// **The page's writes, read from the queue.** The queue is the one record of
+/// what knobas sent, and the mirror cannot answer: Confluence rewrites a body on
+/// the way in, so the mirror's never equals what was sent.
+///
+/// `page` is `None` until the source has named the page; the create's own row
+/// still answers, so a note edited while the first publish waits reads as
+/// changed once it lands.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn standing(
+    pool: &PgPool,
+    day: NaiveDate,
+    source_id: &str,
+    page: Option<&str>,
+    body_md: &str,
+) -> Result<Standing, IpcError> {
+    let writes: Vec<PageWrite> = sqlx::query_as(
+        "select id, state, detail, payload
+           from knobas.write_queue
+          where source_id = $1
+            and state <> 'discarded'
+            and ((op = $2 and payload->'CreatePage'->>'title' = $3)
+              or (op = $4 and payload->'UpdatePage'->>'entity' = $5))
+          order by id desc",
+    )
+    .bind(source_id)
+    .bind(CREATE_PAGE)
+    .bind(page_title_of(day))
+    .bind(UPDATE_PAGE)
+    .bind(page)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let mirrored = match page {
+        Some(page) => mirrored_version(pool, page).await?,
+        None => None,
+    };
+    Ok(standing_of(&writes, &to_storage(body_md), mirrored))
+}
+
+/// The version the mirror holds a page at, or `None` where it names none.
+///
+/// A **payload read outside an adapter**, as [`space_of`] is, under the same
+/// ADR-0007 discipline: one named read, and a record that says nothing reads as
+/// a page nobody is known to have moved, which leaves Confluence's own version
+/// check as the guard.
+async fn mirrored_version(pool: &PgPool, page: &str) -> Result<Option<i64>, IpcError> {
+    let payload: Option<serde_json::Value> =
+        sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
+            .bind(page)
+            .fetch_optional(pool)
+            .await
+            .map_err(IpcError::internal)?;
+    Ok(payload.and_then(|record| record.pointer("/version/number")?.as_i64()))
+}
+
 /// Draw the link a settled publication owes, if it can be drawn yet.
 ///
 /// Idempotent and total: every read of a protocol runs it, and it is right at
@@ -893,12 +1077,130 @@ pub fn create_page_payload(
     })
 }
 
+/// The `WriteOp::UpdatePage` payload for *Publish again* (F-327): the whole page,
+/// from the note's body, against the version knobas last wrote ([`Standing`]).
+#[must_use]
+pub fn update_page_payload(page: &str, base_version: i64, body_md: &str) -> serde_json::Value {
+    serde_json::json!({
+        "UpdatePage": {
+            "entity": page,
+            "base_version": base_version,
+            "body": to_storage(body_md),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn day() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 9, 3).unwrap()
+    }
+
+    fn created(id: i64, state: WriteState, body: &str) -> PageWrite {
+        PageWrite {
+            id,
+            state,
+            detail: None,
+            payload: serde_json::json!({ "CreatePage": { "body": body } }),
+        }
+    }
+
+    fn updated(id: i64, state: WriteState, base: i64, body: &str) -> PageWrite {
+        PageWrite {
+            id,
+            state,
+            detail: Some("the queue says".to_owned()),
+            payload: serde_json::json!({ "UpdatePage": { "base_version": base, "body": body } }),
+        }
+    }
+
+    /// The note is measured against what the queue carried, not the mirror,
+    /// and the version counts up from what was sent.
+    #[test]
+    fn a_page_stands_as_its_newest_write_left_it() {
+        let sent = [created(1, WriteState::Sent, "<p>a</p>")];
+        let same = standing_of(&sent, "<p>a</p>", Some(1));
+        assert!(!same.changed_since);
+        assert!(!same.page_moved);
+        assert_eq!(same.base_version, Some(1));
+        assert!(same.again.is_none());
+        assert!(standing_of(&sent, "<p>b</p>", Some(1)).changed_since);
+
+        let twice = [
+            updated(2, WriteState::Sent, 1, "<p>b</p>"),
+            created(1, WriteState::Sent, "<p>a</p>"),
+        ];
+        let after = standing_of(&twice, "<p>b</p>", Some(1));
+        assert!(!after.changed_since, "the update is what the page holds");
+        assert_eq!(after.base_version, Some(2));
+        assert!(
+            !after.page_moved,
+            "a mirror behind what was sent has not moved"
+        );
+    }
+
+    /// A write on its way is the page as soon as it lands, and is drawn; a
+    /// refused one left nothing behind, so the note is still owed to the page.
+    #[test]
+    fn a_write_on_its_way_counts_and_a_refused_one_does_not() {
+        let pending = [
+            updated(2, WriteState::Pending, 1, "<p>b</p>"),
+            created(1, WriteState::Sent, "<p>a</p>"),
+        ];
+        let going = standing_of(&pending, "<p>b</p>", Some(1));
+        assert!(!going.changed_since);
+        assert_eq!(going.again.as_ref().map(|again| again.write_id), Some(2));
+        assert_eq!(going.base_version, Some(1), "nothing new has landed");
+
+        let refused = [
+            updated(2, WriteState::Refused, 1, "<p>b</p>"),
+            created(1, WriteState::Sent, "<p>a</p>"),
+        ];
+        let stopped = standing_of(&refused, "<p>b</p>", Some(1));
+        assert!(stopped.changed_since, "the page still has the first body");
+        assert_eq!(
+            stopped.again.as_ref().map(|again| again.state),
+            Some(WriteState::Refused),
+            "and the refusal is drawn"
+        );
+    }
+
+    /// The first publish's own body answers while it waits, so a note edited
+    /// meanwhile reads as changed; with nothing sent there is no version yet.
+    #[test]
+    fn a_first_publish_still_waiting_has_no_version() {
+        let waiting = [created(1, WriteState::Pending, "<p>a</p>")];
+        let standing = standing_of(&waiting, "<p>b</p>", None);
+        assert!(standing.changed_since);
+        assert_eq!(standing.base_version, None);
+        assert!(
+            standing.again.is_none(),
+            "a create is the publication, not *again*"
+        );
+    }
+
+    /// Somebody's edit at the source: the mirror has passed what knobas wrote.
+    #[test]
+    fn a_mirror_past_what_was_sent_has_moved() {
+        let sent = [created(1, WriteState::Sent, "<p>a</p>")];
+        assert!(standing_of(&sent, "<p>a</p>", Some(2)).page_moved);
+        assert!(
+            !standing_of(&sent, "<p>a</p>", None).page_moved,
+            "no version, no claim"
+        );
+    }
+
+    /// The whole page, in the dialect it is stored in, against the given version.
+    #[test]
+    fn publishing_again_replaces_the_page_from_the_note() {
+        assert_eq!(
+            update_page_payload("wiki:7", 3, "## a\n\n- b\n"),
+            serde_json::json!({
+                "UpdatePage": { "entity": "wiki:7", "base_version": 3, "body": "<h2>a</h2><ul><li>b</li></ul>" }
+            })
+        );
     }
 
     /// The two titles, and the difference between them, which is the whole of

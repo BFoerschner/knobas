@@ -283,7 +283,7 @@ async fn the_newest_finished_runs_log_is_stored_once_and_found_by_everything() {
             "pipeline".to_owned(),
             pipeline.clone(),
             vec![(
-                Some("line 102".to_owned()),
+                Some("Log line 102".to_owned()),
                 format!("refused{t} by the bank")
             )]
         )]

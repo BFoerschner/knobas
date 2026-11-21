@@ -1,13 +1,15 @@
 /**
  * `?fake-ipc`: Checkouts (#499): the clones root, a repository's checkout and diff, the
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
- * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
+ * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffFile, DiffRead, OpenObject, PullRequestWorktree, RangeDiff } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, LocalDir, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, ViewBlock, WorkingAt } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
-import { fillObject, isDiffEnd, objectCommand, worktreeOf } from "../../../tf/openin/openin";
+import { lineDiff } from "../../../tf/diff/line-diff";
+import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
+import { ASCII_AFTER, ASCII_BEFORE, asciiArt } from "../fake-ascii";
 import { CORPUS } from "./corpus";
 
 /**
@@ -34,18 +36,46 @@ let fakeClonesRoot: string | null = DEFAULT_CLONES_ROOT;
  * root is a label rather than a walk, and the walk is `knobas-core`'s to prove.
  */
 function seedClonesRoot(params: URLSearchParams): void {
+  const long = params.get("fake-long-paths");
+  if (long !== null) {
+    fakeScanRoot = long.trim() === "" ? LONG_ROOT : long.trim();
+    fakeClonesRoot = fakeScanRoot;
+    fakeFolderTail = LONG_TAIL;
+    fakeGitPath = LONG_GIT;
+  }
   const given = params.get("fake-clones-root");
   if (given === null) return;
   fakeClonesRoot = given.trim() === "" ? null : given.trim();
 }
 
-/** What the scan would find, per repo entity. */
+/**
+ * `?fake-long-paths` (the clone-path pass, 2026-11-16): every path the fixture draws as a long Windows one, with spaces,
+ * so a layout check can hold each place a path is drawn to its box. `?fake-long-paths=<root>` names the root instead.
+ * The scan finds its clones under it, each folder ending in a long name, and git is deep under *Program Files*.
+ */
+const LONG_ROOT = String.raw`C:\Users\someone with a long name\source\repos\very\deep\nested\folders with spaces in them\and still more folders`;
+const LONG_TAIL = "-the-repository-name-that-is-long";
+const LONG_GIT = String.raw`C:\Program Files\Git for Windows, installed in a folder with a long name\mingw64\libexec\git-core\git.exe`;
+
+/** The root the scan found its clones under: the default clones root, or `?fake-long-paths`' own. */
+let fakeScanRoot = DEFAULT_CLONES_ROOT;
+/** What ends each scanned folder's name after the repository's: nothing, or `?fake-long-paths`' long tail. */
+let fakeFolderTail = "";
+let fakeGitPath = "/usr/bin/git";
+
+/** The folder the scan would find, per repo entity, under the scan's root. */
 const FAKE_SCANNED: Record<string, string> = {
-  "mock:tidewater/payout-service": "/Users/mara/src/payout-service",
+  "mock:tidewater/payout-service": "payout-service",
   // Code's *Local checkout* column (#837): two more clones, as prototype-6 has several.
-  "mock:tidewater/psp-client": "/Users/mara/src/psp-client",
-  "mock:tidewater/rust-common": "/Users/mara/src/rust-common",
+  "mock:tidewater/psp-client": "psp-client",
+  "mock:tidewater/rust-common": "rust-common",
 };
+
+/** Where the scan found `repo`'s clone, if it did: under the root the scan walked, and only while that is the clones root. */
+function scannedPath(repo: string): string | undefined {
+  const folder = FAKE_SCANNED[repo];
+  return folder === undefined || fakeClonesRoot !== fakeScanRoot ? undefined : joinInside(fakeScanRoot, `${folder}${fakeFolderTail}`);
+}
 
 const fakeOverrides: Record<string, string> = {};
 
@@ -74,6 +104,102 @@ function fakeRangeDiff(entityId: string, base: string, head: string, ignoreWhite
   return fakeDiffOf(repoView(entityId, `compare:${base}...${head}`), shas && fakeCheckout(entityId).path !== null, ignoreWhitespace);
 }
 
+/** The fake compares listed, by repository and the ends their files are read between, as the backend keeps the source's. */
+const listedDiffs = new Map<string, RangeDiff>();
+
+/** `entity_range_files` (the compare pass, 2026-11-13): the fake compare's files, without their lines. */
+function fakeRangeFiles(entityId: string, base: string, head: string, diff: RangeDiff): RangeFiles {
+  listedDiffs.set(`${entityId}\n${diff.range?.base ?? base}\n${diff.range?.head ?? head}`, diff);
+  return { ...diff, files: diff.files.map((file) => ({ ...file, hunks: [], truncated: false })) };
+}
+
+/** `entity_range_file`: one file of the fake compare, whole in one page (the fake has no file long enough to page). */
+function fakeRangeFile(entityId: string, base: string, head: string, path: string, from: number, ignoreWhitespace: boolean): RangeFilePage {
+  const diff = listedDiffs.get(`${entityId}\n${base}\n${head}`) ?? (head === WORKING ? fakeWorking(entityId).diff : fakeRangeDiff(entityId, base, head, ignoreWhitespace));
+  const file = diff.files.find((one) => one.path === path);
+  if (file === undefined) throw { code: "not_found", message: `the diff changes no file ${path}`, source_id: null };
+  return { file, from, continues: false, next: null };
+}
+
+/** The working tree's token (ux26, `tf/diff/address.ts`). */
+const WORKING = "~working-tree";
+
+/**
+ * The fixture's working tree against any base (ux26, ADR-0050): what its one uncommitted change, a Markdown file, a
+ * drawing and a new untracked note make, each file's text before and after, so a rendered side reads the same words
+ * `entity_file_bytes` hands it for `~working-tree` and for the base's sha.
+ */
+const WORKING_FILES: Record<string, [before: string | null, after: string]> = {
+  "docs/retry.md": [
+    "# Retrying a payout\n\nA payout that fails with a transient code is sent again.\n\n## Steps\n\n- Validate the mandate\n- Submit the debit\n- Retry once after 24 h\n",
+    "# Retrying a payout\n\nA payout that fails with a transient code is sent again with exponential backoff.\n\n## Steps\n\n- Validate the mandate\n- Submit the debit\n- Retry three times, 24 h, 48 h and 96 h apart\n- Alert the payments channel when the last retry fails\n",
+  ],
+  "docs/flow.mmd": ["flowchart LR\n  validate --> submit\n", "flowchart LR\n  validate --> submit\n  submit -->|transient| retry\n  retry --> submit\n"],
+  "notes/new-idea.md": [null, "# A new idea\n\nKeep the retry count in the ledger, not in memory.\n"],
+};
+/** The working tree's files, with `?fake-ascii`'s drawing among them (`fake-ascii.ts`). */
+function workingFiles(): Record<string, [before: string | null, after: string]> {
+  return asciiArt() ? { ...WORKING_FILES, "docs/states.txt": [ASCII_BEFORE, ASCII_AFTER] } : WORKING_FILES;
+}
+const WORKING_BASE = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
+/** The fixture checkout's one commit its upstream lacks (`tree.ahead` is 1): Commits on the working tree lists it. */
+const WORKING_AHEAD = { sha: "4f1c2a9e0b7d3c5a8e6f1b2d4c7a9e0f3b5d8c1a", title: "Park a batch after its third retry", meta: "mara · 20 minutes ago" };
+/** `?fake-touched`: every ask finds the tree touched since the last (a new stamp each time). */
+let workingAsks = 0;
+const touched = () => new URLSearchParams(globalThis.location?.search).has("fake-touched");
+
+/** The fixture's working tree as `entity_range_files` answers it for `~working-tree`; refused with no checkout. */
+function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } {
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) throw { code: "not_found", message: "This repository is not cloned on this computer, so it has no working tree here.", source_id: null };
+  const local = fakeCheckoutDiff(entityId);
+  const tracked = local.status === "read" ? local.unstaged.files.filter((file) => workingFiles()[file.path] === undefined) : [];
+  const made = Object.entries(workingFiles()).map(([path, [before, after]]) => {
+    const file = lineDiff(path, before ?? "", after);
+    return { ...file, change: before === null ? "added" : file.change } as DiffFile;
+  });
+  const files = [...tracked, ...made].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const tree = checkout.tree?.status === "read" ? checkout.tree : null;
+  workingAsks += 1;
+  return {
+    // The checkout's one commit to push (its tree is 1 ahead), as the commits `HEAD` has that the base lacks.
+    diff: { files, truncated: false, range: { repository: entityId, base: WORKING_BASE, head: WORKING, commits: [WORKING_AHEAD] }, read_at: "checkout" },
+    working: {
+      stamp: touched() ? `touched-${workingAsks}` : "fixed",
+      head: tree?.head ?? "9c1d2aa0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a",
+      branch: tree?.branch ?? null,
+      untracked: ["notes/new-idea.md"],
+      untracked_truncated: false,
+    },
+  };
+}
+
+/** A working-tree file's bytes at `~working-tree` (after) or any other end (before); `undefined` for a file it does not hold. */
+export function fakeWorkingBytes(path: string, commit: string | null): Uint8Array | undefined {
+  const sides = workingFiles()[path];
+  // Only the working tree's own ends: every other commit reads the fixture's files as before.
+  if (sides === undefined || (commit !== WORKING && commit !== "~index" && commit !== WORKING_BASE)) return undefined;
+  const text = commit === WORKING ? sides[1] : sides[0];
+  if (text === null) throw { code: "not_found", message: `no file ${path} there`, source_id: null };
+  return new TextEncoder().encode(text);
+}
+
+/** The names `entity_range_names` answers for the working tree: the list less its counts. */
+function fakeWorkingNames(entityId: string): RangeNames {
+  const { diff, working } = fakeWorking(entityId);
+  const letter = { added: "A", deleted: "D", renamed: "R", modified: "M", binary: "M" } as const;
+  return {
+    paths: diff.files.map((f) => f.path),
+    changes: diff.files.map((f) => letter[f.change]).join(""),
+    renamed: [],
+    modes: [],
+    truncated: false,
+    range: diff.range!,
+    predicted_at: "",
+    working,
+  };
+}
+
 /**
  * `entity_commit_diff` (#2319): the commit's fake `diff` section, read "at the
  * checkout" when its repository has one and `sha` is one, else "from the source".
@@ -90,6 +216,28 @@ function fakeDiffOf(view: ReturnType<typeof repoView>, local: boolean, ignoreWhi
     file.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === kind).map((line) => line.text.replace(/\s+/g, ""))).join("\n");
   const files = local && ignoreWhitespace ? block.files.filter((file) => bare(file, "add") !== bare(file, "del")) : block.files;
   return { files, truncated: block.truncated, range: block.range ?? null, read_at: local ? "checkout" : "source" };
+}
+
+/** The checkout's `HEAD`, where the fixture has one. */
+function fakeHead(entityId: string): string | null {
+  const tree = fakeCheckout(entityId).tree;
+  return tree?.status === "read" ? tree.head : null;
+}
+
+/** `entity_local_dir` at the checkout's `HEAD`: the source's listing of the folder; `null` at any other commit, as before. */
+function fakeHeadDir(entityId: string, commit: string | null, dir: string): LocalDir | null {
+  if (commit === null || commit !== fakeHead(entityId)) return null;
+  const block = repoView(entityId, dir === "" ? "files" : `files:${dir}`)?.sections[0]?.blocks[0];
+  if (block?.type !== "tree") return null;
+  const entries = block.entries.map((entry) => ({ path: dir === "" ? entry.name : `${dir}/${entry.name}`, kind: entry.kind, size: entry.size }));
+  return { commit, as_of: null, dir, entries, complete: true };
+}
+
+/** `entity_local_file` at the checkout's `HEAD`: the source's file. */
+function fakeHeadFile(entityId: string, commit: string | null, path: string): ViewBlock | null {
+  if (commit === null || commit !== fakeHead(entityId)) return null;
+  const block = repoView(entityId, `file:${path}`)?.sections[0]?.blocks[0];
+  return block?.type === "file" ? { ...block, commit } : null;
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
@@ -112,8 +260,7 @@ function fakeCheckout(entityId: string): CheckoutView {
   // Keyed on the *root* as well as the repo, so a run pointed at a temporary
   // directory of its own sees the honest *no checkout* rather than a path
   // under a root nobody set.
-  const scanned =
-    repo === null || fakeClonesRoot !== DEFAULT_CLONES_ROOT ? undefined : FAKE_SCANNED[repo];
+  const scanned = repo === null ? undefined : scannedPath(repo);
   const path = override ?? scanned ?? (repo === null ? undefined : fakeCloned[repo]) ?? null;
   return {
     repo_entity_id: repo,
@@ -182,6 +329,8 @@ function fakeCheckoutDiff(entityId: string): DiffRead {
           truncated: false,
           threads: [],
         },
+        // A Markdown file edited too (ux26): Local changes draws it rendered, the index against the working tree.
+        { ...lineDiff("docs/retry.md", WORKING_FILES["docs/retry.md"]![0]!, WORKING_FILES["docs/retry.md"]![1]), change: "modified" } as DiffFile,
       ],
       truncated: false,
     },
@@ -272,7 +421,7 @@ function slug(name: string): string {
 function fakeSettings(): CheckoutSettings {
   return {
     clones_root: fakeClonesRoot,
-    git: fakeNoGit ? { status: "no_git" } : { status: "found", path: "/usr/bin/git" },
+    git: fakeNoGit ? { status: "no_git" } : { status: "found", path: fakeGitPath },
     default_application: fakeApps.some((app) => app.id === fakeDefault) ? fakeDefault : (fakeApps[0]?.id ?? null),
     applications: fakeApps.map((app) => ({ ...app })),
   };
@@ -348,6 +497,31 @@ function fakeOpen(args: Record<string, unknown>) {
   );
 }
 
+/**
+ * `open_folder` (2026-11-16): the application's own command with the folder in
+ * the checkout's place, as the backend runs it; a folder with `..` in it, or
+ * git's own, is refused as there.
+ */
+function fakeOpenFolder(args: Record<string, unknown>) {
+  const folder = String(args["folder"] ?? "").replace(/^\.\/|\/$/g, "");
+  const parts = folder.split("/");
+  if (folder === "" || parts.some((part) => part === ".." || part === ".git" || part === "") || folder.startsWith("/")) {
+    throw { code: "invalid", message: `${folder} is not a folder inside the checkout`, source_id: null };
+  }
+  const entityId = String(args["entityId"] ?? "");
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw { code: "not_found", message: `${entityId} has no checkout on this machine, so there is nothing to open`, source_id: null };
+  }
+  const at = `${checkout.path}/${folder}`;
+  const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+  const app = fakeApps.find((one) => one.id === id);
+  if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+  refuse(app.command, `'${app.command}'`);
+  const name = parts[parts.length - 1] ?? "";
+  return words(app.command).map((word) => word.replace(/\{path\}/g, at).replace(/\{file\}/g, at).replace(/\{line\}/g, "1").replace(/\{name\}/g, name));
+}
+
 /** The fake's Gitea pages (#2274), as `code_pages` declares Gitea's, after its base URL. */
 function fakePage(entityId: string, object: OpenObject): string | null {
   const repo = fakeRepoOf(entityId);
@@ -403,7 +577,7 @@ function fakeDiffTool(args: Record<string, unknown>): string[] | null {
   const base = String(args["base"] ?? "");
   const head = String(args["head"] ?? "");
   if (checkout.path === null || !isDiffEnd(base, true) || !isDiffEnd(head, false)) return null;
-  return ["/usr/bin/git", "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
+  return [fakeGitPath, "-C", checkout.path, "difftool", "--dir-diff", "--gui", "--no-prompt", base, head, "--"];
 }
 
 /**
@@ -440,7 +614,7 @@ function fakeClone(args: Record<string, unknown>): CloneAnswer {
   if (fakeClonesRoot === null) {
     throw { code: "invalid", message: "no clones root is set: choose where clones go in Settings › Checkouts", source_id: null };
   }
-  const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+  const path = joinInside(fakeClonesRoot, entry.title.split("/").pop() ?? entry.title);
   if (args["stop"] === true) {
     const timer = fakeCloning.get(id);
     if (timer === undefined) return { status: "not_cloning" };
@@ -467,6 +641,60 @@ function fakeClone(args: Record<string, unknown>): CloneAnswer {
   return { status: "cloning", path };
 }
 
+/**
+ * *Clone all* (PR #2479): every repository of the corpus not on this machine,
+ * cloned one after another in 300 ms each, its run told on `clone:all` and
+ * each clone on `clone:progress`.
+ */
+let fakeCloneAll: CloneAllState | null = null;
+
+function fakeCloneAllPlan(): CloneAllPlan {
+  const missing = CORPUS.filter((entry) => entry.kind === "repo" && fakeCheckout(entry.entity_id).path === null);
+  const sources = new Map<string, number>();
+  for (const entry of missing) {
+    const source = entry.entity_id.slice(0, entry.entity_id.indexOf(":"));
+    sources.set(source, (sources.get(source) ?? 0) + 1);
+  }
+  return {
+    root: fakeClonesRoot,
+    names: fakeClonesRoot === null ? [] : missing.map((entry) => entry.title),
+    sources: [...sources].map(([source_id, repositories]) => ({ source_id, name: source_id === "mock" ? "Tidewater Git" : source_id, repositories })),
+    already: CORPUS.filter((entry) => entry.kind === "repo").length - missing.length,
+    skipped: [],
+  };
+}
+
+function fakeStartCloneAll(): CloneAllState {
+  if (fakeCloneAll !== null && !fakeCloneAll.finished) return fakeCloneAll;
+  if (fakeClonesRoot === null) throw { code: "invalid", message: "no clones root is set: choose where clones go in Settings › Checkouts", source_id: null };
+  const todo = CORPUS.filter((entry) => entry.kind === "repo" && fakeCheckout(entry.entity_id).path === null);
+  const run: CloneAllState = { run: (fakeCloneAll?.run ?? 0) + 1, total: todo.length, cloned: 0, adopted: 0, failed: [], current: [], finished: todo.length === 0 };
+  fakeCloneAll = run;
+  const tell = () => bridge?.emit("clone:all", { ...run, failed: [...run.failed], current: [...run.current] });
+  const next = () => {
+    const entry = todo.shift();
+    if (entry === undefined) {
+      run.finished = true;
+      tell();
+      return;
+    }
+    run.current = [entry.title];
+    tell();
+    // Quicker than one *Clone*'s eight steps, so a whole run fits under a trip's wait.
+    const path = joinInside(fakeClonesRoot ?? "", entry.title.split("/").pop() ?? entry.title);
+    emit(entry.entity_id, path, { state: "progress", phase: "Receiving objects", percent: 50 });
+    setTimeout(() => {
+      fakeCloned[entry.entity_id] = path;
+      emit(entry.entity_id, path, { state: "done" });
+      run.cloned += 1;
+      run.current = [];
+      next();
+    }, 300);
+  };
+  setTimeout(next, 0);
+  return { ...run };
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
@@ -490,6 +718,7 @@ export function handlers(): Handlers {
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
     open_checkout: (args) => fakeOpen(args),
     open_object: (args) => fakeOpenObject(args),
+    open_folder: (args) => fakeOpenFolder(args),
     object_page: (args) => fakePage(String(args["entityId"] ?? ""), args["object"] as OpenObject),
     diff_tool: (args) => fakeDiffTool(args),
     open_diff_tool: (args) => {
@@ -510,10 +739,68 @@ export function handlers(): Handlers {
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
     entity_range_diff: (args) =>
-      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
+      String(args["head"] ?? "") === WORKING
+        ? { ...fakeWorking(String(args["entityId"] ?? "")).diff, working: fakeWorking(String(args["entityId"] ?? "")).working }
+        : fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), args["ignoreWhitespace"] === true),
     entity_commit_diff: (args) =>
       fakeCommitDiff(String(args["entityId"] ?? ""), String(args["commitId"] ?? ""), String(args["sha"] ?? ""), args["ignoreWhitespace"] === true),
     clone_repo: (args) => fakeClone(args),
+    // The demo has no checkout on disk to read a tree at the mirror's tip (ADR-0041): Files reads the fake source, as before.
+    // At the checkout's own `HEAD` it answers with the source's tree, so the working tree in the branch box (2026-11-21)
+    // draws: `HEAD`'s tree with the fixture's uncommitted changes laid over it.
+    entity_local_tree: () => null,
+    entity_local_dir: (args) => fakeHeadDir(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["dir"] ?? "")),
+    entity_local_paths: () => null,
+    entity_local_file: (args) => fakeHeadFile(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["path"] ?? "")),
+    entity_source_range_diff: (args) =>
+      fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),
+    entity_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      if (head === WORKING) {
+        const { diff, working } = fakeWorking(id);
+        return { ...fakeRangeFiles(id, base, head, diff), working };
+      }
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, args["ignoreWhitespace"] === true));
+    },
+    // The fake checkouts list their compares whole: Compare reads the list as before. The working tree's names come first.
+    entity_range_names: (args) => (String(args["head"] ?? "") === WORKING ? fakeWorkingNames(String(args["entityId"] ?? "")) : null),
+    entity_source_range_files: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      return fakeRangeFiles(id, base, head, fakeRangeDiff(id, base, head, false));
+    },
+    entity_range_file: (args) =>
+      fakeRangeFile(
+        String(args["entityId"] ?? ""),
+        String(args["base"] ?? ""),
+        String(args["head"] ?? ""),
+        String(args["path"] ?? ""),
+        Number(args["from"] ?? 0),
+        args["ignoreWhitespace"] === true,
+      ),
+    entity_range_file_pages: (args) => {
+      const [id, base, head] = [String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? "")];
+      const asks = (args["files"] as { path: string }[] | undefined) ?? [];
+      return asks.map(({ path }) => {
+        try {
+          return fakeRangeFile(id, base, head, path, 0, args["ignoreWhitespace"] === true);
+        } catch {
+          return null;
+        }
+      });
+    },
+    cancel_read: () => false,
+    // *Clone all* (PR #2479): the corpus's repositories not on this machine, one after another.
+    clone_all_plan: () => fakeCloneAllPlan(),
+    clone_all: () => fakeStartCloneAll(),
+    clone_all_state: () => (fakeCloneAll === null ? null : { ...fakeCloneAll }),
+    entity_checkouts: (args) =>
+      ((args["entityIds"] as string[] | undefined) ?? []).flatMap((entityId) => {
+        try {
+          return [{ entity_id: entityId, checkout: fakeCheckout(entityId) }];
+        } catch {
+          return [];
+        }
+      }),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
@@ -534,6 +821,9 @@ export function handlers(): Handlers {
 /** What `?fake-ipc`'s query seeds before the bridge is installed. */
 export function seed(params: URLSearchParams): void {
   seedClonesRoot(params);
+  // Settings' worktree list, which is empty until a pull request opens in one, holds one under the long root.
+  const tree = params.has("fake-long-paths") ? worktreeOf(fakeClonesRoot, "mock:tidewater/payout-service", 142) : null;
+  if (tree !== null) fakeWorktrees = [{ repo_entity_id: "mock:tidewater/payout-service", number: 142, path: tree, closed: false }];
   seedOpenState(params);
   seedClones(params);
 }
@@ -543,10 +833,11 @@ export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
 
-const atLoad = seedOf({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
+const atLoad = seedOf({ fakeClonesRoot, fakeScanRoot, fakeFolderTail, fakeGitPath, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge });
 onFakeReset(() => {
   for (const timer of fakeCloning.values()) clearInterval(timer);
   fakeWorktrees = [];
-  ({ fakeClonesRoot, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
+  fakeCloneAll = null;
+  ({ fakeClonesRoot, fakeScanRoot, fakeFolderTail, fakeGitPath, fakeApps, fakeDefault, fakeOpenFails, fakeNoGit, fakeClonePercent, bridge } = atLoad());
 });
-keepSeed(fakeOverrides, fakeCloning, fakeCloned);
+keepSeed(fakeOverrides, fakeCloning, fakeCloned, listedDiffs);

@@ -1,0 +1,14 @@
+[
+  ["com:# syntax=docker/dockerfile:1"],
+  ["kw:FROM ",":node:22-alpine ","kw:AS ",":build"],
+  ["kw:WORKDIR ",":/app"],
+  ["kw:COPY ",":package*.json ./"],
+  ["kw:RUN ","fn:npm ",":ci ","var:--no-audit ","esc:\\"],
+  ["esc:    ","op:&& ","fn:npm ",":cache clean ","var:--force"],
+  ["kw:ARG ",":VERSION","op:=",":dev"],
+  ["kw:ENV ",":NODE_ENV","op:=",":production PORT","op:=",":8080"],
+  ["kw:EXPOSE ","num:8080"],
+  ["kw:HEALTHCHECK CMD ","fn:wget ",":-qO- http://localhost:8080/health ","op:|| ","fn:exit ","num:1"],
+  ["kw:CMD ","punct:[","str:\"node\"","punct:, ","str:\"server.js\"","punct:]"],
+  []
+]

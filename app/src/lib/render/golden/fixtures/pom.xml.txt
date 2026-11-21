@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The payout service. -->
+<project xmlns="urn:example:pom">
+  <modelVersion>4.0.0</modelVersion>
+  <artifactId>payout-service</artifactId>
+  <dependencies>
+    <dependency scope="test">
+      <groupId>org.junit</groupId>
+      <version>${junit.version}</version>
+    </dependency>
+  </dependencies>
+  <description><![CDATA[Retries & parks]]></description>
+</project>

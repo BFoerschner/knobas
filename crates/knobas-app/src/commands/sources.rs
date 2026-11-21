@@ -100,7 +100,7 @@ pub async fn state_colours(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::sources::state_colours::KindStateColours>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+    crate::sources::state_colours::read(&pool, lifecycle.registry(), lifecycle.seen_words()).await
 }
 
 /// Set one word's tone override: `kind`'s `word` draws `tone`, or no colour
@@ -124,7 +124,7 @@ pub async fn set_tone_override<R: tauri::Runtime>(
     let pool = lifecycle.pool()?;
     let line = crate::sources::state_colours::set(&pool, &kind, &word, tone).await?;
     crate::events::emit(&app, None, crate::events::ACTIVITY_NEW, &line);
-    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+    crate::sources::state_colours::read(&pool, lifecycle.registry(), lifecycle.seen_words()).await
 }
 
 /// Clear tone overrides: `kind`'s override for `word`, or every override of
@@ -146,7 +146,7 @@ pub async fn clear_tone_overrides<R: tauri::Runtime>(
     if let Some(line) = crate::sources::state_colours::clear(&pool, &kind, word.as_deref()).await? {
         crate::events::emit(&app, None, crate::events::ACTIVITY_NEW, &line);
     }
-    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+    crate::sources::state_colours::read(&pool, lifecycle.registry(), lifecycle.seen_words()).await
 }
 
 /// The install flow's paths over the sources state's registry (#1323).
@@ -484,6 +484,12 @@ pub async fn delete_source<R: tauri::Runtime>(
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     state.scheduler.forget_source(&id, purge).await;
+    // Its site's session goes with it, as a credential does (ADR-0050).
+    if let Ok(sites) = crate::site::state(&app)
+        && let Err(error) = sites.forget(&id, true).await
+    {
+        tracing::warn!(%error, "a deleted source's site session was not removed");
+    }
     Ok(())
 }
 

@@ -299,7 +299,7 @@ test("a walk reading draws a determinate bar and names its unit (#1379)", async 
   progress({ phase: "fetching", items: 0, elapsed_ms: 8300, walked: 120, of: 300, unit: "repositories" });
   expect(bar().max).toBe(300);
   expect(bar().value).toBe(120);
-  expect(text()).toContain("120 of 300 repositories · 0 items · 8.3 s");
+  expect(text()).toContain("120 of 300 repositories · 0 items · 8s");
 
   // A walk with no known total keeps the bar indeterminate but still reads.
   progress({ phase: "fetching", items: 3, elapsed_ms: 9000, walked: 7, unit: "pages" });

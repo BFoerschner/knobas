@@ -39,6 +39,7 @@ use uuid::Uuid;
 
 use crate::{IpcError, Lifecycle};
 
+mod archive;
 mod board;
 mod builds;
 mod capture;
@@ -52,11 +53,13 @@ mod links;
 mod list;
 mod lookups;
 mod projects;
+mod run_read;
 mod standup;
 mod start_work;
 mod suggestions;
 mod viewed;
 
+pub use archive::*;
 pub use board::*;
 pub use builds::*;
 pub use capture::*;
@@ -70,6 +73,7 @@ pub use links::*;
 pub use list::*;
 pub use lookups::*;
 pub use projects::*;
+pub use run_read::*;
 pub use standup::*;
 pub use start_work::*;
 pub use suggestions::*;

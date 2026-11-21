@@ -907,3 +907,103 @@ async fn under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust() {
         [format!("asset:ist-child-{t}"), format!("asset:ist-{t}")]
     );
 }
+
+/// `n` repositories in a database of their own, in one statement: repo `i`
+/// called `<t>-<i>`, dated `i / 10` days into 2026 when `ties` (ten repos a
+/// day), else `i` days.
+async fn many_repos(pool: &sqlx::PgPool, t: &str, n: i32, ties: bool) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'gitea:Owner' || $1 || '/' || $1 || '-' || g, 'repo', $1 || '-' || g
+           from generate_series(0, $2 - 1) g",
+    )
+    .bind(t)
+    .bind(n)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         select 'gitea:Owner' || $1 || '/' || $1 || '-' || g, 'gitea', 'repo', $1 || '-' || g, '',
+                jsonb_build_object('full_name', 'Owner' || $1 || '/' || $1 || '-' || g, 'name', $1 || '-' || g),
+                timestamptz '2026-01-01' + make_interval(days => case when $3 then g / 10 else g end)
+           from generate_series(0, $2 - 1) g",
+    )
+    .bind(t)
+    .bind(n)
+    .bind(ties)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// With nothing typed the box reads only the newest parent rows when they
+/// fill its list (the scale pass, 2026-11-10: 66 to 3 ms at 112,000 rows),
+/// and the answer is the whole statement's: past 2,000 rows, with times
+/// shared ten at a time across the cut, and where the newest rows name too
+/// few parents to fill the list, which reads the whole statement again.
+#[tokio::test]
+async fn the_newest_parents_with_nothing_typed_are_the_whole_reads() {
+    for (label, n, ties) in [
+        // Ten repos a day, so the 2,000th newest row shares its time with
+        // nine others on either side of the cut.
+        ("ties", 2_500, true),
+        // Thirty repos, and below three of them 2,100 branches newer than
+        // any: the newest 2,000 rows name only those three, so the list is
+        // not filled from them and the whole statement is read.
+        ("few", 30, false),
+    ] {
+        let connector =
+            knobas_db::test_util::scratch_database(&format!("newest_parents_{label}")).await;
+        let pool = connector.pool(2).await.unwrap();
+        for (id, kind, name, enabled) in POOL_SOURCES {
+            sqlx::query(
+                "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+                 values ($1, $2, $3, 'http://x', 'Pat', $4)",
+            )
+            .bind(id)
+            .bind(kind)
+            .bind(name)
+            .bind(enabled)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let t = token();
+        let searcher = searcher(&pool).await;
+        many_repos(&pool, &t, n, ties).await;
+        if label == "few" {
+            sqlx::query(
+                "insert into knobas.entity (id, kind, title)
+                 select 'gitea:Owner' || $1 || '/' || $1 || '-' || (g % 3) || '@refs/heads/b' || g, 'branch', 'b' || g
+                   from generate_series(0, 2099) g",
+            )
+            .bind(&t)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+                 select 'gitea:Owner' || $1 || '/' || $1 || '-' || (g % 3) || '@refs/heads/b' || g, 'gitea',
+                        'branch', 'b' || g, '',
+                        jsonb_build_object('commit', jsonb_build_object('id', md5(g::text)),
+                          'repository', jsonb_build_object('full_name', 'Owner' || $1 || '/' || $1 || '-' || (g % 3),
+                                                           'name', $1 || '-' || (g % 3))),
+                        timestamptz '2027-01-01' + make_interval(mins => g)
+                   from generate_series(0, 2099) g",
+            )
+            .bind(&t)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let offered = searcher
+            .filter_parent_suggestions("")
+            .await
+            .unwrap()
+            .parents;
+        let whole = searcher.whole_parent_suggestions("").await.unwrap();
+        assert_eq!(offered.len(), 20, "{label}: a full list");
+        assert_eq!(offered, whole, "{label}: the whole statement's answer");
+    }
+}

@@ -8,7 +8,9 @@ import { getAsset, type AssetDetail } from "../../ipc/assets";
 import type { EchoListen } from "../queued.svelte";
 import type { DetailRefreshPorts } from "../refresh.svelte";
 import {
+  cardReads,
   createLink,
+  entityBriefs,
   entityThread,
   getEntity,
   hideLinkSetMember,
@@ -19,12 +21,15 @@ import {
   miniBoard,
   previewLinkSetRule,
   saveLinkSet,
+  deleteLinkSet,
   promoteContext,
   submitWrite,
   unlink,
   visitEntity,
+  type CardRows,
   type CheckoutView,
   type ContextRow,
+  type EntityBrief,
   type EntityDetail,
   type EntityFilter,
   type EntityPage,
@@ -50,6 +55,8 @@ import { TICKET_SYSTEM } from "../roles.svelte";
 export interface JobPorts {
   listSources: () => Promise<SourceFacts[]>;
   getEntity: (entityId: string) => Promise<EntityDetail>;
+  /** What many ids are, in one read (`entity_briefs`); where left out, each id is read whole with `getEntity`. */
+  entityBriefs?: (entityIds: string[]) => Promise<EntityBrief[]>;
   promoteContext: (entityId: string) => Promise<ContextRow>;
   listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
@@ -63,6 +70,11 @@ export interface JobPorts {
   launcherHome: SessionPorts["launcherHome"];
   /** What the ticket reaches (#817). */
   jobReach: (entityId: string) => Promise<Reached[]>;
+  /**
+   * The reach and the card's four sections in one read over one walk (`card_reads`, ux19); where left out, the reach is
+   * `jobReach` and each section its own `listEntities`.
+   */
+  cardReads?: (entityId: string, sections: EntityFilter[], limit: number) => Promise<CardRows>;
   /** The link sets that apply and the parent (#867): the drawer's groups. */
   jobLinkSets: (entityId: string) => Promise<JobLinkSets>;
   /** *Hide here* and *Show again* (R-7.5); never edits the set. */
@@ -97,12 +109,13 @@ export function bridgeTicketBoard(query: string): Promise<MiniBoard> {
  * Link sets commands, no new ones. Apart from `JobPorts` so the job's other
  * suites need not stand them in.
  */
-export type JobSetPorts = Pick<SetPorts, "linkSets" | "saveLinkSet" | "previewLinkSetRule">;
+export type JobSetPorts = Pick<SetPorts, "linkSets" | "saveLinkSet" | "previewLinkSetRule" | "deleteLinkSet">;
 
 export const bridgeSetPorts: JobSetPorts = {
   linkSets: () => linkSets(),
   saveLinkSet: (draft) => saveLinkSet(draft),
   previewLinkSetRule: (rule) => previewLinkSetRule(rule),
+  deleteLinkSet: (id) => deleteLinkSet(id),
 };
 
 /**
@@ -113,6 +126,7 @@ export const bridgeSetPorts: JobSetPorts = {
 export const bridgePorts: JobPorts = {
   listSources: () => listSources(),
   getEntity: (entityId) => getEntity(entityId),
+  entityBriefs: (entityIds) => entityBriefs(entityIds),
   promoteContext: (entityId) => promoteContext(entityId),
   listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
   submitWrite: (payload) => submitWrite(payload),
@@ -123,6 +137,7 @@ export const bridgePorts: JobPorts = {
   search: (query) => search(query),
   launcherHome: () => launcherHome(),
   jobReach: (entityId) => jobReach(entityId),
+  cardReads: (entityId, sections, limit) => cardReads(entityId, sections, limit),
   jobLinkSets: (entityId) => jobLinkSets(entityId),
   hideLinkSetMember: (ticketId, memberId, hidden) => hideLinkSetMember(ticketId, memberId, hidden),
   getAsset: (assetId) => getAsset(assetId),

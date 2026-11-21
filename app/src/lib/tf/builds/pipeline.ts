@@ -10,14 +10,15 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
-import { ageLabel, secondsLabel } from "../../time/format";
+import { ageLabel, dayHeadingLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { echoWrite, type Echo } from "../queued.svelte";
-import { reenterWords, secretNoun } from "../settings/settings";
+import { credentialFix, secretNoun } from "../settings/settings";
+import { stateWord } from "../state-word";
 import { pipelineHash, runTone, shortTime } from "./builds";
 
 /**
@@ -261,10 +262,10 @@ export function resultWord(run: RunRow): string {
   return run.state?.text ?? "finished";
 }
 
-/** A bar's tip: *#1187 FAILURE, main · 4 m 12 s, today 10:05*. */
+/** A bar's tip: *#1187 Failed, main · 4m 12s, today 10:05*. */
 export function barTip(run: RunRow, now: Date = new Date()): string {
-  const head = `${run.number !== null ? `#${run.number}` : "queued"} ${resultWord(run)}${run.branch ? `, ${run.branch}` : ""}`;
-  const took = run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : resultWord(run);
+  const head = `${run.number !== null ? `#${run.number}` : "queued"} ${stateWord(resultWord(run))}${run.branch ? `, ${run.branch}` : ""}`;
+  const took = run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : stateWord(resultWord(run));
   const at = run.started ?? run.updated_at;
   return `${head} · ${took}${at ? `, ${shortTime(at, now)}` : ""}`;
 }
@@ -341,33 +342,31 @@ export function branchesOf(runs: readonly RunRow[]): string[] {
   return [...new Set(runs.map((run) => run.branch).filter((branch): branch is string => branch !== null))];
 }
 
-/** The local calendar day of an instant, `YYYY-MM-DD`. */
-function dayOf(at: Date): string {
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-}
-
 /** One day's runs, under its heading. */
 export interface DayGroup {
   label: string;
+  /** The label, or the label and its count where the day comes twice. */
+  key: string;
   runs: RunRow[];
 }
 
 /**
  * The runs by the day they started (or were queued), in order: *Today*,
- * *Yesterday*, then the date. A run with no instant at all joins the group
+ * *Yesterday*, then the date (`Wed 4 Nov`). A run with no instant at all joins the group
  * before it.
  */
 export function byDay(runs: readonly RunRow[], now: Date = new Date()): DayGroup[] {
-  const today = dayOf(now);
-  const yesterday = dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const groups: DayGroup[] = [];
   for (const run of runs) {
     const at = run.started ?? run.updated_at;
-    const day = at === null ? (groups.at(-1)?.label ?? "Today") : dayOf(new Date(at));
-    const label = day === today ? "Today" : day === yesterday ? "Yesterday" : day;
+    const label = at === null ? (groups.at(-1)?.label ?? "Today") : dayHeadingLabel(new Date(at), now);
     const last = groups.at(-1);
     if (last && last.label === label) last.runs.push(run);
-    else groups.push({ label, runs: [run] });
+    else {
+      // A day can come twice where the runs are held in the order they drew (`held-order`): each group keys apart.
+      const again = groups.filter((group) => group.label === label).length;
+      groups.push({ label, key: again === 0 ? label : `${label} ${again + 1}`, runs: [run] });
+    }
   }
   return groups;
 }
@@ -446,9 +445,11 @@ export interface StaleLine {
  */
 export function staleLine(
   pipeline: Pick<PipelineRow, "source_id" | "source_name">,
-  sources: readonly Pick<SourceSummary, "id" | "health" | "auth_kind">[],
+  sources: readonly (Pick<SourceSummary, "id"> & Partial<Pick<SourceSummary, "health" | "auth_kind">>)[],
   sync: readonly SourceSyncStatus[],
   now: Date = new Date(),
+  /** What waits while the source can't be signed in to, as the page's own words. */
+  waits = "Runs you start",
 ): StaleLine | null {
   const source = sources.find((row) => row.id === pipeline.source_id);
   const state = source?.health;
@@ -460,8 +461,8 @@ export function staleLine(
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
     const lead = since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
-      text: `${lead} Runs you start wait in the queue until it works again.`,
-      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, words: reenterWords(source.auth_kind), secret },
+      text: `${lead} ${waits} wait in the queue until it works again.`,
+      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}/reenter`, words: `${credentialFix(source.auth_kind, state.state)}…`, secret },
     };
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {

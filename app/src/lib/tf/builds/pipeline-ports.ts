@@ -39,6 +39,7 @@ import type {
   RunPreset,
   RunRow,
   RunTests,
+  ShownView,
   SourceView,
   TestOutcome,
 } from "../../ipc/entity";
@@ -55,7 +56,7 @@ import {
 import { EVENTS } from "../../ipc";
 import { writeFollower, type WriteFollower } from "../../shell/follow-write";
 import type { RefusedWritesPort } from "../../shell/refused-writes";
-import { openExternal } from "../../shell/open-external";
+import { routeWeb } from "../../shell/open-web";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
 import type { DetailRefreshPorts } from "../refresh.svelte";
@@ -151,7 +152,7 @@ export const BRIDGE: PipelinePorts = {
   syncStatus: () => syncStatus(),
   jobBranches: (job) => readJobBranches(job),
   submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
-  openExternal: (url) => openExternal(url),
+  openExternal: (url) => routeWeb(url),
   presets: (pipelineId) => runPresets(pipelineId),
   savePreset: (preset) => saveRunPreset(preset),
   deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),
@@ -166,7 +167,7 @@ export const BRIDGE: PipelinePorts = {
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */
 export interface RunPorts extends PipelinePorts {
   /** The run's view (`entity_view`): the whole of it, or the one section named. */
-  view: (runId: string, section?: string) => Promise<SourceView | null>;
+  view: (runId: string, section?: string) => Promise<ShownView | SourceView | null>;
   /** The last lines of the run's whole log, up to the cap, and its steps (`run_log`, #854). */
   log: (runId: string) => Promise<RunLog | null>;
   /** The run's tests, failed first (`run_tests`, #855). */

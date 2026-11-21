@@ -47,6 +47,13 @@ use super::*;
 /// first `lanes_first` lanes, biggest first, are sent
 /// ([`knobas_core::mini_board::MiniBoard::lanes`]). Omitted, the board has
 /// no lanes, as before.
+///
+/// `page` (ux18) reads past the first cards, for a ticket view that shows
+/// every ticket ([`knobas_core::mini_board::Page`]): a column's next cards
+/// (`after` those it holds, of the `statuses` its column gathers, in a
+/// `lane`), or the list sorted here by a header, its order in
+/// [`knobas_core::mini_board::MiniBoard::order`]. Omitted, the first cards,
+/// as before.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn mini_board(
@@ -59,34 +66,45 @@ pub async fn mini_board(
     saved_view: Option<String>,
     lanes: Option<knobas_core::mini_board::LaneField>,
     lanes_first: Option<u32>,
+    page: Option<knobas_core::mini_board::Page>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    if let Some(why) = page
+        .as_ref()
+        .and_then(knobas_core::mini_board::Page::refusal)
+    {
+        return Err(IpcError::invalid(why));
+    }
     let pool = lifecycle.pool()?;
     let lanes = lanes.map(|by| knobas_core::mini_board::Lanes {
         by,
         first: lanes_first,
     });
     if let Some(view) = saved_view {
-        return saved_view_board_laned(
+        return saved_view_board_paged(
             &pool,
             lifecycle.registry(),
             &view,
             per_column,
             query.as_deref(),
             lanes,
+            page.as_ref(),
+            Some(lifecycle.picker()),
         )
         .await;
     }
-    mini_board_laned(
+    mini_board_paged(
         &pool,
         lifecycle.registry(),
         Room {
             ctx_id: ctx_id.as_deref(),
             role: role.as_deref(),
             project: project.as_deref(),
+            picker: Some(lifecycle.picker()),
         },
         per_column,
         query.as_deref(),
         lanes,
+        page.as_ref(),
     )
     .await
 }
@@ -99,6 +117,10 @@ pub struct Room<'a> {
     /// every source.
     pub role: Option<&'a str>,
     pub project: Option<&'a str>,
+    /// The names the launcher's picker holds, whose projects make a key
+    /// typed with a space or none (`pay 123`, `pay123`) the key in the
+    /// board's search (`knobas_search::typed_key`). `None` reads no key.
+    pub picker: Option<&'a knobas_search::picker::Picker>,
 }
 
 /// [`mini_board`], against a pool.
@@ -125,6 +147,7 @@ pub async fn mini_board_inner(
             ctx_id,
             role,
             project,
+            picker: None,
         },
         per_column,
         query,
@@ -146,10 +169,28 @@ pub async fn mini_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    mini_board_paged(pool, registry, room, per_column, query, lanes, None).await
+}
+
+/// [`mini_board_laned`] past its first cards: see [`mini_board`]'s `page`.
+///
+/// # Errors
+///
+/// See [`mini_board_inner`].
+pub async fn mini_board_paged(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    room: Room<'_>,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+    page: Option<&knobas_core::mini_board::Page>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Room {
         ctx_id,
         role,
         project,
+        picker,
     } = room;
     // The role's fillers (#1299). The core reads an empty source list as
     // every source, so a role nobody fills answers here, with nothing on it.
@@ -162,6 +203,7 @@ pub async fn mini_board_laned(
                     sources: Vec::new(),
                     lanes: Vec::new(),
                     more_lanes: 0,
+                    order: None,
                 });
             }
             fillers
@@ -169,37 +211,94 @@ pub async fn mini_board_laned(
         None => Vec::new(),
     };
     let declarations = declared_paths(pool, registry).await?;
-    let (only, identity) = tickets_matching(pool, registry, query).await?;
-    Ok(knobas_core::mini_board::read_scoped(
-        pool,
-        knobas_core::mini_board::Scope {
-            ctx_id,
-            sources: &sources,
-            project,
-            only: only.as_deref(),
-            identity: &identity,
-            lanes,
-        },
-        &declarations,
-        per_column,
-    )
-    .await?)
+    let (admits, identity) = tickets_admitted(pool, registry, query, picker).await?;
+    let scope = |only| knobas_core::mini_board::Scope {
+        ctx_id,
+        sources: &sources,
+        project,
+        only,
+        identity: &identity,
+        lanes,
+        page,
+    };
+    Ok(match admits {
+        knobas_search::Admits::Every => {
+            knobas_core::mini_board::read_scoped(pool, scope(None), &declarations, per_column)
+                .await?
+        }
+        knobas_search::Admits::Nothing => {
+            knobas_core::mini_board::read_scoped(pool, scope(Some(&[])), &declarations, per_column)
+                .await?
+        }
+        // The query narrows the board's own scan (the broad-keys pass,
+        // 2026-11-13): a filter that keeps most of the board read every
+        // ticket twice, once for its ids and once for the board of them.
+        knobas_search::Admits::Some(narrowing) => {
+            knobas_core::mini_board::read_scoped_narrowed(
+                pool,
+                scope(None),
+                &declarations,
+                per_column,
+                &*narrowing,
+            )
+            .await?
+        }
+    })
+}
+
+/// `searcher` with `picker`'s names, when there is one: its projects make
+/// `pay 123` the key `PAY-123` in the board's search (ux25).
+fn picked(
+    searcher: knobas_search::Searcher,
+    picker: Option<&knobas_search::picker::Picker>,
+) -> knobas_search::Searcher {
+    match picker {
+        Some(picker) => searcher.with_picker(picker.clone()),
+        None => searcher,
+    }
+}
+
+/// What a board's search admits of the tickets (`Every`: no search, nothing
+/// narrowed) and the identity `@me` resolves to, from **one** vocabulary
+/// read, as [`tickets_matching`] reads them; the mirror is not asked for the
+/// ids. With `picker`, a key typed with a space or none is read as the key.
+async fn tickets_admitted(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    query: Option<&str>,
+    picker: Option<&knobas_search::picker::Picker>,
+) -> Result<(knobas_search::Admits, Vec<String>), IpcError> {
+    let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
+        return Ok((knobas_search::Admits::Every, identity_of(pool).await?));
+    };
+    let searcher = picked(
+        crate::commands::search::searcher(pool, registry).await?,
+        picker,
+    );
+    let vocabulary = searcher.vocabulary().await?;
+    let admits = knobas_search::Searcher::admits_in(&vocabulary, query, "ticket")?;
+    Ok((admits, vocabulary.identity))
 }
 
 /// The ticket ids a board's search admits (`None`: no search, nothing
 /// narrowed) and the identity `@me` resolves to, from **one** vocabulary read:
 /// the searcher loads it for the parse, and the board wants the identity out
 /// of the same load rather than a second one (#1659). Without a search the
-/// identity alone is read, and no searcher is built.
+/// identity alone is read, and no searcher is built. With `picker`, a key
+/// typed with a space or none is read as the key.
 async fn tickets_matching(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     query: Option<&str>,
+    picker: Option<&knobas_search::picker::Picker>,
 ) -> Result<(Option<Vec<String>>, Vec<String>), IpcError> {
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
         return Ok((None, identity_of(pool).await?));
     };
-    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    let searcher = picked(
+        crate::commands::search::searcher(pool, registry).await?,
+        picker,
+    );
     let vocabulary = searcher.vocabulary().await?;
     let only = searcher
         .matching_ids_in(&vocabulary, query, "ticket")
@@ -249,13 +348,39 @@ pub async fn saved_view_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    saved_view_board_paged(pool, registry, view, per_column, query, lanes, None, None).await
+}
+
+/// [`saved_view_board_laned`] past its first cards (ux18): see
+/// [`mini_board`]'s `page`. A column's page is cut in the source's order, as
+/// its first cards are; the list sorted by a header is read through the
+/// cards statement over the view's tickets, which sorts it as it sorts any
+/// board's.
+///
+/// `picker` reads a key typed with a space or none in `query` as the key
+/// (ux25); `None` reads none.
+///
+/// # Errors
+///
+/// See [`saved_view_board`].
+#[allow(clippy::too_many_arguments)]
+pub async fn saved_view_board_paged(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    view: &str,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+    page: Option<&knobas_core::mini_board::Page>,
+    picker: Option<&knobas_search::picker::Picker>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Some(layout) = crate::ticket_views::saved_view_layout(pool, view).await? else {
         return Err(IpcError::not_found(format!(
             "no Jira view is called {view}"
         )));
     };
     let mut only = layout.members.clone();
-    let (matched, identity) = tickets_matching(pool, registry, query).await?;
+    let (matched, identity) = tickets_matching(pool, registry, query, picker).await?;
     if let Some(matched) = matched {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
         only.retain(|id| matched.contains(id));
@@ -268,6 +393,64 @@ pub async fn saved_view_board_laned(
         lanes.map(|lanes| lanes.by),
     )
     .await?;
+    if let Some(page) = page.filter(|page| page.sort.is_some()) {
+        // The tickets the view's columns draw, a status on none left out as
+        // the board leaves it, sorted by the cards statement.
+        let drawn: Vec<String> = layout
+            .arrange(statuses.columns, placed_id, None)
+            .into_iter()
+            .flat_map(|(_, tickets, _)| tickets.into_iter().map(|ticket| ticket.entity_id))
+            .collect();
+        return Ok(knobas_core::mini_board::read_scoped(
+            pool,
+            knobas_core::mini_board::Scope {
+                only: Some(&drawn),
+                identity: &identity,
+                page: Some(page),
+                ..knobas_core::mini_board::Scope::default()
+            },
+            &declarations,
+            per_column,
+        )
+        .await?);
+    }
+    if let Some(page) = page {
+        let arranged = paged(
+            layout.arrange(statuses.columns, placed_id, None),
+            page,
+            per_column,
+        );
+        let mut board = read_kept(
+            pool,
+            arranged.clone(),
+            &statuses.sources,
+            &identity,
+            &declarations,
+        )
+        .await?;
+        if let Some(lanes) = lanes {
+            // The page's one lane, its cells the cards the page kept.
+            let (kept, _) = knobas_core::mini_board::lanes_of(
+                arranged
+                    .iter()
+                    .map(|(status, tickets, _)| (status, tickets.as_slice())),
+                |ticket| {
+                    (
+                        ticket.entity_id.as_str(),
+                        ticket.lane.as_str(),
+                        ticket.updated_at,
+                    )
+                },
+                knobas_core::mini_board::Lanes {
+                    by: lanes.by,
+                    first: None,
+                },
+                None,
+            );
+            board.lanes = kept;
+        }
+        return Ok(board);
+    }
     let Some(lanes) = lanes else {
         let arranged = layout.arrange(statuses.columns, placed_id, per_column);
         return read_kept(pool, arranged, &statuses.sources, &identity, &declarations).await;
@@ -304,6 +487,37 @@ pub async fn saved_view_board_laned(
     Ok(board)
 }
 
+/// A saved view's columns, already in the source's order, cut to `page`
+/// (ux18): only the columns it names and the lane it names, each past the
+/// `after` cards it passes over and then `per_column` of them. The columns
+/// it names are one column to the page, ranked in the source's order, as a
+/// gathered column of a view of your own is ranked by date.
+fn paged(
+    arranged: Vec<(Option<String>, Vec<knobas_core::mini_board::Placed>, u32)>,
+    page: &knobas_core::mini_board::Page,
+    per_column: Option<u32>,
+) -> Vec<(Option<String>, Vec<knobas_core::mini_board::Placed>, u32)> {
+    let after = page.after as usize;
+    let take = per_column.map_or(usize::MAX, |cap| cap as usize);
+    arranged
+        .into_iter()
+        .filter(|(status, _, _)| {
+            page.statuses
+                .as_ref()
+                .is_none_or(|statuses| statuses.contains(status))
+        })
+        .map(|(status, tickets, total)| {
+            let tickets = tickets
+                .into_iter()
+                .filter(|ticket| page.lane.as_ref().is_none_or(|lane| &ticket.lane == lane))
+                .skip(after)
+                .take(take)
+                .collect();
+            (status, tickets, total)
+        })
+        .collect()
+}
+
 /// A placed ticket's id, which a saved view's order ranks it by.
 fn placed_id(ticket: &knobas_core::mini_board::Placed) -> &str {
     &ticket.entity_id
@@ -333,6 +547,7 @@ fn unlaned(
         sources,
         lanes: Vec::new(),
         more_lanes: 0,
+        order: None,
     }
 }
 

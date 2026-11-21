@@ -3,7 +3,7 @@
  * path is missing or empty says its kind's word, never a wrong place.
  */
 import { describe, expect, it } from "vitest";
-import { cellsOf } from "./cells";
+import { cellsOf, cutAtName, cutLead, whyOf } from "./cells";
 
 const of = (kind: string, path: string | null, title = "Retry payouts") =>
   cellsOf({ kind, entity_id: `src:${kind}:1`, title, path }, "Pull request");
@@ -37,6 +37,13 @@ describe("cellsOf reads the engine's key cell first (#2452)", () => {
     expect(withCell(kind, "http", "Handbook › Payments")).toEqual({ cell: "http", mono: false, title: "owner/name" });
   });
 
+  it("a pull request's title starts with its number, read off its id (F-654)", () => {
+    const row = { kind: "pr", entity_id: "gitea:tidewater/payout-service#142", title: "Backoff" };
+    expect(cellsOf({ ...row, path: "tidewater/payout-service", cell: "payout-service" }, "Pull request")).toEqual({ cell: "payout-service", mono: false, title: "#142 Backoff" });
+    expect(cellsOf({ ...row, path: "tidewater/payout-service" }, "Pull request").title).toBe("#142 Backoff");
+    expect(cellsOf({ ...row, entity_id: "gitea:tidewater/payout-service", path: null }, "Pull request").title).toBe("Backoff");
+  });
+
   it("a ticket keeps its key and a repository its owner", () => {
     expect(withCell("ticket", "http")).toEqual({ cell: "PAY-7", mono: true, title: "owner/name" });
     expect(withCell("repo", "http")).toEqual({ cell: "owner", mono: false, title: "name" });
@@ -44,5 +51,127 @@ describe("cellsOf reads the engine's key cell first (#2452)", () => {
 
   it("an empty cell falls back to the path line", () => {
     expect(withCell("page", "", "Engineering › Payments").cell).toBe("Engineering");
+  });
+});
+
+describe("whyOf, the evidence line (D10)", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+  const hit = (place: string | null, segments = [seg("The "), seg("payout", true), seg(" retried.")], marks: number[] = []) => ({
+    excerpts: [{ place, segments }, { place: "Comment by Priya", segments: [seg("other")] }],
+    marks,
+  });
+
+  it("quotes the first excerpt under its place", () => {
+    for (const place of ["Description", "Comment by Jonas Becker", "Backoff policy"]) {
+      const why = whyOf(hit(place))!;
+      expect(why.place).toBe(place);
+      expect(why.segments).toEqual([seg("The "), seg("payout", true), seg(" retried.")]);
+      expect(why.code).toBe(false);
+      expect(why.count).toBeNull();
+    }
+  });
+
+  it("names no place where the passage says it itself", () => {
+    expect(whyOf(hit(null))!.place).toBeNull();
+    expect(whyOf(hit("Heading"))!.place).toBeNull();
+  });
+
+  it("draws a log's line in the mono face under its number", () => {
+    const why = whyOf(hit("Log line 212"))!;
+    expect(why.place).toBe("Log line 212");
+    expect(why.code).toBe(true);
+  });
+
+  it("is null for a row with marks, and for one with no excerpt", () => {
+    expect(whyOf(hit("Description", undefined, [0, 3]))).toBeNull();
+    expect(whyOf({ excerpts: [] })).toBeNull();
+    expect(whyOf({ excerpts: [], marks: [] })).toBeNull();
+  });
+
+  it("is null where the key cell holds every quoted word: the key is its own reason (D9, row 18)", () => {
+    const keyed = { excerpts: [{ place: "Description", segments: [seg("Blocked by "), seg("PAY-231", true), seg(".")] }] };
+    expect(whyOf(keyed, "PAY-231")).toBeNull();
+    expect(whyOf(keyed, "PAY-232")).not.toBeNull();
+    expect(whyOf(keyed)).not.toBeNull();
+  });
+
+  it("keeps the excerpt it quotes, for opening at it", () => {
+    const h = hit("Description");
+    expect(whyOf(h)!.excerpt).toBe(h.excerpts[0]);
+  });
+});
+
+describe("cutLead", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+
+  it("leaves a lead of 18 characters and less, and a passage that opens on a mark", () => {
+    expect(cutLead([seg("eighteen chars ok "), seg("x", true)])).toEqual([seg("eighteen chars ok "), seg("x", true)]);
+    expect(cutLead([seg("x", true), seg(" ".repeat(40))])).toEqual([seg("x", true), seg(" ".repeat(40))]);
+  });
+
+  it("cuts a longer lead to an ellipsis and its last 16 characters, from a word's start", () => {
+    const cut = cutLead([seg("The certificate on the old directory host "), seg("adproxy", true), seg("-01 expires")]);
+    expect(cut[0]).toEqual(seg("…directory host "));
+    expect(Array.from(cut[0]!.text).length).toBeLessThanOrEqual(17);
+    expect(cut.slice(1)).toEqual([seg("adproxy", true), seg("-01 expires")]);
+  });
+
+  it("starts at a word inside the kept 16, never mid-word", () => {
+    const cut = cutLead([seg("aaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbb cc "), seg("x", true)]);
+    expect(cut[0]!.text).toBe("…cc ");
+  });
+
+  it("keeps the last 16 as they are where no word starts in them", () => {
+    const cut = cutLead([seg("a".repeat(40)), seg("x", true)]);
+    expect(cut[0]!.text).toBe(`…${"a".repeat(16)}`);
+  });
+});
+
+describe("whyOf for a repository its files found (D10)", () => {
+  const seg = (text: string, hit = false) => ({ text, hit });
+  const line = {
+    place: "src/main/java/com/acme/adproxy/ADProxyServer.java:7",
+    segments: [seg("public final class "), seg("ADProxy", true), seg("Server {")],
+    file: { path: "src/main/java/com/acme/adproxy/ADProxyServer.java", line: 7, before: "", after: "" },
+  };
+  const named = {
+    place: null,
+    segments: [seg("charts/"), seg("ad-proxy", true), seg("/values.yaml")],
+    file: { path: "charts/ad-proxy/values.yaml", line: null, before: "", after: "" },
+  };
+
+  it("names the file and its line, quotes the line in mono, and closes with the files by text", () => {
+    const why = whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" } })!;
+    expect(why.place).toBe("ADProxyServer.java:7");
+    expect(why.code).toBe(true);
+    expect(why.count).toBe("4 files");
+    expect(why.segments.find((s) => s.hit)!.text).toBe("ADProxy");
+    expect(whyOf({ excerpts: [line], files: { by_text: 1, by_name: 0, branch: "main" } })!.count).toBe("1 file");
+  });
+
+  it("draws a file its name found as its path, marked, and the files by name", () => {
+    const why = whyOf({ excerpts: [named], files: { by_text: 0, by_name: 3, branch: "main" } })!;
+    expect(why.place).toBeNull();
+    expect(why.segments.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("")).toBe("charts/[ad-proxy]/values.yaml");
+    expect(why.count).toBe("3 file names");
+    // Cut as `TfPath` cuts a path: the folders give way, the file's name stays whole (long-paths.mjs).
+    const flat = (segs: { text: string; hit: boolean }[]) => segs.map((s) => (s.hit ? `[${s.text}]` : s.text)).join("");
+    expect(flat(why.path!.head)).toBe("charts/[ad-proxy]/");
+    expect(flat(why.path!.tail)).toBe("values.yaml");
+  });
+
+  it("cuts a mark that runs over the last slash into the folders and the name", () => {
+    const cut = cutAtName([{ text: "src/", hit: false }, { text: "retry/Retry", hit: true }, { text: "Queue.java", hit: false }]);
+    expect(cut.head).toEqual([{ text: "src/", hit: false }, { text: "retry/", hit: true }]);
+    expect(cut.tail).toEqual([{ text: "Retry", hit: true }, { text: "Queue.java", hit: false }]);
+    expect(cutAtName([{ text: "README.md", hit: false }])).toEqual({ head: [], tail: [{ text: "README.md", hit: false }] });
+  });
+
+  it("has no path on a line its text found", () => {
+    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" } })!.path).toBeNull();
+  });
+
+  it("is no line where the repository's name explains it", () => {
+    expect(whyOf({ excerpts: [line], files: { by_text: 4, by_name: 3, branch: "main" }, marks: [0, 3] })).toBeNull();
   });
 });

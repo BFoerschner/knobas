@@ -9,6 +9,9 @@ import type { AssetProperty, AssetRow, DependsOnRow, PropertyValue } from "../..
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { SYNCED_AT } from "./corpus";
+// The roster is derived from this file's estate, and an asset's monitoring from the roster: called, never at load, so the
+// two modules may name each other (the asset-tree shots, 2026-11-19).
+import { fakeMonitorRoster } from "./monitors";
 
 // -- the estate -------------------------------------------------------------
 
@@ -684,16 +687,38 @@ function deleteAsset(args: Record<string, unknown>) {
  * One asset as a column row -- everything but its properties and its path,
  * plus the rollup `assets::ROLLUP` computes (#431).
  */
+/**
+ * The monitors watching `asset`, from the roster the Monitors tab draws: one statement on both pages, so an asset whose
+ * monitor is down on Monitors is down here too (the asset-tree shots, 2026-11-19: knobas-jira read *Health None* and
+ * "not in Kuma yet" beside a roster that had jira down watching it).
+ */
+function watchingOf(asset: FixtureAsset, roster: ReturnType<typeof fakeMonitorRoster>) {
+  return roster.filter((row) => row.assets.some((watched) => watched.id === asset.id));
+}
+
+/** A roster state as the health it gives an asset: a paused monitor gives none, as `AssetRow::health` says. */
+function monitorHealth(row: ReturnType<typeof fakeMonitorRoster>[number]): FixtureAsset["status"] {
+  if (row.tombstoned) return "none";
+  return row.state === "down" ? "down" : row.state === "warn" ? "warn" : row.state === "up" ? "up" : "none";
+}
+
+/** An asset's own two, as the backend rates it: its own status and the monitors attached to it. */
+function ownTwo(asset: FixtureAsset, roster: ReturnType<typeof fakeMonitorRoster>): FixtureAsset["status"] {
+  return worst([asset.status, ...watchingOf(asset, roster).map(monitorHealth)]);
+}
+
 function assetRow(asset: FixtureAsset): AssetRow {
   const { properties: _properties, ...row } = asset;
   const under = descendants(asset);
-  const inside = worst(under.map((held) => held.status));
+  const roster = fakeMonitorRoster(false);
+  const rated = under.map((held) => ownTwo(held, roster));
+  const inside = worst(rated);
   return {
     ...row,
     has_children: heldBy(asset.id).length > 0,
-    health: worst([asset.status, inside]),
+    health: worst([ownTwo(asset, roster), inside]),
     inside,
-    problems_inside: under.filter((held) => PROBLEM.includes(held.status)).length,
+    problems_inside: rated.filter((status) => PROBLEM.includes(status)).length,
     // Zero for the same reason `links` below is empty: no link graph here, so
     // no asset is linked to any work and no row carries the badge (#435).
     linked_work: 0,
@@ -798,11 +823,16 @@ function assetDetail(args: Record<string, unknown>) {
     // the pane reads `detail.monitors.length`, so a fixture short of the key
     // throws on the pane of every asset rather than drawing nothing.
     monitors: asset.monitors,
-    // Nothing is *attached*, and that is the honest answer: an attachment is a
-    // `monitored-by` link to a mirrored monitor, this fixture has no link
-    // graph and no mirror, so every name the file gave is still a name (#445).
-    // The pane therefore draws the waiting list and no *Monitoring* section.
-    monitoring: [],
+    // What is *attached*: the roster's monitors that watch this asset, the ones
+    // the poll resolved the file's names to, as `knobas_sync::attach` would
+    // (#445). A name with no monitor of that name in the roster still waits.
+    monitoring: watchingOf(asset, fakeMonitorRoster(false)).map((row) => ({
+      entity_id: row.entity_id,
+      name: row.name,
+      state: row.state,
+      web_url: row.web_url,
+      tombstoned: row.tombstoned,
+    })),
     // **One target**, so `?fake-ipc` can walk *Create monitor for this asset*
     // (#453). The fixture's Uptime Kuma is the one a reader configured with an
     // account -- the absent direction has its own witness in
@@ -1064,7 +1094,7 @@ export function handlers(): Handlers {
     // here stays that way for as long as the page lives, so the whole create /
     // edit / move walk can be driven in a browser. Nothing is persisted --
     // reload and the estate is the fixture again.
-    asset_tree: fresh((args) => assetColumn(args)),
+    asset_tree: fresh((args) => ((new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes("assets") ? [] : assetColumn(args))),
     get_asset: fresh((args) => assetDetail(args)),
     asset_types: () => ASSET_TYPES,
     create_asset: fresh((args) => createAsset(args)),

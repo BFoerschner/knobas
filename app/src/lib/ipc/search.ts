@@ -6,17 +6,21 @@
  * Rust doc comment and nowhere else. The `invoke` functions and
  * {@link noFilters} stay hand-written.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type { EntityRow } from "./generated/entity";
 import type {
+  EverythingMatches,
   FavouriteTarget,
   FilterSuggestions,
+  FuzzyRanked,
   Keys,
   LauncherHome,
   QueryTranslation,
   SearchFilters,
   SearchQuery,
   SearchResponse,
+  SearchSettings,
+  FilesInRepo,
   SmartListSummary,
   TicketView,
   TicketViewDraft,
@@ -24,7 +28,14 @@ import type {
 } from "./generated/search";
 
 export type {
+  EverythingMatches,
+  FileAt,
+  FilesFound,
+  FilesInRepo,
+  FilesProgress,
+  SearchSettings,
   ActionKey,
+  FuzzyRanked,
   CardField,
   FavouriteTarget,
   FieldSuggestion,
@@ -68,6 +79,31 @@ export type {
 /** No filters — what the box sends until the chips exist. */
 export function noFilters(): SearchFilters {
   return { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] };
+}
+
+/** Settings › Search (the everything-search decisions, D13): what *Everything* matches, and what each box covers. */
+export function searchSettings(): Promise<SearchSettings> {
+  return invoke<SearchSettings>("search_settings");
+}
+
+/** Store what *Everything* matches; answers the page as it now stands. */
+export function setSearchEverything(matches: EverythingMatches): Promise<SearchSettings> {
+  return invoke<SearchSettings>("set_search_everything", { matches });
+}
+
+/** The files of `repository` the box's words find (D11): what the pane lists under the answer's first. */
+export function searchFiles(repository: string, raw: string): Promise<FilesInRepo> {
+  return invoke<FilesInRepo>("search_files", { repository, raw });
+}
+
+/** Store *Keep at most*, the file text kept in MB, `0` for none (D13); answers the page. */
+export function setSearchFilesKept(mb: number): Promise<SearchSettings> {
+  return invoke<SearchSettings>("set_search_files_kept", { mb });
+}
+
+/** *Read every repository again* (D13): the next files pass reads every repository whole. */
+export function rereadFiles(): Promise<SearchSettings> {
+  return invoke<SearchSettings>("reread_files");
 }
 
 /** Answer one launcher query. */
@@ -188,4 +224,16 @@ export function saveTicketView(view: TicketViewDraft): Promise<TicketView> {
 /** Delete a ticket view; *Undo* saves it back. */
 export function deleteTicketView(id: string): Promise<void> {
   return invoke<void>("delete_ticket_view", { id });
+}
+
+// ---- the page filters' ranking (the fuzzy-search pass, 2026-11-19) -------------
+
+/**
+ * A list a page holds, ranked by what was typed with the launcher's rules for
+ * names, best first: each row's index in `haystacks`, whether it is held by its
+ * letters in order, and its matched letters as pairs of start and end in UTF-16
+ * code units. Code's repositories and Docs' spaces draw their rows in this order.
+ */
+export function fuzzyRank(text: string, haystacks: readonly string[]): Promise<FuzzyRanked[]> {
+  return invoke<FuzzyRanked[]>("fuzzy_rank", { text, haystacks });
 }

@@ -15,10 +15,15 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
+import { JAR_FILES, jarSize } from "../jar";
+import { ASCII_AFTER, asciiArt } from "../../fake-ascii";
+import type { BranchPull, DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
-import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
+import { ago, agoStamp } from "../../../time";
+import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
+import { ITEMS_YAML, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
+import { fakePage } from "../folder-render";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -418,6 +423,22 @@ const BINARY: Record<string, () => Uint8Array> = {
   "docs/scan.pdf": SCAN_PDF,
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
+/**
+ * `?fake-openapi` (ux18): a spec of the pet store, one with refs into other files, and one of 5,000 operations. Built
+ * once, when first asked: constants, so nothing here goes back to a seed.
+ */
+const openapiFiles: () => Record<string, string> = (() => {
+  let specs: Record<string, string> | null = null;
+  return () =>
+    (specs ??= {
+      "api/openapi.yaml": PETS_30_YAML,
+      "api/split.yaml": SPLIT_31_YAML,
+      "api/schemas/order.yaml": ORDER_YAML,
+      "api/paths/items.yaml": ITEMS_YAML,
+      "api/big.yaml": bigSpec(5000),
+    });
+})();
+
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
@@ -435,6 +456,14 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-pipeline") ? Object.fromEntries(Object.keys(WRAPPED).map((path) => [path, ""])) : {}),
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
+      ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      // `?fake-ascii` (2026-11-21): ASCII art, box drawing and arrows, for the code face (`../../fake-ascii.ts`).
+      ...(asciiArt() ? { "docs/states.txt": ASCII_AFTER } : {}),
+      // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
+      ...(query.has("fake-jar") ? Object.fromEntries(Object.keys(JAR_FILES).map((path) => [path, ""])) : {}),
+      // `?fake-render-page=<words>` (2026-11-17): a long page the saved *Cat* renderer draws as HTML, shaped by the words
+      // as a folder renderer's `page` is (`fakePage`: `hidden`, `vh`, `wide`, `fixed`, `inner`).
+      ...(query.has("fake-render-page") ? { "docs/report.cat.html": fakePage("docs/report.cat.html", `page ${query.get("fake-render-page") ?? ""}`) } : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;
@@ -466,7 +495,7 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
     if (!path.startsWith(prefix)) continue;
     const rest = path.slice(prefix.length);
     if (rest.includes("/")) dirs.add(rest.slice(0, rest.indexOf("/")));
-    else entries.push({ name: rest, kind: "file", size: binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
+    else entries.push({ name: rest, kind: "file", size: jarSize(path) ?? binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
   }
   return [
     ...[...dirs].sort().map((name): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${prefix}${name}` })),
@@ -474,12 +503,11 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
   ];
 }
 
-const age = (at: string) => {
-  const days = Math.max(0, Math.round((Date.parse("2026-08-22T14:30:00Z") - Date.parse(at)) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
-};
+/** An age in the words the adapters write (`knobas_source::view::ago`), against the fixture's clock: an ISO date past a day, which the read turns into words. */
+const age = (at: string) => (agoStamp(at, new Date(SYNCED_AT)) ?? ago(at, new Date(SYNCED_AT)));
 
-function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
+/** A commit row, the same in every list, as the adapter's `commit_row` is. */
+export function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
   return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null, author };
 }
 
@@ -523,6 +551,26 @@ const PAYOUT_BRANCHES: {
   { name: "chore/bump-tokio", ahead: 0, behind: 6, pr: null, tip: ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-17T10:15:00Z"] },
 ];
 
+/**
+ * `?fake-branch-pulls` (the compare-first-open pass, 2026-11-20): the mirror's `repo_branch_pulls` of `payout-service`,
+ * from the branches above, as the real mirror answers it: each branch with its tip and the pull request open from it. By
+ * default the fixture's mirror lists none, so the header reads each branch's view; Compare pressed before its standing
+ * lands then draws *New pull request* over a branch whose standing says a pull request is open.
+ */
+export function payoutBranchPulls(repoId: string): BranchPull[] {
+  if (repoId !== PAYOUT) return [];
+  return [
+    { entity_id: `${PAYOUT}@refs/heads/main`, name: "main", tip: "5d77e1a2c3b4", is_default: true, pull: null },
+    ...PAYOUT_BRANCHES.map(({ name, pr, tip }) => ({
+      entity_id: `${PAYOUT}@refs/heads/${name}`,
+      name,
+      tip: tip[0],
+      is_default: false,
+      pull: pr === null ? null : { branch: name, entity_id: pr, cell: `#${pr.slice(pr.lastIndexOf("#") + 1)}` },
+    })),
+  ];
+}
+
 // `code_facts` for the branches above and `main` (#986): the mirror holds every
 // branch, its author its tip's.
 CODE_FACTS.push((ids) =>
@@ -531,6 +579,13 @@ CODE_FACTS.push((ids) =>
     ...PAYOUT_BRANCHES.map(({ name, tip }) => ({ name, author: tip[2] })),
   ]
     .map(({ name, author }) => ({ entity_id: `${PAYOUT}@refs/heads/${name}`, author }))
+    .filter(({ entity_id }) => ids.has(entity_id))
+    .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
+);
+
+// The branch's commits, whose author the mirror holds as the adapter's rows name it.
+CODE_FACTS.push((ids) =>
+  PAYOUT_COMMITS.map(([sha, , author]) => ({ entity_id: payoutCommitId(sha), author }))
     .filter(({ entity_id }) => ids.has(entity_id))
     .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
 );
@@ -642,6 +697,11 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
       { type: "file", trail: [], path, text: "", language: null, size: wrapped.size, truncated: false, binary: true, url: null, sha: blobOf(wrapped.inner), commit: ref },
     ]);
   }
+  const jar = jarSize(path);
+  if (jar !== undefined)
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: jar, truncated: false, binary: true, url: null, sha: blobOf(path), commit: ref },
+    ]);
   const bytes = binaryOf(path)?.();
   if (bytes !== undefined)
     return section(id, "Files", [
@@ -679,6 +739,9 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
+    // A text side as bytes, as the app reads every rendered side (the stage pass, 2026-11-20).
+    const text = renderedDiffSide(commitAt, path);
+    if (typeof text === "string") return new TextEncoder().encode(text);
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
   }
   const branchAt = entityId.indexOf("@refs/heads/");
@@ -782,8 +845,15 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
       sides.set(path, [sides.get(path)?.[0] ?? before, after]);
     }
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
-    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest.
-    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits: [] };
+    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest; and the
+    // commits it carries, newest first, as Gitea's compare lists them (2026-11-13: Compare draws them from the default branch).
+    // A head named by another branch than the job's lists that branch's own commits, as its view does: Compare draws the
+    // compare's commits wherever it lists them (the compare pass, 2026-11-13).
+    const other = at(head) === -1 && head !== FEATURE_NAME ? (PAYOUT_BRANCHES.find((b) => b.name === head) ?? BULK_BRANCHES.find((b) => b.name === head)) : undefined;
+    const listed: (readonly [string, string, string, string])[] =
+      other !== undefined ? (other.ahead === 0 ? [] : [other.tip]) : PAYOUT_COMMITS.slice(newest, oldest + 1).map(([sha, subject, author, at]) => [sha, subject, author, at] as const);
+    const commits = listed.map(([sha, subject, author, at]) => ({ sha, title: subject, meta: `${author} · ${age(at)}` }));
+    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits };
     return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
   }
   // A file whole at one of the branch's commits or main's tip (#2310): `file@<sha>:<path>`.
@@ -798,7 +868,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   }
   if (sectionId === "branches") {
     const rows: ViewRow[] = [
-      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
+      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 2026-08-21", tone: "muted", chip: "default", url: null },
       ...(repoId === PAYOUT
         ? [...PAYOUT_BRANCHES, ...BULK_BRANCHES].map(({ name, tip }) => ({
             entity_id: `${PAYOUT}@refs/heads/${name}`,

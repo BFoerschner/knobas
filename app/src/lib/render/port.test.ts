@@ -3,9 +3,9 @@
  * worker, and D2 in a frame held as one (#2381), started on the first such
  * diagram, never before, and each answer reaches the request it belongs to.
  */
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
-import { frameWorker, workerDiagram, type DiagramMessage, type DiagramReply, type Palette } from "./port";
+import { frameWorker, lateBy, workerDiagram, type DiagramMessage, type DiagramReply, type Palette } from "./port";
 
 const PALETTE: Palette = {
   dark: false, paper: "#E4E8EC", sheet: "#F7F8F9", sheet2: "#EEF1F4", ink: "#17212B", ink2: "#4B5663",
@@ -41,6 +41,29 @@ function heldWorker() {
     fail: (message: string) => listeners.error?.forEach((l) => l({ message })),
   };
 }
+
+test("the fixture's late diagrams are asked of the engine that much later, and at once where it names no delay (#2510)", async () => {
+  vi.useFakeTimers();
+  try {
+    let late = 0;
+    const asked: string[] = [];
+    const draw = lateBy(async (request) => {
+      asked.push(request.code);
+      return { svg: `<svg>${request.code}</svg>` };
+    }, () => late);
+    void draw({ engine: "mermaid", code: "a", palette: PALETTE });
+    expect(asked).toEqual(["a"]);
+    late = 900;
+    const answer = draw({ engine: "mermaid", code: "b", palette: PALETTE });
+    await vi.advanceTimersByTimeAsync(899);
+    expect(asked).toEqual(["a"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(["a", "b"]);
+    expect(await answer).toEqual({ svg: "<svg>b</svg>" });
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("the worker starts on the first diagram, once, and each answer settles its own request", async () => {
   const held = heldWorker();
@@ -112,7 +135,7 @@ test("D2's frame is hidden and sandboxed to scripts alone, and holds what is sen
 test("a D2 frame that never says hello fails as a worker does", async () => {
   const { worker, frame } = framed(20);
   const failed = new Promise<string>((resolve) => worker.addEventListener("error", (event) => resolve((event as ErrorEvent).message)));
-  expect(await failed).toBe("D2's frame did not load within 0.02 s.");
+  expect(await failed).toBe("D2's frame did not load within 0.02s.");
   worker.terminate();
   expect(frame.isConnected).toBe(false);
 });

@@ -7,10 +7,13 @@ import { describe, expect, test } from "vitest";
 
 import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset } from "../../ipc/assets";
 import { jobIndex } from "../job/open-jobs";
+import { stateWord } from "../state-word";
 import {
+  assetFor,
+  stripPaint,
   stateChip,
   gaps,
-  hiddenFoldOpen,
+  keepDrawn,
   kindWord,
   prefill,
   routePrefill,
@@ -18,6 +21,7 @@ import {
   segments,
   sorted,
   uptimeText,
+  STATE_CHIPS,
   visibleMonitors,
   type KeptMonitors,
 } from "./monitors";
@@ -46,6 +50,8 @@ function row(over: Partial<MonitorRow>): MonitorRow {
     actions: ["pause_monitor"],
     refreshes: true,
     samples: [],
+    bar: "u".repeat(48),
+    down_since: null,
     ...over,
   };
 }
@@ -69,35 +75,30 @@ describe("the order", () => {
 });
 
 describe("the state chip", () => {
-  test("says since when a monitor is down, from its samples", () => {
-    const down = row({
-      state: "down",
-      samples: [sample(90, "up"), sample(60, "down"), sample(30, "down"), sample(1, "down")],
-    });
+  test("says since when a monitor is down, as the backend read it", () => {
+    const down = row({ state: "down", down_since: sample(60, "down").taken_at });
     const chip = stateChip(down, new Date(NOW));
     expect(chip.tone).toBe("err");
-    expect(chip.label).toMatch(/^down since \d\d:\d\d$/);
+    expect(chip.label).toBe("down");
+    expect(chip.since).toMatch(/^since \d\d:\d\d$/);
     const at = new Date(NOW - 60 * 60_000);
     const pad = (n: number) => String(n).padStart(2, "0");
-    expect(chip.label).toBe(`down since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
+    expect(chip.since).toBe(`since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
   });
 
   test("keeps the day on a monitor down since before today (#1986)", () => {
-    const at = (day: number) => ({ taken_at: new Date(2026, 9, day, 12, 40).toISOString(), state: "down" });
+    const at = (day: number) => new Date(2026, 9, day, 12, 40).toISOString();
     const now = new Date(2026, 9, 16, 9, 0);
-    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).label).toBe("down since yesterday 12:40");
-    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).label).toBe("down since 2026-10-12 12:40");
+    expect(stateChip(row({ state: "down", down_since: at(15) }), now).since).toBe("since yesterday 12:40");
+    expect(stateChip(row({ state: "down", down_since: at(12) }), now).since).toBe("since Mon 12:40");
   });
 
   test("says down alone when no sample says since when", () => {
     expect(stateChip(row({ state: "down" }))).toEqual({ label: "down", tone: "err" });
   });
 
-  test("says slow with the response on a warning", () => {
-    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({
-      label: "slow, 8\u00a0400 ms",
-      tone: "warn",
-    });
+  test("says slow on a warning with a response, whose time is the row's Response", () => {
+    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({ label: "slow", tone: "warn" });
   });
 
   test("says paused for a tombstone whatever its last reading", () => {
@@ -137,16 +138,18 @@ describe("the columns", () => {
 });
 
 describe("the bar", () => {
-  test("is 48 half-hours, the worst reading in each, a gap where there was none", () => {
-    const bar = segments(row({ samples: [sample(10, "down"), sample(20, "up"), sample(45, "warn")] }), NOW);
+  test("is the backend's 48 half-hours, a letter each, oldest first; a short or strange one is a gap", () => {
+    const bar = segments(row({ bar: `${"-".repeat(44)}umwd` }));
     expect(bar).toHaveLength(48);
-    expect(bar[47]).toBe("down");
-    expect(bar[46]).toBe("warn");
+    expect(bar.slice(44)).toEqual(["up", "paused", "warn", "down"]);
     expect(bar[0]).toBe("gap");
+    // Fewer letters are the newest half-hours: what is missing is older, and a letter no state has is no reading.
+    expect(segments(row({ bar: "dx" })).slice(45)).toEqual(["gap", "down", "gap"]);
+    expect(segments(row({ bar: "p" }))[47]).toBe("paused");
   });
 
   test("is all paused for a paused monitor", () => {
-    expect(new Set(segments(row({ tombstoned: true, samples: [sample(10, "up")] }), NOW))).toEqual(new Set(["paused"]));
+    expect(new Set(segments(row({ tombstoned: true, bar: "ud".repeat(24) })))).toEqual(new Set(["paused"]));
   });
 });
 
@@ -185,17 +188,6 @@ describe("the filter", () => {
     expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Down"] }, index))).toEqual(["noisy"]);
     expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Up"] }, index))).toEqual([]);
     expect(hiddenNames(visibleMonitors(rows, { ...base, scope: "mine" }, index))).toEqual([]);
-  });
-
-  test("the hidden fold opens by itself only when it holds every match, and otherwise stays as the reader left it", () => {
-    const some = visibleMonitors(rows, base, index);
-    const onlyHidden = visibleMonitors(rows, { ...base, text: "noisy" }, index);
-    const none = visibleMonitors(rows, { ...base, text: "nothing" }, index);
-    expect(hiddenFoldOpen(null, some)).toBe(false);
-    expect(hiddenFoldOpen(null, onlyHidden)).toBe(true);
-    expect(hiddenFoldOpen(null, none)).toBe(false);
-    expect(hiddenFoldOpen(true, some)).toBe(true);
-    expect(hiddenFoldOpen(false, onlyHidden)).toBe(false);
   });
 
   test("the words match the monitor, the asset and the type", () => {
@@ -288,4 +280,79 @@ describe("Create monitor opens with", () => {
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4")]))).toEqual({ name: "vm-pay-01", kind: "ping", target: "10.0.0.4" });
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4"), text("hostname", "vm-pay-01.lan")])).target).toBe("vm-pay-01.lan");
   });
+});
+
+describe("the state pills read what the chips read", () => {
+  const NO_JOBS = jobIndex([]);
+  const states = ["down", "warn", "up", "pending", "maintenance"] as const;
+  test.each(states)("a %s row is kept by the pill its chip names, and by no other", (state) => {
+    const it = row({ state, response_time_ms: state === "warn" ? 8400 : 40 });
+    const word = stateWord(stateChip(it).label);
+    expect(STATE_CHIPS as readonly string[]).toContain(word);
+    for (const pill of STATE_CHIPS) {
+      const kept = visibleMonitors([it], { scope: "all", job: null, states: [pill], type: "", text: "" }, NO_JOBS).shown;
+      expect(kept.length).toBe(pill === word ? 1 : 0);
+    }
+  });
+
+  test("a paused monitor is kept by Paused whatever it last read, and slow needs no response to say so", () => {
+    const paused = row({ state: "up", tombstoned: true });
+    expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "", text: "" }, NO_JOBS).shown).toEqual([paused]);
+    expect(stateChip(row({ state: "warn", response_time_ms: null })).label).toBe("slow");
+  });
+});
+
+test("the strip paints each bar its state's colour, a pixel apart, as one background (PR #2479)", () => {
+  const bars = [
+    { state: "up" as const, at: 0, title: "" },
+    { state: "down" as const, at: 1, title: "" },
+    { state: "gap" as const, at: 2, title: "" },
+  ];
+  const gaps = "repeating-linear-gradient(to right, transparent 0 2px, var(--tf-mon-gap) 2px 3px)";
+  expect(stripPaint(bars, false)).toEqual({
+    image: `${gaps}, linear-gradient(to right, var(--tf-mon-up) 0px 3px, var(--err) 3px 6px, var(--rule-2) 6px 8px)`,
+    width: 8,
+    pitch: 3,
+  });
+  // A run of one state is one stretch of colour, however many bars it holds: a day up is one stop pair.
+  const day = Array.from({ length: 48 }, (_, at) => ({ state: (at < 46 ? "up" : "down") as "up" | "down", at, title: "" }));
+  expect(stripPaint(day, false).image).toBe(`${gaps}, linear-gradient(to right, var(--tf-mon-up) 0px 138px, var(--err) 138px 143px)`);
+  // Narrow, the hourly bars are 3 px.
+  expect(stripPaint(bars.slice(0, 1), true)).toMatchObject({ width: 3, pitch: 4 });
+  expect(stripPaint([], false)).toEqual({ image: "none", width: 0, pitch: 3 });
+  // A hidden monitor's are grey, a down hour a shade darker; the open monitor's are 5 px.
+  expect(stripPaint(bars, false, true).image).toBe(`${gaps}, linear-gradient(to right, var(--rule) 0px 3px, var(--muted) 3px 6px, var(--rule-2) 6px 8px)`);
+  expect(stripPaint(bars, false, false, true)).toMatchObject({ width: 17, pitch: 6 });
+});
+
+describe("a read of the roster again (the monitors-page pass, 2026-11-19)", () => {
+  const a = row({ entity_id: "kuma:a", name: "a" });
+  const b = row({ entity_id: "kuma:b", name: "b", state: "warn", response_time_ms: 900 });
+  test("keeps every row whose drawn parts did not change, the list itself when none did", () => {
+    const before = [a, b];
+    // Every monitor's response moved and it was read a minute later: a's is not drawn, b's is (it is slow).
+    const next = [{ ...a, response_time_ms: 141, checked_at: "2026-10-16T14:00:00Z" }, { ...b, response_time_ms: 901 }];
+    const kept = keepDrawn(before, next);
+    expect(kept[0]).toBe(a);
+    expect(kept[1]).toBe(next[1]);
+    expect(keepDrawn(before, [{ ...a, checked_at: "x" }, { ...b }])).toBe(before);
+  });
+  test("draws again a row whose state, bar, uptime or hiding changed, and takes rows in and out", () => {
+    const changed = [{ ...a, bar: `${"u".repeat(47)}d` }, { ...b, hidden: true }];
+    const kept = keepDrawn([a, b], changed);
+    expect(kept[0]).toBe(changed[0]);
+    expect(kept[1]).toBe(changed[1]);
+    const c = row({ entity_id: "kuma:c", name: "c" });
+    expect(keepDrawn([a, b], [a, c]).map((r) => r.entity_id)).toEqual(["kuma:a", "kuma:c"]);
+    expect(keepDrawn([a, b], [{ ...a, uptime: [{ window: "30d", ratio: 0.5 }] }])[0]).not.toBe(a);
+    expect(keepDrawn(null, [a])).toEqual([a]);
+  });
+});
+
+test("New asset for it starts from the monitor's name and the type its kind of check watches, else a service", () => {
+  expect(assetFor({ name: "gitea", monitor_type: "docker" })).toEqual({ name: "gitea", typeId: "container" });
+  expect(assetFor({ name: "pg", monitor_type: "postgres" })).toEqual({ name: "pg", typeId: "database" });
+  expect(assetFor({ name: "box", monitor_type: "ping" })).toEqual({ name: "box", typeId: "vm" });
+  expect(assetFor({ name: "web", monitor_type: "http" })).toEqual({ name: "web", typeId: "service" });
+  expect(assetFor({ name: "x", monitor_type: null })).toEqual({ name: "x", typeId: "service" });
 });

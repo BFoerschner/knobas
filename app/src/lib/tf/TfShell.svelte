@@ -40,20 +40,24 @@
     commandSteps?: () => Promise<import("../ipc/app").CommandStep[]>;
     /** *Run pipelines on diffs* (#2270), held once the database answers; on without it. */
     diffPipelines?: () => Promise<boolean>;
+    /** Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), held once the database answers; Docs' own page and none hidden without it. */
+    docsChoices?: () => Promise<import("../ipc/entity").DocsChoices>;
   }
 </script>
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, untrack, type Snippet } from "svelte";
+  import { onMount, tick, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
   import { diffPipelines as heldDiffPipelines } from "./diff/diff-pipelines.svelte";
+  import { docsChoices as readDocsChoices } from "../ipc/entity";
+  import { docsChoices as heldDocsChoices } from "./docs/docs-choices.svelte";
   import { rendererDefaults as heldDefaults } from "../render/defaults.svelte";
   import { commandSteps as heldCommandSteps, namedPipelines as heldPipelines } from "../render/pipelines.svelte";
   import { defaultPipeline } from "../render/defaults";
-  import { installPipelines } from "./diff/piped";
+  import { installPipelines, type DiffPipeline } from "./diff/piped";
   import { installCommands } from "../render/command";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -71,15 +75,36 @@
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
-  import { escStep, escTarget, openerName } from "./escape";
+  import { escHolder, escStep, escTarget, escThrough, openerName, windowTitle } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
+  import { catchReenterPress, secretPrompt } from "./settings/secret-prompt.svelte";
+  import TfSecretPromptHost from "./settings/TfSecretPromptHost.svelte";
+  import type { SettingsPorts } from "./settings/ports";
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
-  import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
-  import { provideShownPageName } from "./page-name.svelte";
+  import { runsRead } from "./builds/runs-read.svelte";
+  import { goBackTo, goWithoutOpener, leftName, noteArrival, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
+  import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
-  import { parseTfHash, sectionOf } from "./route";
+  import { onOpenKey } from "./page-open.svelte";
+  import { PAGES } from "./pages";
+  import { capturePlace, pressOpens, resetScrolls, restorePlace, type Place } from "./return-place";
+  import { installRowRoom } from "./row-room";
+  import { installFocusKeep, installKeysHere } from "./focus-keep";
+  import { installInputModality } from "./input-modality";
+  import { loadEveryFace } from "../shell/faces";
+  import { warmDiffView } from "./diff/warm";
+  import { warmDiagrams } from "../render/diagram";
+  import { renderPort } from "../render/port";
+  import { warmDocs } from "./docs/warm";
+  import { openAhead } from "./ahead";
+  import { installFindKey } from "./filter-keys";
+  import { installPlainTyping } from "./plain-typing";
+  import { installExternalLinks } from "../shell/external-links";
+  import { installPressGuard } from "./press-guard";
+  import { PressHold } from "./press-hold.svelte";
+  import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -91,14 +116,30 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
+  import { homeInstead } from "./home";
   import { scopedTicket } from "./job/scoped.svelte";
-  import { cardWidth } from "./job/card-width.svelte";
+  import { sideWidths } from "./side-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
+  import { pipelineHash } from "./builds/builds";
+  import { sessionValue } from "./filter/filter-state.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
+  import TfAck from "./TfAck.svelte";
   import TfToasts from "./TfToasts.svelte";
+  import TfContextMenu from "./context/TfContextMenu.svelte";
   import TfTopBar from "./TfTopBar.svelte";
+  import TfZoomLevel from "./TfZoomLevel.svelte";
+  import { installZoomInput, zoom as sharedZoom, zoomKey, type Zoom } from "./zoom.svelte";
+  import { noteScrolls } from "./scrolled";
+  import { readLandingAtAddress } from "./repo/hover-reads";
+  import { siteAllow, siteDo, siteRevealDownload, siteSettings, sitesKept, siteZoom, type SiteDownload, type SiteKey, type SiteRouted, type SiteStatus } from "../ipc/site";
+  import { siteStore } from "./site/site.svelte";
+  import { closeSite, reloadSite, siteBack, siteForward } from "./site/actions";
+  import TfSiteQuit from "./site/TfSiteQuit.svelte";
+  import { ackBand } from "../shell/ack.svelte";
+  import { openInBrowser } from "../shell/external-links"; // browser on purpose: a site's link to an address it may not show
+  import { openWeb } from "../shell/open-web";
   import "./tf.css";
 
   let {
@@ -122,6 +163,8 @@
       namedPipelines,
       commandSteps,
       diffPipelines,
+      // Named only when called, as `docs-choices.svelte.ts`' own reads are.
+      docsChoices: async () => readDocsChoices(),
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onstarttimer = () => {},
@@ -134,6 +177,8 @@
     nav = { back: () => history.back(), forward: () => history.forward() },
     kept = sharedKeptPages,
     keys = launcherKeys,
+    secretPorts,
+    zoom = sharedZoom,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /**
@@ -177,6 +222,10 @@
     kept?: KeptPagesSetting;
     /** The keys bound (#2429), whose saved lists' chords open search on the list; the window's when omitted. */
     keys?: KeyStore;
+    /** What the credential prompt over a page reads and writes; the bridge's when omitted. */
+    secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
+    /** The window's zoom (`zoom.svelte.ts`): its keys, its wheel, its plate and the status bar's level. */
+    zoom?: Zoom;
   } = $props();
 
   let hash = $state(location.hash);
@@ -187,40 +236,255 @@
    * it was opened from, which `Esc` returns to, and the entry before it. The
    * window's first address was opened by nothing.
    */
-  let here = $state<Opened>({ opener: null, prev: null });
-  history.replaceState(stamped(history.state, { opener: null, prev: null }), "");
+  let here = $state.raw<Opened>({ ...NOT_OPENED, prev: null });
+  history.replaceState(stamped(history.state, { ...NOT_OPENED, prev: null }), "");
 
   /** Put `next` in place of the address the reader is on, without a step back to it; a rooms address opened nothing. */
   function replaceHash(next: string) {
-    here = { opener: null, prev: here.prev };
-    history.replaceState(stamped(history.state, $state.snapshot(here)), "", next);
+    here = { ...NOT_OPENED, prev: here.prev };
+    history.replaceState(stamped(history.state, here), "", next);
     // The state itself, not a `hashchange`: on the first pass the listener (an `onMount`) is not there yet.
     hash = next;
   }
 
+  // ---- the place the reader left (`return-place.ts`) ----
+  let mainEl = $state<HTMLElement>();
+  /** What was last pressed on a page: on the way out, the row that opened the next one. */
+  let pressed: Element | null = null;
+  /** Where each address was left, for the way back to it. */
+  const places = new Map<string, Place>();
+  const PLACES = 60;
+  /** The next address change is the way back: `Esc` or *Back to*. A step through history says so itself. */
+  let stepping = false;
+  /** The address a press on a nav entry is on its way to: a return to the section as it was left, which opens nothing. */
+  let navTo: string | null = null;
+  /**
+   * The run, pull request or repository each section was left on by a nav press, tab included: a press on its row in that
+   * section brings it back. Used once, and any other arrival at an item of the section ends it.
+   */
+  const leftItems: Partial<Record<Section, string>> = {};
+  /** The kept pages drawn so far: one shown for the first time starts at the top, not at the last page's scroll. */
+  const drawnPages = new WeakSet<Element>();
+  /** Ends the return under way when another address comes. */
+  let endReturn: (() => void) | null = null;
+
+  const shownKept = (): Element | null => mainEl?.querySelector(":scope > .tf-kept:not([hidden])") ?? null;
+
+  /** Note where `from` was left, before its page hides. */
+  function notePlace(from: string, to: string) {
+    const page = shownKept();
+    if (!mainEl || page === null) return;
+    places.delete(from);
+    const place = capturePlace(mainEl, page, pressed, to);
+    places.set(from, place);
+    // A run pressed on bare `#/builds`: the entry comes back by the pipeline's own address, and that is this page.
+    const pipeline = from === sectionHash("builds") && place.pressed?.closest("a")?.getAttribute("href") === to ? parentOf(parseTfHash(to)) : null;
+    if (pipeline?.startsWith("#/builds/")) places.set(pipeline, place);
+    if (places.size > PLACES) places.delete(places.keys().next().value!);
+    pressed = null;
+  }
+
+  /** A step to another address of the page `from` was opened from (`#/settings` opened a source, `Esc` goes to `#/settings/sources`): where it was opened. */
+  function openingPlace(from: string, to: string): Place | undefined {
+    return [...places].reverse().find(([left, place]) => place.to === from && samePage(left, to))?.[1];
+  }
+
+  /**
+   * Once `to` is drawn: back to its place on a return, or on a nav press or a row's reopening, which leave focus where it is;
+   * a new place in a kept page, or a page never shown, at the top.
+   */
+  function settlePlace(to: string, from: string, returning: boolean, opening: boolean, left: Element | null, nav: boolean) {
+    endReturn?.();
+    endReturn = null;
+    void tick().then(() => {
+      const page = shownKept();
+      if (!mainEl || page === null || location.hash !== to) return;
+      const first = !drawnPages.has(page);
+      drawnPages.add(page);
+      const place = returning ? (places.get(to) ?? openingPlace(from, to)) : nav ? places.get(to) : undefined;
+      if (place !== undefined) endReturn = restorePlace(place, page, !nav);
+      else if (opening && page === left) resetScrolls(mainEl, page);
+      // Not where the page it came from was left at the top: setting the scroll laid out the new page in the task that
+      // builds it, 17 ms of a quarter-speed main thread on a repository's first open (the ux21 overs pass). `notePlace`
+      // read it as that page was left, laid out then.
+      else if (opening && first && leftAt(from) !== 0) mainEl.scrollTop = 0;
+    });
+  }
+
+  /** Where the shell's scroller stood as `from` was left (`notePlace`), or `null` where that is not known. */
+  function leftAt(from: string): number | null {
+    return places.get(from)?.scrolls.find((one) => one.el === mainEl)?.top ?? null;
+  }
+
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
   const shownPage = provideShownPageName();
+  // The window's name follows the page, and the page's name as it is read (F-015).
+  $effect(() => {
+    document.title = windowTitle(route, shownPage.name);
+  });
+  // A press on *Back to <name>* is the key's own step.
+  provideBackStep((to, opened) => leave(to, opened));
 
   /**
    * The address moved (#2229). An entry already stamped is one history
    * stepped to, or one replaced in place: it keeps its stamp. A new entry is
-   * stamped here, before the page it left is gone: opened by nothing when it
-   * was told so (`goWithoutOpener`), the page's own opener on a tab switch,
-   * otherwise the page it left.
+   * stamped here, before the page it left is gone ({@link stampFor}). Either way
+   * the card row's narrowing is what the entry says.
    */
   function arrive() {
-    const now = location.hash;
+    let now = location.hash;
+    // Two writes before the events are delivered are two events that read one address. The second moved nothing, and
+    // its stamped entry would read as a return, whose hold would then undo the reader's next scroll.
+    if (now === hash) return;
     const how = takeTold(now);
     const had = stampOf(history.state);
+    const left = shownKept();
+    // The page the app first drew was never shown by an address change, and it has been drawn all the same.
+    if (left !== null) drawnPages.add(left);
+    // A plain press on the row of the item this section was left on, and launcher jumps and links from elsewhere never are.
+    const reopen = how === null && had === null ? reopening(now) : null;
+    const nav = navTo === now || reopen !== null;
+    navTo = null;
+    if (how !== "replace") notePlace(hash, now);
+    // In place of the row's address, on the entry the press made, so one press is one step back.
+    if (reopen !== null) {
+      history.replaceState(history.state, "", reopen);
+      now = reopen;
+    }
+    const arrived = parseTfHash(now);
+    if (itemOf(arrived) !== null) delete leftItems[sectionOf(arrived)!];
+    // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
+    const returning = how !== "replace" && (stepping || had !== null);
+    const opening = how !== "replace" && !returning && !samePage(hash, now);
+    noteArrival({ hash: now, how, returning });
+    stepping = false;
     if (how !== "replace" && had !== null) {
       here = had;
     } else {
-      if (how === "unopened") here = { opener: null, prev: hash };
-      else if (how === null && samePage(hash, now)) here = { opener: here.opener, prev: hash };
-      else if (how === null) here = { opener: { hash, name: openerName(route, shownPage.name) }, prev: hash };
-      history.replaceState(stamped(history.state, $state.snapshot(here)), "");
+      if (how !== "replace") here = stampFor(how, now);
+      history.replaceState(stamped(history.state, here), "");
     }
+    if (how !== "replace") scopedTicket.hold(here.trip);
+    const was = hash;
     hash = now;
+    if (how !== "replace") settlePlace(now, was, returning, opening, left, nav);
+  }
+
+  /** The address a press going to `to` reopens, if `to` is the bare address of the item this section was left on. */
+  function reopening(to: string): string | null {
+    const section = sectionOf(route);
+    const left = section === null ? undefined : leftItems[section];
+    return left !== undefined && reopens(left, to) && pressOpens(pressed, to) ? left : null;
+  }
+
+  /**
+   * How a new entry at `now` came to be: opened by nothing when it was told so; the stamp its opener had on an `Esc`
+   * step that couldn't step back; the page's own opener on a tab switch; otherwise the page it left. A press keeps
+   * what a card row narrowed, or takes what the row just narrowed, since a row says so before its address moves.
+   */
+  function stampFor(how: Exclude<Told, "replace"> | null, now: string): Opened {
+    if (how === "unopened") return { ...NOT_OPENED, prev: hash };
+    if (how === "back") return { ...(here.opener?.from ?? NOT_OPENED), prev: hash };
+    if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, visit: isTopPage(parseTfHash(now)), prev: hash };
+    const trip = tripAt(now);
+    if (how === null && samePage(hash, now)) return { opener: here.opener, trip, visit: here.visit, prev: hash };
+    return { opener: openerOf(hash, leftName() ?? openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
+  }
+
+  /** What a press to `now` keeps narrowed: Sub-tasks is the bare list's, so a saved view ends it, as *All tickets* does. */
+  function tripAt(now: string): Trip | null {
+    const to = parseTfHash(now);
+    const trip = scopedTicket.trip;
+    return trip?.section === "tickets" && to.view === "tickets" && to.rest.length > 0 ? null : trip;
+  }
+
+  // ---- section memory: a nav entry returns to the section as you left it (design system, the return contract) ----
+  /** The address of each section's tab or saved view it was last on, outside a card row's narrowing. */
+  const sectionTabs = $state<Partial<Record<Section, string>>>({});
+  const lastPipeline = sessionValue("builds-last-pipeline");
+  $effect(() => {
+    const onRun = route.view === "full" && route.head === "build";
+    // A source's page is not a section of Settings: the cog goes to Sources from there.
+    if (route.view === "full" && route.head === "settings" && route.rest[0] === "source") sectionTabs.settings = "#/settings/sources";
+    const section = onRun ? "builds" : sectionTabOf(route);
+    if (section === null || untrack(() => scopedTicket.section) === section) return;
+    // Builds remembers only a pipeline it holds, so an address it doesn't is nothing to come back to, and a run leads back to its own.
+    if (section === "builds" && route.view === "full" && route.rest[0] !== undefined) {
+      if (route.rest[0] === lastPipeline.value) sectionTabs.builds = onRun ? pipelineHash(route.rest[0]) : hash;
+      return;
+    }
+    // A tab the page does not have is said so, and is nothing to come back to.
+    if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
+    sectionTabs[section] = hash;
+  });
+  /**
+   * The address each section was last stood on, at any depth: a Docs page or space, a ticket, a pull request or a
+   * repository at its tab, a run at its tab, a marked monitor, a link set, a source's page (2026-11-13, Björn: "when i
+   * select a page in docs, then go somewhere else and then return to docs my selected page isn't shown"). Not a card
+   * row's narrowing, not home (`#/job` lights Tickets and is no place in it), not a tab the page does not have, and on
+   * Builds not a pipeline it does not hold.
+   */
+  const sectionPlaces = $state<Partial<Record<Section, string>>>({});
+  $effect(() => {
+    const section = sectionOf(route);
+    if (section === null || route.view === "job" || untrack(() => scopedTicket.section) === section) return;
+    if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
+    if (route.view === "full" && route.head === "builds" && route.rest[0] !== undefined && route.rest[0] !== lastPipeline.value) return;
+    sectionPlaces[section] = hash;
+  });
+  /**
+   * Docs' own page as the entry knows it: a search it was left on, else where Docs opens, its home when one is chosen
+   * (PR #2479, 2026-11-17, `docs-choices.svelte.ts`). With none chosen, that is `#/docs`, as it was.
+   */
+  function docsOwn(): string {
+    const tab = sectionTabs.docs;
+    const at = tab === undefined ? null : parseTfHash(tab);
+    return tab !== undefined && at?.view === "full" && at.rest[0] === "search" ? tab : heldDocsChoices.start;
+  }
+  /**
+   * Where a nav entry goes: from another section, back to where you were in it; inside it, to the section's own page as
+   * it was left (its tab, view, pipeline or search), which a press there moves nothing on.
+   */
+  const navHref = (section: Exclude<Section, "job">) => {
+    const own = section === "docs" ? docsOwn() : (sectionTabs[section] ?? sectionHash(section));
+    return sectionOf(route) === section ? own : (sectionPlaces[section] ?? own);
+  };
+
+  /**
+   * The press rule's hold on an entry that just moved the address (`press-hold.svelte.ts`): a second press of it by a
+   * person, a double click or a second `Enter`, lands on the page it came back to and does nothing, rather than going on
+   * to the section's own page. Only while that page is the one shown: an address moved since makes the next press a new
+   * one. A script's press is no person's and goes through, as the press guard lets it.
+   */
+  const navHold = new PressHold();
+  /** The entry the hold is on, and the address its press went to. */
+  let navHeld: { section: Section; on: string } | null = null;
+
+  /**
+   * A press on a nav entry: the section as it was left, each scroller included, opened by nothing, so `Esc` never jumps from
+   * one section to another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
+   * The cog and `⌘,` return the same way and keep their opener, since `Esc` leaves Settings for the page they were pressed on.
+   * `person` says a person pressed it, whose second press within the hold is the same press.
+   */
+  function onnav(section: Exclude<Section, "job">, target: string, person = false) {
+    const gear = section === "settings";
+    if (person && navHold.held() && navHeld?.section === section && location.hash === navHeld.on) return;
+    if (location.hash === target) {
+      if (gear) return;
+      here = { ...NOT_OPENED, prev: here.prev };
+      history.replaceState(stamped(history.state, here), "");
+      scopedTicket.clear();
+      return;
+    }
+    const from = sectionOf(route);
+    if (from !== null && itemOf(route) !== null) leftItems[from] = location.hash;
+    navTo = target;
+    if (person) {
+      navHold.hold();
+      navHeld = { section, on: target };
+    }
+    if (gear) go(target);
+    else goWithoutOpener(target);
   }
 
   /**
@@ -270,26 +534,38 @@
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
-  // The ticket page card's width (#2402), kept in the same storage.
-  cardWidth.load();
+  /**
+   * Home with no chosen job is *All tickets* (`home.ts`, 2026-11-20): a bare
+   * `#/job` then (typed, kept in history, or home whose chosen job the
+   * ticket page found gone) is replaced by `#/tickets` before anything
+   * under it draws, so the page that only pointed at Tickets is never shown.
+   */
+  $effect.pre(() => {
+    const instead = homeInstead(route, chosenJob.id);
+    if (instead !== null) untrack(() => replaceHash(instead));
+  });
+  // Every sidebar's width (the ticket page card's among them, #2402), kept in the same storage.
+  sideWidths.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
   /**
    * A ticket a card's sections row opened its section on (#2401,
    * `job/scoped.svelte.ts`) is that section's pages' *This job* while it is
-   * on screen (`TfKeptPage`); leaving the section forgets it.
+   * on screen (`TfKeptPage`). Each history entry says whether it is part of that
+   * trip (`arrive`). A page can end it in place (*All tickets*), and then the
+   * entry stops saying so.
    */
-  let shownSection: ReturnType<typeof sectionOf> = null;
   $effect(() => {
-    const section = sectionOf(route);
-    if (shownSection !== null && section !== shownSection && shownSection === scopedTicket.section) untrack(() => scopedTicket.clear());
-    shownSection = section;
+    if (scopedTicket.section !== null || untrack(() => here.trip) === null) return;
+    here = { ...here, trip: null };
+    history.replaceState(stamped(history.state, here), "");
   });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
    * the ladder's own rungs, so the hint names what the key does.
    */
-  const back = $derived(escTarget(route, here.opener));
+  const visiting = $derived(here.visit || (scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job"));
+  const back = $derived(escTarget(route, here.opener, visiting, shownPage.parent));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -353,10 +629,20 @@
 
   // Every diff's default pipeline per file (#2270) is the viewer's (#2265): read from the held stores at each ask, so a
   // pipeline edited in Settings, or a default saved from the viewer, reaches the diffs too. Installed once.
+  // Each path's answer is kept until either list is replaced (each change replaces it whole): a compare of 10,000 files
+  // asked it of every file each time its list landed (the stored-compare pass, 2026-11-14).
+  let pipelineAnswers: { defaults: unknown; pipelines: unknown; by: Map<string, DiffPipeline | null> } = { defaults: null, pipelines: null, by: new Map() };
   installPipelines({
     of: (path) => {
-      const found = defaultPipeline(path, heldDefaults.list, heldPipelines.list);
-      return found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+      const [defaults, pipelines] = [heldDefaults.list, heldPipelines.list];
+      if (pipelineAnswers.defaults !== defaults || pipelineAnswers.pipelines !== pipelines) pipelineAnswers = { defaults, pipelines, by: new Map() };
+      const kept = pipelineAnswers.by.get(path);
+      if (kept !== undefined) return kept;
+      const found = defaultPipeline(path, defaults, pipelines);
+      const answer = found === null ? null : { name: found.pipeline.name, pattern: found.pattern, steps: found.pipeline.steps };
+      if (pipelineAnswers.by.size >= 50_000) pipelineAnswers.by.clear();
+      pipelineAnswers.by.set(path, answer);
+      return answer;
     },
   });
 
@@ -365,6 +651,14 @@
   onReady(ready, () => ports.commandSteps, (list) => heldCommandSteps.hold(list));
   // *Run pipelines on diffs* (#2270): until it answers, it is on.
   onReady(ready, () => ports.diffPipelines, (on) => heldDiffPipelines.hold(on));
+  // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17): until they answer, Docs' own page and every space.
+  onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
+  // The runs marked read (ux18): until they answer, every failed run asks, as before there were marks.
+  onReady(ready, () => () => runsRead.load(), () => {});
+  // Which sources' pages open inside knobas (ADR-0050): until they answer, every address opens the browser, as before.
+  onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
+  // *Sites kept open*, which the native side holds once read.
+  onReady(ready, () => sitesKept, () => {});
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -377,6 +671,8 @@
       .then((rows) => {
         if (dead) return;
         sources = rows;
+        // The sites' nameplates (ADR-0050).
+        siteStore.nameAll(rows);
         // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
         sourceRoles.take(rows);
       })
@@ -421,6 +717,14 @@
         if (recolours(payload)) recoloured += 1;
       }),
     );
+    // A source's site (ADR-0050): its state, the keys it gave knobas, where its links went, its downloads, its close,
+    // and the quit that asks about it.
+    hold(ports.listen(EVENTS.siteStatus, ({ payload }) => siteStore.update(payload as SiteStatus)));
+    hold(ports.listen(EVENTS.siteClosed, ({ payload }) => siteStore.closed((payload as { source: string }).source)));
+    hold(ports.listen(EVENTS.siteKey, ({ payload }) => siteKey(payload as SiteKey)));
+    hold(ports.listen(EVENTS.siteRouted, ({ payload }) => siteRouted(payload as SiteRouted)));
+    hold(ports.listen(EVENTS.siteDownload, ({ payload }) => siteDownload(payload as SiteDownload)));
+    hold(ports.listen(EVENTS.siteQuit, ({ payload }) => (quitting = payload as SiteStatus[])));
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
 
@@ -455,18 +759,46 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    // On a site's page a key between two `Esc`s is a new start (decisions §9).
+    if (route.view === "site" && event.key !== "Escape") siteStore.disarm(route.source);
     // ⌘R presses the page's *Refresh* or *Sync now* (#2156), and the webview
     // never reloads; an overlay owns the keyboard, as it does history's keys.
     if (onRefreshKey(event, dialogOpen())) return;
+    // `O` presses the page's *Open in ⟨source⟩*, `⇧O` opens the browser (ADR-0050).
+    if (onOpenKey(event, dialogOpen())) return;
+    // ⌘+ / ⌘− / ⌘0 zoom the window from anywhere, a field and a dialog too, as a browser's do: the window's, not a page's.
+    const zooming = zoomKey(event);
+    if (zooming !== null) {
+      event.preventDefault();
+      if (zooming === 0) zoom.reset();
+      else zoom.step(zooming);
+      return;
+    }
     const travel = historyStep(event);
     if (travel !== null) {
       event.preventDefault();
       if (dialogOpen()) return;
+      // On a site's page, back and forward in the site first, then in knobas (decisions §8).
+      if (route.view === "site" && (travel === "back" ? siteBack(route.source) : siteForward(route.source))) return;
       if (travel === "back") nav.back();
       else nav.forward();
       return;
     }
     const mod = event.metaKey || event.ctrlKey;
+    // ⌘W closes the site, through its question; ⌘L gives the site the keyboard back (decisions §8).
+    if (route.view === "site" && mod && !event.shiftKey && !event.altKey && !dialogOpen()) {
+      const key = event.key.toLowerCase();
+      if (key === "w") {
+        event.preventDefault();
+        void closeSite(route.source);
+        return;
+      }
+      if (key === "l") {
+        event.preventDefault();
+        void siteDo(route.source, "focus", false).catch(() => {});
+        return;
+      }
+    }
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
       onsearch("");
@@ -490,7 +822,7 @@
     }
     if (mod && event.key === ",") {
       event.preventDefault();
-      go("#/settings");
+      if (!dialogOpen()) onnav("settings", navHref("settings"), event.isTrusted);
       return;
     }
     // A saved list's chord (#2429): search on the list, from any page and in
@@ -517,26 +849,148 @@
           : {
               filter: field.hasAttribute("data-filter"),
               text: field instanceof HTMLInputElement ? field.value : "",
+              through: escThrough(field),
             },
       route,
       opener: here.opener,
+      visiting,
+      parent: shownPage.parent,
+      armed: route.view === "site" && siteStore.armed.has(route.source),
     });
     if (step.do === "nothing") return;
+    if (step.do === "arm") {
+      event.preventDefault();
+      if (route.view === "site") siteStore.arm(route.source, siteStore.status.get(route.source)?.esc_again_ms ?? 500);
+      return;
+    }
     event.preventDefault();
     if (step.do === "close") layers.open[step.index]?.close();
     else if (step.do === "clear-filter" && field instanceof HTMLInputElement) {
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
-    } else if (step.do === "blur") field?.blur();
-    else if (step.do === "go") leave(step.hash, step.opened);
+    } else if (step.do === "blur") {
+      // Out to what holds the field, never the body: the next `Tab` is back in it, and the next `Esc` is the page's.
+      const holder = field === null ? null : escHolder(field);
+      field?.blur();
+      holder?.focus({ preventScroll: true });
+    }
+    else if (step.do === "go") {
+      if (route.view === "site") siteStore.disarm(route.source);
+      leave(step.hash, step.opened);
+    }
+  }
+
+  // ---- a source's site (ADR-0050) ----
+  /** The sites that hold changes, while knobas asks before it quits. */
+  let quitting = $state<SiteStatus[] | null>(null);
+  /** A site's native view covers the page: the floats stand out of its rectangle (decisions §7). */
+  const siteShown = $derived(route.view === "site" && siteStore.status.get(route.source)?.shown === true);
+  $effect(() => {
+    ackBand.site = siteShown;
+  });
+  // A site is drawn at the window's zoom (decisions §14).
+  $effect(() => {
+    const level = zoom.level;
+    if (lifecycle.ready) void siteZoom(level).catch(() => {});
+  });
+
+  /** A key knobas took from a site (decisions §8): the same function its own key runs with the keyboard in knobas. */
+  function siteKey({ source, key }: SiteKey) {
+    switch (key) {
+      case "search":
+        return onsearch("");
+      case "settings":
+        return onnav("settings", navHref("settings"));
+      case "timer":
+        return ontimer?.();
+      case "reload":
+        return void reloadSite(source);
+      case "back":
+        if (!siteBack(source)) nav.back();
+        return;
+      case "forward":
+        if (!siteForward(source)) nav.forward();
+        return;
+      case "zoom-in":
+        return zoom.step(1);
+      case "zoom-out":
+        return zoom.step(-1);
+      case "zoom-reset":
+        return zoom.reset();
+      case "close":
+        return void closeSite(source);
+      case "bar":
+        void siteDo(source, "focus-shell", false).catch(() => {});
+        document.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-site-at")?.focus({ preventScroll: true });
+        return;
+      case "esc-armed":
+        return siteStore.arm(source, siteStore.status.get(source)?.esc_again_ms ?? 500);
+      case "esc-leave":
+        siteStore.disarm(source);
+        if (route.view === "site" && route.source === source && back !== null) leave(back.hash, back.opened);
+        return;
+    }
+  }
+
+  /** Where a link a site may not show went (decisions §6): the bar says so for six seconds. */
+  function siteRouted(routed: SiteRouted) {
+    const name = siteStore.name(routed.source);
+    if (routed.to === "site" && routed.other !== null) {
+      openWeb(routed.url, { source: routed.other });
+      return;
+    }
+    if (routed.to === "refused") {
+      siteStore.say(routed.source, { text: `${routed.host} links do not open from a site.` });
+      return;
+    }
+    openInBrowser(routed.url);
+    let origin: string | null = null;
+    try {
+      origin = new URL(routed.url).origin;
+    } catch {
+      origin = null;
+    }
+    const text = `Opened ${routed.host} in your browser. It is not one of ${name}'s addresses.`;
+    if (origin === null) {
+      siteStore.say(routed.source, { text });
+      return;
+    }
+    const allowed = origin;
+    siteStore.say(routed.source, {
+      text,
+      action: {
+        label: "Allow it here",
+        run: () =>
+          void siteAllow(routed.source, allowed)
+            .then((setting) => {
+              siteStore.holdOne(setting);
+              siteStore.say(routed.source, null);
+            })
+            .catch(() => {}),
+      },
+    });
+  }
+
+  /** A site's download (decisions §11): said in its bar, never a toast over the site. */
+  function siteDownload(download: SiteDownload) {
+    if (download.state === "saved") {
+      siteStore.say(download.source, {
+        text: `Saved ${download.name} to Downloads.`,
+        action: { label: "Show in folder", run: () => void siteRevealDownload(download.id).catch(() => {}) },
+      });
+    } else if (download.state === "failed") {
+      siteStore.say(download.source, { text: `Could not save ${download.name}.` });
+    }
   }
 
   /** `Esc`'s step to `hash` (rungs 5 to 8), `opened` when it is the entry's opener. */
   function leave(hash: string, opened: boolean) {
     // Back on the Tickets that opened this ticket page, that ticket is selected again (spec #2227).
     if (opened && route.view === "ticket" && parseTfHash(hash).view === "tickets") selectTicket(route.id);
+    stepping = true;
     // The opener is the entry before: step back to it, so `⌘]` comes forward to this page again.
     if (opened && hash === here.prev) nav.back();
+    else if (opened) goBackTo(hash);
     else goWithoutOpener(hash);
   }
 
@@ -563,30 +1017,64 @@
   }
   const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
 
+  // First, so that a press it swallows reaches nothing else.
+  onMount(() => installPressGuard());
+  onMount(() => installFindKey(() => onsearch(sectionFilter(route))));
+  onMount(() => installRowRoom());
+  onMount(() => installPlainTyping());
+  // A link to a web page opens in the browser, never in this window (Björn, 2026-11-13).
+  onMount(() => installExternalLinks());
+  onMount(() => installFocusKeep());
+  onMount(() => installKeysHere());
+  // A select rings after a key, not after a press (design system, Motion and focus).
+  onMount(() => installInputModality());
+  onMount(() => installZoomInput(zoom));
+  // So no page's first draw waits on a face and lays itself out again when it lands (the render-cost pass, 2026-11-14).
+  onMount(() => loadEveryFace());
+  // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
+  onMount(() => warmDiffView());
+  // So a README's first diagram is drawn by warm code, inside the text's hold (#2510).
+  onMount(() => warmDiagrams(renderPort()));
+  // So a Docs page kept hidden comes back laid out at Reading's new size (the ux18 Windows pass, Fable's ruling).
+  onMount(() => warmDocs());
+  // So a section's first press shows a page already built (the ux13-overs pass, 2026-11-15).
+  onMount(() => openAhead(() => lifecycle.ready, () => sectionOf(route), (section) => untrack(() => navHref(section))));
   onMount(() => {
-    const onhash = () => arrive();
+    // Each box's place first, while the last frame's layout is clean: a page the move hides takes it from there.
+    const onhash = () => {
+      noteScrolls();
+      // A repository's landing reads before its page is built (Fable's ruling, the compare-first-open pass).
+      readLandingAtAddress(location.hash);
+      arrive();
+    };
     window.addEventListener("hashchange", onhash);
     window.addEventListener("keydown", onkeydown);
+    window.addEventListener("click", catchReenterPress, true);
     for (const type of MOUSE) window.addEventListener(type, onmouse);
     return () => {
       window.removeEventListener("hashchange", onhash);
       window.removeEventListener("keydown", onkeydown);
+      window.removeEventListener("click", catchReenterPress, true);
       for (const type of MOUSE) window.removeEventListener(type, onmouse);
     };
   });
 </script>
 
-<div class="tf">
+<div class="tf" class:tf-site-shown={siteShown}>
   <TfTopBar
     current={sectionOf(route)}
     {inbox}
     {badges}
     {timer}
+    job={chosen?.key ?? null}
     onsearch={() => onsearch(sectionFilter(route))}
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
+    {navHref}
+    {onnav}
   />
-  <main class="tf-main" tabindex="-1">
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions: not a control, it notes what a press on a page was on -->
+  <main class="tf-main" tabindex="-1" bind:this={mainEl} onclickcapture={(event) => (pressed = event.target instanceof Element ? event.target : null)}>
     <TfPage
       {kept}
       stale={recoloured}
@@ -611,10 +1099,27 @@
       }}
     />
   </main>
-  <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} />
+  <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} {zoom} />
   {@render dialogs?.(sync)}
   {#if writeQueuePanel.open}
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
   {/if}
+  {#if quitting !== null && quitting.length > 0}
+    <TfSiteQuit unsaved={quitting} onclose={() => (quitting = null)} {layers} />
+  {/if}
+  {#if secretPrompt.source !== null}
+    <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />
+  {/if}
   <TfToasts />
+  <TfAck />
+  <TfZoomLevel {zoom} />
+  <div class="tf-floats"></div>
+  <!-- The right-click menu (2026-11-16): one for the window, in the float host. -->
+  <TfContextMenu
+    {onsearch}
+    {onstarttimer}
+    canTime={ontimer !== undefined}
+    job={chosen === null ? null : { entityId: chosen.entityId, label: chosen.key }}
+    {layers}
+  />
 </div>

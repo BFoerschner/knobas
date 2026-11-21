@@ -65,7 +65,9 @@
       "estimate_h": null,
       "spent_week_m": null,
       "blocked_by": ["OPS-77"],
-      "comments": [],
+      "comments": [
+        { "who": "jonas", "when": "2026-08-21T15:40:00Z", "text": "The drift starts where ledger-gateway hands the batch on: SettleBridgeServer still rounds each line before it sums." }
+      ],
       "worklogs": [
         { "who": "mara", "date": "2026-08-21", "minutes": 160, "text": "Review PR #139 fixes, re-test partial refund drift" }
       ]
@@ -358,12 +360,17 @@
   "branches": [
     { "name": "main", "repo": "payout-service", "ticket": null, "state": "default", "ahead": null, "checked_out": false },
     { "name": "feature/PAY-231-sepa-retry", "repo": "payout-service", "ticket": "PAY-231", "state": "open", "ahead": 3, "checked_out": true },
-    { "name": "fix/PAY-228-partial-refund-drift", "repo": "payout-service", "ticket": "PAY-228", "state": "merged", "ahead": null, "checked_out": false }
+    { "name": "fix/PAY-228-partial-refund-drift", "repo": "payout-service", "ticket": "PAY-228", "state": "merged", "ahead": null, "checked_out": false },
+    { "name": "main", "repo": "ledger-api", "ticket": null, "state": "default", "ahead": null, "checked_out": false },
+    { "name": "main", "repo": "ledger-gateway", "ticket": null, "state": "default", "ahead": null, "checked_out": false }
   ],
   "repos": [
     { "name": "payout-service", "lang": "Rust", "team": "Payments", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
-    { "name": "ledger-api", "lang": "Kotlin", "team": "Payments", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
-    { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null }
+    { "name": "ledger-api", "lang": "Kotlin", "team": "Payments", "clone": "~/code/ledger-api", "default_branch": "main", "commit_count": null },
+    { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null },
+    { "name": "ADProxy", "lang": "Go", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null },
+    { "name": "abcMappingService", "lang": "Kotlin", "team": "Payments", "clone": null, "default_branch": null, "commit_count": null },
+    { "name": "ledger-gateway", "lang": "Java", "team": "Payments", "clone": null, "default_branch": "main", "commit_count": null }
   ],
   "monitors": [
     { "id": "payout-service-health", "name": "payout-service health", "type": "http", "state": "up", "response_time_ms": 38.0, "url": "https://payout.tidewater.example/health" },

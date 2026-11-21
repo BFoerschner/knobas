@@ -54,6 +54,14 @@
  * modules answering the same command is an error, not a silent override.
  */
 import type { Answers } from "./fake-answers";
+import type { EntityDetail, EntityFilter, EntityPage, Reached } from "../../ipc/entity";
+import { lateDiagrams } from "../../render/port";
+import { expandScale, seedScale } from "./fake-scale";
+import { CORPUS } from "./fake/corpus";
+import { addFakeRuns } from "./fake/builds";
+import { addInboxItem } from "./fake/inbox";
+import { downFakeMonitor } from "./fake/monitors";
+import { endRunsChanged } from "./fake/sources";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -75,6 +83,8 @@ export type Handlers = { [K in keyof Answers]?: (args: Record<string, unknown>) 
 interface Listener {
   event: string;
   callback: (payload: unknown) => void;
+  /** The callback's id (`transformCallback`), dropped with the listener. */
+  handler: number;
 }
 
 /** What a fake bridge hands back to whoever installed it. */
@@ -94,17 +104,29 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   const callbacks = new Map<number, (payload: unknown) => void>();
   const listeners = new Map<number, Listener>();
 
+  // A listener dropped lets its callback go too, as Tauri's own `unregisterListener` does
+  // (`unregisterCallback(listeners[id].handlerId)`). Kept, every `listen()` a page ever made held its handler, and
+  // through it the page's state and nodes, for the window's life: a soak over this bridge grew by 2,500 nodes and
+  // 1.2 MB a minute that the app's own window never held (the hover-lag pass, 2026-11-16).
+  const drop = (eventId: number) => {
+    const listener = listeners.get(eventId);
+    if (listener === undefined) return;
+    listeners.delete(eventId);
+    callbacks.delete(listener.handler);
+  };
+
   const invoke = async (cmd: string, args: Record<string, unknown> = {}) => {
     if (cmd === "plugin:event|listen") {
       const id = ++nextEventId;
-      const callback = callbacks.get(args["handler"] as number);
+      const handler = args["handler"] as number;
+      const callback = callbacks.get(handler);
       if (callback) {
-        listeners.set(id, { event: String(args["event"]), callback });
+        listeners.set(id, { event: String(args["event"]), callback, handler });
       }
       return id;
     }
     if (cmd === "plugin:event|unlisten") {
-      listeners.delete(args["eventId"] as number);
+      drop(args["eventId"] as number);
       return null;
     }
     const handler = handlers[cmd];
@@ -117,7 +139,6 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   };
 
   const internals = {
-    invoke,
     transformCallback(callback: (payload: unknown) => void) {
       const id = ++nextCallbackId;
       callbacks.set(id, callback);
@@ -128,6 +149,11 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
     },
     convertFileSrc: (path: string) => path,
   };
+
+  // `invoke` read-only, as Tauri's own `scripts/core.js` defines it (`Object.defineProperty` with `value` only): a
+  // module that assigns to it throws here as it does in the packaged app, which is how v3.2.9-ux7 hung at start
+  // while every probe and fixture run passed. A probe taps commands through `window.__knobasIpcTap` instead.
+  Object.defineProperty(internals, "invoke", { value: invoke });
 
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     value: internals,
@@ -145,7 +171,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
   Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
     value: {
       unregisterListener(_event: string, eventId: number) {
-        listeners.delete(eventId);
+        drop(eventId);
       },
     },
     configurable: true,
@@ -187,11 +213,45 @@ const FEATURES = Object.entries(import.meta.glob<FakeFeature>("./fake/*.ts", { e
  * real backend was slow to attach.
  */
 export function installIfRequested(): void {
-  const params = new URLSearchParams(location.search);
+  // `fake-scale` turns on the per-area switches it stands for (`fake-scale.ts`).
+  const params = expandScale(new URLSearchParams(location.search));
   if (!params.has("fake-ipc")) return;
+  seedScale(params);
   for (const [, feature] of FEATURES) feature.seed?.(params);
-  const bridge = installFakeTauri(holdBack(demoHandlers(params), params));
+  const real = params.get("fake-real");
+  const handlers = real ? realBackend(Number(real), demoHandlers(params)) : demoHandlers(params);
+  // The real backend's latency is its own: nothing is held back over it.
+  const bridge = installFakeTauri(real ? handlers : holdBack(handlers, params));
   for (const [, feature] of FEATURES) feature.attach?.(bridge);
+  // `?fake-hooks` (the still-rows trips, 2026-11-11): a trip adds rows to the corpus and ends a run that changed
+  // something, so a page reads again with rows it did not draw.
+  // `emit` (the monitors-builds pass): any event, so a probe on a real backend, which emits none, can end a run.
+  // `?fake-diagram-late=<ms>` (#2510): every diagram answers that much later, so its drawing lands after the text's hold.
+  const diagramLate = Number(params.get("fake-diagram-late") ?? 0);
+  if (Number.isFinite(diagramLate) && diagramLate > 0) lateDiagrams(diagramLate);
+  if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor(), emit: (event: string, payload: unknown) => bridge.emit(event, payload) } });
+}
+
+/**
+ * `?fake-ipc&fake-real=<port>` (the still-rows pass, 2026-11-11): every command goes to the app's own backend running
+ * with no window on that port (`crates/knobas-app/examples/headless_ipc.rs`), over a real database, so headless Chrome
+ * draws a built front end on real data. A plugin's command stays the fixture's; nothing emits events.
+ */
+function realBackend(port: number, fixture: Record<string, Handler>): Record<string, Handler> {
+  const forward = (cmd: string) => async (args: Record<string, unknown>) => {
+    const response = await fetch(`http://127.0.0.1:${port}/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd, args }),
+    });
+    const answer = (await response.json()) as { ok?: unknown; err?: unknown };
+    if ("err" in answer) throw answer.err;
+    return answer.ok;
+  };
+  return new Proxy(fixture, {
+    get: (target, cmd) => (typeof cmd === "string" && !cmd.startsWith("plugin:") ? forward(cmd) : target[cmd as string]),
+    ownKeys: (target) => Reflect.ownKeys(target),
+  });
 }
 
 /** A read that never answers. */
@@ -211,8 +271,35 @@ export function holdBack(handlers: Record<string, Handler>, params: URLSearchPar
   const view = handlers["entity_view"];
   const prefix = params.get("fake-hold-view");
   if (prefix && view) out["entity_view"] = (args) => (String(args["section"] ?? "").startsWith(prefix) ? never() : view(args));
+  const late = lateReads(params.get("fake-late"));
+  for (const name of Object.keys(out)) {
+    const ms = late.get(name) ?? late.get("*");
+    const inner = out[name]!;
+    if (ms !== undefined) out[name] = (args) => new Promise((resolve) => setTimeout(resolve, ms)).then(() => inner(args));
+  }
   return out;
 }
+
+/**
+ * `?fake-late=code_facts:600,entity_checkouts:900` (the still-rows pass, 2026-11-11): each named command answers that
+ * many ms late, as the real backend's reads land one by one after a page first draws; `*:<ms>` is every other command.
+ * The rows-still trips use it to land each late read after the first draw.
+ */
+export function lateReads(value: string | null): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const part of (value ?? "").split(",")) {
+    const [command, ms] = part.split(":");
+    const n = Number(ms);
+    if (command && ms !== undefined && Number.isFinite(n) && n >= 0) out.set(command, n);
+  }
+  return out;
+}
+
+/**
+ * The commands the fixture answers from its other reads rather than from a feature module (the query audit,
+ * 2026-11-12): what many ids are, and a card's sections over one reach.
+ */
+export const COMPOSED = ["entity_briefs", "card_reads"] as const;
 
 /**
  * The fixture's answers: every feature module's, put together.
@@ -228,5 +315,31 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       all[command] = handler;
     }
   }
+  // The backend's one-call reads ({@link COMPOSED}), answered from the fixture's own reads they stand for,
+  // so the two can never disagree: what each id is, by `get_entity`; a card's sections, by `job_reach` and
+  // `list_entities`.
+  all["entity_briefs"] ??= async (args) => {
+    const ids = [...new Set((args["entityIds"] as string[] | undefined) ?? [])];
+    const read = await Promise.allSettled(ids.map(async (entityId) => (await all["get_entity"]!({ entityId })) as EntityDetail));
+    return read.flatMap((answer) => {
+      if (answer.status !== "fulfilled") return [];
+      const { entity_id, kind, source_id, title, state } = answer.value.row;
+      return [{ entity_id, kind, source_id, title, state }];
+    });
+  };
+  all["card_reads"] ??= async (args) => {
+    const entityId = String(args["entityId"] ?? "");
+    const limit = Number(args["limit"] ?? 200);
+    const reached = (await all["job_reach"]!({ entityId })) as Reached[];
+    const sections = await Promise.all(
+      ((args["sections"] as EntityFilter[] | undefined) ?? []).map((filter) =>
+        Promise.resolve(all["list_entities"]!({ filter: { ...filter, reach: entityId }, limit, offset: 0 })).then(
+          (page) => (page as EntityPage).rows,
+          () => [],
+        ),
+      ),
+    );
+    return { reached, sections };
+  };
   return all;
 }

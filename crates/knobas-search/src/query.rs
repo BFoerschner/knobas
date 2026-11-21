@@ -250,6 +250,14 @@ pub struct EffectiveFilters {
     /// `Searcher::search` and nothing else, so a Docs search or a saved
     /// list's count reads no body it does not show.
     pub excerpts: bool,
+    /// Whether the page's rows carry a `ts_headline` of their title and body
+    /// ([`SearchHit::snippet`](crate::SearchHit::snippet)). **No command
+    /// sets it** (the query audit of 2026-11-12): the launcher draws
+    /// [`Self::excerpts`] and the Docs search cuts its own snippet from the
+    /// body, and the headline of a page of 50 rows was 65 ms of a common
+    /// word's 264 ms in the launcher and 142 of 190 ms in the Docs search.
+    /// Off, the statement answers `null` and a hit's `snippet` is empty.
+    pub headline: bool,
     /// The kinds declaring the Builds frame's `pipeline` (#2422,
     /// [`crate::frames`]): each is answered as kind `pipeline`, and a
     /// `pipeline` kind filter takes them in. Set by the launcher's search
@@ -259,6 +267,19 @@ pub struct EffectiveFilters {
     /// runs, commits and a Jira view's mirror row. Set by the launcher's
     /// search alone; empty leaves nothing out.
     pub hidden_kinds: Vec<String>,
+    /// The kinds *Everything* matches by their names and keys alone (the
+    /// everything-search decisions, 2026-11-20, D13): a box of Settings ›
+    /// Search cleared (`ticket`, `pr`, `page`). Beside the whole vector's
+    /// match, a row of one of them must match by its title too, as under
+    /// *Titles*; a broad word's walk of the newest rows skips them. Set by
+    /// the launcher's search alone, so a saved list's count and the Docs
+    /// search are other questions.
+    pub names_only_kinds: Vec<String>,
+    /// Whether a run log is left out of what *Everything* matches and
+    /// quotes (D13, *Build logs* cleared): the log's corpus is not searched
+    /// and a pipeline's excerpt reads its body. Set by the launcher's search
+    /// alone.
+    pub no_logs: bool,
 }
 
 impl EffectiveFilters {
@@ -502,9 +523,14 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
         // The grammar has no word for it; the query sets it (`Searcher::search`).
         titles: false,
         excerpts: false,
+        // Nothing draws one (`EffectiveFilters::headline`).
+        headline: false,
         // The launcher's search sets these from the declarations (#2422).
         pipeline_kinds: Vec::new(),
         hidden_kinds: Vec::new(),
+        // So does Settings › Search (D13).
+        names_only_kinds: Vec::new(),
+        no_logs: false,
     }
 }
 
@@ -517,6 +543,7 @@ impl Parsed {
                 filters: SearchFilters::default(),
                 unknown_tokens: Vec::new(),
                 left_out_tokens: Vec::new(),
+                keyed: None,
             },
             prefix_last_term: false,
             identity: vocab.identity.clone(),
@@ -607,7 +634,7 @@ fn leading_prefix(head: &str) -> Option<(&'static str, Prefix)> {
 /// Split on whitespace, but keep a double-quoted run together **with its
 /// quotes** -- `websearch_to_tsquery` reads those quotes as a phrase, so
 /// stripping them here would silently turn a phrase search into an AND.
-fn tokenize(input: &str) -> Vec<String> {
+pub(crate) fn tokenize(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
@@ -750,12 +777,37 @@ fn negates_what_cannot_be_negated(token: &str) -> bool {
 pub fn needles(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for token in tokenize(text) {
-        if token.starts_with('-') || token.eq_ignore_ascii_case("or") {
+        // `!word` leaves a word out as `-word` does (the fuzzy-search
+        // decisions, 2026-11-19, D4 rule 9).
+        if token.starts_with('-') || token.starts_with('!') || token.eq_ignore_ascii_case("or") {
             continue;
         }
         push_needle(&mut out, &token);
     }
     out
+}
+
+/// `text` with each token's leading `!` made a `-`, or `None` where no
+/// token starts with one (the fuzzy-search decisions, 2026-11-19, D4 rule
+/// 9): `!word` is the picker's sign for a word left out, and
+/// `websearch_to_tsquery` reads it as the word itself, so the statements are
+/// handed the grammar's own sign. A quoted phrase is one token.
+#[must_use]
+pub fn bangs_as_minus(text: &str) -> Option<String> {
+    let tokens = tokenize(text);
+    if !tokens.iter().any(|token| token.starts_with('!')) {
+        return None;
+    }
+    Some(
+        tokens
+            .into_iter()
+            .map(|token| match token.strip_prefix('!') {
+                Some(rest) => format!("-{rest}"),
+                None => token,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 /// One alternative of the Tickets view's word filter (#1889): a row it

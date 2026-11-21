@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import type { ArtifactEntry, LogLine, RunLog, RunTest, TestOutcome } from "../../ipc/entity";
 import {
@@ -15,6 +15,8 @@ import {
   sizeText,
   stepMatch,
   stepOpens,
+  fitSteps,
+  isCommand,
   stepSegments,
   stepState,
   stepSummary,
@@ -59,10 +61,10 @@ test("the log is its steps' folds with the lines outside them loose, in order", 
 test("the steps bar is one segment per step, as wide as its share of the time, toned by result, with the duration as its tip", () => {
   const segments = stepSegments(LOG, false);
   expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
-    [0, "Checkout", "ok", "Checkout, 12 s"],
-    [1, "cargo test", "err", "cargo test, 1 m 22 s"],
+    [0, "Checkout", "ok", "Checkout, 12s"],
+    [1, "cargo test", "err", "cargo test, 1m 22s"],
   ]);
-  // 12 s of 94 s, then 82 s of 94 s: each starts where the one before ends.
+  // 12s of 94s, then 82s of 94s: each starts where the one before ends.
   expect(segments[0]!.x).toBe(0);
   expect(segments[0]!.width).toBeCloseTo(12.77, 1);
   expect(segments[1]!.x).toBeCloseTo(12.77, 1);
@@ -73,7 +75,7 @@ test("a running step has no duration yet: it says running, and takes the mean of
   const passing: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
   const segments = stepSegments(passing, true);
   expect(segments.map((s) => [s.state, s.tip])).toEqual([
-    ["ok", "Checkout, 12 s"],
+    ["ok", "Checkout, 12s"],
     ["run", "cargo test, running"],
   ]);
   expect(segments[1]!.width).toBeCloseTo(50, 1);
@@ -83,12 +85,12 @@ test("a running run's steps the log has not reached are drawn after the running 
   const running: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
   const segments = stepSegments(running, true, ["Checkout", "cargo test", "Build image", "Publish"]);
   expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
-    [0, "Checkout", "ok", "Checkout, 12 s"],
+    [0, "Checkout", "ok", "Checkout, 12s"],
     [1, "cargo test", "run", "cargo test, running"],
     [2, "Build image", "wait", "Build image, not started"],
     [3, "Publish", "wait", "Publish, not started"],
   ]);
-  // Each step without a duration takes the 12 s the one finished step took.
+  // Each step without a duration takes the 12s the one finished step took.
   for (const s of segments) expect(s.width).toBeCloseTo(25, 1);
   expect(segments[3]!.x).toBeCloseTo(75, 1);
 });
@@ -125,7 +127,7 @@ test("a step is err with an error in it, running when it is the last of a run in
   const passing: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: "warn" }] };
   expect(stepState(passing, 1, true)).toBe("run");
   expect(stepState(passing, 1, false)).toBe("ok");
-  expect(stepSummary(LOG.steps[1]!, "err")).toBe("1 m 22 s, 3 lines");
+  expect(stepSummary(LOG.steps[1]!, "err")).toBe("1m 22s, 3 lines");
   expect(stepSummary(LOG.steps[0]!, "run")).toBe("running, 2 lines");
   expect(stepSummary({ ...LOG.steps[0]!, seconds: null, first: 1, last: 1 }, "ok")).toBe("1 line");
 });
@@ -219,4 +221,39 @@ test("artifact words: sizes as the view writes them, folder counts, what preview
   ]);
   expect(previewable(entry("logs", true))).toBe(false);
   expect(savedText("/Users/mara/Downloads/junit (1).xml")).toBe("Saved junit (1).xml to ~/Downloads");
+});
+
+test("a step's name that is a command line is told from one that is words", () => {
+  for (const name of ["cargo test --test sepa_retry", "cargo build --tests", "npm test", "./deploy.sh staging", "run-it -v"]) expect(isCommand(name)).toBe(true);
+  for (const name of ["Checkout", "Start PSP sandbox stub", "Go live", "Make the image", "Build - release"]) expect(isCommand(name)).toBe(false);
+});
+
+describe("the steps bar once it is measured", () => {
+  const step = (name: string, x: number, width: number) => ({ name, x, width });
+  const twoPxALetter = (name: string) => name.length * 2;
+
+  test("a step too short for its name widens to it, and the others give it up by their time", () => {
+    const fitted = fitSteps([step("Checkout", 0, 1), step("aaaa", 1, 49.5), step("bbbb", 50.5, 49.5)], 1000, twoPxALetter);
+    expect(fitted[0]!.width).toBeCloseTo(1.6, 5);
+    expect(fitted[1]!.width).toBeCloseTo(49.2, 5);
+    expect(fitted[2]!.x).toBeCloseTo(50.8, 5);
+    expect(fitted[2]!.width).toBeCloseTo(49.2, 5);
+  });
+
+  test("steps that all fit their names keep their widths", () => {
+    const steps = [step("a", 0, 30), step("b", 30, 70)];
+    expect(fitSteps(steps, 1000, twoPxALetter).map((s) => s.width)).toEqual([30, 70]);
+  });
+
+  test("with no room for every name, a short name stays whole, the longest share what is left, and the bar still ends at 100", () => {
+    const fitted = fitSteps([step("aa", 0, 90), step("bbbbbbbbbbbbbbbbbbbb", 90, 5), step("cccccccccccccccccccc", 95, 5)], 54, twoPxALetter);
+    expect(fitted[0]!.width).toBeCloseTo((4 / 54) * 100, 5);
+    expect(fitted[1]!.width).toBeCloseTo(fitted[2]!.width, 5);
+    expect(fitted[2]!.x + fitted[2]!.width).toBeCloseTo(100, 5);
+  });
+
+  test("an unmeasured bar stays as its time says", () => {
+    const steps = [step("Checkout", 0, 1), step("b", 1, 99)];
+    expect(fitSteps(steps, 0, twoPxALetter)).toEqual(steps);
+  });
 });

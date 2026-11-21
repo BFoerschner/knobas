@@ -7,6 +7,12 @@
 //!
 //! # What runs (ADR-0026, on ADR-0021's terms)
 //!
+//! git itself, and not knobas's own reader ([`super::reader`]): what is
+//! changed in a working tree depends on the person's filters, line-ending
+//! settings, sparse rules and submodules, which only their git applies. The
+//! three commands run at once, and an answer is kept until something in the
+//! checkout changes ([`read_known`]), so the tab opened again starts none.
+//!
 //! Three read-only git commands at the checkout path, under
 //! [`working_tree`](super::working_tree)'s environment and guards:
 //!
@@ -97,6 +103,12 @@ pub struct UncommittedDiff {
     /// More than [`MAX_UNTRACKED`] paths were untracked; the rest are not
     /// listed.
     pub untracked_truncated: bool,
+    /// The checkout's stamp this was read at, as hex (ux26): the page's
+    /// epoch, so a re-read on focus that brings a new one reads its rendered
+    /// sides again. Absent where the stamp could not read the checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stamp: Option<String>,
 }
 
 /// The answer the *Local changes* tab draws: the diff, or why there is none.
@@ -141,6 +153,60 @@ pub async fn read(path: &Path) -> DiffRead {
     read_with(&search, path).await
 }
 
+/// [`read`], unless nothing in the checkout changed since the last answer
+/// there: then that answer, and no git (the git-starts pass, 2026-11-16, as
+/// [`read_known`](super::working_tree::read_known) keeps the working tree's
+/// state). Each diff git gave is kept with the checkout's
+/// [stamp](super::stamp), taken before git ran, so a change made while it ran
+/// is read next time. Only a [`DiffRead::Read`] is kept, and of the last
+/// [`KNOWN`] checkouts: a diff can be megabytes.
+pub async fn read_known(path: &Path) -> DiffRead {
+    read_known_with(path, read).await
+}
+
+/// [`read_known`], with the read it makes when the stamp moved passed in, so
+/// a test can count them.
+async fn read_known_with(path: &Path, read: impl AsyncFnOnce(&Path) -> DiffRead) -> DiffRead {
+    let at = path.to_path_buf();
+    let stamp = tokio::task::spawn_blocking(move || super::stamp::of(&at))
+        .await
+        .ok()
+        .flatten();
+    if let Some(stamp) = stamp
+        && let Some(diff) = known()
+            .iter()
+            .find(|(kept, at, _)| kept == path && *at == stamp)
+            .map(|(_, _, diff)| diff.clone())
+    {
+        return diff;
+    }
+    let mut diff = read(path).await;
+    if let (Some(stamp), DiffRead::Read(read)) = (stamp, &mut diff) {
+        read.stamp = Some(format!("{stamp:016x}"));
+    }
+    let mut known = known();
+    known.retain(|(kept, _, _)| kept != path);
+    if let (Some(stamp), DiffRead::Read(_)) = (stamp, &diff) {
+        known.push_front((path.to_path_buf(), stamp, diff.clone()));
+        known.truncate(KNOWN);
+    }
+    diff
+}
+
+/// How many checkouts' uncommitted diffs [`read_known`] keeps.
+const KNOWN: usize = 4;
+
+type Known = std::collections::VecDeque<(std::path::PathBuf, u64, DiffRead)>;
+
+/// [`read_known`]'s answers, the newest first.
+fn known() -> std::sync::MutexGuard<'static, Known> {
+    static KNOWN_ONES: std::sync::OnceLock<std::sync::Mutex<Known>> = std::sync::OnceLock::new();
+    KNOWN_ONES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// [`read`], with the `PATH` to look for `git` on passed in, so "git is not
 /// installed" is reachable from a test on a machine that has git.
 pub async fn read_with(search: &OsStr, path: &Path) -> DiffRead {
@@ -163,15 +229,22 @@ async fn read_guarded(search: &OsStr, path: &Path, timeout: Duration, caps: Read
     if !is_dir_off_runtime(path).await {
         return DiffRead::NotARepo;
     }
+    // The three at once: in a row each waited for the start of the one
+    // before, and a start is the dear part on Windows (the git-starts pass,
+    // 2026-11-16). All three only read.
     let all = async {
-        let unstaged = half(&git, path, false, caps).await?;
-        let staged = half(&git, path, true, caps).await?;
-        let (untracked, untracked_truncated) = untracked(&git, path, caps.untracked).await?;
+        let (unstaged, staged, untracked) = tokio::join!(
+            half(&git, path, false, caps),
+            half(&git, path, true, caps),
+            untracked(&git, path, caps.untracked)
+        );
+        let (unstaged, staged, (untracked, untracked_truncated)) = (unstaged?, staged?, untracked?);
         Ok(UncommittedDiff {
             unstaged,
             staged,
             untracked,
             untracked_truncated,
+            stamp: None,
         })
     };
     match tokio::time::timeout(timeout, all).await {
@@ -524,5 +597,86 @@ mod tests {
             }
         );
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// The tab opened again with nothing changed is what git said, without
+    /// git; an edit, and a file git does not track, are read (the git-starts
+    /// pass, 2026-11-16).
+    #[tokio::test]
+    async fn a_checkout_nothing_touched_is_not_diffed_again_and_an_edit_is() {
+        let dir = two_long_changes();
+        let p = dir.path();
+        let reads = std::sync::atomic::AtomicU32::new(0);
+        let counted = async |path: &Path| {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            read(path).await
+        };
+        let ran = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        let first = read_known_with(p, counted).await;
+        assert!(matches!(first, DiffRead::Read(_)), "{first:?}");
+        assert_eq!(read_known_with(p, counted).await, first, "the same answer");
+        assert_eq!(ran(), 1, "git ran once");
+        // Past the file system's clock tick, so an mtime can move.
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "edited again\n").unwrap();
+        let edited = read_known_with(p, counted).await;
+        assert_eq!(ran(), 2, "an edit is read");
+        assert_ne!(edited, first);
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(p.join("untracked.txt"), "new\n").unwrap();
+        let DiffRead::Read(with_new) = read_known_with(p, counted).await else {
+            panic!("git did not answer");
+        };
+        assert_eq!(ran(), 3, "a new file is read");
+        assert_eq!(with_new.untracked, ["untracked.txt"]);
+        // A folder that is no repository is asked every time, and kept never.
+        let nowhere = tempfile::tempdir().unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                read_known_with(nowhere.path(), counted).await,
+                DiffRead::NotARepo
+            );
+        }
+        assert_eq!(ran(), 5);
+    }
+
+    /// The three commands run at once: with a git that takes half a second
+    /// to start, the whole read is one start's wait, not three in a row.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_three_commands_wait_for_one_start_not_three() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = two_long_changes();
+        let real = String::from_utf8(
+            std::process::Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let stub = bin.path().join("git");
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\nsleep 0.5\nexec '{}' \"$@\"\n", real.trim()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let search = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
+        .unwrap();
+        let started = std::time::Instant::now();
+        let answer = read_guarded(&search, dir.path(), PATIENT, CAPS).await;
+        let took = started.elapsed();
+        let DiffRead::Read(diff) = answer else {
+            panic!("git did not answer: {answer:?}");
+        };
+        assert_eq!(diff.unstaged.files.len(), 2);
+        assert!(
+            took < Duration::from_millis(1300),
+            "three starts of half a second each took {took:?}: in a row they take 1.5 s"
+        );
     }
 }

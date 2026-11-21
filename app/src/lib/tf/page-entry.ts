@@ -27,8 +27,10 @@
  *   A page that reads `visible` pauses its focus re-reads, polling and timers
  *   while hidden and re-reads when shown (#2249); a page that ignores it still
  *   works. A component deep inside a page asks `pageVisible()` instead.
- * - **Shown again**, a role view's `syncRevision` moves, so it re-reads as it
- *   does after *Sync now*; the shell's ⌘R and a page's own keys reach only
+ * - **Shown again**, a role view's `syncRevision` moves only if a run of its
+ *   role's sources ended with something new while it was hidden, so it
+ *   re-reads then as it does after *Sync now*, and a return to what nothing
+ *   changed reads nothing; the shell's ⌘R and a page's own keys reach only
  *   the shown page.
  */
 import type { Component, Snippet } from "svelte";
@@ -104,6 +106,8 @@ export interface RoleFrameProps {
 export interface TfPageEntry {
   /** Whether this page draws `route`. */
   matches: (route: TfRoute) => boolean;
+  /** Whether the page has what the address names, for a section whose tabs are its address; absent means it does. */
+  knows?: (route: TfRoute) => boolean;
   component: Component<Record<string, unknown>>;
   /**
    * Whether the shell draws its breadcrumb (R-1.6) above the page, as for a
@@ -136,6 +140,7 @@ export interface TfPageEntry {
  */
 export function definePage<Props extends object, Matched extends TfRoute>(page: {
   matches: (route: TfRoute) => route is Matched;
+  knows?: (route: Matched) => boolean;
   component: Component<Props>;
   crumbs?: boolean;
   role?: string;

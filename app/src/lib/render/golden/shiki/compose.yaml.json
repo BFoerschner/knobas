@@ -1,0 +1,17 @@
+[
+  ["com:# The gateway and its queue."],
+  ["key:services","op::"],
+  [":  ","key:gateway","op::"],
+  [":    ","key:image","op::",": ","str:tidewater/gateway:3.2.9"],
+  [":    ","key:environment","op::"],
+  [":      ","key:RETRY_LIMIT","op::",": ","num:3"],
+  [":      ","key:RETRY_BACKOFF","op::",": ","str:\"250ms\"",":  ","com:# doubles each try"],
+  [":      ","key:ENABLED","op::",": ","con:true"],
+  [":    ","key:ports","op::"],
+  [":      ","punct:-",": ","str:\"8080:8080\""],
+  [":    ","key:volumes","op::"],
+  [":      ","punct:-",": ","str:gitea-data:/data"],
+  [":    ","key:command","op::",": ","punct:[","str:\"serve\"","punct:,",": ","str:\"--port\"","punct:,",": ","str:\"8080\"","punct:]"],
+  [":    ","key:restart","op::",": ","str:unless-stopped"],
+  []
+]

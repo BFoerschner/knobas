@@ -75,12 +75,16 @@ export interface SourceRoles {
   answers(role: string, sourceId: string, read: string): boolean;
   /** What a person calls `sourceId` (#1476): its display name, or the id when the list never said. */
   nameOf(sourceId: string): string;
+  /** `sourceId`'s display name from Settings › Sources, or `null` while the list has not said or names it blank. */
+  displayName(sourceId: string): string | null;
   /**
    * Whether a role view draws *Sync now* (#2106): some enabled source fills
    * `role`. Not knowing is no. Which sources a click runs is the mirror's
    * answer (`sync_role`); this only says whether there is one to ask about.
    */
   syncs(role: string): boolean;
+  /** Whether `sourceId` fills `role` (a run of it can bring that role's views something new). Not knowing is no. */
+  filledBy(role: string, sourceId: string): boolean;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -107,8 +111,15 @@ export function createSourceRoles(): SourceRoles {
     nameOf(sourceId) {
       return state.sources?.find((row) => row.id === sourceId)?.display_name ?? sourceId;
     },
+    displayName(sourceId) {
+      return state.sources?.find((row) => row.id === sourceId)?.display_name.trim() || null;
+    },
     syncs(role) {
       return state.sources?.some((source) => source.enabled !== false && fills(source, role)) ?? false;
+    },
+    filledBy(role, sourceId) {
+      const source = state.sources?.find((row) => row.id === sourceId);
+      return source !== undefined && fills(source, role);
     },
   };
 }
