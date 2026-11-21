@@ -148,3 +148,13 @@ test("off the working tree, the tab is the forge's commits alone", async () => {
   expect(asked).toEqual([]);
   expect(rows()).toHaveLength(2);
 });
+
+test("a branch far from its base draws its first 100 local commits and says how many more, opening Compare on the working tree", async () => {
+  const many = Array.from({ length: 120 }, (_, n) => ({ sha: n.toString(16).padStart(40, "c"), title: `local ${n}`, meta: "mara · today" }));
+  await draw({ branch: "feat/far", onForge: false, base: "main", changed: 0, ahead: 0, stamp: "s1" }, async () => listing(many));
+  const local = [...target!.querySelectorAll(".tf-rcommits tbody tr.tf-rlocal")];
+  expect(local).toHaveLength(101);
+  const more = local.at(-1)!.querySelector("a")!;
+  expect(more.textContent).toBe("20 more not pushed");
+  expect(more.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/~working-tree");
+});

@@ -46,7 +46,7 @@
   import { onRefreshed } from "./refreshed.svelte";
   import { onViewFresh } from "./view-fresh.svelte";
   import { commitLine } from "./file-tree";
-  import { commitHash, repoHash, sourceName, viewRows, visibleViewRows } from "./repo";
+  import { commitHash, compareHash, repoHash, sourceName, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, WORKING_TREE, type RangePick } from "../diff/address";
   import TfStateChip from "../TfStateChip.svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -106,6 +106,11 @@
     };
   });
 
+  /**
+   * The checkout's commits drawn at most: the read lists up to 500 (`range_files::COMMITS`), and a branch far from its base
+   * would draw them all; the rest are one press away in Compare on the working tree, which windows its list.
+   */
+  const LOCAL_ROWS = 100;
   /** On the working tree, the checkout's commits the forge lacks, newest first; `null` until read. */
   let unpushed = $state<RangeCommit[] | null>(null);
   let unpushedRead = 0;
@@ -276,7 +281,7 @@
           <td class="tf-ropen"></td>
         </tr>
       {/if}
-      {#each localShown as commit (commit.sha)}
+      {#each localShown.slice(0, LOCAL_ROWS) as commit (commit.sha)}
         <!-- Read from the checkout: the mirror holds no id for it yet, so it is drawn plain. -->
         <tr class="tf-rlocal" title={`${commit.sha.slice(0, 7)} is in your checkout, not on ${sourceName(source)}`}>
           {#if anyPickable}<td class="tf-rpick"></td>{/if}
@@ -286,6 +291,15 @@
           <td class="tf-ropen"></td>
         </tr>
       {/each}
+      {#if localShown.length > LOCAL_ROWS}
+        <tr class="tf-rlocal">
+          {#if anyPickable}<td class="tf-rpick"></td>{/if}
+          <td class="tf-mono"></td>
+          <td><a href={compareHash(repoId, WORKING_TREE)}>{localShown.length - LOCAL_ROWS} more not pushed</a></td>
+          <td></td>
+          <td class="tf-ropen"></td>
+        </tr>
+      {/if}
       {#each shown as row, n (n)}
         <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
           {#if anyPickable}
