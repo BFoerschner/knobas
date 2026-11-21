@@ -43,6 +43,9 @@ function draw(current: SettingsSection | null, seed: Record<string, string> = {}
 
 const fold = () => target.querySelector<HTMLDetailsElement>("details.tf-stg-fold")!;
 const title = () => target.querySelector<HTMLAnchorElement>("summary > a.tf-stg-pl")!;
+/** The chevron: the summary's own room left of the title's link (jsdom lays nothing out, so left of 0). */
+const chevron = () => fold().querySelector("summary")!;
+const CHEVRON = { clientX: -1 };
 const rowNames = () => [...target.querySelectorAll<HTMLAnchorElement>("a.tf-stg-leaf, a.tf-stg-pl")].map((a) => a.textContent?.trim());
 function click(el: Element, init: MouseEventInit = {}): MouseEvent {
   const event = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, button: 0, ...init });
@@ -103,8 +106,10 @@ test("a first click on a parent's title opens its page and its fold, and never c
 
 test("a click on the open parent's row toggles its fold and opens no page", () => {
   draw("appearance");
-  expect(click(title()).defaultPrevented).toBe(true);
+  location.hash = "#/settings/appearance";
+  click(title());
   expect(fold().open).toBe(false);
+  expect(location.hash).toBe("#/settings/appearance");
   expect(storage.data.get(FOLDED_KEY)).toBe("appearance");
   click(title());
   expect(fold().open).toBe(true);
@@ -114,8 +119,7 @@ test("a click on the open parent's row toggles its fold and opens no page", () =
 
 test("the chevron folds alone; Enter and a modified click keep the link's own way", () => {
   draw("sources");
-  const summary = fold().querySelector("summary")!;
-  expect(click(summary).defaultPrevented).toBe(true);
+  expect(click(chevron(), CHEVRON).defaultPrevented).toBe(true);
   expect(fold().open).toBe(false);
   expect(onpage).not.toHaveBeenCalled();
   // Enter on a link is a click with no count: the page only.
@@ -127,7 +131,7 @@ test("the chevron folds alone; Enter and a modified click keep the link's own wa
 
 test("a fold is kept, and a parent added later starts open", () => {
   draw("sources");
-  click(fold().querySelector("summary")!);
+  click(chevron(), CHEVRON);
   expect(storage.data.get(FOLDED_KEY)).toBe("appearance");
   const again = createSettingsFolds(() => storage);
   expect(again.isOpen("appearance")).toBe(false);
@@ -139,7 +143,7 @@ test("a move to a child's page opens its parent and keeps it; while folded, the 
   expect(fold().open).toBe(true);
   expect(storage.data.has(FOLDED_KEY)).toBe(false);
   // The chevron may fold it while the child is open: the parent's row then marks that it holds the page.
-  click(fold().querySelector("summary")!);
+  click(chevron(), CHEVRON);
   expect(fold().open).toBe(false);
   expect(fold().querySelector("summary")!.classList.contains("tf-holds")).toBe(true);
   expect(fold().querySelector('a[aria-current="page"]')?.textContent?.trim()).toBe("Code colours");

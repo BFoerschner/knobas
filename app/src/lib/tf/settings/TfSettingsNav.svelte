@@ -4,7 +4,8 @@
   its keys apply (`treeKeysOf`): one Tab stop, ↑ ↓ walk the rows shown, → opens a fold then steps in, ← closes it then
   steps to the parent, Home and End.
 
-  Clicks follow the Docs tree's rule (`docs/decisions/2026-11-21-a-click-on-a-docs-row-opens-its-fold.md`): a click on
+  Clicks follow the Docs tree's rule through its shared helper (`tf/fold-press.ts`,
+  `docs/decisions/2026-11-21-a-click-on-a-docs-row-opens-its-fold.md`): a click on
   a parent's row opens its page and its fold and never closes it; a click on the open parent's row toggles its fold;
   the chevron folds alone. `Enter`, a modified click and the middle button keep the link's own way. A fold is kept
   (`settings-folds.svelte.ts`), and a move to a child's page opens its parent. A folded parent holding the open page
@@ -14,8 +15,9 @@
   import { untrack } from "svelte";
 
   import { treeKeysOf } from "../docs/tree-keys";
+  import { foldKeyed, foldPress } from "../fold-press";
   import { settingsFolds, type SettingsFolds } from "./settings-folds.svelte";
-  import { SETTINGS_TREE, settingsHash, settingsParent, type SettingsNode, type SettingsSection } from "./settings";
+  import { SETTINGS_TREE, settingsHash, settingsParent, type SettingsSection } from "./settings";
 
   let {
     current,
@@ -40,21 +42,7 @@
     if (parent !== null) untrack(() => folds.set(parent, true));
   });
 
-  /** A press on a parent's row, by the Docs rule. */
-  function pressed(event: MouseEvent & { currentTarget: HTMLElement }, node: SettingsNode): void {
-    if (event.detail === 0 || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const onTitle = (event.target as Element).closest("a") !== null;
-    // The fold's state changes in the press, not in the browser's later `toggle`, so its rows draw with the chevron.
-    if (!onTitle || current === node.key) {
-      event.preventDefault();
-      return folds.set(node.key, !folds.isOpen(node.key));
-    }
-    // The title's link opens the page as any link does (a link inside a summary does not fold it); its fold opens too.
-    folds.set(node.key, true);
-    onpage?.();
-  }
-
-  /** → and ← fold by key through the element; what they did is kept. */
+  /** A fold changed by the browser itself (find in page, say): what it did is kept. */
   function toggled(event: Event & { currentTarget: HTMLDetailsElement }, key: SettingsSection): void {
     if (event.currentTarget.open !== folds.isOpen(key)) folds.set(key, event.currentTarget.open);
   }
@@ -72,9 +60,10 @@
       <details class="tf-stg-fold" {open} ontoggle={(event) => toggled(event, node.key)}>
         <!-- svelte-ignore a11y_no_redundant_roles -->
         <summary
-          onclick={(event) => pressed(event, node)}
+          onclick={(event) => foldPress(event, current === node.key, (now) => folds.set(node.key, now))}
+          onkeydown={(event) => foldKeyed(event, (now) => folds.set(node.key, now))}
           class:tf-holds={!open && current !== null && node.children.some((child) => child.key === current)}
-          ><a class="tf-stg-pl" href={settingsHash(node.key)} aria-current={current === node.key ? "page" : undefined}
+          ><a class="tf-stg-pl" href={settingsHash(node.key)} aria-current={current === node.key ? "page" : undefined} onclick={(event) => current !== node.key && leaf(event)}
             >{node.name}{@render badge?.(node.key)}</a
           ></summary
         >
