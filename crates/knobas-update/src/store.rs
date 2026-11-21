@@ -80,6 +80,10 @@ pub struct Attempt {
     pub backup: Option<String>,
     /// The private folder the artifact was staged in, removed at the next start.
     pub staged: Option<PathBuf>,
+    /// Where the Mac's swap left the old bundle when it could not stage inside `staged` (the app on another volume than
+    /// the temp folder), removed at the next start too.
+    #[serde(default)]
+    pub aside: Option<PathBuf>,
 }
 
 /// The last update on this computer.

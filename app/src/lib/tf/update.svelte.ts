@@ -122,8 +122,21 @@ export function createUpdates(ports: UpdatePorts = REAL_PORTS, onUpdated: (state
   };
 }
 
-/** The one toast after an update went in. */
+/**
+ * The one toast after an update went in, once the shell is drawn: the state is read while the start screen still shows,
+ * and a toast pushed then would run out its time before anyone could see it (the Mac's end-to-end run, 2026-11-21).
+ */
 function toastUpdated(state: UpdateState): void {
+  let tries = 0;
+  const shown = () => document.querySelector(".tf-nav") !== null;
+  const wait = () => {
+    if (shown() || tries++ > 480) toastNow(state);
+    else setTimeout(wait, 250);
+  };
+  wait();
+}
+
+function toastNow(state: UpdateState): void {
   push({
     text: updatedToast(state),
     action: { label: "What's new", run: () => (location.hash = "#/settings/updates") },

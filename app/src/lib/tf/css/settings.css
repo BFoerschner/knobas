@@ -464,11 +464,8 @@ button.tf-thm-sw { cursor: pointer; }
    runs, whole when it is checked. */
 .tf-upd-way { display: flex; flex-direction: column; padding-top: 30px; min-width: 0; }
 .tf-upd-track { position: relative; height: 4px; border-radius: 2px; background: var(--rule-2); }
-/* The fill is a <progress> (no inline style under the CSP), drawn as the track's own colour. */
-.tf-upd-fill { position: absolute; inset: 0; width: 100%; height: 100%; appearance: none; border: 0; border-radius: 2px; background: transparent; display: block; }
-.tf-upd-fill::-webkit-progress-bar { background: transparent; border-radius: 2px; }
-.tf-upd-fill::-webkit-progress-value { background: var(--info); border-radius: 2px; }
-.tf-upd-fill::-moz-progress-bar { background: var(--info); border-radius: 2px; }
+.tf-upd-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: var(--info); }
+.tf-upd-track.tf-bad > .tf-upd-fill { background: var(--err); }
 .tf-upd-track.tf-go::after { content: ""; position: absolute; right: -1px; top: -3px; border-left: 6px solid var(--rule); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
 .tf-upd-track.tf-go.tf-full::after { border-left-color: var(--info); }
 .tf-upd-n { margin-top: 6px; text-align: center; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); line-height: 18px; height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

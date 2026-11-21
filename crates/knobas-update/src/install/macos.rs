@@ -50,20 +50,25 @@ pub fn staging_parent(installed: &Path) -> PathBuf {
     }
 }
 
-/// Unpack `archive` (a `tar.gz` holding one `<name>.app`) and put it in place of `installed`.
-/// Answers the staging folder, which now holds the old bundle and is removed at the next start.
+/// Unpack `archive` (a `tar.gz` holding one `<name>.app`) and put it in place of `installed`,
+/// staging inside `near` when that is on the app's volume. Answers the staging folder, which now
+/// holds the old bundle and is removed at the next start.
 ///
 /// # Errors
 ///
 /// [`InstallError`]; the installed bundle is as it was.
-pub fn swap_bundle(archive: &Path, installed: &Path) -> Result<PathBuf, InstallError> {
-    swap_bundle_with(
-        archive,
-        installed,
-        &staging_parent(installed),
-        exchange,
-        |a, b| std::fs::rename(a, b),
-    )
+pub fn swap_bundle(archive: &Path, installed: &Path, near: &Path) -> Result<PathBuf, InstallError> {
+    let device = |path: &Path| std::fs::metadata(path).map(|meta| meta.dev()).ok();
+    let beside = installed
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let parent = match (device(near), device(&beside)) {
+        (Some(a), Some(b)) if a == b => near.to_path_buf(),
+        _ => staging_parent(installed),
+    };
+    swap_bundle_with(archive, installed, &parent, exchange, |a, b| {
+        std::fs::rename(a, b)
+    })
 }
 
 /// [`swap_bundle`] with the staging folder's parent and the two renames given, for the tests.
@@ -174,6 +179,21 @@ mod tests {
     }
 
     /// Mutant: remove the old bundle before the rename, and no app is found.
+    /// The old bundle is left inside the private folder the attempt records, when that is on the
+    /// app's volume, so the next start's removal of that folder takes it too.
+    #[test]
+    fn the_swap_stages_inside_the_folder_it_is_given() {
+        let root = tempfile::tempdir().unwrap();
+        let installed = bundle(&root.path().join("Applications"), "knobas.app", "old");
+        let new = bundle(&root.path().join("build"), "knobas.app", "new");
+        let archive = archive(root.path(), &new);
+        let private = root.path().join("private");
+        std::fs::create_dir(&private).unwrap();
+        let left = swap_bundle(&archive, &installed, &private).unwrap();
+        assert!(left.starts_with(&private), "{}", left.display());
+        assert_eq!(marker(&installed), "new");
+    }
+
     #[test]
     fn a_refused_rename_leaves_the_installed_bundle_as_it_was() {
         let root = tempfile::tempdir().unwrap();

@@ -311,11 +311,17 @@ async fn the_backup_is_taken_before_the_installer_is_staged() {
         !launch.program.starts_with(rig.cache()),
         "the installer runs from the private copy"
     );
+    // The private folder is in the attempt, and the next start removes it.
+    let private = launch.program.parent().unwrap().to_path_buf();
     let attempt = rig.updater("3.2.9-ux27", nsis());
     // The next start, still the old version: the attempt reads as not installed.
     let last = attempt.state().last.unwrap();
     assert!(!last.installed);
     assert_eq!(last.backup.as_deref(), Some("knobas-backup.knobas"));
+    assert!(
+        !private.exists(),
+        "the next start removed the private folder"
+    );
 }
 
 /// Mutant: ignore the backup's error.
@@ -357,6 +363,8 @@ async fn a_failed_backup_stops_an_update_that_changes_the_schema_and_not_one_tha
     updater.install().unwrap();
     until("the quit", || rig.host.did().len() == 2).await;
     assert_eq!(rig.host.did(), ["backup", "quit Exit"]);
+    // The next start takes the private folder away.
+    drop(rig.updater("3.2.9-ux27", nsis()));
 }
 
 /// A Mac copy whose swap fails: the old app stays, nothing is closed, the attempt is taken back.
@@ -411,6 +419,7 @@ async fn the_attempts_outcome_is_read_from_the_running_version() {
             at: Utc::now(),
             backup: Some("b.knobas".to_owned()),
             staged: None,
+            aside: None,
         });
         files.save_state(&state).unwrap();
     };

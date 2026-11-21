@@ -96,6 +96,16 @@
     }
   }
 
+  /**
+   * The track's fill, as a share of its width: set through the element's style object, which the CSP allows (an inline
+   * `style` attribute it does not). A `<progress>` drew as a tall block in WKWebView.
+   */
+  function filled(share: number) {
+    return (node: HTMLElement) => {
+      node.style.width = `${Math.round(Math.min(1, Math.max(0, share)) * 1000) / 10}%`;
+    };
+  }
+
   /** Every word a button ever holds, the current one first: the button is as wide as the widest. */
   const words = (current: string, all: readonly string[]) => [current, ...all.filter((word) => word !== current)];
 
@@ -145,7 +155,7 @@
   </div>
   <div class="tf-upd-way">
     <div class="tf-upd-track" class:tf-go={box?.track.go} class:tf-full={box?.track.fill === 1} class:tf-part={box !== null && box.track.fill !== null && box.track.fill < 1} class:tf-bad={box?.track.bad}>
-      {#if box !== null && box.track.fill !== null}<progress class="tf-upd-fill" max="1000" value={Math.round(box.track.fill * 1000)} aria-label="Downloaded"></progress>{/if}
+      {#if box !== null && box.track.fill !== null}<i class="tf-upd-fill" {@attach filled(box.track.fill)}></i>{/if}
     </div>
     <span class="tf-upd-n" class:tf-ok={box?.reading.tone === "ok"} class:tf-err={box?.reading.tone === "err"}>{box?.reading.text || " "}</span>
   </div>

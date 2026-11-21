@@ -286,8 +286,8 @@ impl Updater {
         let Some(attempt) = inner.stored.attempt.take() else {
             return;
         };
-        if let Some(staged) = &attempt.staged {
-            let _ = std::fs::remove_dir_all(staged);
+        for left in [&attempt.staged, &attempt.aside].into_iter().flatten() {
+            let _ = std::fs::remove_dir_all(left);
         }
         let current = &self.config.current;
         if version::parse(current) == version::parse(&attempt.to) {
@@ -873,6 +873,7 @@ impl Updater {
             at: Utc::now(),
             backup,
             staged: Some(private.clone()),
+            aside: None,
         };
         let stored = {
             let mut inner = self.lock();
@@ -894,7 +895,18 @@ impl Updater {
                     step: Step::Replacing,
                 });
                 self.emit();
-                if let Err(why) = self.replace(kind, &staged) {
+                let replaced = self.replace(kind, &staged, &private);
+                if let Ok(Some(aside)) = &replaced {
+                    let stored = {
+                        let mut inner = self.lock();
+                        if let Some(attempt) = inner.stored.attempt.as_mut() {
+                            attempt.aside = Some(aside.clone());
+                        }
+                        inner.stored.clone()
+                    };
+                    self.save(&stored);
+                }
+                if let Err(why) = replaced {
                     let stored = {
                         let mut inner = self.lock();
                         inner.stored.attempt = None;
@@ -920,23 +932,37 @@ impl Updater {
         Ok(())
     }
 
+    /// Put the staged copy in place. Answers where the old Mac bundle was left when that is
+    /// outside `private` (which the next start removes anyway).
     #[cfg(unix)]
-    fn replace(&self, kind: InstallKind, staged: &Path) -> Result<(), String> {
+    fn replace(
+        &self,
+        kind: InstallKind,
+        staged: &Path,
+        private: &Path,
+    ) -> Result<Option<PathBuf>, String> {
         let installed = self
             .config
             .installed
             .as_deref()
             .ok_or_else(|| "knobas does not know where it is installed".to_owned())?;
         match kind {
-            InstallKind::App => install::macos::swap_bundle(staged, installed)
-                .map(drop)
+            InstallKind::App => install::macos::swap_bundle(staged, installed, private)
+                .map(|left| (!left.starts_with(private)).then_some(left))
                 .map_err(|error| error.to_string()),
-            _ => install::appimage::replace(staged, installed).map_err(|error| error.to_string()),
+            _ => install::appimage::replace(staged, installed)
+                .map(|()| None)
+                .map_err(|error| error.to_string()),
         }
     }
 
     #[cfg(not(unix))]
-    fn replace(&self, _kind: InstallKind, _staged: &Path) -> Result<(), String> {
+    fn replace(
+        &self,
+        _kind: InstallKind,
+        _staged: &Path,
+        _private: &Path,
+    ) -> Result<Option<PathBuf>, String> {
         Err("this copy cannot replace itself".to_owned())
     }
 

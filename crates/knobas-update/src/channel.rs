@@ -291,7 +291,19 @@ fn parse(body: &[u8]) -> Result<Manifest, CheckError> {
 #[must_use]
 pub fn notes(body: &str) -> String {
     let mut kept = String::new();
-    for line in body.lines() {
+    let mut lines = body
+        .lines()
+        .skip_while(|line| line.trim().is_empty())
+        .peekable();
+    // The release's own "## What's new in vX.Y.Z": the page heads the notes with it already.
+    if lines.peek().is_some_and(|line| {
+        line.trim_start_matches('#')
+            .trim()
+            .starts_with("What's new in")
+    }) {
+        lines.next();
+    }
+    for line in lines {
         if line.trim() == "---" {
             break;
         }
@@ -305,7 +317,7 @@ pub fn notes(body: &str) -> String {
         }
         kept.truncate(cut);
     }
-    kept.trim_end().to_owned()
+    kept.trim().to_owned()
 }
 
 /// The notes of `version` and its page, from `<api>/repos/…/releases/tags/v<version>`.
@@ -451,10 +463,7 @@ mod tests {
             .unwrap();
         assert_eq!(found.manifest.version, "3.2.9-ux28");
         assert!(found.pre_release);
-        assert_eq!(
-            found.notes.as_deref(),
-            Some("## What's new in v3.2.9-ux28\n\nThings.")
-        );
+        assert_eq!(found.notes.as_deref(), Some("Things."));
     }
 
     #[tokio::test]
@@ -536,7 +545,8 @@ mod tests {
 
     #[test]
     fn notes_stop_at_the_rule() {
-        assert_eq!(notes("## What's new\n\nA\n---\nB"), "## What's new\n\nA");
+        assert_eq!(notes("## What's new in v3.2.9\n\nA\n---\nB"), "A");
+        assert_eq!(notes("## Fixed\n\nA\n---\nB"), "## Fixed\n\nA");
         let long = "x".repeat(NOTES_CAP + 10);
         assert_eq!(notes(&long).len(), NOTES_CAP);
     }
