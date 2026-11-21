@@ -41,7 +41,10 @@
   (`shell/windowed.svelte.ts`, #2209); `j`/`k` draws the next first.
 
   **Moving a ticket** (ADR-0054, ticket-edit decisions sections 3 to 13): a
-  card's right-click menu offers *Move to ▸* with the statuses it can reach,
+  card is dragged to a column, which lights where it can go (`card-drag.svelte.ts`;
+  `m` carries the selected card by key); a column of several statuses asks
+  which, at the drop point. A card's right-click menu offers *Move to ▸* with
+  the statuses it can reach,
   and the list's Status cell is a button that opens them (`m` on the selected
   row). A move is drawn at once, the card in its new column with *Queued*
   then *Sent* (`moves.svelte.ts`, laid over the board's read by
@@ -209,6 +212,7 @@
   import { askReach, asking as reachAsking, moveRefusal, noteObserved, reachOf } from "./reach.svelte";
   import { dismissNote, movedStatus, moveTicket, moveWaits, offerMoves, ticketNotes, undoLastMove, watchTicketNotes, type MoveOffer } from "./moves.svelte";
   import StatusMenu from "./StatusMenu.svelte";
+  import { createCardDrag } from "./card-drag.svelte";
 
   let {
     ready,
@@ -759,12 +763,15 @@
     if (was !== undefined) boardHold.restore(entityId, was);
   }
 
-  /** Move `card` to `status`: on the board it stands at the top of its new column at once (section 8). */
-  function moveCard(card: MiniBoardCard, status: string) {
+  /**
+   * Move `card` to `status`: on the board it stands at once where it was dropped (`at`, section 8), or at the top of its
+   * new column for a move by menu.
+   */
+  function moveCard(card: MiniBoardCard, status: string, at: { place: string; before: string | null } | null = null) {
     if (moveBlocked(card) !== null) return;
     const id = card.entity_id;
     if (showing.layout === "board") {
-      const lands = landing(card, status);
+      const lands = at ?? landing(card, status);
       const was = lands === null ? null : boardHold.move(id, lands.place, lands.before);
       if (was !== null && !movedFrom.has(id)) movedFrom.set(id, was);
     }
@@ -772,14 +779,15 @@
   }
 
   /** The chip a moved card draws on its head line, in a column holding `listed` statuses (several: it names the one picked). */
-  function writeOf(card: MiniBoardCard, listed: readonly string[]): { words: string; tone: "info" | "muted"; title?: string } | null {
+  function writeOf(card: MiniBoardCard, listed: readonly string[]): { words: string; other: string; tone: "info" | "muted"; title?: string } | null {
     const echo = echoOn(card.entity_id, "status");
     if (echo === null) return null;
     const sent = echo.state === "sent";
     const several = listed.length > 1;
-    const words = sent ? (several ? `${echo.text}, sent` : "Sent") : several ? `${echo.text}, queued` : "Queued";
+    const queued = several ? `${echo.text}, queued` : "Queued";
+    const done = several ? `${echo.text}, sent` : "Sent";
     const title = echo.write === null ? undefined : moveWaits[echo.write];
-    return { words, tone: sent ? "muted" : "info", ...(title === undefined ? {} : { title }) };
+    return { words: sent ? done : queued, other: sent ? queued : done, tone: sent ? "muted" : "info", ...(title === undefined ? {} : { title }) };
   }
 
   /** What *Move to ▸* in a ticket's right-click menu offers (section 10). */
@@ -813,6 +821,61 @@
         },
       }),
     );
+  });
+
+  // -- the drag (sections 7 to 10) --
+  /** What the live region says: each step of a carry, a drop, a put back. */
+  let said = $state("");
+  /** The status menu at a drop point, and what its pick answers. */
+  let dropMenu = $state<{ card: MiniBoardCard; statuses: string[]; at: { x: number; y: number }; answer: (status: string | null) => void } | null>(null);
+  let dropMenuOpen = $state(false);
+  /** The column a card stands in, as the drag reads it: the statuses it gathers, by name. */
+  function dropColumnOf(column: MiniBoardColumn, listed: readonly string[]) {
+    const statuses = listed.length > 0 ? [...listed] : column.status === null ? [] : [column.status];
+    return { name: columnHead(column.status, view?.columns ?? []), statuses };
+  }
+  const drag = createCardDrag({
+    cardOf: (entityId) => {
+      const entry = heldBoard.rows.find((one) => one.card.entity_id === entityId);
+      if (entry === undefined) return null;
+      const place = boardHold.tagOf(entry);
+      return { card: entry.card, place, lane: place.split("\u0001")[0] ?? "" };
+    },
+    columns: () => {
+      const byPlace = new Map<string, { lane: string; column: { name: string; statuses: string[] } }>();
+      for (const { lane } of reader.bands) for (const { column, listed } of columnsOf(lane)) byPlace.set(placeAt(lane, column), { lane: lane.key ?? "", column: dropColumnOf(column, listed) });
+      return [...document.querySelectorAll<HTMLElement>(".tf-tickets .tf-col[data-place]")]
+        .filter((node) => node.closest(".tf-kept[hidden]") === null)
+        .flatMap((node) => {
+          const known = byPlace.get(node.dataset.place!);
+          return known === undefined ? [] : [{ place: node.dataset.place!, lane: known.lane, column: known.column, node }];
+        });
+    },
+    facts: (card) => ({
+      source: sourceRoles.nameOf(card.source_id),
+      moves: sourceRoles.writes(card.source_id, "transition"),
+      refused: moveRefusal(card.entity_id) ?? null,
+    }),
+    drop: (card, to) => moveCard(card, to.status, { place: to.place, before: to.before }),
+    choose: (card, statuses, at) =>
+      new Promise((answer) => {
+        dropMenu = { card, statuses, at, answer };
+        dropMenuOpen = true;
+      }),
+    ask: (card, when) => askReach(card, when, ports.moves?.reachableTransitions),
+    scroller: () => {
+      const wrap = document.querySelector<HTMLElement>(".tf-tickets .tf-board-wrap");
+      const cols = wrap?.querySelectorAll<HTMLElement>(".tf-cols") ?? [];
+      return cols.length === 1 ? cols[0]! : (wrap ?? document.body);
+    },
+    say: (text) => (said = text),
+  });
+  // The layout or the view changes, or the page hides: a held card goes back.
+  $effect(() => {
+    void showing.layout;
+    void viewId;
+    if (!pageShown()) untrack(() => drag.putBack());
+    return () => untrack(() => drag.putBack());
   });
 
   // -- the list's Status cell (section 10) --
@@ -1032,6 +1095,11 @@
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;
+      // `m` on the board picks the selected card up (the carry, section 10).
+      if (event.key === "m" && showing.layout === "board" && current !== null && layers.open.length === 0) {
+        if (drag.carry(current.card.entity_id)) event.preventDefault();
+        return;
+      }
       // `m` on the list's selected row opens its status menu under the cell (section 10).
       if (event.key === "m" && showing.layout === "list" && current !== null && layers.open.length === 0) {
         const cell = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(current.card.entity_id)}"] .tf-statecell`);
@@ -1146,7 +1214,7 @@
     </div>
   </nav>
 
-  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach fbarHeight}>
+  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach fbarHeight} {@attach drag.attach}>
     {#if subtasksOf !== null || back !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
       <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
@@ -1281,7 +1349,7 @@
               {@const pointer = reader.all ? null : listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               {@const place = placeAt(lane, column)}
-              <div class="tf-col">
+              <div class="tf-col" data-place={place}>
                 <h3>
                   {columnHead(column.status, view?.columns ?? [])}
                   <span
@@ -1290,6 +1358,8 @@
                     title={limit !== null ? `At most ${limit} on this column` : undefined}
                     >{column.total}{#if limit !== null}{" "}of {limit}{/if}</span
                   >
+                  <!-- While a card is held, a column that would ask says which statuses, in room its head's line has (section 7). -->
+                  <span class="tf-colsts" aria-hidden="true"></span>
                 </h3>
                 <div class="tf-stack">
                   <TicketStack cards={heldCards.get(place) ?? []} atMost={openShare(place, heldCards.get(place) ?? [])} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
@@ -1394,7 +1464,9 @@
                         }}
                         ondblclick={(event) => event.stopPropagation()}
                         ><span class="tf-statename">{columnName(card.status)}</span><span class="tf-chev" aria-hidden="true"></span></button
-                      >{#if write}{" "}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} title={write.title}>{write.words}</span>{/if}</td
+                      >{#if write}{" "}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} title={write.title}
+                          ><span class="tf-wwords"><span class="tf-won">{write.words}</span><span aria-hidden="true">{write.other}</span></span></span
+                        >{/if}</td
                     >
                   {:else if column === "priority"}
                     <td class="tf-c-priority" title={sentenceCase(card.priority) ?? undefined}>{sentenceCase(card.priority) ?? ""}</td>
@@ -1426,6 +1498,29 @@
     {/if}
   </TfScroller>
 
+  <p class="tf-sr" role="status" aria-live="polite">{said}</p>
+  {#if dropMenu !== null}
+    {@const asked = dropMenu}
+    <StatusMenu
+      bind:open={dropMenuOpen}
+      opener={null}
+      at={asked.at}
+      heading
+      ticketKey={asked.card.key}
+      status={asked.card.status}
+      source={sourceRoles.nameOf(asked.card.source_id)}
+      reach={null}
+      only={asked.statuses}
+      onpick={(status) => {
+        dropMenu = null;
+        asked.answer(status);
+      }}
+      onclose={() => {
+        dropMenu = null;
+        asked.answer(null);
+      }}
+    />
+  {/if}
   {#if statusMenu !== null}
     {@const menuCard = statusMenu.card}
     <StatusMenu

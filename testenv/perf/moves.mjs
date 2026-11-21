@@ -48,6 +48,12 @@ const real = /[?&]fake-real=/.test(app);
 const base = app.replace(/#.*$/, "");
 
 const shown = ".tf-kept:not([hidden])";
+/** A To Do ticket of the fixture's mock source, whose workflow offers In Progress (`fake/entity.ts`). */
+const MOVE_TICKET = "#/ticket/mock%3APAY-240";
+/** The Tickets page's List switch, pressed. */
+const TO_LIST = `(() => { const b = [...document.querySelectorAll('${shown} [aria-label="Layout"] button')].find((x) => x.textContent === "List"); b?.click(); return !!b; })()`;
+/** The first To Do card, focused, for `m`. */
+const SELECT_TODO = `(() => { const col = [...document.querySelectorAll('${shown} .tf-col[data-place]')].find((c) => c.dataset.place.endsWith("To Do")); const n = col?.querySelector(".tf-tcard"); n?.focus(); return !!n; })()`;
 const nav = (section) => `.tf-nav a[data-section="${section}"], .tf-nav a[href="#/${section}"], .tf-nav a[href^="#/${section}/"]`;
 const GEAR = `a.tf-iconbtn[aria-label="Settings"]`;
 const ESC = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
@@ -260,6 +266,16 @@ const PLACES = [
   // A repository its files found, alone under `#r` (D11): the pane draws the answer's file at once and the repository's
   // other files under it when `search_files` lands, so nothing drawn moves.
   { name: "launcher-file-pane", start: "#/tickets", store: { "knobas.launcher.scope": "everything" }, setupKey: CMD_K, fill: { into: "[role=dialog] input", text: real ? "#r packetlin" : "#r settlebridg" }, type: { into: "[role=dialog] input", key: "e" }, hash: null, ready: "[role=dialog] .tf-ln-file", anywhere: true, away: "clear" },
+  // A ticket's move (ADR-0054): its status menu, and a move in each state the queue gives it (the fixture's
+  // `fake-move`), on the ticket page; the list's status menu; the board lit for a carried card. The moved ticket's own
+  // chip and note come; nothing else may move. `once`: a moved ticket offers another status, so there is no return.
+  { name: "ticket-status-menu", fixture: true, start: MOVE_TICKET, press: `${shown} .tf-statebtn`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
+  { name: "ticket-move-queued", fixture: true, once: true, fake: "fake-move=slow", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
+  { name: "ticket-move-sent", fixture: true, once: true, start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
+  { name: "ticket-move-refused", fixture: true, once: true, fake: "fake-move=refused", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
+  { name: "ticket-move-held", fixture: true, once: true, fake: "fake-move=held", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
+  { name: "list-status-menu", fixture: true, start: "#/tickets", before: [{ eval: TO_LIST }], press: `${shown} .tf-statecell`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
+  { name: "board-carry", fixture: true, start: "#/tickets", before: [{ eval: SELECT_TODO }], key: { key: "m", code: "KeyM", windowsVirtualKeyCode: 77 }, hash: null, ready: ".tf-board-wrap[data-held]", anywhere: true, away: "Escape" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "create-monitor", optional: true, start: "#/monitors/unmonitored", press: `${shown} button`, text: "Create monitor", starts: true, hash: null, ready: "[role=dialog]", away: "Escape" },
   { name: "link-dialog", start: "#/tickets", setup: `${shown} .tf-tcard`, setupOnce: true, press: `${shown} button`, text: "Link something to it", starts: true, hash: null, away: "Escape" },

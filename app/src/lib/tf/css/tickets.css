@@ -221,3 +221,34 @@
 .tf-menu .tf-menu-h { padding: 4px 10px 6px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-menu .tf-menu-line { padding: 4px 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); max-width: 300px; }
 .tf-menu kbd { --fs: var(--size-code); margin-left: auto; font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+
+/* ---- a held card (ADR-0054; ticket-edit decisions, section 9). Nothing moves during a drag: what follows the hand is
+   a copy in the float host, moved by transform; the board changes only colours. ---- */
+/* The card's own box keeps its room, emptied: where it came from, and where it returns. */
+.tf-tcard.tf-held { background: none; border-style: dashed; box-shadow: none; }
+.tf-tcard.tf-held > * { visibility: hidden; }
+/* The copy floats: the selected card's ring and the shadow; on the chosen job's yellow card it keeps the yellow. */
+.tf-tghost { position: fixed; left: 0; top: 0; z-index: 34; pointer-events: none; margin: 0; will-change: transform; box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
+.tf-tghost.tf-card { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
+/* Why the column under it will not take it: under the copy, where the eye is. */
+.tf-twhy { position: fixed; left: 0; top: 0; z-index: 34; pointer-events: none; max-width: 300px; padding: 5px 8px; border-radius: 4px; background: var(--ink); color: var(--sheet); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.35; will-change: transform; }
+/* Where it lands: one line in the float host. */
+.tf-tline { position: fixed; left: 0; top: 0; z-index: 33; pointer-events: none; height: 2px; border-radius: 1px; background: var(--ink); will-change: transform; }
+.tf-twhy[hidden], .tf-tline[hidden] { display: none; }
+/* While a card is held: a column it can reach keeps its fill and takes a hairline; one it cannot loses its fill and
+   steps back, as a disabled control does; the one under the pointer takes the selection's outline. No tone: "you may
+   drop here" is not a state of a ticket. */
+.tf-board-wrap[data-held] { cursor: grabbing; user-select: none; }
+.tf-board-wrap[data-held] .tf-tcard { cursor: grabbing; }
+.tf-col[data-drop="yes"] .tf-stack { outline: 1px solid var(--ink-2); outline-offset: -1px; }
+.tf-col[data-drop="no"] .tf-stack { background: none; outline: 1px dashed var(--rule); outline-offset: -1px; }
+.tf-col[data-drop="no"] .tf-cards, .tf-col[data-drop="no"] h3 { opacity: 0.4; }
+.tf-col[data-drop="no"][data-over] { cursor: not-allowed; }
+.tf-col:is([data-drop="yes"], [data-drop="ask"])[data-over] .tf-stack { outline: 2px solid var(--ink); outline-offset: -2px; }
+/* A column of several statuses says them while a card is held, at its head's right end: room the line always had. */
+.tf-col h3 .tf-colsts { margin-left: auto; min-width: 0; flex: 0 1 auto; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-col h3 .tf-colsts:empty { display: none; }
+/* A write chip's words, each it can say stacked in one cell: it keeps the longest's width, so it never moves as it turns. */
+.tf-wwords { display: inline-grid; }
+.tf-wwords > span { grid-area: 1 / 1; visibility: hidden; }
+.tf-wwords > .tf-won { visibility: visible; }

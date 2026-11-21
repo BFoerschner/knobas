@@ -58,8 +58,8 @@
     source?: string | null;
     /** On the card itself: its column's window measures it and holds it still (`TicketStack`). */
     row?: Attachment<HTMLElement>;
-    /** Where its move's write is, drawn as a chip on the head line; `null` draws none. */
-    write?: { words: string; tone: "info" | "muted"; title?: string } | null;
+    /** Where its move's write is, drawn as a chip on the head line; `null` draws none. `other`: the words it turns to or from, kept under it so its width holds. */
+    write?: { words: string; other?: string; tone: "info" | "muted"; title?: string } | null;
     /** What the card says of a move the source refused or knobas holds; `null` draws none. */
     note?: { tone: "err" | "warn"; lead: string; words: string } | null;
     /** The note's `×`: its write discarded. */
@@ -90,7 +90,9 @@
   <span class="tf-thead">
     <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>
     {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
-    {#if write}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} class:tf-muted={write.tone === "muted"} title={write.title}>{write.words}</span>{/if}
+    {#if write}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} class:tf-muted={write.tone === "muted"} title={write.title}
+        ><span class="tf-wwords"><span class="tf-won">{write.words}</span>{#if write.other}<span aria-hidden="true">{write.other}</span>{/if}</span></span
+      >{/if}
   </span>
   {#if note}
     {@const said = `${note.lead} ${note.words}`.trim()}

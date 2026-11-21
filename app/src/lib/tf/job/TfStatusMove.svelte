@@ -62,7 +62,7 @@
   let button = $state<HTMLButtonElement | null>(null);
 
   const shown = $derived(echo?.text ?? status);
-  const write = $derived(echo === null ? null : echo.state === "sent" ? "Moved, sent" : "Moving, queued");
+  const sent = $derived(echo?.state === "sent");
 
 </script>
 
@@ -80,7 +80,10 @@
   }}
   ><TfStateChip text={shown ?? "No status"} /><span class="tf-chev" aria-hidden="true"></span></button
 >
-{#if write !== null}<span class="tf-chip tf-swrite" class:tf-info={echo?.state !== "sent"}>{write}</span>{/if}
+<!-- Both words stacked, the one that stands shown: the chip keeps the longer one's width, so nothing moves as it turns *sent*. -->
+{#if echo !== null}<span class="tf-chip tf-swrite" class:tf-info={!sent}
+    ><span class="tf-wwords"><span class:tf-won={!sent} aria-hidden={sent ? "true" : undefined}>Moving, queued</span><span class:tf-won={sent} aria-hidden={sent ? undefined : "true"}>Moved, sent</span></span></span
+  >{/if}
 {#if note}
   <p class="tf-fact-note" class:tf-held={note.tone === "warn"} role="status">
     <span>{note.lead} {note.words}</span>

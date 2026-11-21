@@ -1423,7 +1423,7 @@ test("the status opens a menu of where the ticket can go, and a pick moves it at
     items[0]!.click();
     flushSync();
     expect(target.querySelector(".tf-jobrow .tf-statebtn")!.textContent).toBe("In review");
-    expect(target.querySelector(".tf-jobrow .tf-swrite")?.textContent).toBe("Moving, queued");
+    expect(target.querySelector(".tf-jobrow .tf-swrite .tf-won")?.textContent).toBe("Moving, queued");
     await settle();
     expect(calls.writes).toContainEqual({ Transition: { entity: ID, status: "In Review" } });
     expect(target.querySelector(".tf-jobkey")!.getBoundingClientRect()).toEqual(keyBox);

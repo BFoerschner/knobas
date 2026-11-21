@@ -381,5 +381,26 @@
     "moved": 0
    }
   }
+ },
+ "drag": {
+  "_": "Lines for testenv/perf/card-drag.mjs (ADR-0054, ticket-edit decisions section 14): from the input's own event time to the frame after what it shows painted, median of the rounds. Björn's key lines, 100 / 100 / 200 ms at CPU 1x / 4x / 6x, for a pickup (the board lit and the copy drawn), a drop on a one-status column (the card in its new column with its chip) and the carry's keys (m, an arrow, Enter); and no frame over 34 ms while a card is held at 4x on a board as it opens. The source's round trip is never inside these: it is behind the echo.",
+  "pickup": {
+   "1": 100,
+   "4": 100,
+   "6": 200
+  },
+  "drop": {
+   "1": 100,
+   "4": 100,
+   "6": 200
+  },
+  "key": {
+   "1": 100,
+   "4": 100,
+   "6": 200
+  },
+  "move": {
+   "4": 34
+  }
  }
 }

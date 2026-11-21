@@ -2537,7 +2537,7 @@ const inColumn = (status: string) => {
   const col = [...target.querySelectorAll(".tf-col")].find((one) => one.querySelector("h3")!.textContent!.trim().startsWith(status));
   return [...(col?.querySelectorAll<HTMLElement>(".tf-tcard") ?? [])].map((one) => one.dataset.entity!.replace("jira:", ""));
 };
-const chipOf = (key: string) => target.querySelector(`[data-entity="jira:${key}"] .tf-twrite`)?.textContent ?? null;
+const chipOf = (key: string) => target.querySelector(`[data-entity="jira:${key}"] .tf-twrite .tf-won`)?.textContent ?? null;
 
 test("the list's Status cell opens the statuses the ticket can reach, and a pick queues the move, drawn at once", async () => {
   const h = harness();
@@ -2618,4 +2618,28 @@ test("a refused move puts the card back in its column at its place, with the sou
   ticketNotes["jira:PAY-3"] = { write, tone: "err", lead: "Not moved to Done.", words: "No move from To Do to Done." };
   flushSync();
   expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-trefused')?.textContent).toContain("Not moved to Done. No move from To Do to Done.");
+});
+
+test("m on the board carries the selected card: Enter on a one-status column moves it there at the top, Queued, with no menu", async () => {
+  const h = harness();
+  const { sent } = movable(h, ["In Progress"]);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  // Asked where it can go as it was selected.
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS[1]!.card, status: "To Do" }, "press", h.ports.moves!.reachableTransitions);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(target.querySelector(".tf-board-wrap")!.hasAttribute("data-held")).toBe(true);
+  expect(target.querySelector(".tf-sr")!.textContent).toContain("PAY-2 picked up. PAY-2 over In progress.");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(target.querySelector(".tf-board-wrap")!.hasAttribute("data-held")).toBe(false);
+  expect(document.querySelector(".tf-move-m")).toBeNull();
+  expect(inColumn("In progress")[0]).toBe("PAY-2");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  await settle();
+  expect(sent).toEqual([{ Transition: { entity: "jira:PAY-2", status: "In Progress" } }]);
 });

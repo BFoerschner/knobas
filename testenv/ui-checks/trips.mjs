@@ -162,6 +162,12 @@
 //                 scroll and every row of the rail (fold heads, links, the filter) with where it stands. Fails if a press changes any of them by
 //                 more than 1 px: a press in the tree opens the page and moves nothing in the rail.
 //
+//   card-drag     2026-11-21 (Björn: "drag/drop ... it also shows, after picking up the ticket, where you only can drag the ticket", ADR-0054).
+//                 At `route`, by real mouse: a card of `from` rests, is pressed and glides to `to`, a column it can reach. While held the wrap says
+//                 `data-held` and each column `data-drop` (`to` "yes", `no` "no"); the release lands the card in `to` with its write chip and one
+//                 move queued. A second card glides to `no`, a column it cannot reach: the release leaves it in `from` and queues nothing. Fails if
+//                 a column keeps `data-drop` or the float host keeps a copy, a line or a reason at rest, or if a card drawn elsewhere moved.
+//
 //   tree-click    2026-11-21 (Björn: "when I click on a tree element, I want it to always expand … click on it again, it should toggle"). At `route`,
 //                 by real pointer on `fold`'s title: the first click must open a page and the fold, the next two on the open page close and open it,
 //                 two on its chevron close and open it with no page. Fails if a press moves a row at or above the pressed one, if the fold is ever drawn
@@ -428,12 +434,19 @@ const SWATCH_CHECK = String.raw`(b) => {
   return null;
 }`;
 
+// Moving a ticket on the board (ADR-0054): a drag to a column it can reach, and one to a column it cannot.
+const MOVES = [
+  { page: "Moving a ticket", route: "tickets", trips: [
+    { id: "card-drag", kind: "card-drag", strict: true, finding: "2026-11-21-ticket-move", size: [1440, 868], from: "To Do", to: "In Progress", no: "Done" },
+  ] },
+];
+
 // By page. `press` finds the first visible control with those words; `prep` runs first: { click, text | starts }, { fill, text }, { eval } or { wait }.
 // The right-click menu's cases (2026-11-16): one per kind of thing a person right-clicks daily, a field, and nothing.
 const RIGHT_CLICK = [
   { page: "Right-click, Tickets", route: "tickets", trips: [
-    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "link", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
-    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "link", "web", "copy-key", "copy-key-title", "copy-link"] },
+    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "link", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
+    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "link", "web", "copy-key", "copy-key-title", "copy-link"] },
     { id: "rc-field", kind: "right-click", finding: "right-click", platform: true, on: { sel: ".tf-main input" } },
   ] },
   { page: "Right-click, Code", route: "code", trips: [
@@ -496,6 +509,7 @@ const RIGHT_SPAM = [
 const PAGES = [
   ...COLD,
   ...RIGHT_CLICK,
+  ...MOVES,
   ...RIGHT_SPAM,
   // The still-rows pass (PR #2479, 2026-11-11): each late read lands after the first draw, and nothing drawn may move.
   { page: "Code, Repositories", route: "code", trips: [
@@ -4171,7 +4185,91 @@ async function startBrowser() {
     return { reasons, note: `${did.join(", then ")}: ${why ? "not as asked" : "as asked"}` };
   }
 
-  const KINDS = { "press-result": pressResult, "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "right-spam": rightSpam, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
+  async function cardDrag(t) {
+    const reasons = [];
+    // Each drawn column by its status, with its standing and its cards; whether a card is held; what stands in the float host.
+    const read = async () => JSON.parse(await evaluate(`JSON.stringify((() => {
+      const cols = [...document.querySelectorAll(".tf-col[data-place]")].filter((c) => c.getClientRects().length);
+      return {
+        cols: cols.map((c) => ({ status: c.dataset.place.split("\\u0001")[1], drop: c.dataset.drop ?? null, cards: [...c.querySelectorAll(".tf-tcard[data-entity]")].map((n) => [n.dataset.entity, Math.round(n.getBoundingClientRect().top), Math.round(n.getBoundingClientRect().left)]) })),
+        held: !!document.querySelector(".tf-board-wrap[data-held]"),
+        floats: document.querySelectorAll(".tf-floats .tf-tghost, .tf-floats .tf-tline, .tf-floats .tf-twhy").length,
+      };
+    })())`));
+    const col = (state, status) => state.cols.find((c) => c.status?.toLowerCase() === status.toLowerCase());
+    const pointOf = async (sel) => JSON.parse(await evaluate(`(() => { const n = ${sel}; if (!n) return "null"; const r = n.getBoundingClientRect(); return JSON.stringify({ x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(20, r.height / 2) }); })()`));
+    const colSel = (status) => `[...document.querySelectorAll(".tf-col[data-place]")].find((c) => c.dataset.place.split("\\u0001")[1]?.toLowerCase() === ${JSON.stringify(status.toLowerCase())})`;
+    const firstCard = (status, skip = "") => `${colSel(status)}?.querySelector(".tf-tcard[data-entity]${skip ? `:not([data-entity='${skip}'])` : ""}")`;
+    const atRest = (what, state) => {
+      if (state.held) reasons.push(`${what}: the board still says a card is held`);
+      const lit = state.cols.filter((c) => c.drop !== null).map((c) => c.status);
+      if (lit.length) reasons.push(`${what}: ${lit.join(", ")} kept data-drop`);
+      if (state.floats) reasons.push(`${what}: the float host kept ${state.floats} of the drag's floats`);
+    };
+    // Every card but the moved one stands where it stood.
+    const stayed = (what, before, after, moved) => {
+      const where = (state) => new Map(state.cols.flatMap((c) => c.cards.filter(([id]) => id !== moved).map(([id, top, left]) => [id, `${c.status} ${top} ${left}`])));
+      const was = where(before);
+      const now = where(after);
+      const shifted = [...was].filter(([id, at]) => now.has(id) && now.get(id) !== at && !col(after, t.to)?.cards.some(([other]) => other === id) && !col(after, t.from)?.cards.some(([other]) => other === id));
+      if (shifted.length) reasons.push(`${what}: ${shifted.length} cards outside the two columns moved, the first ${shifted[0][0]}`);
+    };
+    const dragTo = async (card, status) => {
+      const from = await pointOf(card);
+      if (!from) throw new Error(`no card in ${t.from}`);
+      const to = await pointOf(`${colSel(status)}?.querySelector(".tf-stack")`);
+      if (!to) throw new Error(`no column ${status}`);
+      await mouseTo(from.x, from.y);
+      await sleep(250); // The rest asks where it can go.
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1 });
+      await glide(from, { x: to.x + 60, y: to.y + 40 }, 300);
+      await sleep(120);
+      const held = await read();
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x + 60, y: to.y + 40, button: "left", clickCount: 1 });
+      await sleep(900);
+      return held;
+    };
+    if (t.size) await fit(...t.size);
+    await open(t);
+    await sleep(800);
+    const start = await read();
+    if (!col(start, t.from) || !col(start, t.to) || !col(start, t.no)) throw new Error(`the board has no ${t.from}, ${t.to} or ${t.no} column: ${start.cols.map((c) => c.status).join(", ")}`);
+    atRest("before", start);
+    // A drag to a column it can reach.
+    const moving = await evaluate(`${firstCard(t.from)}?.dataset.entity ?? null`);
+    if (!moving) throw new Error(`no card in ${t.from}`);
+    const beforeWrites = await snap();
+    const lit = await dragTo(firstCard(t.from), t.to);
+    if (!lit.held) reasons.push("while held the board did not say a card is held");
+    if (col(lit, t.to)?.drop !== "yes") reasons.push(`while held ${t.to} said ${col(lit, t.to)?.drop ?? "nothing"}, not yes`);
+    if (col(lit, t.no)?.drop !== "no") reasons.push(`while held ${t.no} said ${col(lit, t.no)?.drop ?? "nothing"}, not no`);
+    if (col(lit, t.from)?.drop !== null) reasons.push(`while held its own column said ${col(lit, t.from)?.drop}`);
+    const landed = await read();
+    atRest("after the drop", landed);
+    if (!col(landed, t.to)?.cards.some(([id]) => id === moving)) reasons.push(`${moving} is not in ${t.to} after the drop`);
+    if (col(landed, t.from)?.cards.some(([id]) => id === moving)) reasons.push(`${moving} is still in ${t.from}`);
+    const chip = await evaluate(`document.querySelector('.tf-tcard[data-entity="${moving}"] .tf-twrite .tf-won')?.textContent ?? ""`);
+    const writes = added(await snap(), beforeWrites).filter((w) => w === "Transition");
+    if (writes.length !== 1) reasons.push(`the drop queued ${writes.length} writes`);
+    stayed("the drop", start, landed, moving);
+    // A drag to a column it cannot reach.
+    const stays = await evaluate(`${firstCard(t.from, moving)}?.dataset.entity ?? null`);
+    let refusedNote = "no second card";
+    if (stays) {
+      const quiet = await snap();
+      const shut = await dragTo(firstCard(t.from, moving), t.no);
+      if (col(shut, t.no)?.drop !== "no") reasons.push(`the second drag found ${t.no} saying ${col(shut, t.no)?.drop ?? "nothing"}`);
+      const back = await read();
+      atRest("after the refused drop", back);
+      if (!col(back, t.from)?.cards.some(([id]) => id === stays)) reasons.push(`${stays} left ${t.from} on a drop where it cannot go`);
+      const more = added(await snap(), quiet).filter((w) => w === "Transition");
+      if (more.length) reasons.push(`the refused drop queued ${more.length} writes`);
+      refusedNote = `${stays} stayed in ${t.from}`;
+    }
+    return { reasons, note: `${moving} dragged to ${t.to} (chip "${chip}", ${writes.length} write), ${refusedNote}` };
+  }
+
+  const KINDS = { "card-drag": cardDrag, "press-result": pressResult, "cold-start": coldStart, "frame-scroll": frameScroll, "right-click": rightClick, "right-spam": rightSpam, "app-page": appPage, "list-return": listReturn, "rows-still": rowsStill, "find-meet": findMeet, "find-ladder": findLadder, "scroller-tab": scrollerTab, "pane-esc": paneEsc, "field-in-view": fieldInView, "press-holds": pressHolds, "nav-reopen": navReopen, "nav-place": navPlace, "nav-docs": navDocs, "tree-walk": treeWalk, "tree-click": treeClick, "gear-return": gearReturn, "walk-place": walkPlace, "scroller-keys": scrollerKeys, "scroller-select": scrollerSelect, "pane-keys": paneKeys, "comment-view": commentView, "nav-return": navReturn, "hold-to-undo": holdToUndo, "hold-gutter": holdGutter, "hold-leave": holdLeave, "find-key": findKey, "add-source-fold": addSourceFold, "strip-press": stripPress, "rail-top": railTop, "aimed-after-close": aimedAfterClose, "enter-twice": enterTwice, "leave-back": leaveBack, "esc-sweep": escSweep, "enter-fast": enterFast, "enter-walks": enterWalks, "pointer-twice": pointerTwice, "undo-stale": undoStale, "column-filter": columnFilter, "row-room": rowRoom, "walk-done": walkDone, "dialog-typing": dialogTyping, "kept-opening": keptOpening, "strip-walk": stripWalk };
   return { run: (t) => KINDS[t.kind](t), stop };
 }
 
