@@ -143,6 +143,17 @@ test("in a data language a property is a key, whichever scope cut it", async () 
   expect(kinds(json.lineAt(0))).toEqual(expect.arrayContaining(["key:a", "con:true"]));
 });
 
+test("a TOML key and a dotenv key are keys", async () => {
+  const toml = core();
+  toml.handle({ type: "open", id: 1, path: "Cargo.toml", text: 'name = "knobas"' });
+  await toml.done;
+  expect(kinds(toml.lineAt(0))).toContain("key:name");
+  const env = core();
+  env.handle({ type: "open", id: 1, path: ".env", text: "RETRY_LIMIT=3" });
+  await env.done;
+  expect(kinds(env.lineAt(0))).toContain("key:RETRY_LIMIT");
+});
+
 test("a file's name picks its language", () => {
   expect(languageOf("src/main.rs")).toBe("rust");
   expect(languageOf("web/client.ts")).toBe("typescript");

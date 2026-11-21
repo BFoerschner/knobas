@@ -105,7 +105,8 @@ export const ROLE_SCOPES: readonly (readonly [role: TokenRole, scopes: readonly 
     "prop",
     ["variable.other.property", "variable.other.object.property", "meta.object-literal.key", "variable.other.member", "support.variable.property", "entity.name.variable.field"],
   ],
-  ["key", ["support.type.property-name", "entity.name.tag.yaml", "keyword.other.definition.ini"]],
+  // TOML names a key `variable.other.key` and dotenv `variable.key` (the highlighter re-ruling, 2026-11-21).
+  ["key", ["support.type.property-name", "entity.name.tag.yaml", "keyword.other.definition.ini", "variable.other.key", "variable.key"]],
   ["tag", ["entity.name.tag", "punctuation.definition.tag"]],
   [
     "attr",
