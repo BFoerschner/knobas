@@ -77,6 +77,12 @@ url = "2"
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
 
+# The socket probe on Windows (ux28, `socket.rs`): AF_UNIX, which std has no
+# type for there. Already in the lockfile through tokio, and what the patched
+# `vendor/sqlx-core` connects with.
+[target.'cfg(windows)'.dependencies]
+socket2 = { version = "0.6", features = ["all"] }
+
 [dev-dependencies]
 # Only `tests/schema.rs` reaches for the column types the migrations declare;
 # nothing in `src/` mentions a timestamp. A dependency here rather than above

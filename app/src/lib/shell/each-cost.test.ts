@@ -265,6 +265,8 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfUpdatesSection.svelte  words(box.second.label, SECOND_WORDS)": "named small: the six words the update box's second button ever says, stacked so it keeps the longest's width",
   "tf/settings/TfUpdatesSection.svelte  asking ?? []": "named small: the three things a restart for an update can lose (drafts, a site's unsaved changes, a timer)",
   "tf/render/TfFolderPickMenu.svelte  taking": "named small: the folder renderers that take one folder, in the glyph's menu, which the person saves by hand in Settings (a handful)",
+  "shell/Booting.svelte  db.blocked.tried": "a handful by what it is: the routes one start tried to its own database, the loopback and the socket (ux28)",
+  "shell/Booting.svelte  db.blocked.allow": "at most two: the programs an administrator allows, knobas-app and its postgres (ux28)",
   "tf/diff/TfDiffFolder.svelte  renderers": "the person's own folder renderers that take one folder, for *Render with*: a handful",
   "tf/diff/TfDiffFolder.svelte  said ? kept.filter((f) => f.stderr !== \"\") : []": "at most two: a comparison's two sides",
   "tf/diff/TfDiffView.svelte  cardSegments": "windowed: the rows `fileWin.slice` draws near the view, a grouped folder's generated cards and end line in one inset box",

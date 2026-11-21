@@ -42,7 +42,48 @@ pub enum DbState {
     Failed {
         /// Why, shown to the user as text.
         message: String,
+        /// What the boot screen's *Copy details* copies (ux28): the step
+        /// that failed, what the data folder held, every connection tried
+        /// with its OS error, the machine and its security products. Absent
+        /// for a failure that has no start behind it (a server that died
+        /// after `ready`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        details: Option<String>,
+        /// Set when the operating system refused knobas its own server for
+        /// permissions (Windows' WSAEACCES, 10013): a firewall rule or
+        /// security software. The boot screen then says so in plain words.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        blocked: Option<Blocked>,
     },
+}
+
+impl DbState {
+    /// A failure with `message` alone: no start behind it to report on.
+    #[must_use]
+    pub fn failed(message: impl Into<String>) -> DbState {
+        DbState::Failed {
+            message: message.into(),
+            details: None,
+            blocked: None,
+        }
+    }
+}
+
+/// What the boot screen tells someone whose machine blocks knobas from its
+/// own database (ux28): what knobas tried, and what an administrator can
+/// allow.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct Blocked {
+    /// The cause in plain words, for the line under the heading.
+    pub cause: String,
+    /// Each address or socket path tried and refused: `tcp 127.0.0.1:54321`.
+    pub tried: Vec<String>,
+    /// The programs to allow, by their full paths: `knobas-app` and the
+    /// `postgres` it starts.
+    pub allow: Vec<String>,
 }
 
 /// What the shell needs to decide what to draw.
@@ -204,6 +245,25 @@ impl Lifecycle {
         *self.db.lock().unwrap_or_else(PoisonError::into_inner) = state;
     }
 
+    /// Give the failure that says `message` its full *Copy details* (ux28):
+    /// the machine's facts arrive after the failure is on screen. False, and
+    /// nothing changes, when the window has moved on (a *Retry*, another
+    /// failure); the caller emits the new state when this answers true.
+    pub(crate) fn refine_failure(&self, message: &str, details: String) -> bool {
+        let mut db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+        match &mut *db {
+            DbState::Failed {
+                message: failed,
+                details: shown,
+                ..
+            } if failed == message => {
+                *shown = Some(details);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Claim a retry: move `Failed` back to `Starting`, and say whether this
     /// call is the one that now owns a bring-up.
     ///
@@ -273,7 +333,7 @@ impl Lifecycle {
             .suspended
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = state;
-        *db = DbState::Failed { message };
+        *db = DbState::failed(message);
         true
     }
 
@@ -345,8 +405,8 @@ impl Lifecycle {
     fn not_ready(&self) -> IpcError {
         IpcError::not_ready(match self.get() {
             // It did start, and then stopped (#1779): the message says so.
-            DbState::Failed { message } if self.server_is_down() => message,
-            DbState::Failed { message } => format!("the database did not start: {message}"),
+            DbState::Failed { message, .. } if self.server_is_down() => message,
+            DbState::Failed { message, .. } => format!("the database did not start: {message}"),
             _ => "the database is still starting".to_owned(),
         })
     }
@@ -1143,10 +1203,7 @@ mod tests {
             serde_json::json!({ "state": "ready" })
         );
         assert_eq!(
-            serde_json::to_value(DbState::Failed {
-                message: "port 5432 in use".into()
-            })
-            .unwrap(),
+            serde_json::to_value(DbState::failed("port 5432 in use")).unwrap(),
             serde_json::json!({ "state": "failed", "message": "port 5432 in use" })
         );
     }
@@ -1263,9 +1320,7 @@ mod tests {
         // the same data directory is the failure this prevents.
         assert!(!life.begin_retry(), "a starting database is not retried");
 
-        life.set(DbState::Failed {
-            message: "port 5432 in use".to_owned(),
-        });
+        life.set(DbState::failed("port 5432 in use"));
         assert!(life.begin_retry(), "a failure can be retried");
         assert_eq!(
             life.get(),
@@ -1281,14 +1336,37 @@ mod tests {
         assert!(!life.begin_retry(), "a live database is not restarted");
     }
 
+    /// ux28: the machine's facts reach the failure they were read for, and
+    /// not one a *Retry* has replaced.
+    #[test]
+    fn a_failures_details_are_refined_only_while_it_is_shown() {
+        let life = Lifecycle::new();
+        life.set(DbState::Failed {
+            message: "blocked".to_owned(),
+            details: Some("quick".to_owned()),
+            blocked: None,
+        });
+        assert!(!life.refine_failure("another", "full".to_owned()));
+        assert!(life.refine_failure("blocked", "full".to_owned()));
+        assert_eq!(
+            life.get(),
+            DbState::Failed {
+                message: "blocked".to_owned(),
+                details: Some("full".to_owned()),
+                blocked: None,
+            }
+        );
+        assert!(life.begin_retry());
+        assert!(!life.refine_failure("blocked", "late".to_owned()));
+        assert_eq!(life.get(), DbState::Starting { detail: None });
+    }
+
     /// ...and a bring-up that *failed* says so, rather than repeating "still
     /// starting" for the rest of the session.
     #[test]
     fn a_failed_bring_up_says_why_in_the_refusal() {
         let life = Lifecycle::new();
-        life.set(DbState::Failed {
-            message: "port 5432 in use".to_owned(),
-        });
+        life.set(DbState::failed("port 5432 in use"));
         let error = life.pool().expect_err("there is no pool");
         assert_eq!(error.code, crate::IpcErrorCode::NotReady);
         assert!(

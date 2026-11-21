@@ -2701,21 +2701,29 @@ const CASES: Case[] = [
   // Settings › Updates (ADR-0052): its notes' read.
   sectionCase("TfUpdatesSection", "updates"),
   {
-    /** The start screen's update line (ADR-0052): the effect that installs once a pressed download is ready. */
+    /**
+     * The start screen's update line (ADR-0052): the effect that installs once a pressed download is ready. And
+     * *Copy details* (ux28), which arms the timer that puts its word back while the copy answers late: a reader who
+     * presses it and the window moves on before either is done.
+     */
     name: "Booting",
     source: "lib/shell/Booting.svelte",
     open: (target) => ({
       app: mount(Booting, {
         target,
         props: {
-          db: { state: "failed", message: "migration 102 failed" },
+          db: { state: "failed", message: "migration 102 failed", details: "details" },
           version: "3.2.9-ux28",
           demo: false,
           onretry: () => {},
           update: { state: null, check: () => deferred(undefined), download: () => deferred(undefined), install: () => deferred(undefined) },
+          copy: () => deferred<void>(undefined),
         },
       }),
     }),
+    exercise: (target) => {
+      [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Copy details")?.click();
+    },
   },
   sectionCase("TfRenderersSection", "renderers"),
   // Appearance's State colours (#2466): its read lands late.

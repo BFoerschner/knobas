@@ -889,7 +889,7 @@ async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it()
         matches!(state, DbState::Failed { .. })
     })
     .await;
-    let DbState::Failed { message } = failed else {
+    let DbState::Failed { message, .. } = failed else {
         unreachable!()
     };
     assert!(
@@ -1211,7 +1211,7 @@ async fn a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_
     knobas_app::bring_up(app.handle(), &profile, None, registry).await;
 
     let message = match app.state::<Lifecycle>().get() {
-        DbState::Failed { message } => message,
+        DbState::Failed { message, .. } => message,
         other => panic!("a second launch on a live owner must fail, not reach {other:?}"),
     };
     assert!(
@@ -1235,4 +1235,92 @@ async fn a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_
         "the refused window's quit stops nothing"
     );
     owner.stop().await.unwrap();
+}
+
+/// ux28: knobas's own connection to the server it just started is refused
+/// for permissions, as a Windows Filtering Platform block (a firewall rule,
+/// security software) refuses a loopback connect with WSAEACCES (10013). The
+/// ux27 screen said "error communicating with database" and nothing else;
+/// the boot screen now names the cause, what was tried and the programs an
+/// administrator can allow, and *Copy details* carries the step, what the
+/// data folder held, each route with its OS error, and both programs.
+///
+/// Both routes are refused (the loopback and the socket in the data folder,
+/// ADR-0053): a product that blocks the socket file too still stops the
+/// start, and the screen then lists both. Under `/tmp` on Unix, since the
+/// Mac's `$TMPDIR` is too deep for a socket path.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_whose_own_connection_is_refused_for_permissions_explains_itself() {
+    let data = if cfg!(unix) {
+        tempfile::Builder::new()
+            .prefix("kb")
+            .tempdir_in("/tmp")
+            .unwrap()
+    } else {
+        tempfile::tempdir().unwrap()
+    };
+    let profile = Profile::new(false, data.path());
+    let data_dir = profile.db_config(None).root_dir.join("data");
+    knobas_db::embedded::seam::refuse_tcp_connects(&data_dir, knobas_db::report::WSAEACCES);
+    knobas_db::embedded::seam::refuse_socket_connects(&data_dir, knobas_db::report::WSAEACCES);
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    knobas_db::embedded::seam::allow_tcp_connects(&data_dir);
+
+    let DbState::Failed {
+        message,
+        details,
+        blocked,
+    } = app.state::<Lifecycle>().get()
+    else {
+        panic!("a refused connection fails the start");
+    };
+    let blocked = blocked.expect("the screen names the block");
+    assert!(
+        blocked
+            .cause
+            .contains("blocked knobas from reaching its own database"),
+        "{}",
+        blocked.cause
+    );
+    assert!(
+        blocked
+            .tried
+            .iter()
+            .any(|route| route.starts_with("tcp 127.0.0.1:")),
+        "{:?}",
+        blocked.tried
+    );
+    assert!(
+        blocked.tried.iter().any(|route| route.starts_with("unix ")),
+        "the socket was tried too: {:?}",
+        blocked.tried
+    );
+    assert_eq!(
+        blocked.allow.len(),
+        2,
+        "knobas and postgres: {:?}",
+        blocked.allow
+    );
+    assert!(blocked.allow[1].contains("postgres"), "{:?}", blocked.allow);
+    assert!(message.contains("10013"), "{message}");
+
+    let details = details.expect("Copy details has the start's report");
+    for line in [
+        "failed at: knobas connecting to its server",
+        "found: no data folder yet (first start)",
+        "tried:",
+        "knobas: ",
+        "postgres: ",
+        "error: ",
+    ] {
+        assert!(details.contains(line), "{line:?} in:\n{details}");
+    }
+    assert!(details.contains("10013"), "the exact OS error:\n{details}");
+    assert!(
+        !data_dir.join("postmaster.pid").exists(),
+        "the failed start stopped the server it started"
+    );
+    shutdown(&app);
 }

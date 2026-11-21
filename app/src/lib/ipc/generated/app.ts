@@ -26,6 +26,26 @@ secrets_in_memory: boolean, };
 export type Ask = "look" | "open" | "again";
 
 /**
+ * What the boot screen tells someone whose machine blocks knobas from its
+ * own database (ux28): what knobas tried, and what an administrator can
+ * allow.
+ */
+export type Blocked = { 
+/**
+ * The cause in plain words, for the line under the heading.
+ */
+cause: string, 
+/**
+ * Each address or socket path tried and refused: `tcp 127.0.0.1:54321`.
+ */
+tried: Array<string>, 
+/**
+ * The programs to allow, by their full paths: `knobas-app` and the
+ * `postgres` it starts.
+ */
+allow: Array<string>, };
+
+/**
  * What a renderer writes on stdout: SVG or HTML (drawn sanitized, in a
  * sandboxed frame), or an image's bytes.
  */
@@ -83,7 +103,21 @@ detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "
 /**
  * Why, shown to the user as text.
  */
-message: string, };
+message: string, 
+/**
+ * What the boot screen's *Copy details* copies (ux28): the step
+ * that failed, what the data folder held, every connection tried
+ * with its OS error, the machine and its security products. Absent
+ * for a failure that has no start behind it (a server that died
+ * after `ready`).
+ */
+details?: string, 
+/**
+ * Set when the operating system refused knobas its own server for
+ * permissions (Windows' WSAEACCES, 10013): a firewall rule or
+ * security software. The boot screen then says so in plain words.
+ */
+blocked?: Blocked, };
 
 /**
  * What kind of output a run made, as the Code page draws it.

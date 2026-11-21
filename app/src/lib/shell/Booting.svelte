@@ -25,6 +25,7 @@
     demo,
     onretry,
     update = null,
+    copy = (text: string) => navigator.clipboard.writeText(text),
   }: {
     db: DbState;
     version: string;
@@ -32,6 +33,8 @@
     onretry: () => void;
     /** The updater, for the line that offers a newer knobas when the database cannot start. */
     update?: Pick<Updates, "state" | "check" | "download" | "install"> | null;
+    /** Puts text on the clipboard; a test's own. */
+    copy?: (text: string) => Promise<void>;
   } = $props();
 
   const line = $derived(bootLine(update?.state ?? null));
@@ -53,17 +56,64 @@
 
   /** The line under the heading, or `null` when there is nothing true to say. */
   const detail = $derived(db.state === "starting" ? db.detail : null);
+
+  /**
+   * What *Copy details* copies (ux28): the backend's report of the failed
+   * start, or the message alone when there is none (a server that died after
+   * `ready`), with the version line a report needs either way.
+   */
+  const details = $derived(
+    db.state === "failed"
+      ? (db.details ?? `${db.message}\nknobas ${version} · profile ${demo ? "demo" : "default"}`)
+      : "",
+  );
+
+  /** The button's own word for what the last press did; it says *Copy details* again after a moment. */
+  let copied = $state<"idle" | "copied" | "failed">("idle");
+  let settle: ReturnType<typeof setTimeout> | undefined;
+
+  async function copyDetails() {
+    clearTimeout(settle);
+    try {
+      await copy(details);
+      copied = "copied";
+    } catch {
+      copied = "failed";
+    }
+    settle = setTimeout(() => (copied = "idle"), 2000);
+  }
+
+  $effect(() => () => clearTimeout(settle));
 </script>
 
 <div class="boot">
   <div class="boot-b">
     {#if db.state === "failed"}
       <h1>knobas cannot start its database</h1>
+      {#if db.blocked}
+        <!-- ux28: the operating system refused knobas its own server. The cause first, in words; then what was tried and what an administrator can allow, as paths to copy. -->
+        <p class="boot-cause">{db.blocked.cause}</p>
+        {#if db.blocked.tried.length > 0}
+          <p>knobas tried</p>
+          <ul class="boot-paths boot-mono">
+            {#each db.blocked.tried as route (route)}<li>{route}</li>{/each}
+          </ul>
+        {/if}
+        {#if db.blocked.allow.length > 0}
+          <p>An administrator can allow these programs:</p>
+          <ul class="boot-paths boot-mono">
+            {#each db.blocked.allow as program (program)}<li>{program}</li>{/each}
+          </ul>
+        {/if}
+      {/if}
       <!-- Text, always: the message is whatever PostgreSQL or the OS said. -->
       <p class="boot-mono boot-fail">{db.message}</p>
       <p>knobas {version} · profile {demo ? "demo" : "default"}</p>
       <div class="acts">
         <button class="tf-btn tf-primary" onclick={onretry}>Retry</button>
+        <button class="tf-btn" onclick={copyDetails}
+          >{copied === "copied" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy details"}</button
+        >
       </div>
       <div class="boot-upd" data-testid="boot-update">
         {#if line !== null}
@@ -143,6 +193,25 @@
 
   .boot-fail {
     color: var(--err);
+  }
+
+  /* The cause is the sentence the reader came for: the body's ink, not the secondary one. */
+  .boot-b .boot-cause {
+    color: var(--ink);
+  }
+
+  /* Paths and addresses, one to a line, selectable for an administrator. */
+  .boot-paths {
+    margin-top: 4px;
+    padding-left: 0;
+    list-style: none;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .boot-paths li + li {
+    margin-top: 2px;
   }
 
   .acts {

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# The patched sqlx-core below is a path dependency, not a member (ux28).
+exclude = ["vendor/sqlx-core"]
 
 [workspace.package]
 edition = "2024"
@@ -84,3 +86,11 @@ debug = "line-tables-only"
 [profile.test]
 debug = 0
 incremental = false
+
+# sqlx-core 0.9.0 with one patch (ux28, `vendor/sqlx-core/KNOBAS.md`): its
+# `connect_uds` reaches an AF_UNIX socket on Windows too, so knobas can reach
+# its own PostgreSQL where a firewall rule or security software blocks the
+# loopback TCP connect (os error 10013). Remade on every sqlx upgrade: Cargo
+# refuses to resolve a newer sqlx until it is.
+[patch.crates-io]
+sqlx-core = { path = "vendor/sqlx-core" }

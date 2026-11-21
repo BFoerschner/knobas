@@ -5,9 +5,14 @@
 //! per machine and version into the shared `~/.theseus/postgresql/<version>`
 //! (see the private `installation_dir` helper), so a `root_dir` holds only the user's data.
 //!
-//! The server always speaks TCP on `127.0.0.1`: a Unix socket path under
-//! `~/Library/Application Support/...` would blow past macOS' 103-byte
-//! `sun_path` limit.
+//! The server listens on TCP on `127.0.0.1` and, since ux28 (ADR-0053), on a
+//! Unix-domain socket in its own data folder, and a bring-up picks one of the
+//! two for every connection it hands out ([`preferred_link`]): the socket
+//! first on Windows, where a firewall rule or security software that blocks
+//! the loopback TCP connect (os error 10013) does not see it, TCP first
+//! elsewhere. A data folder too deep for a socket path (macOS takes 103 bytes:
+//! the default profile's is 77 plus the user name, so names up to 26 bytes
+//! fit) has no socket, and its starts are TCP alone ([`crate::socket`]).
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Seek, Write};
@@ -19,6 +24,8 @@ use std::time::Duration;
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
+
+use crate::report::{Found, StartReport, Step};
 
 /// The exact PostgreSQL version knobas runs against. Pinned rather than
 /// ranged: PG 18 changed generated-column defaults, and the schema depends on
@@ -34,7 +41,8 @@ pub const DATABASE_NAME: &str = "knobas";
 /// yet, the connection is what fails.
 pub(crate) const MAINTENANCE_DATABASE: &str = "postgres";
 
-/// Loopback host. Never a Unix socket -- see the module docs.
+/// Loopback host, the TCP half of the link; the socket is the other (see the
+/// module docs).
 const HOST: &str = "127.0.0.1";
 
 /// Binary name of `pg_ctl` on this platform.
@@ -166,6 +174,18 @@ pub enum DbError {
     #[error("postgres connection: {0}")]
     Sqlx(#[from] sqlx::Error),
 
+    /// The server is up and knobas's own connection to it failed below
+    /// PostgreSQL: the operating system refused or dropped it (ux28). On
+    /// Windows a WSAEACCES (10013) here is a firewall rule or security
+    /// software blocking `knobas-app.exe`. `routes` is every address or
+    /// socket path tried; the [`StartReport`] holds each one's own error.
+    #[error("knobas could not connect to its own database server ({routes}): {source}")]
+    Unreachable {
+        routes: String,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("schema migration: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
 
@@ -292,6 +312,7 @@ impl std::fmt::Debug for Connector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connector")
             .field("host", &self.options.get_host())
+            .field("socket", &self.options.get_socket())
             .field("port", &self.options.get_port())
             .field("database", &self.options.get_database())
             .field("password", &"<redacted>")
@@ -303,8 +324,16 @@ impl Connector {
     /// # Errors
     /// [`sqlx::Error`] if the URL cannot be parsed.
     fn parse(url: &str) -> Result<Connector, sqlx::Error> {
+        let mut options: PgConnectOptions = url.parse()?;
+        // sqlx reads `host=` as a socket folder only when it starts with `/`;
+        // a Windows folder (`C:\...`) is one too (ux28).
+        if options.get_socket().is_none()
+            && let Some(dir) = windows_socket_host(url)
+        {
+            options = options.socket(dir);
+        }
         Ok(Connector {
-            options: url.parse()?,
+            options,
             password: password_of(url),
             keep: None,
         })
@@ -338,6 +367,45 @@ impl Connector {
         self.options.get_database()
     }
 
+    /// The same server and database over its Unix-domain socket in `dir`
+    /// (ux28): sqlx dials `<dir>/.s.PGSQL.<port>`.
+    #[must_use]
+    pub fn on_socket(&self, dir: &Path) -> Connector {
+        Connector {
+            options: self.options.clone().socket(dir),
+            password: self.password.clone(),
+            keep: self.keep.clone(),
+        }
+    }
+
+    /// `socket` or `tcp`: which link this connector takes, for a log line.
+    #[must_use]
+    pub fn link(&self) -> &'static str {
+        if self.options.get_socket().is_some() {
+            "socket"
+        } else {
+            "tcp"
+        }
+    }
+
+    /// What this connector dials, as a [`StartReport`] names it:
+    /// `tcp 127.0.0.1:54321`, or `unix <socket dir>` with the port.
+    #[must_use]
+    pub fn route(&self) -> String {
+        match self.options.get_socket() {
+            Some(dir) => format!(
+                "unix {} (.s.PGSQL.{})",
+                dir.display(),
+                self.options.get_port()
+            ),
+            None => format!(
+                "tcp {}:{}",
+                self.options.get_host(),
+                self.options.get_port()
+            ),
+        }
+    }
+
     /// The connection URL, password and all.
     ///
     /// The one place a `Connector` gives the string back, and it exists only
@@ -357,8 +425,19 @@ impl Connector {
             .map(|password| format!(":{}", utf8_percent_encode(password, NON_ALPHANUMERIC)))
             .unwrap_or_default();
         let database = self.options.get_database().unwrap_or_default();
+        // On the socket, its folder as libpq and sqlx read it: `host=` a path.
+        let socket = self
+            .options
+            .get_socket()
+            .map(|dir| {
+                format!(
+                    "?host={}",
+                    utf8_percent_encode(&dir.to_string_lossy(), NON_ALPHANUMERIC)
+                )
+            })
+            .unwrap_or_default();
         format!(
-            "postgresql://{user}{password}@{}:{}/{database}",
+            "postgresql://{user}{password}@{}:{}/{database}{socket}",
             self.options.get_host(),
             self.options.get_port()
         )
@@ -370,7 +449,7 @@ impl Connector {
     /// rather than from `argv` on purpose -- see [`Connector::password`].
     pub(crate) fn libpq_env(&self) -> Vec<(&'static str, String)> {
         let mut env = vec![
-            ("PGHOST", self.options.get_host().to_owned()),
+            ("PGHOST", self.libpq_host()),
             ("PGPORT", self.options.get_port().to_string()),
             ("PGUSER", self.options.get_username().to_owned()),
         ];
@@ -381,6 +460,20 @@ impl Connector {
             env.push(("PGPASSWORD", password.clone()));
         }
         env
+    }
+
+    /// What libpq's `PGHOST` is: the socket's folder when this connector is
+    /// on the socket (libpq reads a host that is a path as one), the host
+    /// otherwise. On Windows libpq passes the folder as ANSI bytes, so a
+    /// folder outside ASCII (`C:\Users\björn`, which `psql` failed on with
+    /// 10050 while sqlx connected) goes over TCP instead.
+    fn libpq_host(&self) -> String {
+        match self.options.get_socket() {
+            Some(dir) if !cfg!(windows) || dir.to_string_lossy().is_ascii() => {
+                dir.to_string_lossy().into_owned()
+            }
+            _ => self.options.get_host().to_owned(),
+        }
     }
 
     /// One connection, belonging to no pool.
@@ -537,6 +630,19 @@ fn password_of(url: &str) -> Option<String> {
     )
 }
 
+/// A URL's `host=` parameter when it is an absolute Windows folder
+/// (`C:\\x` or `C:/x`): a socket folder sqlx would take for a host name.
+fn windows_socket_host(url: &str) -> Option<PathBuf> {
+    let parsed = url::Url::parse(url).ok()?;
+    let (_, host) = parsed.query_pairs().find(|(key, _)| key == "host")?;
+    let bytes = host.as_bytes();
+    let absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    absolute.then(|| PathBuf::from(host.into_owned()))
+}
+
 /// Take one connection out of `pool`, under [`FIRST_CONNECT_TIMEOUT`]: for
 /// `KNOBAS_DB_URL`'s first contact alone (#1815).
 ///
@@ -597,11 +703,31 @@ impl EmbeddedDb {
     /// live knobas has this profile open, or a server answering on the port
     /// the lock file records cannot be reached as ours.
     pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError> {
+        Self::start_reporting(cfg, &mut StartReport::default()).await
+    }
+
+    /// [`start`](Self::start), recording on `report` the step it reached,
+    /// what the data folder held and every connection it tried, for a
+    /// failure screen that has to explain itself without the machine's logs
+    /// (ux28).
+    ///
+    /// # Errors
+    ///
+    /// As [`start`](Self::start).
+    pub async fn start_reporting(
+        cfg: DbConfig,
+        report: &mut StartReport,
+    ) -> Result<EmbeddedDb, DbError> {
         if let Some(url) = cfg.existing_url.as_deref() {
             tracing::info!("connecting to externally managed postgres");
             let connector = Connector::parse(url)?;
+            report.reach(Step::ClientConnect);
+            let pool = connector.app_pool_on_first_contact().await;
+            report.record(connector.route(), &pool);
+            let pool = pool?;
+            report.reach(Step::Ready);
             return Ok(EmbeddedDb {
-                pool: connector.app_pool_on_first_contact().await?,
+                pool,
                 connector,
                 postgresql: None,
                 stop_settings: None,
@@ -612,7 +738,7 @@ impl EmbeddedDb {
 
         let root = cfg.root_dir.clone();
         let settings = off_runtime(&cfg.root_dir, move || build_settings(&root)).await??;
-        launch(&cfg.root_dir, settings).await
+        launch_reporting(&cfg.root_dir, settings, report).await
     }
 
     /// [`start`](Self::start) for a managed server with a larger connection
@@ -995,10 +1121,21 @@ pub(crate) fn pg_ctl_stop_immediate(data_dir: &Path) -> Option<std::process::Com
 ///
 /// The managed half of [`EmbeddedDb::start`], split from it so the test
 /// server's start shares the recovery rather than a copy of it.
+#[cfg(feature = "test-util")]
 pub(crate) async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbError> {
+    launch_reporting(root_dir, settings, &mut StartReport::default()).await
+}
+
+/// [`launch`], recording on `report` how far it got and every connection
+/// it tried (ux28).
+async fn launch_reporting(
+    root_dir: &Path,
+    settings: Settings,
+    report: &mut StartReport,
+) -> Result<EmbeddedDb, DbError> {
     let data_dir = settings.data_dir.clone();
 
-    match start_managed(root_dir, settings.clone()).await? {
+    match start_managed(root_dir, settings.clone(), report).await? {
         Started::Ready(db) => Ok(*db),
         Started::StaleLock { port, serving } => {
             // The lock file sent us to a stranger, so it is not describing
@@ -1015,7 +1152,7 @@ pub(crate) async fn launch(root_dir: &Path, settings: Settings) -> Result<Embedd
             );
             let locked = data_dir.clone();
             off_runtime(&data_dir, move || clear_lock(&locked)).await??;
-            match start_managed(root_dir, settings).await? {
+            match start_managed(root_dir, settings, report).await? {
                 Started::Ready(db) => Ok(*db),
                 // Only reachable if something recreated the lock file in
                 // between; at that point it is genuinely ambiguous.
@@ -1165,10 +1302,16 @@ enum Started {
 /// own `initdb` and marked ([`initialise`]), and after `setup()`
 /// the password file and the data directory are kept to their owner
 /// ([`keep_to_owner`]).
-async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
+async fn start_managed(
+    root_dir: &Path,
+    mut settings: Settings,
+    report: &mut StartReport,
+) -> Result<Started, DbError> {
     let started = std::time::Instant::now();
+    report.reach(Step::Prepare);
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
+    report.data_dir = Some(data_dir.clone());
     let root = root_dir.to_path_buf();
     let claimed = off_runtime(&root, {
         let root = root.clone();
@@ -1188,6 +1331,13 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             });
         }
     };
+    // What the folder held before anything here touches it: a fresh start
+    // or a server left running. Once per bring-up, so the stale-lock retry
+    // keeps what the first attempt found.
+    if report.found.is_none() {
+        let reading = data_dir.clone();
+        report.found = Some(off_runtime(&data_dir, move || Found::read(&reading)).await?);
+    }
     // Each step reads or writes the data directory, so each runs under
     // `spawn_blocking`, in the order it ran before; the bring-up lock and the
     // ownership lock are held across them.
@@ -1199,8 +1349,9 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     off_runtime(&data_dir, move || recover_or_mark(&recovering)).await??;
 
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
-    // them after the handle is gone.
-    let adoption = settings.clone();
+    // them after the handle is gone. Cloned again below once the socket is
+    // decided, since `restart_durable` and `restart` start from it.
+    let mut adoption = settings.clone();
 
     // One yield before the work starts, so a *warm* install interleaves the
     // way a cold one does. On a machine without the binaries, `setup()`
@@ -1215,22 +1366,75 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     // -- which re-downloads whenever this file changes -- runs the cold one.
     tokio::task::yield_now().await;
 
+    report.reach(Step::Initdb);
     initialise(root_dir, &adoption).await?;
+    // The server's socket, in its own data folder (ux28, ADR-0053), where the
+    // folder can hold one: a path past the platform's limit, or a platform
+    // without AF_UNIX, starts on TCP alone, as every start did before.
+    let probing = data_dir.clone();
+    let socket_on = match off_runtime(&data_dir, move || crate::socket::usable(&probing)).await? {
+        Ok(()) => {
+            listen_on_socket(&mut settings);
+            true
+        }
+        Err(reason) => {
+            tracing::info!(%reason, "no socket in this data folder: TCP alone");
+            report.attempts.push(crate::report::Attempt::skipped(
+                socket_route(&data_dir),
+                reason,
+            ));
+            false
+        }
+    };
+    adoption = settings.clone();
     // The port is ours to pick, on the loopback, as late as the handle allows:
     // `setup()` below only finds the install and the data directory `initialise`
     // left, so the port is free for that long and no longer. See [`loopback_port`].
     settings.port = loopback_port().map_err(|source| DbError::io(&data_dir, source))?;
+    let without_socket = socket_on.then(|| {
+        let mut plain = settings.clone();
+        no_socket(&mut plain);
+        plain
+    });
     let mut postgresql = PostgreSQL::new(settings);
     // The data directory is initialised by now, so all this `setup()` can
     // still do is install: for a profile whose PostgreSQL has gone (another
     // machine's data directory, a removed `~/.theseus`).
+    report.reach(Step::Install);
     if let Err(source) = postgresql.setup().await {
         return Err(not_installed(&postgresql, source));
     }
+    report.server_exe = Some(server_exe(postgresql.settings()));
     let owned = adoption.clone();
     off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
 
-    if let Err(error) = start_server(&mut postgresql).await {
+    report.reach(Step::ServerStart);
+    let mut socket_on = socket_on;
+    let mut started_server = start_server_reporting(&mut postgresql, report).await;
+    // The socket must never make a start worse than TCP alone: a server that
+    // could not make its socket file is started once more without one.
+    if let (Err(DbError::ServerStart { reason, .. }), Some(plain)) =
+        (&started_server, without_socket)
+        && is_socket_failure(reason)
+    {
+        tracing::warn!(%reason, "the server could not make its socket: starting it on TCP alone");
+        report.attempts.push(crate::report::Attempt::skipped(
+            socket_route(&data_dir),
+            format!("the server could not make it: {reason}"),
+        ));
+        // Its start failed, so `postmaster.pid` names no server of this
+        // handle's; never dropped, as below.
+        std::mem::forget(postgresql);
+        no_socket(&mut adoption);
+        postgresql = PostgreSQL::new(plain);
+        if let Err(source) = postgresql.setup().await {
+            return Err(not_installed(&postgresql, source));
+        }
+        socket_on = false;
+        report.reach(Step::ServerStart);
+        started_server = start_server_reporting(&mut postgresql, report).await;
+    }
+    if let Err(error) = started_server {
         // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
         // `postmaster.pid` merely *exists* -- it has no idea whether this
         // handle is the one that started that server. So every arm below that
@@ -1247,7 +1451,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             Lock::Cleared => {
                 #[cfg(feature = "test-util")]
                 seam::stale_lock_cleared();
-                if let Err(retry) = start_server(&mut postgresql).await {
+                if let Err(retry) = start_server_reporting(&mut postgresql, report).await {
                     // The lock file this handle would stop on is no longer
                     // the one it cleared: a sibling that lost the same race
                     // may have started its server in between, and `pg_ctl
@@ -1262,21 +1466,31 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             Lock::Absent => return Err(error),
             Lock::Live { port } => {
                 std::mem::forget(postgresql);
-                return adopt(adoption, port, owner_lock).await;
+                return adopt(adoption, port, owner_lock, report).await;
             }
         }
     }
 
-    if !postgresql.database_exists(DATABASE_NAME).await? {
-        postgresql.create_database(DATABASE_NAME).await?;
-    }
+    // knobas's own connection, not `postgresql_embedded`'s `database_exists`:
+    // that one's error said nothing of where it dialled (ux27's 10013), and
+    // each attempt here goes on the report with its route.
+    let routes = routes_to(postgresql.settings(), socket_on)?;
+    report.reach(Step::ClientConnect);
+    let (maintenance, mut admin) = connect_first(&routes, report).await?;
+    report.reach(Step::FirstQuery);
+    ensure_database(&mut admin)
+        .await
+        .map_err(|(_, source)| DbError::Sqlx(source))?;
+    let _ = admin.close().await;
 
-    let url = postgresql.settings().url(DATABASE_NAME);
-    let connector = Connector::parse(&url)?;
-    let pool = connector.app_pool().await?;
+    let connector = maintenance.with_database(DATABASE_NAME);
+    let pool = app_pool_reporting(&connector, report).await?;
+    report.reach(Step::Ready);
 
     tracing::info!(
         port = postgresql.settings().port,
+        link = connector.link(),
+        route = %connector.route(),
         ms = started.elapsed().as_millis(),
         "embedded postgres ready"
     );
@@ -1377,12 +1591,14 @@ async fn adopt(
     mut settings: Settings,
     port: u16,
     owner_lock: OwnerLock,
+    report: &mut StartReport,
 ) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
+    report.adopted = true;
+    report.reach(Step::ClientConnect);
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
     settings.port = port;
-    let url = settings.url(DATABASE_NAME);
 
     let unreachable = |reason: String| DbError::AlreadyRunning {
         data_dir: data_dir.clone(),
@@ -1392,10 +1608,46 @@ async fn adopt(
     // Through the maintenance database, not `knobas`: the identity check has to
     // happen before we trust the server, and creating `knobas` when it is
     // missing needs a connection that does not depend on it existing.
-    let admin = PgConnection::connect(&settings.url(MAINTENANCE_DATABASE)).await;
-    let mut admin = match admin {
-        Ok(admin) => admin,
-        Err(source) => {
+    // Over the socket too, where this server made one (a build before ux28
+    // made none in the data folder): the stranger rules below read the TCP
+    // answer alone, since a socket in our own data folder is our server's.
+    let socket_on = crate::socket::file(&data_dir, port).exists();
+    let routes = routes_to(&settings, socket_on)?;
+    let mut tcp_error = None;
+    let mut reached = None;
+    for (at, route) in routes.iter().enumerate() {
+        let last = at + 1 == routes.len();
+        match connect_bounded(route, report, last).await {
+            Ok(admin) => {
+                reached = Some((route.clone(), admin));
+                break;
+            }
+            Err(source) if route.link() == "tcp" => tcp_error = Some(source),
+            // A PostgreSQL that answered on our own socket and turned us
+            // away is ours, in a state we cannot use: say so, keep the lock.
+            Err(source) if !is_wire_level(&source) => {
+                return Err(unreachable(format!(
+                    "it answered on its socket and refused: {source}"
+                )));
+            }
+            Err(_) => {}
+        }
+    }
+    let (route, mut admin) = match reached {
+        Some(reached) => reached,
+        None => {
+            let source = tcp_error.unwrap_or_else(|| {
+                sqlx::Error::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no route to the recorded server",
+                ))
+            });
+            // Refused for permissions is no stranger: a firewall rule or
+            // security software stopped the connect, and the lock may well
+            // describe a live server of ours (ux28).
+            if crate::report::io_error_in(&source).is_some_and(crate::report::is_access_denied) {
+                return Err(unreachable_or_sqlx(source, report));
+            }
             let stranger = if is_wire_level(&source) {
                 Some("something that does not speak postgres")
             } else if refuses_our_credentials(&source) {
@@ -1429,6 +1681,7 @@ async fn adopt(
     // the lock file: a data directory that was copied elsewhere carries a
     // `postmaster.pid` naming a port some unrelated server may now hold, and
     // connecting to that would silently read the wrong database.
+    report.reach(Step::FirstQuery);
     let serving: (String,) = sqlx::query_as("show data_directory")
         .fetch_one(&mut admin)
         .await
@@ -1459,44 +1712,10 @@ async fn adopt(
     // The same step the managed path performs, for the same reason: a first run
     // that died between `initdb` and `create database` leaves a server with no
     // `knobas` in it, and adopting it must finish the job rather than report an
-    // unreachable database. `create database` has no `if not exists`, hence the
-    // lookup, and `AssertSqlSafe` for the statement: a database name cannot be
-    // a bind parameter, and the audit sqlx is asking for is that `DATABASE_NAME`
-    // is a compile-time constant of this crate -- no input reaches the string.
-    let existing: Option<(i32,)> = sqlx::query_as("select 1 from pg_database where datname = $1")
-        .bind(DATABASE_NAME)
-        .fetch_optional(&mut admin)
+    // unreachable database.
+    ensure_database(&mut admin)
         .await
-        .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
-    if existing.is_none() {
-        tracing::warn!(
-            port,
-            "the adopted server has no {DATABASE_NAME} database: creating it"
-        );
-        if let Err(source) = sqlx::query(sqlx::AssertSqlSafe(format!(
-            r#"create database "{DATABASE_NAME}""#
-        )))
-        .execute(&mut admin)
-        .await
-        {
-            // 42P04 = duplicate_database. `create database` has no `if not
-            // exists`, so the lookup above is a check-then-act. No second
-            // knobas runs it beside this one (both the bring-up and the
-            // ownership lock are held here), but anything else on the server
-            // can create the database in between, and the outcome wanted --
-            // a database that exists -- is then exactly what happened.
-            let raced = source
-                .as_database_error()
-                .and_then(sqlx::error::DatabaseError::code)
-                .is_some_and(|code| code == "42P04");
-            if !raced {
-                return Err(unreachable(format!(
-                    "cannot create the {DATABASE_NAME} database: {source}"
-                )));
-            }
-            tracing::info!("the {DATABASE_NAME} database appeared before this adoption created it");
-        }
-    }
+        .map_err(|(what, source)| unreachable(format!("{what}: {source}")))?;
     let fsync: (String,) = sqlx::query_as("select current_setting('fsync')")
         .fetch_one(&mut admin)
         .await
@@ -1515,15 +1734,23 @@ async fn adopt(
     };
     let stop_settings = postgresql.is_none().then_some(settings);
 
-    let connector = Connector::parse(&url)?;
-    let pool = connector.app_pool().await.map_err(|source| {
+    let connector = route.with_database(DATABASE_NAME);
+    report.reach(Step::ClientConnect);
+    let pooled = connector.app_pool().await;
+    if pooled.is_err() {
+        report.record(connector.route(), &pooled);
+    }
+    let pool = pooled.map_err(|source| {
         unreachable(format!(
             "cannot connect to {DATABASE_NAME} on port {port}: {source}"
         ))
     })?;
+    report.reach(Step::Ready);
 
     tracing::warn!(
         port,
+        link = connector.link(),
+        route = %connector.route(),
         "adopting the orphaned postgres serving this data directory, and its stop"
     );
     Ok(Started::Ready(Box::new(EmbeddedDb {
@@ -1983,7 +2210,8 @@ const INITDB_FILES: [&str; 4] = [
 fn served(data_dir: &Path) -> bool {
     match std::fs::read_to_string(data_dir.join("postmaster.pid")) {
         Ok(contents) => {
-            lock_pid(&contents).is_some() && lock_port(&contents).is_some_and(port_answers)
+            lock_pid(&contents).is_some()
+                && lock_port(&contents).is_some_and(|port| server_answers(data_dir, port))
         }
         Err(source) => source.kind() != io::ErrorKind::NotFound,
     }
@@ -2220,6 +2448,279 @@ async fn start_server(postgresql: &mut PostgreSQL) -> Result<(), DbError> {
         reason,
         source: Box::new(source),
     })
+}
+
+/// [`start_server`], moving `report` to [`Step::Bind`] when the server's
+/// reason is that it could not listen: on its port, or on its socket file.
+async fn start_server_reporting(
+    postgresql: &mut PostgreSQL,
+    report: &mut StartReport,
+) -> Result<(), DbError> {
+    let started = start_server(postgresql).await;
+    if let Err(DbError::ServerStart { reason, .. }) = &started
+        && is_bind_failure(reason)
+    {
+        report.reach(Step::Bind);
+    }
+    started
+}
+
+/// Whether a server's start reason says it could not listen.
+fn is_bind_failure(reason: &str) -> bool {
+    const LISTEN_FAILURES: [&str; 4] = [
+        "could not bind",
+        "could not create any TCP/IP sockets",
+        "could not create Unix socket",
+        "could not create any Unix-domain sockets",
+    ];
+    LISTEN_FAILURES
+        .iter()
+        .any(|failure| reason.contains(failure))
+}
+
+/// The `postgres` executable under `settings`' binaries: the program an
+/// administrator allows beside `knobas-app` (ux28).
+fn server_exe(settings: &Settings) -> PathBuf {
+    let name = if cfg!(windows) {
+        "postgres.exe"
+    } else {
+        "postgres"
+    };
+    settings.binary_dir().join(name)
+}
+
+/// `unix_socket_directories` relative to the data folder (the server's
+/// working folder): `.` sidesteps the socket path's length and encoding on
+/// the server's side, and an absolute folder with a space in it fails on
+/// Windows (`invalid argument`). Never `Settings::socket_dir`: the crate's
+/// `-k` is Unix-only, and its drop removes that folder.
+const SOCKET_DIRECTORY: &str = ".";
+
+/// Have the server listen on its socket in the data folder too, readable by
+/// its owner alone on Unix (the folder already is).
+fn listen_on_socket(settings: &mut Settings) {
+    #[cfg(feature = "test-util")]
+    let directory = if seam::socket_broken(&settings.data_dir) {
+        "./no-such-folder"
+    } else {
+        SOCKET_DIRECTORY
+    };
+    #[cfg(not(feature = "test-util"))]
+    let directory = SOCKET_DIRECTORY;
+    settings
+        .configuration
+        .insert("unix_socket_directories".to_owned(), directory.to_owned());
+    if cfg!(unix) {
+        settings
+            .configuration
+            .insert("unix_socket_permissions".to_owned(), "0700".to_owned());
+    }
+}
+
+/// Undo [`listen_on_socket`]: the server then listens where PostgreSQL's own
+/// default says (on Unix `/tmp`, on Windows nowhere), as before ux28.
+fn no_socket(settings: &mut Settings) {
+    settings.configuration.remove("unix_socket_directories");
+    settings.configuration.remove("unix_socket_permissions");
+}
+
+/// Whether a server's start reason is its Unix-domain socket: the socket or
+/// its lock file (`.s.PGSQL.<port>.lock`).
+fn is_socket_failure(reason: &str) -> bool {
+    reason.contains("Unix") || reason.contains(".s.PGSQL.")
+}
+
+/// The socket route as a report names it, before there is a port.
+fn socket_route(data_dir: &Path) -> String {
+    format!("unix {}", data_dir.display())
+}
+
+/// How knobas reaches its own server (ux28, ADR-0053).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// The Unix-domain socket in the data folder.
+    Socket,
+    /// TCP on `127.0.0.1`.
+    Tcp,
+}
+
+/// The environment variable that puts one link first, in every build:
+/// `socket` or `tcp`. A way out without a new build, and how the two are
+/// timed against each other.
+pub const LINK_ENV: &str = "KNOBAS_DB_LINK";
+
+/// The link a bring-up tries first: the socket on Windows, where it is faster
+/// and where a firewall rule or security software that blocks the loopback
+/// TCP connect does not see it; TCP elsewhere, where large answers are faster
+/// over TCP (both measured in ADR-0053). [`LINK_ENV`] overrides it.
+#[must_use]
+pub fn preferred_link() -> Link {
+    match std::env::var(LINK_ENV).as_deref() {
+        Ok("socket") => Link::Socket,
+        Ok("tcp") => Link::Tcp,
+        _ if cfg!(windows) => Link::Socket,
+        _ => Link::Tcp,
+    }
+}
+
+/// The connectors to a server of ours on `settings`' port, to its maintenance
+/// database, in the order a bring-up tries them: [`preferred_link`] first,
+/// the socket only when `socket_on`.
+fn routes_to(settings: &Settings, socket_on: bool) -> Result<Vec<Connector>, DbError> {
+    let tcp = Connector::parse(&settings.url(MAINTENANCE_DATABASE))?;
+    if !socket_on {
+        return Ok(vec![tcp]);
+    }
+    let socket = tcp.on_socket(&settings.data_dir);
+    Ok(match preferred_link() {
+        Link::Socket => vec![socket, tcp],
+        Link::Tcp => vec![tcp, socket],
+    })
+}
+
+/// How long a route that is not the last gets before the next is tried. A
+/// local connect completes or is refused in milliseconds; this is for one a
+/// security product holds without answering. The last route keeps the pool's
+/// own wait, which a loaded machine's live server needs (#1815).
+const ROUTE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// [`connect_once`], bounded by [`ROUTE_TIMEOUT`] unless it is the `last`
+/// route; a timeout is recorded as one.
+async fn connect_bounded(
+    connector: &Connector,
+    report: &mut StartReport,
+    last: bool,
+) -> Result<PgConnection, sqlx::Error> {
+    if last {
+        return connect_once(connector, report).await;
+    }
+    match tokio::time::timeout(ROUTE_TIMEOUT, connect_once(connector, report)).await {
+        Ok(outcome) => outcome,
+        Err(_elapsed) => {
+            let timed_out: Result<PgConnection, sqlx::Error> =
+                Err(sqlx::Error::Io(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("no answer within {}s", ROUTE_TIMEOUT.as_secs()),
+                )));
+            report.record(connector.route(), &timed_out);
+            timed_out
+        }
+    }
+}
+
+/// The first of `routes` that connects, with its connection. A PostgreSQL
+/// that answered and refused ends the search with its answer: another route
+/// reaches the same server. A failure below PostgreSQL moves on, and when
+/// every route failed so, it is [`DbError::Unreachable`] naming them all.
+async fn connect_first(
+    routes: &[Connector],
+    report: &mut StartReport,
+) -> Result<(Connector, PgConnection), DbError> {
+    let mut failed = None;
+    for (at, route) in routes.iter().enumerate() {
+        match connect_bounded(route, report, at + 1 == routes.len()).await {
+            Ok(connection) => return Ok((route.clone(), connection)),
+            Err(source) if !is_wire_level(&source) => return Err(DbError::Sqlx(source)),
+            Err(source) => failed = Some(source),
+        }
+    }
+    let source = failed.unwrap_or_else(|| {
+        sqlx::Error::Io(io::Error::new(io::ErrorKind::NotFound, "no route to try"))
+    });
+    Err(unreachable_or_sqlx(source, report))
+}
+
+/// One connection through `connector`, recorded on `report` with its route
+/// and its outcome (ux28).
+///
+/// With `test-util`, a data folder [`seam::refuse_tcp_connects`] names
+/// refuses every TCP route here with the error a Windows Filtering Platform
+/// block gives: what a firewall rule or security software does to a
+/// loopback connect, without either.
+async fn connect_once(
+    connector: &Connector,
+    report: &mut StartReport,
+) -> Result<PgConnection, sqlx::Error> {
+    #[cfg(feature = "test-util")]
+    if let Some(code) = report.data_dir.as_deref().and_then(|data_dir| {
+        if connector.options.get_socket().is_some() {
+            seam::socket_refusal(data_dir)
+        } else {
+            seam::tcp_refusal(data_dir)
+        }
+    }) {
+        let refused: Result<PgConnection, sqlx::Error> =
+            Err(sqlx::Error::Io(io::Error::from_raw_os_error(code)));
+        report.record(connector.route(), &refused);
+        return refused;
+    }
+    let outcome = connector.connect().await;
+    report.record(connector.route(), &outcome);
+    outcome
+}
+
+/// The app's pool on `connector`, its first connection's failure recorded on
+/// `report` as [`connect_reporting`]'s is.
+async fn app_pool_reporting(
+    connector: &Connector,
+    report: &mut StartReport,
+) -> Result<PgPool, DbError> {
+    let pooled = connector.app_pool().await;
+    if pooled.is_err() {
+        report.record(connector.route(), &pooled);
+    }
+    pooled.map_err(|source| unreachable_or_sqlx(source, report))
+}
+
+/// A connection failure as the bring-up reports it: below PostgreSQL, the
+/// routes tried and the last one's error; a PostgreSQL that answered and
+/// refused, as it said.
+fn unreachable_or_sqlx(source: sqlx::Error, report: &StartReport) -> DbError {
+    if is_wire_level(&source) {
+        DbError::Unreachable {
+            routes: report.failed_routes().join(", "),
+            source,
+        }
+    } else {
+        DbError::Sqlx(source)
+    }
+}
+
+/// Create [`DATABASE_NAME`] on the server `admin` is connected to, if it is
+/// not there yet. The error says which of the two statements failed.
+///
+/// `create database` has no `if not exists`, hence the lookup, and
+/// `AssertSqlSafe` for the statement: a database name cannot be a bind
+/// parameter, and `DATABASE_NAME` is a compile-time constant of this crate.
+/// A 42P04 (`duplicate_database`) from the create is the outcome wanted: the
+/// database exists.
+async fn ensure_database(admin: &mut PgConnection) -> Result<(), (&'static str, sqlx::Error)> {
+    let existing: Option<(i32,)> = sqlx::query_as("select 1 from pg_database where datname = $1")
+        .bind(DATABASE_NAME)
+        .fetch_optional(&mut *admin)
+        .await
+        .map_err(|source| ("cannot query it", source))?;
+    if existing.is_some() {
+        return Ok(());
+    }
+    let created = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"create database "{DATABASE_NAME}""#
+    )))
+    .execute(&mut *admin)
+    .await;
+    match created {
+        Ok(_) => Ok(()),
+        Err(source)
+            if source
+                .as_database_error()
+                .and_then(sqlx::error::DatabaseError::code)
+                .is_some_and(|code| code == "42P04") =>
+        {
+            tracing::info!("the {DATABASE_NAME} database appeared before this start created it");
+            Ok(())
+        }
+        Err(source) => Err(("cannot create the database", source)),
+    }
 }
 
 /// What a start's log says went wrong: the last `FATAL` line the start wrote
@@ -2580,7 +3081,7 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     };
 
     if let Some(port) = lock_port(&contents)
-        && port_answers(port)
+        && server_answers(data_dir, port)
     {
         tracing::warn!(
             port,
@@ -2625,7 +3126,7 @@ fn recorded_pid(data_dir: &Path) -> Option<u32> {
 
 /// A `postmaster.pid`'s line 1, the postmaster's pid. A standalone backend
 /// records its pid negated, which this reads as none.
-fn lock_pid(contents: &str) -> Option<u32> {
+pub(crate) fn lock_pid(contents: &str) -> Option<u32> {
     contents
         .lines()
         .next()?
@@ -2636,7 +3137,7 @@ fn lock_pid(contents: &str) -> Option<u32> {
 }
 
 /// A `postmaster.pid`'s line 4, the port the postmaster last listened on.
-fn lock_port(contents: &str) -> Option<u16> {
+pub(crate) fn lock_port(contents: &str) -> Option<u16> {
     contents
         .lines()
         .nth(3)?
@@ -2717,6 +3218,8 @@ fn is_wire_level(error: &sqlx::Error) -> bool {
 /// the shipped binary.
 #[cfg(feature = "test-util")]
 pub mod seam {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
     type Hook = Arc<dyn Fn() + Send + Sync>;
@@ -2735,6 +3238,87 @@ pub mod seam {
     /// Drop whatever [`after_clearing_a_stale_lock`] installed.
     pub fn forget_hooks() {
         *slot().lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Keyed by the data folder and whether the route is the socket.
+    fn refusals() -> &'static Mutex<HashMap<(PathBuf, bool), i32>> {
+        static REFUSALS: OnceLock<Mutex<HashMap<(PathBuf, bool), i32>>> = OnceLock::new();
+        REFUSALS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn broken_sockets() -> &'static Mutex<Vec<PathBuf>> {
+        static BROKEN: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+        BROKEN.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    /// Refuse every TCP connection a bring-up of `data_dir` makes with the
+    /// operating system's error `os_code` (ux28): 10013, WSAEACCES, is what
+    /// a Windows Filtering Platform block (a firewall rule, security
+    /// software) gives a loopback connect. Keyed by the data folder, so the
+    /// tests beside it in one binary connect as ever. Undo with
+    /// [`allow_tcp_connects`].
+    pub fn refuse_tcp_connects(data_dir: &Path, os_code: i32) {
+        refusals()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((data_dir.to_path_buf(), false), os_code);
+    }
+
+    /// [`refuse_tcp_connects`] for the socket route: a security product that
+    /// blocks that too.
+    pub fn refuse_socket_connects(data_dir: &Path, os_code: i32) {
+        refusals()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((data_dir.to_path_buf(), true), os_code);
+    }
+
+    /// Undo [`refuse_tcp_connects`] and [`refuse_socket_connects`] for
+    /// `data_dir`, and [`break_socket`].
+    pub fn allow_tcp_connects(data_dir: &Path) {
+        let mut refusals = refusals().lock().unwrap_or_else(PoisonError::into_inner);
+        refusals.remove(&(data_dir.to_path_buf(), false));
+        refusals.remove(&(data_dir.to_path_buf(), true));
+        broken_sockets()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|broken| broken != data_dir);
+    }
+
+    /// Have the server of `data_dir` fail to make its socket file, as a
+    /// folder that refuses one would: the start then retries on TCP alone.
+    pub fn break_socket(data_dir: &Path) {
+        broken_sockets()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(data_dir.to_path_buf());
+    }
+
+    pub(crate) fn socket_broken(data_dir: &Path) -> bool {
+        broken_sockets()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|broken| broken == data_dir)
+    }
+
+    /// The error a TCP connect of a bring-up of `data_dir` is refused with.
+    pub(crate) fn tcp_refusal(data_dir: &Path) -> Option<i32> {
+        refusals()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&(data_dir.to_path_buf(), false))
+            .copied()
+    }
+
+    /// The error a socket connect of a bring-up of `data_dir` is refused
+    /// with.
+    pub(crate) fn socket_refusal(data_dir: &Path) -> Option<i32> {
+        refusals()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&(data_dir.to_path_buf(), true))
+            .copied()
     }
 
     /// Cloned out before it is called, so the lock is not held across a hook
@@ -2836,14 +3420,69 @@ fn clear_lock(data_dir: &Path) -> Result<(), DbError> {
     }
 }
 
-fn port_answers(port: u16) -> bool {
+/// Whether a server may be answering for `data_dir` on `port`: on its socket
+/// in the data folder, or on the loopback port (ux28). The socket is the
+/// stronger evidence, since no stranger can hold a file in our own data
+/// folder; and where a firewall rule blocks the loopback, it is the one that
+/// answers.
+///
+/// A loopback connect refused **for permissions** counts as an answer: it
+/// says nothing about whether a server is there, and a silent port is what
+/// clears a lock. [`adopt`] then meets the same refusal and keeps the lock
+/// ([`DbError::Unreachable`]) rather than clear one a live server of ours may
+/// hold.
+fn server_answers(data_dir: &Path, port: u16) -> bool {
+    if crate::socket::answers(data_dir, port, LIVENESS_TIMEOUT) {
+        return true;
+    }
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, LIVENESS_TIMEOUT).is_ok()
+    #[cfg(feature = "test-util")]
+    let probe = match seam::tcp_refusal(data_dir) {
+        Some(code) => Err(io::Error::from_raw_os_error(code)),
+        None => TcpStream::connect_timeout(&addr, LIVENESS_TIMEOUT),
+    };
+    #[cfg(not(feature = "test-util"))]
+    let probe = TcpStream::connect_timeout(&addr, LIVENESS_TIMEOUT);
+    match probe {
+        Ok(_) => true,
+        Err(error) => crate::report::is_access_denied(&error),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ux28: a route on which a PostgreSQL answered and refused ends the
+    /// search with that answer (another route reaches the same server, so it
+    /// would refuse too), and a route the operating system refused moves on.
+    #[tokio::test]
+    async fn the_first_route_a_postgres_answers_on_ends_the_search() {
+        let good = crate::test_util::test_connector().await;
+        let refusing = Connector {
+            options: good.options.clone().password("not-the-password"),
+            password: Some("not-the-password".to_owned()),
+            keep: None,
+        };
+        let mut report = StartReport::default();
+        let outcome = connect_first(&[refusing.clone(), good.clone()], &mut report).await;
+        assert!(matches!(outcome, Err(DbError::Sqlx(_))), "{outcome:?}");
+        assert_eq!(report.attempts.len(), 1, "{report:#?}");
+
+        // A route nothing listens on moves on to the next.
+        let silent = Connector {
+            options: good.options.clone().port(1),
+            password: good.password.clone(),
+            keep: None,
+        };
+        let mut report = StartReport::default();
+        let (route, _connection) = connect_first(&[silent, good.clone()], &mut report)
+            .await
+            .expect("the second route connects");
+        assert_eq!(route.route(), good.route());
+        assert_eq!(report.attempts.len(), 2, "{report:#?}");
+        assert!(report.attempts[1].error.is_none(), "{report:#?}");
+    }
 
     /// #2025: the reason is this start's last `FATAL`, from `FATAL:` on and
     /// on one line, never an earlier start's.
@@ -3139,7 +3778,7 @@ mod tests {
         );
 
         // The loser, with the settings it built before any of that happened.
-        let db = match start_managed(dir.path(), cold).await {
+        let db = match start_managed(dir.path(), cold, &mut StartReport::default()).await {
             Ok(Started::Ready(db)) => db,
             Ok(Started::StaleLock { serving, .. }) => {
                 panic!("the winner serves this very directory, not {serving:?}")
@@ -3407,7 +4046,14 @@ mod tests {
     async fn adopt_treats_a_stranger_on_the_recorded_port_as_a_stale_lock() {
         for (stranger, port) in strangers() {
             let dir = tempfile::tempdir().unwrap();
-            match adopt(adoption_settings(dir.path()), port, owner_lock(dir.path())).await {
+            match adopt(
+                adoption_settings(dir.path()),
+                port,
+                owner_lock(dir.path()),
+                &mut StartReport::default(),
+            )
+            .await
+            {
                 Ok(Started::StaleLock { port: p, .. }) => assert_eq!(p, port, "{stranger}"),
                 Ok(Started::Ready(_)) => panic!("{stranger} could not have been adopted"),
                 Err(error) => panic!("{stranger} on the port is a stale lock, not {error:?}"),
@@ -3435,6 +4081,7 @@ mod tests {
                 adoption_settings(dir.path()),
                 recorded,
                 owner_lock(dir.path()),
+                &mut StartReport::default(),
             )
             .await
             {

@@ -11,12 +11,12 @@ import { expect, test, vi } from "vitest";
 import Booting from "./Booting.svelte";
 import type { DbState } from "../ipc/app";
 
-function render(db: DbState, onretry = () => {}) {
+function render(db: DbState, onretry = () => {}, copy = (_text: string) => Promise.resolve()) {
   const target = document.createElement("div");
   document.body.append(target);
   const app = mount(Booting, {
     target,
-    props: { db, version: "0.1.0", demo: true, onretry },
+    props: { db, version: "0.1.0", demo: true, onretry, copy },
   });
   flushSync();
   return {
@@ -177,4 +177,83 @@ test("a failed start offers a newer knobas in a line whose room is always kept",
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
   expect(pressed).toEqual(["download", "install"]);
   offered.done();
+});
+
+/** The button whose text is `label`. */
+function button(target: HTMLElement, label: string): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+}
+
+/**
+ * ux28: a machine whose firewall or security software blocks knobas from its
+ * own database. The screen names the cause in words, then what knobas tried
+ * and which programs an administrator can allow, as paths; the raw message
+ * stays under them.
+ */
+test("a blocked start says so in words, with what was tried and what to allow", () => {
+  const screen = render({
+    state: "failed",
+    message: "knobas could not connect to its own database server (tcp 127.0.0.1:54321): os error 10013",
+    details: "knobas 0.1.0 · profile demo · Windows 11\nfailed at: knobas connecting to its server",
+    blocked: {
+      cause: "Windows or security software on this computer blocked knobas from reaching its own database.",
+      tried: ["tcp 127.0.0.1:54321"],
+      allow: ["C:\\Program Files\\knobas\\knobas-app.exe", "C:\\Users\\b\\.theseus\\postgresql\\18.6.0\\bin\\postgres.exe"],
+    },
+  });
+  const text = screen.text();
+  expect(text).toContain("Windows or security software on this computer blocked knobas from reaching its own database.");
+  expect(text).toContain("knobas tried");
+  expect(text).toContain("An administrator can allow these programs:");
+  const items = [...screen.target.querySelectorAll("li")].map((li) => li.textContent);
+  expect(items).toEqual([
+    "tcp 127.0.0.1:54321",
+    "C:\\Program Files\\knobas\\knobas-app.exe",
+    "C:\\Users\\b\\.theseus\\postgresql\\18.6.0\\bin\\postgres.exe",
+  ]);
+  // The paths are values to copy, so they are in the code face; the cause is prose.
+  for (const list of screen.target.querySelectorAll("ul")) expect(mono(list)).toBe(true);
+  const cause = [...screen.target.querySelectorAll("p")].find((p) => p.textContent?.startsWith("Windows or"));
+  expect(mono(cause!)).toBe(false);
+  expect(text).toContain("os error 10013");
+  expect(button(screen.target, "Retry")).toBeDefined();
+  screen.done();
+});
+
+/** Any other failure keeps the screen it had: no cause block. */
+test("a failure that is not a block shows no cause block", () => {
+  const screen = render({ state: "failed", message: "port 50861 is in use", details: "x" });
+  expect(screen.target.querySelectorAll("ul")).toHaveLength(0);
+  expect(screen.text()).not.toContain("administrator");
+  screen.done();
+});
+
+/** *Copy details* copies the backend's report, and says it did. */
+test("Copy details copies the start's report and says Copied", async () => {
+  const copy = vi.fn((_text: string) => Promise.resolve());
+  const details = "knobas 0.1.0 · profile demo · Windows 11\nfailed at: knobas connecting to its server";
+  const screen = render({ state: "failed", message: "boom", details }, () => {}, copy);
+  button(screen.target, "Copy details")!.click();
+  await vi.waitFor(() => expect(button(screen.target, "Copied")).toBeDefined());
+  expect(copy).toHaveBeenCalledWith(details);
+  screen.done();
+});
+
+/** With no report behind the failure, it copies the message and the version line. */
+test("Copy details without a report copies the message and the version line", async () => {
+  const copy = vi.fn((_text: string) => Promise.resolve());
+  const screen = render({ state: "failed", message: "the server stopped" }, () => {}, copy);
+  button(screen.target, "Copy details")!.click();
+  await vi.waitFor(() => expect(copy).toHaveBeenCalledOnce());
+  expect(copy).toHaveBeenCalledWith("the server stopped\nknobas 0.1.0 · profile demo");
+  screen.done();
+});
+
+/** A clipboard that refuses says so on the button rather than claiming success. */
+test("a refused copy says Could not copy", async () => {
+  const copy = vi.fn((_text: string) => Promise.reject(new Error("denied")));
+  const screen = render({ state: "failed", message: "boom", details: "d" }, () => {}, copy);
+  button(screen.target, "Copy details")!.click();
+  await vi.waitFor(() => expect(button(screen.target, "Could not copy")).toBeDefined());
+  screen.done();
 });

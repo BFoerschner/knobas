@@ -31,6 +31,7 @@
 pub mod archive;
 pub mod assets;
 pub mod backup;
+mod boot_report;
 pub mod bundle;
 pub mod capture;
 pub mod checkout;
@@ -1118,6 +1119,9 @@ async fn bring_up_app<R: tauri::Runtime>(
     set_db_state(handle, DbState::Starting { detail });
 
     let lifecycle = handle.state::<Lifecycle>();
+    // How far the start got and every connection it tried, for a failure's
+    // *Copy details* (ux28).
+    let mut report = knobas_db::report::StartReport::default();
     let outcome = async {
         // The PostgreSQL this build carries, unpacked on a machine that has
         // none, so the start below downloads nothing. A failed unpack is not
@@ -1127,7 +1131,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             Some(needs) => needs.install().await,
             None => None,
         };
-        let db = knobas_db::EmbeddedDb::start(config)
+        let db = knobas_db::EmbeddedDb::start_reporting(config, &mut report)
             .await
             .map_err(|error| match &provision {
                 Some(needs) if matches!(error, knobas_db::DbError::NotInstalled { .. }) => {
@@ -1383,6 +1387,15 @@ async fn bring_up_app<R: tauri::Runtime>(
             error.to_string()
         }
     };
+    // The screen says so at once, with what this process knows; the facts
+    // Windows has about the machine (its build, security products and
+    // firewall: one `powershell` child, up to seconds) are added when they
+    // arrive, below.
+    let version = handle.package_info().version.to_string();
+    let profile_name = if profile.demo { "demo" } else { "default" };
+    let local = boot_report::MachineFacts::local();
+    let details = boot_report::details(&version, profile_name, &message, &report, &local);
+    let blocked = boot_report::blocked(&report, &local);
     // **Stopped, never dropped** (#1634, LIFE-6), and before `Failed`, so a
     // Retry starts from a stopped server. Dropping a server this process
     // started runs `pg_ctl stop` synchronously in `PostgreSQL`'s `Drop`,
@@ -1393,7 +1406,25 @@ async fn bring_up_app<R: tauri::Runtime>(
     {
         tracing::error!(%error, "stopping the server of a failed bring-up failed");
     }
-    set_db_state(handle, DbState::Failed { message });
+    set_db_state(
+        handle,
+        DbState::Failed {
+            message: message.clone(),
+            details: Some(details),
+            blocked,
+        },
+    );
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let machine = boot_report::MachineFacts::read().await;
+        let details = boot_report::details(&version, profile_name, &message, &report, &machine);
+        // The whole text in the log too, for a machine whose log can be read.
+        tracing::error!(details = %details, "what the failed start did");
+        let lifecycle = handle.state::<Lifecycle>();
+        if lifecycle.refine_failure(&message, details) {
+            events::emit(&handle, None, events::DB_STATE, lifecycle.get());
+        }
+    });
 }
 
 /// The Docs tree read once in the background after `ready` (the
@@ -1508,12 +1539,10 @@ async fn restart_server<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
             tracing::error!(%error, "the embedded postgres did not start again");
             set_db_state(
                 handle,
-                DbState::Failed {
-                    message: format!(
-                        "the database server stopped while knobas was running and did not \
-                         start again: {error}"
-                    ),
-                },
+                DbState::failed(format!(
+                    "the database server stopped while knobas was running and did not start \
+                     again: {error}"
+                )),
             );
         }
     }
