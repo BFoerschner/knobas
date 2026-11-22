@@ -423,7 +423,7 @@
   </button>
 {/snippet}
 
-<div class="tf-full tf-pw-page">
+<div class="tf-pw-page">
   {#if !held || !m || !node}
     <div class="tf-pw-none">
       {#if failed}<p class="tf-stg-errt">{failed}</p>{/if}
