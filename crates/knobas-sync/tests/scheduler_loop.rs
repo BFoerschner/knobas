@@ -1362,33 +1362,40 @@ async fn a_backfill_is_logged_under_its_own_trigger() {
 /// id for. Five seconds is the deadline every other wait in this file
 /// allows, for the same reason -- a loaded machine, not a measurement.
 async fn await_source_idle(pool: &PgPool, source_id: &str) {
-    for _ in 0..200 {
+    let deadline = tokio::time::Instant::now() + HANG_GUARD;
+    while tokio::time::Instant::now() < deadline {
         let runs = run_log::list(pool, Some(source_id), 10).await.unwrap();
         if !runs.is_empty() && runs.iter().all(|r| r.finished_at.is_some()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("{source_id} still has a run open after five seconds");
+    panic!("{source_id} still has a run open after {HANG_GUARD:?}");
 }
 
 /// Wait for one run's log row to be finished. Polls rather than sleeping a
 /// fixed span: the row is written by the spawned task, and a fixed sleep is
 /// either a flake or slow. Note what this does *not* promise -- see the two
 /// meanings of "over" on the test above.
+///
+/// The run is read by its id, not looked for among the log's newest rows:
+/// `trigger_all` starts a run for every enabled source in the database, other
+/// tests' too, so more than a page of newer runs can push this one out of a
+/// "newest 50" while it finishes. And the wait is [`HANG_GUARD`], a deadline
+/// against a hang: five seconds was a span, and `trigger_all`'s runs queue
+/// for [`knobas_sync::scheduler::SYNC_CONCURRENCY`] permits behind every
+/// other source's (the final suite, 2026-11-22: "run 58 never finished" at
+/// load 22 on the WSL box).
 async fn await_finish(pool: &PgPool, run_id: i64) {
-    for _ in 0..200 {
-        let finished = run_log::list(pool, None, 50)
-            .await
-            .unwrap()
-            .iter()
-            .any(|r| r.id == run_id && r.finished_at.is_some());
-        if finished {
+    let deadline = tokio::time::Instant::now() + HANG_GUARD;
+    while tokio::time::Instant::now() < deadline {
+        let run = run_log::get(pool, run_id).await.unwrap();
+        if run.is_some_and(|r| r.finished_at.is_some()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("run {run_id} never finished");
+    panic!("run {run_id} never finished within {HANG_GUARD:?}");
 }
 
 // -- ADR-0005: a run id always comes with an ending ---------------------------
