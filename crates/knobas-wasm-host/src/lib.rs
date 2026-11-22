@@ -346,6 +346,16 @@ impl WasmAdapter {
         {
             return Err(LoadError::Descriptor(format!("web_sign_in: {error}")));
         }
+        if let Some(links) = &template.web_links {
+            let kinds: Vec<&str> = template
+                .entity_kinds
+                .iter()
+                .map(|k| k.id.as_str())
+                .collect();
+            if let Err(error) = knobas_source::web_links::check(links, &kinds) {
+                return Err(LoadError::Descriptor(format!("web_links: {error}")));
+            }
+        }
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
@@ -430,6 +440,15 @@ impl WasmAdapter {
     /// sign-in* alone.
     #[must_use]
     pub fn declares_web_sign_in(&self) -> bool {
+        reads_web_sign_in(&self.inner.version)
+    }
+
+    /// Whether the host reads the descriptor's `web_links` (1.7.0, ux30):
+    /// where the source's own website shows an item of a kind, and its front
+    /// page. A component built against an older minor has them dropped, and
+    /// its site opens at its base URL.
+    #[must_use]
+    pub fn declares_web_links(&self) -> bool {
         reads_web_sign_in(&self.inner.version)
     }
 
@@ -746,7 +765,8 @@ fn new_store(
 }
 
 /// Whether a component built against `version` has its descriptor's
-/// `web_sign_in` read: 1.7.0 and every later minor, and any later major.
+/// `web_sign_in` and `web_links` read: 1.7.0 and every later minor, and any
+/// later major.
 fn reads_web_sign_in(version: &Version) -> bool {
     version.major > 1 || version.minor >= WEB_SIGN_IN_FROM_MINOR
 }

@@ -1553,11 +1553,9 @@
   const opened = $derived.by(() => {
     if (drawn === null) return null;
     if (fileMade === null) return openWith(drawn, allRenderers(), defaults.list);
-    // A generated file (ADR-0046): a page opens as one after the person's own defaults; no JAR view, which reads a
-    // repository's file in the backend (a v1 limit).
-    const made = openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
-    const offered = made.offered.filter((r) => r.id !== "jar");
-    return { ...made, offered, renderer: made.renderer?.id === "jar" ? (offered[0] ?? null) : made.renderer };
+    // A generated file (ADR-0046): a page opens as one after the person's own defaults. A JAR opens in the JAR view,
+    // its archive read from the generated folder (`folder_render_archive_open`); with no archive reads it stays binary.
+    return openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
   });
   /** What *Open in…* opens in an API client while the file is drawn by the API explorer (ux31). */
   let specOpener = $state<SpecOpener | null>(null);
@@ -1978,10 +1976,22 @@
    * The JAR view's reads for the archive shown (ux19), bound to where it was read: keyed by what they read, so a
    * re-read of the same file hands the view the same reads and it reads nothing again.
    */
-  const jarAt = $derived(file === null || drawAs !== "jar" ? null : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk));
+  const jarAt = $derived(
+    file === null || drawAs !== "jar"
+      ? null
+      : fileMade !== null
+        ? JSON.stringify(["made", fileMade.token, fileMade.rel])
+        : bytesKey(at, file.path, fileReadAt(disk, file.path, file.commit ?? null), disk),
+  );
   const jarPorts = $derived.by((): JarPorts | null => {
     const reads = ports.archive;
     if (jarAt === null || reads === undefined) return null;
+    if (fileMade !== null) {
+      // A generated archive (ADR-0046): listed from the generated folder, then read by its handle as any archive.
+      const [, token, rel] = JSON.parse(jarAt) as [string, string, string];
+      const list = madePorts.archive;
+      return list === undefined ? null : { ...reads, open: () => list(token, rel) };
+    }
     const [entityId, path, commit] = JSON.parse(jarAt) as [string, string, string | null];
     return { ...reads, open: () => reads.open(entityId, path, commit) };
   });

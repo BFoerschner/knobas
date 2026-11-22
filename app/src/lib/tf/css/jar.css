@@ -150,3 +150,21 @@
 @media (prefers-reduced-motion: no-preference) {
   .tf-jar-caret { transition: transform .12s ease-out; }
 }
+
+/* A JAR in a comparison (2026-11-22): a head line, then the entries that differ, each the JAR view's row with the diff
+   card's badge first and its sizes before and after at the end. */
+.tf-jdiff { min-width: 0; }
+.tf-jdiff-head {
+  margin: 0; height: 29px; box-sizing: border-box; padding: 0 8px; line-height: 28px; border-bottom: 1px solid var(--rule-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2);
+}
+.tf-jdiff-same { padding: 0 8px; }
+.tf-jdiff-row { grid-template-columns: 3ch minmax(0, 1fr) auto 20ch; }
+.tf-jdiff-row .tf-bd { justify-self: start; }
+.tf-jdiff-cls { margin: 10px 0 4px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-jdiff-cls:first-child { margin-top: 0; }
+.tf-jar-detail > .tf-jar-dnote + .tf-pdfd-hunk, .tf-jar-detail > .tf-pdfd-hunk + .tf-pdfd-hunk { margin-top: 6px; }
+.tf-jar-detail > .tf-jar-dnote:not(:last-child) { margin-bottom: 6px; }
+.tf-jdiff-imgs { display: flex; gap: 14px; min-width: 0; }
+.tf-jdiff-imgs figure { margin: 0; flex: 1 1 0; min-width: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.tf-jdiff-imgs figcaption { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }

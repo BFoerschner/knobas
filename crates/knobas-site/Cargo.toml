@@ -85,8 +85,8 @@ windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_UI_Windo
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDate", "NSArray", "NSHTTPCookie", "NSRunLoop", "NSUUID", "NSObjCRuntime", "NSEnumerator", "NSGeometry", "NSURL", "NSURLRequest", "objc2-core-foundation"] }
 objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "block2", "WKWebsiteDataStore", "WKHTTPCookieStore", "WKWebViewConfiguration"] }
 
-# WebKit wants the main thread and its run loop: no harness (the file says why).
+# WebKit wants the main thread and its run loop: no harness (the file says why). No `path`: the name finds
+# tests/mac_forget.rs, a file of its own on test-layout-exceptions.txt (a `[[test]]` with a path is a second binary).
 [[test]]
 name = "mac_forget"
-path = "tests/mac_forget.rs"
 harness = false

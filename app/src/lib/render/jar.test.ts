@@ -15,6 +15,7 @@ function index(names: string[], over: Partial<ArchiveIndex> = {}): ArchiveIndex 
     names: sorted.join("\n"),
     sizes: sorted.map(() => 10),
     packed_sizes: sorted.map(() => 5),
+    crcs: sorted.map(() => 0),
     flags: sorted.map(() => 0),
     manifest: [],
     maven: [],

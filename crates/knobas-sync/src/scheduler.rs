@@ -3145,6 +3145,18 @@ async fn flush_loop(inner: Arc<Inner>) {
 mod tests {
     use super::*;
 
+    /// The quit's wall clock covers every wait inside the scheduler's shutdown
+    /// and a second more: the grace, the wait for aborted runs, the pool's
+    /// close twice. 3 + 2 + 2 * 2 + 1 = 10 s.
+    #[test]
+    fn the_quit_bound_covers_the_shutdowns_own_waits() {
+        assert_eq!(QUIT_BOUND, Duration::from_secs(10));
+        assert!(
+            QUIT_BOUND
+                > SHUTDOWN_GRACE + ABORTED_GONE_TIMEOUT + POOL_CLOSE_TIMEOUT + POOL_CLOSE_TIMEOUT
+        );
+    }
+
     /// The two states the status read excludes from `next_run_at` are the two
     /// [`config::due`] excludes from scheduling, spelled the same way. A
     /// countdown to a run the scheduler will never start is a lie the sources

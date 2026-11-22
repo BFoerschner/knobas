@@ -724,7 +724,7 @@ pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> 
 /// declaration to choose between *Refresh* and *Sync now*, and between a
 /// refresh and the run alone after a landed write, and the host would answer
 /// *not offered* to every refresh of it (#2101). One built against 1.6.0 or
-/// earlier declares no `web_sign_in` (ux30).
+/// earlier declares no `web_sign_in` and no `web_links` (ux30).
 pub(crate) async fn descriptor(
     adapter: &WasmAdapter,
     instance: wit::Instance,
@@ -749,6 +749,11 @@ pub(crate) async fn descriptor(
         // *Fill sign-in* alone, whatever its JSON says (ADR-0050).
         if !adapter.declares_web_sign_in() {
             descriptor.web_sign_in = None;
+        }
+        // So are its web links (ux30): an older component's site opens at
+        // its base URL.
+        if !adapter.declares_web_links() {
+            descriptor.web_links = None;
         }
         Ok(descriptor)
     })

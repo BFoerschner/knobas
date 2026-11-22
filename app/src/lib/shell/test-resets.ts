@@ -56,6 +56,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/diff/diff-rendered.svelte.ts#diffRendered": async () => (await import("../tf/diff/diff-rendered.svelte")).diffRendered.reset(),
   "tf/repo/cloned-here.svelte.ts#known": async () => (await import("../tf/repo/cloned-here.svelte")).forgetCheckouts(),
   "tf/diff/image-mode.svelte.ts#imageMode": async () => (await import("../tf/diff/image-mode.svelte")).imageMode.set("sides"),
+  // How a changed class in a JAR's comparison is diffed (2026-11-22), stored in `localStorage`: each test starts on Source.
+  "tf/diff/class-mode.svelte.ts#classMode": async () => (await import("../tf/diff/class-mode.svelte")).classMode.reset(),
+  // The decompiles waiting their turn: a test's held one never blocks the next test's.
+  "tf/diff/TfJarDiff.svelte#queue": async () => (await import("../tf/diff/TfJarDiff.svelte")).forgetDecompileQueue(),
   // Each role's face and size, and code's ligatures (2026-11-16, 2026-11-18), stored in `localStorage` and written on
   // <html>: each test starts on the bundled faces at 100 % with no ligatures, and reads the installed fonts afresh.
   "tf/fonts.svelte.ts#fonts": async () => (await import("../tf/fonts.svelte")).fonts.reset(),

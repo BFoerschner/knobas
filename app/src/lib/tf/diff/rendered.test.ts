@@ -1,10 +1,10 @@
 /** Which diffs offer *Rendered* (#2279; ux26's stage), the renderers that can draw both sides, and the stage's heights. */
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { openWith } from "../../render/defaults";
 import { allRenderers, HTML, IMAGE, MARKDOWN, MERMAID, OPENAPI, SOURCE, type Renderer } from "../../render/registry";
-import { changedLines, docStage, hunkText, IMAGE_STAGE, meetsLines, renderedChoices, renderedPlan, renderedRoom, stageOf } from "./rendered";
+import { changedLines, docStage, hunkText, IMAGE_STAGE, meetsLines, renderedChoices, renderedPlan, renderedRoom, specHint, stageOf } from "./rendered";
 
 const add = (nu: number, text: string): DiffLine => ({ kind: "add", old: null, new: nu, text });
 const del = (old: number, text: string): DiffLine => ({ kind: "del", old, new: null, text });
@@ -69,7 +69,7 @@ test("a command renderer draws a binary file's diff nowhere: it is handed text",
   expect(renderedChoices(PNG, { offered: [command, IMAGE], renderer: command, pattern: null }, bytes)).toEqual([IMAGE]);
 });
 
-test("an .html file, which opens as Source, offers Page; an OpenAPI file offers its API (ux31)", () => {
+test("an .html file, which opens as Source, offers Page; an OpenAPI file offers OpenAPI, its two views (2026-11-22)", () => {
   const page = file({ path: "site/index.html" });
   expect(opened(page).renderer).toBe(SOURCE);
   expect(renderedChoices(page, opened(page), bytes)).toEqual([HTML]);
@@ -116,4 +116,28 @@ test("the lines a change touched: removed by their old numbers, added by their n
   expect(changedLines(of([[ctx(1, 1), del(2), ctx(3, 2)]]))).toEqual({ old: [[2, 2]], new: [] });
   expect(meetsLines(3, 6, [[1, 2], [6, 9]])).toBe(true);
   expect(meetsLines(3, 5, [[1, 2], [6, 9]])).toBe(false);
+});
+
+describe("specHint (2026-11-22)", () => {
+  const f = (path: string, over: Partial<DiffFile> = {}): DiffFile => ({ path, old_path: null, change: "modified", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [], ...over });
+  const line = (kind: "add" | "del" | "context", n: number, text: string) => ({ kind, old: kind === "add" ? null : n, new: kind === "del" ? null : n, text });
+  test("a name a spec goes by, only as JSON or YAML", () => {
+    expect(specHint(f("api/petstore.oas.yml"))).toBe("openapi: 3.0.0");
+    expect(specHint(f("swagger.json"))).toBe("openapi: 3.0.0");
+    expect(specHint(f("docs/openapi.md"))).toBeUndefined();
+    expect(specHint(f("openapi.json", { change: "binary" }))).toBeUndefined();
+    expect(specHint(f("config/app.json"))).toBeUndefined();
+  });
+  test("an added file whole, a first hunk from line 1, or a version key line anywhere", () => {
+    const added = f("a.yaml", { change: "added", hunks: [{ header: "", lines: [line("add", 1, "openapi: 3.1.0"), line("add", 2, "info: {}")] }] });
+    expect(specHint(added)).toBe("openapi: 3.1.0\ninfo: {}");
+    // Only JSON or YAML is looked into: every other added file would be planned apart from its name's kind.
+    expect(specHint({ ...added, path: "notes.md" })).toBeUndefined();
+    const top = f("a.yaml", { hunks: [{ header: "", lines: [line("context", 1, "swagger: '2.0'"), line("del", 2, "x"), line("add", 2, "y")] }] });
+    expect(specHint(top)).toBe("swagger: '2.0'\ny");
+    const deep = f("a.yaml", { hunks: [{ header: "", lines: [line("del", 40, "openapi: 3.0.0"), line("add", 40, "openapi: 3.1.0")] }] });
+    expect(specHint(deep)).toBe("openapi: 3.0.0");
+    const plain = f("a.yaml", { hunks: [{ header: "", lines: [line("del", 40, "  openapi: 3"), line("add", 40, "x")] }] });
+    expect(specHint(plain)).toBeUndefined();
+  });
 });

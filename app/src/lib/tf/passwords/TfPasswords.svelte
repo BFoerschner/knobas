@@ -31,6 +31,8 @@
   import { stampLabel, clockLabel } from "../../time/format";
   import TfPwEntry from "./TfPwEntry.svelte";
   import TfPwWrite from "./TfPwWrite.svelte";
+  import TfPwWeb from "./TfPwWeb.svelte";
+  import type { WebOn } from "./web";
   import type { Layers } from "../layers.svelte";
   import { folds, heldNow, readHeld } from "./held.svelte";
   import {
@@ -333,6 +335,18 @@
     return held.sources[openEntry.src] ?? null;
   });
   const word = $derived(held && openEntry ? sourceWord(held, openEntry.src) : "the password manager");
+
+  // *Open web interface* in the header (ux30): the folder on show, a source's top or, with one source, the page's top
+  // opens the front page; with several sources the page's top has none.
+  let headWeb = $state<TfPwWeb | null>(null);
+  const webHere = $derived.by((): { source: PwSource; item: string | null; on: WebOn; name: string | null } | null => {
+    if (!held || !node) return null;
+    if (node.id === "") return held.sources.length === 1 ? { source: held.sources[0]!, item: null, on: "home", name: null } : null;
+    const src = held.sources[node.src];
+    if (!src) return null;
+    if (node.top) return { source: src, item: null, on: "home", name: null };
+    return { source: src, item: node.id, on: "folder", name: node.name };
+  });
   let retrying = $state(false);
 
   async function retry(): Promise<void> {
@@ -362,6 +376,13 @@
     }
     if (inTextField(event.target)) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    // W: the open entry in the password manager's web interface, else the folder; Shift W in the browser.
+    if (key === "w") {
+      event.preventDefault();
+      if (record && entryPane) entryPane.openWeb(event.shiftKey);
+      else void headWeb?.press(event.shiftKey);
+      return;
+    }
     const act: Record<string, () => void> = {
       "/": () => filter?.focus(),
       ArrowDown: () => move(1),
@@ -578,6 +599,7 @@
             </div>
             <div class="tf-acts">
               {#if newSource}<button type="button" class="tf-btn" aria-label="New entry" aria-keyshortcuts="N" onclick={() => (writing = "new")}>New entry<kbd>N</kbd></button>{/if}
+              {#if webHere}{#key `${webHere.source.id}/${webHere.item}`}<TfPwWeb bind:this={headWeb} source={webHere.source} item={webHere.item} on={webHere.on} name={webHere.name} {ports} key={record === null} />{/key}{/if}
               {@render sync?.()}
             </div>
           </header>

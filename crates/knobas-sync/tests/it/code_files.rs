@@ -624,8 +624,12 @@ async fn an_archive_the_deadline_cuts_is_not_asked_again_and_holds_up_nothing() 
     let small = push(&world, "acme/small", "c1", &files).await;
     // Pushed last, so it comes first: the newest repository.
     let huge = push(&world, "acme/huge", "c1", &files).await;
+    // The run's deadline starts before its database steps (removals, the bound, the owed list): on a loaded machine
+    // 400 ms ran out before the archive was asked at all, and the first assert saw no ask (the final suite,
+    // 2026-11-22, in a cargo-mutants baseline). Five seconds reach the ask on any machine and still cut the stand-in's
+    // 30-second archive, which is what this run is for.
     let bounds = Bounds {
-        budget: Duration::from_millis(400),
+        budget: Duration::from_secs(5),
         ..Bounds::default()
     };
     let first = pass_within(&world, bounds, u64::MAX).await;

@@ -112,4 +112,21 @@ async fn a_jar_on_the_working_tree_is_opened_as_it_is_on_disk() {
         .await
         .unwrap_err();
     assert_eq!(gone.code, knobas_app::IpcErrorCode::NotFound, "{gone:?}");
+
+    // The index's archive (Local changes' staged half, 2026-11-22): what is staged, not the working tree's file.
+    let in_index = open("~index".to_owned(), "app.jar").await.unwrap_err();
+    assert!(
+        in_index.message.contains("not a zip archive"),
+        "{}",
+        in_index.message
+    );
+    git(clone.path(), &["add", "app.jar"]);
+    std::fs::write(clone.path().join("app.jar"), b"changed again, not staged").unwrap();
+    let staged = open("~index".to_owned(), "app.jar")
+        .await
+        .expect("the staged archive opens");
+    assert_eq!(staged.names, "");
+    let none = open("~index".to_owned(), "nope.jar").await.unwrap_err();
+    assert_eq!(none.code, knobas_app::IpcErrorCode::NotFound, "{none:?}");
+    assert!(none.message.contains("the index"), "{}", none.message);
 }

@@ -357,6 +357,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Measured against the testenv's Gitea 1.27.3 (#2274): `/src/<ref>/`
         // answers a branch or a sha (a 303 to `/src/branch/` or
         // `/src/commit/`), and compare takes `<sha>^` as written or encoded.
+        web_links: None,
         web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::at(&[
             "/user/login",
         ])),

@@ -17,7 +17,8 @@
   decodes them. Each renderer draws as the file viewer draws it: Markdown through the sanitizer, a diagram, a page and
   a command's output each in its frame, an image as an `<img>` of a blob URL (an SVG sanitized first,
   `render/image.ts`), let go when the stage goes. A PDF is compared page by page (`TfPdfDiff`, #2282) once both sides
-  are read.
+  are read. A JAR is one column too (`TfJarDiff`): the entries that differ between its two listings, the foot counting
+  them, and *Outline | Source* at the caption's end where a changed class can be decompiled.
 
   **Changed blocks** (ruling 3's second half): in a Markdown comparison each top-level block that holds a changed line
   (`changed`, the diff's own lines) is marked on its own side, a 3 px bar and a tint that fades out (`.tf-rchg`). The
@@ -42,7 +43,14 @@
   import TfOasDiff from "../render/TfOasDiff.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import { imageMode as sharedImageMode, type ImageModeChoice } from "./image-mode.svelte";
-  import { meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
+  import { isListing, meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
+  import type { JavaRuntime } from "../../ipc/app";
+  import type { ArchiveIndex } from "../../ipc/entity";
+  import { compareJars, compareWords } from "../../render/jar-diff";
+  import { bridgeArchive, type ArchivePorts } from "../../render/jar-ports";
+  import TfJarDiff from "./TfJarDiff.svelte";
+  import { isOpenApi } from "../../render/openapi-sniff";
+  import { classMode as sharedClassMode, type ClassModeChoice } from "./class-mode.svelte";
 
   let {
     plan,
@@ -63,6 +71,9 @@
     epoch = 0,
     changed = null,
     partial = false,
+    archives = bridgeArchive(),
+    reopen = () => Promise.resolve(null),
+    classMode = sharedClassMode,
   }: {
     plan: RenderedPlan;
     path: string;
@@ -92,6 +103,12 @@
     changed?: { old: LineRanges; new: LineRanges } | null;
     /** The lines are cut or not all read: the first changes are marked, and the foot says so. */
     partial?: boolean;
+    /** A JAR's reads by handle once each side is listed, and Java's state: the bridge's, a fake in tests. */
+    archives?: Omit<ArchivePorts, "open">;
+    /** A JAR's side listed again where the backend let it go. */
+    reopen?: (side: Side) => Promise<ArchiveIndex | null>;
+    /** How a changed class is diffed, one choice app-wide. */
+    classMode?: ClassModeChoice;
   } = $props();
 
   // ---- Changed blocks (ux26, ruling 3) ----
@@ -172,17 +189,50 @@
   const twoImages = $derived(image && sides.length === 2);
   const shownMode = $derived<ImageMode>(twoImages ? imageMode.current : "sides");
   const overlaid = $derived(shownMode !== "sides");
-  /** The columns the stage draws: one for a PDF or an API spec (their own two), a swipe or an onion, else one a side. */
-  const columns = $derived(id === "pdf" || id === "openapi" || overlaid ? 1 : sides.length);
+  /** An OpenAPI comparison's sides that are no spec, once read: both, and the stage says so once. */
+  const noSpec = (side: Side) => {
+    const got = sideOf(side);
+    return got?.kind === "drawn" && !isListing(got.content) && !isOpenApi(textOf(got.content));
+  };
+  const neitherSpec = $derived(id === "openapi" && sides.length > 0 && sides.every(noSpec));
+  /** The columns the stage draws: one for a PDF or an API spec (their own two), a JAR, a swipe or an onion, else one a side. */
+  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || overlaid || neitherSpec ? 1 : sides.length);
   /** An API spec's stage (`TfOasDiff`), and what it says for the foot. */
   let oasStage = $state<ReturnType<typeof TfOasDiff> | null>(null);
   let oasSay = $state("");
+
+  /** A JAR's side as listed: the listing, `null` for no file on that side, `undefined` while it is read or failed. */
+  const listingOf = (side: Side): ArchiveIndex | null | undefined => {
+    if (!plan.sides.includes(side)) return null;
+    const got = sideOf(side);
+    if (got === undefined || got.kind === "failed") return undefined;
+    if (got.kind === "absent") return null;
+    return isListing(got.content) ? got.content : undefined;
+  };
+  const jarSides = $derived(id === "jar" ? { old: listingOf("old"), new: listingOf("new") } : null);
+  const jarCompare = $derived(jarSides === null || jarSides.old === undefined || jarSides.new === undefined ? null : compareJars(jarSides.old, jarSides.new));
+  /** What decompiling stands at, asked once a JAR is drawn. */
+  let java = $state<JavaRuntime | null>(null);
+  $effect(() => {
+    if (id !== "jar") return;
+    let live = true;
+    archives.java().then(
+      (rt) => live && (java = rt),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  /** *Outline | Source*: where a changed class is listed and a Java was found. */
+  const classSeg = $derived(id === "jar" && java !== null && java.java !== null && (jarCompare?.rows.some((r) => r.kind === "class" && r.change === "changed") ?? false));
 
   /** A side's bytes once read, `null` where there is no file on that side; `undefined` while it is read. */
   const bytesOf = (side: Side): Uint8Array | null | undefined => {
     const got = sideOf(side);
     if (got === undefined || got.kind === "failed") return undefined;
     if (got.kind === "absent") return null;
+    if (isListing(got.content)) return undefined;
     return typeof got.content === "string" ? new TextEncoder().encode(got.content) : got.content;
   };
   const decoder = new TextDecoder("utf-8", { fatal: false });
@@ -195,7 +245,7 @@
     const made: Partial<Record<Side, string>> = {};
     for (const side of plan.sides) {
       const got = sideOf(side);
-      if (got?.kind !== "drawn") continue;
+      if (got?.kind !== "drawn" || isListing(got.content)) continue;
       const bytes = typeof got.content === "string" ? new TextEncoder().encode(got.content) : got.content;
       made[side] = URL.createObjectURL(imageBlob(bytes, path));
     }
@@ -238,6 +288,7 @@
     if (unread[0] === "new") return ends?.new === "working tree" ? "Reading the working tree's side…" : "Reading the side after…";
     if (id === "openapi") return oasSay;
     if (image) return sides.flatMap((side) => (sizes[side] ? [`${NAME[side]} ${sizes[side]}`] : [])).join(", ");
+    if (jarCompare !== null) return compareWords(jarCompare, jarSides?.old === null ? "added" : jarSides?.new === null ? "removed" : null);
     if (marksOn && changes.length > 0) {
       const count = `Change ${Math.max(1, at + 1)} of ${changes.length}`;
       return partial ? `${count}. The first changes are marked: Lines has them all.` : count;
@@ -280,8 +331,20 @@
       <span class="tf-rcap-side tf-rcap-{side}" title={caption(side)}><b>{NAME[side]}</b>{#if ends}{" "}{ends[side]}{/if}</span>
     {/each}
   {/if}
-  {#if twoImages || choices.length > 1}
+  {#if twoImages || choices.length > 1 || classSeg}
     <span class="tf-rcap-acts">
+      {#if classSeg && java !== null}
+        <span class="tf-seg" role="group" aria-label="Diff {path}'s changed classes by">
+          <button type="button" aria-pressed={!java.can_decompile || classMode.current === "outline"} onclick={() => classMode.set("outline")}>Outline</button>
+          <button
+            type="button"
+            aria-pressed={java.can_decompile && classMode.current === "source"}
+            aria-disabled={java.can_decompile ? undefined : "true"}
+            title={java.can_decompile ? undefined : (java.reason ?? undefined)}
+            onclick={() => java?.can_decompile && classMode.set("source")}>Source</button
+          >
+        </span>
+      {/if}
       {#if twoImages}
         <span class="tf-seg" role="group" aria-label="Show {path}'s two images">
           {#each IMAGE_MODES as m (m.mode)}<button type="button" aria-pressed={shownMode === m.mode} onclick={() => imageMode.set(m.mode)}>{m.label}</button>{/each}
@@ -294,7 +357,18 @@
   {/if}
 </div>
 <div class="tf-rstage" bind:this={stage} class:tf-rstage-img={image} class:tf-rstage-one={columns === 1} class:tf-rstage-open={open} data-renderer={id}>
-  {#if id === "pdf"}
+  {#if id === "jar"}
+    {@const failed = sides.find((side) => failure(side) !== null)}
+    <div class="tf-rside">
+      {#if failed !== undefined}
+        <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
+      {:else if jarSides !== null && jarCompare !== null && jarSides.old !== undefined && jarSides.new !== undefined}
+        <TfJarDiff {path} before={jarSides.old} after={jarSides.new} compare={jarCompare} {archives} {java} mode={classMode.current} {reopen} {render} />
+      {:else}
+        {@render waiting(sides[0] ?? "new")}
+      {/if}
+    </div>
+  {:else if id === "pdf"}
     {@const failed = sides.find((side) => failure(side) !== null)}
     {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
     <div class="tf-rside">
@@ -306,6 +380,8 @@
         {@render waiting(sides[0] ?? "new")}
       {/if}
     </div>
+  {:else if neitherSpec}
+    <div class="tf-rside tf-rside-doc"><p class="tf-jar-dnote tf-roas-no">Neither side is an OpenAPI or Swagger spec: Lines has the change.</p></div>
   {:else if id === "openapi"}
     {@const failed = sides.find((side) => failure(side) !== null)}
     {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
@@ -347,7 +423,7 @@
     {#each sides as side (side)}
       {@const got = sideOf(side)}
       <div class="tf-rside tf-rside-{side}" class:tf-rside-doc={!image} class:tf-rside-img={image} {@attach marking(side)}>
-        {#if got?.kind === "drawn"}
+        {#if got?.kind === "drawn" && !isListing(got.content)}
           {@render drawn(side, got.content)}
         {:else if got?.kind === "failed"}
           <p class="tf-stepfail" role="alert">The side {side === "old" ? "before" : "after"} could not be read: {got.why}</p>

@@ -206,3 +206,26 @@ test("a renderer with no glob is never applied by the toggle, and its glyph grou
   await settle();
   expect(target.querySelector(".tf-dfolder")?.getAttribute("data-folder")).toBe("lib");
 });
+
+test("a generated JAR that differs is drawn rendered, each side listed from its generated folder by token (2026-11-22)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", { ...DIFFERS, files: [{ path: "libs/app.jar", change: "modified" as const, before_size: 900, after_size: 950, binary: true }] });
+  rendering.set(true);
+  const listed: string[] = [];
+  const index = (handle: string, crc: number) => ({
+    handle, kind: "jar", size: 1, total: 0, packed: 0, names: "a.txt", sizes: [5], packed_sizes: [5], crcs: [crc], flags: [0],
+    manifest: [], maven: [], release: null, releases: [], libs: [], prefix: 0, warnings: [],
+  });
+  draw([file("docs/index.md")], fake, {
+    madeArchive: (token: string, path: string) => (listed.push(`${token}:${path}`), Promise.resolve(index(token, token === "a" ? 1 : 2))),
+    archives: { nested: vi.fn(), entry: vi.fn(), cls: vi.fn(), decompile: vi.fn(), download: vi.fn(), java: () => Promise.resolve({ java: null, decompiler: null, needs: null, can_decompile: false, reason: null, set_path: null }) },
+  });
+  await settle();
+  await settle();
+  const jar = target.querySelector('.tf-dunder .tf-diff[data-file*="app.jar"]') ?? [...target.querySelectorAll(".tf-dunder .tf-diff")].find((c) => c.textContent!.includes("app.jar"))!;
+  expect(listed.sort()).toEqual(["a:libs/app.jar", "b:libs/app.jar"]);
+  expect([...jar.querySelectorAll(".tf-jdiff-row")].map((r) => r.textContent!.replace(/\s+/g, " ").trim())).toEqual(["M a.txt 5 B"]);
+  expect(jar.textContent).not.toContain("A binary file");
+});

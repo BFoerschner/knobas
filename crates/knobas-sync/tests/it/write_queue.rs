@@ -471,6 +471,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         web_sign_in: None,
+        web_links: None,
         code_pages: None,
         by_hand_by_default: false,
         passwords: None,

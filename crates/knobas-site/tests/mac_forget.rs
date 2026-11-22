@@ -8,14 +8,30 @@
 //!
 //! WebKit wants the main thread and a running run loop, so this test has no harness (`harness = false`) and spins
 //! the main run loop itself. macOS 14 or later; nothing to test on another system.
+//!
+//! With no harness, it prints libtest's `test result:` line itself: `just test` reads that line from every test binary
+//! and fails one that has none (the final suite, 2026-11-22: this binary failed the Linux run for want of it).
 
 #[cfg(target_os = "macos")]
 fn main() {
-    mac::run();
+    let started = std::time::Instant::now();
+    let ran = mac::run();
+    result(ran, started);
 }
 
 #[cfg(not(target_os = "macos"))]
-fn main() {}
+fn main() {
+    result(false, std::time::Instant::now());
+}
+
+/// libtest's summary line: the one test passed, or ignored where this system has nothing to test.
+fn result(ran: bool, started: std::time::Instant) {
+    let (passed, ignored) = if ran { (1, 0) } else { (0, 1) };
+    println!(
+        "\ntest result: ok. {passed} passed; 0 failed; {ignored} ignored; 0 measured; 0 filtered out; finished in {:.2}s",
+        started.elapsed().as_secs_f64()
+    );
+}
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -103,10 +119,11 @@ mod mac {
         false
     }
 
-    pub fn run() {
+    /// Whether the test ran: `false` where this macOS has no data stores by identifier.
+    pub fn run() -> bool {
         if !knobas_site::mac::sessions_persist() {
             println!("mac_forget: skipped, no data stores by identifier before macOS 14");
-            return;
+            return false;
         }
         let mtm = MainThreadMarker::new().expect("the test's main thread");
         let seed = std::process::id().to_le_bytes();
@@ -193,5 +210,6 @@ mod mac {
             "a forgotten store still hands out its cookies: {left:?}"
         );
         println!("test mac_forget::a_forgotten_store_hands_out_no_cookie ... ok");
+        true
     }
 }

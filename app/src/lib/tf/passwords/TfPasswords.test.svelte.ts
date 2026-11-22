@@ -6,6 +6,14 @@ import TfPasswords from "./TfPasswords.svelte";
 import { forgetHeld } from "./held.svelte";
 import { forgetComment, type PasswordPorts } from "./ports";
 import { resetClip } from "./clip.svelte";
+import { siteStore } from "../site/site.svelte";
+import type { SiteSetting } from "../../ipc/site";
+
+/** The password source's site, as Settings holds it (ux30): it opens inside and signs in with the source's credential. */
+const SITE: SiteSetting = {
+  source: "pw", open_inside: true, base: "https://pw.example:10001", own: "https://pw.example:10001", allowed: [], suggested: [],
+  kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: { user: "mara.lindqvist", on: true },
+};
 
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
@@ -15,7 +23,7 @@ function row(id: string, folder: string, title: string, flags = 0): PwRow {
 
 function held(down: string | null = null): Held {
   return {
-    sources: [{ id: "pw", name: "Team passwords", account: "mara.lindqvist", by_hand: true, synced_at: "2026-11-22T10:22:00Z", down_at: down, never_synced: false, offers, skipped_root: "pw:root", adapter_name: "Pleasant Password Server" }],
+    sources: [{ id: "pw", name: "Team passwords", account: "mara.lindqvist", by_hand: true, synced_at: "2026-11-22T10:22:00Z", down_at: down, never_synced: false, offers, skipped_root: "pw:root", adapter_name: "Pleasant Password Server", web: { entry: true, folder: true } }],
     folders: [
       { id: "pw:pay", source: 0, parent: null, name: "Payments", comment_read: true, can_add: true },
       { id: "pw:agents", source: 0, parent: "pw:pay", name: "Agents", comment_read: false, can_add: true },
@@ -64,6 +72,8 @@ function ports(over: Partial<PasswordPorts> = {}, view: Held = held()): Password
     copySecret: vi.fn(async () => {}),
     attachment: vi.fn(async (): Promise<AttachmentAnswer> => ({ kind: "read", name: "wg-hub.conf", size: 21, data: btoa("[Interface]\nPort = 1"), text: "[Interface]\nPort = 1" })),
     saveAttachment: vi.fn(async () => "/home/mara/Downloads/wg-hub.conf"),
+    webLink: vi.fn(async (_source: string, item: string | null) => ({ url: `https://pw.example:10001/web?item=${item ?? ""}`, at: item === null ? ("home" as const) : ("entry" as const) })),
+    openWeb: vi.fn(() => {}),
     ...over,
   };
 }
@@ -95,12 +105,14 @@ beforeEach(() => {
   forgetHeld();
   forgetComment();
   resetClip();
+  siteStore.hold([SITE]);
 });
 
 afterEach(() => {
   if (app) unmount(app);
   app = null;
   target.remove();
+  siteStore.hold([]);
 });
 
 test("the tree lists the folders under the skipped root, with their totals and the comment mark", async () => {
@@ -340,4 +352,60 @@ test("a read the source does not answer reads the page again, so every read turn
   await settle();
   expect(target.querySelector(".tf-pw-f .tf-pw-fh")?.textContent).toContain("did not answer, so nothing was read");
   expect(p.held).toHaveBeenCalledTimes(2);
+});
+
+test("the open entry offers its web interface, inside and signed in, and a press opens the address the Rust side builds", async () => {
+  const p = ports();
+  await open(p, ["entry", "pw:graf"]);
+  const web = [...target.querySelectorAll<HTMLButtonElement>(".tf-pw-entry .tf-acts button")].find((b) => b.textContent?.startsWith("Open web interface"))!;
+  expect(web.textContent).toBe("Open web interfaceW");
+  expect(web.title).toBe(
+    "Opens this entry in the password manager's web interface, inside knobas and signed in. A new sign-in is recorded there under mara.lindqvist. Shift W opens it in your browser instead.",
+  );
+  web.click();
+  await settle();
+  expect(p.webLink).toHaveBeenCalledWith("pw", "pw:graf");
+  expect(p.openWeb).toHaveBeenCalledWith("https://pw.example:10001/web?item=pw:graf", "pw", false, "pw:graf");
+});
+
+test("W opens the open entry's web interface, Shift W in the browser", async () => {
+  const p = ports();
+  await open(p, ["entry", "pw:graf"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true }));
+  await settle();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "W", shiftKey: true, bubbles: true }));
+  await settle();
+  expect((p.openWeb as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[0], c[2]])).toEqual([
+    ["https://pw.example:10001/web?item=pw:graf", false],
+    ["https://pw.example:10001/web?item=pw:graf", true],
+  ]);
+});
+
+test("the folder on show offers its own web page in the header; the source's top its front page", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:plat"]);
+  const head = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-pw-head .tf-acts button")].find((b) => b.textContent?.startsWith("Open web interface"));
+  expect(head()!.title).toMatch(/^Opens this folder in the password manager's web interface, inside knobas and signed in\./);
+  head()!.click();
+  await settle();
+  expect(p.webLink).toHaveBeenLastCalledWith("pw", "pw:plat");
+  unmount(app!);
+  app = null;
+  await open(p, []);
+  expect(head()!.title).toMatch(/^Opens the password manager's web interface,/);
+  head()!.click();
+  await settle();
+  expect(p.webLink).toHaveBeenLastCalledWith("pw", null);
+});
+
+test("a source whose base URL is no web address, or with its site off, draws no button or says the browser", async () => {
+  siteStore.hold([{ ...SITE, own: "" }]);
+  await open(ports(), ["entry", "pw:graf"]);
+  expect(button("Open web interface")).toBeUndefined();
+  unmount(app!);
+  app = null;
+  siteStore.hold([{ ...SITE, open_inside: false }]);
+  await open(ports(), ["entry", "pw:graf"]);
+  const web = [...target.querySelectorAll<HTMLButtonElement>(".tf-pw-entry .tf-acts button")].find((b) => b.textContent?.startsWith("Open web interface"))!;
+  expect(web.title).toBe("Opens this entry in the password manager's web interface, in your browser.");
 });

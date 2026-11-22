@@ -163,6 +163,8 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["A", "Passwords", "Open or copy the address"],
   ["E", "Passwords", "Edit the open entry, where its source lets you"],
   ["N", "Passwords", "A new entry in the folder you are in"],
+  ["W", "Passwords", "Open the entry or folder in the password manager's web interface"],
+  ["Shift W", "Passwords", "Open it in the browser"],
   ["Esc", "Passwords", "Clear the filter, else up one folder"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];

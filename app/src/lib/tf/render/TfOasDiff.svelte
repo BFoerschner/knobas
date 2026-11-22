@@ -6,6 +6,11 @@
   after at once. `n` and `p` step through the marks (`nextChange`), opening each on both sides. With nothing but
   formatting changed the stage says *The same API on both sides*. There is no request column: which side's server, and
   whose secret, would be a guess.
+
+  A spec on one side only (added, deleted, or a file that is a spec on one side and not the other; Fable's amendment of
+  the JAR note's ruling 9) lists everything on that side, the other side saying *Not an OpenAPI or Swagger spec on this
+  side.*, and the foot says *14 operations, all added* or *all removed*; no `changes` runs. Neither side a spec is the
+  stage's own sentence (`TfDiffRendered`).
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -13,6 +18,8 @@
   import TfOasInline, { type InlineMark } from "./TfOasInline.svelte";
   import { SpecSession, specEngine, type SpecEngine } from "../../render/openapi-port";
   import { sameApi, type SpecChanges } from "../../render/openapi-changes";
+  import { isOpenApi } from "../../render/openapi-sniff";
+  import type { SpecIndex } from "../../render/openapi";
 
   let {
     before,
@@ -31,10 +38,17 @@
     onsay?: (words: string) => void;
   } = $props();
 
+  /** Each side's text where it is a spec, `null` where there is no file or no spec on it. */
+  const oldSpec = $derived(before !== null && isOpenApi(before) ? before : null);
+  const newSpec = $derived(after !== null && isOpenApi(after) ? after : null);
+  /** A spec on one side only: that side lists everything, all added or all removed. */
+  const oneSided = $derived(oldSpec === null || newSpec === null);
+  let oneIndex = $state.raw<SpecIndex | null>(null);
+
   let changes = $state.raw<SpecChanges | null>(null);
   let failed = $state<string | null>(null);
   $effect(() => {
-    const [old, nu, root] = [before, after, path];
+    const [old, nu, root] = [oldSpec, newSpec, path];
     changes = null;
     failed = null;
     if (old === null || nu === null) return;
@@ -90,7 +104,12 @@
   $effect(() => {
     const n = steps.length;
     const c = changes;
-    onsay(failed !== null ? `The marks could not be worked out: ${failed}` : c === null ? (before !== null && after !== null ? "Comparing the two sides…" : "") : sameApi(c) ? "The same API on both sides" : `Change ${Math.max(1, at + 1)} of ${n}`);
+    if (oneSided) {
+      const ops = oneIndex === null ? null : oneIndex.ops.length + oneIndex.webhooks.length;
+      onsay(ops === null ? "" : `${ops.toLocaleString("en")} ${ops === 1 ? "operation" : "operations"}, all ${newSpec !== null ? "added" : "removed"}`);
+      return;
+    }
+    onsay(failed !== null ? `The marks could not be worked out: ${failed}` : c === null ? "Comparing the two sides…" : sameApi(c) ? "The same API on both sides" : `Change ${Math.max(1, at + 1)} of ${n}`);
   });
 
   /** `n` (1) and `p` (-1): the next or previous mark opened on both sides and brought into view; false where none. */
@@ -106,16 +125,28 @@
   }
 </script>
 
+{#snippet noSpec(side: "old" | "new")}
+  <p class="tf-jar-dnote tf-roas-no tf-oasd-no" data-side={side}>Not an OpenAPI or Swagger spec on this side.</p>
+{/snippet}
+
 <div class="tf-oasd" class:tf-oasd-one={before === null || after === null}>
-  {#if before !== null && after !== null && marks === null}
+  {#if !oneSided && marks === null}
     <!-- The sides wait for the marks, so neither draws its whole list and then shrinks to what changed. -->
     {#if failed !== null}<p class="tf-stepfail" role="alert">{failed}</p>{:else}<p class="tf-oas-wait" role="status">Comparing the two sides…</p>{/if}
   {:else}
     {#if before !== null}
-      <TfOasInline bind:this={oldSide} text={before} {path} {engine} fill marks={marks?.old ?? null} {open} label="API before" />
+      {#if oldSpec !== null}
+        <TfOasInline bind:this={oldSide} text={oldSpec} {path} {engine} fill marks={oneSided ? null : (marks?.old ?? null)} {open} label="API before" onindex={(index) => oneSided && (oneIndex = index)} />
+      {:else}
+        {@render noSpec("old")}
+      {/if}
     {/if}
     {#if after !== null}
-      <TfOasInline bind:this={newSide} text={after} {path} {engine} fill marks={marks?.new ?? null} {open} label="API after" />
+      {#if newSpec !== null}
+        <TfOasInline bind:this={newSide} text={newSpec} {path} {engine} fill marks={oneSided ? null : (marks?.new ?? null)} {open} label="API after" onindex={(index) => oneSided && (oneIndex = index)} />
+      {:else}
+        {@render noSpec("new")}
+      {/if}
     {/if}
   {/if}
 </div>

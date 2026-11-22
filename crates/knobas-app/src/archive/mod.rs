@@ -294,6 +294,28 @@ pub async fn open_bytes(bytes: Vec<u8>, name: &str) -> Result<ArchiveIndex, IpcE
         .map(|i| (*i).clone())
 }
 
+/// An archive a folder renderer made (ADR-0046), listed: `read` hands its bytes, read only where no listing is kept under
+/// `key`. A generated folder is never rewritten, so its file is the same bytes for as long as its token names it.
+///
+/// # Errors
+///
+/// As `read`, and `invalid` for bytes that are no archive, with why.
+pub async fn open_kept<F>(key: String, name: &str, read: F) -> Result<ArchiveIndex, IpcError>
+where
+    F: std::future::Future<Output = Result<Vec<u8>, IpcError>>,
+{
+    let kept = lock().by_key.get(&key).cloned();
+    if let Some(handle) = kept
+        && let Ok(o) = opened(&handle)
+    {
+        return Ok((*o.index).clone());
+    }
+    let bytes = read.await?;
+    take_in(bytes, name.to_owned(), Some(key))
+        .await
+        .map(|i| (*i).clone())
+}
+
 /// Opens the archive at `path` in `entity_id`'s tree, at `commit` (a file block's, handed back) or the entity's own
 /// reference: its listing, under a handle the other reads name it by.
 ///
@@ -328,23 +350,24 @@ pub async fn open(
             mebibytes(ARCHIVE_CAP)
         ))
     };
-    // The working tree's archive (ux29, the Files tab on *Working tree*): read from the checkout as it is on disk, never
-    // the source, and kept by no key, so a rebuilt JAR is read again.
-    if commit == Some(crate::checkout::working::END) {
+    // The working tree's archive (ux29, the Files tab on *Working tree*) or the index's (Local changes' staged half, a
+    // comparison's side): read from the checkout, never the source, and kept by no key, so a rebuilt JAR is read again.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
         use crate::checkout::working::Bytes;
-        return match crate::checkout::working_file_bytes(
-            pool,
-            entity_id,
-            crate::checkout::working::END,
-            path,
-            ARCHIVE_CAP,
-        )
-        .await?
+        return match crate::checkout::working_file_bytes(pool, entity_id, end, path, ARCHIVE_CAP)
+            .await?
         {
             Bytes::Read(bytes) => take_in(bytes, name, None).await.map(|i| (*i).clone()),
             Bytes::TooLarge(size) => Err(too_large(size)),
             Bytes::NotThere => Err(IpcError::not_found(format!(
-                "git lists no file {path} in the working tree"
+                "git lists no file {path} in {}",
+                if end == crate::checkout::working::INDEX {
+                    "the index"
+                } else {
+                    "the working tree"
+                }
             ))),
         };
     }
@@ -591,10 +614,10 @@ pub async fn download(handle: &str, entry: Option<&str>, dir: &Path) -> Result<S
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn tiny_jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn tiny_jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         // Stored entries: enough for the store's own paths; `knobas-jar`'s tests hold the reader to real archives.
         let mut out = Vec::new();
         let mut central = Vec::new();
@@ -676,7 +699,7 @@ mod tests {
     }
 
     /// The store is the process's: its tests take turns, so one's evictions do not reach another's handles.
-    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    pub(crate) static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     async fn an_archive_opens_reads_its_entries_and_its_nested_jar() {
@@ -686,6 +709,8 @@ mod tests {
         let ix = open_bytes(jar, "app.jar").await.unwrap();
         assert_eq!(ix.names, "BOOT-INF/lib/lib-1.0.jar\na.txt");
         assert_eq!(ix.kind, "boot-jar");
+        // Each entry's CRC as declared, aligned with its name: what a comparison tells a changed entry by.
+        assert_eq!(ix.crcs, vec![crc32(&lib), crc32(b"hello")]);
         assert_eq!(entry_bytes(&ix.handle, "a.txt").await.unwrap(), b"hello");
         let inner = nested(&ix.handle, "BOOT-INF/lib/lib-1.0.jar")
             .await

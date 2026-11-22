@@ -447,6 +447,10 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-rstage .tf-rframe, .tf-rstage .tf-rstage-frame { min-height: 0; height: calc(var(--tf-rstage) - 1px); }
 .tf-rstage.tf-rstage-open .tf-rframe, .tf-rstage.tf-rstage-open .tf-rstage-frame { height: 640px; }
 .tf-rside-doc:has(> .tf-rframe, > .tf-rstage-frame) { padding: 0; }
+/* An OpenAPI comparison (2026-11-22): each side's view in a scroller of its own at the stage's height, as a page's frame. */
+.tf-rstage[data-renderer="openapi"] .tf-rside-doc { height: calc(var(--tf-rstage) - 1px); overflow: auto; padding: 0 14px; box-sizing: border-box; background: var(--under); }
+.tf-rstage.tf-rstage-open[data-renderer="openapi"] .tf-rside-doc { height: 640px; }
+.tf-roas-no { padding: 10px 0; }
 /* A PDF's own head names the sides the caption already names. */
 .tf-rstage .tf-pdfd-head { display: none; }
 .tf-rfoot { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 31px; padding: 0 12px; border-top: 1px solid var(--rule-2); --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); }
@@ -517,7 +521,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-was { margin: 2px 0 6px; }
 .tf-was-at { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; background: var(--under); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: calc(40px * var(--size-code)) calc(40px * var(--size-code)) 1fr; white-space: pre; overflow: visible; }
+.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln, .tf-diff.tf-split .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: calc(40px * var(--size-code)) calc(40px * var(--size-code)) 1fr; white-space: pre; overflow: visible; }
 .tf-was-hunk .tf-no, .tf-pdfd-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
 .tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--diff-add); }
 .tf-was-hunk .tf-del, .tf-pdfd-hunk .tf-del { background: var(--diff-del); }
@@ -802,3 +806,5 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-oasd > .tf-oas-inline + .tf-oas-inline { border-left: 1px solid var(--rule); }
 .tf-oasd > .tf-oas-wait, .tf-oasd > .tf-stepfail { padding: 12px; }
 .tf-rstage-open .tf-oasd { height: 85vh; }
+.tf-oasd > .tf-oasd-no { padding: 10px 12px; }
+.tf-oasd > .tf-oasd-no + .tf-oas-inline, .tf-oasd > .tf-oas-inline + .tf-oasd-no { border-left: 1px solid var(--rule); }

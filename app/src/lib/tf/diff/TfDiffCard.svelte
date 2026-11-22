@@ -59,6 +59,8 @@
 <script lang="ts">
   import type { Attachment } from "svelte/attachments";
   import TfStateChip from "../TfStateChip.svelte";
+  import type { ArchivePorts } from "../../render/jar-ports";
+  import type { ArchiveIndex } from "../../ipc/entity";
   import { flushSync } from "svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { inlineEditor } from "../inline-editor";
@@ -109,6 +111,8 @@
     sideOf,
     load,
     commands,
+    archives = undefined,
+    reopen = undefined,
     ends = null,
     choices = [],
     opened = null,
@@ -159,6 +163,10 @@
     sideOf: (side: Side) => SideGot | undefined;
     load: (side: Side) => void;
     commands: CommandPort;
+    /** A JAR's comparison's reads by handle, for the stage; none, the stage's own. */
+    archives?: Omit<ArchivePorts, "open"> | undefined;
+    /** A JAR's side listed again where the backend let it go. */
+    reopen?: ((side: Side) => Promise<ArchiveIndex | null>) | undefined;
     /** Where each side is read, for the stage's caption (`main at 4f2a91c`, *working tree*). */
     ends?: { old: string; new: string } | null;
     /** The renderers that can draw this comparison, and *Render as*'s menu, pattern and two presses. */
@@ -624,6 +632,8 @@
         {epoch}
         {render}
         {commands}
+        {...archives ? { archives } : {}}
+        {...reopen ? { reopen } : {}}
         changed={rendered.renderer.id === "markdown" ? changedLines(file) : null}
         partial={file.truncated || more !== null || waiting}
         {...frame ? { frame } : {}}

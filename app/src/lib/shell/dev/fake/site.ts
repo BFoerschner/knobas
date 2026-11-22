@@ -34,6 +34,8 @@ const BASES: Record<string, string> = {
   kuma: "https://status.tidewater.example",
   mock: "https://mock.tidewater.example",
   kestrel: "https://kestrel.tidewater.example",
+  // The Passwords page's source (`fake/passwords.ts`): its site signs in with its own credential (ux30).
+  team: "https://pw.tidewater.example:10001",
 };
 
 const TITLES: Record<string, string> = {
@@ -123,7 +125,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       source,
       {
         source,
-        open_inside: !off && (source === "jira" || source === "confluence"),
+        open_inside: !off && (source === "jira" || source === "confluence" || source === "team"),
         base,
         own: base,
         allowed: [],
@@ -135,6 +137,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         // `?fake-long-paths`: a long username, for the row in `long-paths.mjs`.
         sign_in_user:
           source === "confluence" ? (params.has("fake-long-paths") ? "tidewater.confluence-service-account-with-a-long-name@payments.platform.tidewater.example" : "knobas") : null,
+        own_sign_in: source === "team" ? { user: "mara.lindqvist", on: true } : null,
       },
     ]),
   );
@@ -314,6 +317,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     site_sign_in_remove: (args) => {
       const id = String(args["id"]);
       const one = { ...settings.get(id)!, sign_in_user: null };
+      settings.set(id, one);
+      return one;
+    },
+    site_sign_in_own: (args) => {
+      const id = String(args["id"]);
+      const before = settings.get(id)!;
+      const one = { ...before, own_sign_in: before.own_sign_in ? { ...before.own_sign_in, on: args["on"] === true } : null };
       settings.set(id, one);
       return one;
     },

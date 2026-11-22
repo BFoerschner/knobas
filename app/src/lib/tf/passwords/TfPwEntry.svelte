@@ -9,6 +9,7 @@
   import TfPwCode from "./TfPwCode.svelte";
   import TfPwSecret from "./TfPwSecret.svelte";
   import TfPwFile from "./TfPwFile.svelte";
+  import TfPwWeb from "./TfPwWeb.svelte";
   import type { Layers } from "../layers.svelte";
   import { attachmentKind } from "../job/attachments";
   import { ipcErrorMessage } from "../../ipc";
@@ -71,6 +72,7 @@
   const canEdit = $derived(entry.can_modify && source.offers.writes.includes("edit_entry"));
 
   let password = $state<TfPwSecret | null>(null);
+  let web = $state<TfPwWeb | null>(null);
   let code = $state<TfPwCode | null>(null);
 
   const folder = $derived(entry.folder !== null ? m.nodes.get(entry.folder) ?? null : null);
@@ -98,6 +100,10 @@
     await ports.copyPlain(entry.username);
     copied("username");
   }
+  /** W: the entry in the password manager's web interface; Shift W in the browser. */
+  export function openWeb(elsewhere: boolean): void {
+    void web?.press(elsewhere);
+  }
   export async function address(): Promise<void> {
     if (!entry.address) return;
     if (isWeb(entry.address)) await ports.openExternal(entry.address);
@@ -117,12 +123,11 @@
       </div>
       <h2>{entry.title}</h2>
     </div>
-    {#if canChange || canEdit}
-      <div class="tf-acts">
-        {#if canChange}<button type="button" class="tf-btn" disabled={down || blocked} title={down ? `${source.name} does not answer` : undefined} onclick={onchange}>Change password…</button>{/if}
-        {#if canEdit}<button type="button" class="tf-btn" aria-label="Edit" aria-keyshortcuts="E" disabled={down} title={down ? `${source.name} does not answer` : undefined} onclick={onedit}>Edit<kbd>E</kbd></button>{/if}
-      </div>
-    {/if}
+    <div class="tf-acts">
+      {#if canChange}<button type="button" class="tf-btn" disabled={down || blocked} title={down ? `${source.name} does not answer` : undefined} onclick={onchange}>Change password…</button>{/if}
+      {#if canEdit}<button type="button" class="tf-btn" aria-label="Edit" aria-keyshortcuts="E" disabled={down} title={down ? `${source.name} does not answer` : undefined} onclick={onedit}>Edit<kbd>E</kbd></button>{/if}
+      <TfPwWeb bind:this={web} {source} item={entry.id} on="entry" name={entry.title} hasFolder={entry.folder !== null} {ports} key />
+    </div>
   </div>
   {#if down}
     <div class="tf-stale tf-pw-enote" role="status">

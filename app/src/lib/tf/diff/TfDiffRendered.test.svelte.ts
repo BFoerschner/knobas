@@ -442,33 +442,40 @@ const specOf = (summary: string, required: string[], reordered = false) => {
   const doc = { openapi: "3.0.3", info: { title: "Pets", version: "1" }, paths, components: { schemas: { Pet: { type: "object", required, properties: { id: { type: "integer" }, name: { type: "string" } } } } } };
   return JSON.stringify(reordered ? { components: doc.components, paths: { "/health": paths["/health"], "/pets": paths["/pets"] }, info: doc.info, openapi: doc.openapi } : doc, null, 2);
 };
-const SPEC = file("api/openapi.json", { hunks: [{ header: "@@ -9,1 +9,1 @@", lines: [del(9, '"summary": "Health"'), add(9, '"summary": "Is it up"')] }] });
+/** A spec whose name says nothing and whose change is far from its top: `specHint` cannot tell, the sniff can. */
+const SPEC = file("api/payouts.json", { hunks: [{ header: "@@ -9,1 +9,1 @@", lines: [del(9, '"summary": "Health"'), add(9, '"summary": "Is it up"')] }] });
 
-test("a changed API spec offers Rendered once its side is sniffed; Lines stays the default", async () => {
-  const { context, asked } = reader({ "api/openapi.json": [specOf("Health", ["id"]), specOf("Is it up", ["id", "name"])] });
+/** A reader whose sides are read at the checkout (Local changes, a comparison ending at the working tree). */
+function localReader(texts: Record<string, [old: string | null, now: string | null]>) {
+  const r = reader(texts);
+  return { ...r, context: { ...r.context, local: true } };
+}
+
+test("a plain-named spec changed mid-file offers Rendered once its drawn card's side is sniffed; Lines stays the default", async () => {
+  const { context, asked } = localReader({ "api/payouts.json": [specOf("Health", ["id"]), specOf("Is it up", ["id", "name"])] });
   draw({ files: [SPEC], context });
   // The side is read once, to know the file for a spec; the stage takes the same read.
-  await vi.waitFor(() => expect(modes("api/openapi.json")).toEqual(["Lines*", "Rendered"]));
-  expect(asked).toEqual(["bytes new:api/openapi.json"]);
-  expect(card("api/openapi.json").querySelector(".tf-dbody")).not.toBeNull();
+  await vi.waitFor(() => expect(modes("api/payouts.json")).toEqual(["Lines*", "Rendered"]));
+  expect(asked).toEqual(["bytes new:api/payouts.json"]);
+  expect(card("api/payouts.json").querySelector(".tf-dbody")).not.toBeNull();
 });
 
 test("Rendered draws the inline form on both sides, held to what changed and marked; n opens the first change on both", async () => {
-  const { context } = reader({ "api/openapi.json": [specOf("Health", ["id"]), specOf("Is it up", ["id", "name"])] });
+  const { context } = localReader({ "api/payouts.json": [specOf("Health", ["id"]), specOf("Is it up", ["id", "name"])] });
   draw({ files: [SPEC], context });
-  await vi.waitFor(() => expect(modes("api/openapi.json")).toContain("Rendered"));
-  mode("api/openapi.json", "Rendered");
-  await vi.waitFor(() => expect(card("api/openapi.json").querySelectorAll(".tf-oas-inline .tf-oas-ibtn").length).toBe(6));
-  const rows = (label: string) => [...card("api/openapi.json").querySelectorAll(`.tf-oas-inline[aria-label="${label}"] .tf-oas-ibtn`)].map((b) => b.textContent?.replace(/\s+/g, " ").trim());
+  await vi.waitFor(() => expect(modes("api/payouts.json")).toContain("Rendered"));
+  mode("api/payouts.json", "Rendered");
+  await vi.waitFor(() => expect(card("api/payouts.json").querySelectorAll(".tf-oas-inline .tf-oas-ibtn").length).toBe(6));
+  const rows = (label: string) => [...card("api/payouts.json").querySelectorAll(`.tf-oas-inline[aria-label="${label}"] .tf-oas-ibtn`)].map((b) => b.textContent?.replace(/\s+/g, " ").trim());
   expect(rows("API before")).toEqual(["GET /pets List pets Changed through Pet", "GET /health Health Changed", "Schema Pet Changed"]);
   expect(rows("API after")).toEqual(["GET /pets List pets Changed through Pet", "GET /health Is it up Changed", "Schema Pet Changed"]);
-  const foot = () => card("api/openapi.json").querySelector(".tf-rfoot-say")!.textContent;
+  const foot = () => card("api/payouts.json").querySelector(".tf-rfoot-say")!.textContent;
   expect(foot()).toBe("Change 1 of 3");
 
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
   flushSync();
   // The first change opens before and after at once.
-  const open = () => [...card("api/openapi.json").querySelectorAll('.tf-oas-ibtn[aria-expanded="true"]')].map((b) => b.closest(".tf-oas-inline")!.getAttribute("aria-label"));
+  const open = () => [...card("api/payouts.json").querySelectorAll('.tf-oas-ibtn[aria-expanded="true"]')].map((b) => b.closest(".tf-oas-inline")!.getAttribute("aria-label"));
   expect(open()).toEqual(["API before", "API after"]);
   expect(foot()).toBe("Change 1 of 3");
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
@@ -477,19 +484,88 @@ test("Rendered draws the inline form on both sides, held to what changed and mar
 });
 
 test("a spec reordered and nothing else says it is the same API on both sides", async () => {
-  const { context } = reader({ "api/openapi.json": [specOf("Health", ["id"]), specOf("Health", ["id"], true)] });
+  const { context } = localReader({ "api/payouts.json": [specOf("Health", ["id"]), specOf("Health", ["id"], true)] });
   draw({ files: [SPEC], context });
-  await vi.waitFor(() => expect(modes("api/openapi.json")).toContain("Rendered"));
-  mode("api/openapi.json", "Rendered");
-  await vi.waitFor(() => expect(card("api/openapi.json").querySelector(".tf-rfoot-say")!.textContent).toBe("The same API on both sides"));
-  expect(card("api/openapi.json").querySelectorAll(".tf-oas-ibtn")).toHaveLength(0);
+  await vi.waitFor(() => expect(modes("api/payouts.json")).toContain("Rendered"));
+  mode("api/payouts.json", "Rendered");
+  await vi.waitFor(() => expect(card("api/payouts.json").querySelector(".tf-rfoot-say")!.textContent).toBe("The same API on both sides"));
+  expect(card("api/payouts.json").querySelectorAll(".tf-oas-ibtn")).toHaveLength(0);
 });
 
 test("a YAML file that is no spec is read once and offers no rendered mode", async () => {
   const compose = file("deploy/compose.yaml");
-  const { context, asked } = reader({ "deploy/compose.yaml": ["services: {}", "services:\n  web: {}"] });
+  const { context, asked } = localReader({ "deploy/compose.yaml": ["services: {}", "services:\n  web: {}"] });
   draw({ files: [compose], context });
   await vi.waitFor(() => expect(asked).toEqual(["bytes new:deploy/compose.yaml"]));
   await settle();
   expect(modes("deploy/compose.yaml")).toEqual([]);
+});
+
+test("a sniffed spec gains the switch and nothing else: the band's Rendered leaves it on Lines", async () => {
+  const { context } = localReader({ "api/payouts.json": [specOf("Health", ["id"]), specOf("Is it up", ["id"])] });
+  draw({ files: [SPEC], context, rendering: { on: true, set: () => {}, reset: () => {} } });
+  await vi.waitFor(() => expect(modes("api/payouts.json")).toEqual(["Lines*", "Rendered"]));
+});
+
+test("where a side may be a forge's request, a plain-named spec is not read for the sniff and keeps Lines", async () => {
+  const { context, asked } = reader({ "api/payouts.json": [specOf("Health", ["id"]), specOf("Is it up", ["id"])] });
+  draw({ files: [SPEC], context });
+  await settle();
+  expect(asked).toEqual([]);
+  expect(modes("api/payouts.json")).toEqual([]);
+});
+
+test("a spec on one side only lists everything there, the other side says it is no spec, and the foot counts them added", async () => {
+  const { context } = reader({ "api/openapi.json": ['{"a": 1}', specOf("Health", ["id"])] });
+  draw({ files: [file("api/openapi.json", { hunks: [{ header: "@@ -1,1 +1,1 @@", lines: [del(1, '{"a": 1}'), add(1, "{")] }] })], context });
+  mode("api/openapi.json", "Rendered");
+  await vi.waitFor(() => expect(card("api/openapi.json").querySelectorAll(".tf-oas-ibtn").length).toBe(3));
+  expect(stage("api/openapi.json").querySelector('[data-side="old"]')?.textContent).toBe("Not an OpenAPI or Swagger spec on this side.");
+  expect(card("api/openapi.json").querySelector(".tf-oas-imark")).toBeNull();
+  expect(card("api/openapi.json").querySelector(".tf-rfoot-say")!.textContent).toBe("2 operations, all added");
+});
+
+/** A one-line change in a YAML or JSON file, as a forge's diff gives it. */
+const changedAt = (path: string, n: number, was: string, now: string): DiffFile => ({
+  path,
+  old_path: null,
+  change: "modified",
+  additions: 1,
+  deletions: 1,
+  hunks: [{ header: `@@ -${n} +${n} @@`, lines: [{ kind: "del", old: n, new: null, text: was }, { kind: "add", old: null, new: n, text: now }] }],
+  truncated: false,
+  threads: [],
+});
+
+test("an OpenAPI spec offers Rendered where its diff or its name shows it one; a plain config file does not (2026-11-22)", () => {
+  const { context } = reader({});
+  draw({
+    files: [
+      changedAt("api/openapi.yaml", 9, "a", "b"),
+      // A plain file of the same name first: what one name plans is not kept for the other.
+      changedAt("old/spec.yaml", 9, "a", "b"),
+      changedAt("api/spec.yaml", 1, "openapi: 3.0.0", "openapi: 3.1.0"),
+      changedAt("config/app.json", 3, '"a": 1', '"a": 2'),
+      changedAt("docker-compose.yml", 9, "a", "b"),
+    ],
+    context,
+  });
+  expect(modes("old/spec.yaml")).toEqual([]);
+  expect(modes("api/openapi.yaml")).toEqual(["Lines*", "Rendered"]);
+  expect(modes("api/spec.yaml")).toEqual(["Lines*", "Rendered"]);
+  expect(modes("config/app.json")).toEqual([]);
+  expect(modes("docker-compose.yml")).toEqual([]);
+});
+
+test("an OpenAPI comparison says which side is no spec, and once where neither is", async () => {
+  const { context } = reader({ "api/openapi.yaml": ["title: not a spec\n", "openapi: 3.0.0\ninfo:\n  title: x\n"], "api/swagger.json": ['{"a": 1}', '{"a": 2}'] });
+  draw({ files: [changedAt("api/openapi.yaml", 1, "title: not a spec", "openapi: 3.0.0"), changedAt("api/swagger.json", 1, '{"a": 1}', '{"a": 2}')], context });
+  mode("api/openapi.yaml", "Rendered");
+  mode("api/swagger.json", "Rendered");
+  await settle();
+  // The marked inline form is the stage (Fable's amendment): the side that is no spec says so in its column.
+  await vi.waitFor(() => expect(stage("api/openapi.yaml").querySelector('[data-side="old"]')?.textContent).toBe("Not an OpenAPI or Swagger spec on this side."));
+  expect(stage("api/openapi.yaml").querySelector('[data-side="new"]')).toBeNull();
+  expect(stage("api/swagger.json").textContent?.trim()).toBe("Neither side is an OpenAPI or Swagger spec: Lines has the change.");
+  expect(stage("api/swagger.json").classList.contains("tf-rstage-one")).toBe(true);
 });
