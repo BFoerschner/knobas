@@ -384,7 +384,9 @@
         config: validated.config,
         secret: { value: secret, account },
         sync_interval_secs: defaultIntervalFor(chosen),
+        sync_by_hand: chosen.by_hand_by_default,
         enabled: true,
+
       });
       secret = "";
       accountPassword = "";

@@ -157,3 +157,21 @@ test("the queue control counts the writes that need a decision too", () => {
   expect(queueLabel(2, 0).decide).toBeNull();
   expect(read(0, 0)).toBe("No queued writes");
 });
+
+test("a source by hand reads its last sync as a clock time, by hand (ADR-0056)", () => {
+  const finished = "2026-08-22T10:22:00Z";
+  const at = new Date(finished);
+  const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const [first, second] = sourceReadings(
+    [
+      { id: "pw", display_name: "Team passwords", sync_by_hand: true },
+      { id: "pw2", display_name: "Tidewater org", sync_by_hand: true },
+    ],
+    [health("pw", "ok"), health("pw2", "ok")],
+    [synced("pw", finished), synced("pw2", finished)],
+    NOW,
+  );
+  expect(first!.text).toBe(`Team passwords synced ${clock}, by hand`);
+  expect(second!.text).toBe(`Tidewater org ${clock}, by hand`);
+  expect(first!.tone).toBe("ok");
+});

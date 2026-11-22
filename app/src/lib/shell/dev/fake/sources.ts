@@ -160,6 +160,7 @@ function fixtureSource(
     base_url: baseUrl,
     enabled: true,
     sync_interval_secs: 900,
+    sync_by_hand: false,
     // The user a Settings page shows (#830): the config's `username`, which
     // only a username-and-password source carries here.
     config: (authKind === "UserPassword" ? { username: "mara.oyelaran" } : {}) as Record<string, unknown>,
@@ -249,6 +250,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     auth_methods: ["ApiToken"],
     // The adapter's sync-interval floor (#1187).
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [],
     write_ops: [],
     entity_kinds: KIND_INFO,
@@ -263,6 +265,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193, #1208).
     roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     write_ops: [],
@@ -289,6 +292,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The roles it claims, as the real adapter does (#1193, #1206).
     roles: [
       { role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] },
@@ -307,6 +311,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 20,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193).
     roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "artifact_bytes", "download", "run_chain"] }],
     write_ops: [],
@@ -333,6 +338,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [{ role: "ticket-system", reads: [] }],
     write_ops: [],
     entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
@@ -443,6 +449,7 @@ const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   adapter_version: "0.1.0",
   auth_methods: ["Pat"],
   min_sync_interval_secs: 60,
+  by_hand_by_default: false,
   roles: [{ role: "wasm-fixture:survey-desk", reads: [] as string[] }],
   // Its one write is its source action, *Book repair…* (#1407).
   write_ops: ["source_action"],
@@ -761,6 +768,8 @@ export function handlers(): Handlers {
         auth_kind: (input["auth_kind"] ?? null) as AuthMethod | null,
         config: (input["config"] ?? {}) as Record<string, unknown>,
         sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
+        sync_by_hand: input["sync_by_hand"] === true,
+
         health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },
         // The adapter's claims and kinds, as `list_sources` takes them from its template.
         roles: adapter === undefined ? [] : adapter.roles,

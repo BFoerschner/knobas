@@ -125,6 +125,7 @@ function summary(id = "jira"): SourceSummary {
     base_url: "https://jira.tidewater.example",
     enabled: true,
     sync_interval_secs: 900,
+    sync_by_hand: false,
     config: {},
     auth_kind: "Pat",
     health: { source_id: id, state: "ok", checked_at: null, detail: null, secret_expires_at: null },

@@ -139,6 +139,10 @@ pub struct SourceConfigRow {
     pub auth_kind: AuthKind,
     pub config: serde_json::Value,
     pub sync_interval_secs: u32,
+    /// The source syncs only when a person presses *Sync now* (ADR-0056):
+    /// [`DUE`] never names it, and the interval above is the one it returns
+    /// to when set back to a schedule.
+    pub sync_by_hand: bool,
     pub enabled: bool,
     pub cursor: Option<String>,
     pub health: CredentialHealth,
@@ -157,6 +161,7 @@ pub struct InsertConfig {
     pub auth_kind: AuthKind,
     pub config: serde_json::Value,
     pub sync_interval_secs: u32,
+    pub sync_by_hand: bool,
     pub enabled: bool,
 }
 
@@ -168,6 +173,7 @@ pub struct PatchConfig {
     pub base_url: Option<String>,
     pub config: Option<serde_json::Value>,
     pub sync_interval_secs: Option<u32>,
+    pub sync_by_hand: Option<bool>,
     pub enabled: Option<bool>,
 }
 
@@ -184,7 +190,7 @@ pub struct DueSource {
 /// and this table are both read into `FromRow` structs elsewhere, and the
 /// project rule is that a `tsvector` must never be able to wander into one.
 const COLUMNS: &str = "id, kind as adapter_kind, display_name, base_url, auth_kind, config,
-                       sync_interval_secs, enabled, cursor,
+                       sync_interval_secs, sync_by_hand, enabled, cursor,
                        auth_state, auth_checked_at, auth_detail, secret_expires_at, backoff_until";
 
 /// The raw shape of a `source_config` row, before the enums are parsed.
@@ -197,6 +203,7 @@ struct RawRow {
     auth_kind: String,
     config: serde_json::Value,
     sync_interval_secs: i32,
+    sync_by_hand: bool,
     enabled: bool,
     cursor: Option<String>,
     auth_state: String,
@@ -226,6 +233,7 @@ impl From<RawRow> for SourceConfigRow {
             // corrupted row clamps rather than panicking a scheduler tick.
             sync_interval_secs: u32::try_from(raw.sync_interval_secs)
                 .unwrap_or(knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS),
+            sync_by_hand: raw.sync_by_hand,
             enabled: raw.enabled,
             cursor: raw.cursor,
             backoff_until: raw.backoff_until,
@@ -266,8 +274,9 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Option<SourceConfigRow>, sql
 pub async fn insert(pool: &PgPool, new: &InsertConfig) -> Result<SourceConfigRow, sqlx::Error> {
     let sql = format!(
         "insert into knobas.source_config
-             (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+             (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled,
+              sync_by_hand)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          returning {COLUMNS}"
     );
     let row: RawRow = sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -279,6 +288,7 @@ pub async fn insert(pool: &PgPool, new: &InsertConfig) -> Result<SourceConfigRow
         .bind(&new.config)
         .bind(i32::try_from(new.sync_interval_secs).unwrap_or(i32::MAX))
         .bind(new.enabled)
+        .bind(new.sync_by_hand)
         .fetch_one(pool)
         .await?;
     Ok(row.into())
@@ -302,7 +312,8 @@ pub async fn patch(
              base_url           = coalesce($3, base_url),
              config             = coalesce($4, config),
              sync_interval_secs = coalesce($5, sync_interval_secs),
-             enabled            = coalesce($6, enabled)
+             enabled            = coalesce($6, enabled),
+             sync_by_hand       = coalesce($7, sync_by_hand)
          where id = $1
          returning {COLUMNS}"
     );
@@ -317,6 +328,7 @@ pub async fn patch(
                 .map(|s| i32::try_from(s).unwrap_or(i32::MAX)),
         )
         .bind(patch.enabled)
+        .bind(patch.sync_by_hand)
         .fetch_optional(pool)
         .await?;
     Ok(row.map(Into::into))
@@ -692,7 +704,11 @@ pub async fn clear_backoff(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
 ///   here: no backoff means the interval decides, and a backoff on a
 ///   never-finished source still holds it off;
 /// * `enabled = false` and the two states that need a human are excluded
-///   outright -- no request, no backoff churn (interfaces §3, "Missing").
+///   outright -- no request, no backoff churn (interfaces §3, "Missing");
+/// * a source that syncs **only by hand** (`sync_by_hand`, ADR-0056) is never
+///   due: not at first, not after its interval, not for a backoff's retry. A
+///   press (*Sync now*, a role page's *Sync now*, *Sync all*, *Backfill*)
+///   triggers it directly and does not come through here.
 ///
 /// A run *in flight* must not reset the schedule -- a source with an open run
 /// on top of a finished one is not never-synced, or the scheduler would start
@@ -716,7 +732,9 @@ select c.id,
        where source_id = c.id and finished_at is not null
   ) f on true
  where c.enabled
+   and not c.sync_by_hand
    and c.auth_state not in ('unauthorized', 'missing_secret')
+
    and coalesce(
          greatest(
            f.last_finished_at + make_interval(secs => c.sync_interval_secs::double precision),
@@ -743,6 +761,21 @@ pub async fn due(pool: &PgPool) -> Result<Vec<DueSource>, sqlx::Error> {
             first_run: r.first_run,
         })
         .collect())
+}
+
+/// Whether `source_id` syncs only when a person presses *Sync now*
+/// (`knobas.source_config.sync_by_hand`, ADR-0056). A source that does not
+/// exist answers `false`: the trigger after it names the missing source.
+///
+/// # Errors
+/// [`sqlx::Error`] if the read fails.
+pub async fn syncs_by_hand(pool: &PgPool, source_id: &str) -> Result<bool, sqlx::Error> {
+    let by_hand: Option<bool> =
+        sqlx::query_scalar("select sync_by_hand from knobas.source_config where id = $1")
+            .bind(source_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(by_hand.unwrap_or(false))
 }
 
 #[cfg(test)]

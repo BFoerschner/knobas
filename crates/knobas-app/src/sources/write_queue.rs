@@ -1348,6 +1348,7 @@ mod tests {
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

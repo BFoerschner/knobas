@@ -126,6 +126,8 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: write_ops.to_vec(),
         entity_kinds: vec![KindInfo {
             id: "pr".to_owned(),
@@ -134,6 +136,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
             monogram: "PR".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
         // Where this stand-in keeps what the inbox reads (#277). Gitea's
@@ -271,6 +274,7 @@ impl Harness {
                 config: serde_json::json!({ "username": username, "adapter_kind": kind }),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

@@ -52,6 +52,7 @@ pub mod live_sources;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
+pub mod passwords;
 mod postgres;
 mod profile;
 pub mod protocol;

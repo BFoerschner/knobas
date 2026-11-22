@@ -395,9 +395,10 @@
     {layers}
     taken={(sources ?? []).map((source) => source.id)}
     onclose={closeAdd}
-    onsaved={() => {
+    onsaved={(added) => {
       closeAdd();
-      push({ text: "Added. The first sync is running." });
+      push({ text: added.sync_by_hand ? `Added ${added.display_name}. It syncs only when you press Sync now.` : "Added. The first sync is running." });
+
       void load();
     }}
   />

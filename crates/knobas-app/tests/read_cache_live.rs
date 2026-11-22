@@ -94,6 +94,7 @@ async fn app() -> App {
             config: serde_json::json!({ "repos": [SEEDED] }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -518,6 +519,7 @@ async fn scratch_repo(files: &[(&str, &[u8])]) -> (App, String, Delete) {
             config: serde_json::json!({ "repos": [format!("{owner}/{name}")] }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

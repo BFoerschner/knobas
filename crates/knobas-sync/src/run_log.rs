@@ -882,6 +882,7 @@ mod tests {
             swept: 7,
             cursor: r#"{"v":1,"n":9}"#.to_owned(),
             left_out: None,
+            otp_keys: crate::RunOtpKeys::default(),
         });
         assert_eq!(counts.upserted, 21);
         assert_eq!(counts.deleted, 4);
@@ -905,6 +906,7 @@ mod tests {
             swept: 0,
             cursor: String::new(),
             left_out: None,
+            otp_keys: crate::RunOtpKeys::default(),
         });
         assert_eq!(counts.upserted, i64::MAX);
         assert!(counts.touched() >= 0, "a count never reads as negative");

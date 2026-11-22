@@ -63,6 +63,7 @@ function summary(id: string, name: string, state: CredentialHealth["state"], ove
     base_url: id === "jira" ? "https://jira.tidewater.example" : "https://teamcity.tidewater.example",
     enabled: true,
     sync_interval_secs: 300,
+    sync_by_hand: false,
     // A field besides the user, so Save is seen to send the config whole:
     // `update_source` replaces it, and a field left out is lost.
     config: { username: "mara", projects: ["TW", "OPS"] },
@@ -124,6 +125,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
           auth_methods: ["UserPassword" as const],
           accepts_account: false,
           min_sync_interval_secs: 60,
+          by_hand_by_default: false,
           roles: [],
           source_actions: [],
           clone_from: [],
@@ -579,6 +581,7 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
     },
     secret: { value: "hunter2", account: null },
     sync_interval_secs: 900,
+    sync_by_hand: false,
     enabled: true,
   });
   expect(target.querySelector('[role="dialog"]')).toBeNull();
@@ -596,6 +599,7 @@ const SURVEYS = {
   auth_methods: ["Pat" as const],
   accepts_account: false,
   min_sync_interval_secs: 60,
+  by_hand_by_default: false,
   roles: [{ role: "wasm-fixture:survey-desk", reads: [] }],
   source_actions: [],
   write_ops: [],
@@ -951,7 +955,14 @@ test("the schedule and the pause switch are saved as they change", async () => {
   every.value = "900";
   every.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
-  expect(p.updateSource).toHaveBeenLastCalledWith("jira", { sync_interval_secs: 900 });
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", { sync_interval_secs: 900, sync_by_hand: false });
+
+  // By hand sends no interval, so the stored one is where an interval choice later returns (ADR-0056).
+  every.value = "hand";
+  every.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", { sync_by_hand: true });
+  expect(toasts.items.at(-1)?.text).toBe("Jira syncs only when you press Sync now.");
 
   target.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Syncing"]')!.click();
   await settle();
@@ -1451,6 +1462,7 @@ function floored(kind: string, name: string, floor: number) {
     auth_methods: ["ApiToken" as const],
     accepts_account: false,
     min_sync_interval_secs: floor,
+    by_hand_by_default: false,
     roles: [],
     source_actions: [],
     clone_from: [],
@@ -1479,9 +1491,13 @@ function flooredPorts(sources: SourceSummary[], over: Partial<SettingsPorts> = {
   });
 }
 
+/** *Syncs*'s options without the words every interval starts with, and without the last one, *Only when I press Sync now*. */
 function everyOptions(): string[] {
-  return [...target.querySelectorAll<HTMLOptionElement>("#tf-src-every option")].map((o) => o.textContent!.trim());
+  const all = [...target.querySelectorAll<HTMLOptionElement>("#tf-src-every option")].map((o) => o.textContent!.trim());
+  expect(all.at(-1)).toBe("Only when I press Sync now");
+  return all.slice(0, -1).map((words) => words.replace(/^Every /, ""));
 }
+
 
 test("a source page's schedule starts at its adapter's floor (#1188)", async () => {
   const expected: Record<string, string[]> = {
@@ -1539,7 +1555,41 @@ test("Add a source pre-fills a floor under a minute, else 15 minutes (#1188)", a
   }
 });
 
+test("Add a source sends the adapter's by-hand default, and says the new source syncs only when pressed (ADR-0056)", async () => {
+  const vault = { ...floored("vault", "Password vault", 60), by_hand_by_default: true };
+  const added = summary("vault-2", "Team passwords", "ok", { adapter_kind: "vault", sync_by_hand: true });
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve([])),
+    listAdapters: vi.fn(() => Promise.resolve([...FLOORED, vault])),
+    addSource: vi.fn(() => Promise.resolve(added)),
+  });
+  await open([], p);
+  button("Add a source…").click();
+  await settle();
+  const radio = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")].find((label) => label.textContent!.includes("Password vault"))!;
+  radio.querySelector("input")!.click();
+  flushSync();
+  type("#tf-add-id", "vault-2");
+  type("#tf-add-address", "https://example.invalid");
+  type("#tf-add-secret", "hunter2");
+  dialogButton("Test connection").click();
+  await settle();
+  dialogButton("Add source").click();
+  await settle();
+  expect(p.addSource).toHaveBeenCalledWith(expect.objectContaining({ adapter_kind: "vault", sync_by_hand: true }));
+  expect(toasts.items.at(-1)?.text).toBe("Added Team passwords. It syncs only when you press Sync now.");
+});
+
+test("a source by hand selects Only when I press Sync now and says nothing is read in the background (ADR-0056)", async () => {
+  await open(["source", "jira"], flooredPorts([summary("jira", "Jira", "ok", { sync_by_hand: true })]));
+  expect(target.querySelector<HTMLSelectElement>("#tf-src-every")!.value).toBe("hand");
+  expect(target.textContent).toContain("Nothing is read from Jira in the background. It syncs when you press Sync now.");
+  expect(target.textContent).toContain("Syncs only when you press Sync now");
+});
+
+
 test("a source whose records missed a role's path says so on its row and its page (#1199)", async () => {
+
   const miss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
   const missing = [summary("jira", "Jira", "ok", { role_misses: [miss] })];
   await open([], ports({ listSources: vi.fn(() => Promise.resolve(missing)) }));

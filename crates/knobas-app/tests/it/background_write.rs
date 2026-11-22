@@ -105,6 +105,8 @@ fn descriptor() -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec![
             "comment".to_owned(),
             "create_branch".to_owned(),
@@ -119,6 +121,7 @@ fn descriptor() -> SourceDescriptor {
             monogram: "PR".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
@@ -202,6 +205,7 @@ async fn fixture_on(
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

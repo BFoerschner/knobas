@@ -69,6 +69,7 @@ fn kind(id: &str) -> KindInfo {
         monogram: "JV".into(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -105,6 +106,8 @@ impl Source for Boards {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![kind("ticket"), kind(views)],
             config_schema: json!({ "type": "object", "properties": {} }),

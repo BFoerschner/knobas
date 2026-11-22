@@ -1,5 +1,6 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
 import type { KindInfo, Tone } from "./entity";
+import type { Offers } from "./passwords";
 
 /**
  * The limits every call into the adapter is held to (#1204): what the
@@ -891,7 +892,12 @@ export type MonitorKind = "http" | "tcp" | "ping" | "docker";
  * What the Add-source form submits. Carries the typed secret, which goes to
  * the keychain and never to Postgres (§14).
  */
-export type NewSource = { id: string, adapter_kind: string, display_name: string, base_url: string, auth_kind: AuthMethod, config: unknown, secret: SecretInput, sync_interval_secs: number, enabled: boolean, };
+export type NewSource = { id: string, adapter_kind: string, display_name: string, base_url: string, auth_kind: AuthMethod, config: unknown, secret: SecretInput, sync_interval_secs: number, 
+/**
+ * Sync only when a person presses *Sync now* (ADR-0056). The form sends
+ * the adapter's `by_hand_by_default`; absent means a schedule.
+ */
+sync_by_hand?: boolean, enabled: boolean, };
 
 /**
  * Where an item's **parent** sits in its payload, and the names that parent
@@ -1425,7 +1431,26 @@ url_forms: Array<UrlForm>,
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as a source with no code pages: *Browser* is then not offered.
  */
-code_pages?: CodePages, };
+code_pages?: CodePages, 
+/**
+ * A new source of this adapter syncs **only by hand** until its page
+ * says otherwise (ADR-0056): the Add-source form sends `sync_by_hand`
+ * from it. A password manager sets it, because each read it answers may
+ * be a line in its audit log under the person's name.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as an adapter whose sources start on a schedule.
+ */
+by_hand_by_default: boolean, 
+/**
+ * What a password source offers beyond the role's minimum (ADR-0056):
+ * present exactly when the descriptor claims [`passwords::PASSWORDS`],
+ * which [`role::check`] holds.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as a source that is no password manager.
+ */
+passwords?: Offers, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -1459,12 +1484,22 @@ auth_kind: AuthMethod, config: unknown, secret: SecretInput | null, };
  * entity namespace, baked into every entity id, link and activity row, and is
  * therefore immutable (P10). `display_name` is the renameable one.
  */
-export type SourcePatch = { display_name?: string | null, base_url?: string | null, config?: unknown, sync_interval_secs?: number | null, enabled?: boolean | null, };
+export type SourcePatch = { display_name?: string | null, base_url?: string | null, config?: unknown, sync_interval_secs?: number | null, 
+/**
+ * `true` takes the source out of the schedule; `false` puts it back on
+ * its interval (ADR-0056).
+ */
+sync_by_hand?: boolean | null, enabled?: boolean | null, };
 
 /**
  * One row of the sources view.
  */
-export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, 
+export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, 
+/**
+ * The source syncs only when a person presses *Sync now* (ADR-0056); its
+ * `next_run_at` is then `None`.
+ */
+sync_by_hand: boolean, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, 
 /**
  * When the scheduler runs this source next; `None` when the source is
  * disabled, running, or needs a human.

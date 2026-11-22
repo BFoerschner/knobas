@@ -195,6 +195,8 @@ async fn refresh_locked(
         saved_views,
         role_check,
         payload_paths,
+        private_titles,
+        passwords: _,
     } = declared;
     // The run's lock: waits for a run in flight to commit, or under
     // `Lock::Try` reads nothing while one holds it; either way holds off the
@@ -237,7 +239,7 @@ async fn refresh_locked(
             let gone = items
                 .iter()
                 .any(|item| item.deleted && item.entity.to_string() == entity);
-            write_items(tx, source_id, kinds, role_check, items).await?;
+            write_items(tx, source_id, kinds, &private_titles, role_check, items).await?;
             // The parent's position moves with its rows, in this transaction:
             // Gitea's change gates compare the forge with the position, so
             // rows written past it would be judged against a forge that may
@@ -274,7 +276,15 @@ async fn refresh_locked(
             } else {
                 RefreshOutcome::Refreshed
             };
-            write_items(tx, source_id, kinds, role_check, vec![item]).await?;
+            write_items(
+                tx,
+                source_id,
+                kinds,
+                &private_titles,
+                role_check,
+                vec![item],
+            )
+            .await?;
             outcome
         }
     };
@@ -300,6 +310,7 @@ async fn write_items(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
     kinds: std::collections::HashSet<String>,
+    private_titles: &std::collections::HashSet<String>,
     role_check: knobas_source::role::data::DataCheck,
     items: Vec<knobas_source::SyncItem>,
 ) -> Result<(), SyncError> {
@@ -307,7 +318,8 @@ async fn write_items(
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
     let roles = {
-        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check)
+            .with_private_titles(private_titles.clone());
         for item in items {
             sink.item(item).await?;
         }

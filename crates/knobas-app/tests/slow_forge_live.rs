@@ -109,6 +109,7 @@ async fn rig() -> Rig {
             config: serde_json::json!({ "repos": [SEEDED] }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -716,6 +717,7 @@ async fn a_big_folder_with_no_clone_reads_its_own_level_through_a_slow_forge() {
             config: config.clone(),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

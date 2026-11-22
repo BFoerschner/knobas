@@ -473,6 +473,8 @@ fn descriptor() -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: Vec::new(),
         entity_kinds: Vec::new(),
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -529,6 +531,7 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
             config: serde_json::json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -1045,6 +1048,7 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
             config: serde_json::json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

@@ -75,6 +75,10 @@
   import { storedWhere } from "../../shell/secret-store";
   import {
     BACKFILL_HINT,
+    BY_HAND,
+    byHandNote,
+    syncsPatch,
+    syncsWords,
     EXPIRY_CLASS,
     IDENTITY_FIELD,
     credentialAlert,
@@ -198,6 +202,8 @@
   // The adapter's floor (#1188); an adapter this build does not know offers the
   // 60 s every source had before adapters declared one.
   const floor = $derived(adapter?.min_sync_interval_secs ?? DEFAULT_MIN_SYNC_INTERVAL_SECS);
+  // A password manager says what it offers in its descriptor (ADR-0056); its page words by hand for one-time codes.
+  const isPasswordSource = $derived(adapter?.passwords !== undefined);
 
   // ---- Connection: what is typed, against what is stored ----
   // Read once: the page is keyed on the source, so a list re-read under the
@@ -672,28 +678,36 @@
 <section class="tf-stg-sec">
   <h2>Schedule</h2>
   <div class="tf-stg-row">
-    <label class="tf-stg-l" for="tf-src-every">Every</label>
+    <label class="tf-stg-l" for="tf-src-every">Syncs</label>
     <div class="tf-stg-c">
       <select
         id="tf-src-every"
         class="tf-stg-in"
-        value={source.sync_interval_secs}
+        value={source.sync_by_hand ? BY_HAND : String(source.sync_interval_secs)}
         disabled={saving}
         onchange={async (event) => {
           const select = event.currentTarget;
-          const secs = Number(select.value);
+          const patch = syncsPatch(select.value);
+          const done = patch.sync_by_hand
+            ? `${name} syncs only when you press Sync now.`
+            : `${name} syncs every ${intervalWords(patch.sync_interval_secs ?? source.sync_interval_secs)}`;
           // A schedule the backend refused goes back to the stored one.
-          if (!(await update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`, `every:${source.id}`))) {
-            select.value = String(source.sync_interval_secs);
+          if (!(await update(patch, done, `every:${source.id}`))) {
+            select.value = source.sync_by_hand ? BY_HAND : String(source.sync_interval_secs);
           }
         }}
       >
         {#each intervalOptions(source.sync_interval_secs, floor) as secs (secs)}
-          <option value={secs}>{intervalWords(secs)}</option>
+          <option value={String(secs)}>{syncsWords(secs)}</option>
         {/each}
+        <option value={BY_HAND}>{syncsWords(BY_HAND)}</option>
       </select>
+      {#if source.sync_by_hand}
+        <p class="tf-stg-note">{byHandNote(name, isPasswordSource)}</p>
+      {/if}
     </div>
   </div>
+
   <div class="tf-stg-row">
     <div class="tf-stg-l">Syncing</div>
     <div class="tf-stg-c">
@@ -775,7 +789,14 @@
 <section class="tf-stg-sec">
   <h2>Sync runs</h2>
   {#if runs !== null && runs.length === 0}
-    <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
+    {#if source.sync_by_hand && isPasswordSource}
+      <p class="tf-stg-p">Not synced yet. <b>Sync now</b> lists its entries and their folders. It reads no passwords.</p>
+    {:else if source.sync_by_hand}
+      <p class="tf-stg-p">No runs yet. It syncs when you press <b>Sync now</b>.</p>
+    {:else}
+      <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
+    {/if}
+
   {:else if runs !== null}
     <table class="tf-tbl tf-stg-runs">
       <thead><tr><th>Started</th><th>Took</th><th>Result</th></tr></thead>

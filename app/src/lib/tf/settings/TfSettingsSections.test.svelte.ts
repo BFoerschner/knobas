@@ -619,6 +619,7 @@ test("a restore puts the sources it brought in the health store the status bar f
     base_url: "https://jira.tidewater.example",
     enabled: true,
     sync_interval_secs: 300,
+    sync_by_hand: false,
     config: {},
     health: { source_id: "jira", state: "unknown", checked_at: null, detail: null, secret_expires_at: null },
     last_run: null,

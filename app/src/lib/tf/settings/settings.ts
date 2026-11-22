@@ -11,7 +11,7 @@ import { folderPagePlace } from "./folder-page";
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
-import { secondsLabel, stampLabel } from "../../time/format";
+import { clockLabel, secondsLabel, stampLabel } from "../../time/format";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 import type { Walk } from "../../sources/walk";
@@ -318,11 +318,46 @@ export function intervalOptions(current: number, floor: number): number[] {
 }
 
 /**
+ * The value *Syncs* stores for *Only when I press Sync now* (ADR-0056): not
+ * an interval, so the stored interval survives and a source set back to a
+ * schedule returns to it.
+ */
+export const BY_HAND = "hand";
+
+/** One of *Syncs*'s options: *Every 5 min*, or *Only when I press Sync now*. */
+export function syncsWords(value: number | typeof BY_HAND): string {
+  return value === BY_HAND ? "Only when I press Sync now" : `Every ${intervalWords(value)}`;
+}
+
+/**
+ * What choosing an option of *Syncs* sends: a source on a schedule sends its
+ * interval and `sync_by_hand: false`, by hand sends `sync_by_hand: true` and
+ * leaves the interval as stored.
+ */
+export function syncsPatch(value: string): { sync_interval_secs?: number; sync_by_hand: boolean } {
+  return value === BY_HAND ? { sync_by_hand: true } : { sync_interval_secs: Number(value), sync_by_hand: false };
+}
+
+/**
+ * The note under *Syncs* while a source syncs only by hand. The second and
+ * third sentences are for a password source (one that fills the Passwords
+ * role), where the codes are made on this machine.
+ */
+export function byHandNote(name: string, passwords: boolean): string {
+  const first = `Nothing is read from ${name} in the background.`;
+  return passwords
+    ? `${first} It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.`
+    : `${first} It syncs when you press Sync now.`;
+}
+
+/**
  * The line under a source's name: *Jira Data Center, 177 tickets. Syncs every
- * 5 min, last 4 min ago.*
+ * 5 min, last 4 min ago.* A source by hand: *Syncs only when you press Sync
+ * now, last at 10:22.*
  */
 export function sourceLine(
-  source: Pick<SourceSummary, "item_count" | "kinds" | "enabled" | "sync_interval_secs" | "last_run">,
+  source: Pick<SourceSummary, "item_count" | "kinds" | "enabled" | "sync_interval_secs" | "last_run"> &
+    Partial<Pick<SourceSummary, "sync_by_hand">>,
   adapterName: string,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
@@ -331,8 +366,13 @@ export function sourceLine(
   const finished = status?.last_finished_at ?? source.last_run?.finished_at ?? null;
   const last = finished ? `last ${ago(finished, now)}` : "not synced yet";
   if (!source.enabled) return `${head} Paused, ${last}.`;
+  if (source.sync_by_hand) {
+    const at = finished ? `last at ${clockLabel(finished, now, true)}` : "not synced yet";
+    return `${head} Syncs only when you press Sync now, ${at}.`;
+  }
   return `${head} Syncs every ${intervalWords(source.sync_interval_secs)}, ${last}.`;
 }
+
 
 /** The alert on top of a source's page, or `null` when its credential works. */
 export function credentialAlert(

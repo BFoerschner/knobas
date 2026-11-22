@@ -439,6 +439,8 @@ impl knobas_sync::scheduler::AdapterRegistry for ProbeRegistry {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: Vec::new(),
             config_schema: serde_json::json!({}),
@@ -1708,6 +1710,7 @@ async fn mock_source(pool: &sqlx::PgPool, id: &str, config: serde_json::Value, e
             config,
             sync_interval_secs: 86_400,
             enabled,
+            sync_by_hand: false,
         },
     )
     .await

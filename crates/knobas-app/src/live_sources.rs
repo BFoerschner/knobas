@@ -75,6 +75,7 @@ pub async fn apply(
                 base_url: Some(source.base_url),
                 config: Some(source.config),
                 sync_interval_secs: Some(source.sync_interval_secs),
+                sync_by_hand: source.sync_by_hand,
                 enabled: Some(source.enabled),
             };
             crud::update(pool, registry.as_ref(), &id, patch).await?;

@@ -24,6 +24,7 @@ fn a_source(id: &str) -> InsertConfig {
         config: serde_json::json!({ "flavor": "datacenter" }),
         sync_interval_secs: 300,
         enabled: true,
+        sync_by_hand: false,
     }
 }
 
@@ -72,6 +73,7 @@ async fn patch_changes_what_the_user_owns_and_nothing_else() {
             base_url: None,
             config: Some(serde_json::json!({ "flavor": "cloud" })),
             sync_interval_secs: Some(900),
+            sync_by_hand: None,
             enabled: Some(false),
         },
     )
@@ -659,5 +661,86 @@ async fn a_duplicate_id_is_refused_by_the_database() {
             .as_database_error()
             .is_some_and(|db| db.is_unique_violation()),
         "expected a unique violation, got {error:?}"
+    );
+}
+
+/// ADR-0056: a source that syncs only by hand is never due -- not at first,
+/// not after its interval, not after a failed run's backoff has run out --
+/// and its status names no next run. A press triggers it directly and does
+/// not come through `due`.
+#[tokio::test]
+async fn a_source_by_hand_is_never_due_and_has_no_next_run() {
+    let pool = pool().await;
+    let id = unique("cfg");
+    let row = config::insert(
+        &pool,
+        &InsertConfig {
+            sync_by_hand: true,
+            ..a_source(&id)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(row.sync_by_hand, "the insert keeps what the form sent");
+
+    // Never run: a scheduled source would be due now, as a first run.
+    assert!(
+        config::due(&pool).await.unwrap().iter().all(|d| d.id != id),
+        "a source by hand was scheduled for its first run"
+    );
+    let status = knobas_sync::scheduler::status_for(&pool, &id)
+        .await
+        .unwrap()
+        .expect("the source has a status");
+    assert!(
+        status.next_run_at.is_none(),
+        "a source by hand was given a next run: {:?}",
+        status.next_run_at
+    );
+
+    // A run that finished long past its interval, and a failed one whose
+    // backoff ran out: still not due.
+    sqlx::query(
+        "insert into knobas.sync_run (source_id, trigger, finished_at, outcome)
+         values ($1, 'manual', now() - interval '2 hours', 'ok'),
+                ($1, 'manual', now() - interval '1 hour', 'unreachable')",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    config::set_backoff(&pool, &id, Utc::now() - ChronoDuration::seconds(1))
+        .await
+        .unwrap();
+    assert!(
+        config::due(&pool).await.unwrap().iter().all(|d| d.id != id),
+        "a source by hand was scheduled after its interval or its backoff"
+    );
+    assert!(config::syncs_by_hand(&pool, &id).await.unwrap());
+
+    // Set back to a schedule, it returns to the interval it had and is due.
+    let back = config::patch(
+        &pool,
+        &id,
+        &PatchConfig {
+            sync_by_hand: Some(false),
+            ..PatchConfig::default()
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the source exists");
+    assert!(!back.sync_by_hand);
+    assert_eq!(back.sync_interval_secs, 300, "the interval was kept");
+    assert!(
+        config::due(&pool).await.unwrap().iter().any(|d| d.id == id),
+        "a source set back to a schedule is due again"
+    );
+    assert!(!config::syncs_by_hand(&pool, &id).await.unwrap());
+    assert!(
+        !config::syncs_by_hand(&pool, "no-such-source")
+            .await
+            .unwrap(),
+        "a source that does not exist is not by hand"
     );
 }

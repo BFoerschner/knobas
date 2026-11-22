@@ -3,7 +3,9 @@ import { expect, test } from "vitest";
 import type { CredentialHealth, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import {
   BACKFILL_HINT,
+  BY_HAND,
   bareAddress,
+  byHandNote,
   credentialAlert,
   declaresUser,
   holdings,
@@ -19,6 +21,8 @@ import {
   settingsPlace,
   sourceLine,
   sourceState,
+  syncsPatch,
+  syncsWords,
   userOf,
 } from "./settings";
 
@@ -141,6 +145,36 @@ test("the line under the name says what it is, what it holds and when it syncs",
     "Jira Data Center, 177 tickets. Paused, not synced yet.",
   );
 });
+
+test("Syncs offers the intervals and by hand, and by hand keeps the interval it had (ADR-0056)", () => {
+  expect(syncsWords(300)).toBe("Every 5 min");
+  expect(syncsWords(20)).toBe("Every 20 s");
+  expect(syncsWords(3600)).toBe("Every 1 hour");
+  expect(syncsWords(BY_HAND)).toBe("Only when I press Sync now");
+  // By hand sends no interval, so the stored one survives; an interval turns by hand off.
+  expect(syncsPatch(BY_HAND)).toEqual({ sync_by_hand: true });
+  expect(syncsPatch("900")).toEqual({ sync_interval_secs: 900, sync_by_hand: false });
+});
+
+test("a source by hand says so under its name and under Syncs", () => {
+  const source = { item_count: 177, kinds: [ticket], enabled: true, sync_interval_secs: 300, last_run: null, sync_by_hand: true };
+  const finished = new Date(NOW.getTime() - 4 * 60_000);
+  const clock = `${String(finished.getHours()).padStart(2, "0")}:${String(finished.getMinutes()).padStart(2, "0")}`;
+  expect(sourceLine(source, "Pleasant Password Server", status(), NOW)).toBe(
+    `Pleasant Password Server, 177 tickets. Syncs only when you press Sync now, last at ${clock}.`,
+  );
+  expect(sourceLine(source, "Pleasant Password Server", null, NOW)).toBe(
+    "Pleasant Password Server, 177 tickets. Syncs only when you press Sync now, not synced yet.",
+  );
+  expect(sourceLine({ ...source, enabled: false }, "Pleasant Password Server", null, NOW)).toBe(
+    "Pleasant Password Server, 177 tickets. Paused, not synced yet.",
+  );
+  expect(byHandNote("Team passwords", true)).toBe(
+    "Nothing is read from Team passwords in the background. It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.",
+  );
+  expect(byHandNote("Tidewater Jira", false)).toBe("Nothing is read from Tidewater Jira in the background. It syncs when you press Sync now.");
+});
+
 
 test("a credential failure is said on top with what waits for it; a working one says nothing", () => {
   expect(credentialAlert("TeamCity", "Password", health("unauthorized"), null, NOW)).toBe(

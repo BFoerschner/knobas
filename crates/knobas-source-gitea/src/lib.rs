@@ -158,6 +158,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // Not by id: `refresh_under` walks the repository as a run
             // walks it (ADR-0047), for this kind, a branch and a commit.
             refreshes: true,
+            title_stays_in_mirror: false,
         },
         KindInfo {
             id: KIND_BRANCH.into(),
@@ -173,6 +174,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             full_sync_exhaustive: true,
             // Its repository walked (ADR-0047).
             refreshes: true,
+            title_stays_in_mirror: false,
         },
         KindInfo {
             id: KIND_PR.into(),
@@ -183,6 +185,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // included. A budgeted kind is non-exhaustive by definition.
             full_sync_exhaustive: false,
             refreshes: true,
+            title_stays_in_mirror: false,
         },
         KindInfo {
             id: KIND_COMMIT.into(),
@@ -193,6 +196,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             full_sync_exhaustive: false,
             // Its repository walked (ADR-0047).
             refreshes: true,
+            title_stays_in_mirror: false,
         },
         KindInfo {
             id: KIND_TICKET.into(),
@@ -209,6 +213,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // (`state=all`), so closing moves its state and never tombstones it.
             full_sync_exhaustive: false,
             refreshes: true,
+            title_stays_in_mirror: false,
         },
     ]
 }
@@ -359,6 +364,8 @@ pub fn descriptor_template() -> SourceDescriptor {
             range: "/{repo}/compare/{base}...{head}".to_owned(),
             pull_request: "/{repo}/pulls/{pr}".to_owned(),
         }),
+        by_hand_by_default: false,
+        passwords: None,
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.

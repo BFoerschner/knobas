@@ -161,8 +161,21 @@ impl SecretStore for KeyringStore {
             .map_err(map_error)
     }
 
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        match self.entry(account)?.get_password() {
+            Ok(raw) => Ok(Some(raw)),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(other) => Err(map_error(other)),
+        }
+    }
+
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        self.entry(account)?.set_password(text).map_err(map_error)
+    }
+
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         // Absent is success: `delete_source` runs this after the config row is
+
         // gone, and a source whose secret was already removed by hand must
         // still delete cleanly (interfaces §3, Delete).
         match self.entry(account)?.delete_credential() {

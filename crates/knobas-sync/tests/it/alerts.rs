@@ -97,6 +97,8 @@ impl Source for Monitors {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: self
                 .kinds
@@ -108,6 +110,7 @@ impl Source for Monitors {
                     monogram: "MO".into(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 })
                 .collect(),
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),

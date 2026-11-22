@@ -523,6 +523,7 @@ impl Adapter for Fixture {
                 monogram: "SV".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             },
             pipeline,
             run,
@@ -608,6 +609,8 @@ impl Adapter for Fixture {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
         }
     }
 

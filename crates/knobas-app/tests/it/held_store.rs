@@ -34,6 +34,7 @@ async fn the_rows_only_the_sync_held_leave_the_full_store_first() {
             secret: SecretInput::of("pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await

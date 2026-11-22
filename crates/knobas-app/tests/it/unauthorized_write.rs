@@ -96,6 +96,8 @@ fn descriptor() -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["comment".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "monitor".to_owned(),
@@ -104,6 +106,7 @@ fn descriptor() -> SourceDescriptor {
             monogram: "MO".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
@@ -240,6 +243,7 @@ async fn fixture(name: &str) -> Fixture {
                 config: json!({}),
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -391,6 +395,7 @@ async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
         config: None,
         sync_interval_secs: None,
         enabled: None,
+        sync_by_hand: None,
     })
     .await
     .expect("the rename is saved");
@@ -403,6 +408,7 @@ async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
         config: None,
         sync_interval_secs: None,
         enabled: None,
+        sync_by_hand: None,
     })
     .await
     .expect("the address is saved");

@@ -339,6 +339,7 @@ mod tests {
                 monogram: "JI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: json!({}),
             payload_paths: vec![KindPaths {
@@ -364,6 +365,8 @@ mod tests {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
         }
     }
 

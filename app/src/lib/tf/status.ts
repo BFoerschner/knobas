@@ -13,6 +13,8 @@
  */
 import type { AuthState, CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
 import { ago } from "../shell/time";
+import { clockLabel } from "../time/format";
+
 import { credentialFix, secretNoun } from "./settings/settings";
 
 /** A reading's state, which draws its dot. */
@@ -38,7 +40,7 @@ const FAILURE: Partial<Record<AuthState, (when: string, noun: string) => string>
 };
 
 /** What a reading needs of a source: its name, and what its credential is called. */
-type Named = Pick<SourceSummary, "id" | "display_name"> & Partial<Pick<SourceSummary, "auth_kind">>;
+type Named = Pick<SourceSummary, "id" | "display_name"> & Partial<Pick<SourceSummary, "auth_kind" | "sync_by_hand">>;
 
 export function sourceReadings(
   sources: Named[] | null,
@@ -70,7 +72,10 @@ export function sourceReadings(
       return { id: source.id, text: `${name} unreachable, synced ${ago(run.last_finished_at, now)}`, tone: "warn", syncedAt, fix: null };
     }
     const verb = index === 0 ? " synced" : "";
-    const synced = `${name}${verb} ${ago(run.last_finished_at, now)}`;
+    // A source by hand says when it was last pressed, as a clock reading: *Team passwords 10:22, by hand* (ADR-0056).
+    const synced = source.sync_by_hand
+      ? `${name}${verb} ${clockLabel(run.last_finished_at, now, true)}, by hand`
+      : `${name}${verb} ${ago(run.last_finished_at, now)}`;
     // A good credential that left part of the source out (#2374): amber here as on its Settings row, so the two agree.
     if (state?.state === "ok" && state.detail) return { id: source.id, text: `${synced}, ${state.detail}`, tone: "warn", syncedAt, fix: null };
     return { id: source.id, text: synced, tone: "ok", syncedAt, fix: null };

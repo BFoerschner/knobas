@@ -230,6 +230,7 @@ async fn fixture() -> Fixture {
             secret: SecretInput::of("pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await
@@ -474,6 +475,7 @@ async fn a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit() {
                 secret: SecretInput::of("pat"),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: None,
             },
         )
         .await

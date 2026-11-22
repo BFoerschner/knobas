@@ -599,6 +599,7 @@ async fn seed(
                 }),
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -1997,6 +1998,7 @@ async fn writes(
             config: serde_json::json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

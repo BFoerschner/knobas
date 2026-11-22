@@ -1078,6 +1078,7 @@ async fn app_over(
             config,
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -3864,6 +3865,7 @@ async fn wiki_app(
             config: json!({ "username": wiki.user, "spaces": [wiki.space] }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

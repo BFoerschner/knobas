@@ -367,6 +367,7 @@ async fn app(env: &Env) -> SourcesState {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

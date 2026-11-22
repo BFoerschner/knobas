@@ -18,12 +18,18 @@ use crate::{KeychainAccount, Secret, SecretError, SecretStore};
 #[derive(Default)]
 pub struct MemoryStore {
     items: Mutex<HashMap<KeychainAccount, Secret>>,
+    /// Raw text items: the code keys' chunks (ADR-0056).
+    texts: Mutex<HashMap<KeychainAccount, String>>,
 }
 
 impl MemoryStore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn texts(&self) -> MutexGuard<'_, HashMap<KeychainAccount, String>> {
+        self.texts.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn items(&self) -> MutexGuard<'_, HashMap<KeychainAccount, Secret>> {
@@ -46,6 +52,16 @@ impl SecretStore for MemoryStore {
 
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         self.items().remove(account);
+        self.texts().remove(account);
+        Ok(())
+    }
+
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        Ok(self.texts().get(account).cloned())
+    }
+
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        self.texts().insert(account.clone(), text.to_owned());
         Ok(())
     }
 }

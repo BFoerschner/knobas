@@ -70,6 +70,7 @@
 pub mod file_store;
 pub mod keyring_store;
 pub mod memory;
+pub mod otp;
 pub mod spawn;
 
 #[cfg(debug_assertions)]
@@ -123,6 +124,14 @@ impl KeychainAccount {
     #[must_use]
     pub fn importer(producer_id: &str) -> Self {
         Self(format!("importer:{producer_id}"))
+    }
+
+    /// The account chunk `chunk` of one password source's one-time-code keys
+    /// is stored under (ADR-0056): `otp:<source_id>:<n>`, beside the source's
+    /// credential. See [`otp`].
+    #[must_use]
+    pub fn otp(source_id: &str, chunk: usize) -> Self {
+        Self(format!("otp:{source_id}:{chunk}"))
     }
 
     /// The account as the platform store spells it.
@@ -260,6 +269,33 @@ pub trait SecretStore: Send + Sync {
     /// # Errors
     /// [`SecretError`] if the store failed for any other reason.
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError>;
+
+    /// A raw text item under `account`, or `None` if there is none: what the
+    /// code keys' chunks are kept as ([`otp`], ADR-0056). Not an envelope.
+    ///
+    /// The default refuses, so a test store that wraps another keeps no keys
+    /// unless it says so; the three real stores implement it.
+    ///
+    /// # Errors
+    /// [`SecretError`] if the store failed -- absence is not a failure.
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        let _ = account;
+        Err(SecretError::Backend(
+            "this credential store keeps no text items".to_owned(),
+        ))
+    }
+
+    /// Store `text` under `account` as it is, replacing whatever was there.
+    /// [`delete`](Self::delete) removes it.
+    ///
+    /// # Errors
+    /// [`SecretError`] if the store failed.
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        let _ = (account, text);
+        Err(SecretError::Backend(
+            "this credential store keeps no text items".to_owned(),
+        ))
+    }
 }
 
 /// Current envelope version. Bumped only when the shape changes; a reader that
