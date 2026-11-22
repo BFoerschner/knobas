@@ -573,7 +573,7 @@ function passwordPorts() {
   return {
     held: () =>
       deferred({
-        sources: [{ id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: "2026-11-22T10:22:00Z", down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server" }],
+        sources: [{ id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: "2026-11-22T10:22:00Z", down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server", web: { entry: true, folder: true } }],
         folders: [{ id: "pw:f1", source: 0, parent: null, name: "Payments", comment_read: false, can_add: true }],
         entries: [["pw:e1", 0, "pw:f1", "payout db", "payout_svc", null, null, 1, null, []]],
         recent: [],
@@ -589,6 +589,8 @@ function passwordPorts() {
     copySecret: async () => {},
     attachment: () => deferred({ kind: "not_offered" } as never),
     saveAttachment: async () => "",
+    webLink: () => deferred(null as never),
+    openWeb: () => {},
     copy: () => deferred({ kind: "not_offered" } as never),
     hide: () => deferred(undefined),
     code: () => deferred({ kind: "code", code: "123456", digits: 6, period: 30, left_ms: 20_000 } as never),
@@ -3548,7 +3550,7 @@ const CASES: Case[] = [
     source: "lib/tf/passwords/TfPwWrite.svelte",
     open: (target) => {
       const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: ["create_entry" as const] };
-      const source = { id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server" };
+      const source = { id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server", web: { entry: true, folder: true } };
       const m = passwordModel({ sources: [source], folders: [{ id: "pw:f1", source: 0, parent: null, name: "Payments", comment_read: false, can_add: true }], entries: [], recent: [] });
       return {
         app: mount(TfPwWrite, {

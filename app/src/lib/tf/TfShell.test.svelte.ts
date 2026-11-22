@@ -63,6 +63,7 @@ vi.mock("../ipc/site", async (importOriginal) => {
           offered: true,
           persists: true,
           sign_in_user: null,
+          own_sign_in: null,
         })),
       );
     },

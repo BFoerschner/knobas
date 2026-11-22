@@ -229,7 +229,12 @@ skipped_root: string | null,
 /**
  * Its kind's display name, for Settings and nowhere on the page.
  */
-adapter_name: string, };
+adapter_name: string, 
+/**
+ * Which item pages its web interface has, as its adapter declares
+ * (ux30): the words of *Open web interface* follow them.
+ */
+web: WebPages, };
 
 /**
  * What a show or a copy answered.
@@ -263,6 +268,21 @@ export type SourceFacts = { entries: number, folders: number,
  * Format id and how many entries have it, most first.
  */
 formats: Array<[string, number]>, };
+
+/**
+ * Which page an address opens.
+ */
+export type WebAt = "entry" | "folder" | "home";
+
+/**
+ * An address of the source's web interface.
+ */
+export type WebLink = { url: string, at: WebAt, };
+
+/**
+ * Which item pages a source's adapter declares, for the page's words.
+ */
+export type WebPages = { entry: boolean, folder: boolean, };
 
 /**
  * A change to a password source, sent the moment it is made and never

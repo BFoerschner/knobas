@@ -110,6 +110,10 @@ mod glue;
 pub use knobas_source as spi;
 pub use knobas_source::docs::html;
 pub use knobas_source::docs::html::{Hook, Hooked, Reading};
+/// Where the source's own website shows an item of a kind, and its front
+/// page: the descriptor's `web_links`, read by the host from 1.7.0 on (ux30).
+/// The host builds each address from the typed base URL and these.
+pub use knobas_source::web_links::WebLinks;
 /// Where the source's own website shows its sign-in form: the descriptor's
 /// `web_sign_in`, read by the host from 1.7.0 on (ADR-0050). The host types a
 /// saved web sign-in into that form in its own web view; the adapter never

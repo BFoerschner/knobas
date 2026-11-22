@@ -35,9 +35,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         code_pages: None,
+        web_links: Some(web_links()),
+        web_sign_in: Some(web_sign_in()),
         // Each read may be a line in the server's audit log under the
         // person's name: nothing is read in the background.
-        web_sign_in: None,
         by_hand_by_default: true,
         passwords: Some(Offers {
             one_time_codes: true,
@@ -57,6 +58,42 @@ pub fn descriptor_template() -> SourceDescriptor {
                 WriteKind::SetPassword,
             ],
         }),
+    }
+}
+
+/// The web client's sign-in form (measured on 9.5.4, 2026-11-22): drawn at
+/// `/SignIn/Direct`, posted to `/Account/SignIn`, where a refused password
+/// draws it again, so the one-try rule sees a refusal. A signed-out address
+/// lands on `/Account/SignIn` with no form, only a *Connect* link to
+/// `/SignIn/Direct`. The web client signs in with the account the API does,
+/// so the source's own credential is filled (ux30); its *Remember me* keeps
+/// the session 4 hours.
+pub const SIGN_IN_PATHS: [&str; 2] = ["/SignIn/Direct", "/Account/SignIn"];
+
+fn web_sign_in() -> knobas_source::web_sign_in::WebSignInPages {
+    knobas_source::web_sign_in::WebSignInPages::at(&SIGN_IN_PATHS).with_credential()
+}
+
+/// Where the web client shows an entry or a folder (9.5.4): `/WebClient/Main?
+/// itemId=<GUID>` opens either, an entry in its read-only dialog. Each goes
+/// through `/SignIn/Direct?ReturnUrl=…`, which draws the form when signed out
+/// (so the fill needs no press on *Connect*) and answers a 302 to the page
+/// when signed in. `{key}` is encoded once inside the encoded `ReturnUrl`;
+/// a GUID needs no encoding. `ReturnUrl` counts from the server's root, as
+/// Pleasant writes it: an instance behind a path prefix was not measured.
+pub const WEB_ITEM: &str = "/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain%3FitemId%3D{key}";
+
+/// The web client's front page, through the sign-in form as [`WEB_ITEM`].
+pub const WEB_HOME: &str = "/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain";
+
+fn web_links() -> knobas_source::web_links::WebLinks {
+    knobas_source::web_links::WebLinks {
+        home: Some(WEB_HOME.to_owned()),
+        pages: [
+            (passwords::ENTRY_KIND.to_owned(), WEB_ITEM.to_owned()),
+            (passwords::FOLDER_KIND.to_owned(), WEB_ITEM.to_owned()),
+        ]
+        .into(),
     }
 }
 
@@ -98,5 +135,43 @@ mod tests {
             .collect();
         let wire = serde_json::to_value(crate::PleasantConfig::default()).unwrap();
         assert_eq!(keys, wire.as_object().unwrap().keys().collect::<Vec<_>>());
+    }
+
+    /// The web client's sign-in pages and item links hold to their rules, and
+    /// an entry's link returns, once signed in, to the entry's own page.
+    #[test]
+    fn the_web_client_is_declared() {
+        let d = descriptor_template();
+        let pages = d.web_sign_in.as_ref().unwrap();
+        assert_eq!(knobas_source::web_sign_in::check(pages), Ok(()));
+        assert!(pages.uses_credential);
+        assert_eq!(pages.paths, ["/SignIn/Direct", "/Account/SignIn"]);
+        let links = d.web_links.as_ref().unwrap();
+        let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
+        assert_eq!(knobas_source::web_links::check(links, &kinds), Ok(()));
+        let guid = "07c469c8-e880-4927-8c31-a8342cd66d98";
+        for kind in [passwords::ENTRY_KIND, passwords::FOLDER_KIND] {
+            let url = knobas_source::web_links::page(
+                "https://pw.example:10001/",
+                links.page(kind).unwrap(),
+                guid,
+            )
+            .unwrap();
+            let parsed = url::Url::parse(&url).unwrap();
+            assert_eq!(parsed.path(), "/SignIn/Direct", "{kind}");
+            let back: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
+            assert_eq!(
+                back,
+                [(
+                    "ReturnUrl".to_owned(),
+                    format!("/WebClient/Main?itemId={guid}")
+                )],
+                "{kind}"
+            );
+        }
+        assert_eq!(
+            knobas_source::web_links::home("https://pw.example:10001", Some(links)),
+            "https://pw.example:10001/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain"
+        );
     }
 }

@@ -1008,6 +1008,10 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::site::site_sign_in_save,
         commands::site::site_sign_in_remove,
         commands::site::site_fill,
+        // A password source's web interface (ux30), appended at the foot
+        // (§10.8).
+        commands::site::site_sign_in_own,
+        commands::passwords::password_web_link,
     ]
 }
 

@@ -7,7 +7,7 @@
  */
 import { invoke } from "./invoke";
 
-import type { AttachmentAnswer, ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts, Write, WriteAnswer } from "./generated/passwords";
+import type { AttachmentAnswer, ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts, WebLink, Write, WriteAnswer } from "./generated/passwords";
 
 export type {
   Approval,
@@ -35,6 +35,9 @@ export type {
   SecretRef,
   SecretText,
   SourceFacts,
+  WebAt,
+  WebLink,
+  WebPages,
   Write,
   WriteAnswer,
   WriteKind,
@@ -113,4 +116,12 @@ export function passwordAttachment(entityId: string, attachmentId: string): Prom
 /** One of an entry's attachments saved to the Downloads folder; answers its path. */
 export function passwordAttachmentSave(entityId: string, attachmentId: string): Promise<string> {
   return invoke<string>("password_attachment_save", { entityId, attachmentId });
+}
+
+/**
+ * The address of a password source's own web interface on `item` (an entry's or a folder's entity id), or its front
+ * page with none (ux30). `null` when the source has no web address.
+ */
+export function passwordWebLink(source: string, item: string | null): Promise<WebLink | null> {
+  return invoke<WebLink | null>("password_web_link", { source, item });
 }

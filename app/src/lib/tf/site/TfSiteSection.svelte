@@ -7,7 +7,8 @@
 
   *Saved sign-in* (decisions §13 (b), ux29): a username and password knobas types into the site's own sign-in form,
   kept in the source's keychain item. The row knows only that one is saved and for which name; the password is never
-  read back.
+  read back. A site whose adapter says it signs in with the source's own credential (ux30, a password manager's web
+  interface) shows that instead: *Same as ⟨source⟩'s credential*, with *Use another…* and *Turn off*; a saved one wins.
 -->
 <script lang="ts" module>
   import type { SiteAsked, SiteSetting } from "../../ipc/site";
@@ -20,12 +21,13 @@
     forget: (id: string, force: boolean) => Promise<SiteAsked>;
     saveSignIn: (id: string, username: string, password: string) => Promise<SiteSetting>;
     removeSignIn: (id: string) => Promise<SiteSetting>;
+    ownSignIn: (id: string, on: boolean) => Promise<SiteSetting>;
   }
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { setSiteOpenInside, siteAllow, siteDisallow, siteForget, siteSignInRemove, siteSignInSave } from "../../ipc/site";
+  import { setSiteOpenInside, siteAllow, siteDisallow, siteForget, siteSignInOwn, siteSignInRemove, siteSignInSave } from "../../ipc/site";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { siteStore, type SiteStore } from "./site.svelte";
@@ -37,6 +39,7 @@
     forget: (id, force) => siteForget(id, force),
     saveSignIn: (id, username, password) => siteSignInSave(id, username, password),
     removeSignIn: (id) => siteSignInRemove(id),
+    ownSignIn: (id, on) => siteSignInOwn(id, on),
   };
 
   let {
@@ -87,6 +90,13 @@
     } finally {
       saving = false;
     }
+  }
+
+  function ownSignIn(on: boolean) {
+    void write(
+      () => ports.ownSignIn(source, on),
+      () => (on ? `knobas signs in to ${name}'s site with ${name}'s credential.` : `knobas no longer signs in to ${name}'s site. You sign in yourself.`),
+    );
   }
 
   function removeSignIn() {
@@ -201,6 +211,14 @@
           <span>Saved for <span class="tf-mono">{setting.sign_in_user}</span>, never shown</span>
           <button class="tf-btn tf-sm" disabled={saving} onclick={openSignIn}>Change…</button>
           <button class="tf-btn tf-sm tf-ghost" disabled={saving} onclick={removeSignIn}>Remove</button>
+        {:else if setting.own_sign_in?.on}
+          <span>Same as {name}'s credential, <span class="tf-mono">{setting.own_sign_in.user}</span></span>
+          <button class="tf-btn tf-sm" disabled={saving || !setting.offered} onclick={openSignIn}>Use another…</button>
+          <button class="tf-btn tf-sm tf-ghost" disabled={saving} onclick={() => ownSignIn(false)}>Turn off</button>
+        {:else if setting.own_sign_in}
+          <span class="tf-stg-hint">Off. You sign in yourself.</span>
+          <button class="tf-btn tf-sm" disabled={saving} onclick={() => ownSignIn(true)}>Turn on</button>
+          <button class="tf-btn tf-sm" disabled={saving || !setting.offered} onclick={openSignIn}>Use another…</button>
         {:else}
           <span class="tf-stg-hint">None</span>
           <button class="tf-btn tf-sm" disabled={saving || !setting.offered} onclick={openSignIn}>Save one…</button>
@@ -219,7 +237,7 @@
 {#if signing && setting !== undefined}
   <TfDialog
     why={!canSave && !saving ? "Type the username and the password to save them." : null}
-    title="{setting.sign_in_user ? 'Change' : 'Save'} {name}'s sign-in"
+    title={setting.sign_in_user ? `Change ${name}'s sign-in` : setting.own_sign_in ? `Save another sign-in for ${name}` : `Save ${name}'s sign-in`}
     onclose={closeSignIn}
   >
     {#snippet body()}

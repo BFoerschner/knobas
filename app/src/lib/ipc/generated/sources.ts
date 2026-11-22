@@ -1462,7 +1462,19 @@ passwords?: Offers,
  * an external adapter's JSON among them -- decodes as a source whose
  * saved sign-in is filled on a press alone.
  */
-web_sign_in?: WebSignInPages, };
+web_sign_in?: WebSignInPages, 
+/**
+ * Where the source's own website shows one item of a kind, and its
+ * front page (ux30, [`web_links`]): the Passwords page's *Open web
+ * interface* builds its address from the typed base URL and these,
+ * never from a mirrored value. [`web_links::check`] holds it to its
+ * rules (contract battery clause 18). Read on the Rust side.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * -- an external adapter's JSON among them -- decodes as a source whose
+ * site opens at its base URL.
+ */
+web_links?: WebLinks, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -2030,6 +2042,19 @@ fields: Array<PayloadPath>, };
 export type WaitReason = "unreachable" | "unauthorized";
 
 /**
+ * Where the site shows an item of each kind, and its front page.
+ */
+export type WebLinks = { 
+/**
+ * The front page, after the base URL. `None`: the base URL is it.
+ */
+home?: string, 
+/**
+ * Kind id to the template of its page, after the base URL.
+ */
+pages: { [key in string]: string }, };
+
+/**
  * Where the site shows its sign-in form.
  */
 export type WebSignInPages = { 
@@ -2041,7 +2066,13 @@ paths: Array<string>,
 /**
  * The form can stand on any page of the site's own origin.
  */
-any_page: boolean, };
+any_page: boolean, 
+/**
+ * The site signs in with the source's own username and password, so
+ * that credential is filled unless another sign-in is saved for the site
+ * or the person turned the fill off (ux30).
+ */
+uses_credential?: boolean, };
 
 /**
  * Where a ticket's **worklog** is, and what each entry says (#2403): who

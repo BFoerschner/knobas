@@ -67,6 +67,7 @@ impl Source for Vault {
             url_forms: vec![],
             code_pages: None,
             web_sign_in: None,
+            web_links: None,
             by_hand_by_default: true,
             passwords: Some(Offers {
                 one_time_codes: true,

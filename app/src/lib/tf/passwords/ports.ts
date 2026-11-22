@@ -16,16 +16,18 @@ import {
   passwordsWrite,
   passwordAttachment,
   passwordAttachmentSave,
+  passwordWebLink,
   type AttachmentAnswer,
   type CodeAnswer,
   type Held,
   type PwEntry,
   type ReadAnswer,
   type SecretRef,
+  type WebLink,
   type Write,
   type WriteAnswer,
 } from "../../ipc/passwords";
-import { openWebPort } from "../../shell/open-web";
+import { openWeb, openWebPort } from "../../shell/open-web";
 
 export interface PasswordPorts {
   held: () => Promise<Held>;
@@ -46,6 +48,10 @@ export interface PasswordPorts {
   attachment: (entityId: string, attachmentId: string) => Promise<AttachmentAnswer>;
   /** One attachment saved to the Downloads folder; answers its path. */
   saveAttachment: (entityId: string, attachmentId: string) => Promise<string>;
+  /** The source's web interface on an entry or folder, or its front page (ux30). */
+  webLink: (source: string, item: string | null) => Promise<WebLink | null>;
+  /** Open a web interface address: its source's site, or the browser when `elsewhere` (Shift W, ⌘ press). */
+  openWeb: (url: string, source: string, elsewhere: boolean, item: string | null) => void;
 }
 
 export const realPasswordPorts: PasswordPorts = {
@@ -65,6 +71,8 @@ export const realPasswordPorts: PasswordPorts = {
   copySecret: (text, what) => clipboardCopySecret(text, what),
   attachment: (id, aid) => passwordAttachment(id, aid),
   saveAttachment: (id, aid) => passwordAttachmentSave(id, aid),
+  webLink: (source, item) => passwordWebLink(source, item),
+  openWeb: (url, source, elsewhere, item) => openWeb(url, { source, elsewhere, item }),
 };
 
 /** The password, as a secret ref. */

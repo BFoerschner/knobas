@@ -51,6 +51,9 @@ const KINDS: { file: string; user: string; password: string; remember: string }[
   { file: "kuma.html", user: "input[autocomplete=username]", password: "input[type=password]", remember: "#remember" },
   // An external adapter's site (knobas-adapter-xwiki, `knobas:adapter@1.6.0`).
   { file: "xwiki.html", user: "#j_username", password: "#j_password", remember: "input[name=j_rememberme]" },
+  // A password manager's web interface (ux30): Pleasant 9.5.4's form, beside its own feedback form, signed in with the
+  // source's own credential.
+  { file: "pleasant.html", user: "#UserName", password: "#Password", remember: "#RememberMe" },
 ];
 
 for (const kind of KINDS) {

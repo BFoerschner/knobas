@@ -11,6 +11,7 @@ pub mod clipboard;
 pub mod hold;
 pub mod otp;
 pub mod reads;
+pub mod web;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};

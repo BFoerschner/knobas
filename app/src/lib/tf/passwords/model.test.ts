@@ -6,7 +6,7 @@ import { CUT, chainOf, commentFolder, expiry, holding, marks, model, panels, pat
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
 function source(id: string, name: string) {
-  return { id, name, account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant" };
+  return { id, name, account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant", web: { entry: false, folder: false } };
 }
 
 function row(id: string, folder: string | null, title: string, user: string | null = null, src = 0): PwRow {

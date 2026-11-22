@@ -116,6 +116,7 @@ function held(entries: Raw[], params: URLSearchParams): Held {
       synced_at: unsynced ? null : SYNCED_AT, down_at: params.has("pw-offline") ? "2026-11-22T10:40:00Z" : null, never_synced: unsynced,
       offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: true, access_requests: false, marks_protected_fields: false, writes: ["create_entry", "edit_entry", "set_password"] },
       skipped_root: `${SOURCE}:f/Tidewater`, adapter_name: "Pleasant Password Server",
+      web: { entry: true, folder: true },
     }],
     folders: unsynced ? [] : [...folders.values()],
     entries: unsynced ? [] : rows,
@@ -160,6 +161,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
 
   return {
     passwords_held: () => view,
+    // The web interface's address (ux30), built as the Rust side builds Pleasant's.
+    password_web_link: (args) => {
+      if (String(args["source"]) !== SOURCE) return null;
+      const base = "https://pw.tidewater.example:10001/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain";
+      const item = args["item"] == null ? null : String(args["item"]);
+      if (item === null || !item.startsWith(`${SOURCE}:`)) return { url: base, at: "home" };
+      const at = byId.has(item) ? "entry" : "folder";
+      return { url: `${base}%3FitemId%3D${encodeURIComponent(item.slice(SOURCE.length + 1))}`, at };
+    },
     passwords_entry: (args) => {
       const id = String(args["entityId"]);
       const e = byId.get(id);

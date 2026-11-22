@@ -56,6 +56,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_links: None,
         web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::at(&[
             "/login.jsp",
         ])),

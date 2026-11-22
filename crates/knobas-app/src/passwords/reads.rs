@@ -38,6 +38,9 @@ pub struct PwSource {
     pub skipped_root: Option<String>,
     /// Its kind's display name, for Settings and nowhere on the page.
     pub adapter_name: String,
+    /// Which item pages its web interface has, as its adapter declares
+    /// (ux30): the words of *Open web interface* follow them.
+    pub web: super::web::WebPages,
 }
 
 /// One folder.
@@ -315,6 +318,7 @@ fn assemble(sources: &[SourceRow], items: &[ItemRow], ask: &Ask<'_>, recent: Vec
                     .unwrap_or_default(),
                 skipped_root: u16::try_from(i).ok().and_then(|i| skipped.get(&i).cloned()),
                 adapter_name: template.map_or_else(|| s.kind.clone(), |t| t.name.clone()),
+                web: super::web::WebPages::of(template.and_then(|t| t.web_links.as_ref())),
             }
         })
         .collect();
@@ -361,6 +365,54 @@ pub async fn entry(pool: &PgPool, entity_id: &str) -> Result<Option<PwEntry>, sq
             attachments: r.attachments,
             can_read: r.can_read,
             can_modify: r.can_modify,
+        }
+    }))
+}
+
+/// What *Open web interface* was pressed on (ux30), by keys at the source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebTarget {
+    Entry { key: String, folder: Option<String> },
+    Folder { key: String },
+}
+
+/// The entry or folder `entity_id` of `source` as keys at the source, or
+/// `None` for an id that is neither (gone, another source's, another kind).
+///
+/// # Errors
+/// The database's.
+pub async fn web_target(
+    pool: &PgPool,
+    source: &str,
+    entity_id: &str,
+) -> Result<Option<WebTarget>, sqlx::Error> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "select i.kind, i.payload->>'folder'
+           from sync.item i
+           join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
+          where i.entity_id = $1 and i.source_id = $2 and i.kind = any($3)",
+    )
+    .bind(entity_id)
+    .bind(source)
+    .bind(&[passwords::ENTRY_KIND, passwords::FOLDER_KIND][..])
+    .fetch_optional(pool)
+    .await?;
+    let Some(key) = super::web::key_of(source, entity_id) else {
+        return Ok(None);
+    };
+    Ok(row.map(|(kind, folder)| {
+        if kind == passwords::FOLDER_KIND {
+            WebTarget::Folder {
+                key: key.to_owned(),
+            }
+        } else {
+            WebTarget::Entry {
+                key: key.to_owned(),
+                folder: folder
+                    .as_deref()
+                    .and_then(|f| super::web::key_of(source, f))
+                    .map(str::to_owned),
+            }
         }
     }))
 }

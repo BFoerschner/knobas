@@ -27,6 +27,7 @@ const SETTING: SiteSetting = {
   offered: true,
   persists: true,
   sign_in_user: null,
+  own_sign_in: null,
 };
 
 function status(over: Partial<SiteStatus> = {}): SiteStatus {
@@ -71,7 +72,11 @@ const ports: SiteSectionPorts = {
   },
   removeSignIn: (id) => {
     calls.push(`remove ${id}`);
-    return Promise.resolve({ ...SETTING, sign_in_user: null });
+    return Promise.resolve({ ...SETTING, sign_in_user: null, own_sign_in: store.settings.get(id)?.own_sign_in ?? null });
+  },
+  ownSignIn: (id, on) => {
+    calls.push(`own ${id} ${on}`);
+    return Promise.resolve({ ...SETTING, own_sign_in: { user: "mara", on } });
   },
 };
 
@@ -181,4 +186,48 @@ test("Change opens the dialog with the name and an empty password; Remove remove
   flushSync();
   expect(calls).toEqual(["remove wiki"]);
   expect(button("Save one…")).toBeDefined();
+});
+
+test("a site that signs in with its source's credential says so, and turns off and on", async () => {
+  store.holdOne({ ...SETTING, own_sign_in: { user: "mara", on: true } });
+  section();
+  const row = () => [...target.querySelectorAll(".tf-stg-row")].find((el) => el.textContent?.includes("Saved sign-in"))!;
+  expect(row().textContent).toContain("Same as Wiki's credential, mara");
+  expect(button("Save one…")).toBeUndefined();
+  button("Turn off")!.click();
+  await tick();
+  await tick();
+  flushSync();
+  expect(calls).toEqual(["own wiki false"]);
+  expect(row().textContent).toContain("Off. You sign in yourself.");
+  button("Turn on")!.click();
+  await tick();
+  await tick();
+  flushSync();
+  expect(calls).toEqual(["own wiki false", "own wiki true"]);
+  expect(row().textContent).toContain("Same as Wiki's credential, mara");
+});
+
+test("Use another… saves a sign-in that wins, and Remove goes back to the source's credential", async () => {
+  store.holdOne({ ...SETTING, own_sign_in: { user: "mara", on: true } });
+  section();
+  button("Use another…")!.click();
+  flushSync();
+  expect(document.body.textContent).toContain("Save another sign-in for Wiki");
+  expect(document.querySelector<HTMLInputElement>("#tf-site-signin-user")!.value).toBe("");
+  type(document.querySelector<HTMLInputElement>("#tf-site-signin-user")!, "admin");
+  type(document.querySelector<HTMLInputElement>("#tf-site-signin-pass")!, "pw");
+  flushSync();
+  document.querySelector<HTMLFormElement>("#tf-site-signin")!.requestSubmit();
+  await tick();
+  await tick();
+  flushSync();
+  store.holdOne({ ...store.settings.get("wiki")!, own_sign_in: { user: "mara", on: true } });
+  flushSync();
+  expect(target.textContent).toContain("Saved for admin, never shown");
+  button("Remove")!.click();
+  await tick();
+  await tick();
+  flushSync();
+  expect(target.textContent).toContain("Same as Wiki's credential, mara");
 });

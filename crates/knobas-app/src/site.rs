@@ -58,6 +58,13 @@ pub fn kept_since_key(source: &str) -> String {
     format!("site.kept_since.{source}")
 }
 
+/// *Turn off* on a site that signs in with its source's own credential
+/// (ux30): `true` while the person signs in there themselves.
+#[must_use]
+pub fn sign_in_off_key(source: &str) -> String {
+    format!("site.sign_in_off.{source}")
+}
+
 /// *Sites kept open*.
 pub const KEPT_KEY: &str = "site.kept";
 
@@ -88,6 +95,70 @@ pub struct SiteSetting {
     /// The username of the saved web sign-in (ux29), when one is saved. The
     /// password never leaves the keychain item.
     pub sign_in_user: Option<String>,
+    /// The site signs in with the source's own credential (ux30): its
+    /// adapter says so, and the source signs in by username and password.
+    /// `None` for every other site.
+    pub own_sign_in: Option<OwnSignIn>,
+}
+
+/// A site that signs in with its source's own credential (ux30).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[ts(export_to = "site.ts")]
+pub struct OwnSignIn {
+    /// The credential's username: the source's `username` setting.
+    pub user: String,
+    /// Not turned off. A saved sign-in still wins over it.
+    pub on: bool,
+}
+
+/// The configuration key a username-and-password source keeps its username
+/// under, by convention (the Add-source form's `IDENTITY_FIELD`).
+pub const USERNAME_KEY: &str = "username";
+
+/// What a site's sign-in form is filled with (ux30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignInFrom {
+    /// The web sign-in saved for the site.
+    Saved,
+    /// The source's own username and password.
+    Own,
+    /// Nothing: the person signs in.
+    Nothing,
+}
+
+/// The username a site may fill with its source's own credential: the
+/// adapter declares `uses_credential` on declared paths, the source signs in
+/// by username and password, and it has a username. `None` otherwise.
+#[must_use]
+pub fn own_user<'a>(
+    declared: Option<&knobas_source::web_sign_in::WebSignInPages>,
+    auth: Option<knobas_source::AuthMethod>,
+    config: &'a serde_json::Value,
+) -> Option<&'a str> {
+    let declared = declared?;
+    if !declared.uses_credential || declared.any_page || declared.paths.is_empty() {
+        return None;
+    }
+    if auth != Some(knobas_source::AuthMethod::UserPassword) {
+        return None;
+    }
+    config
+        .get(USERNAME_KEY)
+        .and_then(serde_json::Value::as_str)
+        .filter(|user| !user.trim().is_empty())
+}
+
+/// Which sign-in a site fills: a saved one wins, then the source's own
+/// unless turned off, else none.
+#[must_use]
+pub fn sign_in_from(saved: bool, own: bool, off: bool) -> SignInFrom {
+    if saved {
+        SignInFrom::Saved
+    } else if own && !off {
+        SignInFrom::Own
+    } else {
+        SignInFrom::Nothing
+    }
 }
 
 /// What `settings_and_rules` reads the saved web sign-ins with: the keychain
@@ -180,20 +251,115 @@ async fn write_allowed(pool: &PgPool, source: &str, allowed: &[Origin]) -> Resul
     crate::settings::write_value(pool, &allowed_key(source), &serde_json::Value::Array(list)).await
 }
 
-async fn read_open_inside(pool: &PgPool, source: &str) -> Result<bool, IpcError> {
+/// *Open its pages inside knobas* as stored, or `default` when never set:
+/// on for a password source (ux30, Fable's ruling: its site is what the
+/// Passwords page's *Open web interface* opens), off for every other.
+async fn read_open_inside(pool: &PgPool, source: &str, default: bool) -> Result<bool, IpcError> {
     Ok(crate::settings::read_value(pool, &open_inside_key(source))
+        .await?
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default))
+}
+
+async fn read_sign_in_off(pool: &PgPool, source: &str) -> Result<bool, IpcError> {
+    Ok(crate::settings::read_value(pool, &sign_in_off_key(source))
         .await?
         .and_then(|value| value.as_bool())
         .unwrap_or(false))
 }
 
-/// The sources' ids, base URLs and adapter kinds.
-async fn sources(pool: &PgPool) -> Result<Vec<(String, String, String)>, IpcError> {
-    let rows = knobas_sync::config::list(pool).await?;
-    Ok(rows
+/// Write *Turn off* / *Turn on* of a site's own-credential sign-in.
+///
+/// # Errors
+///
+/// A write's.
+pub async fn set_sign_in_off(pool: &PgPool, source: &str, off: bool) -> Result<(), IpcError> {
+    crate::settings::write_value(
+        pool,
+        &sign_in_off_key(source),
+        &serde_json::Value::Bool(off),
+    )
+    .await
+}
+
+/// The sources as configured.
+async fn sources(pool: &PgPool) -> Result<Vec<knobas_sync::config::SourceConfigRow>, IpcError> {
+    Ok(knobas_sync::config::list(pool).await?)
+}
+
+/// The adapter template of `kind`, among the registry's.
+fn template_of(
+    registry: &dyn AdapterRegistry,
+    kind: &str,
+) -> Option<knobas_source::SourceDescriptor> {
+    registry
+        .descriptors()
         .into_iter()
-        .map(|row| (row.id, row.base_url, row.adapter_kind))
-        .collect())
+        .find(|template| template.adapter_kind == kind)
+}
+
+fn auth_of(row: &knobas_sync::config::SourceConfigRow) -> Option<knobas_source::AuthMethod> {
+    match row.auth_kind {
+        knobas_sync::config::AuthKind::Method(method) => Some(method),
+        knobas_sync::config::AuthKind::None => None,
+    }
+}
+
+/// The username and password a site's form is filled with now (ux30): the
+/// saved web sign-in, else the source's own credential where its adapter
+/// declares that and it is not turned off, else `None`.
+///
+/// # Errors
+///
+/// The keychain's, or a read's.
+pub async fn sign_in_for_fill(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    source: &str,
+) -> Result<Option<WebSignIn>, IpcError> {
+    let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::source(source))
+        .await
+        .map_err(|error| IpcError::internal(format!("keychain: {error}")))?;
+    let Some(secret) = stored else {
+        return Ok(None);
+    };
+    if secret.web.is_some() {
+        return Ok(fill_from(secret, None, None, &serde_json::Value::Null, false));
+    }
+    let Some(row) = knobas_sync::config::get(pool, source).await? else {
+        return Ok(None);
+    };
+    let template = template_of(registry, &row.adapter_kind);
+    let declared = template.as_ref().and_then(|t| t.web_sign_in.as_ref());
+    let off = read_sign_in_off(pool, source).await?;
+    Ok(fill_from(secret, declared, auth_of(&row), &row.config, off))
+}
+
+/// What a site's form is filled with, from the source's keychain item and
+/// what the adapter and the row say: the saved web sign-in, else the source's
+/// own username and password where [`own_user`] allows it and it is not
+/// turned off, else `None`. The stored credential's own kind must agree with
+/// the row's: its `value` is a password only for a username-and-password
+/// credential.
+#[must_use]
+pub fn fill_from(
+    secret: knobas_secrets::Secret,
+    declared: Option<&knobas_source::web_sign_in::WebSignInPages>,
+    row_auth: Option<knobas_source::AuthMethod>,
+    config: &serde_json::Value,
+    off: bool,
+) -> Option<WebSignIn> {
+    let auth = row_auth.filter(|method| *method == secret.kind);
+    let own = own_user(declared, auth, config);
+    match sign_in_from(secret.web.is_some(), own.is_some(), off) {
+        SignInFrom::Saved => secret.web,
+        SignInFrom::Own => own.map(|user| WebSignIn {
+            username: user.to_owned(),
+            password: secret.value,
+        }),
+        SignInFrom::Nothing => None,
+    }
 }
 
 /// Every source's site setting, and the rules of the ones that open inside
@@ -212,40 +378,50 @@ pub async fn settings_and_rules(
     let listed = sources(pool).await?;
     // Each source's saved sign-in, read at once: one keychain read a source.
     let users: Vec<Option<String>> = match reads {
-        Some(reads) => {
-            futures_util::future::join_all(listed.iter().map(|(source, _, _)| async move {
-                match read_sign_in(reads.secrets, source).await {
-                    Ok(web) => web.map(|web| web.username),
-                    Err(error) => {
-                        tracing::warn!(source = %source, %error, "a site's sign-in could not be read");
-                        None
-                    }
+        Some(reads) => futures_util::future::join_all(listed.iter().map(|row| async move {
+            let source = &row.id;
+            match read_sign_in(reads.secrets, source).await {
+                Ok(web) => web.map(|web| web.username),
+                Err(error) => {
+                    tracing::warn!(source = %source, %error, "a site's sign-in could not be read");
+                    None
                 }
-            }))
-            .await
-        }
+            }
+        }))
+        .await,
         None => vec![None; listed.len()],
     };
     let mut sign_ins = HashMap::new();
-    for ((source, base_url, kind), user) in listed.into_iter().zip(users) {
-        if let Some(reads) = reads {
-            let declared = reads
-                .registry
-                .descriptors()
-                .into_iter()
-                .find(|template| template.adapter_kind == kind)
-                .and_then(|template| template.web_sign_in)
-                .unwrap_or_default();
+    for (row, user) in listed.into_iter().zip(users) {
+        let template = reads.and_then(|reads| template_of(reads.registry, &row.adapter_kind));
+        let declared = template.as_ref().and_then(|t| t.web_sign_in.clone());
+        let own_sign_in = match own_user(declared.as_ref(), auth_of(&row), &row.config) {
+            Some(own) => Some(OwnSignIn {
+                user: own.to_owned(),
+                on: !read_sign_in_off(pool, &row.id).await?,
+            }),
+            None => None,
+        };
+        let source = row.id;
+        let base_url = row.base_url;
+        if reads.is_some() {
+            let declared = declared.unwrap_or_default();
+            let from = sign_in_from(
+                user.is_some(),
+                own_sign_in.is_some(),
+                own_sign_in.as_ref().is_some_and(|own| !own.on),
+            );
             sign_ins.insert(
                 source.clone(),
                 SignInRule {
-                    saved: user.is_some(),
+                    saved: from != SignInFrom::Nothing,
                     paths: declared.paths,
                     any_page: declared.any_page,
                 },
             );
         }
-        let open_inside = read_open_inside(pool, &source).await?;
+        let passwords = template.as_ref().is_some_and(|t| t.passwords.is_some());
+        let open_inside = read_open_inside(pool, &source, passwords).await?;
         let allowed = read_allowed(pool, &source).await?;
         let kept_since = crate::settings::read_value(pool, &kept_since_key(&source))
             .await?
@@ -274,6 +450,7 @@ pub async fn settings_and_rules(
             offered: knobas_site::OFFERED && base.is_some(),
             persists: knobas_site::sessions_persist(),
             sign_in_user: user,
+            own_sign_in,
         });
         if open_inside && let Some(base) = base {
             bases.push((source, base, allowed));
@@ -487,7 +664,14 @@ impl<R: tauri::Runtime> Shell for TauriShell<R> {
             let (Ok(sites), Ok(sources)) = (state(&app), crate::sources::state(&app)) else {
                 return;
             };
-            match read_sign_in(&sources.secrets, &source).await {
+            match sign_in_for_fill(
+                &sources.pool,
+                &sources.secrets,
+                sources.registry.as_ref(),
+                &source,
+            )
+            .await
+            {
                 Ok(Some(web)) => sites.fill_with(&source, web.username, web.password),
                 Ok(None) => sites.fill_none(&source),
                 Err(error) => {
@@ -695,9 +879,98 @@ mod tests {
         write_sign_in(&empty, "wiki", None).await.unwrap();
     }
 
+    fn pages() -> knobas_source::web_sign_in::WebSignInPages {
+        knobas_source::web_sign_in::WebSignInPages::at(&["/SignIn/Direct"]).with_credential()
+    }
+
+    fn user_password(password: &str) -> knobas_secrets::Secret {
+        knobas_secrets::Secret::just(knobas_source::AuthMethod::UserPassword, password)
+    }
+
+    const UP: Option<knobas_source::AuthMethod> = Some(knobas_source::AuthMethod::UserPassword);
+
+    /// The source's own credential is offered only where the adapter says the
+    /// site uses it on declared pages, and the source signs in by username
+    /// and password with a username.
+    #[test]
+    fn the_own_credential_needs_the_declaration_the_method_and_a_username() {
+        let config = serde_json::json!({"username": "mara"});
+        assert_eq!(own_user(Some(&pages()), UP, &config), Some("mara"));
+        let plain = knobas_source::web_sign_in::WebSignInPages::at(&["/SignIn/Direct"]);
+        assert_eq!(own_user(Some(&plain), UP, &config), None, "not declared");
+        assert_eq!(own_user(None, UP, &config), None);
+        let anywhere = knobas_source::web_sign_in::WebSignInPages {
+            any_page: true,
+            ..pages()
+        };
+        assert_eq!(own_user(Some(&anywhere), UP, &config), None, "any page");
+        let no_paths = knobas_source::web_sign_in::WebSignInPages {
+            paths: Vec::new(),
+            ..pages()
+        };
+        assert_eq!(own_user(Some(&no_paths), UP, &config), None, "no paths");
+        for method in [
+            knobas_source::AuthMethod::Pat,
+            knobas_source::AuthMethod::ApiToken,
+            knobas_source::AuthMethod::OAuth,
+        ] {
+            assert_eq!(own_user(Some(&pages()), Some(method), &config), None, "{method:?}");
+        }
+        assert_eq!(own_user(Some(&pages()), None, &config), None);
+        for config in [
+            serde_json::json!({}),
+            serde_json::json!({"username": "  "}),
+            serde_json::json!({"username": 7}),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(own_user(Some(&pages()), UP, &config), None, "{config}");
+        }
+    }
+
+    #[test]
+    fn a_saved_sign_in_wins_then_the_own_unless_off() {
+        assert_eq!(sign_in_from(true, true, false), SignInFrom::Saved);
+        assert_eq!(sign_in_from(true, true, true), SignInFrom::Saved);
+        assert_eq!(sign_in_from(true, false, false), SignInFrom::Saved);
+        assert_eq!(sign_in_from(false, true, false), SignInFrom::Own);
+        assert_eq!(sign_in_from(false, true, true), SignInFrom::Nothing);
+        assert_eq!(sign_in_from(false, false, false), SignInFrom::Nothing);
+    }
+
+    #[test]
+    fn the_fill_is_the_saved_one_else_the_credential_itself() {
+        let config = serde_json::json!({"username": "mara"});
+        assert_eq!(
+            fill_from(user_password("pw"), Some(&pages()), UP, &config, false),
+            Some(web("mara", "pw"))
+        );
+        assert_eq!(
+            fill_from(user_password("pw"), Some(&pages()), UP, &config, true),
+            None,
+            "turned off"
+        );
+        let mut saved = user_password("pw");
+        saved.web = Some(web("admin", "other"));
+        assert_eq!(
+            fill_from(saved, Some(&pages()), UP, &config, true),
+            Some(web("admin", "other")),
+            "a saved one wins, off or not"
+        );
+        // A token stored for a row that says username and password is no
+        // password to type.
+        let token = knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "tok");
+        assert_eq!(fill_from(token, Some(&pages()), UP, &config, false), None);
+        assert_eq!(
+            fill_from(user_password("pw"), None, UP, &config, false),
+            None,
+            "not declared"
+        );
+    }
+
     #[test]
     fn the_keys_are_per_source() {
         assert_eq!(open_inside_key("jira"), "site.open_inside.jira");
+        assert_eq!(sign_in_off_key("pw"), "site.sign_in_off.pw");
         assert_eq!(allowed_key("jira"), "site.allowed.jira");
         assert_eq!(kept_since_key("jira"), "site.kept_since.jira");
     }

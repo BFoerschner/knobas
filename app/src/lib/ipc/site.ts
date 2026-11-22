@@ -134,6 +134,11 @@ export function siteSignInRemove(id: string): Promise<SiteSetting> {
   return invoke<SiteSetting>("site_sign_in_remove", { id });
 }
 
+/** *Turn off* (`on` false) or *Turn on* the fill of the source's own credential into its site (ux30). */
+export function siteSignInOwn(id: string, on: boolean): Promise<SiteSetting> {
+  return invoke<SiteSetting>("site_sign_in_own", { id, on });
+}
+
 /** *Fill sign-in*: the saved sign-in into the site's page now, if it is on the source's own origin. */
 export function siteFill(source: string): Promise<void> {
   return invoke<void>("site_fill", { source });

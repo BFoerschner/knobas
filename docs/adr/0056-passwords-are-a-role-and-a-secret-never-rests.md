@@ -63,6 +63,16 @@ password manager's audit log with the person's name.**
 - **Attachments** are named in listings and read live, one file at a time; history and access requests have no REST
   endpoint and are not offered.
 
+## Amended 2026-11-22 (ux30): the password manager's own web interface
+
+- The page opens the password manager's own web interface from a link template its adapter declares (`web_links`); a
+  password item still carries no `web_url`.
+- A password manager's web session is the site's own. knobas ticks its "remember me" as for any site, so the session
+  rests in the site's store, outside the keychain, for as long as the server allows. Pleasant 9.5.4 allows 4 hours.
+  *Forget…* removes it. What this ADR names as a secret still never rests.
+- The web sign-in writes "Session Log On" under the account (not the API token's "Identity Verified"); a request on a
+  kept session writes none. `docs/decisions/2026-11-22-a-password-managers-web-interface.md` has the measurements.
+
 ## Consequences
 
 - The knobas-source SPI gains `passwords`, `Source::read_secret`, `Source::passwords_write`, `Sink::otp_key`,
