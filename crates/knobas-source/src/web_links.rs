@@ -280,6 +280,20 @@ mod tests {
     }
 
     #[test]
+    fn a_kind_finds_its_own_template_and_no_other() {
+        let declared = links(
+            &[
+                ("password_entry", "/e/{key}"),
+                ("password_folder", "/f/{key}"),
+            ],
+            None,
+        );
+        assert_eq!(declared.page("password_entry"), Some("/e/{key}"));
+        assert_eq!(declared.page("password_folder"), Some("/f/{key}"));
+        assert_eq!(declared.page("survey"), None);
+    }
+
+    #[test]
     fn home_is_the_declared_page_or_the_base_url() {
         let declared = links(&[], Some("/SignIn/Direct"));
         assert_eq!(

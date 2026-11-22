@@ -226,6 +226,8 @@ mod tests {
             "file:///etc/passwd",
             "javascript:alert(1)",
             "https://",
+            // A host, but no web scheme.
+            "ftp://pw.example",
         ] {
             assert_eq!(
                 web_link(base, Some(&pleasant()), Target::Home),
