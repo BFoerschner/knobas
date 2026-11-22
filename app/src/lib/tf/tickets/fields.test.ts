@@ -132,3 +132,20 @@ test("a source that offers no edits answers null, and nothing is read ahead", as
   expect(fieldsOf(PAY_231)).toEqual({ state: "ready", fields: null });
   expect(asked).toEqual(["fields jira:PAY-231"]);
 });
+
+/** A ticket asked again once it changed draws its last answer meanwhile: an open control does not close. */
+test("while a changed ticket is asked again, its last answer stands", async () => {
+  let land: (fields: TicketFields) => void = () => {};
+  const slow: FieldsPort = {
+    ticketFields: () => new Promise((resolve) => (land = resolve)),
+    fieldOptions: async () => null,
+  };
+  const { port: p } = port();
+  await askFields(PAY_231, "open", p);
+  const moved = { ...PAY_231, updated_at: "2026-11-21T10:00:00Z" };
+  const asking = askFields(moved, "open", slow);
+  expect(fieldsOf(moved)).toEqual({ state: "ready", fields: FIELDS });
+  land({ fields: [ASSIGNEE] });
+  await asking;
+  expect(fieldsOf(moved)).toEqual({ state: "ready", fields: { fields: [ASSIGNEE] } });
+});

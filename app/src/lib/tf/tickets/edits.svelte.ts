@@ -127,6 +127,7 @@ export function chipWords(field: string, text: string, state: "queued" | "sent")
     if (sent) return `${adding ? "Added" : "Removed"} ${name}, sent`;
     return `${adding ? "Adding" : "Removing"} ${name}, queued`;
   }
+  if (field === "assignee" && text === "Unassigned") return sent ? "Unassigned, sent" : "Unassigning, queued";
   if (field === "assignee") return sent ? "Assigned, sent" : "Assigning, queued";
   if (field === "title") return sent ? "Renamed, sent" : "Renaming, queued";
   return sent ? "Set, sent" : "Setting, queued";

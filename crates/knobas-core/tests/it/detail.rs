@@ -128,3 +128,74 @@ async fn nothing_in_the_mirror_is_none() {
         .unwrap();
     assert!(found.is_none());
 }
+
+/// A ticket's author is its assignee (F-107, ADR-0054's live run): where the
+/// kind declares an assignee, the declared path's answer, and nobody where
+/// it says nothing, never the item's own author, which a forge sets to
+/// whoever filed the issue. A kind that declares none keeps the item's.
+#[tokio::test]
+async fn a_tickets_author_is_its_declared_assignee_not_who_filed_it() {
+    let pool = scratch().await;
+    let declared = {
+        let ticket = KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![PayloadPath::of(["assignee", "login"])],
+            ..KindPaths::default()
+        };
+        Declarations::empty().with("forge", vec![ticket])
+    };
+    let filed = |key: &str, payload: serde_json::Value| {
+        let pool = pool.clone();
+        let key = key.to_owned();
+        async move {
+            let entity = EntityRef::new("forge", &key);
+            sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+                .bind(entity.to_string())
+                .bind(&key)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "insert into sync.item (entity_id, source_id, kind, title, body_text, author, payload)
+                 values ($1, 'forge', 'ticket', $2, '', 'lena.hoffmann', $3)",
+            )
+            .bind(entity.to_string())
+            .bind(&key)
+            .bind(payload)
+            .execute(&pool)
+            .await
+            .unwrap();
+            entity
+        }
+    };
+    let assigned = filed(
+        "o/r/issues/1",
+        serde_json::json!({ "assignee": { "login": "jonas.becker" } }),
+    )
+    .await;
+    let nobody = filed("o/r/issues/2", serde_json::json!({ "assignee": null })).await;
+    let read = |entity: EntityRef| {
+        let (pool, declared) = (pool.clone(), declared.clone());
+        async move {
+            detail::read(&pool, &declared, &entity)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    assert_eq!(read(assigned).await.author.as_deref(), Some("jonas.becker"));
+    assert_eq!(
+        read(nobody).await.author,
+        None,
+        "unassigned, not its poster"
+    );
+    let undeclared = ticket(&pool, "loose", "LOOSE-2").await;
+    let loose = detail::read(&pool, &Declarations::empty(), &undeclared)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loose.author, None,
+        "the item's own author, which this one has none of"
+    );
+}
