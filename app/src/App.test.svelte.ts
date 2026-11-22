@@ -11,9 +11,11 @@
  *    bring-up. Seeding at mount threw its one reading away, and because the
  *    scheduler emits `source:health` *on a change only*, a steady install where
  *    every source is `ok` never got a second chance.
- * 2. **The wizard's handoff.** Neither `add_source` nor `demo_load` emits
- *    `source:health`, so finishing the wizard landed on a shell that had never
- *    heard of what was just configured.
+ * 2. **The demo load's handoff.** `demo_load` emits no `source:health`, so a
+ *    load that did not reseed left the shell never having heard of the
+ *    source it configured. (This was the first-run wizard's handoff until
+ *    ux31 removed the wizard; *Load the Tidewater dataset* now stands in
+ *    Tickets' zero-source state.)
  *
  * Both are pinned here against the *lifecycle*, because "when the database is
  * ready" is the whole of what was wrong. The exception is the health test that
@@ -53,20 +55,16 @@ let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
 
-/**
- * Whether this profile has never been set up, and whether it is the `--demo`
- * one -- the two flags that decide whether the shell hands the whole window to
- * the §14a wizard, and whether the wizard offers the Tidewater fixture.
- */
-let firstRun = false;
+/** Whether this is the `--demo` profile, which offers the Tidewater fixture while it has no source. */
 let demoProfile = false;
+/** How many times `demo_load` was asked. */
+let demoLoads = 0;
 
 function status(): AppStatus {
   return {
     db: dbReady ? { state: "ready", detail: null } : { state: "starting", detail: null },
     app_version: "0.0.0-test",
     demo: demoProfile,
-    first_run: firstRun,
   } as AppStatus;
 }
 
@@ -74,7 +72,6 @@ vi.mock("./lib/ipc/app", () => ({
   appStatus: () => Promise.resolve(status()),
   frontendReady: () => Promise.resolve(undefined),
   retryDatabase: () => Promise.resolve(undefined),
-  completeFirstRun: () => Promise.resolve(undefined),
   ping: () => Promise.resolve("pong"),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: (count: number) => Promise.resolve(count),
@@ -126,8 +123,10 @@ vi.mock("./lib/ipc/sources", () => ({
   testSource: () => Promise.resolve({ ok: true }),
   setSourceSecret: () => Promise.resolve(undefined),
   reindexFts: () => Promise.resolve(undefined),
-  demoLoad: () => Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" }),
-  syncNowWithProgress: () => Promise.resolve(1),
+  demoLoad: () => {
+    demoLoads += 1;
+    return Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" });
+  },
   // Settings › Backup reads it for the share export's *State colours* tick (#2469).
   stateColours: () => Promise.resolve([]),
 }));
@@ -330,16 +329,15 @@ function emit(event: string, payload: unknown) {
 }
 
 /**
- * Press the button whose label reads exactly this. The wizard's module buttons
- * carry a second line under their name, so a button's own name (`.nm`) counts
- * as its label too.
+ * Press the button whose label reads exactly this. A button that draws a second label in the same cell (*Loading…*
+ * beside *Load the Tidewater dataset*) is named by its first.
  */
 function press(label: string): void {
   const buttons = [...target.querySelectorAll("button")];
   const button = buttons.find(
     (candidate) =>
       candidate.textContent?.trim() === label ||
-      candidate.querySelector(".nm, .tf-fr-name")?.textContent?.trim() === label,
+      candidate.querySelector(".tf-ld-demo > span")?.textContent?.trim() === label,
   );
   if (!button) {
     throw new Error(
@@ -379,8 +377,8 @@ beforeEach(() => {
   listenCalls = 0;
   listeners.clear();
   dbReady = false;
-  firstRun = false;
   demoProfile = false;
+  demoLoads = 0;
   timerStarts = [];
   entityAnswer = null;
   noteShownHere = false;
@@ -622,93 +620,54 @@ test("with no chosen job the window opens on All tickets at #/tickets, in the ti
 });
 
 /**
- * §14a's landing, after the rooms: *Finish* lands on Tickets with the launcher
- * open, and reseeds credential health, which neither `add_source` nor
- * `demo_load` announces.
+ * **A fresh profile opens on the shell** (ux31, Björn: the first start screen was "an old artifact of earlier times"):
+ * All tickets with no source at all draws the way to add one, at `#/settings/sources/add`, and the way to restore a
+ * backup first, since knobas restores only into a database with no data. No first-run screen takes the window.
  */
-test("finishing the wizard lands on Tickets with the launcher open, and the new source known", async () => {
+test("a fresh profile opens on All tickets' zero-source state, with Add a source and the restore line, and no wizard", async () => {
   dbReady = true;
-  firstRun = true;
-  demoProfile = true;
-  location.hash = "#/settings";
-
   app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  expect(target.querySelector(".tf-top"), "the wizard takes the whole window").toBeNull();
+  await until(() => target.querySelector(".tf-nosources") !== null, "Tickets never drew its zero-source state");
+  expect(location.hash).toBe("#/tickets");
+  expect(target.querySelector(".tf-top"), "the shell has the window").not.toBeNull();
+  const empty = target.querySelector(".tf-nosources")!;
+  expect(empty.textContent).toContain("No sources yet. Add one and its tickets, pull requests, builds and pages come into knobas.");
+  const add = [...empty.querySelectorAll("a")].find((link) => link.textContent?.trim() === "Add a source…");
+  expect(add?.getAttribute("href")).toBe("#/settings/sources/add");
+  expect(add?.classList.contains("tf-primary")).toBe(true);
+  expect(empty.textContent).toContain("Restore it before you add a source: knobas restores only into a database that holds no data yet.");
+  const restore = [...empty.querySelectorAll("a")].find((link) => link.textContent?.trim() === "Open Settings › Backup and export");
+  expect(restore?.getAttribute("href")).toBe("#/settings/backup");
+  expect(empty.textContent, "the Tidewater dataset is the demo profile's alone").not.toContain("Tidewater");
+  expect(target.textContent).not.toContain("No tickets synced yet");
+});
+
+/** A profile with a source and no ticket yet keeps the sentence it had: a ticket system, not a first source. */
+test("with a source and no ticket, All tickets says no tickets synced yet, not the zero-source state", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok")];
+  app = mount(App, { target, props: {} });
+  await until(() => target.textContent?.includes("No tickets synced yet") === true, "the empty mirror's sentence never drew");
+  expect(target.querySelector(".tf-nosources")).toBeNull();
+});
+
+/**
+ * **The demo profile's Tidewater dataset**, which only the wizard offered: in the zero-source state, a press loads it,
+ * says so, and reseeds credential health, which `demo_load` does not announce; that is also what takes Tickets out of
+ * its zero-source state.
+ */
+test("on the demo profile, Load the Tidewater dataset loads it, says so and makes the source known", async () => {
+  dbReady = true;
+  demoProfile = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".tf-nosources") !== null, "Tickets never drew its zero-source state");
 
   healthRows = [row("mock", "ok")];
-  press("Next");
   press("Load the Tidewater dataset");
-  await until(
-    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
-    "the demo load never reached the wizard's last panel",
-  );
-  press("Finish");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash, "§14a lands on Tickets, not home: no job is chosen yet").toBe("#/tickets");
-  await until(
-    () => target.querySelector('.tf [role="dialog"].tf-launch') !== null,
-    "the launcher never opened over the landing",
-  );
-  await until(() => health.get("mock") !== null, "the wizard's source never reached the health store");
-});
-
-/**
- * **A way out of the Source step** (#1399): *Set up later in Settings* records
- * completion as *Finish* does and lands on Settings › Sources, where adding a
- * source lives, with no launcher over it. The next launch, whose `app_status`
- * then says `first_run: false`, opens the shell and no wizard.
- */
-test("Set up later in Settings lands on Settings › Sources, and the next launch has no wizard", async () => {
-  dbReady = true;
-  firstRun = true;
-  location.hash = "#/tickets";
-
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  press("Next");
-  press("Set up later in Settings");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash).toBe("#/settings/sources");
-  await until(
-    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Sources",
-    "Settings › Sources never drew",
-  );
-  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
-
-  unmount(app);
-  app = undefined;
-  // What `complete_first_run` wrote, read back on the next launch.
-  firstRun = false;
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew on the next launch");
-  expect(target.querySelector(".tf-fr")).toBeNull();
-});
-
-/**
- * **Restore on a clean machine** (#1469): the Source step's restore pointer
- * records completion and lands on Settings › Backup and export, with no
- * launcher over it, so the empty-database restore is reachable.
- */
-test("Restore from a backup in Settings lands on Settings › Backup and export", async () => {
-  dbReady = true;
-  firstRun = true;
-  location.hash = "#/tickets";
-
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  press("Next");
-  press("Restore from a backup in Settings");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash).toBe("#/settings/backup");
-  await until(
-    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Backup and export",
-    "Settings › Backup and export never drew",
-  );
-  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
+  await until(() => health.get("mock") !== null, "the loaded source never reached the health store");
+  expect(demoLoads).toBe(1);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Loaded the Tidewater dataset.");
+  await until(() => target.querySelector(".tf-nosources") === null, "the zero-source state outlived the load");
 });
 
 /**

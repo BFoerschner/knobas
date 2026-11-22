@@ -268,38 +268,13 @@ export function credentialHealth(): Promise<CredentialHealth[]> {
  * `EVENTS.syncState` for that. Triggering a source that is already syncing
  * returns the run already in flight.
  *
- * Use {@link syncNowWithProgress} when you are drawing per-item progress.
- * There are two functions rather than one optional argument because
- * `Option<Channel<_>>` is not a valid Tauri command argument (`Channel` has no
- * `Deserialize` impl); the Rust side splits for the same reason, and the
- * evidence is in `crates/knobas-app/tests/it/ipc.rs`.
+ * Use {@link watchSync} when you are drawing per-item progress: it attaches a
+ * channel to the run in flight. No channel here because `Option<Channel<_>>`
+ * is not a valid Tauri command argument (`Channel` has no `Deserialize`
+ * impl); the evidence is in `crates/knobas-app/tests/it/ipc.rs`.
  */
 export function syncNow(sourceId: string): Promise<number> {
   return invoke<number>("sync_now", { sourceId });
-}
-
-/**
- * {@link syncNow}, reporting per-item progress on `progress`.
- *
- * The channel is required. A caller that only needs to know a run started
- * should call {@link syncNow} and listen to `EVENTS.syncState`: per-item
- * progress goes on the channel and nowhere else, and events carry coarse state
- * only.
- *
- * **This is the first-run wizard's command**, and it asks the scheduler for
- * *the source's first sync* rather than for a sync (ADR-0005). Adding a source
- * already wakes the scheduler, so on a fast source that first sync can be over
- * before this call lands; when it is, the run that already happened comes back
- * with its ending on the channel instead of a second run being started over a
- * corpus that is already mirrored. Calling it again — the wizard's *Retry* —
- * gets a run. Whatever happens, an ending arrives on the channel: there is no
- * interleaving in which it is safe to add a timeout here.
- */
-export function syncNowWithProgress(
-  sourceId: string,
-  progress: Channel<SyncProgress>,
-): Promise<number> {
-  return invoke<number>("sync_now_with_progress", { sourceId, progress });
 }
 
 /**

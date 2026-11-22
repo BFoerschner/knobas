@@ -93,7 +93,7 @@ test("an event for a source the seed never mentioned adds it", async () => {
   const stop = health.start();
   await waitFor(() => expect(events.handlers.length).toBe(1));
 
-  // A source added in another window, or by the first-run wizard: the strip
+  // A source added in another window, or by a demo load: the strip
   // must show it without waiting for a re-seed.
   events.emit(row("jira", "ok"));
   flushSync();
@@ -251,9 +251,9 @@ test("replace forgets a source the authoritative list no longer carries", async 
  * The seed is a *read*, and a read has a duration.
  *
  * `reseed()` fetches `credential_health` and hands the answer to
- * {@link Health.replace}. Both of the shell's calls do it — `App.svelte`'s
+ * {@link Health.replace}. Every caller does it — `App.svelte`'s
  * `$effect(() => { if (lifecycle.ready) void health.reseed(); })` at boot and
- * `onFirstRunDone`'s call after the wizard — so an event that lands *while
+ * `TfLoadDemo`'s call after a demo load — so an event that lands *while
  * that read is in flight* meets a `replace` carrying the database as it stood
  * before the event. `start()`'s comment used to claim this away ("the seed
  * that follows is the newer reading"); it is a claim about ordering that the

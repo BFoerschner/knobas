@@ -20,7 +20,6 @@
   import { dismiss, push, undoable } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
-  import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { cacheEvents, enableAnswerCache, warm } from "./lib/ipc/answer-cache";
   import { installHoverReads } from "./lib/tf/repo/hover-reads";
@@ -31,7 +30,7 @@
   import { homeIfBlank } from "./lib/tf/home";
   import { breadcrumbJob, currentJob } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { parseTfHash, sectionHash } from "./lib/tf/route";
+  import { parseTfHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import { updates } from "./lib/tf/update.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
@@ -47,7 +46,9 @@
    *
    * A window opened on no address lands on home (`home.ts`): the chosen job's
    * page at `#/job`, or with none chosen *All tickets* at `#/tickets`, decided
-   * here, before the shell mounts, so its first frame is home's.
+   * here, before the shell mounts, so its first frame is home's. A fresh
+   * profile lands there too: there is no first-run screen since ux31, and
+   * Tickets with no source says how to add one or restore a backup.
    */
   homeIfBlank(location, chosenJob.id);
 
@@ -353,34 +354,6 @@
     launcherOpen = true;
   }
 
-  /**
-   * Whether this session has finished the §14a wizard. `first_run` is read
-   * once at boot, so without this every change after the wizard would put the
-   * reader back into it.
-   */
-  let completedFirstRun = $state(false);
-  const firstRun = $derived(!completedFirstRun && (lifecycle.status?.first_run ?? false));
-
-  /**
-   * §14a's landing: Tickets, with the launcher open over it; not home (`#/job`,
-   * spec #2227), which with no job chosen yet would only point at Tickets. A reader who set
-   * up later (#1399) lands on Settings › Sources instead, where adding a
-   * source lives, and one who restores first (#1469) on Settings › Backup and
-   * export; neither with anything over it.
-   */
-  function onFirstRunDone(landing: FirstRunLanding) {
-    completedFirstRun = true;
-    // The wizard added a source, and neither `add_source` nor `demo_load`
-    // emits `source:health`.
-    void health.reseed();
-    if (landing === "sources" || landing === "backup") {
-      location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
-      return;
-    }
-    location.hash = sectionHash("tickets");
-    openLauncher("");
-  }
-
   async function onRetry() {
     try {
       await lifecycle.retry();
@@ -392,9 +365,7 @@
 
 <svelte:window onhashchange={() => (hash = location.hash)} />
 
-{#if lifecycle.ready && firstRun}
-  <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
-{:else if lifecycle.ready}
+{#if lifecycle.ready}
   <TfShell
     {lifecycle}
     onsearch={openLauncher}

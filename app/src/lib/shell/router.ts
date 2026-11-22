@@ -14,7 +14,6 @@
  * | `#/standup`            | the standup digest, on today (#288)              |
  * | `#/sources`            | the sources view                                 |
  * | `#/settings`           | the settings view                                |
- * | `#/first-run`          | the §14a wizard                                  |
  *
  * **Deviation from the mockup, recorded here:** the mockup addressed
  * `#/ticket/PAY-231`. M1 ids are namespaced (`mock:PAY-231`) because P10 makes
@@ -104,7 +103,6 @@ export type Route =
    * surface; keeping this one bare leaves that segment free for it.
    */
   | { view: "standup" }
-  | { view: "first-run" }
   /**
    * The start-work stepper for one ticket (#44). `key` is the ticket's entity
    * id — the flow starts from a ticket and is keyed on it, so the address is
@@ -193,7 +191,6 @@ export function parseHash(hash: string): Route {
   }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
-  if (head === "first-run") return { view: "first-run" };
   if (head === "start-work") {
     return tail === "" ? { view: "unknown", hash } : { view: "start-work", key: tail };
   }
@@ -239,8 +236,6 @@ export function hashFor(route: Route): string {
       return "#/sources";
     case "settings":
       return "#/settings";
-    case "first-run":
-      return "#/first-run";
     case "start-work":
       return `#/start-work/${encodeId(route.key)}`;
     case "unknown":

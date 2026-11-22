@@ -6,10 +6,6 @@ import type { PipeStep } from "./entity";
  */
 export type AppStatus = { db: DbState, 
 /**
- * No source configured and the first run was never completed (§14a).
- */
-first_run: boolean, 
-/**
  * The `--demo` profile: its own data dir, port and keychain suffix (P13).
  */
 demo: boolean, source_count: number, app_version: string, 

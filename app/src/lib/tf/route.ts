@@ -251,8 +251,9 @@ export function sectionTabOf(route: TfRoute): Section | null {
   if (route.view !== "full" || route.head !== route.section) return null;
   if (route.section === "code" || route.section === "time" || route.section === "builds") return route.section;
   if (route.section === "docs") return route.rest[0] === undefined || route.rest[0] === "search" ? "docs" : null;
-  // A source's page, an application's (`#/settings/checkouts/add`, PR #2479) and a folder renderer's are places, not the section's tab.
-  if (route.section === "settings") return route.rest[0] === "source" || (route.rest[0] === "checkouts" && route.rest.length > 1) || (route.rest[0] === "renderers" && route.rest[1] === "folder") ? null : "settings";
+  // A source's page, an application's (`#/settings/checkouts/add`, PR #2479), a folder renderer's and *Add a source*'s
+  // (`#/settings/sources/add`, ux31) are places, not the section's tab.
+  if (route.section === "settings") return route.rest[0] === "source" || (route.rest[0] === "checkouts" && route.rest.length > 1) || (route.rest[0] === "renderers" && route.rest[1] === "folder") || (route.rest[0] === "sources" && route.rest[1] === "add") ? null : "settings";
   return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
 }
 
@@ -325,7 +326,7 @@ export function parentOf(route: TfRoute): string | null {
   if (TABBED_HEADS.has(route.head)) return null;
   // A source's page sits under Sources, an application's under Checkouts, a folder renderer's under Renderers; every other section of Settings is a tab of it.
   if (route.head === "settings") {
-    if (route.rest[0] === "source") return "#/settings/sources";
+    if (route.rest[0] === "source" || (route.rest[0] === "sources" && route.rest[1] === "add")) return "#/settings/sources";
     if (route.rest[0] === "renderers" && route.rest[1] === "folder") return "#/settings/renderers";
     return route.rest[0] === "checkouts" && route.rest.length > 1 ? "#/settings/checkouts" : null;
   }

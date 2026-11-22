@@ -240,3 +240,27 @@ test("ran moves when a run of a source filling the role ends with something new,
   expect(sync.revision, "no press of its own").toBe(0);
   sourceRoles.forget();
 });
+
+test("a run of a source the list does not name yet counts once the list says it fills the role (ux31)", async () => {
+  // A fresh profile: the list is read and names nothing.
+  sourceRoles.take([]);
+  const { ports, send } = harness([]);
+  const sync = createRoleSyncs(ports).of("ticket-system");
+  expect(sync.ran).toBe(0);
+  await settle();
+
+  // *Load the Tidewater dataset*: its run ends before the shell reads the list again.
+  send(status("mock", 1, false));
+  expect(sync.ran, "not known to fill the role yet").toBe(0);
+  send(status("mock", 1, false));
+  sourceRoles.take([{ id: "mock", display_name: "Tidewater (mock)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] }]);
+  expect(sync.ran, "counted once, now that the list names it").toBe(1);
+  // A source the list names that fills another role is not counted, then or later.
+  send(status("wiki", 2, false));
+  sourceRoles.take([
+    { id: "mock", display_name: "Tidewater (mock)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+    { id: "wiki", display_name: "Wiki", roles: [{ role: "wiki", reads: [] }], role_misses: [] },
+  ]);
+  expect(sync.ran).toBe(1);
+  sourceRoles.forget();
+});

@@ -407,8 +407,8 @@ pub async fn set_run_embedded_html(
 /// *run* (ADR-0005: it is what serves a late caller that run's ending). It must
 /// not outlive the *source*: `knobas.sync_run` has no foreign key to
 /// `source_config`, so a source added again under a deleted one's id inherits a
-/// readable run history that is not its own, and the first-run wizard for the
-/// new source could be handed the deleted source's ending. Told after the
+/// readable run history that is not its own, and a page watching the new
+/// source (`watch_sync`) could be handed the deleted source's run. Told after the
 /// delete has committed, so a delete that failed leaves the scheduler's claim
 /// exactly as it was.
 ///
@@ -557,14 +557,17 @@ pub async fn credential_health<R: tauri::Runtime>(
 /// A source that is already syncing is not started twice -- the id of the run
 /// in flight comes back, so a double-clicked *Sync now* is harmless.
 ///
-/// # Why there are two of these
+/// # Why it takes no channel
 ///
 /// P3 asked for one command with an omittable `Option<Channel<SyncProgress>>`.
 /// Tauri 2 cannot express that: `Channel` implements `Serialize` and its own
 /// `CommandArg` but no `Deserialize`, and the only route from
 /// `Option<Channel<_>>` to `CommandArg` is the blanket impl over `Deserialize`,
 /// so the wrapped form does not compile. P3's documented fallback is therefore
-/// in force, and the evidence is pinned in `crates/knobas-app/tests/it/ipc.rs`.
+/// in force, and the evidence is pinned in `crates/knobas-app/tests/it/ipc.rs`:
+/// a caller that wants per-item progress attaches a channel with
+/// [`watch_sync`] (its twin with a required channel, `sync_now_with_progress`,
+/// went with the first-run wizard in ux31).
 ///
 /// # Errors
 /// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a source that
@@ -584,58 +587,13 @@ pub async fn sync_now<R: tauri::Runtime>(
         .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }
 
-/// [`sync_now`], reporting per-item progress on `progress`.
-///
-/// Same return value and same semantics -- it too returns as soon as the run is
-/// recorded. The channel is **required**; a caller that only needs to know a
-/// run started should call [`sync_now`] and listen to `sync:state`, because
-/// per-item progress goes on the channel and nowhere else (roadmap §4).
-///
-/// # Why this one asks for `FirstRun` and [`sync_now`] does not
-///
-/// This is the first-run wizard's command -- the only caller of it, and the
-/// only surface in knobas that draws a per-item bar over a sync. ADR-0005:
-/// *the wizard triggers `FirstRun` rather than `Manual`, so a first sync
-/// carries that spelling whoever starts it and the run log stops recording who
-/// won a race.* Two paths reach the scheduler when a source is added -- the
-/// wake inside [`add_source`] and this command -- and before ADR-0005 the log
-/// said `first_run` or `manual` depending on which of them got there first.
-///
-/// The spelling also **asks for something narrower**: the source's first sync,
-/// rather than a sync. If the wake's run is already over by the time this
-/// arrives, the scheduler hands back that run and its recorded ending instead
-/// of starting a second one over a corpus that is already mirrored -- which is
-/// what used to put *knobas mirrored 0 items* over a full first sync. A second
-/// call (the wizard's *Retry*) finds nothing left to be handed and gets a run.
-///
-/// [`sync_now`], and therefore *Sync now* in the sources view and the retry
-/// behind *Re-enter*, keeps `Manual`: those ask for work, not for news.
-///
-/// # Errors
-/// As [`sync_now`].
-#[tauri::command]
-pub async fn sync_now_with_progress<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    source_id: String,
-    progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
-) -> Result<i64, IpcError> {
-    let state = crate::sources::state(&app)?;
-    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(&app, progress))
-        as std::sync::Arc<dyn knobas_sync::ProgressSink>;
-    state
-        .scheduler
-        .trigger(&source_id, knobas_sync::SyncTrigger::FirstRun, Some(sink))
-        .await
-        .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
-}
-
 /// Watch the source's run in flight on `progress`, whoever started it (#1384).
 ///
 /// Per-item progress goes on a channel and nowhere else, and only a caller
 /// that started or joined a run has one: the source's settings page, opened
 /// on a scheduled run, had nothing but `sync:state`. This attaches the channel
-/// to the run in flight the way [`sync_now_with_progress`]'s second call joins
-/// one, and answers its run id; the channel then hears the run's remaining
+/// to the run in flight (the scheduler's join, which the first-run wizard's
+/// `sync_now_with_progress` used until ux31 removed both), and answers its run id; the channel then hears the run's remaining
 /// progress and its ending. On an idle source it answers `null`, starts
 /// nothing and sends nothing.
 ///
@@ -1074,8 +1032,8 @@ mod tests {
     /// this one line can be checked is here. It is worth checking because
     /// losing it is silent -- everything still compiles, the delete still
     /// works, and the cost only shows up when somebody adds a source back under
-    /// the deleted one's id and the first-run wizard describes a run that
-    /// belonged to the source they threw away. `Scheduler::forget_source` and
+    /// the deleted one's id and its page describes a run that belonged to
+    /// the source they threw away. `Scheduler::forget_source` and
     /// its own tests live in `knobas-sync`; this pins that it is *called*.
     #[test]
     fn deleting_a_source_tells_the_scheduler_to_forget_it() {
@@ -1085,7 +1043,7 @@ mod tests {
             body.contains("scheduler.forget_source("),
             "delete_source must tell the scheduler, or a source added again \
              under this id inherits the deleted one's run entry -- and with it \
-             the ending the first-run wizard is served (#119, ADR-0005)"
+             the run a watcher of the new source is served (#119, ADR-0005)"
         );
         assert_eq!(
             forget_arguments(&body),

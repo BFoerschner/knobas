@@ -84,11 +84,11 @@ test("#/entity/<id> has no kind on hand, so it is resolved", () => {
   expect(legacyAddress("#/entity/gitea:acme%2Fpayouts%23144")).toEqual({ resolve: "gitea:acme/payouts#144" });
 });
 
-test("a room, the sources view and the wizard land on pages that exist", () => {
+test("a room and the sources view land on pages that exist; the wizard's address is gone (ux31)", () => {
   expect(legacyAddress("#/ctx/all")).toEqual({ go: "#/tickets" });
   expect(legacyAddress("#/ctx/src:jira")).toEqual({ go: "#/tickets" });
   expect(legacyAddress("#/sources")).toEqual({ go: "#/settings/sources" });
-  expect(legacyAddress("#/first-run")).toEqual({ go: "#/settings/sources" });
+  expect(legacyAddress("#/first-run")).toBeNull();
   expect(legacyAddress("#/standup")).toEqual({ go: "#/time/standup" });
   expect(legacyAddress("#/start-work/jira:PAY-231")).toEqual({ go: "#/job/jira%3APAY-231" });
 });

@@ -383,11 +383,16 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
   }),
 ];
 
+/** The fixture's own sources, as against one *Add a source* stored since. */
+const SEEDED = new Set(FIXTURE_SOURCES.map((source) => source.id));
+
 /**
  * The sources as they answer: under `?fake-empty=wiki` no source holds pages, so Docs draws what it draws with no wiki
- * source set up, on a built app as on a dev server.
+ * source set up, on a built app as on a dev server. Under `?fake-empty=sources` there is none of the fixture's, only
+ * what *Add a source* stored since: a fresh profile, which opens on Tickets' zero-source state (ux31).
  */
 function answeredSources(): SourceSummary[] {
+  if (fakeEmpty("sources")) return FIXTURE_SOURCES.filter((source) => !SEEDED.has(source.id));
   if (!fakeEmpty("wiki")) return FIXTURE_SOURCES;
   return FIXTURE_SOURCES.map((source) => ({ ...source, roles: source.roles.filter((claim) => claim.role !== "wiki") }));
 }
@@ -720,12 +725,11 @@ export function handlers(): Handlers {
     preview_update_adapter: (args) => previewUpdate(args),
     update_adapter: (args) => updateOne(args),
     uninstall_adapter: (args) => uninstallOne(args),
-    credential_health: () => FIXTURE_SOURCES.map((source) => source.health),
-    sync_status: () => FIXTURE_SOURCES.map((source) => fakeStatus(source)),
+    credential_health: () => answeredSources().map((source) => source.health),
+    sync_status: () => answeredSources().map((source) => fakeStatus(source)),
     list_sync_runs: (args) => fakeRuns(args),
     db_stats: () => FIXTURE_DB_STATS,
     sync_now: () => 91,
-    sync_now_with_progress: () => 91,
     // No fixture source is running (`fakeStatus`), so there is no run to join
     // and the channel hears nothing, as on an idle source (#1384).
     watch_sync: () => null,

@@ -1813,8 +1813,9 @@ impl WeakScheduler {
 ///
 /// The flag is the *claim on the source's first sync*, and it is what makes
 /// **spent when taken** true wherever the taking happened. A caller that asks
-/// for [`SyncTrigger::FirstRun`] with a channel of its own -- in practice the
-/// first-run wizard, the only caller of `sync_now_with_progress` -- is asking
+/// for [`SyncTrigger::FirstRun`] with a channel of its own -- the first-run
+/// wizard's `sync_now_with_progress` until ux31 removed both; no app command
+/// asks this way today, and the rule stays for the engine's API -- is asking
 /// about *the source's first sync*, and it is entitled to that answer once.
 /// Being enrolled in the run while it is still going is that answer just as
 /// much as being served the run's recorded ending afterwards is, so both spend

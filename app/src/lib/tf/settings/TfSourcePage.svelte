@@ -599,8 +599,8 @@
 {#if live !== null}
   <div class="tf-stg-run" role="status">
     <!--
-      Two elements rather than one with an `undefined` value, as the wizard
-      draws it: a `<progress>` once given a value stays determinate.
+      Two elements rather than one with an `undefined` value: a `<progress>`
+      once given a value stays determinate.
     -->
     {#if walkOf === undefined}
       <progress></progress>

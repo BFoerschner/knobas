@@ -21,7 +21,7 @@
 //! Code's facts into `knobas_core::code_facts`, *Viewed* into
 //! `knobas_core::viewed`, drawing a link into `knobas_core::link`, an action
 //! item's ticket look-up into `crate::protocol`, a saved view's layout into
-//! `crate::ticket_views` and the first run into `crate::settings`.
+//! `crate::ticket_views` and the source count into `crate::settings`.
 //! `no_command_issues_its_own_statement` keeps it so. What is also settled:
 //! who am I (`identity_of`), the declared paths and the stored declarations
 //! are each derived once per command, through `identity_of`,

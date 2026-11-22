@@ -14,8 +14,9 @@
   rooms UI's `AddSource.svelte` did (contract §3: the backend orders the two
   writes), and only after a passing test of the draft as it stands.
 
-  Settings › Sources mounts it, and so does the first-run wizard's *Connect a
-  real system* (#1400), with the same ports: there is one add-source flow.
+  Settings › Sources mounts it, by its button or at `#/settings/sources/add`
+  (Tickets' empty state on a fresh profile, ux31; the first-run wizard that
+  also mounted it went then): there is one add-source flow.
 
   **`Esc` and × keep the adapter, the address and the name** (F-647, `newSourceDraft`), wherever it was opened, and *Cancel*
   ends them, as a source added does. The token, the password, the account and a test's answer are this dialog's own state and

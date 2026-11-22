@@ -513,6 +513,8 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * in.
  */
 function miniBoard(args: Record<string, unknown>) {
+  // A fresh profile (`?fake-empty=sources`, ux31) holds no ticket.
+  if (fakeEmpty("sources")) return { columns: [], sources: [], lanes: [], more_lanes: 0 };
   // Asked for a role, the board is its fillers' (#1299), as the command's:
   // a role nobody fills is an empty board, never every source's. The
   // command takes no source list, so none is read off `args`.
@@ -1013,8 +1015,9 @@ export interface FakeClaimer {
 }
 
 /**
- * `?fake-empty=docs,sets,assets,wiki`: those areas answer with nothing, to draw their empty states. `wiki` is the one
- * that takes a claim away: no source holds pages, as `sources.ts` answers it. Read per answer, as the address can change
+ * `?fake-empty=docs,sets,assets,wiki,sources`: those areas answer with nothing, to draw their empty states. `wiki` is the
+ * one that takes a claim away: no source holds pages, as `sources.ts` answers it. `sources` is a fresh profile: no
+ * source and no ticket, which Tickets draws as its zero-source state (ux31). Read per answer, as the address can change
  * under a dev server.
  */
 export function fakeEmpty(area: string): boolean {

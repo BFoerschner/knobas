@@ -1857,8 +1857,9 @@ swept: number, error: string | null, cursor_after: string | null, };
  *
  * - `schedule`: the scheduler's interval elapsed.
  * - `manual`: the user's *Sync now*.
- * - `first_run`: the first sync after a source was added, the one the
- *   first-run wizard draws a progress bar for.
+ * - `first_run`: the first sync after a source was added (the wake
+ *   after *Add a source*). The first-run wizard that drew a progress bar
+ *   over it went in ux31; a source's page watches it with `watch_sync`.
  * - `backfill`: a deliberate cursor-less run that widens the payload of
  *   items an incremental would never re-fetch (#32), and is **forbidden
  *   to reconcile**: ratified non-sweeping by Björn 2026-08-28, because

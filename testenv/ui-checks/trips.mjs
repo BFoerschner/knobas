@@ -1268,7 +1268,7 @@ const PAGES = [
 ];
 
 // Commands that change something. shell/dev/fake's reads, syncs' progress and heartbeats are left out.
-const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|complete_first_run$|sync_now$|sync_all$|clone_all$|site_fill$|site_sign_in_save$|site_sign_in_remove$)/;
+const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|sync_now$|sync_all$|clone_all$|site_fill$|site_sign_in_save$|site_sign_in_remove$)/;
 
 // Runs in the page, once per document, before the app.
 const LIB = String.raw`(() => {

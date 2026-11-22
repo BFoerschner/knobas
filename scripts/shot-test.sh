@@ -18,9 +18,9 @@ out=${TMPDIR:-/tmp}/knobas-shot-test
 failures=0
 fail() { echo "FAIL: $1" >&2; failures=$((failures + 1)); }
 
-line=$(SHOT_DRY_RUN=1 "$shot" 9 "$out" '?fake-first-run#/tickets')
+line=$(SHOT_DRY_RUN=1 "$shot" 9 "$out" '?fake-empty=sources#/tickets')
 case $line in
-    *"url=http://localhost:5309/?fake-ipc&fake-first-run#/tickets "*) ;;
+    *"url=http://localhost:5309/?fake-ipc&fake-empty=sources#/tickets "*) ;;
     *) fail "query switch: $line" ;;
 esac
 case $line in *"file=$out/tickets.png") ;; *) fail "plain route's file: $line" ;; esac
