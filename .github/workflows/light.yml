@@ -1,0 +1,239 @@
+# The light checks: what CI can answer in minutes without building a line of
+# Rust. They run on every push to `ux-polish` and `main` and on pull requests.
+#
+# Why this file exists (Björn, 2026-11-22): the full gate in `check.yml` stays
+# **manual only** by his ruling of 2026-09-05, because a full Rust + Svelte
+# build per commit was the whole cost when runners were billed, and a cold run
+# takes 15 to 40 minutes. knobas is a public repository now, and GitHub's
+# standard hosted runners are free for public repositories, so the checks that
+# need no cargo build can run on every push again. They catch the slips that
+# agents running only the front-end gates have shipped before:
+#
+# - an edited released migration (lessons-learned 12, ux27: a search and
+#   replace changed a comment in migration 0101, which would have stopped
+#   every ux26 database from starting; `knobas-db`'s checksum test is a Rust
+#   test, and nobody who touched it ran Rust);
+# - a changed released WIT world, which breaks every component built for it;
+# - rustfmt, the commonest red of the full gate (`justfile`, `gate`);
+# - the doc-list tables and conflict markers (`just docs-check`);
+# - the front end's own gate: svelte-check, the whole vitest suite, vite build.
+#
+# Nothing here replaces `check.yml` or `just check`: clippy, the Rust tests,
+# the IPC mirror and the test builds still run there, by hand, and the full
+# suite runs once per release (common rules, "Lighter checks per step").
+# Standard `ubuntu-latest` runners only; no larger runners (they are billed
+# even for public repositories).
+name: light
+
+on:
+  push:
+    branches: [ux-polish, main]
+  pull_request:
+
+# A later push to the same ref supersedes the run of an earlier one.
+concurrency:
+  group: light-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    # A pull request from `ux-polish` or `main` itself is already checked by
+    # its push run; running it again under the PR's merge ref doubles every
+    # push to the open draft PR for nothing.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      (github.head_ref != 'ux-polish' && github.head_ref != 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history and every tag: the freeze checks compare HEAD with the
+      # newest release tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # The release the frozen files are compared against. A pre-release tag
+      # is not on the branch: it is one commit off it that writes the version
+      # into the manifests (`v3.2.9-ux28` is `053ce699` plus that commit), so
+      # "the newest tag reachable from HEAD" would be the last full release
+      # and miss every pre-release since. Instead: the newest `v*` tag whose
+      # migrations and WIT worlds came from HEAD's own history, that is, are
+      # the same at the tag as at its merge base with HEAD. On `ux-polish`
+      # that is the newest ux pre-release; on `main` (behind `ux-polish`) the
+      # newest tag `main` has merged.
+      - id: base
+        name: Find the newest release this branch carries
+        run: |
+          set -euo pipefail
+          frozen=(crates/knobas-db/migrations crates/knobas-db/migrations.sha384
+                  ':(glob)crates/knobas-adapter-sdk/wit-*/**' crates/knobas-wasm-host/wit)
+          base=
+          for t in $(git tag -l 'v*' --sort=-creatordate); do
+            mb=$(git merge-base "$t" HEAD) || continue
+            if git diff --quiet "$mb" "$t" -- "${frozen[@]}"; then base=$t; break; fi
+          done
+          if [ -z "$base" ]; then
+            echo "::error::no v* tag's migrations and WIT worlds are in HEAD's history; nothing to compare the frozen files with"
+            exit 1
+          fi
+          echo "Comparing frozen files with $base ($(git rev-parse --short "$base"))"
+          echo "tag=$base" >> "$GITHUB_OUTPUT"
+
+      # sqlx checksums each migration file's bytes, and a database that ran a
+      # file refuses to start once the file changes (#2327). So a migration in
+      # the last release may never be modified, deleted or renamed, comments
+      # and whitespace included; a schema change is a new file.
+      - name: Released migrations are unchanged
+        env:
+          BASE: ${{ steps.base.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bad=$(git diff --name-status "$BASE" HEAD -- crates/knobas-db/migrations/ | grep -v '^A' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad"
+            echo "::error::a migration released in $BASE was modified, deleted or renamed (status M, D or R above). Restore it: git checkout $BASE -- <file>, and make the change in a new migration."
+            exit 1
+          fi
+          echo "No migration released in $BASE changed."
+
+      # `migrations.sha384` is what `knobas-db`'s Rust test compares against
+      # (`src/migrate.rs`). Its checksum is SHA-384 of the file's bytes, so
+      # the same comparison runs here without a build: every file has its
+      # line with the right checksum, every line names a file, and the
+      # released lines are still there unchanged (append only).
+      - name: The migration checksum list matches and only grows
+        env:
+          BASE: ${{ steps.base.outputs.tag }}
+        run: |
+          set -euo pipefail
+          list=crates/knobas-db/migrations.sha384
+          status=0
+          lines=$(grep -v '^#' "$list" | grep -v '^[[:space:]]*$')
+          dups=$(awk '{ print $1 }' <<< "$lines" | sort | uniq -d)
+          if [ -n "$dups" ]; then echo "::error file=$list::version listed twice: $dups"; status=1; fi
+          while read -r version sum file; do
+            if [ ! -f "crates/knobas-db/migrations/$file" ]; then
+              echo "::error file=$list::$version names $file, which is not in migrations/"; status=1
+            elif [ "${file%%_*}" != "$version" ]; then
+              echo "::error file=$list::$file is listed under version $version"; status=1
+            fi
+          done <<< "$lines"
+          for path in crates/knobas-db/migrations/*.sql; do
+            file=${path##*/}
+            want=$(awk -v f="$file" '$3 == f { print $2 }' <<< "$lines")
+            have=$(sha384sum "$path" | cut -d' ' -f1)
+            if [ -z "$want" ]; then
+              echo "::error file=$list::$file has no line. Append: ${file%%_*} $have $file"; status=1
+            elif [ "$want" != "$have" ]; then
+              echo "::error file=$path::$file's bytes are not the ones its line pins ($want, file has $have)"; status=1
+            fi
+          done
+          gone=$(comm -23 <(git show "$BASE:$list" | grep -v '^#' | grep -v '^[[:space:]]*$' | sort) <(sort <<< "$lines"))
+          if [ -n "$gone" ]; then
+            echo "$gone"
+            echo "::error file=$list::lines released in $BASE were changed or removed (above); the list is append only"
+            status=1
+          fi
+          [ "$status" -eq 0 ] && echo "$(wc -l <<< "$lines") migrations, each pinned and matching."
+          exit "$status"
+
+      # A released `knobas:adapter@X` world is frozen: components built for
+      # it must keep loading. The world in development lives in
+      # `crates/knobas-wasm-host/wit/adapter.wit`; when the next minor starts,
+      # the released one is copied to `crates/knobas-adapter-sdk/wit-X/`
+      # (1.5.0 moved there for 1.6.0). So worlds are matched by the version
+      # their `package` line declares, not by path: each version declared in
+      # the release tag must still be declared at HEAD, byte for byte. The
+      # unreleased 1.6.0 in `wit/` stays free to change until a tag has it.
+      - name: Released WIT worlds are unchanged
+        env:
+          BASE: ${{ steps.base.outputs.tag }}
+        run: |
+          set -euo pipefail
+          worlds() { git ls-tree -r --name-only "$1" -- crates/knobas-adapter-sdk crates/knobas-wasm-host/wit \
+                       | grep -E '^crates/knobas-adapter-sdk/wit-[^/]+/adapter\.wit$|^crates/knobas-wasm-host/wit/adapter\.wit$'; }
+          version() { git show "$1:$2" | sed -n 's/^package knobas:adapter@\([^;]*\);.*/\1/p' | head -n 1; }
+          status=0
+          for f in $(worlds HEAD); do
+            case $f in crates/knobas-adapter-sdk/wit-*)
+              dir=${f%/adapter.wit}; v=$(version HEAD "$f")
+              if [ "${dir##*/wit-}" != "$v" ]; then
+                echo "::error file=$f::$dir declares knobas:adapter@$v"; status=1
+              fi ;;
+            esac
+          done
+          for f in $(worlds "$BASE"); do
+            v=$(version "$BASE" "$f"); blob=$(git rev-parse "$BASE:$f")
+            found=
+            for g in $(worlds HEAD); do
+              [ "$(version HEAD "$g")" = "$v" ] || continue
+              found=1
+              if [ "$(git rev-parse "HEAD:$g")" != "$blob" ]; then
+                echo "::error file=$g::knobas:adapter@$v was released in $BASE ($f) and is frozen; $g differs. Restore it: git show $BASE:$f > $g"
+                status=1
+              fi
+            done
+            if [ -z "$found" ]; then
+              echo "::error::knobas:adapter@$v, released in $BASE as $f, is declared by no adapter.wit at HEAD"; status=1
+            fi
+          done
+          [ "$status" -eq 0 ] && echo "Every world released in $BASE is byte-identical at HEAD."
+          exit "$status"
+
+      # rustfmt needs no build. The toolchain comes from `rust-toolchain.toml`
+      # (as in check.yml), minimal profile plus rustfmt only: a bare `cargo
+      # fmt` would install everything that file lists, wasm target included.
+      - name: Rust formatting
+        run: |
+          set -euo pipefail
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal --component rustfmt --no-self-update
+          cargo "+$channel" fmt --all --check
+
+      # `just docs-check`: the hand-written tables against the tree (#1919)
+      # and the conflict-marker scan. Seconds, no node_modules.
+      - name: Doc lists and conflict markers
+        run: |
+          python3 -I scripts/doc-lists.py
+          scripts/conflict-markers.sh
+
+  front:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      (github.head_ref != 'ux-polish' && github.head_ref != 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Node 22 as in check.yml. The IPC bindings the app imports are checked
+      # in (`app/src/lib/ipc/generated/`), so nothing here needs cargo.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: npm ci
+        working-directory: app
+        run: npm ci
+
+      # The same commands as `just front-changed`, with the whole suite.
+      - name: svelte-check
+        working-directory: app
+        run: npx svelte-check --tsconfig ./tsconfig.json
+
+      # The standard runner has 4 cores; the suite's own cap is 4 workers.
+      - name: vitest (the whole suite)
+        working-directory: app
+        run: npx vitest run --maxWorkers 4
+
+      - name: vite build
+        working-directory: app
+        run: npm run build

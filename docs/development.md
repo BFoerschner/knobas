@@ -70,10 +70,19 @@ app at a server you manage. It has no effect on the tests.
 
 ## CI
 
-Every workflow in `.github/workflows/` runs on `workflow_dispatch` only.
-Nothing runs on push, pull request or tag, so `gh pr checks` reports no checks.
 The local `just check` is the gate. `docs/agents/working-model.md` says who
-runs it and when.
+runs it and when. Two workflows run on their own, and neither is the gate:
+
+- `light.yml`, on every push to `ux-polish` and `main` and on pull requests
+  (Björn, 2026-11-22): the checks that need no cargo build. Released
+  migrations and WIT worlds unchanged since the newest release tag, the
+  migration checksum list, `cargo fmt --check`, `just docs-check`'s two
+  checks, and svelte-check, the whole vitest suite and `vite build`. Its
+  header says why the full gate stays manual.
+- `windows.yml`, on pull requests that touch what its Windows-only tests
+  cover.
+
+Everything else runs on `workflow_dispatch` only:
 
 - `check.yml` runs the same `just check` on Linux. It does not restate the
   gate, so the two cannot drift.
