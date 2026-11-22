@@ -137,10 +137,14 @@ async fn the_reader_syncs_reads_and_is_refused_as_the_real_server_says() {
     assert_eq!(sent, 1, "a second sync reuses the token");
 
     // One password; the comment-required one, refused then read with one.
-    let (teamcity, rec) = &all["TeamCity service account"];
-    let (answer, sent) =
-        knobas_http::counted::counted(read(reader.as_ref(), teamcity, rec.folder.as_ref(), None))
-            .await;
+    let (teamcity, rec_tc) = &all["TeamCity service account"];
+    let (answer, sent) = knobas_http::counted::counted(read(
+        reader.as_ref(),
+        teamcity,
+        rec_tc.folder.as_ref(),
+        None,
+    ))
+    .await;
     assert!(matches!(answer, SecretAnswer::Value(_)));
     assert_eq!(sent, 1, "a read is one request");
     let (payout, rec) = &all["payout-service database user"];
@@ -159,16 +163,42 @@ async fn the_reader_syncs_reads_and_is_refused_as_the_real_server_says() {
         .await,
         SecretAnswer::Value(_)
     ));
+    // Björn, 2026-11-22: Pleasant's own KeePass client drops its connection at a password the account may not see,
+    // and asks for the password again. Here a refused read is an answer, not a fault: Pleasant's sentence in one
+    // request, the token kept, so the next readable password and the next sync sign in no more. In this test, not
+    // one of its own: the token is the process's, and a test signed in before this one would take its first sign-in.
     let (live, rec) = &all["PSP live secret key"];
-    match read(reader.as_ref(), live, rec.folder.as_ref(), None).await {
-        SecretAnswer::Refused { reason } => {
-            assert!(
-                reason.contains("does not have permission to view the password"),
-                "{reason}"
-            );
-        }
-        other => panic!("{other:?}"),
+    let (answer, sent) = knobas_http::counted::counted(reader.as_ref().read_secret(&SecretAsk {
+        entity: live.clone(),
+        which: SecretRef::Password,
+        comment: None,
+        folder: rec.folder.clone(),
+    }))
+    .await;
+    match answer {
+        Ok(SecretAnswer::Refused { reason }) => assert!(
+            reason.contains("does not have permission to view the password"),
+            "Pleasant's own sentence: {reason}"
+        ),
+        other => panic!("a refusal is an answer, not a fault: {other:?}"),
     }
+    assert_eq!(sent, 1, "the refusal is one request: no sign-in after it");
+    let (answer, sent) = knobas_http::counted::counted(read(
+        reader.as_ref(),
+        teamcity,
+        rec_tc.folder.as_ref(),
+        None,
+    ))
+    .await;
+    assert!(!value(answer).is_empty());
+    assert_eq!(
+        sent, 1,
+        "the next read rides the same token: no new sign-in"
+    );
+    let mut after = KeySink::default();
+    let (cursor, sent) = knobas_http::counted::counted(reader.sync(None, &mut after)).await;
+    cursor.unwrap();
+    assert_eq!(sent, 1, "a sync after the refusal reuses the token");
 
     // An attachment, read live.
     let (with_file, rec) = all
@@ -189,55 +219,6 @@ async fn the_reader_syncs_reads_and_is_refused_as_the_real_server_says() {
         }
         other => panic!("{other:?}"),
     }
-}
-
-/// Björn, 2026-11-22: Pleasant's own KeePass client drops its connection at a
-/// password the account may not see, and asks for the password again. Here a
-/// refused read is an answer, not a fault: Pleasant's sentence, the token
-/// kept, and the next readable password one request with no sign-in before it.
-#[tokio::test]
-#[ignore = "needs the Pleasant VM and its users: see the header"]
-async fn a_refused_password_keeps_the_sign_in_and_the_next_read_needs_none() {
-    let reader = source(
-        &env("KNOBAS_PLEASANT_READER_USER"),
-        &env("KNOBAS_PLEASANT_READER_PASSWORD"),
-    );
-    let mut sink = KeySink::default();
-    reader.sync(None, &mut sink).await.unwrap();
-    let all = entries(&sink);
-
-    let (live, rec) = &all["PSP live secret key"];
-    let (answer, sent) = knobas_http::counted::counted(reader.as_ref().read_secret(&SecretAsk {
-        entity: live.clone(),
-        which: SecretRef::Password,
-        comment: None,
-        folder: rec.folder.clone(),
-    }))
-    .await;
-    match answer {
-        Ok(SecretAnswer::Refused { reason }) => assert!(
-            reason.contains("does not have permission to view the password"),
-            "Pleasant's own sentence: {reason}"
-        ),
-        other => panic!("a refusal is an answer, not a fault: {other:?}"),
-    }
-    assert_eq!(sent, 1, "the refusal is one request: no sign-in after it");
-
-    let (teamcity, rec) = &all["TeamCity service account"];
-    let (answer, sent) =
-        knobas_http::counted::counted(read(reader.as_ref(), teamcity, rec.folder.as_ref(), None))
-            .await;
-    assert!(!value(answer).is_empty());
-    assert_eq!(
-        sent, 1,
-        "the next read rides the same token: no new sign-in"
-    );
-
-    // And the source is not left failing: its next sync is the tree alone.
-    let mut again = KeySink::default();
-    let (cursor, sent) = knobas_http::counted::counted(reader.sync(None, &mut again)).await;
-    cursor.unwrap();
-    assert_eq!(sent, 1, "a sync after the refusal reuses the token");
 }
 
 #[tokio::test]
