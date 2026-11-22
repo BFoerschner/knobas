@@ -5284,7 +5284,8 @@ async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
 
 /// Where `KNOBAS_JIRA_RECORD` names a folder, each of Jira's raw answers this
 /// case reads is written there as a fixture: the base URL masked to
-/// `https://jira.example`, e-mail addresses to `masked@example.invalid`.
+/// `https://jira.example`, e-mail addresses to `masked@example.invalid`, and
+/// a Gravatar URL's hash of the address to `masked`.
 async fn record(seeded: &Seeded, name: &str, value: &serde_json::Value) {
     let Ok(dir) = std::env::var("KNOBAS_JIRA_RECORD") else {
         return;
@@ -5295,6 +5296,17 @@ async fn record(seeded: &Seeded, name: &str, value: &serde_json::Value) {
     let masked = text
         .lines()
         .map(|line| {
+            let line = match line.find("gravatar.com/avatar/") {
+                Some(at) => {
+                    let start = at + "gravatar.com/avatar/".len();
+                    let end = line[start..]
+                        .find(|c: char| !c.is_ascii_hexdigit())
+                        .map_or(line.len(), |n| start + n);
+                    format!("{}masked{}", &line[..start], &line[end..])
+                }
+                None => line.to_owned(),
+            };
+            let line = line.as_str();
             if line.trim_start().starts_with("\"emailAddress\"") {
                 let indent = &line[..line.len() - line.trim_start().len()];
                 let comma = if line.trim_end().ends_with(',') {

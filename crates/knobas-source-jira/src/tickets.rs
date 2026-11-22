@@ -22,13 +22,15 @@
 //! `{"name": …}`). Anything else (arrays, cascading selects, rich text, the
 //! sprint and epic fields, time tracking) is left out, not listed read only.
 //!
-//! **Not witnessed on a real Jira** (no Jira ran where this was built;
-//! section 33 of the 2026-11-21 ruling): whether the assignable search with
-//! an empty `username` lists everyone, whether `expand=editmeta` on the
-//! issue read equals the `editmeta` resource for a user without *Edit
-//! Issues*, and the exact 400 body of an edit to a field off the screen. The
-//! mapping and the bodies are held to recorded answers in this module's
-//! tests and to `knobas-mockd`.
+//! **Witnessed on a real Jira 10.3.24** (2026-11-22, `live_jira_seeded`'s
+//! `a_tickets_fields_are_edited_and_read_back_on_a_real_jira`, its answers kept
+//! in `tests/golden/ticket-fields-*.json`): the screen read and its mapping,
+//! the assignable search with an empty `username` listing every assignable
+//! user, each named field and the due date written and read back, Jira's 400
+//! sentence for a field off the screen, and that `editmeta` covers only the
+//! fields a read asks for. **Not witnessed:** what `expand=editmeta` answers
+//! a user without *Edit Issues* (the seeded users all have it), and custom
+//! fields (the seeded screen has none of the kinds this module maps).
 
 use knobas_source::ticket::{
     self, FieldOption, FieldOptions, TicketField, TicketFieldKind, TicketFields,
@@ -551,6 +553,38 @@ mod tests {
             fields.get("labels").unwrap().value,
             json!(["sepa", "triage"])
         );
+    }
+
+    /// The answer a **real Jira 10.3.24** gave the fields read (recorded by
+    /// the live case on 2026-11-22, `tests/golden/ticket-fields-*.json`, the
+    /// host and e-mail addresses masked): the four named fields editable, the
+    /// due date its own, everything else on the screen (components, the epic
+    /// link, the description, versions, links, the reporter) left out.
+    #[test]
+    fn a_real_jiras_screen_reads_into_the_four_and_its_due_date() {
+        let answer: Value = serde_json::from_str(include_str!(
+            "../tests/golden/ticket-fields-issue-editmeta.json"
+        ))
+        .expect("the recorded answer");
+        let key = answer["key"].as_str().expect("a key");
+        let fields = map(key, &answer);
+        assert_eq!(ticket::fault(&fields), None);
+        let ids: Vec<&str> = fields.fields.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["title", "assignee", "priority", "labels", "duedate"]);
+        assert!(
+            fields.fields.iter().all(|f| f.readonly.is_none()),
+            "{fields:?}"
+        );
+        let TicketFieldKind::Choice { options } = &fields.get("priority").unwrap().kind else {
+            panic!("a choice")
+        };
+        assert!(options.iter().any(|o| o.value == "Highest"), "{options:?}");
+        let users: Vec<Value> = serde_json::from_str(include_str!(
+            "../tests/golden/ticket-fields-assignable-empty.json"
+        ))
+        .expect("the recorded people");
+        let found = people(&users);
+        assert!(found.complete && found.options.len() >= 5, "{found:?}");
     }
 
     /// A named field the screen leaves out is listed read only, with the
