@@ -49,6 +49,8 @@ const KINDS: { file: string; user: string; password: string; remember: string }[
   { file: "confluence.html", user: "#username-field", password: "#password-field", remember: "input[name=rememberMe]" },
   { file: "teamcity.html", user: "#username", password: "#password", remember: "input[name=remember]" },
   { file: "kuma.html", user: "input[autocomplete=username]", password: "input[type=password]", remember: "#remember" },
+  // An external adapter's site (knobas-adapter-xwiki, `knobas:adapter@1.6.0`).
+  { file: "xwiki.html", user: "#j_username", password: "#j_password", remember: "input[name=j_rememberme]" },
 ];
 
 for (const kind of KINDS) {

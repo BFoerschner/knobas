@@ -87,6 +87,10 @@ pub const INTERFACE_VERSION: Version = Version {
     patch: 0,
 };
 
+/// The minor of 1.x from which the host reads the descriptor's
+/// `web_sign_in` (ADR-0050, ux29).
+const WEB_SIGN_IN_FROM_MINOR: u64 = 6;
+
 /// The interface the component exports, without its version.
 const SOURCE_EXPORT: &str = "knobas:adapter/source";
 
@@ -337,6 +341,11 @@ impl WasmAdapter {
         let template = adapter
             .describe(&probe.adapter_kind, &probe.adapter_kind)
             .map_err(|e| LoadError::Descriptor(e.to_string()))?;
+        if let Some(pages) = &template.web_sign_in
+            && let Err(error) = knobas_source::web_sign_in::check(pages)
+        {
+            return Err(LoadError::Descriptor(format!("web_sign_in: {error}")));
+        }
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
@@ -406,6 +415,16 @@ impl WasmAdapter {
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.inner.refresh.is_some()
+    }
+
+    /// Whether the host reads the descriptor's `web_sign_in` (1.6.0,
+    /// ADR-0050): where the source's own website shows its sign-in form, so
+    /// a saved web sign-in is filled there by itself. A component built
+    /// against an older minor has it dropped, and its site offers *Fill
+    /// sign-in* alone.
+    #[must_use]
+    pub fn declares_web_sign_in(&self) -> bool {
+        self.inner.version.major > 1 || self.inner.version.minor >= WEB_SIGN_IN_FROM_MINOR
     }
 
     /// Whether the component exports a ticket's fields (1.6.0, ADR-0054).

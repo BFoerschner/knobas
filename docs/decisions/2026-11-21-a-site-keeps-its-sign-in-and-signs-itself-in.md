@@ -56,8 +56,15 @@ carries the next start, and a fill signs in again when it has run out.
 - **Not filled**: a one-time code ("⟨source⟩ asks for a code. That one is yours to type."), a change-password form, a
   form in a frame, a hidden password field, and a provider's page (the bar's chip: "not ⟨source⟩'s own address, so its
   sign-in is not filled").
-- **External adapters** declare the same `web_sign_in` in their descriptor's JSON (the WIT passes the descriptor as
-  JSON, so no WIT change); one that declares nothing gets *Fill sign-in* alone.
+- **External adapters** (Björn: "how am i supposed to open xwiki as nicely as confluence"): `knobas:adapter@1.6.0`
+  reads the same `web_sign_in` from a component's descriptor JSON (the descriptor crosses the WIT as its serde JSON, so
+  the key is the WIT's equivalent of a `web-sign-in-paths` field; the 1.6.0 `descriptor` doc names it). The host reads
+  it from a 1.6.0 component and drops it from one built against 1.0 to 1.5, which keeps *Fill sign-in* alone, and
+  refuses a malformed one at load. The component only says where its sign-in page is: the sign-in stays in the host's
+  keychain item and is typed by the host into its own web view, so the sandbox is unchanged. The SDK re-exports
+  `WebSignInPages`; the fixture declares `/login` in every build (the host test holds 1.6.0 to it and 1.5.0 and 1.3.0
+  to none), and an app test installs the 1.6.0 fixture and sees its declared page ask for the fill. The XWiki adapter
+  (`knobas-adapter-xwiki`) declares XWiki's login page, whose "Remember me" (`j_rememberme`) the fill ticks.
 - **Quitting** drops every view and waits up to 3 s for each site's browser process to end on Windows, when Chromium
   writes its cookie store.
 - **Found on the way (macOS 27)**: a site's view covered its own bar. The window's content view runs under the title
@@ -83,7 +90,7 @@ carries the next start, and a fill signs in again when it has run out.
 ## Tested
 
 Rust: the envelope (v2 reads, v3 round-trips byte for byte, a v3 only with a sign-in, Debug redacts), the descriptor's
-`web_sign_in::check` and battery clause 15, `sign_in.rs`'s origin refusals and one-try rule, the controller on the
+`web_sign_in::check` and battery clause 16, `sign_in.rs`'s origin refusals and one-try rule, the controller on the
 fake host (filled once per landing, refused off the own origin, in a redirect and with nothing saved, Kuma's form
 looked for while it draws), and a log capture through a whole fill with no line holding the password. Mutants: fill on
 any allowed origin, fill twice per landing; each fails its test. Front end: the fill script against each built-in

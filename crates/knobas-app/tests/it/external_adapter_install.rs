@@ -939,3 +939,94 @@ async fn a_preview_of_a_kind_already_installed_is_refused() {
         "an adapter of kind \"wasm-fixture\" is already installed",
     );
 }
+
+/// An external source's site signs itself in as a built-in's does (ADR-0050,
+/// ux29): the 1.6.0 fixture declares its sign-in page, a web sign-in saved in
+/// the source's keychain item is named in Settings, and a page loading there
+/// asks for the fill. The component never sees the sign-in.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_external_source_s_declared_sign_in_page_is_filled_by_itself() {
+    use knobas_secrets::{KeychainAccount, Secret, WebSignIn};
+    use knobas_site::fake::{FakeHost, FakeShell};
+    use knobas_site::host::ViewEvent;
+    use knobas_site::sites::{SiteInsets, install_host};
+
+    let (pool, _connector) = scratch("install-web-sign-in").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_fixture(&pool, &registry, store.path()).await;
+    let _ = add_source(
+        &pool,
+        &registry,
+        "surveys",
+        serde_json::json!({ "fault": "none" }),
+    )
+    .await;
+
+    let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> =
+        std::sync::Arc::new(knobas_secrets::MemoryStore::new());
+    secrets
+        .put(
+            &KeychainAccount::source("surveys"),
+            &Secret::just(knobas_source::AuthMethod::Pat, "a token"),
+        )
+        .unwrap();
+    knobas_app::site::write_sign_in(
+        &secrets,
+        "surveys",
+        Some(WebSignIn {
+            username: "harbour".to_owned(),
+            password: "a password the component never sees".to_owned(),
+        }),
+    )
+    .await
+    .unwrap();
+    knobas_app::site::set_open_inside(&pool, "surveys", true)
+        .await
+        .unwrap();
+
+    let shell = std::sync::Arc::new(FakeShell::new());
+    let host = FakeHost::default();
+    install_host(Box::new(host.clone()));
+    let sites = knobas_site::Sites::new(
+        shell.clone(),
+        knobas_site::Config {
+            profile_dir: store.path().to_path_buf(),
+            keychain_service: "dev.knobas.desktop.test".to_owned(),
+            downloads_dir: None,
+            devtools: false,
+            platform: knobas_site::keys::Platform::Windows,
+        },
+    );
+    let settings = knobas_app::site::settings_and_rules(
+        &pool,
+        Some(&sites),
+        Some(knobas_app::site::SignInReads {
+            secrets: &secrets,
+            registry: &registry,
+        }),
+    )
+    .await
+    .unwrap();
+    let surveys = settings.iter().find(|s| s.source == "surveys").unwrap();
+    assert_eq!(surveys.sign_in_user.as_deref(), Some("harbour"));
+
+    let login = "https://surveys.example/login";
+    sites
+        .open(
+            "surveys",
+            Some(login.to_owned()),
+            SiteInsets::default(),
+            false,
+        )
+        .await
+        .unwrap();
+    host.report("surveys", ViewEvent::Committed(login.to_owned()));
+    host.report("surveys", ViewEvent::Finished(login.to_owned()));
+    shell.drain();
+    assert_eq!(
+        *shell.sign_ins.lock().unwrap(),
+        ["surveys"],
+        "the declared page asks for the saved sign-in"
+    );
+}

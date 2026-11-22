@@ -59,4 +59,6 @@ Björn asked for a site to stay signed in across restarts and to sign itself in.
 - **One try.** A sign-in form still on the page after a fill means the site did not take it: the bar says so and nothing is filled by itself until a press. A one-time code is never typed, and a provider's page (an allowed origin) is the provider's.
 - **Quitting** drops every view and then waits up to 3 s for each site's browser process to end on Windows, which is when Chromium writes its cookie store (it commits only every 30 s before).
 
+**External adapters too** (Björn: "how am i supposed to open xwiki as nicely as confluence"): `knobas:adapter@1.6.0` reads the same `web_sign_in` from a component's descriptor JSON, so an external source's site is filled by itself on its declared page as a built-in's is. The component only declares where the page is; the sign-in stays in the host's keychain item and is typed by the host into its own web view, so the sandbox is unchanged. A component built against 1.0 to 1.5 has the key dropped and keeps *Fill sign-in*. The XWiki adapter (`knobas-adapter-xwiki`) declares `/xwiki/bin/login/XWiki/XWikiLogin` and its "Remember me" (`j_rememberme`) is ticked like the others.
+
 The exposure the original text names stands: a page on the source's own origin that imitates its form receives the password, as it would from a browser's password manager.

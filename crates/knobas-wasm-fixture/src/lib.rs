@@ -607,7 +607,10 @@ impl Adapter for Fixture {
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
             url_forms: Vec::new(),
-            web_sign_in: None,
+            // Its site's sign-in page (ADR-0050, ux29), declared by every
+            // build: the host reads it from a 1.6.0 component and drops it
+            // from the older ones, which keep *Fill sign-in* alone.
+            web_sign_in: Some(knobas_adapter_sdk::WebSignInPages::at(&["/login"])),
             code_pages: None,
         }
     }
