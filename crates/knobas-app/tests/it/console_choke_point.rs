@@ -28,6 +28,9 @@ const MAY_NAME_IT: &[&str] = &[
     // An update's installer (ADR-0052): a GUI program, started detached as knobas leaves, whose own progress window is
     // the point, as an editor's is for `checkout/open.rs`.
     "knobas-update/src/install/windows.rs",
+    // `build_fixture` (4201adf1): cargo building the WASM fixture when a test finds it missing or stale. Behind the
+    // `test-util` feature, so never in the app; the rest of the file names no program.
+    "knobas-wasm-host/src/lib.rs",
 ];
 
 /// `source` without its test module and its comment lines.
