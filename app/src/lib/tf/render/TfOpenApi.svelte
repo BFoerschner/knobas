@@ -31,6 +31,10 @@
   import { refTarget, type Opened, type Operation, type OpRow, type PathRef, type SpecIndex } from "../../render/openapi";
   import { groupsOf, haystack, matches, rowsOf, terms, type Row } from "../../render/openapi-view";
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
+  import { sniffSpec } from "../../render/openapi-sniff";
+
+  /** What the parse answers for a file with no version key at its top (`indexSpec`). */
+  const NOT_AT_TOP = "The file has no openapi or swagger version at its top.";
 
   let {
     text,
@@ -93,6 +97,11 @@
       if (answer.ok) {
         state.schemaBase = answer.index.schemaBase;
         state.schemas = new Set(answer.index.schemas);
+      } else if (answer.error === NOT_AT_TOP && sniffSpec(source)?.deep === true) {
+        // A version key found past the sniff's head was a guess, and the parse found none at the top: the file is
+        // no spec, so it is drawn as Source and nothing is said (ux31, section 12).
+        untrack(() => onsource)?.();
+        return;
       }
       opened = answer;
     });

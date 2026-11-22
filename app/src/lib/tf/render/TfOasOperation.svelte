@@ -70,7 +70,7 @@
   {#if op.description !== ""}{@render text(op.description)}{/if}
   <div class="tf-oas-meta">
     {#if op.operationId !== null}<code class="tf-oas-opid">{op.operationId}</code>{/if}
-    {#if op.security.length > 0}<span class="tf-dim">Needs {op.security.join(", or ")}</span>{/if}
+    {#if op.security.some((r) => r.length > 0)}<span class="tf-dim">Needs {op.security.filter((r) => r.length > 0).map((r) => r.join(" + ")).join(", or ")}</span>{/if}
     {#if oncopylink !== null}
       <span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => oncopylink?.(`${op.method} ${op.path}`, label)}>Copy link</button></span>
     {/if}

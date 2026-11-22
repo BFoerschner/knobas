@@ -117,6 +117,29 @@ test("a YAML file that is no spec stays Source and offers no OpenAPI", async () 
   expect(target.querySelector(".tf-oas")).toBeNull();
 });
 
+test("a spec whose version key is past the sniff's head opens as a spec (ux31)", async () => {
+  const schemas: Record<string, unknown> = {};
+  for (let i = 0; i < 1300; i++) schemas[`S${i}`] = { type: "object", description: "x".repeat(220) };
+  draw("api/sorted.json", JSON.stringify({ components: { schemas }, info: { title: "Sorted", version: "1" }, openapi: "3.0.3", paths: {} }));
+  await specDrawn();
+  expect(face()).toBe("Render as OpenAPI");
+  expect(text(target.querySelector(".tf-oas-title"))).toBe("Sorted");
+});
+
+test("a large file whose openapi key is nested is offered, parsed, and drawn as Source with no error (ux31)", async () => {
+  draw("package.json", JSON.stringify({ name: "pkg", config: { tools: { openapi: "3.0.0" } }, blob: "y".repeat(300 * 1024) }));
+  await vi.waitFor(
+    () => {
+      flushSync();
+      expect(face()).toBe("Render as Source");
+    },
+    { timeout: 10_000, interval: 20 },
+  );
+  await settle();
+  expect(target.querySelector(".tf-oas-bad")).toBeNull();
+  expect(target.querySelector(".tf-fileview .tf-code")).not.toBeNull();
+});
+
 test("a ref into another file is read at the spec's commit through the byte read, only when asked", async () => {
   const reads: string[] = [];
   draw("api/spec.yaml", SPLIT_31_YAML, async (entityId, path, commit) => {

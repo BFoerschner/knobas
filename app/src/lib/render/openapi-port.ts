@@ -7,7 +7,7 @@
  * only when a person opens it, one file at a time per ref, at most {@link FILE_CAP} bytes, at most
  * {@link IN_FLIGHT} reads at once, each file once per session. A ref to a URL is never read.
  */
-import type { Opened, Operation, PathRef, Resolved, SpecCall, SpecFiles } from "./openapi";
+import type { Opened, Operation, PageAnswer, PathRef, Resolved, Shape, SpecCall, SpecFiles, Uses } from "./openapi";
 
 export type { SpecCall };
 
@@ -122,6 +122,26 @@ export class SpecSession {
 
   operation(i: number): Promise<Operation | null> {
     return this.#engine(this.#id, { kind: "operation", i }) as Promise<Operation | null>;
+  }
+
+  /** What a schema holds, merged and told (`Shape`); refs inside its own file followed, others left as refs. */
+  shape(base: string, node: unknown): Promise<Shape> {
+    return this.#engine(this.#id, { kind: "shape", base, node }) as Promise<Shape>;
+  }
+
+  /** Which operations and schemas name schema `name`. */
+  uses(name: string): Promise<Uses> {
+    return this.#engine(this.#id, { kind: "uses", name }) as Promise<Uses>;
+  }
+
+  /** A value the schema allows. */
+  sample(base: string, node: unknown): Promise<unknown> {
+    return this.#engine(this.#id, { kind: "sample", base, node });
+  }
+
+  /** Everything a page's first screen draws, in one message (section 29). */
+  page(place: string): Promise<PageAnswer> {
+    return this.#engine(this.#id, { kind: "page", place }) as Promise<PageAnswer>;
   }
 
   /** A path item kept in another file: its operations, once that file is read. */
