@@ -1,0 +1,27 @@
+{
+ "name": "search-notes",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "Credentials": [
+   {
+    "Id": "{entry:pl-payout-db}",
+    "Name": "payout-service database user",
+    "Username": "payout_app",
+    "Url": "postgres://vm-db-01.tidewater.internal:5432/payments",
+    "Notes": "Read and write on payments.*, no DDL.\nThe service reads it from PAYOUT_DB_PASSWORD.",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Path": "Root/Tidewater/Payments/Prod/Databases/"
+   }
+  ],
+  "Groups": []
+ },
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v5/rest/search"
+ }
+}

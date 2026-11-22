@@ -1,0 +1,47 @@
+{
+ "name": "entry-native-totp",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {
+   "TimeOtp-Secret-Base32": "<base32 seed>"
+  },
+  "CustomApplicationFields": {},
+  "Attachments": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasViewEntryPasswordAccess": false,
+  "HasViewTOTPAccess": false,
+  "HasModifyTOTPAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{entry:pl-psp-dash}",
+  "Name": "PSP dashboard, finance sign-in",
+  "Username": "finance@tidewater.example",
+  "Password": null,
+  "Url": "https://dashboard.psp.example",
+  "Notes": "",
+  "GroupId": "{folder:Tidewater/Payments/Prod/PSP}",
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null,
+  "TOTPIssuer": "Tidewater PSP",
+  "TOTPSecret": "<base32 seed>",
+  "TOTPDigits": 6,
+  "TOTPPeriod": 30
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-psp-dash}"
+ }
+}

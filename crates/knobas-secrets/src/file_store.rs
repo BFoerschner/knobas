@@ -137,8 +137,20 @@ impl SecretStore for FileStore {
         })
     }
 
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        Ok(self.read()?.get(account.as_str()).cloned())
+    }
+
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        self.update(|items| {
+            items.insert(account.as_str().to_owned(), text.to_owned());
+            Ok(())
+        })
+    }
+
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         // Absent is success, as for every store; no file is not created for it.
+
         if !self.path.exists() {
             return Ok(());
         }

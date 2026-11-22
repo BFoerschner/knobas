@@ -35,6 +35,9 @@ test("a stored context is refused as a timer target, by id or by kind alone", ()
   expect(canBeTarget(candidate("ctx:5b1c0f1e", "ctx"))).toBe(false);
   expect(canBeTarget({ entityId: "ctx:5b1c0f1e" })).toBe(false);
   expect(canBeTarget({ entityId: "jira:PAY-231", kind: "ctx" })).toBe(false);
+  // A password entry or folder is timed against nothing (ADR-0056).
+  expect(canBeTarget({ entityId: "pw:e1", kind: "password_entry" })).toBe(false);
+  expect(canBeTarget({ entityId: "pw:f1", kind: "password_folder" })).toBe(false);
   // Case is not a way around it: `NOTE:` and `note:` address the same
   // namespace to every human reading them, and so do `CTX:` and `ctx:`.
   expect(canBeTarget({ entityId: "CTX:5b1c0f1e" })).toBe(false);

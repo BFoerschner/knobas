@@ -12,6 +12,9 @@ test("an entity of a known kind goes where its own page is", () => {
   expect(entityAddress("page", "confluence:42")).toBe("#/page/confluence%3A42");
   expect(entityAddress("asset", "asset:9f1c")).toBe("#/asset/asset%3A9f1c");
   expect(entityAddress("route", "route:9a1b")).toBe("#/route/route%3A9a1b");
+  // The Passwords page (ADR-0056), never `#/item`, whose page draws the payload.
+  expect(entityAddress("password_entry", "pw:e1")).toBe("#/passwords/entry/pw%3Ae1");
+  expect(entityAddress("password_folder", "pw:f1")).toBe("#/passwords/in/pw%3Af1");
 });
 
 test("a ticket opens its ticket page by its entity id, so a key two sources hold opens the one it names (#1476, #1977, spec #2227)", () => {

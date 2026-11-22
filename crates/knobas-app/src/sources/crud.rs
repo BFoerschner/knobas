@@ -310,6 +310,7 @@ pub async fn add(
             config: input.config,
             sync_interval_secs: interval,
             enabled: input.enabled,
+            sync_by_hand: input.sync_by_hand.unwrap_or(false),
         },
     )
     .await;
@@ -425,6 +426,7 @@ pub async fn list(
             base_url: row.base_url,
             enabled: row.enabled,
             sync_interval_secs: row.sync_interval_secs,
+            sync_by_hand: row.sync_by_hand,
             config: row.config,
             health: row.health,
         });
@@ -482,6 +484,7 @@ pub async fn update(
             base_url: patch.base_url,
             config: patch.config,
             sync_interval_secs: patch.sync_interval_secs,
+            sync_by_hand: patch.sync_by_hand,
             enabled: patch.enabled,
         },
     )
@@ -520,7 +523,15 @@ pub async fn delete(
     // Its folder renders go with it (ADR-0044).
     crate::folder_render::runs::Runs::global().forget_source(id);
     knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
+    // Its one-time-code keys go with its credential (ADR-0056), so kept
+    // entries can no longer make a code. Warned about rather than raised: the
+    // source is gone either way, and a store that keeps no text items (a
+    // test's) has none to delete.
+    if let Err(error) = knobas_secrets::otp::spawn::delete(secrets, id).await {
+        tracing::warn!(source = id, %error, "the source's one-time-code keys could not be deleted");
+    }
     // Settings that hang off the id go with it (#2440), last: a failure here
+
     // leaves the keychain item already gone, and at worst a row that keeps a
     // source added again under the id with embeds off, the safe side.
     crate::docs::forget_run_embedded_html(pool, id).await?;
@@ -1804,6 +1815,7 @@ async fn summarize(
         base_url: row.base_url,
         enabled: row.enabled,
         sync_interval_secs: row.sync_interval_secs,
+        sync_by_hand: row.sync_by_hand,
         config: row.config,
         health: row.health,
     })

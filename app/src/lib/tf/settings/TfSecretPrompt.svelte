@@ -25,9 +25,10 @@
     onhealth,
     onclose,
     onstarted = () => {},
+    passwords = false,
     onstopped = () => {},
   }: {
-    source: Pick<SourceSummary, "id" | "display_name" | "auth_kind">;
+    source: Pick<SourceSummary, "id" | "display_name" | "auth_kind"> & Partial<Pick<SourceSummary, "sync_by_hand">>;
     health: CredentialHealth | null;
     /** The adapter takes a second credential (Uptime Kuma's account). */
     acceptsAccount: boolean;
@@ -39,6 +40,8 @@
     onclose: () => void;
     onstarted?: () => void;
     onstopped?: () => void;
+    /** A password manager's credential (ADR-0056): the dialog says it changes nothing at the server. */
+    passwords?: boolean;
   } = $props();
 
   const name = $derived(source.display_name || source.id);
@@ -70,7 +73,13 @@
         return;
       }
       onclose();
+      // A source by hand is asked nothing that nobody pressed (ADR-0056): signing in is not a press for a sync.
+      if (source.sync_by_hand) {
+        push({ text: `Signed in to ${name}. It was not synced: it syncs only when you press Sync now.` });
+        return;
+      }
       push({ text: `Signed in to ${name}. Syncing now.` });
+
       onstarted();
       await ports.syncNow(source.id).catch(() => onstopped());
     } catch (cause) {
@@ -102,6 +111,8 @@
     </form>
     {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
     {#if secretError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{secretError}</p>{/if}
+    {#if passwords}<p class="tf-dlg-note">This tells knobas the new password. It does not change it at the server.</p>{/if}
+
     <p class="tf-dlg-note">
       {noneStored ? "" : `${stored}. `}Writes waiting for {name} go out once it signs in.{acceptsAccount && !noneStored
         ? " A field left empty keeps what is stored."

@@ -36,6 +36,8 @@ import { prHash } from "../tf/pr/pr";
 import { compareHash, repoHash } from "../tf/repo/repo";
 import { draftOf, withHandRule } from "../tf/sets/apply";
 import { jobHash } from "../tf/route";
+import { itemHash } from "../tf/job/job";
+import { ENTRY_KIND, isPasswordKind } from "../tf/passwords/kinds";
 import { keyOf } from "../time/format";
 import type { LauncherRow } from "./rows";
 
@@ -93,7 +95,12 @@ export type SheetEffect =
   /** *Favourite* (`on`) or *Unfavourite* the subject (#2428); the empty box redraws. */
   | { kind: "favourite"; target: FavouriteTarget; on: boolean }
   /** *Assign key…* on a saved list (#2429): the panel that binds the chord which opens it from anywhere. */
-  | { kind: "bind" };
+  | { kind: "bind" }
+  /**
+   * A password entry's copy (ADR-0056), through the Passwords page's own commands: the password (an entry that asks a
+   * usage comment or an approval opens instead), the username, or the one-time code.
+   */
+  | { kind: "pw-copy"; what: "password" | "username" | "code" };
 
 export interface SheetAction {
   /** Stable per kind: what an action key (#2429) is kept under. */
@@ -277,8 +284,31 @@ function inboxActions(item: InboxItem, ops: readonly string[], now: Date): Sheet
   return actions;
 }
 
+/**
+ * A password entry's or folder's rows (ADR-0056, the decisions' section 26): where it opens, the entry's three copies
+ * in the page's words, *Favourite*, and *Copy title*. Never the pair or a set: an entry is linked to nothing and timed
+ * against nothing.
+ */
+function passwordActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: SheetContext): SheetAction[] {
+  const { entityId: id, entityKind: kind, title } = subject;
+  const hash = itemHash({ entity_id: id, kind });
+  const actions: SheetAction[] =
+    kind === ENTRY_KIND
+      ? [
+          { id: "pw-password", label: "Copy password", detail: "It clears in 30 seconds; one that asks a comment opens instead", does: { kind: "pw-copy", what: "password" } },
+          { id: "pw-username", label: "Copy username", detail: "From the last sync; nothing is read", does: { kind: "pw-copy", what: "username" } },
+          { id: "pw-code", label: "Copy one-time code", detail: "Made on this machine; works offline", does: { kind: "pw-copy", what: "code" } },
+          { id: "open", label: "Open", detail: "The entry on the Passwords page", does: { kind: "go", hash } },
+        ]
+      : [{ id: "open", label: "Open", detail: "The folder on the Passwords page", does: { kind: "go", hash } }];
+  actions.push(favouriteAction({ entity: id }, ctx));
+  actions.push({ id: "copy", label: "Copy title", detail: title, does: { kind: "copy", text: title, said: `Copied ${title}` } });
+  return actions;
+}
+
 function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: SheetContext): SheetAction[] {
   const { entityId: id, entityKind: kind, title } = subject;
+  if (isPasswordKind(kind)) return passwordActions(subject, ctx);
   const key = keyOf(id);
   const actions: SheetAction[] = [];
   const go = (hash: string): SheetEffect => ({ kind: "go", hash });

@@ -234,3 +234,16 @@ test("a key is kept per kind: an entity's own kind, else the row's", () => {
   expect(kindOf({ kind: "list", id: "l", label: "L", text: "#t", refusal: null })).toBe("list");
   expect(kindOf({ kind: "view", id: "v", title: "V" })).toBe("view");
 });
+
+test("a password entry: its three copies, Open, Favourite and Copy title; never the link, a set or the timer (ADR-0056)", () => {
+  const entry = entity("password_entry", "pw:e1", "payout db");
+  const sets = [{ id: "s1", name: "Payout stack", description: "", rules: [], members: [] } as unknown as LinkSetRow];
+  expect(ids(entry, { ...CTX, sets })).toEqual(["pw-password", "pw-username", "pw-code", "open", "fav", "copy"]);
+  const actions = sheetActions(entry, CTX);
+  expect(actions.slice(0, 3).map((a) => a.label)).toEqual(["Copy password", "Copy username", "Copy one-time code"]);
+  expect(actions.find((a) => a.id === "pw-password")?.does).toEqual({ kind: "pw-copy", what: "password" });
+  expect(actions.find((a) => a.id === "open")?.does).toEqual({ kind: "go", hash: "#/passwords/entry/pw%3Ae1" });
+  const folder = entity("password_folder", "pw:f1", "Payments");
+  expect(ids(folder, { ...CTX, sets })).toEqual(["open", "fav", "copy"]);
+  expect(sheetActions(folder, CTX)[0]?.does).toEqual({ kind: "go", hash: "#/passwords/in/pw%3Af1" });
+});

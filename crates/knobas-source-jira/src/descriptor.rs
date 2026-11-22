@@ -60,6 +60,8 @@ pub fn descriptor_template() -> SourceDescriptor {
             "/login.jsp",
         ])),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec![
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_TRANSITION.to_owned(),
@@ -83,6 +85,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 // not what Jira claims).
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             },
             KindInfo {
                 id: crate::KIND_JIRA_VIEW.to_owned(),
@@ -96,6 +99,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 // A view's id is not an issue key: it is read with the
                 // boards, and `refresh` answers it not offered (#2146).
                 refreshes: false,
+                title_stays_in_mirror: false,
             },
         ],
         config_schema: config_schema(),

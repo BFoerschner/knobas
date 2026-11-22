@@ -44,6 +44,7 @@ fn source(id: &str, base_url: &str, token: &str) -> NewSource {
         secret: SecretInput::of(token),
         sync_interval_secs: 300,
         enabled: true,
+        sync_by_hand: None,
     }
 }
 

@@ -1,0 +1,13 @@
+{
+ "name": "write-create",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": "{entry:pl-wifi}",
+ "request": {
+  "as": "writer",
+  "method": "POST",
+  "path": "/api/v5/rest/entries"
+ }
+}

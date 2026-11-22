@@ -472,6 +472,8 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         // Every op these tests queue, and no other: the flush refuses one the
         // source does not declare before handing it over (#1950), and
         // `an_op_the_source_does_not_declare_is_refused_without_reaching_it`
@@ -497,6 +499,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
             monogram: "TI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
         payload_paths: vec![
@@ -1036,6 +1039,7 @@ async fn harness() -> Harness {
             config: serde_json::json!({}),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

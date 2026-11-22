@@ -84,6 +84,7 @@ pub fn kind() -> KindInfo {
         monogram: "BT".into(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 

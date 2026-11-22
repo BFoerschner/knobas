@@ -619,6 +619,7 @@ test("a restore puts the sources it brought in the health store the status bar f
     base_url: "https://jira.tidewater.example",
     enabled: true,
     sync_interval_secs: 300,
+    sync_by_hand: false,
     config: {},
     health: { source_id: "jira", state: "unknown", checked_at: null, detail: null, secret_expires_at: null },
     last_run: null,
@@ -796,7 +797,8 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(34);
+  // 34, and the Passwords page's eleven (ADR-0056).
+  expect(rows).toHaveLength(45);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",

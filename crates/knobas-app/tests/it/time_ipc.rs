@@ -2034,6 +2034,7 @@ async fn configure_jira(pool: &PgPool, username: &str) {
             config: serde_json::json!({ "username": username }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -2952,6 +2953,7 @@ async fn configure(pool: &PgPool, id: &str, adapter_kind: &str) {
             config: serde_json::json!({ "username": "mara.lindqvist" }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

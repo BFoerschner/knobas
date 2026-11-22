@@ -79,6 +79,8 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
         url_forms: Vec::new(),
         web_sign_in: template.web_sign_in.clone(),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: if writes { write_ops() } else { Vec::new() },
         ..template
     }
@@ -138,6 +140,8 @@ pub fn descriptor_template() -> SourceDescriptor {
         // A single-page app: its sign-in dialog stands on whatever page loads (ADR-0050).
         web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::any_page()),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),
@@ -161,6 +165,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             // see `crate::cursor`.
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: config_schema(),
         payload_paths: payload_paths(),

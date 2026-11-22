@@ -66,6 +66,8 @@ impl Source for Monitors {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: self.kind.to_owned(),
@@ -74,6 +76,7 @@ impl Source for Monitors {
                 monogram: "MO".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![knobas_source::KindPaths {

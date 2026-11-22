@@ -1,0 +1,62 @@
+{
+  "Id": "00000000-0000-0000-0000-000000000000", "Name": "Root", "ParentId": null,
+  "HasModifyEntriesAccess": true, "Credentials": [],
+  "CommentPrompts": {"AskForCommentOnViewPassword": false, "AskForCommentOnViewOffline": false,
+    "AskForCommentOnModifyEntries": false, "AskForCommentOnMoveEntries": false,
+    "AskForCommentOnMoveFolders": false, "AskForCommentOnModifyFolders": false},
+  "Children": [{
+    "Id": "6f9b1c3e-0001-4a10-9000-000000000001", "Name": "Tidewater",
+    "ParentId": "00000000-0000-0000-0000-000000000000", "HasModifyEntriesAccess": true,
+    "Credentials": [],
+    "Children": [{
+      "Id": "6f9b1c3e-0002-4a10-9000-000000000002", "Name": "Payments",
+      "ParentId": "6f9b1c3e-0001-4a10-9000-000000000001", "HasModifyEntriesAccess": true,
+      "Credentials": [],
+      "Children": [{
+        "Id": "6f9b1c3e-0003-4a10-9000-000000000003", "Name": "Databases",
+        "ParentId": "6f9b1c3e-0002-4a10-9000-000000000002", "HasModifyEntriesAccess": true,
+        "CommentPrompts": {"AskForCommentOnViewPassword": true, "AskForCommentOnModifyEntries": true},
+        "Children": [],
+        "Credentials": [{
+          "Id": "a1b2c3d4-0001-4b00-8000-000000000001", "Name": "payout-service database user",
+          "Username": "payout_svc", "Password": null, "Url": "pg-pay-01.tidewater.internal:5432",
+          "Notes": "Rotated quarterly.", "GroupId": "6f9b1c3e-0003-4a10-9000-000000000003",
+          "Created": "2026-03-02T09:00:00", "Modified": "2026-08-30T10:22:00", "Expires": "2027-01-31T00:00:00",
+          "HasModifyEntriesAccess": true, "HasViewEntryContentsAccess": true, "Tags": [],
+          "CustomApplicationFields": {},
+          "CustomUserFields": {"Port": "5432", "Recovery PIN": null,
+            "TimeOtp-Secret-Base32": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"},
+          "CommentPrompts": {"AskForCommentOnViewPassword": true, "AskForCommentOnModifyEntries": true}
+        }]
+      }]
+    }, {
+      "Id": "6f9b1c3e-0004-4a10-9000-000000000004", "Name": "Platform",
+      "ParentId": "6f9b1c3e-0001-4a10-9000-000000000001", "HasModifyEntriesAccess": false,
+      "Children": [],
+      "Credentials": [{
+        "Id": "a1b2c3d4-0002-4b00-8000-000000000002", "Name": "wiki admin", "Username": "admin",
+        "Password": null, "Url": "https://wiki.tidewater.example", "Notes": null,
+        "GroupId": "6f9b1c3e-0004-4a10-9000-000000000004", "Modified": "2026-07-01T08:00:00",
+        "HasModifyEntriesAccess": false, "HasViewEntryContentsAccess": true,
+        "CustomUserFields": {"TOTP Seed": "KRSXG5CTMVRXEZLUKRSXG5CTMVRXEZLU", "TOTP Settings": "30;6"}
+      }, {
+        "Id": "a1b2c3d4-0003-4b00-8000-000000000003", "Name": "grafana service account",
+        "Username": "grafana", "Url": "https://grafana.tidewater.example",
+        "GroupId": "6f9b1c3e-0004-4a10-9000-000000000004", "Modified": "2026-07-02T08:00:00",
+        "HasViewEntryContentsAccess": true,
+        "CustomUserFields": {"otp": "key=MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U&step=30&size=6"}
+      }, {
+        "Id": "a1b2c3d4-0004-4b00-8000-000000000004", "Name": "status page",
+        "Username": "ops", "Url": "https://status.tidewater.example",
+        "GroupId": "6f9b1c3e-0004-4a10-9000-000000000004", "Modified": "2026-07-03T08:00:00",
+        "HasViewEntryContentsAccess": true,
+        "CustomUserFields": {"otp": "otpauth://totp/Tidewater:ops?secret=ONSWG4TFORXXK4TFON2GK43U&issuer=Tidewater&period=30&digits=6"}
+      }, {
+        "Id": "a1b2c3d4-0005-4b00-8000-000000000005", "Name": "steam account",
+        "Username": "ops-steam", "GroupId": "6f9b1c3e-0004-4a10-9000-000000000004",
+        "HasViewEntryContentsAccess": false,
+        "CustomUserFields": {"otp": "otpauth://totp/Steam:ops?secret=ONSWG4TFORXXK4TF&encoder=steam"}
+      }]
+    }]
+  }]
+}

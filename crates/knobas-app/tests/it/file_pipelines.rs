@@ -182,6 +182,7 @@ async fn fixture() -> Fixture {
             secret: SecretInput::of("pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await

@@ -212,6 +212,11 @@ pub struct NewSource {
     pub config: serde_json::Value,
     pub secret: SecretInput,
     pub sync_interval_secs: u32,
+    /// Sync only when a person presses *Sync now* (ADR-0056). The form sends
+    /// the adapter's `by_hand_by_default`; absent means a schedule.
+    #[serde(default)]
+    #[ts(optional)]
+    pub sync_by_hand: Option<bool>,
     pub enabled: bool,
 }
 
@@ -231,6 +236,10 @@ pub struct SourcePatch {
     pub config: Option<serde_json::Value>,
     #[ts(optional = nullable)]
     pub sync_interval_secs: Option<u32>,
+    /// `true` takes the source out of the schedule; `false` puts it back on
+    /// its interval (ADR-0056).
+    #[ts(optional = nullable)]
+    pub sync_by_hand: Option<bool>,
     #[ts(optional = nullable)]
     pub enabled: Option<bool>,
 }
@@ -365,9 +374,13 @@ pub struct SourceSummary {
     pub base_url: String,
     pub enabled: bool,
     pub sync_interval_secs: u32,
+    /// The source syncs only when a person presses *Sync now* (ADR-0056); its
+    /// `next_run_at` is then `None`.
+    pub sync_by_hand: bool,
     #[ts(type = "unknown")]
     pub config: serde_json::Value,
     pub health: knobas_sync::config::CredentialHealth,
+
     pub last_run: Option<knobas_sync::run_log::SyncRunRow>,
     /// When the scheduler runs this source next; `None` when the source is
     /// disabled, running, or needs a human.
@@ -917,6 +930,7 @@ mod tests {
             display_name: "S".into(),
             base_url: String::new(),
             enabled: true,
+            sync_by_hand: false,
             sync_interval_secs: 300,
             config: serde_json::json!({}),
             health: knobas_sync::config::CredentialHealth {

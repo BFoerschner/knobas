@@ -1,0 +1,45 @@
+{
+ "name": "entry-plain",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {},
+  "CustomApplicationFields": {},
+  "Attachments": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasViewEntryPasswordAccess": true,
+  "HasViewTOTPAccess": true,
+  "HasModifyTOTPAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{entry:pl-teamcity}",
+  "Name": "TeamCity service account",
+  "Username": "svc-knobas",
+  "Password": null,
+  "Url": "https://ci.tidewater.internal",
+  "Notes": "",
+  "GroupId": "{folder:Tidewater/Platform/CI/Service accounts}",
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null,
+  "TOTPIssuer": null,
+  "TOTPSecret": null,
+  "TOTPDigits": 0,
+  "TOTPPeriod": 0
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-teamcity}"
+ }
+}

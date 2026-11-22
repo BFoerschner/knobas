@@ -14,6 +14,7 @@ import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelt
 import { protocolDayOf } from "../../standup/protocol";
 import { keyOf, minutesLabel } from "../../time/format";
 import { CI } from "../roles.svelte";
+import { ENTRY_KIND, FOLDER_KIND } from "../passwords/kinds";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
 export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
@@ -279,6 +280,11 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
       return `#/asset/${id}`;
     case "monitor":
       return `#/monitors/at/${id}`;
+    // The Passwords page (ADR-0056), never `#/item`, whose page draws the payload.
+    case ENTRY_KIND:
+      return `#/passwords/entry/${id}`;
+    case FOLDER_KIND:
+      return `#/passwords/in/${id}`;
     case "jira_view":
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     // A pipeline under the shell's word (#2422, the launcher's kind) or the

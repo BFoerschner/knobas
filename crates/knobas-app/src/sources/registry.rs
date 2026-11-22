@@ -112,6 +112,16 @@ const ADAPTERS: &[Adapter] = &[
         doc_writes: None,
         tree: None,
     },
+    // The Passwords role's first source (ADR-0056).
+    Adapter {
+        kind: "pleasant",
+        template: knobas_source_pleasant::descriptor_template,
+        build: knobas_source_pleasant::build,
+        doc: None,
+        doc_editor: None,
+        doc_writes: None,
+        tree: None,
+    },
 ];
 
 /// Turns stored configurations into live adapters.

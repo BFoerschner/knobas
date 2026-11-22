@@ -125,6 +125,7 @@ function summary(id = "jira"): SourceSummary {
     base_url: "https://jira.tidewater.example",
     enabled: true,
     sync_interval_secs: 900,
+    sync_by_hand: false,
     config: {},
     auth_kind: "Pat",
     health: { source_id: id, state: "ok", checked_at: null, detail: null, secret_expires_at: null },
@@ -865,7 +866,7 @@ test("the wizard says nothing of rooms or spec sections, and names the roles it 
   button("Next")!.click();
   flushSync();
   seen.push(text());
-  expect(text()).toContain("A ticket system, code host, CI, wiki or monitoring");
+  expect(text()).toContain("A ticket system, code host, CI, wiki, monitoring or password manager");
   for (const page of seen) {
     expect(page).not.toMatch(/room/i);
     expect(page).not.toContain("§");

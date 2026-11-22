@@ -224,6 +224,7 @@ async fn app_with(
             // is one it asked for.
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

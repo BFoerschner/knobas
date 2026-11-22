@@ -182,6 +182,7 @@ fn kind(id: &str) -> KindInfo {
         monogram: "T".to_owned(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -203,6 +204,8 @@ fn tracker_descriptor() -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["comment".to_owned(), "transition".to_owned()],
         entity_kinds: vec![kind("ticket")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -238,6 +241,8 @@ fn forge_descriptor() -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: Vec::new(),
         entity_kinds: vec![kind("commit")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -512,6 +517,7 @@ async fn harness(name: &str) -> Harness {
                 config: serde_json::json!({ "username": ME }),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

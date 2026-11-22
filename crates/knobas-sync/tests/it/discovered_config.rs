@@ -101,6 +101,8 @@ impl Source for Fake {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -109,6 +111,7 @@ impl Source for Fake {
                 monogram: "TI".to_owned(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({"type": "object", "properties": {
                 "epic_link_field": {"type": ["string", "null"]},
@@ -238,6 +241,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
             config: stored,
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

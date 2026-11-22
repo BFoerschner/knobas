@@ -77,6 +77,8 @@ impl Source for Fake {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: vec!["comment".to_owned()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -85,6 +87,7 @@ impl Source for Fake {
                 monogram: "TI".to_owned(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({"type": "object", "properties": {}}),
             // Nothing declared: this stand-in has no payload shapes to
@@ -300,6 +303,7 @@ async fn sources(ids: &[String]) -> Vec<Harness> {
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

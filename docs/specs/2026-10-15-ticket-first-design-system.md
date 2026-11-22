@@ -353,6 +353,20 @@ The card (`TfJobCard.svelte`, `job.css`) is the same markup in both moods (spec 
 - **The width handle** is the page's sidebar edge (*A sidebar's width is the reader's*, under Layout) on the card's right: dragging sets the card between 240 and 720 px (and at most 60 % of the page), ←/→ step 16 px, and a double click or Enter fits the card so nothing on it wraps, where every other sidebar returns to its default. The width is browser state (`knobas.ticket.side`, default 320 px). Below 900 px the edge is gone. Amended 2026-11-16 (the sidebar-resize pass): it was a 6 px handle of the card's own that darkened the card's edge.
 - **The fold.** The reading column's Attachments panel is a native `<details class="tf-tkfold">`, closed by default. Its summary is the heading, a count badge and a chevron (`.tf-tkmark`) that points right while closed and turns down when open, in 120 ms. An attachment row is one button drawn as the row, not a `.tf-btn`, that opens the attachment preview; the row has no *Open* or *Download* (#2415).
 
+### The Passwords page's code and comb
+
+Added 2026-11-22 (ADR-0056, `passwords.css`).
+
+- **The one-time code** (`.tf-pw-code`) is the page's one loud thing: the job key's type at the same display size,
+  weight 800, tabular figures, in two groups of three with a gap between them, read off the screen and typed
+  somewhere else. Where it is withheld it is six dots of the same height, so nothing moves when it arrives.
+- **The comb** (`.tf-pw-comb`, `TfPwComb`) is how long something has left: thirty ticks, one a second, the standing
+  ticks the seconds left, the last five in the warn tone. One element whose `--n` the page's one ticker sets; no
+  transition, the same under reduced motion. Three sizes: small in a hint line (a copy that clears), the default
+  beside a shown password, large beside the code. Its words say the same in seconds, for a reader that does not see it.
+- **A secret's row reserves its hint lines** (two for the password, one for any other), so the row below never moves
+  when a receipt, a countdown or a refusal appears.
+
 ### Dialog footer
 
 Right-aligned, `var(--control-gap)` apart, at the default size. A ghost *Cancel* comes first, then the primary. An extra action (an edit dialog's *Delete*, `.tf-first`) goes on the far left, two of them side by side, and what the primary waits for (`why`) stands just left of *Cancel*. Every dialog has a primary, except a viewer ([Header](#header)), which has no footer.

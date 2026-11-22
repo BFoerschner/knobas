@@ -355,6 +355,7 @@ async fn add(f: &Fixture) {
             secret: SecretInput::of("first-pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await
@@ -513,6 +514,7 @@ async fn add_again(f: &Fixture) {
             secret: SecretInput::of("again-pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await
@@ -585,6 +587,7 @@ async fn each_source_has_its_own_instance() {
             secret: SecretInput::of("other-pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await

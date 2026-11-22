@@ -357,6 +357,7 @@ async fn app_with(
             config: json!({ "username": account, "project_ids": seeded_projects() }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -386,6 +387,7 @@ async fn app_with(
                 }),
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

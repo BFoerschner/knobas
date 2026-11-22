@@ -34,6 +34,7 @@ pub mod fingerprint;
 pub mod grants;
 pub mod held;
 pub mod instance;
+pub mod passwords;
 pub mod pipeline;
 pub mod query;
 pub mod role;
@@ -245,6 +246,24 @@ pub struct SourceDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub code_pages: Option<code_pages::CodePages>,
+    /// A new source of this adapter syncs **only by hand** until its page
+    /// says otherwise (ADR-0056): the Add-source form sends `sync_by_hand`
+    /// from it. A password manager sets it, because each read it answers may
+    /// be a line in its audit log under the person's name.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as an adapter whose sources start on a schedule.
+    #[serde(default)]
+    pub by_hand_by_default: bool,
+    /// What a password source offers beyond the role's minimum (ADR-0056):
+    /// present exactly when the descriptor claims [`passwords::PASSWORDS`],
+    /// which [`role::check`] holds.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as a source that is no password manager.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub passwords: Option<passwords::Offers>,
     /// Where the source's own website shows its sign-in form (ADR-0050,
     /// ux29, [`web_sign_in`]): a saved web sign-in is filled there by itself
     /// once per landing. [`web_sign_in::check`] holds it to its rules
@@ -448,6 +467,16 @@ pub struct KindInfo {
     #[serde(default = "every_kind_refreshes")]
     #[ts(skip)]
     pub refreshes: bool,
+    /// The kind's title stays in the mirror (ADR-0056): the engine writes an
+    /// empty title into `knobas.entity` for its items, so no backup and no
+    /// share export carries it. The Passwords role's two kinds set it.
+    ///
+    /// `#[serde(default)]`, so a descriptor that predates this reads as one
+    /// whose titles reach `knobas.entity` as they always did. Left out of the
+    /// TypeScript mirror, as `refreshes` is.
+    #[serde(default)]
+    #[ts(skip)]
+    pub title_stays_in_mirror: bool,
 }
 
 /// [`KindInfo::refreshes`]' default: a kind is refreshed unless its
@@ -2270,6 +2299,37 @@ pub trait Source: Send + Sync {
     ///
     /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
+    /// Read one secret of a password entry **live** (ADR-0056): its
+    /// password, a custom field the mirror holds no value for, or an earlier
+    /// password. The answer is held by the app for at most
+    /// [`passwords::HOLD_SECS`] and written nowhere.
+    ///
+    /// One call is at most one request to the source, and so at most one
+    /// line in its audit log: an adapter sends the read without retrying it.
+    ///
+    /// [`passwords::SecretAnswer::NotOffered`], the default, is an adapter
+    /// that fills no Passwords role, or an entity that is not an entry
+    /// (battery clause 16).
+    async fn read_secret(
+        &self,
+        ask: &passwords::SecretAsk,
+    ) -> Result<passwords::SecretAnswer, SourceError> {
+        let _ = ask;
+        Ok(passwords::SecretAnswer::NotOffered)
+    }
+    /// Send a **direct write** to a password source (ADR-0056): at once,
+    /// never queued, answered when the source has. A write whose kind the
+    /// descriptor's [`passwords::Offers::writes`] does not list is refused
+    /// with [`SourceError::Protocol`] and no status, so nothing was sent.
+    ///
+    /// The default refuses every write by name.
+    async fn passwords_write(
+        &self,
+        write: passwords::Write,
+    ) -> Result<passwords::Written, SourceError> {
+        Err(passwords::undeclared(&self.descriptor().id, write.kind()))
+    }
+
     /// What a person may change on `entity` besides its status, as the
     /// source says **now** (ADR-0054): each field with its kind, the value
     /// the source holds, and why not where it cannot be changed. Read when a
@@ -2806,6 +2866,18 @@ pub trait Sink {
         let _ = kind;
     }
 
+    /// Hand the host the one-time-code key of `entity` (ADR-0056). It is kept
+    /// in the OS keychain and **never in the mirror**: the one way a key
+    /// leaves an adapter. A key inside an item would be one `payload`
+    /// assignment from the mirror, and an external adapter has no keychain
+    /// (ADR-0028), so the host does the keeping.
+    ///
+    /// The default drops it, so a sink that keeps no keys -- a test's, a
+    /// backfill's preview -- compiles unchanged.
+    async fn otp_key(&mut self, entity: &EntityRef, key: passwords::OtpKey) {
+        let _ = (entity, key);
+    }
+
     /// Say that this run left part of the source out because the source
     /// would not serve it, and why, in one line the source's row shows
     /// beside its last sync: *boards unavailable: Jira Software is unlicensed
@@ -2846,6 +2918,8 @@ mod tests {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -2854,6 +2928,7 @@ mod tests {
                 monogram: "JI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {

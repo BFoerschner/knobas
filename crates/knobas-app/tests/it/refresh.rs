@@ -210,6 +210,7 @@ fn kind(id: &str) -> KindInfo {
         monogram: "T".to_owned(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -233,6 +234,8 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
         entity_kinds: vec![kind("ticket"), kind("build"), kind("repo")],
         config_schema: json!({"type": "object", "properties": {}}),
@@ -326,6 +329,7 @@ async fn fixture(name: &str) -> Fixture {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -819,6 +823,7 @@ async fn scheduled(
                 config: config.clone(),
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

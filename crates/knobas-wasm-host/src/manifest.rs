@@ -129,6 +129,12 @@ pub enum Refusal {
          ({PACKAGE}/docs, 1.5.0), so knobas could draw none of its pages"
     )]
     NoDocsProjection { role: &'static str },
+    /// A component claims the Passwords role (ADR-0056). Its required read,
+    /// `read_secret`, has no export in the adapter interface: a password
+    /// manager signs in with an exchange the host cannot do for a sandboxed
+    /// adapter, and decrypts with a key it would have to see.
+    #[error("This knobas hosts no external password adapters.")]
+    NoPasswordAdapters,
 }
 
 /// A manifest and its artifact that passed every static check.
@@ -310,6 +316,23 @@ pub fn check_descriptor(manifest: &Manifest, descriptor: &SourceDescriptor) -> R
         }
     }
     knobas_source::role::check(descriptor)?;
+    check_no_passwords(descriptor)
+}
+
+/// A component may not claim the Passwords role (ADR-0056): its required
+/// read has no export, so the host could not call it.
+///
+/// # Errors
+///
+/// [`Refusal::NoPasswordAdapters`].
+pub fn check_no_passwords(descriptor: &SourceDescriptor) -> Result<(), Refusal> {
+    let claims = descriptor
+        .roles
+        .iter()
+        .any(|claim| claim.role == knobas_source::role::PASSWORDS);
+    if claims || descriptor.passwords.is_some() {
+        return Err(Refusal::NoPasswordAdapters);
+    }
     Ok(())
 }
 
@@ -328,4 +351,46 @@ pub fn check_docs(descriptor: &SourceDescriptor, projects: bool) -> Result<(), R
         return Err(Refusal::NoDocsProjection { role });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    fn descriptor(extra: serde_json::Value) -> SourceDescriptor {
+        let mut wire = serde_json::json!({
+            "id": "vault", "adapter_kind": "vault", "name": "Vault",
+            "capabilities": [], "adapter_version": "1.0.0", "auth_methods": [],
+            "write_ops": [], "entity_kinds": [], "config_schema": {}
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            wire[key] = value.clone();
+        }
+        serde_json::from_value(wire).unwrap()
+    }
+
+    /// ADR-0056: a component that claims the Passwords role, or says what it
+    /// offers as one, is refused at install by this sentence.
+    #[test]
+    fn a_component_that_claims_passwords_is_refused() {
+        assert!(check_no_passwords(&descriptor(serde_json::json!({}))).is_ok());
+        let claimed = descriptor(serde_json::json!({
+            "roles": [{"role": "passwords", "reads": ["read_secret"]}]
+        }));
+        let refused = check_no_passwords(&claimed).unwrap_err();
+        assert!(matches!(refused, Refusal::NoPasswordAdapters));
+        assert_eq!(
+            refused.to_string(),
+            "This knobas hosts no external password adapters."
+        );
+        let offers = descriptor(serde_json::json!({
+            "passwords": {"one_time_codes": true, "expiry": false, "usage_comments": false,
+                          "audit_log": false, "history": null, "attachments": false,
+                          "access_requests": false}
+        }));
+        assert!(matches!(
+            check_no_passwords(&offers),
+            Err(Refusal::NoPasswordAdapters)
+        ));
+    }
 }

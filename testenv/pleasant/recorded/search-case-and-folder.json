@@ -1,0 +1,53 @@
+{
+ "name": "search-case-and-folder",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "Credentials": [
+   {
+    "Id": "{entry:pl-payout-db}",
+    "Name": "payout-service database user",
+    "Username": "payout_app",
+    "Url": "postgres://vm-db-01.tidewater.internal:5432/payments",
+    "Notes": "Read and write on payments.*, no DDL.\nThe service reads it from PAYOUT_DB_PASSWORD.",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Path": "Root/Tidewater/Payments/Prod/Databases/"
+   },
+   {
+    "Id": "{entry:pl-pg-prod}",
+    "Name": "pg-payments-prod superuser",
+    "Username": "postgres",
+    "Url": "postgres://vm-db-01.tidewater.internal:5432",
+    "Notes": "Break glass only. Use the service users for everything else.",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Path": "Root/Tidewater/Payments/Prod/Databases/"
+   },
+   {
+    "Id": "{entry:pl-pg-stage}",
+    "Name": "pg-payments-stage superuser",
+    "Username": "postgres",
+    "Url": "postgres://vm-pay-stage-01:5432/payments",
+    "Notes": "",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Stage/Databases}",
+    "Path": "Root/Tidewater/Payments/Stage/Databases/"
+   }
+  ],
+  "Groups": [
+   {
+    "Id": "{folder:Tidewater/Payments}",
+    "Name": "Payments",
+    "FullPath": "Root/Tidewater/Payments/"
+   }
+  ]
+ },
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v5/rest/search"
+ }
+}

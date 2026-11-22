@@ -1,0 +1,15 @@
+{
+ "name": "entry-missing",
+ "status": 400,
+ "headers": {
+  "content-type": "text/plain; charset=utf-8"
+ },
+ "body": {
+  "error_message": "Cannot find the requested entry."
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/00000000-0000-4000-8000-000000000000"
+ }
+}

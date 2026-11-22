@@ -64,8 +64,25 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // update.ts
     crate::update::UpdateState::export_all(cfg)?;
     crate::update::UpdateNotes::export_all(cfg)?;
+    // passwords.ts (ADR-0056)
+    knobas_source::passwords::Offers::export_all(cfg)?;
+    knobas_source::passwords::EntryRecord::export_all(cfg)?;
+    knobas_source::passwords::FolderRecord::export_all(cfg)?;
+    knobas_source::passwords::SecretRef::export_all(cfg)?;
+    knobas_source::passwords::Write::export_all(cfg)?;
+    crate::passwords::reads::Held::export_all(cfg)?;
+    crate::passwords::reads::PwEntry::export_all(cfg)?;
+    crate::passwords::clipboard::ClipState::export_all(cfg)?;
+    crate::commands::passwords::ReadAnswer::export_all(cfg)?;
+    crate::commands::passwords::CodeAnswer::export_all(cfg)?;
+    crate::commands::passwords::Copied::export_all(cfg)?;
+    crate::passwords::reads::SourceFacts::export_all(cfg)?;
+    crate::commands::passwords::WriteAnswer::export_all(cfg)?;
+    crate::commands::passwords::AttachmentAnswer::export_all(cfg)?;
+
     // site.ts
     crate::site::SiteSetting::export_all(cfg)?;
+
     knobas_site::state::SiteStatus::export_all(cfg)?;
     knobas_site::sites::SiteInsets::export_all(cfg)?;
     knobas_site::sites::SiteAsked::export_all(cfg)?;

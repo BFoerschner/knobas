@@ -530,6 +530,7 @@ witness-unit:
     testenv/live-lock-test.sh
     testenv/seed-teamcity-builds-test.sh
     testenv/perf/watchdog-test.sh
+    testenv/pleasant/test.sh
     testenv/ui-checks/trip-runner-test.sh
 
 # The step before every `just check` (issue #736): the mechanical misses that
@@ -1903,6 +1904,28 @@ start-work-live:
 # is Gitea's, and a Kuma suite has no business starting and seeding Gitea
 # (testenv/README.md, "One environment, one owner at a time"). `--env-kuma` is
 # that half.
+pleasant_live_env := "the Pleasant VM on the WSL box (testenv/pleasant/README.md), started under a pc ticket:
+  ssh knobas-wsl '~/scratch-pleasant/vm.sh start'
+  set -a; . <(ssh knobas-wsl cat scratch-pleasant/credentials.env); set +a
+  ssh -fN -L 24801:127.0.0.1:24801 -L 24822:127.0.0.1:24822 knobas-wsl   # from the Mac"
+
+# Pleasant Password Server's stand-in against the REAL server (ADR-0013's
+# licence exception, testenv/pleasant/README.md): one request list sent to
+# both, each holding the same 20 entries, and any difference in shape, status,
+# headers or error body fails it. `record` rewrites testenv/pleasant/recorded/
+# from the real server instead (commit the change); `--recorded` checks the
+# stand-in against those recordings with no VM, as `witness-unit` does.
+pleasant-contract mode="--live":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ {{ quote(mode) }} != "--recorded" ]; then
+      just _require-live-env {{ quote(pleasant_live_env) }} KNOBAS_PLEASANT_URL KNOBAS_PLEASANT_USER \
+        KNOBAS_PLEASANT_PASSWORD KNOBAS_PLEASANT_WRITER_USER KNOBAS_PLEASANT_WRITER_PASSWORD \
+        KNOBAS_PLEASANT_READER_USER KNOBAS_PLEASANT_READER_PASSWORD KNOBAS_PLEASANT_EXPIRE_CMD \
+        KNOBAS_PLEASANT_RESTORE_CMD
+    fi
+    node testenv/pleasant/contract.mjs {{ mode }}
+
 kuma_live_env := "testenv/, which is what the lines above this one do:
   docker compose --env-file images.env up -d --wait uptime-kuma
   ./seed-kuma.sh

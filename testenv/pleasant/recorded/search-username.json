@@ -1,0 +1,27 @@
+{
+ "name": "search-username",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "Credentials": [
+   {
+    "Id": "{entry:pl-teamcity}",
+    "Name": "TeamCity service account",
+    "Username": "svc-knobas",
+    "Url": "https://ci.tidewater.internal",
+    "Notes": "",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Platform/CI/Service accounts}",
+    "Path": "Root/Tidewater/Platform/CI/Service accounts/"
+   }
+  ],
+  "Groups": []
+ },
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v5/rest/search"
+ }
+}

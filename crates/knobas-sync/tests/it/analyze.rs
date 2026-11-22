@@ -41,6 +41,8 @@ impl Source for Growing {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -49,6 +51,7 @@ impl Source for Growing {
                 monogram: "GR".into(),
                 full_sync_exhaustive: false,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: Vec::new(),

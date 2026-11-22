@@ -268,6 +268,7 @@ fn kind(id: &str) -> KindInfo {
         monogram: "P".to_owned(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -299,6 +300,8 @@ fn wiki_descriptor(id: &str) -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["create_page".to_owned(), "update_page".to_owned()],
         entity_kinds: vec![kind("page")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -322,6 +325,8 @@ fn tracker_descriptor() -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["create_ticket".to_owned()],
         entity_kinds: vec![kind("ticket")],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
@@ -414,6 +419,7 @@ impl Harness {
                     config: serde_json::json!({}),
                     sync_interval_secs: 86_400,
                     enabled: true,
+                    sync_by_hand: false,
                 },
             )
             .await

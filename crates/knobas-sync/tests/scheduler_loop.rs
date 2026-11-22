@@ -102,6 +102,8 @@ impl Source for Slow {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             // The comment its writes are: the flush refuses an op the source
             // does not declare (#1950).
             write_ops: vec!["comment".into()],
@@ -112,6 +114,7 @@ impl Source for Slow {
                 monogram: "SL".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to
@@ -353,6 +356,7 @@ async fn seed(pool: &PgPool, n: usize) -> Vec<String> {
                 config: serde_json::json!({}),
                 sync_interval_secs: 60,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -1503,7 +1507,8 @@ async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
         .await
         .expect("the sync after the write answers once its run ends")
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .expect("a scheduled source runs after a write");
     scheduler.shutdown().await;
 
     assert_ne!(
@@ -1554,7 +1559,12 @@ async fn a_sync_after_a_write_with_nothing_in_flight_starts_one_run_and_no_more(
     let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
-    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
+    let waited_on = scheduler
+        .sync_after_write(&id)
+        .await
+        .unwrap()
+        .expect("a scheduled source runs after a write");
+
     scheduler.shutdown().await;
 
     let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
@@ -1565,6 +1575,52 @@ async fn a_sync_after_a_write_with_nothing_in_flight_starts_one_run_and_no_more(
          for: {runs:?}"
     );
     assert_eq!(runs[0].id, waited_on, "and it is the one it named");
+    retire(&pool, &ids).await;
+}
+
+/// **A write to a source that syncs only by hand starts no run** (ADR-0056).
+/// A write is not a press: the landed write's refresh reads its own item
+/// back, and anything else it changed waits for the next *Sync now*. A press
+/// still runs it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sync_after_a_write_to_a_source_by_hand_starts_no_run_and_a_press_still_does() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    sqlx::query("update knobas.source_config set sync_by_hand = true where id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
+    assert_eq!(waited_on, None, "a write started a run of a source by hand");
+    assert!(
+        run_log::list(&pool, Some(&id), 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a run was logged for a source by hand that nobody pressed"
+    );
+
+    let pressed = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    let mut runs = Vec::new();
+    for _ in 0..100 {
+        runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
+        if runs.iter().any(|run| run.finished_at.is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    scheduler.shutdown().await;
+    assert_eq!(runs.len(), 1, "a press runs a source by hand: {runs:?}");
+    assert_eq!(runs[0].id, pressed);
     retire(&pool, &ids).await;
 }
 
@@ -2345,6 +2401,7 @@ async fn re_add(pool: &PgPool, id: &str) {
             // would make those assertions test visibility rather than the
             // purge they are about.
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

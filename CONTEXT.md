@@ -81,7 +81,7 @@ A write an adapter declares that belongs to no [role](#role)'s vocabulary, such 
 _Avoid_: custom op, plugin action
 
 **Role**:
-A domain knobas has a working surface for (code host, ticket system, CI, wiki, monitoring), stated as what a source must provide to fill it: the [kinds](#kind) it emits, the [declared paths](#declared-path) each kind carries, the live reads it answers and the writes it may offer. A source may fill several roles. The shell draws a role's surface for every source that fills it, never for a named source; which sources fill a role is one answer, given by the [mirror](#mirror) to every surface that asks, and a surface never decides its fillers itself. An item whose source fills no role is on no role's surface and stays live everywhere else. A source whose items fit no built-in role declares a **custom role** of its own, whose view opens when one of its items is opened and which has no surface of its own (ADR-0029).
+A domain knobas has a working surface for (code host, ticket system, CI, wiki, monitoring, passwords), stated as what a source must provide to fill it: the [kinds](#kind) it emits, the [declared paths](#declared-path) each kind carries, the live reads it answers and the writes it may offer. A source may fill several roles. The shell draws a role's surface for every source that fills it, never for a named source; which sources fill a role is one answer, given by the [mirror](#mirror) to every surface that asks, and a surface never decides its fillers itself. An item whose source fills no role is on no role's surface and stays live everywhere else. A source whose items fit no built-in role declares a **custom role** of its own, whose view opens when one of its items is opened and which has no surface of its own (ADR-0029).
 _Avoid_: capability (the descriptor's flags), type, category, frame (the shell's drawing of a role)
 
 **Project**:
@@ -94,6 +94,10 @@ The whole-corpus report of every [project](#project) a source's live items show 
 **Mirror**:
 The local synced copy of every source's data, with provenance. Readers see its [live items](#live-item); the readers that reach past them are listed under that term. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
 _Avoid_: cache, index
+
+**By hand**:
+A [source](#source) that syncs only when a person presses *Sync now*: no schedule, no run after a write, and no next run on its sources line ("by hand"). A password manager's sources start this way, because each sync may write a line under the person's name in the manager's audit log (ADR-0056). Settings › Sources › *Syncs* turns it on or off for any source.
+_Avoid_: manual sync, paused (a paused source has a schedule it is not running), off
 
 **Item**:
 One mirrored record of a given kind.
@@ -257,6 +261,26 @@ _Avoid_: diff page (the diff between any two commits, at its own address), branc
 **Account**:
 A second credential stored beside a source's ordinary one, in the same keychain item: a username and password, optional, for a source whose write channel its ordinary credential cannot open. Uptime Kuma is the only one: its API key opens `/metrics` and nothing else, so a Kuma with only the key reads every monitor and offers no [write-back](#write-back), and adding the account turns pause and resume on. Not an auth method, which is how a source authenticates its ordinary traffic. Added from the Add-source form or from the credential strip the sources view's **Account** button opens.
 _Avoid_: second secret, write credential, admin login
+
+**Direct write**:
+A write to a password manager (add an entry, edit one, change its password) sent once when the person presses *Save* and answered before the dialog closes, never put in the write queue. If the source does not answer, nothing is kept and the dialog keeps what was typed. A direct write is not a [write-back](#write-back) in the queue's sense: it cannot wait, retry or be undone from the queue, because it may carry a [secret](#secret) (ADR-0056).
+_Avoid_: queued write, write op (for these), sync back
+
+**Secret**:
+A value a password manager hides behind a reveal: a password, a field the source marks protected, an earlier password, an attachment's bytes. Read live from the source, held in the app process for at most 30 seconds (the *hold*), and written to no table, file, log, cache or queue. A [code key](#code-key) is not a secret in this sense: it is kept, in the system's password store. A note or a field the source sends openly is not one either: the [mirror](#mirror) holds it (ADR-0056).
+_Avoid_: credential (a source's own sign-in), sensitive data, password (for the general term)
+
+**Code key**:
+The key a [password entry](#password-entry)'s one-time codes are made from, read by a sync and kept in the system's password store, never in the [mirror](#mirror), so codes work offline and read nothing from the source. On Pleasant it is the entry's own `TOTPSecret` or one of four KeePass plugins' custom fields; an account the source does not let see it gets none (ADR-0056).
+_Avoid_: TOTP secret (the vendor's word), seed, OTP
+
+**Password entry**:
+The [kind](#kind) of one password manager record: its username, address, notes, the custom fields the source sends openly, its folder, its rules and rights, and never its password or [code key](#code-key). Its title stays in the [mirror](#mirror) and never reaches `knobas.entity`, so link lists, link sets, the timer and the standup never name it; it takes part in none of them (ADR-0056).
+_Avoid_: credential (Pleasant's word), login, item (the generic word)
+
+**Password folder**:
+The [kind](#kind) of a password manager's folder: its name and parent, whether it asks a usage comment, whether the account may add to it. The Passwords page's tree is drawn from these; the manager's own root is not emitted (ADR-0056).
+_Avoid_: group (Pleasant's word), vault, collection
 
 **Section**:
 A heading of any level on a wiki [page](#kind) and everything under it until the next heading of any level, so a section never holds a heading. The unit knobas edits a page in, one section of prose at a time. A section holding a macro or a table, or sitting inside a table, refuses its edit and offers the source's own editor. A section is edited as text, so lists and inline formatting come back as plain paragraphs, and the surface says so before the edit. The edit that goes out carries the whole page body, so everything outside the section is sent back as it arrived.

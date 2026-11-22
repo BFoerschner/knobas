@@ -21,6 +21,9 @@
 -->
 <script lang="ts" module>
   import type { SourceSummary as Summary, SourceSyncStatus as SyncRow } from "../ipc/sources";
+  import type { ClipState } from "../ipc/passwords";
+  import { clipped } from "./passwords/clip.svelte";
+
 
   /** The reads the status bar needs, injectable so a test needs no bridge. */
   export interface TfShellPorts {
@@ -728,6 +731,9 @@
     hold(ports.listen(EVENTS.siteRouted, ({ payload }) => siteRouted(payload as SiteRouted)));
     hold(ports.listen(EVENTS.siteDownload, ({ payload }) => siteDownload(payload as SiteDownload)));
     hold(ports.listen(EVENTS.siteQuit, ({ payload }) => (quitting = payload as SiteStatus[])));
+    // What the clipboard holds for knobas (ADR-0056): the status bar's line and the entry's rows read it.
+    hold(ports.listen(EVENTS.clipboardState, ({ payload }) => clipped((payload as ClipState | null) ?? { what: null, entity_id: null, until: null })));
+
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
 

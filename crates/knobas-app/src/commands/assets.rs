@@ -1285,6 +1285,7 @@ mod tests {
             config: serde_json::json!({}),
             sync_interval_secs: 60,
             enabled: true,
+            sync_by_hand: false,
             cursor: None,
             health: knobas_sync::health::CredentialHealth {
                 source_id: id.to_owned(),

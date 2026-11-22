@@ -213,6 +213,7 @@ fn a_new_source(id: &str) -> NewSource {
         secret: SecretInput::of("pat-one"),
         sync_interval_secs: 300,
         enabled: true,
+        sync_by_hand: None,
     }
 }
 
@@ -322,6 +323,7 @@ async fn a_source_that_needs_no_credential_names_no_auth_kind() {
             config: serde_json::json!({}),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -672,10 +674,30 @@ async fn deleting_a_source_removes_its_secret_and_can_purge_its_items() {
     sources::crud::add(&f.pool, &f.secrets, &f.registry, a_new_source(&f.id))
         .await
         .unwrap();
+    // Code keys kept for it (ADR-0056) go with the credential.
+    let key = knobas_source::passwords::OtpKey {
+        secret: knobas_source::passwords::SecretText::new("JBSWY3DPEHPK3PXP"),
+        digits: 6,
+        period: 30,
+        algorithm: knobas_source::passwords::OtpAlgorithm::Sha1,
+    };
+    knobas_secrets::otp::replace(
+        f.secrets.as_ref(),
+        &f.id,
+        &[(format!("{}:e1", f.id), key)].into_iter().collect(),
+    )
+    .unwrap();
 
     sources::crud::delete(&f.pool, &f.secrets, &Default::default(), &f.id, false)
         .await
         .unwrap();
+    assert!(
+        knobas_secrets::otp::read(f.secrets.as_ref(), &f.id)
+            .unwrap()
+            .is_empty(),
+        "the code keys go with it"
+    );
+
     assert!(
         knobas_sync::config::get(&f.pool, &f.id)
             .await
@@ -691,6 +713,68 @@ async fn deleting_a_source_removes_its_secret_and_can_purge_its_items() {
         .await
         .unwrap_err();
     assert!(matches!(err, sources::SourcesError::NotFound(_)), "{err:?}");
+}
+
+/// ADR-0056: a source added by hand says so on both read paths and has no
+/// next run, and *Syncs* sets it back to its interval and out again. Both
+/// summary builders are walked, `add`'s and `list`'s, for the reason the
+/// auth-kind test above gives.
+#[tokio::test]
+async fn a_source_added_by_hand_has_no_next_run_until_it_is_put_on_a_schedule() {
+    let f = fixture().await;
+    let added = sources::crud::add(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        NewSource {
+            sync_by_hand: Some(true),
+            ..a_new_source(&f.id)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(added.sync_by_hand);
+    assert!(
+        added.next_run_at.is_none(),
+        "a source by hand has no next run"
+    );
+    let listed = sources::crud::list(&f.pool, &f.registry)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == f.id)
+        .expect("listed");
+    assert!(listed.sync_by_hand, "list reads the column too");
+    assert!(listed.next_run_at.is_none());
+
+    let scheduled = sources::crud::update(
+        &f.pool,
+        &f.registry,
+        &f.id,
+        SourcePatch {
+            sync_by_hand: Some(false),
+            ..SourcePatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!scheduled.sync_by_hand);
+    assert_eq!(scheduled.sync_interval_secs, 300, "the interval it had");
+    assert!(scheduled.next_run_at.is_some());
+
+    let by_hand = sources::crud::update(
+        &f.pool,
+        &f.registry,
+        &f.id,
+        SourcePatch {
+            sync_by_hand: Some(true),
+            ..SourcePatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(by_hand.sync_by_hand);
+    assert!(by_hand.next_run_at.is_none());
 }
 
 #[tokio::test]
@@ -710,6 +794,7 @@ async fn updating_a_source_cannot_change_its_id_or_its_kind() {
             config: None,
             sync_interval_secs: Some(600),
             enabled: Some(false),
+            sync_by_hand: None,
         },
     )
     .await
@@ -827,6 +912,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         display_name: "S".into(),
         base_url: String::new(),
         enabled: true,
+        sync_by_hand: false,
         sync_interval_secs: 300,
         config: serde_json::json!({}),
         health: knobas_sync::config::CredentialHealth {
@@ -1114,6 +1200,7 @@ fn a_kuma_source(id: &str, account: Option<(&str, &str)>) -> NewSource {
         },
         sync_interval_secs: 300,
         enabled: true,
+        sync_by_hand: None,
     }
 }
 
@@ -1438,6 +1525,7 @@ async fn each_adapter_refuses_an_interval_under_its_own_floor_and_names_it() {
             secret: SecretInput::of("token"),
             sync_interval_secs: secs,
             enabled: true,
+            sync_by_hand: None,
         };
         let floor_named = |err: &sources::SourcesError| match err {
             sources::SourcesError::Invalid(why) => why.contains(&format!("{floor} seconds")),

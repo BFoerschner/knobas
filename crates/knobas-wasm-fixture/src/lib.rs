@@ -523,6 +523,7 @@ impl Adapter for Fixture {
                 monogram: "SV".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             },
             pipeline,
             run,
@@ -612,6 +613,8 @@ impl Adapter for Fixture {
             // from the older ones, which keep *Fill sign-in* alone.
             web_sign_in: Some(knobas_adapter_sdk::WebSignInPages::at(&["/login"])),
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
         }
     }
 

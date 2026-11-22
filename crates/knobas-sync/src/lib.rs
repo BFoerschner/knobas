@@ -116,6 +116,28 @@ pub struct SyncReport {
     #[serde(skip)]
     #[ts(skip)]
     pub left_out: Option<String>,
+    /// The one-time-code keys the adapter handed to the sink
+    /// (`Sink::otp_key`, ADR-0056), for the scheduler to keep in the OS
+    /// keychain once the run has committed. **Never serialized**: the report
+    /// is the run's activity line.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub otp_keys: RunOtpKeys,
+}
+
+/// The code keys one run collected, and whether it walked the entry kind
+/// whole: such a run's keys replace the source's stored ones, any other's are
+/// merged in and remove nothing (ADR-0056). A failed run reports none, so the
+/// keys of the last good run keep working.
+#[derive(Debug, Clone, Default)]
+pub struct RunOtpKeys {
+    /// Entity id to key, in the order the adapter handed them over.
+    pub keys: Vec<(String, knobas_source::passwords::OtpKey)>,
+    /// The run saw every entry: what was not handed over is gone.
+    pub whole: bool,
+    /// The source fills the Passwords role, so its keys are to be stored even
+    /// when there are none (a whole run with none clears them).
+    pub applies: bool,
 }
 
 /// Why a run failed.
@@ -532,6 +554,7 @@ async fn run_inner(
         swept,
         previous,
         left_out,
+        otp_keys,
     } = locked;
     let report = SyncReport {
         source_id,
@@ -540,7 +563,9 @@ async fn run_inner(
         swept,
         cursor,
         left_out,
+        otp_keys,
     };
+
     let changed_nothing = report.upserted == 0
         && report.deleted == 0
         && report.swept == 0
@@ -594,6 +619,13 @@ struct Declared {
     role_check: knobas_source::role::data::DataCheck,
     /// What the job contexts' status is read through (#1501).
     payload_paths: Vec<knobas_core::payload::KindPaths>,
+    /// The kinds whose titles stay in the mirror
+    /// (`KindInfo::title_stays_in_mirror`, ADR-0056): `knobas.entity` gets
+    /// an empty title for their items.
+    private_titles: HashSet<String>,
+    /// Whether the source claims the Passwords role, whose code keys the run
+    /// hands to the keychain.
+    passwords: bool,
 }
 
 impl Declared {
@@ -610,6 +642,16 @@ impl Declared {
             .filter(|kind| kind.full_sync_exhaustive)
             .map(|kind| kind.id.clone())
             .collect();
+        let private_titles: HashSet<String> = descriptor
+            .entity_kinds
+            .iter()
+            .filter(|kind| kind.title_stays_in_mirror)
+            .map(|kind| kind.id.clone())
+            .collect();
+        let passwords = descriptor
+            .roles
+            .iter()
+            .any(|claim| claim.role == knobas_source::role::PASSWORDS);
         let kinds: HashSet<String> = descriptor
             .entity_kinds
             .into_iter()
@@ -624,6 +666,8 @@ impl Declared {
                 saved_views,
                 role_check,
                 payload_paths: descriptor.payload_paths,
+                private_titles,
+                passwords,
             },
         )
     }
@@ -638,6 +682,7 @@ struct Locked {
     /// The position the run started from, for the "changed nothing" test.
     previous: Option<Cursor>,
     left_out: Option<String>,
+    otp_keys: RunOtpKeys,
 }
 
 /// Everything that happens under the source's advisory lock.
@@ -660,6 +705,8 @@ async fn run_locked(
         saved_views,
         role_check,
         payload_paths,
+        private_titles,
+        passwords,
     } = declared;
     // Held until this transaction ends, however it ends. Two runs of one source
     // would otherwise take the same rows in whatever order their batches
@@ -716,8 +763,9 @@ async fn run_locked(
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
 
-    let (cursor, upserted, deleted, emitted, whole, role_check, left_out) = {
-        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
+    let (cursor, upserted, deleted, emitted, whole, role_check, left_out, otp_keys) = {
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check)
+            .with_private_titles(private_titles);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
         // run: flush it before the cursor claims to cover it.
@@ -730,7 +778,17 @@ async fn run_locked(
             sink.whole,
             sink.roles,
             sink.left_out,
+            sink.otp_keys,
         )
+    };
+    // The keys replace the stored ones only when the run saw every entry: a
+    // run from no position, or one whose adapter walked the kind whole.
+    let otp_keys = RunOtpKeys {
+        whole: passwords
+            && (full_sync || whole.contains(knobas_source::passwords::ENTRY_KIND))
+            && may_sweep,
+        applies: passwords,
+        keys: otp_keys,
     };
 
     // The role data check's verdicts, in the run's transaction: a failed run
@@ -820,6 +878,7 @@ async fn run_locked(
         swept,
         previous,
         left_out,
+        otp_keys,
     })
 }
 
@@ -996,6 +1055,12 @@ struct PgSink<'t, 'c> {
     deleted: u64,
     /// The last line the adapter said it left out (`Sink::left_out`, #2374).
     left_out: Option<String>,
+    /// The kinds whose items get an empty title in `knobas.entity`
+    /// (`KindInfo::title_stays_in_mirror`, ADR-0056).
+    private_titles: HashSet<String>,
+    /// The code keys handed over this run (`Sink::otp_key`), for the
+    /// scheduler to keep in the keychain once the run commits.
+    otp_keys: Vec<(String, knobas_source::passwords::OtpKey)>,
 }
 
 impl<'t, 'c> PgSink<'t, 'c> {
@@ -1017,7 +1082,15 @@ impl<'t, 'c> PgSink<'t, 'c> {
             upserted: 0,
             deleted: 0,
             left_out: None,
+            private_titles: HashSet::new(),
+            otp_keys: Vec::new(),
         }
+    }
+
+    /// Give the items of `kinds` an empty title in `knobas.entity`.
+    fn with_private_titles(mut self, kinds: HashSet<String>) -> Self {
+        self.private_titles = kinds;
+        self
     }
 
     /// Whether this item is this source's to emit, and addressable at all.
@@ -1064,6 +1137,16 @@ impl<'t, 'c> PgSink<'t, 'c> {
                 self.source_id, item.kind
             )));
         }
+        // The Passwords role fixes its records (ADR-0056): a payload with a
+        // key beside them is where a secret would leak, so the run fails and
+        // writes nothing. The message names the entity and the key, never a
+        // value.
+        if let Err(why) = knobas_source::passwords::check_payload(&item.kind, &item.payload) {
+            return Err(SourceError::Sink(format!(
+                "source {:?} emitted {id} of kind {:?} with a payload that is not its record: {why}",
+                self.source_id, item.kind
+            )));
+        }
         Ok(())
     }
 
@@ -1104,8 +1187,16 @@ impl<'t, 'c> PgSink<'t, 'c> {
         let mut deleted = Vec::with_capacity(n);
         let mut payloads = Vec::with_capacity(n);
         let mut web_urls = Vec::with_capacity(n);
+        let mut entity_titles = Vec::with_capacity(n);
         for (id, item) in batch {
             ids.push(id);
+            // A kind whose title stays in the mirror is named by its id alone
+            // where a backup or a share export can carry it (ADR-0056).
+            entity_titles.push(if self.private_titles.contains(&item.kind) {
+                String::new()
+            } else {
+                item.title.clone()
+            });
             kinds.push(item.kind);
             titles.push(item.title);
             bodies.push(item.body_text);
@@ -1120,7 +1211,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         sqlx::query(ENTITY_UPSERT)
             .bind(&ids)
             .bind(&kinds)
-            .bind(&titles)
+            .bind(&entity_titles)
             .bind(&updated)
             .bind(&deleted)
             .execute(&mut **self.tx)
@@ -1314,6 +1405,12 @@ impl Sink for PgSink<'_, '_> {
     /// Kept for the source's credential health (#2374): the last line wins.
     async fn left_out(&mut self, why: &str) {
         self.left_out = Some(why.to_owned());
+    }
+
+    /// Kept in memory for the run, never written here: the scheduler hands
+    /// them to the keychain once the run has committed (ADR-0056).
+    async fn otp_key(&mut self, entity: &EntityRef, key: knobas_source::passwords::OtpKey) {
+        self.otp_keys.push((entity.to_string(), key));
     }
 }
 
@@ -1565,5 +1662,88 @@ mod tests {
         assert_eq!(entities.rows_affected(), 1, "only the retitled entity");
         assert_eq!(rows.rows_affected(), 1, "only the changed mirror row");
         tx.rollback().await.unwrap();
+    }
+
+    fn a_password_entry(source_id: &str) -> SyncItem {
+        use knobas_source::passwords;
+        passwords::entry_item(
+            passwords::EntryHead {
+                source: source_id.to_owned(),
+                key: "e1".to_owned(),
+                title: "payout-service database user".to_owned(),
+                updated_at: None,
+            },
+            &passwords::EntryRecord {
+                username: Some("payout_svc".to_owned()),
+                can_read: true,
+                ..passwords::EntryRecord::default()
+            },
+        )
+    }
+
+    /// ADR-0056: an item of a kind whose title stays in the mirror has an
+    /// empty title in `knobas.entity`, which every backup and share export
+    /// carries, and its title in `sync.item`, which none does.
+    #[tokio::test]
+    async fn a_password_entrys_title_stays_in_the_mirror() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source_id = format!("unit-{}", uuid::Uuid::new_v4().simple());
+        let kind = knobas_source::passwords::ENTRY_KIND.to_owned();
+        let mut tx = pool.begin().await.unwrap();
+        {
+            let kinds = HashSet::from([kind.clone()]);
+            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds.clone(), None)
+                .with_private_titles(kinds);
+            sink.item(a_password_entry(&source_id)).await.unwrap();
+            sink.flush().await.unwrap();
+        }
+        let id = format!("{source_id}:e1");
+        let (entity_title,): (String,) =
+            sqlx::query_as("select title from knobas.entity where id = $1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        let (mirror_title,): (String,) =
+            sqlx::query_as("select title from sync.item where entity_id = $1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(entity_title, "", "the title reached knobas.entity");
+        assert_eq!(mirror_title, "payout-service database user");
+    }
+
+    /// ADR-0056: an entry whose payload carries anything beside its record
+    /// is refused before it is buffered, naming the entity and the key, so
+    /// the run fails and writes nothing.
+    #[tokio::test]
+    async fn an_entry_with_a_key_beside_its_record_is_refused() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source_id = format!("unit-{}", uuid::Uuid::new_v4().simple());
+        let kind = knobas_source::passwords::ENTRY_KIND.to_owned();
+        let mut tx = pool.begin().await.unwrap();
+        let mut leaked = a_password_entry(&source_id);
+        leaked.payload["Password"] = serde_json::json!("hunter2");
+        let refused = {
+            let kinds = HashSet::from([kind]);
+            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds, None);
+            let refused = sink.item(leaked).await.unwrap_err();
+            assert!(sink.buf.is_empty(), "the refused item was buffered");
+            refused
+        };
+        tx.rollback().await.unwrap();
+        let SourceError::Sink(message) = refused else {
+            panic!("refused as {refused:?}, not as a sink error");
+        };
+        assert!(message.contains(&format!("{source_id}:e1")), "{message}");
+        assert!(message.contains("Password"), "{message}");
+        assert!(
+            !message.contains("hunter2"),
+            "the refusal quotes the value: {message}"
+        );
     }
 }

@@ -118,6 +118,7 @@
   import { savedListOf } from "./sheet";
   import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
+  import { ENTRY_KIND, isPasswordKind } from "../tf/passwords/kinds";
   import { type LauncherAction, filterActions, navigationActions, placeActions } from "./actions";
   import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, rowItem, stepOf, twinItems, walk } from "./rows";
   import { modeName, seedKinds, seedName } from "./section";
@@ -512,6 +513,31 @@
       },
       () => {},
     );
+  });
+
+  /**
+   * A password entry's username and address for the pane (ADR-0056): read from the mirror through the Passwords
+   * page's own command once the selection rests on it, which asks the source nothing. A folder needs no read.
+   */
+  let credential = $state.raw<{ id: string; username: string | null; address: string | null } | null>(null);
+  $effect(() => {
+    const row = previewRow;
+    if (row?.kind !== "hit" || row.hit.kind !== ENTRY_KIND) return;
+    const id = row.hit.entity_id;
+    if (credential?.id === id) return;
+    void io.passwords.entry(id).then(
+      (entry) => {
+        if (previewRow?.kind === "hit" && previewRow.hit.entity_id === id) credential = { id, username: entry?.username ?? null, address: entry?.address ?? null };
+      },
+      () => {},
+    );
+  });
+  const previewCredential = $derived.by(() => {
+    const row = previewRow;
+    if (row?.kind !== "hit" || !isPasswordKind(row.hit.kind)) return null;
+    if (row.hit.kind !== ENTRY_KIND) return { path: row.hit.path };
+    const read = credential?.id === row.hit.entity_id ? credential : null;
+    return { path: row.hit.path, username: read?.username, address: read?.address };
   });
 
   /**
@@ -1452,6 +1478,7 @@
           excerpts={previewRow?.kind === "hit" ? previewRow.hit.excerpts : []}
           files={previewRow?.kind === "hit" ? (previewRow.hit.files ?? null) : null}
           more={previewRow?.kind === "hit" && filesIn?.id === previewRow.hit.entity_id ? filesIn.found : null}
+          credential={previewCredential}
           onopen={(excerpt) => previewRow && activate(previewRow, excerpt)}
         />
       {/if}

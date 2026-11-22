@@ -179,6 +179,8 @@ fn descriptor() -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec!["comment".to_owned(), "log_work".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "ticket".to_owned(),
@@ -187,6 +189,7 @@ fn descriptor() -> SourceDescriptor {
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
@@ -252,6 +255,7 @@ async fn app(name: &str) -> (SourcesState, Arc<Wrote>) {
             config: json!({ "username": "mara.lindqvist" }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

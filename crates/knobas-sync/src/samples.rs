@@ -740,6 +740,8 @@ mod tests {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![knobas_source::KindInfo {
                 id: "ticket".into(),
@@ -748,6 +750,7 @@ mod tests {
                 monogram: "TI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({}),
             payload_paths: Vec::new(),
@@ -761,6 +764,7 @@ mod tests {
             monogram: "MO".into(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         });
         assert_eq!(
             monitor_paths(&descriptor),

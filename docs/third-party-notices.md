@@ -285,3 +285,15 @@ Each copyright notice is its authors', in their repositories:
 - One Dark Pro: https://github.com/Binaryify/OneDark-Pro
 - Dracula for Visual Studio Code: https://github.com/dracula/visual-studio-code
 - Catppuccin for VS Code: https://github.com/catppuccin/vscode
+
+## The password generator's word list
+
+### EFF's Long Wordlist (`app/src/lib/tf/passwords/eff-large-wordlist.txt`)
+
+The Electronic Frontier Foundation's 7,776-word list for passphrases, from
+<https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt> (SHA-256 of the
+download `addd35536511597a02fa0a9ff1e5284677b8883b83e986e43f15a3db996b903e`),
+with its dice numbers left out. Creative Commons Attribution 3.0 United States
+(<https://creativecommons.org/licenses/by/3.0/us/>), © 2016 Electronic Frontier
+Foundation. The Passwords page's generator (ADR-0056) loads it when *Words* is
+first chosen.

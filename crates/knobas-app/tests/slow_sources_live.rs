@@ -248,6 +248,7 @@ async fn rig() -> Rig {
                 config: product.config,
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await

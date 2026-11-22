@@ -86,6 +86,12 @@ export const EVENTS = {
    * Settings › Search reads its status again.
    */
   codeFiles: "code:files",
+  /**
+   * `ClipState` — what the clipboard holds for knobas now: a secret it put there, whose and until when, or nothing
+   * (ADR-0056). The status bar draws it.
+   */
+  clipboardState: "clipboard:state",
+
   /** `SiteStatus` — a live site's state changed (ADR-0050). */
   siteStatus: "site:status",
   /** `SiteKey` — a key knobas took from a site, by name. */

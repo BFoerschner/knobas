@@ -125,6 +125,8 @@ impl Source for PausingSource {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -133,6 +135,7 @@ impl Source for PausingSource {
                 monogram: "TK".to_owned(),
                 full_sync_exhaustive: false,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: Vec::new(),

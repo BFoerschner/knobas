@@ -1,0 +1,56 @@
+{
+ "name": "entry-protected-field",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {
+   "Key id": "led-2026-08",
+   "Algorithm": "Ed25519",
+   "Recovery PIN": "<protected>"
+  },
+  "CustomApplicationFields": {},
+  "Attachments": [
+   {
+    "CredentialObjectId": "{entry:pl-ledger-key}",
+    "AttachmentId": "{attachment:pl-ledger-key:0}",
+    "FileName": "ledger-signing.pem",
+    "FileSize": 282
+   }
+  ],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasViewEntryPasswordAccess": true,
+  "HasViewTOTPAccess": true,
+  "HasModifyTOTPAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": true,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{entry:pl-ledger-key}",
+  "Name": "ledger-api signing key",
+  "Username": "",
+  "Password": null,
+  "Url": "",
+  "Notes": "The password is the PEM's passphrase.",
+  "GroupId": "{folder:Tidewater/Payments/Prod/Keys}",
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null,
+  "TOTPIssuer": null,
+  "TOTPSecret": null,
+  "TOTPDigits": 0,
+  "TOTPPeriod": 0
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-ledger-key}"
+ }
+}

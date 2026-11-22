@@ -538,6 +538,7 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
                     monogram: owned.monogram.to_owned(),
                     full_sync_exhaustive: false,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
             )
         })
@@ -570,6 +571,7 @@ fn launcher_kind(kind: &str) -> Option<KindInfo> {
             monogram: (*monogram).to_owned(),
             full_sync_exhaustive: false,
             refreshes: true,
+            title_stays_in_mirror: false,
         })
 }
 
@@ -589,6 +591,7 @@ fn derive_kind_info(kind: &str) -> KindInfo {
         // descriptor the adapter returned.
         full_sync_exhaustive: false,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -692,6 +695,7 @@ mod tests {
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
         assert_eq!(catalog.info("ticket").monogram, "JI");
         assert_eq!(catalog.declared_kinds(), ["ticket"]);
@@ -734,6 +738,7 @@ mod tests {
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
 
         // `route` joined `asset` and `note` with M4.0's routes (#432).
@@ -796,6 +801,7 @@ mod tests {
             monogram: "ST".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
         assert_eq!(catalog.info("note").plural, "Notes");
         assert!(!catalog.is_declared("note"));
@@ -861,6 +867,7 @@ mod tests {
             monogram: monogram.to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }
     }
 
@@ -880,6 +887,8 @@ mod tests {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
             config_schema: serde_json::Value::Object(serde_json::Map::new()),

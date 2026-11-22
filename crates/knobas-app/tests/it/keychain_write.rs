@@ -61,6 +61,8 @@ fn descriptor(account: bool) -> SourceDescriptor {
         url_forms: Vec::new(),
         web_sign_in: None,
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: if account {
             vec!["pause_monitor".to_owned(), "resume_monitor".to_owned()]
         } else {
@@ -73,6 +75,7 @@ fn descriptor(account: bool) -> SourceDescriptor {
             monogram: "MO".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: json!({"type": "object", "properties": {}}),
         payload_paths: Vec::new(),
@@ -334,6 +337,7 @@ async fn fixture_with(name: &str, account: bool) -> Fixture {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

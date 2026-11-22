@@ -599,3 +599,7 @@ button.tf-thm-sw { cursor: pointer; }
 /* The Selected row's quick picks (Björn, 2026-11-22): knobas's ink plate, the theme's accent, the theme's own. */
 .tf-apt-picks { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: var(--control-gap); padding-bottom: 6px; }
 .tf-apt-picks .tf-btn[aria-pressed="true"] { border-color: var(--ink); }
+
+/* *Syncs* (ADR-0056): sized to its longest choice, *Only when I press Sync now*; the note while by hand goes under the row. */
+.tf-stg-in.tf-stg-syncs { width: auto; min-width: 0; }
+.tf-stg-note.tf-stg-byhand { margin: 0 0 10px; max-width: 72ch; }

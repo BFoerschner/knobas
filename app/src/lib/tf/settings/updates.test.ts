@@ -1,14 +1,18 @@
 /** Settings › Updates' words (ADR-0052, decisions D13): every row of the box's table, a state in, its strings out. */
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
-import { updateSample as fakeUpdate } from "./update-samples";
 import { bootLine, channelLine, cogTitle, megabytes, updateBox } from "./updates";
 
 // Noon, so "today" and "yesterday" in the fixture's times are the same words whenever the suite runs.
 const NOW = new Date(2026, 10, 21, 12, 0);
-beforeAll(() => {
+// The samples date themselves when their module loads, so it loads once the clock is pinned: imported at the top, it
+// read the real clock, and the test failed on every day but the one it was written on.
+let fakeUpdate: typeof import("./update-samples").updateSample;
+beforeAll(async () => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  fakeUpdate = (await import("./update-samples")).updateSample;
 });
+
 afterAll(() => {
   vi.useRealTimers();
 });

@@ -676,6 +676,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
             config: serde_json::json!({ "username": env.user }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

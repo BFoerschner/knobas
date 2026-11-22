@@ -1,0 +1,405 @@
+{
+ "name": "folder-totp",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {},
+  "CustomApplicationFields": {},
+  "Children": [
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [
+     {
+      "CustomUserFields": {},
+      "CustomApplicationFields": {},
+      "Children": [],
+      "Credentials": [
+       {
+        "CustomUserFields": {},
+        "CustomApplicationFields": {},
+        "Attachments": [],
+        "Tags": [],
+        "HasModifyEntriesAccess": false,
+        "HasViewEntryContentsAccess": true,
+        "HasViewEntryPasswordAccess": true,
+        "HasViewTOTPAccess": true,
+        "HasModifyTOTPAccess": false,
+        "CommentPrompts": {
+         "AskForCommentOnViewPassword": false,
+         "AskForCommentOnViewOffline": false,
+         "AskForCommentOnModifyEntries": false,
+         "AskForCommentOnMoveEntries": false,
+         "AskForCommentOnMoveFolders": false,
+         "AskForCommentOnModifyFolders": false
+        },
+        "Id": "{entry:pl-teamcity}",
+        "Name": "TeamCity service account",
+        "Username": "svc-knobas",
+        "Password": null,
+        "Url": "https://ci.tidewater.internal",
+        "Notes": "",
+        "GroupId": "{folder:Tidewater/Platform/CI/Service accounts}",
+        "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Expires": null,
+        "TOTPIssuer": null,
+        "TOTPSecret": null,
+        "TOTPDigits": 0,
+        "TOTPPeriod": 0
+       }
+      ],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasExportAccess": false,
+      "HasViewOfflineAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{folder:Tidewater/Platform/CI/Service accounts}",
+      "Name": "Service accounts",
+      "ParentId": "{folder:Tidewater/Platform/CI}",
+      "Notes": null,
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null
+     },
+     {
+      "CustomUserFields": {},
+      "CustomApplicationFields": {},
+      "Children": [],
+      "Credentials": [
+       {
+        "CustomUserFields": {},
+        "CustomApplicationFields": {},
+        "Attachments": [],
+        "Tags": [],
+        "HasModifyEntriesAccess": false,
+        "HasViewEntryContentsAccess": true,
+        "HasViewEntryPasswordAccess": true,
+        "HasViewTOTPAccess": true,
+        "HasModifyTOTPAccess": false,
+        "CommentPrompts": {
+         "AskForCommentOnViewPassword": false,
+         "AskForCommentOnViewOffline": false,
+         "AskForCommentOnModifyEntries": false,
+         "AskForCommentOnMoveEntries": false,
+         "AskForCommentOnMoveFolders": false,
+         "AskForCommentOnModifyFolders": false
+        },
+        "Id": "{entry:pl-agent-1}",
+        "Name": "build-agent-01 root",
+        "Username": "root",
+        "Password": null,
+        "Url": "ssh://10.20.8.11",
+        "Notes": "",
+        "GroupId": "{folder:Tidewater/Platform/CI/Agents}",
+        "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Expires": null,
+        "TOTPIssuer": null,
+        "TOTPSecret": null,
+        "TOTPDigits": 0,
+        "TOTPPeriod": 0
+       }
+      ],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasExportAccess": false,
+      "HasViewOfflineAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{folder:Tidewater/Platform/CI/Agents}",
+      "Name": "Agents",
+      "ParentId": "{folder:Tidewater/Platform/CI}",
+      "Notes": null,
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null
+     }
+    ],
+    "Credentials": [],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Platform/CI}",
+    "Name": "CI",
+    "ParentId": "{folder:Tidewater/Platform}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   },
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [],
+    "Credentials": [
+     {
+      "CustomUserFields": {
+       "TOTP Seed": "<base32 seed>",
+       "TOTP Settings": "30;6"
+      },
+      "CustomApplicationFields": {},
+      "Attachments": [],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasViewEntryPasswordAccess": true,
+      "HasViewTOTPAccess": true,
+      "HasModifyTOTPAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{entry:pl-grafana}",
+      "Name": "Grafana admin",
+      "Username": "admin",
+      "Password": null,
+      "Url": "https://grafana.tidewater.internal",
+      "Notes": "",
+      "GroupId": "{folder:Tidewater/Platform/Monitoring}",
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null,
+      "TOTPIssuer": null,
+      "TOTPSecret": null,
+      "TOTPDigits": 0,
+      "TOTPPeriod": 0
+     }
+    ],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Platform/Monitoring}",
+    "Name": "Monitoring",
+    "ParentId": "{folder:Tidewater/Platform}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   },
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [],
+    "Credentials": [
+     {
+      "CustomUserFields": {
+       "otp": "key=<base32 seed>&step=30&size=6"
+      },
+      "CustomApplicationFields": {},
+      "Attachments": [],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasViewEntryPasswordAccess": true,
+      "HasViewTOTPAccess": true,
+      "HasModifyTOTPAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{entry:pl-ops-mail}",
+      "Name": "ops@ shared mailbox",
+      "Username": "ops@tidewater.example",
+      "Password": null,
+      "Url": "https://mail.tidewater.example",
+      "Notes": "",
+      "GroupId": "{folder:Tidewater/Platform/Mail}",
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null,
+      "TOTPIssuer": null,
+      "TOTPSecret": null,
+      "TOTPDigits": 0,
+      "TOTPPeriod": 0
+     }
+    ],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Platform/Mail}",
+    "Name": "Mail",
+    "ParentId": "{folder:Tidewater/Platform}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   },
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [
+     {
+      "CustomUserFields": {},
+      "CustomApplicationFields": {},
+      "Children": [],
+      "Credentials": [
+       {
+        "CustomUserFields": {},
+        "CustomApplicationFields": {},
+        "Attachments": [
+         {
+          "CredentialObjectId": "{entry:pl-wg}",
+          "AttachmentId": "{attachment:pl-wg:0}",
+          "FileName": "wg-hub.conf",
+          "FileSize": 216
+         }
+        ],
+        "Tags": [],
+        "HasModifyEntriesAccess": false,
+        "HasViewEntryContentsAccess": true,
+        "HasViewEntryPasswordAccess": true,
+        "HasViewTOTPAccess": true,
+        "HasModifyTOTPAccess": false,
+        "CommentPrompts": {
+         "AskForCommentOnViewPassword": false,
+         "AskForCommentOnViewOffline": false,
+         "AskForCommentOnModifyEntries": false,
+         "AskForCommentOnMoveEntries": false,
+         "AskForCommentOnMoveFolders": false,
+         "AskForCommentOnModifyFolders": false
+        },
+        "Id": "{entry:pl-wg}",
+        "Name": "WireGuard hub",
+        "Username": "",
+        "Password": null,
+        "Url": "wg://vpn.tidewater.example:51820",
+        "Notes": "",
+        "GroupId": "{folder:Tidewater/Platform/Network/VPN}",
+        "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Expires": null,
+        "TOTPIssuer": null,
+        "TOTPSecret": null,
+        "TOTPDigits": 0,
+        "TOTPPeriod": 0
+       }
+      ],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasExportAccess": false,
+      "HasViewOfflineAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{folder:Tidewater/Platform/Network/VPN}",
+      "Name": "VPN",
+      "ParentId": "{folder:Tidewater/Platform/Network}",
+      "Notes": null,
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null
+     }
+    ],
+    "Credentials": [],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Platform/Network}",
+    "Name": "Network",
+    "ParentId": "{folder:Tidewater/Platform}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   }
+  ],
+  "Credentials": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasExportAccess": false,
+  "HasViewOfflineAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{folder:Tidewater/Platform}",
+  "Name": "Platform",
+  "ParentId": "{folder:Tidewater}",
+  "Notes": null,
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/folders/{folder:Tidewater/Platform}?recurseLevel=2"
+ }
+}

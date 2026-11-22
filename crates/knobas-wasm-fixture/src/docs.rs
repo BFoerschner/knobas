@@ -106,6 +106,7 @@ pub fn kind() -> KindInfo {
         monogram: "PG".into(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 

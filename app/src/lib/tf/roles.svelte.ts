@@ -33,6 +33,9 @@ export const CI = "ci";
 export const WIKI = "wiki";
 export const MONITORING = "monitoring";
 export const TICKET_SYSTEM = "ticket-system";
+/** A password manager's entries (ADR-0056): `knobas_source::role::PASSWORDS`. */
+export const PASSWORDS = "passwords";
+
 /** The ticket system's optional read that turns a saved view's query into conditions (#1208). */
 export const TRANSLATE_QUERY = "translate_query";
 

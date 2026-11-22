@@ -16,6 +16,9 @@ serde_json.workspace = true
 # #1325): the entity and sources barrels' types are declared here (#1326, #1327).
 ts-rs.workspace = true
 thiserror.workspace = true
+# `passwords::SecretText` zeroes its bytes on drop (ADR-0056). Already in the
+# lock through other crates; builds for wasm32-wasip2.
+zeroize = "1.9"
 
 [dev-dependencies]
 tokio.workspace = true

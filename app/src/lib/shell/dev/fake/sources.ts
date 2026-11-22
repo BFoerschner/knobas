@@ -114,6 +114,15 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
     ...fixtureSource("kestrel", "kestrel", "Tidewater Kestrel", "https://kestrel.tidewater.example", "ok", 1, 97, "Pat"),
     roles: [{ role: "ticket-system", reads: [] }],
   },
+  // The Passwords page's one source (ADR-0056): a Pleasant Password Server set to sync only by hand, so Settings ›
+  // Sources shows *Only when I press Sync now* and the source's *Passwords* section.
+  {
+    ...fixtureSource("team", "pleasant", "Team passwords", "https://passwords.tidewater.example:10001", "ok", 32, 98, "UserPassword"),
+    sync_by_hand: true,
+    next_run_at: null,
+    config: { username: "mara.lindqvist" } as Record<string, unknown>,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+  },
 ];
 
 // A ticket system the fixture draws moves, edits and comments on its tickets (ADR-0054), as Jira's and Gitea's
@@ -160,6 +169,7 @@ function fixtureSource(
     base_url: baseUrl,
     enabled: true,
     sync_interval_secs: 900,
+    sync_by_hand: false,
     // The user a Settings page shows (#830): the config's `username`, which
     // only a username-and-password source carries here.
     config: (authKind === "UserPassword" ? { username: "mara.oyelaran" } : {}) as Record<string, unknown>,
@@ -249,6 +259,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     auth_methods: ["ApiToken"],
     // The adapter's sync-interval floor (#1187).
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [],
     write_ops: [],
     entity_kinds: KIND_INFO,
@@ -263,6 +274,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193, #1208).
     roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     write_ops: [],
@@ -289,6 +301,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The roles it claims, as the real adapter does (#1193, #1206).
     roles: [
       { role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] },
@@ -307,6 +320,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 20,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193).
     roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "artifact_bytes", "download", "run_chain"] }],
     write_ops: [],
@@ -324,7 +338,31 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     ],
     config_schema: TEAMCITY_SCHEMA,
   }),
+  // Pleasant Password Server (ADR-0056): what the Passwords role's first adapter declares.
+  descriptor({
+    id: "pleasant",
+    adapter_kind: "pleasant",
+    name: "Pleasant Password Server",
+    capabilities: [],
+    adapter_version: "3.2.8",
+    auth_methods: ["UserPassword"],
+    min_sync_interval_secs: 60,
+    by_hand_by_default: true,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+    write_ops: [],
+    entity_kinds: [
+      { id: "password_entry", label: "Password entry", plural: "Password entries", monogram: "PW", full_sync_exhaustive: true },
+      { id: "password_folder", label: "Password folder", plural: "Password folders", monogram: "PF", full_sync_exhaustive: true },
+    ],
+    config_schema: {
+      type: "object",
+      properties: { username: { type: "string", title: "Username", description: "The account knobas signs in as, with the password below. Test connection says whom it signed in as." } },
+      required: ["username"],
+    },
+    passwords: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: true, access_requests: false, marks_protected_fields: false, writes: ["create_entry", "edit_entry", "set_password"] },
+  }),
   // The fixture-only second ticket system (#2032): one saved-view kind, named Kestrel.
+
   descriptor({
     id: "kestrel",
     adapter_kind: "kestrel",
@@ -333,6 +371,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [{ role: "ticket-system", reads: [] }],
     write_ops: [],
     entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
@@ -443,6 +482,7 @@ const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   adapter_version: "0.1.0",
   auth_methods: ["Pat"],
   min_sync_interval_secs: 60,
+  by_hand_by_default: false,
   roles: [{ role: "wasm-fixture:survey-desk", reads: [] as string[] }],
   // Its one write is its source action, *Book repair…* (#1407).
   write_ops: ["source_action"],
@@ -761,6 +801,8 @@ export function handlers(): Handlers {
         auth_kind: (input["auth_kind"] ?? null) as AuthMethod | null,
         config: (input["config"] ?? {}) as Record<string, unknown>,
         sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
+        sync_by_hand: input["sync_by_hand"] === true,
+
         health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },
         // The adapter's claims and kinds, as `list_sources` takes them from its template.
         roles: adapter === undefined ? [] : adapter.roles,

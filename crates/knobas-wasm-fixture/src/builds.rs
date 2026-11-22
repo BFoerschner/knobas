@@ -62,6 +62,7 @@ pub fn kinds() -> [KindInfo; 2] {
         monogram: monogram.into(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     };
     [
         kind("pipeline", "Pipeline", "Pipelines", "PL"),

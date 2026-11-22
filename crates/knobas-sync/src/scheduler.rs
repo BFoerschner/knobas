@@ -534,7 +534,9 @@ select c.id as source_id,
        case
          when r.id is not null then null
          when not c.enabled then null
+         when c.sync_by_hand then null
          when c.auth_state in ('unauthorized', 'missing_secret') then null
+
          else coalesce(
                 greatest(
                   f.finished_at + make_interval(secs => c.sync_interval_secs::double precision),
@@ -1242,13 +1244,50 @@ async fn attempt(
     }
     // The same test as `write_queue::retryable`'s: change the two together.
     match report {
-        Ok(report) => Ok((report, source)),
+        Ok(mut report) => {
+            keep_otp_keys(deps, source_id, &mut report).await;
+            Ok((report, source))
+        }
+
         Err(error @ SyncError::Source(SourceError::Protocol { status: None, .. }))
             if held_on.is_some() =>
         {
             Err(RunFailure::LocalQuota(error))
         }
         Err(error) => Err(RunFailure::Sync(error)),
+    }
+}
+
+/// Keep the code keys a run that **committed** handed over (ADR-0056), in
+/// the OS keychain beside the source's credential: a run that walked every
+/// entry replaces the stored set, any other adds to it and removes nothing.
+/// A failed run never reaches here, so the keys of the last good run keep
+/// working. The keys leave the report either way; they are in no log line.
+///
+/// A store that refuses is warned about and does not fail the run: the
+/// mirror is right, and the entries say *Sync now to make codes here*.
+async fn keep_otp_keys(deps: &SchedulerDeps, source_id: &str, report: &mut crate::SyncReport) {
+    let run = std::mem::take(&mut report.otp_keys);
+    if !run.applies {
+        return;
+    }
+    let count = run.keys.len();
+    let keys: knobas_secrets::otp::OtpKeys = run.keys.into_iter().collect();
+    let kept = if run.whole {
+        knobas_secrets::otp::spawn::replace(&deps.secrets, source_id, keys).await
+    } else {
+        knobas_secrets::otp::spawn::merge(&deps.secrets, source_id, keys).await
+    };
+    match kept {
+        Ok(chunks) => tracing::debug!(
+            source_id,
+            count,
+            chunks,
+            "kept the run's one-time-code keys"
+        ),
+        Err(error) => {
+            tracing::warn!(source_id, count, %error, "the run's one-time-code keys could not be kept")
+        }
     }
 }
 
@@ -2052,17 +2091,24 @@ impl Scheduler {
     /// [`trigger`](Self::trigger) and nothing else: the **wait**, and that
     /// what it waits for is a run **after the write** (#375).
     ///
-    /// Answers the id of the run it waited on last.
+    /// Answers the id of the run it waited on last, or `None` for a source
+    /// that syncs **only by hand** (ADR-0056): a write is not a press, so it
+    /// starts no run there. The landed write's refresh still reads its item
+    /// back; whatever else the write changed waits for the next *Sync now*.
     ///
     /// # Errors
-    /// [`TriggerError`], from either trigger.
-    pub async fn sync_after_write(&self, source_id: &str) -> Result<i64, TriggerError> {
+    /// [`TriggerError`], from either trigger, or reading whether the source
+    /// syncs by hand.
+    pub async fn sync_after_write(&self, source_id: &str) -> Result<Option<i64>, TriggerError> {
+        if config::syncs_by_hand(&self.deps().pool, source_id).await? {
+            return Ok(None);
+        }
         match self.trigger_and_wait(source_id).await? {
-            Triggered::Started(run_id) => Ok(run_id),
+            Triggered::Started(run_id) => Ok(Some(run_id)),
             Triggered::Existing(_) => self
                 .trigger_and_wait(source_id)
                 .await
-                .map(Triggered::run_id),
+                .map(|t| Some(t.run_id())),
         }
     }
 

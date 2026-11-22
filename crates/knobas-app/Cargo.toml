@@ -68,6 +68,7 @@ knobas-source-confluence = { path = "../knobas-source-confluence" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 knobas-source-jira = { path = "../knobas-source-jira" }
 knobas-source-kuma = { path = "../knobas-source-kuma" }
+knobas-source-pleasant = { path = "../knobas-source-pleasant" }
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-source-teamcity = { path = "../knobas-source-teamcity" }
 knobas-sync = { path = "../knobas-sync" }
@@ -89,6 +90,17 @@ serde_json.workspace = true
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true
+# One-time codes, made on this machine (ADR-0056, RFC 6238). All four were in
+# the lock already through other crates; MIT OR Apache-2.0.
+hmac = "0.13"
+sha1 = "0.11"
+# `hmac` 0.13 takes the digest-0.11 hashes; `sha2` 0.10 above serves the rest.
+sha2-otp = { package = "sha2", version = "0.11" }
+data-encoding = "2.11"
+# The clipboard a copied secret goes to and is cleared from, by the Rust side,
+# with the platforms' "keep out of history" marks (ADR-0056). MIT OR
+# Apache-2.0, about 55 KB, no image code.
+arboard = { version = "3.7", default-features = false }
 # `tracing` makes Tauri wrap every command in the spans `logging::CommandLog`
 # times (#747); it adds no IPC and no permission.
 tauri = { version = "2", features = ["tracing"] }

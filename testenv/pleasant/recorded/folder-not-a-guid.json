@@ -1,0 +1,11 @@
+{
+ "name": "folder-not-a-guid",
+ "status": 404,
+ "headers": {},
+ "body": "",
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/folders/not-a-guid"
+ }
+}

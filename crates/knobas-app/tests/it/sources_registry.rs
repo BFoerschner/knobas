@@ -233,6 +233,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
         // §10.8 ratification under ADR-0006 is the diff this table exists to
         // put in front of a reviewer.
         ("kuma", vec![]),
+        // Pleasant Password Server queues nothing (ADR-0056): a change to an
+        // entry is a direct write, a `passwords::Write`, never a `WriteOp`.
+        ("pleasant", vec![]),
     ]
     .into_iter()
     .collect();

@@ -525,4 +525,16 @@ impl Sink for Counting<'_> {
     async fn left_out(&mut self, why: &str) {
         self.inner.left_out(why).await;
     }
+
+    /// Handed on: the scheduler keeps the run's code keys from the engine's
+    /// sink once the run commits (ADR-0056). The trait's default drops a key,
+    /// so a wrapper that forgot this lost every key of every run the app
+    /// reported progress for (seen in the real app on WSL, 2026-11-22).
+    async fn otp_key(
+        &mut self,
+        entity: &knobas_core::entity::EntityRef,
+        key: knobas_source::passwords::OtpKey,
+    ) {
+        self.inner.otp_key(entity, key).await;
+    }
 }

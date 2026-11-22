@@ -1340,6 +1340,8 @@ impl Source for MockSource {
             url_forms: Vec::new(),
             web_sign_in: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: if self.files_tickets {
                 vec!["comment".to_owned(), "create_ticket".to_owned()]
             } else {
@@ -1355,6 +1357,7 @@ impl Source for MockSource {
                     monogram: "TK".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "pr".to_owned(),
@@ -1363,6 +1366,7 @@ impl Source for MockSource {
                     monogram: "PR".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "build".to_owned(),
@@ -1371,6 +1375,7 @@ impl Source for MockSource {
                     monogram: "BU".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "page".to_owned(),
@@ -1379,6 +1384,7 @@ impl Source for MockSource {
                     monogram: "PG".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "commit".to_owned(),
@@ -1387,6 +1393,7 @@ impl Source for MockSource {
                     monogram: "CM".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 // The two the corpus gained in #537. `RP` and `BR` are the
                 // monograms `app/src/lib/shell/kinds.ts` already draws for
@@ -1404,6 +1411,7 @@ impl Source for MockSource {
                     monogram: "RP".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "branch".to_owned(),
@@ -1412,6 +1420,7 @@ impl Source for MockSource {
                     monogram: "BR".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 // The Builds frame's pipeline (#1240); a `build` is its run.
                 KindInfo {
@@ -1421,6 +1430,7 @@ impl Source for MockSource {
                     monogram: "PL".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
                 KindInfo {
                     id: "monitor".to_owned(),
@@ -1429,6 +1439,7 @@ impl Source for MockSource {
                     monogram: "MO".to_owned(),
                     full_sync_exhaustive: true,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
             ],
             // Every kind above declares `full_sync_exhaustive: true`: the

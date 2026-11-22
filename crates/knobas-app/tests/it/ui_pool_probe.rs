@@ -389,6 +389,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                 config: serde_json::json!({}),
                 sync_interval_secs: 60,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
