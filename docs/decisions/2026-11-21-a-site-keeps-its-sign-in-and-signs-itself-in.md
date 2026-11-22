@@ -88,8 +88,21 @@ carries the next start, and a fill signs in again when it has run out.
   site signed in with nothing saved to fill. TeamCity filled on the first look (its page encrypts the password itself),
   quit, new start: signed in. Uptime Kuma's dialog was found on `/dashboard` and filled; after a new start the dashboard
   showed signed in. Five runs' logs hold none of the three passwords.
+- **XWiki through its external adapter, the Mac's real window** (`knobas-adapter-xwiki` built against 1.7.0, installed
+  through knobas' own install, the test wiki's account, a forward of my own to its port): on a forgotten session
+  XWiki sent the site to `/xwiki/bin/login/XWiki/XWikiLogin;jsessionid=…`, knobas filled it by itself and XWiki
+  signed in; after ⌘Q and a new start the site opened signed in with nothing filled. Two runs' logs hold no password.
+  The run found three faults, fixed before it passed:
+  - the `;jsessionid` a servlet container puts in the path on a first visit hid the declared page; a path's `;`
+    parameters are not part of the page now;
+  - XWiki keeps a sign-in form in a panel of every signed-in page, so the check after a fill said "did not take" while
+    XWiki was signed in. "Not taken" is now the sign-in page again, as §13 (b) said from the start; the form check
+    decides it only for an `any_page` adapter (Kuma), and still finds a second factor;
+  - *Forget…* on the Mac failed with "data store is currently opened": it ran the instant the view was dropped, so
+    the session stayed. The platform now reports the removal and *Forget…* tries again for up to 4 s before listing
+    it for the next start.
 - Not run in a window: Gitea and Forgejo on Windows, Jira on Windows, and Forgejo, Confluence, TeamCity and Kuma on the
-  Mac.
+  Mac; XWiki on Windows.
 
 ## Tested
 
