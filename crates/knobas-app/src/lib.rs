@@ -1981,6 +1981,7 @@ mod tests {
             super::events::SITE_CLOSED,
             super::events::SITE_QUIT,
             super::events::UPDATE_STATE,
+            super::events::CLIPBOARD_STATE,
         ];
         names.sort_unstable();
         declared.sort_unstable();
