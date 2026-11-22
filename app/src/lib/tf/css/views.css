@@ -18,8 +18,8 @@
 }
 .tf-vw-row:hover .tf-vw-more, .tf-vw-more:focus-visible, .tf-vw-more[aria-expanded="true"] { opacity: 1; }
 .tf-vw-more:hover { background: var(--sheet-2); }
-.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more { color: var(--on-fill); }
-.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more:hover { background: color-mix(in srgb, var(--on-fill) 15%, transparent); }
+.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more { color: var(--on-sel-row); }
+.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more:hover { background: color-mix(in srgb, var(--on-sel-row) 15%, transparent); }
 .tf-vw-menu { display: inline-flex; }
 .tf-menu.tf-vw-m { width: 200px; }
 .tf-vw-m b { font-weight: 500; }

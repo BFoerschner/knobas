@@ -30,7 +30,7 @@ light frame.
    lightness alone. A filled pair's fix moves the ground.
 8. **States told apart** is a quiet line with a fix that may move a hue.
 9. **A theme under 3:1 for the text one needs to find the way back asks first, and is kept only on a press.** Reset
-   is a button, a launcher action, ⌘⇧⌫ or Ctrl+Shift+Backspace, and `knobas --default-theme`.
+   is a button, a launcher action and `knobas --default-theme` (the design's ⌘⇧⌫ was dropped, below).
 10. **The first paint has the theme**, from a script in the page's head, and the bare window has its colour from the
     Rust side.
 11. **Settings › Appearance › Theme** is the page. Appearance's *Theme* row is now *Mode*.
@@ -49,7 +49,7 @@ page's module missed the first paint in 5 of 5 loads at each speed. Set by a scr
 
 ## Not in this pass
 
-JetBrains schemes. Themes in a backup. A chart palette, since there is no chart with series. Fonts, radius or
+A chart palette, since there is no chart with series. Fonts, radius or
 density in a theme. Changing knobas's own state colours for colour-blind readers.
 
 ## Reversing it
@@ -71,8 +71,36 @@ Steps 1 to 9 of the design, on `ux-polish`. Where the build differs from the des
   computed page colour rather than a screenshot of it.
 - *Put knobas's themes back* in the launcher is an action that runs where it is; its address is the Theme page.
 
-Section 11's nine questions are unanswered; each default is in one place: code follows the window (`themes.svelte.ts`,
-`codeDrawn`), the card is knobas's in every built-in (`builtins.ts`), the colour-blind set is not knobas's own
-(`app-derive.ts`'s `KNOBAS`), an import arrives as published with *Fix all* (`theme-import.ts`), themes stay on this
-computer (`themes.svelte.ts`), JetBrains is not read (`themes.ts`), the reset key (`theme-reset.ts`), the nine code
-colours (`builtins.ts`), and an import's button colours the primary button only (`app-import.ts`, `primary`).
+## Björn's answers (2026-11-22)
+
+Section 11, answered, and built:
+
+1. **Code follows the window**, and can be set apart: as built.
+2. **The yellow card is a theme colour.** Any theme may set it. One that sets none but sets its Attention gets a card
+   of that hue at knobas's card's lightness and chroma, so the built-ins and imports bring their own; a theme that sets
+   no Attention keeps knobas's yellow, and so do knobas's own themes.
+3. **Colour-blind mode**, a switch in Settings › Appearance, off at first. On, it names each pair of states that reads
+   the same under protanopia, deuteranopia or tritanopia, with the roles ("Attention and Failed read the same under
+   deuteranopia"), for both sides' themes, under the Theme page's States, and in a toast when such a theme is put in a
+   slot. The simulation is Machado, Oliveira and Fernandes (2009), *A Physiologically-based Model for Simulation of
+   Color Vision Deficiency*, IEEE TVCG 15(6), at full severity; a pair reads the same under 0.08 in OKLab. Two
+   built-ins, *knobas Light for colour blindness* and *knobas Dark for colour blindness*, carry the set *Tell them
+   apart* computed: light Passed `#00604F`, Attention `#905C0C`, Failed `#9B0618`; dark Passed `#52D8BD`, Attention
+   `#F2BD5B`.
+4. **An import arrives as published, with *Fix all*:** as built.
+5. **Themes are in backups.** The store is mirrored into one `knobas.setting` row (`themes.kept`), which the database's
+   dump carries; a restore puts it back. A share export carries no setting, so none carries themes.
+6. **JetBrains `.icls`** (code colours only): wanted, last in ux29 if time allows. Built last: the scheme's attributes are
+   read onto the seventeen roles, the first one present winning and an empty one taking its base's (`ICLS` in
+   `theme/themes.ts`). A scheme lists only what differs from Darcula or Default, so a role it leaves out draws in ink.
+   Its side is its page colour, else its parent. Tested against Dracula's own JetBrains scheme.
+7. **No reset key.** The button, the launcher action and `knobas --default-theme` stay.
+8. **The built-ins keep their published code colours.** The nine are not lightened. On their own window a few fall
+   under 4.5:1 and are marked; the editor's *Fix all* and each row's fix work on a built-in too, by making a copy with
+   the fixed colours where the original drew.
+9. **A selected row is a pair of theme colours of its own**, *Selected row* and *Text on a selected row*
+   (`--sel-row`, `--on-sel-row`), split from *Pressed* (`--fill`, `--on-fill`, which pressed segments keep). Unset,
+   it is the ink plate of today. Its row in the editor has three quick picks: *knobas (ink)*, *The theme's accent*, and
+   for an import that had one, *The theme's own* (VS Code's `list.activeSelectionBackground` and `-Foreground`, Zed's
+   `element.selected`), which the import offers and does not set. The pair is checked at 4.5:1 and joins the 3:1
+   floor; a selected row's states (`--on-ink-*`) are worked out against it.

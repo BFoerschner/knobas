@@ -23,6 +23,8 @@
   `open_backup_folder` command picks the running profile's (#1704).
 -->
 <script lang="ts">
+  import { restoreThemes } from "../theme-backup.svelte";
+  import { themes as windowThemes } from "../themes.svelte";
   import type { Attachment } from "svelte/attachments";
 
   import { pageVisible } from "../kept-pages.svelte";
@@ -235,6 +237,8 @@
       await ports.restoreBackup(archive.file);
       choosing = null;
       onrestored();
+      // The themes the backup kept come back with it (Björn, 2026-11-22).
+      void restoreThemes(windowThemes);
       push({ text: `Restored from ${archive.file}. Restart knobas so every view reads the restored database.`, ms: 30_000 });
     } catch (cause) {
       // The dialog stays: the refusal ("already holds knobas data") is the answer.

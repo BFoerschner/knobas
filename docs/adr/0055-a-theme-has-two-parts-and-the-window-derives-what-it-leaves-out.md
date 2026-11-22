@@ -19,9 +19,31 @@ the code slots follow the window's unless set apart.**
 - **Both sides' variables are on the root at once**, as ADR-0051 has it, now for every colour.
 - **What was last written is kept beside the themes**, and a script in the document's head writes it back before
   the first paint. That script derives nothing.
-- **The window draws an unreadable theme only after a press that says so**, and Reset needs no reading.
-- **Kept on this computer**, as ADR-0051 has it. One command tells the Rust side the page colour of each side and
-  the mode, for the bare window.
+- **The window draws an unreadable theme only after a press that says so**, and Reset is a button, a launcher action
+  and a start flag.
+- **Kept on this computer and in backups.** One command tells the Rust side the page colour of each side and the mode,
+  for the bare window; two keep the theme store in one setting, which a backup carries and a restore brings back.
+
+## How an imported theme is read
+
+| knobas | VS Code `colors` | Zed `style` |
+|---|---|---|
+| Panel | `editor.background` | `editor.background`, `background` |
+| Text | `editor.foreground`, `foreground` | `editor.foreground`, `text` |
+| Page | `sideBar.background` and three more | `panel.background`, `surface.background`, `background` |
+| Inset | `list.hoverBackground`, `editor.lineHighlightBackground`, `editorWidget.background` | `ghost_element.hover`, `element.hover`, `editor.active_line.background` |
+| Field | `input.background`, `dropdown.background` | derived |
+| Primary button and its text | `button.background`, `button.foreground` | derived |
+| Selected row and its text | offered, not set: `list.activeSelectionBackground`, `list.activeSelectionForeground` | offered, not set: `element.selected` |
+| Passed, Attention, Failed, Running | `terminal.ansiGreen`, `-Yellow`, `-Red`, `-Blue` first | `success`, `warning`, `error`, `info` first |
+| Card | derived from Attention | derived from Attention |
+
+Every other key, and every guard, is in `app/src/lib/tf/theme/app-import.ts`. *Pressed* is never read: GitHub's green
+filling every pressed segment and selected row is what the split of the primary button from it is for.
+
+A JetBrains scheme (`.icls`) brings a code part only: it holds no window colours knobas can read onto these keys, and
+it lists only the attributes that differ from its parent, so a role it leaves out draws in ink (`ICLS` in
+`app/src/lib/tf/theme/themes.ts`).
 
 ## Rejected
 

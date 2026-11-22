@@ -144,16 +144,16 @@ pub fn open_main_window<R: Runtime>(
     for script in crate::window_look::init_scripts(default_theme) {
         builder = builder.initialization_script(script);
     }
-    // The look the page last kept: the window is built hidden, takes the title bar's side and the page colour, and
-    // is shown, so the bare window is the theme's before the page paints. Without one, as before.
+    // The look the page last kept: the window is built with the title bar's side and the page colour, so the bare
+    // window is the theme's before the page paints. Without one, as before. Not built hidden and shown after: on
+    // macOS a web view made hidden never loaded its page once shown (the real window, 2026-11-22).
     let look =
         app.path().app_data_dir().ok().and_then(|data| {
             crate::window_look::read(&crate::profile::Profile::new(demo, &data).dir)
         });
-    let shown = look.is_some() && main.visible;
     if let Some(look) = &look {
         let (theme, colour) = look_for_window(look, false);
-        builder = builder.visible(false).theme(theme).background_color(colour);
+        builder = builder.theme(theme).background_color(colour);
     }
     let window = builder.build()?;
     if let Some(look) = &look {
@@ -161,9 +161,6 @@ pub fn open_main_window<R: Runtime>(
         if look.theme().is_none() {
             let system_dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
             let _ = window.set_background_color(Some(look_for_window(look, system_dark).1));
-        }
-        if shown && let Err(failure) = window.show() {
-            tracing::warn!(%failure, "the main window would not show");
         }
     }
     crate::webview_menu::trim(&window);

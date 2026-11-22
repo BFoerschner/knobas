@@ -26,10 +26,10 @@ test("knobas Light's roles have the design system's figures", () => {
   expect(roleContrast(KNOBAS.light, "prop", undefined).ratio).toBeCloseTo(Math.min(...Object.values(surfacesOf(KNOBAS.light)).map((bg) => contrast(KNOBAS.light.ink, bg))), 5);
 });
 
-test("every built-in role passes 4.5:1 on knobas's surfaces of its side and on its own", () => {
+test("every built-in role passes 4.5:1 on knobas's surfaces of its side (on its own window a few fall under, and its editor offers the fix)", () => {
   const failing: string[] = [];
   for (const theme of BUILTINS)
-    for (const window of [KNOBAS[theme.kind], ownWindow(theme.id)])
+    for (const window of [KNOBAS[theme.kind]])
       for (const role of ROLES) {
         const { ratio, on } = roleContrast(window, role, theme.syntax[role]);
         if (ratio < 4.5) failing.push(`${theme.name} ${role} ${ratio.toFixed(2)} on ${on} of ${window.sheet}`);
@@ -37,12 +37,13 @@ test("every built-in role passes 4.5:1 on knobas's surfaces of its side and on i
   expect(failing).toEqual([]);
 });
 
-test("One Dark's keyword reads 4.5:1 on a One Dark window, where its old colour was 3.8:1 on the added line", () => {
+test("One Dark keeps its own keyword (Björn, 2026-11-22), which is 3.8:1 on its own added line, so its row is marked and fixable", () => {
   const oneDark = ownWindow("one-dark");
-  expect(roleContrast(oneDark, "kw", BUILTINS.find((t) => t.id === "one-dark")!.syntax.kw).ratio).toBeGreaterThanOrEqual(4.5);
-  const old = roleContrast(oneDark, "kw", "#C678DD");
-  expect(old.on).toBe("added line");
-  expect(old.ratio).toBeCloseTo(3.8, 1);
+  expect(BUILTINS.find((t) => t.id === "one-dark")!.syntax.kw).toBe("#C678DD");
+  const kw = roleContrast(oneDark, "kw", "#C678DD");
+  expect([kw.on, kw.low]).toEqual(["added line", true]);
+  expect(kw.ratio).toBeCloseTo(3.8, 1);
+  expect(roleContrast(KNOBAS.dark, "kw", "#C678DD").low).toBe(false);
 });
 
 test("the fix reaches 4.5 on every surface, keeps the hue, and moves a passing colour not at all", () => {
@@ -79,7 +80,7 @@ test("the sentence names the surface, its figure cut and never rounded up", () =
 test("a quiet line's colour, 40 % of a built-in role mixed into the secondary ink, passes 4.5:1 on the sheet", () => {
   const failing: string[] = [];
   for (const theme of BUILTINS)
-    for (const c of [KNOBAS[theme.kind], ownWindow(theme.id)])
+    for (const c of [KNOBAS[theme.kind]])
       for (const role of ROLES) {
         const mixed = mixOklab(theme.syntax[role] ?? c.ink, c.ink2, 0.4);
         const ratio = contrast(mixed, c.sheet);

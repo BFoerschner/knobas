@@ -5,12 +5,13 @@
  * comments slant. A theme may hold either part or both.
  *
  * This file is the model: what a theme may hold, reading one a person kept, and reading and writing theme files.
- * Import reads knobas's own file, a VS Code theme and a Zed theme onto the roles; export writes knobas's own. Nothing
- * here touches the page or storage (`tf/themes.svelte.ts` does).
+ * Import reads knobas's own file, a VS Code theme, a Zed theme, a Base16 scheme and a JetBrains scheme (code only)
+ * onto the roles; export writes knobas's own. Nothing here touches the page or storage (`tf/themes.svelte.ts` does).
  */
 import { PIERRE_ROLE, ROLES, type Role } from "../../render/roles";
 import { appFromVsCode, appFromZed, fromBase16, kindOfVsCode, readBase16 } from "./app-import";
 import { type AppKey, KEYS } from "./app-roles";
+import { luminance } from "./colour";
 
 export type ThemeKind = "light" | "dark";
 
@@ -34,6 +35,8 @@ export interface Theme {
   from?: string;
   /** The window's colours it sets, `#RRGGBB` a key; absent where the theme has no window colours. */
   app?: Partial<Record<AppKey, string>>;
+  /** Colours its file had that knobas offers and does not set: a selected row as the editor draws it. */
+  offers?: Partial<Record<AppKey, string>>;
   /** `#RRGGBB` a role; a role left out draws in ink. Empty where the theme has no code colours. */
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
@@ -52,7 +55,7 @@ export const MOST_THEMES = 64;
 export const LARGEST_FILE = 1024 * 1024;
 export const LONGEST_NAME = 60;
 
-export const REFUSED = "That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style` or Base16 colours.";
+export const REFUSED = "That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style`, Base16 colours or JetBrains `<scheme>`.";
 
 /** A colour a theme may hold, as `#RRGGBB` upper case, or `null`: `#RGB`, `#RRGGBB` and `#RRGGBBAA` are read, alpha dropped. */
 export function colour(value: unknown): string | null {
@@ -128,6 +131,8 @@ export function readTheme(value: unknown): Theme | null {
   if (typeof v.from === "string" && v.from !== "") theme.from = v.from.slice(0, LONGEST_NAME);
   const app = appOf(v.app);
   if (app) theme.app = app;
+  const offers = appOf(v.offers);
+  if (offers && Object.keys(offers).length > 0) theme.offers = offers;
   const diff = diffOf(v.diff);
   if (diff) theme.diff = diff;
   if (v.italicComments === false) theme.italicComments = false;
@@ -164,6 +169,8 @@ export interface ThemeFile {
   kind: ThemeKind;
   /** The window's colours, where the theme has them (ADR-0055). A build from before ignores the key. */
   app?: Partial<Record<AppKey, string>>;
+  /** What its source file offered and knobas did not set. */
+  offers?: Partial<Record<AppKey, string>>;
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
   italicComments: boolean;
@@ -171,7 +178,7 @@ export interface ThemeFile {
 
 /** `theme` as knobas's file: its name, `<name>.knobas-theme.json`, and its text. */
 export function exportTheme(theme: Theme): { fileName: string; text: string } {
-  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, ...(theme.app ? { app: { ...theme.app } } : {}), syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
+  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, ...(theme.app ? { app: { ...theme.app } } : {}), ...(theme.offers ? { offers: { ...theme.offers } } : {}), syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
   if (theme.diff) file.diff = { ...theme.diff };
   const safe = theme.name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "theme";
   return { fileName: `${safe}.knobas-theme.json`, text: `${JSON.stringify(file, null, 2)}\n` };
@@ -249,7 +256,11 @@ export function fromVsCode(json: Record<string, unknown>): ImportedTheme {
   const kind = kindOfVsCode(json);
   const theme: ImportedTheme = { name, kind, syntax, from: name };
   const colors = json.colors;
-  if (colors !== null && typeof colors === "object" && !Array.isArray(colors) && Object.keys(colors).length > 0) theme.app = appFromVsCode(json).set;
+  if (colors !== null && typeof colors === "object" && !Array.isArray(colors) && Object.keys(colors).length > 0) {
+    const read = appFromVsCode(json);
+    theme.app = read.set;
+    if (Object.keys(read.offers).length > 0) theme.offers = read.offers;
+  }
   const slant = ruleFor(rules, "comment", "fontStyle");
   if (slant !== null && !/italic/.test(slant)) theme.italicComments = false;
   return theme;
@@ -281,8 +292,9 @@ export function fromZed(json: Record<string, unknown>): ImportedTheme[] {
     const kind: ThemeKind = item.appearance === "light" ? "light" : "dark";
     const theme: ImportedTheme = { name, kind, syntax, from: name };
     if (style && typeof style === "object") {
-      const app = appFromZed(style, kind).set;
-      if (Object.keys(app).length > 0) theme.app = app;
+      const read = appFromZed(style, kind);
+      if (Object.keys(read.set).length > 0) theme.app = read.set;
+      if (Object.keys(read.offers).length > 0) theme.offers = read.offers;
     }
     if (italic === false) theme.italicComments = false;
     out.push(theme);
@@ -292,6 +304,81 @@ export function fromZed(json: Record<string, unknown>): ImportedTheme[] {
 
 /** What a file read for import gave: the themes in it (and a file it includes that knobas cannot read here), or why it was refused. */
 export type ImportResult = { themes: ImportedTheme[]; includes?: string } | { refused: string };
+
+// ---------- import: a JetBrains colour scheme (`.icls`) ----------
+
+/**
+ * The attributes a JetBrains scheme is asked for each role, first present winning (Björn, 2026-11-22: "as an option").
+ * An exported scheme lists only what differs from its parent (Darcula or the light Default), so a role it leaves out
+ * draws in ink. It holds no window colours knobas can use, so the theme has a code part only.
+ */
+export const ICLS: Record<Role, readonly string[]> = {
+  com: ["DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT", "DEFAULT_DOC_COMMENT"],
+  kw: ["DEFAULT_KEYWORD"],
+  str: ["DEFAULT_STRING"],
+  esc: ["DEFAULT_VALID_STRING_ESCAPE"],
+  num: ["DEFAULT_NUMBER"],
+  con: ["DEFAULT_CONSTANT", "DEFAULT_STATIC_FIELD"],
+  fn: ["DEFAULT_FUNCTION_DECLARATION", "DEFAULT_FUNCTION_CALL", "DEFAULT_INSTANCE_METHOD"],
+  ty: ["DEFAULT_CLASS_NAME", "DEFAULT_CLASS_REFERENCE", "DEFAULT_INTERFACE_NAME"],
+  prop: ["DEFAULT_INSTANCE_FIELD"],
+  key: ["JSON.PROPERTY_KEY", "YAML_SCALAR_KEY"],
+  tag: ["DEFAULT_TAG", "HTML_TAG_NAME", "XML_TAG_NAME"],
+  attr: ["DEFAULT_ATTRIBUTE", "HTML_ATTRIBUTE_NAME", "DEFAULT_METADATA"],
+  var: ["DEFAULT_LOCAL_VARIABLE", "DEFAULT_PARAMETER"],
+  op: ["DEFAULT_OPERATION_SIGN"],
+  punct: ["DEFAULT_COMMA", "DEFAULT_SEMICOLON", "DEFAULT_BRACES"],
+  head: ["MARKDOWN_HEADER_LEVEL_1", "MARKDOWN_HEADER"],
+  link: ["DEFAULT_HYPERLINK_ATTRIBUTES", "HYPERLINK_ATTRIBUTES"],
+};
+
+/** A JetBrains colour value (`cc7832`, `0`, `80`: hex digits, left-padded to six) as `#RRGGBB`, or `null`. */
+export function iclsColour(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !/^[0-9a-f]{1,6}$/i.test(value.trim())) return null;
+  return `#${value.trim().padStart(6, "0").toUpperCase()}`;
+}
+
+/** A JetBrains `.icls` scheme onto the roles: its name, its side and the colours it sets. `null` where it is not one. */
+export function fromIcls(text: string): ImportedTheme | null {
+  if (typeof DOMParser === "undefined") return null;
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const scheme = doc.documentElement;
+  if (scheme.nodeName !== "scheme" || doc.getElementsByTagName("parsererror").length > 0) return null;
+  /** An attribute's own options, and those of the attribute it is based on where it sets none of its own. */
+  const attribute = (name: string, depth = 0): Record<string, string> | null => {
+    const node = [...scheme.querySelectorAll(":scope > attributes > option")].find((o) => o.getAttribute("name") === name);
+    if (!node) return null;
+    const out: Record<string, string> = {};
+    for (const o of node.querySelectorAll(":scope > value > option")) out[o.getAttribute("name") ?? ""] = o.getAttribute("value") ?? "";
+    const base = node.getAttribute("baseAttributes");
+    if (Object.keys(out).length === 0 && base && depth < 4) return attribute(base, depth + 1);
+    return out;
+  };
+  const syntax: Partial<Record<Role, string>> = {};
+  for (const role of ROLES)
+    for (const name of ICLS[role]) {
+      const c = iclsColour(attribute(name)?.FOREGROUND);
+      if (c !== null) {
+        syntax[role] = c;
+        break;
+      }
+    }
+  const name = themeName(scheme.getAttribute("name"));
+  const parent = scheme.getAttribute("parent_scheme") ?? "";
+  const ground = iclsColour(attribute("TEXT")?.BACKGROUND);
+  // Its own page colour, else its parent (Darcula is dark, Default light), else its name.
+  const kind: ThemeKind = ground
+    ? luminance(ground) > 0.18 ? "light" : "dark"
+    : /darcula|dark/i.test(parent) ? "dark"
+    : /default|light/i.test(parent) ? "light"
+    : /\blight\b/i.test(name) ? "light"
+    : "dark";
+  const theme: ImportedTheme = { name, kind, syntax, from: name };
+  // FONT_TYPE: 1 bold, 2 italic, 3 both. A comment set upright says so.
+  const style = attribute("DEFAULT_LINE_COMMENT")?.FONT_TYPE ?? attribute("DEFAULT_BLOCK_COMMENT")?.FONT_TYPE;
+  if (style !== undefined && style !== "2" && style !== "3") theme.italicComments = false;
+  return theme;
+}
 
 /** A Base16 scheme as a theme with both parts. */
 function base16Theme(text: string): ImportResult | null {
@@ -313,7 +400,11 @@ export function importThemes(text: string): ImportResult {
     try {
       json = JSON.parse(stripJsonc(text));
     } catch {
-      // A Base16 scheme is YAML as often as JSON.
+      // A JetBrains scheme is XML; a Base16 scheme is YAML as often as JSON.
+      if (text.trimStart().startsWith("<")) {
+        const icls = fromIcls(text);
+        return icls ? { themes: [icls] } : { refused: REFUSED };
+      }
       return base16Theme(text) ?? { refused: REFUSED };
     }
   }
@@ -325,6 +416,8 @@ export function importThemes(text: string): ImportResult {
     const theme: ImportedTheme = { name, kind: v.kind, syntax: syntaxOf(v.syntax), from: name };
     const app = appOf(v.app);
     if (app) theme.app = app;
+    const offers = appOf(v.offers);
+    if (offers && Object.keys(offers).length > 0) theme.offers = offers;
     const diff = diffOf(v.diff);
     if (diff) theme.diff = diff;
     if (v.italicComments === false) theme.italicComments = false;

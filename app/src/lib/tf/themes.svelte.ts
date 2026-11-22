@@ -28,6 +28,7 @@ export const SLOT_KEY: Record<ThemeKind, string> = { light: "knobas.theme.light"
 export const APP_SLOT_KEY: Record<ThemeKind, string> = { light: "knobas.app-theme.light", dark: "knobas.app-theme.dark" };
 export const THEMES_KEY = "knobas.themes";
 export const ASIS_KEY = "knobas.app-theme.asis";
+
 export const PAINT_KEY = "knobas.paint";
 export const UNCHANGED_KEY = "knobas.diff.unchanged";
 export const KINDS: readonly ThemeKind[] = ["light", "dark"];
@@ -133,6 +134,15 @@ export function scopeValues(app: Theme, code: Theme | null, colours: Colours = d
   return out;
 }
 
+/** What a backup carries of the themes (Björn, 2026-11-22): a person's own, the four slots and the *Keep it*s. */
+export interface ThemeSnapshot {
+  v: 1;
+  themes: Theme[];
+  app: Record<ThemeKind, string | null>;
+  code: Record<ThemeKind, string | null>;
+  asis: string[];
+}
+
 export interface Themes {
   /** A person's own themes, oldest first. */
   readonly own: readonly Theme[];
@@ -195,6 +205,10 @@ export interface Themes {
   setUnchanged(value: Unchanged): void;
   /** Keeps what waits for its save now, and draws what waits for its frame. */
   flush(): void;
+  /** Everything a backup carries of the themes. */
+  snapshot(): ThemeSnapshot;
+  /** A backup's themes put back as they were kept: they replace what this computer has. */
+  restore(snapshot: unknown): boolean;
   /** Tests only: nothing kept, every slot knobas's, nothing written. */
   reset(): void;
 }
@@ -227,6 +241,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   const keptThemes = keptValue(storage, THEMES_KEY);
   const keptAsis = keptValue(storage, ASIS_KEY);
   const keptPaint = keptValue(storage, PAINT_KEY);
+
   const keptUnchanged = keptValue(storage, UNCHANGED_KEY);
   const defaultTheme = options.defaultTheme === true;
 
@@ -245,6 +260,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   /** The code slots: an id, or `null` where the slot follows the window's. */
   const codeSlots = $state<Record<ThemeKind, string | null>>({ light: defaultTheme ? null : keptCode.light.read(), dark: defaultTheme ? null : keptCode.dark.read() });
   let asis = $state<string[]>(readAsis());
+
   const readUnchanged = (): Unchanged => {
     const kept = keptUnchanged.read();
     return UNCHANGED.includes(kept as Unchanged) ? (kept as Unchanged) : DEFAULT_UNCHANGED;
@@ -482,6 +498,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       const taken = [...BUILTINS, ...own].map((t) => t.name);
       const theme: Theme = { ...imported, id: ownId(), name: uniqueName(imported.name, taken), syntax: { ...imported.syntax } };
       if (imported.app) theme.app = { ...imported.app };
+      if (imported.offers) theme.offers = { ...imported.offers };
       if (imported.diff) theme.diff = { ...imported.diff };
       while (find(theme.id)) theme.id = ownId();
       own = [...own, theme];
@@ -561,6 +578,22 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
         repaint();
       }
       if (framed) apply();
+    },
+    snapshot: () => ({ v: 1, themes: $state.snapshot(own) as Theme[], app: { ...appSlots }, code: { ...codeSlots }, asis: [...asis] }),
+    restore(value) {
+      if (value === null || typeof value !== "object") return false;
+      const s = value as Partial<ThemeSnapshot>;
+      if (s.v !== 1 || !Array.isArray(s.themes)) return false;
+      own = readThemes(JSON.stringify(s.themes));
+      save();
+      const id = (x: unknown) => (typeof x === "string" && x !== "" ? x : null);
+      for (const kind of KINDS) {
+        writeApp(kind, id(s.app?.[kind]));
+        writeCode(kind, id(s.code?.[kind]));
+      }
+      writeAsis(Array.isArray(s.asis) ? s.asis.filter((x): x is string => typeof x === "string") : []);
+      applyNow();
+      return true;
     },
     reset() {
       if (saving !== null) timers.clear(saving);

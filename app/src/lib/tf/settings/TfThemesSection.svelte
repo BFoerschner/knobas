@@ -78,6 +78,25 @@
     editingId = copy.id;
   }
 
+  /** A built-in's fix: a copy with the fixed colours, put where the original drew, with Undo. */
+  function fixCopy(of: Theme, fixes: Partial<Theme["syntax"]>): void {
+    const { id: _id, ...rest } = of;
+    const before = { follows: themes.follows(of.kind), code: themes.slot(of.kind), app: themes.appSlot(of.kind) };
+    const copy = themes.add({ ...rest, ...(of.app ? { app: { ...of.app } } : {}), syntax: { ...of.syntax, ...fixes }, name: `${of.name} copy`, from: of.name });
+    if (copy === null) return void push({ text: "knobas keeps 64 themes of your own. Delete one to make another." });
+    if (themes.follows(of.kind) && themes.appDrawn(of.kind).id === of.id && copy.app) themes.chooseApp(copy.id);
+    else themes.choose(copy.id);
+    editingId = copy.id;
+    const n = Object.keys(fixes).length;
+    undoable(`${of.name} comes with knobas, so a copy was made with ${n === 1 ? "1 colour" : `${n} colours`} fixed.`, () => {
+      themes.remove(copy.id);
+      if (before.app !== themes.appSlot(of.kind)) themes.chooseApp(before.app);
+      if (before.follows) themes.follow(of.kind);
+      else themes.choose(before.code);
+      editingId = of.id;
+    });
+  }
+
   function remove(gone: Theme): void {
     const undo = themes.remove(gone.id);
     if (undo === null) return;
@@ -108,7 +127,7 @@
   </div>
   <div class="tf-acts">
     <button type="button" class="tf-btn" onclick={() => picker?.click()}>Import…</button>
-    <input type="file" accept=".json,.jsonc,.yaml,.yml,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
+    <input type="file" accept=".json,.jsonc,.yaml,.yml,.icls,.xml,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
   </div>
 </header>
 <div class="tf-stg-row tf-thm-eng">
@@ -168,4 +187,4 @@
   {/each}
 </div>
 <!-- Not keyed by the theme: the preview's code stays drawn while another theme is shown, and only its colours change. -->
-<TfThemeEditor theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} />
+<TfThemeEditor theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} onfixcopy={fixCopy} />

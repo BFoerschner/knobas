@@ -3689,8 +3689,8 @@
   }
 
   .row.tip {
-    background: var(--fill);
-    color: var(--on-fill);
+    background: var(--sel-row);
+    color: var(--on-sel-row);
   }
 
   .row.tip .mg {
@@ -3739,7 +3739,7 @@
   }
 
   .row.tip {
-    --row-fill: var(--fill);
+    --row-fill: var(--sel-row);
   }
 
   .row .lbl,
@@ -3790,7 +3790,7 @@
   }
 
   .row.tip .badge {
-    background: color-mix(in srgb, var(--on-fill) 18%, transparent);
+    background: color-mix(in srgb, var(--on-sel-row) 18%, transparent);
     color: inherit;
   }
 

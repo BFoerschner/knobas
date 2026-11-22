@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 import { apartLine, closestStates, failures, fixAll, fixRow, fixWords, lowSentence, pairs, rowFigure, tellApart, unreadable } from "./app-check";
 import { derive, KNOBAS } from "./app-derive";
 import { appFromVsCode } from "./app-import";
-import { worst } from "./colour";
+import { contrast, worst } from "./colour";
 
 const FIXTURES = join(process.cwd(), "src/lib/tf/theme/fixtures");
 const fixture = (id: string) => JSON.parse(readFileSync(join(FIXTURES, `${id}.colors.json`), "utf8")) as Record<string, unknown>;
@@ -106,3 +106,25 @@ test("Tell them apart moves knobas Light's states to 0.08 apart, each still 4.5:
   expect(tellApart(apart)).toMatchObject({ ok: got.ok, warn: got.warn, err: got.err });
   expect(apartLine(apart)).toMatch(/^Told apart: the closest two, \w+ and \w+, are 0\.\d\d apart\.$/);
 });
+
+test("a selected row is its own pair (Björn, 2026-11-22): the ink plate until set, then checked at 4.5:1 and floored at 3:1", () => {
+  // Unset, it is today's look: the pressed plate and its words.
+  expect([KNOBAS.light.selRow, KNOBAS.light.onSelRow]).toEqual([KNOBAS.light.fill, KNOBAS.light.onFill]);
+  expect(derive("dark", { sheet: "#282A36", ink: "#F8F8F2" }).colours.selRow).toBe(derive("dark", { sheet: "#282A36", ink: "#F8F8F2" }).colours.fill);
+  // Set to an accent, its words are the more readable of the panel and the text on it.
+  const accent = derive("light", { sheet: "#FDF6E3", ink: "#586E75", selRow: "#268BD2" }).colours;
+  expect(accent.onSelRow).toBe(contrastPick("#FDF6E3", "#586E75", "#268BD2"));
+  const low = failures(accent).find((f) => f.key === "onSelRow")!;
+  expect(low.on).toBe("a selected row");
+  expect(low.ratio).toBeLessThan(4.5);
+  expect(unreadable(accent).map((f) => f.key)).not.toContain("onSelRow");
+  // Under 3:1 it joins the floor, as text on what is pressed does.
+  const faint = derive("light", { selRow: "#9AA0A6", onSelRow: "#B0B5BA" }).colours;
+  expect(unreadable(faint).map((f) => f.key)).toContain("onSelRow");
+  // Its fix moves the row, not its words.
+  const fixed = fixAll("light", { sheet: "#FDF6E3", ink: "#586E75", selRow: "#268BD2" });
+  expect(failures(derive("light", fixed).colours).filter((f) => f.key === "onSelRow")).toEqual([]);
+  expect(fixed.selRow).not.toBe("#268BD2");
+});
+
+const contrastPick = (sheet: string, ink: string, row: string) => (contrast(sheet, row) >= contrast(ink, row) ? sheet : ink);

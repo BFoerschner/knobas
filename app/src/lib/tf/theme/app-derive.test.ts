@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 import { failures } from "./app-check";
 import { type Colours, derive, KNOBAS } from "./app-derive";
 import { APP_KEYS, KEYS, ROW_KEYS } from "./app-roles";
-import { contrast, deltaE } from "./colour";
+import { contrast, deltaE, toOklch } from "./colour";
 
 const tokens = readFileSync(join(process.cwd(), "src/lib/tf/css/tokens.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const blockOf = (selector: string, from = 0) => {
@@ -94,7 +94,7 @@ test("a colour a theme sets is never changed by the derivation", () => {
   const set = Object.fromEntries(ROW_KEYS.map((k) => [k, colours[k as keyof Colours] ?? "#3B3D4F"]));
   // A secondary text too faint to pass is still the one the theme set.
   set.ink2 = "#4A4D60";
-  expect(ROW_KEYS).toHaveLength(30);
+  expect(ROW_KEYS).toHaveLength(32);
   const again = derive("dark", set).colours;
   for (const key of ROW_KEYS) expect(again[key as keyof Colours], key).toBe(set[key]);
 });
@@ -108,4 +108,15 @@ test("a copy of knobas Light with a purple Passed changes Passed's tint, its row
   const { colours } = derive("light", { ok: "#7A3EB1" });
   const changed = KEYS.filter((k) => k !== "selection" && k !== "ok" && colours[k as keyof Colours] !== KNOBAS.light[k as keyof Colours]);
   expect(changed.sort()).toEqual(["okBg", "okWord", "onInkOk"].sort());
+});
+
+test("a theme's card is its own: derived from the Attention it sets, knobas's yellow where it sets none", () => {
+  const dracula = derive("dark", { sheet: "#282A36", ink: "#F8F8F2", warn: "#F1FA8C" }).colours;
+  const [, , hue] = toOklch(dracula.card);
+  expect(Math.abs((hue * 180) / Math.PI - (toOklch("#F1FA8C")[2] * 180) / Math.PI)).toBeLessThan(2);
+  expect(dracula.card).not.toBe(KNOBAS.dark.card);
+  expect(failures(dracula)).toEqual([]);
+  expect(derive("dark", { sheet: "#282A36", ink: "#F8F8F2" }).colours.card).toBe(KNOBAS.dark.card);
+  // A card set by the theme is the theme's, whatever its Attention.
+  expect(derive("light", { warn: "#905C0C", card: "#C8E6FF" }).colours.card).toBe("#C8E6FF");
 });

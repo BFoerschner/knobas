@@ -129,8 +129,7 @@
   import TfToasts from "./TfToasts.svelte";
   import TfThemeKeep from "./TfThemeKeep.svelte";
   import { push as pushToast } from "../shell/toasts.svelte";
-  import { isResetKey, putKnobasBack } from "./theme-reset";
-  import { themes as windowThemes, unreadableAtStart } from "./themes.svelte";
+  import { unreadableAtStart } from "./themes.svelte";
   import TfContextMenu from "./context/TfContextMenu.svelte";
   import TfTopBar from "./TfTopBar.svelte";
   import TfZoomLevel from "./TfZoomLevel.svelte";
@@ -770,13 +769,6 @@
     if (onRefreshKey(event, dialogOpen())) return;
     // `O` presses the page's *Open in ⟨source⟩*, `⇧O` opens the browser (ADR-0050).
     if (onOpenKey(event, dialogOpen())) return;
-    // ⌘⇧⌫ puts knobas's own themes back from anywhere, a field and a dialog too, so a theme nobody can read is undone
-    // without reading anything (ADR-0055).
-    if (isResetKey(event) && !event.defaultPrevented) {
-      event.preventDefault();
-      putKnobasBack(windowThemes);
-      return;
-    }
     // ⌘+ / ⌘− / ⌘0 zoom the window from anywhere, a field and a dialog too, as a browser's do: the window's, not a page's.
     const zooming = zoomKey(event);
     if (zooming !== null) {

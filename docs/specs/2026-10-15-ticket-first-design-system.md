@@ -14,7 +14,7 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and appears behind matched search text and what mentions you. A chip that names the job is neutral. A theme may recolour the card. Whatever its colour, it marks the ticket you are on and nothing else.
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and appears behind matched search text and what mentions you. A chip that names the job is neutral. A theme may recolour the card, and one that sets an Attention of its own gets a card of that hue (2026-11-22). Whatever its colour, it marks the ticket you are on and nothing else.
 - **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones, their tints and `--mark` from the card's own tokens (`--card-ok` and its siblings, `--card-mark`), which are the light values in both of knobas's themes (`job.css`), so the blocked chip, every dot and a matched word follow without a rule of their own (spec #2396, #2400; ADR-0055).
 - **Weight does the shouting, not colour or size.** Big figures (the job key, counts, durations) are the headings face at weight 800, in Inter's display cut, which its optical size axis picks by itself at those sizes. They keep their `"wdth" 62` and page titles their `"wdth" 85`: a chosen Headings face with a width axis or condensed members draws them narrow; Inter has neither and draws them at its normal width (amended 2026-11-20, below). Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
@@ -50,6 +50,7 @@ The values below are knobas's own two themes. A theme may set any of them (Theme
 | `--shadow` | `0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25)` | `0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6)` | Floating things only |
 | `--on-fill` | `--sheet` | `--sheet` | Text on `--fill`: a pressed segment, a rail's selected row, the Docs tree's current page (ADR-0055) |
 | `--primary` / `--on-primary` | `--fill` / `--on-fill` | `--fill` / `--on-fill` | The primary button and its words. Split from `--fill`, so a theme's button colour never fills every selected row |
+| `--sel-row` / `--on-sel-row` | `--fill` / `--on-fill` | `--fill` / `--on-fill` | A selected row of a list, a rail or a tree, and its words (2026-11-22). Split from `--fill`, which pressed segments keep; the tones on a selected row (`--on-ink-*`) are worked out against it |
 | `--link` | `--info` | `--info` | A link in words |
 | `--selection` | none | none | Selected text where a theme sets it (`data-sel` on `<html>`); unset, the system's own highlight |
 | `--scroll` | `--rule` | `--rule` | A scrollbar's thumb |
@@ -105,10 +106,12 @@ each side, Code colours code's, which follows the window's theme until set apart
 - **The token names are the contract.** A theme sets any of 51 keys (`tf/theme/app-roles.ts`), each one of the tokens
   above, and what it leaves out is derived from what it sets (`app-derive.ts`). A colour drawn anywhere in the app is a
   token, or is on `tf/theme/literal-colours.txt` with its reason (`tf-css.test.ts`).
-- **Text on a fill is `--on-fill`, on the primary button `--on-primary`**, and never a surface token: a theme's blue
+- **Text on a fill is `--on-fill`, on a selected row `--on-sel-row`, on the primary button `--on-primary`**, and never a surface token: a theme's blue
   button on a dark panel would otherwise get dark words on blue. A link is `--link`.
 - **On the yellow card the states are the card's own tokens** (`--card-ok` and its siblings).
 - **A translucent plate is a `color-mix()` of a token with `transparent`**, never an `rgba()` literal.
+- **Colour-blind mode** (Settings › Appearance) names the pairs of states that read the same under protanopia,
+  deuteranopia or tritanopia (Machado, 2009); *knobas Light for colour blindness* and its dark twin tell them apart.
 - **No colour fades.** A `transition` names no colour property (the site bar's key hint aside), so a theme switch never
   draws half a theme.
 

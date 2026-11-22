@@ -6,7 +6,7 @@
      each key and `app-derive.ts`'s `KNOBAS` holds the same values. `--selection` has none: unset, the system's own
      highlight draws. */
   --paper: var(--paper-light, #E4E8EC); --sheet: var(--sheet-light, #F7F8F9); --sheet-2: var(--sheet-2-light, #EEF1F4); --field: var(--field-light, #FFFFFF); --ink: var(--ink-light, #17212B); --ink-2: var(--ink-2-light, #4B5663); --muted: var(--muted-light, #5F6975);
-  --rule: var(--rule-light, #CBD2D9); --rule-2: var(--rule-2-light, #DDE2E7); --fill: var(--fill-light, var(--ink)); --on-fill: var(--on-fill-light, var(--sheet)); --primary: var(--primary-light, var(--fill)); --on-primary: var(--on-primary-light, var(--on-fill));
+  --rule: var(--rule-light, #CBD2D9); --rule-2: var(--rule-2-light, #DDE2E7); --fill: var(--fill-light, var(--ink)); --on-fill: var(--on-fill-light, var(--sheet)); --primary: var(--primary-light, var(--fill)); --on-primary: var(--on-primary-light, var(--on-fill)); --sel-row: var(--sel-row-light, var(--fill)); --on-sel-row: var(--on-sel-row-light, var(--on-fill));
   --card: var(--card-light, #F2D157); --card-2: var(--card-2-light, #E8C440); --card-ink: var(--card-ink-light, #2A230B); --card-ink-2: var(--card-ink-2-light, #5A4D1E);
   --focus: var(--focus-light, #2F55D4); --link: var(--link-light, var(--info)); --mark: var(--mark-light, #F6E08F); --selection: var(--selection-light); --scroll: var(--scroll-light, var(--rule));
   --ok: var(--ok-light, #1F7444); --warn: var(--warn-light, #8A5600); --err: var(--err-light, #B0262A); --info: var(--info-light, #2F55D4);
@@ -87,7 +87,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: var(--paper-dark, #12171C); --sheet: var(--sheet-dark, #1A2027); --sheet-2: var(--sheet-2-dark, #212932); --field: var(--field-dark, #12171C); --ink: var(--ink-dark, #E4E9EE); --ink-2: var(--ink-2-dark, #A0ABB7); --muted: var(--muted-dark, #94A0AC);
-    --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill));
+    --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill)); --sel-row: var(--sel-row-dark, var(--fill)); --on-sel-row: var(--on-sel-row-dark, var(--on-fill));
     --card: var(--card-dark, #D9B941); --card-2: var(--card-2-dark, #C9A930); --card-ink: var(--card-ink-dark, #1D1806); --card-ink-2: var(--card-ink-2-dark, #3F3511);
     --focus: var(--focus-dark, #8AA6FF); --link: var(--link-dark, var(--info)); --mark: var(--mark-dark, #5C4E17); --selection: var(--selection-dark); --scroll: var(--scroll-dark, var(--rule));
     --ok: var(--ok-dark, #6FCF97); --warn: var(--warn-dark, #E5B04D); --err: var(--err-dark, #FF8A80); --info: var(--info-dark, #8AA6FF);
@@ -111,7 +111,7 @@
 }
 :root[data-theme="dark"] {
   --paper: var(--paper-dark, #12171C); --sheet: var(--sheet-dark, #1A2027); --sheet-2: var(--sheet-2-dark, #212932); --field: var(--field-dark, #12171C); --ink: var(--ink-dark, #E4E9EE); --ink-2: var(--ink-2-dark, #A0ABB7); --muted: var(--muted-dark, #94A0AC);
-  --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill));
+  --rule: var(--rule-dark, #323C47); --rule-2: var(--rule-2-dark, #28313A); --fill: var(--fill-dark, #A9B3BE); --on-fill: var(--on-fill-dark, var(--sheet)); --primary: var(--primary-dark, var(--fill)); --on-primary: var(--on-primary-dark, var(--on-fill)); --sel-row: var(--sel-row-dark, var(--fill)); --on-sel-row: var(--on-sel-row-dark, var(--on-fill));
   --card: var(--card-dark, #D9B941); --card-2: var(--card-2-dark, #C9A930); --card-ink: var(--card-ink-dark, #1D1806); --card-ink-2: var(--card-ink-2-dark, #3F3511);
   --focus: var(--focus-dark, #8AA6FF); --link: var(--link-dark, var(--info)); --mark: var(--mark-dark, #5C4E17); --selection: var(--selection-dark); --scroll: var(--scroll-dark, var(--rule));
   --ok: var(--ok-dark, #6FCF97); --warn: var(--warn-dark, #E5B04D); --err: var(--err-dark, #FF8A80); --info: var(--info-dark, #8AA6FF);

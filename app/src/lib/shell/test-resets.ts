@@ -60,6 +60,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The highlighter chosen (the highlighter re-ruling, 2026-11-21), stored in `localStorage`: each test starts on Pierre.
   "tf/highlighter.svelte.ts#highlighter": async () => (await import("../tf/highlighter.svelte")).highlighter.reset(),
   "tf/themes.svelte.ts#themes": async () => (await import("../tf/themes.svelte")).themes.reset(),
+  // Colour-blind mode (2026-11-22), stored in `localStorage`: each test starts with it off.
+  "tf/colour-blind.svelte.ts#colourBlind": async () => (await import("../tf/colour-blind.svelte")).colourBlind.reset(),
   "tf/settings/TfFontRole.svelte#asked": async () => (await import("../tf/settings/TfFontRole.svelte")).forgetInstalledFonts(),
   // The menus standing (the stuck menu, ux27, 2026-11-21): a menu leaves as it is torn down; one a test left drawn is
   // forgotten, so the next test's first menu closes none of it.

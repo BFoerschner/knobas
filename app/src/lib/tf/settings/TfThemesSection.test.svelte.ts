@@ -165,7 +165,7 @@ test("a file that is not a theme is refused in one sentence", async () => {
   Object.defineProperty(input, "files", { value: [new File(['{"name":"x"}'], "x.json")], configurable: true });
   input.dispatchEvent(new Event("change", { bubbles: true }));
   for (let i = 0; i < 20 && toasts.items.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
-  expect(toasts.items.at(-1)?.text).toBe("That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style` or Base16 colours.");
+  expect(toasts.items.at(-1)?.text).toBe("That file is not a theme knobas can read. It has no `knobasTheme`, `colors`, `tokenColors`, `style`, Base16 colours or JetBrains `<scheme>`.");
 });
 
 test("Same as the app theme follows the window's theme, and a choice sets the slot apart", () => {
