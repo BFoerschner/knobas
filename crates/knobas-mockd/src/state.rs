@@ -901,3 +901,90 @@ fn resolve_references(issues: &mut [JiraIssue], fx: &knobas_source_mock::Fixture
         issue.links = link;
     }
 }
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    /// A ticket's edit as Jira's `PUT /issue/{key}` takes it (ADR-0054):
+    /// the summary and the priority set, labels added once and removed, an
+    /// unknown priority refused in Jira's words, an unknown issue `None` (the
+    /// final suite's mutants, which the Jira adapter's tests alone saw).
+    #[test]
+    fn an_edit_sets_what_it_carries_and_refuses_an_unknown_priority() {
+        let state = MockState::from_fixture();
+        let before = state.issue("PAY-231").expect("in the fixture");
+        assert_eq!(state.edit_issue("NOPE-1", Some("x"), None, &[], &[]), None);
+        assert_eq!(
+            state.edit_issue("PAY-231", None, Some("Urgent"), &[], &[]),
+            Some(Err(
+                "priority: Priority name 'Urgent' is not valid".to_owned()
+            ))
+        );
+        assert_eq!(state.issue("PAY-231").unwrap().priority, before.priority);
+        let add = vec!["sepa".to_owned(), "sepa".to_owned()];
+        assert_eq!(
+            state.edit_issue("PAY-231", Some("Retitled"), Some("Low"), &add, &[]),
+            Some(Ok(()))
+        );
+        let after = state.issue("PAY-231").unwrap();
+        assert_eq!(after.summary, "Retitled");
+        assert_eq!(after.priority.as_deref(), Some("Low"));
+        assert_eq!(after.labels.iter().filter(|l| *l == "sepa").count(), 1);
+        assert!(after.updated > before.updated);
+        let remove = vec!["sepa".to_owned()];
+        assert_eq!(
+            state.edit_issue("PAY-231", None, None, &[], &remove),
+            Some(Ok(()))
+        );
+        assert!(
+            !state
+                .issue("PAY-231")
+                .unwrap()
+                .labels
+                .contains(&"sepa".to_owned())
+        );
+        assert_eq!(
+            state.issue("PAY-231").unwrap().summary,
+            "Retitled",
+            "an edit without a summary keeps it"
+        );
+    }
+
+    /// An assignment sets a person the fixture names, or nobody; a stranger
+    /// is refused and an unknown issue is `None`.
+    #[test]
+    fn an_assignment_takes_a_known_person_or_nobody() {
+        let state = MockState::from_fixture();
+        let person = knobas_source_mock::fixture().people[0].username.clone();
+        assert_eq!(state.assign_issue("NOPE-1", Some(&person)), None);
+        assert_eq!(
+            state.assign_issue("PAY-231", Some("stranger")),
+            Some(Err("User 'stranger' does not exist.".to_owned()))
+        );
+        assert_eq!(state.assign_issue("PAY-231", Some(&person)), Some(Ok(())));
+        assert_eq!(
+            state.issue("PAY-231").unwrap().assignee.as_deref(),
+            Some(person.as_str())
+        );
+        assert_eq!(state.assign_issue("PAY-231", None), Some(Ok(())));
+        assert_eq!(state.issue("PAY-231").unwrap().assignee, None);
+    }
+
+    /// A create lands in a project the fixture has, numbered after its
+    /// highest key; one into a project it does not have is `None`.
+    #[test]
+    fn a_create_lands_in_a_known_project_only() {
+        let state = MockState::from_fixture();
+        assert!(
+            state
+                .create_issue("NOPE", "x", None, "Task", "mara")
+                .is_none()
+        );
+        let made = state
+            .create_issue("PAY", "A new one", Some("body"), "Task", "mara")
+            .expect("PAY is in the fixture");
+        assert!(made.key.starts_with("PAY-"), "{}", made.key);
+        assert_eq!(state.issue(&made.key).unwrap().summary, "A new one");
+    }
+}
