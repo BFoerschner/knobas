@@ -41,6 +41,7 @@
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
   import { sniffSpec } from "../../render/openapi-sniff";
   import { columnsFor, paneHeight } from "./oas-layout";
+  import { zen } from "../zen.svelte";
   import { clientsFound, specOpener, type SpecOpener } from "./oas-open.svelte";
 
   /** What the parse answers for a file with no version key at its top (`indexSpec`). */
@@ -190,6 +191,12 @@
     };
     fit();
     window.addEventListener("resize", fit);
+    // Zen mode moves the pane's top: measured again once the page has laid out without the repository's header.
+    $effect(() => {
+      void zen.shown;
+      const frame = requestAnimationFrame(fit);
+      return () => cancelAnimationFrame(frame);
+    });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {

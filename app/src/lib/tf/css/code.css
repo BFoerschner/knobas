@@ -788,3 +788,8 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-madebar-left > li { display: contents; }
 .tf-madebar-left > li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-madebar-left > li > :last-child { color: var(--ink-2); }
+/* Zen mode (ux31, `../zen.svelte.ts`): the file alone. The repository's crumbs, header and tabs and the tree go; the file
+   view takes the page's width, its own header (the path, Render as, Open in, the Zen button) stays. */
+.tf-full.tf-zen > .tf-crumbs, .tf-full.tf-zen > .tf-repohead, .tf-full.tf-zen > .tf-tabs { display: none; }
+.tf-repo.tf-zen { grid-template-columns: minmax(0, 1fr); }
+.tf-repo.tf-zen > .tf-sedge, .tf-repo.tf-zen > .tf-ftreebox { display: none; }

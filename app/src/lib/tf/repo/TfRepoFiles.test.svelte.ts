@@ -19,6 +19,8 @@ import { createRendererDefaults, type RendererDefaults } from "../../render/defa
 import type { RendererDefault } from "../../render/defaults";
 import { fileHash, lineHash } from "./repo";
 import { toasts } from "../../shell/toasts.svelte";
+import { zen } from "../zen.svelte";
+import { layers } from "../layers.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -98,6 +100,7 @@ beforeEach(() => {
 afterEach(() => {
   if (view) unmount(view);
   view = null;
+  zen.on = false;
   target.remove();
 });
 
@@ -1246,4 +1249,98 @@ test("another file opens at its top, not at the depth the last one was read to; 
   } finally {
     Element.prototype.getBoundingClientRect = real;
   }
+});
+
+// -- Zen mode (ux31, `../zen.svelte.ts`) -------------------------------------------
+
+const zenButton = () => target.querySelector<HTMLButtonElement>(".tf-fileview .tf-zenbtn");
+const zenPress = (key: string, at: EventTarget = window, extra: KeyboardEventInit = {}) => {
+  at.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra }));
+  flushSync();
+};
+
+test("Zen mode: a Markdown file offers it, its button and Z turn it on and off, Esc's panel rung leaves it", async () => {
+  draw(openSource(MD_FILES).entityView, "README.md");
+  await settle();
+  const grid = target.querySelector(".tf-repo")!;
+  expect(zenButton()!.getAttribute("title")).toBe("Zen mode: the file alone, the repository and its tree hidden (Z)");
+  expect(zenButton()!.getAttribute("aria-pressed")).toBe("false");
+  expect(grid.classList.contains("tf-zen")).toBe(false);
+
+  zenButton()!.click();
+  flushSync();
+  expect(zen.shown).toBe(true);
+  expect(grid.classList.contains("tf-zen")).toBe(true);
+  expect(zenButton()!.getAttribute("aria-pressed")).toBe("true");
+  expect(zenButton()!.getAttribute("title")).toBe("Leave Zen mode (Z)");
+  // `Esc` closes the topmost panel first: Zen mode is one while it shows.
+  const panel = layers.open.at(-1)!;
+  expect(panel.kind).toBe("panel");
+  panel.close();
+  flushSync();
+  expect(zen.on).toBe(false);
+  expect(grid.classList.contains("tf-zen")).toBe(false);
+  expect(layers.open).toHaveLength(0);
+
+  zenPress("z");
+  expect(zen.shown).toBe(true);
+  zenPress("Z", window, { shiftKey: true });
+  expect(zen.on).toBe(false);
+  // With ⌘, Ctrl or ⌥ it is another key's.
+  zenPress("z", window, { metaKey: true });
+  zenPress("z", window, { ctrlKey: true });
+  zenPress("z", window, { altKey: true });
+  expect(zen.on).toBe(false);
+});
+
+test("Zen mode: Z typed into Go to file is a letter; a source file offers no Zen mode and Z does nothing there", async () => {
+  draw(openSource(MD_FILES).entityView, "README.md");
+  await settle();
+  const field = target.querySelector<HTMLInputElement>(".tf-gotofile input")!;
+  field.focus();
+  zenPress("z", field);
+  expect(zen.on).toBe(false);
+  field.blur();
+  unmount(view!);
+  view = null;
+
+  draw(openSource(MD_FILES).entityView, "src/retry.rs");
+  await settle();
+  expect(zenButton()).toBeNull();
+  zenPress("z");
+  expect(zen.on).toBe(false);
+  expect(zen.here).toBe(false);
+});
+
+test("Zen mode holds from one Markdown file to the next and ends when the file view closes", async () => {
+  const props = $state({
+    ports: { ...openSource(MD_FILES), submitWrite: async () => ({}) as never },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "README.md" as string | null,
+    line: null,
+    changed: new Set<string>(),
+    treeSections: declared,
+    defaults: createRendererDefaults(storedDefaults().port),
+  });
+  view = mount(TfRepoFiles, { target, props });
+  await settle();
+  zenPress("z");
+  expect(zen.shown).toBe(true);
+  props.path = "docs/runbook.md";
+  await settle();
+  expect(zen.shown).toBe(true);
+  // A source file: nothing hidden, and the reader's ask still stands for the next document.
+  props.path = "src/retry.rs";
+  await settle();
+  expect(zen.on).toBe(true);
+  expect(zen.shown).toBe(false);
+  expect(target.querySelector(".tf-repo")!.classList.contains("tf-zen")).toBe(false);
+  props.path = "README.md";
+  await settle();
+  expect(zen.shown).toBe(true);
+  unmount(view);
+  view = null;
+  expect(zen.on).toBe(false);
 });

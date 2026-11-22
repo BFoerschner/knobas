@@ -14,6 +14,7 @@ vi.mock("../../ipc/api", () => ({
   apiCancel: async () => {},
   apiAnswerBody: async () => new TextEncoder().encode('{"ok":true}'),
   apiSaveAnswer: async () => "x",
+  apiClientsFound: async () => ({ bruno: false }),
   apiHoldSecret: async (origin: string, scheme: string, secret: string, user: string | null) => void calls.push({ cmd: "hold", args: { origin, scheme, secret, user } }),
   apiSend: async (send: { id: number; url: string; method: string }) => {
     calls.push({ cmd: "send", args: send });

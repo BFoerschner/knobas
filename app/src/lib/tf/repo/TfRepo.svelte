@@ -332,6 +332,7 @@
   import type { SourceSyncStatus } from "../../ipc/sources";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
+  import { zen } from "../zen.svelte";
 
   let {
     ready,
@@ -1419,7 +1420,7 @@
   }
 </script>
 
-<div class="tf-full" bind:this={page} {@attach watchCompareLinks}>
+<div class="tf-full" class:tf-zen={zen.shown} bind:this={page} {@attach watchCompareLinks}>
   <TfCrumbs parts={crumbs} {back} />
 
   {#if repoId === null || failed !== null}
