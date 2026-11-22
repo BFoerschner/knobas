@@ -114,7 +114,11 @@ impl Confine {
         }
         let mut filters: Vec<String> = Vec::new();
         for origin in self.origins() {
-            let socket = if origin.scheme == "https" { "wss" } else { "ws" };
+            let socket = if origin.scheme == "https" {
+                "wss"
+            } else {
+                "ws"
+            };
             filters.extend(prefixes(origin, &origin.scheme));
             filters.extend(prefixes(origin, socket));
             filters.extend(prefixes(origin, &format!("blob:{}", origin.scheme)));
@@ -178,7 +182,9 @@ impl Gate {
     /// A gate that holds `url` until [`Self::open`].
     #[must_use]
     pub fn waiting(url: &str) -> Self {
-        Self(std::cell::RefCell::new(GateState::Waiting(Some(url.to_owned()))))
+        Self(std::cell::RefCell::new(GateState::Waiting(Some(
+            url.to_owned(),
+        ))))
     }
 
     /// A load of `url` asked for: `Some(url)` to load now; `None` when it
@@ -283,7 +289,10 @@ mod tests {
     }
 
     fn confine(own: &str, allowed: &[&str]) -> Confine {
-        Confine::new(origin(own), allowed.iter().map(|text| origin(text)).collect())
+        Confine::new(
+            origin(own),
+            allowed.iter().map(|text| origin(text)).collect(),
+        )
     }
 
     const OWN: &str = "https://127.0.0.1:24801";
@@ -361,7 +370,10 @@ mod tests {
     #[test]
     fn an_allowed_origin_loads_from_the_own_page_and_others_still_do_not() {
         let c = confine("https://vault.example", &["https://sso.example"]);
-        assert!(c.may_load(Some("https://vault.example/"), "https://sso.example/login.js"));
+        assert!(c.may_load(
+            Some("https://vault.example/"),
+            "https://sso.example/login.js"
+        ));
         assert!(c.may_load(Some("https://vault.example/"), "https://vault.example/a"));
         assert!(!c.may_load(Some("https://vault.example/"), "https://cdn.example/"));
         assert_eq!(c.origins().count(), 2);
@@ -425,7 +437,10 @@ mod tests {
             (".*", "block"),
             (r"^https://127\.0\.0\.1:24801/", "ignore-previous-rules"),
             (r"^wss://127\.0\.0\.1:24801/", "ignore-previous-rules"),
-            (r"^blob:https://127\.0\.0\.1:24801/", "ignore-previous-rules"),
+            (
+                r"^blob:https://127\.0\.0\.1:24801/",
+                "ignore-previous-rules",
+            ),
             ("^data:", "ignore-previous-rules"),
             ("^about:", "ignore-previous-rules"),
         ]
@@ -469,7 +484,10 @@ mod tests {
     /// against the address normalised as WebKit does.
     fn webkit_blocks(rules: &str, top: Option<&str>, url: &str) -> bool {
         fn normal(url: &str) -> String {
-            Url::parse(url).map(|u| u.to_string()).unwrap_or_else(|_| url.to_owned()).to_ascii_lowercase()
+            Url::parse(url)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| url.to_owned())
+                .to_ascii_lowercase()
         }
         fn matches(filter: &str, url: &str) -> bool {
             if filter == ".*" {
@@ -478,7 +496,11 @@ mod tests {
             let mut literal = String::new();
             let mut chars = filter.strip_prefix('^').expect("anchored").chars();
             while let Some(ch) = chars.next() {
-                literal.push(if ch == '\\' { chars.next().expect("escaped") } else { ch });
+                literal.push(if ch == '\\' {
+                    chars.next().expect("escaped")
+                } else {
+                    ch
+                });
             }
             url.starts_with(&literal.to_ascii_lowercase())
         }
@@ -493,7 +515,10 @@ mod tests {
             }
             if let Some(unless) = trigger.get("unless-top-url") {
                 let tops = unless.as_array().expect("a list");
-                if tops.iter().any(|t| matches(t.as_str().expect("a pattern"), &top)) {
+                if tops
+                    .iter()
+                    .any(|t| matches(t.as_str().expect("a pattern"), &top))
+                {
                     continue;
                 }
             }
@@ -510,7 +535,10 @@ mod tests {
     fn the_rule_list_refuses_exactly_what_may_load_refuses() {
         let cases = [
             confine(OWN, &[]),
-            confine("https://vault.example", &["https://sso.example", "http://idp.example:8080"]),
+            confine(
+                "https://vault.example",
+                &["https://sso.example", "http://idp.example:8080"],
+            ),
             confine("http://vault.example:80", &["https://[::1]:8443"]),
         ];
         let tops = [
@@ -606,7 +634,10 @@ mod tests {
     fn an_opened_gate_lets_every_load_through_until_held() {
         let gate = Gate::opened();
         assert!(gate.is_open());
-        assert_eq!(gate.load("https://a.example/").as_deref(), Some("https://a.example/"));
+        assert_eq!(
+            gate.load("https://a.example/").as_deref(),
+            Some("https://a.example/")
+        );
         gate.hold();
         assert!(!gate.is_open());
         assert_eq!(gate.load("https://a.example/b"), None);

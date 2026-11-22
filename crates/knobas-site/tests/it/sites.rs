@@ -1259,7 +1259,10 @@ async fn allowing_an_origin_on_a_confined_site_confines_it_anew_before_the_landi
     w.sites.show("vault", INSETS, true, true);
     assert!(!w.host.navigate("vault", "https://idp.example/sso"));
     w.shell.drain();
-    assert_eq!(w.sites.answer("vault", "https://idp.example", true), Ok(None));
+    assert_eq!(
+        w.sites.answer("vault", "https://idp.example", true),
+        Ok(None)
+    );
     w.shell.drain();
     let calls = w.host.view("vault").borrow().calls.clone();
     let confine = calls
@@ -1279,7 +1282,10 @@ async fn allowing_an_origin_on_a_confined_site_confines_it_anew_before_the_landi
     w.sites.show("jira", INSETS, true, true);
     assert!(!w.host.navigate("jira", "https://idp.example/sso"));
     w.shell.drain();
-    assert_eq!(w.sites.answer("jira", "https://idp.example", true), Ok(None));
+    assert_eq!(
+        w.sites.answer("jira", "https://idp.example", true),
+        Ok(None)
+    );
     w.shell.drain();
     assert!(
         !w.host

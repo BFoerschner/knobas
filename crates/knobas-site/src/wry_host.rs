@@ -14,8 +14,8 @@ use wry::{NewWindowResponse, PageLoadEvent, WebContext, WebView, WebViewBuilder}
 
 use crate::confine::{Confine, Gate, NOT_CONFINED};
 use crate::host::{Hooks, HostError, LeaveFreely, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
-use crate::state::SiteFailure;
 use crate::scripts::{DIRTY_PROBE, Dirty, SignInCall, fill_sign_in};
+use crate::state::SiteFailure;
 
 /// knobas's main window, and how to give its own web view the keyboard.
 pub struct WryHost<W: HasWindowHandle + 'static> {
@@ -106,7 +106,9 @@ impl Confined {
     pub fn refused(&self, why: &str) {
         tracing::warn!(source = %self.source, error = why, "a site's refusal of other websites is not in place: it loads nothing");
         self.gate.shut();
-        (self.event)(ViewEvent::Failed(SiteFailure::Other(NOT_CONFINED.to_owned())));
+        (self.event)(ViewEvent::Failed(SiteFailure::Other(
+            NOT_CONFINED.to_owned(),
+        )));
     }
 }
 
@@ -167,46 +169,46 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
             builder.with_url(spec.url.as_str())
         }
         .with_bounds(wry_rect(spec.bounds))
-            .with_visible(false)
-            .with_focused(false)
-            .with_devtools(spec.devtools)
-            .with_clipboard(false)
-            .with_general_autofill_enabled(false)
-            .with_hotkeys_zoom(false)
-            .with_background_color((r, g, b, a))
-            .with_back_forward_navigation_gestures(true)
-            .with_accept_first_mouse(true)
-            .with_navigation_handler(move |url| nav_hook(&url))
-            .with_new_window_req_handler(move |url, _features| {
-                new_hook(&url);
-                NewWindowResponse::Deny
-            })
-            .with_download_started_handler(move |url, path| {
-                let suggested = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                match started_hook(&url, &suggested) {
-                    Some((chosen, id)) => {
-                        *path = chosen;
-                        started_ids.borrow_mut().insert(url, id);
-                        true
-                    }
-                    None => false,
+        .with_visible(false)
+        .with_focused(false)
+        .with_devtools(spec.devtools)
+        .with_clipboard(false)
+        .with_general_autofill_enabled(false)
+        .with_hotkeys_zoom(false)
+        .with_background_color((r, g, b, a))
+        .with_back_forward_navigation_gestures(true)
+        .with_accept_first_mouse(true)
+        .with_navigation_handler(move |url| nav_hook(&url))
+        .with_new_window_req_handler(move |url, _features| {
+            new_hook(&url);
+            NewWindowResponse::Deny
+        })
+        .with_download_started_handler(move |url, path| {
+            let suggested = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match started_hook(&url, &suggested) {
+                Some((chosen, id)) => {
+                    *path = chosen;
+                    started_ids.borrow_mut().insert(url, id);
+                    true
                 }
-            })
-            .with_download_completed_handler(move |url, _path: Option<PathBuf>, ok| {
-                if let Some(id) = done_ids.borrow_mut().remove(&url) {
-                    done_hook(ViewEvent::Downloaded { id, ok });
-                }
-            })
-            .with_document_title_changed_handler(move |title| title_hook(ViewEvent::Title(title)))
-            .with_on_page_load_handler(move |event, url| {
-                load_hook(match event {
-                    PageLoadEvent::Started => ViewEvent::Committed(url),
-                    PageLoadEvent::Finished => ViewEvent::Finished(url),
-                });
+                None => false,
+            }
+        })
+        .with_download_completed_handler(move |url, _path: Option<PathBuf>, ok| {
+            if let Some(id) = done_ids.borrow_mut().remove(&url) {
+                done_hook(ViewEvent::Downloaded { id, ok });
+            }
+        })
+        .with_document_title_changed_handler(move |title| title_hook(ViewEvent::Title(title)))
+        .with_on_page_load_handler(move |event, url| {
+            load_hook(match event {
+                PageLoadEvent::Started => ViewEvent::Committed(url),
+                PageLoadEvent::Finished => ViewEvent::Finished(url),
             });
+        });
         #[cfg(target_os = "macos")]
         {
             builder = crate::mac::builder(builder, spec, &hooks);

@@ -509,7 +509,7 @@ What a [site](#site) keeps on this computer between runs: its cookies, storage a
 _Avoid_: profile (the demo or the real knobas), login (knobas's own to a source), cookie jar
 
 **Allowed address**:
-An origin a [site](#site) may show besides its source's own: a sign-in host the person said yes to when the site was sent there, or a second address of the same system. Per source, listed in Settings, never taken from a mirrored record. An address outside the list opens the browser.
+An origin a [site](#site) may show besides its source's own: a sign-in host the person said yes to when the site was sent there, or a second address of the same system. Per source, listed in Settings, never taken from a mirrored record. An address outside the list opens the browser. On a password manager's site it is also the only origin besides the source's own that anything may load from, unless the page on top is on an allowed origin, which loads as in a browser (ADR-0050, ux30).
 _Avoid_: whitelist, trusted site, base URL (the source's own, which is always allowed)
 
 **Web sign-in**:

@@ -32,10 +32,9 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
     HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    PermissionRequestedEventHandler, WebResourceRequestedEventHandler,
-    ProcessFailedEventHandler, ScriptDialogOpeningEventHandler,
+    PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler,
     ServerCertificateErrorDetectedEventHandler, SourceChangedEventHandler,
-    TrySuspendCompletedHandler,
+    TrySuspendCompletedHandler, WebResourceRequestedEventHandler,
 };
 use windows_core::{BOOL, HSTRING, Interface, PWSTR};
 use wry::{MemoryUsageLevel, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};

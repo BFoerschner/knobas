@@ -16,7 +16,8 @@
 //!    browser".
 //! 6. A confined site (ux30, [`crate::confine`]): a `WKContentRuleList`
 //!    refuses every load the rule refuses, frames included, and the
-//!    navigation delegate cancels such a frame before it starts.
+//!    navigation delegate cancels such a frame before it starts. WebRTC is
+//!    off on such a view, since no rule list sees UDP.
 
 use std::cell::RefCell;
 use std::ptr::NonNull;
@@ -27,8 +28,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, NSObject, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags};
-use objc2_foundation::{NSObjectProtocol, NSString};
 use objc2_foundation::NSError;
+use objc2_foundation::{NSObjectProtocol, NSString};
 use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore, WKWebsiteDataStore};
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtDarwin, WebViewExtDarwin, WebViewExtMacOS};
 
@@ -493,6 +494,7 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined, rules: Opti
     let generation = confined.generation.get() + 1;
     confined.generation.set(generation);
     let manager = view.manager();
+    peer_connections(view, rules.is_none());
     let Some(rules) = rules else {
         // SAFETY: WKUserContentController's own method, on the main thread.
         unsafe { manager.removeAllContentRuleLists() };
@@ -563,6 +565,30 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined, rules: Opti
             Some(&encoded),
             Some(&done),
         );
+    }
+}
+
+/// WebRTC on or off for `view`. A content rule list sees no UDP, and a page's
+/// `RTCPeerConnection` sends STUN to any host it names (measured in the Mac
+/// window, 2026-11-22), so a confined site has none. WebKit's own preference,
+/// `_peerConnectionEnabled` (SPI, answered on macOS 15 to 27); where it is
+/// missing the log says so.
+fn peer_connections(view: &WebView, on: bool) {
+    let wk = view.webview();
+    // SAFETY: WKWebView's configuration and its WKPreferences, on the main
+    // thread; the setter is sent only where the preferences answer it.
+    unsafe {
+        let configuration: Retained<AnyObject> = msg_send![&*wk, configuration];
+        let preferences: Retained<AnyObject> = msg_send![&*configuration, preferences];
+        let setter = sel!(_setPeerConnectionEnabled:);
+        let answers: bool = msg_send![&*preferences, respondsToSelector: setter];
+        if answers {
+            let () = msg_send![&*preferences, _setPeerConnectionEnabled: Bool::new(on)];
+        } else if !on {
+            tracing::warn!(
+                "WebKit has no switch for WebRTC here: a confined site can still send STUN"
+            );
+        }
     }
 }
 
