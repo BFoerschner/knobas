@@ -466,7 +466,7 @@ export interface Run {
   code: boolean;
 }
 
-const runOf = (v: unknown): Run => ({ text: typeof v === "string" ? v : JSON.stringify(v) ?? String(v), code: true });
+const runOf = (v: unknown): Run => ({ text: typeof v === "string" ? v : (v === undefined ? String(v) : JSON.stringify(v)), code: true });
 const words = (text: string): Run => ({ text, code: false });
 
 /** How many values of an `enum` a field's line draws before it counts the rest. */

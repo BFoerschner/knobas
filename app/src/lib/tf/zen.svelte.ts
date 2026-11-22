@@ -16,11 +16,11 @@ export const ZEN_KEY = "z";
 export const ZEN_KEY_LABEL = ZEN_KEY.toUpperCase();
 
 /** The renderers Zen mode applies to. */
-export const ZEN_RENDERERS: ReadonlySet<string> = new Set(["markdown", "pdf", "jar", "image", "openapi", "mermaid", "d2", "graphviz", "html"]);
+export const ZEN_RENDERERS: readonly string[] = ["markdown", "pdf", "jar", "image", "openapi", "mermaid", "d2", "graphviz", "html"];
 
 /** Whether a file drawn by `drawAs` may be shown in Zen mode. */
 export function zenApplies(drawAs: string | null): boolean {
-  return drawAs !== null && ZEN_RENDERERS.has(drawAs);
+  return drawAs !== null && ZEN_RENDERERS.includes(drawAs);
 }
 
 /** Whether a key press is Zen mode's: `z` with no ⌘, Ctrl or ⌥, not answered already. A field is the caller's to ask. */

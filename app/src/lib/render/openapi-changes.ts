@@ -28,7 +28,7 @@ export function stableJson(value: unknown): string {
       .map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`)
       .join(",")}}`;
   }
-  return JSON.stringify(value) ?? "null";
+  return value === undefined ? "null" : JSON.stringify(value);
 }
 
 /** A document's schemas, by name: 3.x's `components.schemas`, 2.0's `definitions`. */

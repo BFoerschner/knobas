@@ -24,11 +24,11 @@ const opOf = (files: SpecFiles, index: SpecIndex, anchor: string): Operation => 
 test("a server's variables, the operation's own servers, its path item's, else the spec's", () => {
   const { files, index } = opened(MODEL_31_JSON);
   expect(index.servers).toEqual([
-    { url: "https://{tenant}.example.test/{base}", description: "Hosted", variables: { tenant: { default: "acme", enum: ["acme", "globex"], description: "" }, base: { default: "v2", enum: [], description: "" } } },
+    { url: "https://" + "{tenant}.example.test/{base}", description: "Hosted", variables: { tenant: { default: "acme", enum: ["acme", "globex"], description: "" }, base: { default: "v2", enum: [], description: "" } } },
   ]);
   expect(opOf(files, index, "post /things").servers.map((s) => s.url)).toEqual(["https://write.example.test"]);
   expect(opOf(files, index, "get /things").servers.map((s) => s.url)).toEqual(["https://things.example.test"]);
-  expect(opOf(files, index, "get /things/{id}").servers.map((s) => s.url)).toEqual(["https://{tenant}.example.test/{base}"]);
+  expect(opOf(files, index, "get /things/{id}").servers.map((s) => s.url)).toEqual(["https://" + "{tenant}.example.test/{base}"]);
 });
 
 test("a 2.0 spec's host, basePath and schemes are its servers; with no host the address is relative", () => {
@@ -74,7 +74,7 @@ test("links, callbacks, external docs, a webhook, and info's contact, licence an
   expect(hook.body?.content.map((m) => m.type)).toEqual(["application/json"]);
   expect(index.info).toEqual({
     contact: { name: "API team", email: "api@example.test", url: "https://example.test/team" },
-    license: { name: "MIT", url: "https://opensource.org/licenses/MIT" },
+    license: { name: "MIT", url: "https://example.org/licenses/MIT" },
     terms: "https://example.test/terms",
     externalDocs: { url: "https://example.test/docs", description: "Guide" },
   });

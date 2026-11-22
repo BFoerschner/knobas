@@ -14,7 +14,7 @@
 .tf-oas.tf-oas-3 { grid-template-columns: var(--side-oas-rail, 300px) minmax(0, 1fr) minmax(430px, 36%); }
 .tf-oas.tf-oas-4 { grid-template-columns: var(--side-oas-rail, 340px) minmax(0, 1.05fr) 520px minmax(0, 1fr); }
 .tf-oas > * { min-width: 0; min-height: 0; }
-.tf-oas-col { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.tf-oas-col { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--sheet); }
 .tf-oas-col + .tf-oas-col { border-left: 1px solid var(--rule); }
 
 /* ---- the rail ---- */
@@ -28,7 +28,7 @@
 .tf-oas-modes .tf-seg button { height: var(--control-h-sm); padding: 0 9px; font-size: calc(var(--t-xs) * var(--fs)); }
 /* The count holds the room its longest text needs, so nothing beside it moves as it changes. */
 .tf-oas-count { margin-left: auto; min-width: 9ch; text-align: right; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tf-oas-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; padding: 4px 6px; outline: none; display: flex; flex-direction: column; }
+.tf-oas-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; padding: 4px 6px; outline: none; display: flex; flex-direction: column; background: var(--sheet); }
 /* A row's depth, by attribute: CSP refuses a style written in markup. */
 .tf-oas-row[data-d="1"] { --d: 1; }
 .tf-oas-row[data-d="2"] { --d: 2; }
@@ -204,7 +204,7 @@
 .tf-oas-sec > .tf-oas-fs { border-bottom: 1px solid var(--rule-2); }
 .tf-oas-lab + :is(.tf-oas-fs, .tf-oas-what, .tf-oas-pick) { margin-top: -6px; }
 .tf-oas-fs > .tf-oas-f { display: grid; grid-template-columns: subgrid; padding: 0; border: 0; column-gap: 0; }
-.tf-oas-fs > .tf-oas-f + * { border-top: 1px solid var(--rule-2); }
+.tf-oas-fs > .tf-oas-f + :is(.tf-oas-f, .tf-oas-fnote) { border-top: 1px solid var(--rule-2); }
 
 /* The row: what toggles. Its head line's cells stand in the list's columns. */
 .tf-oas-fr { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; padding-block: 6px; min-width: 0; }
@@ -287,7 +287,7 @@
 .tf-oas-time { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-time select { height: var(--control-h-sm); }
 .tf-oas-send kbd { margin-left: 6px; }
-.tf-oas-anslines { padding: 6px 0; white-space: pre; overflow: auto; display: flex; flex-direction: column; }
+.tf-oas-anslines { padding: 6px 0; white-space: pre; overflow: auto; display: flex; flex-direction: column; background: var(--sheet-2); }
 .tf-oas-anslines > * { flex: none; }
 .tf-oas-al { display: grid; grid-template-columns: 5ch minmax(0, 1fr); column-gap: 10px; min-height: calc(var(--t-xs) * var(--fs) * var(--code-lh, 1.6)); }
 .tf-oas-ln { text-align: right; color: var(--muted); user-select: none; padding-right: 4px; }
@@ -312,7 +312,7 @@
 .tf-oas-ihead .tf-oas-api { flex: 1 1 auto; }
 .tf-oas-ihead .tf-minif { flex: 0 1 260px; }
 .tf-oas-ihead .tf-oas-count { margin-left: 0; }
-.tf-oas-ilist { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 6px; display: flex; flex-direction: column; }
+.tf-oas-ilist { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 6px; display: flex; flex-direction: column; background: var(--sheet); }
 .tf-oas-ilist > .tf-oas-fnote { padding: 8px; }
 .tf-oas-irow + .tf-oas-irow { border-top: 1px solid var(--rule-2); }
 .tf-oas-ibtn {

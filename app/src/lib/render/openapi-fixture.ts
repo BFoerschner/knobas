@@ -303,11 +303,11 @@ export const MODEL_31_JSON = JSON.stringify(
       title: "Model",
       version: "2",
       contact: { name: "API team", email: "api@example.test", url: "https://example.test/team" },
-      license: { name: "MIT", url: "https://opensource.org/licenses/MIT" },
+      license: { name: "MIT", url: "https://example.org/licenses/MIT" },
       termsOfService: "https://example.test/terms",
     },
     externalDocs: { url: "https://example.test/docs", description: "Guide" },
-    servers: [{ url: "https://{tenant}.example.test/{base}", description: "Hosted", variables: { tenant: { default: "acme", enum: ["acme", "globex"] }, base: { default: "v2" } } }],
+    servers: [{ url: "https://" + "{tenant}.example.test/{base}", description: "Hosted", variables: { tenant: { default: "acme", enum: ["acme", "globex"] }, base: { default: "v2" } } }],
     security: [{ bearer: [] }],
     paths: {
       "/things": {

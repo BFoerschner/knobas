@@ -14,6 +14,7 @@
     the row into a question in place, in the warn tone, once a host until knobas quits.
 -->
 <script lang="ts">
+  import { secondsLabel } from "../../time/format";
   import { untrack } from "svelte";
 
   import type { Operation, SpecIndex } from "../../render/openapi";
@@ -322,7 +323,7 @@
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void copyCurl()}>Copy as curl</button>
         <label class="tf-oas-time"><span class="tf-dim">Give up after</span>
           <select aria-label="Give up after" bind:value={timeoutS}>
-            {#each [5, 15, 30, 60, 120, 300, 600] as s (s)}<option value={s}>{s < 60 ? `${s} s` : `${s / 60} min`}</option>{/each}
+            {#each [5, 15, 30, 60, 120, 300, 600] as s (s)}<option value={s}>{secondsLabel(s)}</option>{/each}
           </select>
         </label>
         {#if why !== null}<span class="tf-dim">{why}</span>{/if}

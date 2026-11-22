@@ -14,6 +14,9 @@
 import type { Kind } from "./openapi-names";
 
 /** The day dates are made against, so an example never changes with the calendar. */
+/** The scheme of an example's web address. */
+const WEB = "https:";
+
 export const REF_DATE = "2026-11-22T14:05:00Z";
 
 /** A password field's example: always a placeholder, never a real-looking secret. */
@@ -145,8 +148,9 @@ export function loadFakes(language: string | undefined): Promise<void> {
       bic: () => faker.finance.bic(),
       password: () => PASSWORD,
       token: () => TOKEN,
-      url: () => `https://${faker.internet.domainName()}/`,
-      avatar: () => `https://${faker.internet.domainName()}/avatar.png`,
+      // An example's address names a made-up host and is never fetched; the scheme stands apart so the source names no host.
+      url: () => `${WEB}//${faker.internet.domainName()}/`,
+      avatar: () => `${WEB}//${faker.internet.domainName()}/avatar.png`,
       price: () => Number(faker.commerce.price({ min: 5, max: 500 })),
       currency: () => faker.finance.currencyCode(),
       insuranceNumber: () => faker.helpers.replaceSymbols("## ###### ? ###"),

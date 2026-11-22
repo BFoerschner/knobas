@@ -62,6 +62,20 @@ import Booting from "./Booting.svelte";
  */
 const pending: { resolve: (value: unknown) => void; value: unknown }[] = [];
 
+/** The spec worker's stand-in for the API explorer's parts (ux31): every call answers late, a spec of one operation. */
+const oasEngine = (_session: number, call: { kind: string }) =>
+  deferred(
+    call.kind === "open"
+      ? { ok: true, index: { key: "openapi", version: "3.0.0", title: "T", apiVersion: "1", description: "", servers: [], security: [], info: { contact: null, license: null, terms: "", externalDocs: null }, webhooks: [], tags: [], ops: [], pathRefs: [], schemas: [], schemaBase: "#/components/schemas/", problems: [] } }
+      : call.kind === "changes"
+        ? { ok: true, changes: { ops: { added: [], removed: [], changed: [] }, schemas: { added: [], removed: [], changed: [] } } }
+        : call.kind === "shape"
+          ? { props: [], variants: null, items: undefined, extra: undefined, description: "", facts: {}, base: "openapi.yaml" }
+          : null,
+  );
+/** An explorer's state over {@link oasEngine}. */
+const oasState = () => new OasState(new SpecSession(oasEngine as never, null), "openapi.yaml");
+
 function deferred<T>(value: T): Promise<T> {
   return new Promise<T>((resolve) => {
     pending.push({ resolve: resolve as (v: unknown) => void, value });
@@ -328,6 +342,24 @@ vi.mock("../ipc/app", () => ({
  * walked because this file's rule is that every component with an `$effect`
  * is, not because it is suspected of leaking one.
  */
+// The API explorer's commands (ux31): every read answers late, nothing is sent.
+vi.mock("../ipc/api", () => ({
+  apiServers: () => deferred({ servers: [], last: {} }),
+  apiSetServers: () => deferred(undefined),
+  apiSent: () => deferred([]),
+  apiHeld: () => deferred([]),
+  apiSend: () => deferred({ kind: "failed", id: 0, stage: "stopped", words: "" }),
+  apiCancel: () => deferred(undefined),
+  apiAnswerBody: () => deferred(new Uint8Array()),
+  apiSaveAnswer: () => deferred(""),
+  apiHoldSecret: () => deferred(undefined),
+  apiForgetHeld: () => deferred(undefined),
+  apiClientsFound: () => deferred({ bruno: false }),
+  apiOpenIn: () => deferred({ argv: [], folder: "", wrote: false, left_out: [] }),
+  apiScratchSize: () => deferred(0),
+  apiScratchClear: () => deferred(0),
+}));
+
 vi.mock("../ipc/backup", () => ({
   backupStatus: () =>
     deferred({
@@ -447,6 +479,15 @@ const { createFolderRenderers } = await import("../render/folders.svelte");
 const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
+const TfOasAnswer = (await import("../tf/render/TfOasAnswer.svelte")).default;
+const TfOasInline = (await import("../tf/render/TfOasInline.svelte")).default;
+const TfOasDiff = (await import("../tf/render/TfOasDiff.svelte")).default;
+const TfOasMedia = (await import("../tf/render/TfOasMedia.svelte")).default;
+const TfOasShape = (await import("../tf/render/TfOasShape.svelte")).default;
+const TfOasRequest = (await import("../tf/render/TfOasRequest.svelte")).default;
+const TfApiServersSection = (await import("../tf/settings/TfApiServersSection.svelte")).default;
+const { OasState } = await import("../tf/render/oas.svelte");
+const { SpecSession } = await import("../render/openapi-port");
 const TfJar = (await import("../tf/render/TfJar.svelte")).default;
 const TfJarCode = (await import("../tf/render/TfJarCode.svelte")).default;
 const TfDecompilerSetting = (await import("../tf/settings/TfDecompilerSetting.svelte")).default;
@@ -1729,6 +1770,9 @@ const CASES: Case[] = [
                       apiVersion: "1",
                       description: "",
                       servers: [],
+                      security: [],
+                      info: { contact: null, license: null, terms: "", externalDocs: null },
+                      webhooks: [],
                       tags: [],
                       ops: [{ i: 0, method: "get", path: "/a", summary: "", operationId: null, tags: [], deprecated: false, anchor: "get /a" }],
                       pathRefs: [],
@@ -1742,6 +1786,69 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** An answer's box (ux31): nothing sent, nothing to read. */
+    name: "TfOasAnswer",
+    source: "lib/tf/render/TfOasAnswer.svelte",
+    open: (target) => ({ app: mount(TfOasAnswer, { target, props: { sending: undefined } }) }),
+  },
+  {
+    /** A spec drawn small (ux31): its parse answers late. */
+    name: "TfOasInline",
+    source: "lib/tf/render/TfOasInline.svelte",
+    open: (target) => ({ app: mount(TfOasInline, { target, props: { text: "openapi: 3.0.0\n", engine: oasEngine } }) }),
+  },
+  {
+    /** A spec in a comparison (ux31): both parses and the marks answer late. */
+    name: "TfOasDiff",
+    source: "lib/tf/render/TfOasDiff.svelte",
+    open: (target) => ({ app: mount(TfOasDiff, { target, props: { before: "openapi: 3.0.0\n", after: "openapi: 3.0.1\n", path: "openapi.yaml", engine: oasEngine } }) }),
+  },
+  {
+    /** A body's media (ux31): its example made from the schema answers late. */
+    name: "TfOasMedia",
+    source: "lib/tf/render/TfOasMedia.svelte",
+    open: (target) => ({
+      app: mount(TfOasMedia, {
+        target,
+        props: { st: oasState(), list: [{ type: "application/json", schema: { type: "object" }, example: undefined, examples: [] }], k: "get /a/r200", base: "openapi.yaml", onfollow: () => {} },
+      }),
+    }),
+  },
+  {
+    /** A schema's rows (ux31): a choice's shape answers late. */
+    name: "TfOasShape",
+    source: "lib/tf/render/TfOasShape.svelte",
+    open: (target) => ({
+      app: mount(TfOasShape, {
+        target,
+        props: { st: oasState(), shape: { props: [], variants: null, items: undefined, extra: undefined, description: "", facts: {}, base: "openapi.yaml" }, k: "schemas/A", onfollow: () => {} },
+      }),
+    }),
+  },
+  {
+    /** A request (ux31): its servers and held secrets answer late; nothing is sent. */
+    name: "TfOasRequest",
+    source: "lib/tf/render/TfOasRequest.svelte",
+    open: (target) => ({
+      app: mount(TfOasRequest, {
+        target,
+        props: {
+          st: oasState(),
+          op: { method: "get", path: "/a", summary: "", description: "", operationId: null, tags: [], deprecated: false, parameters: [], body: null, responses: [], security: [], servers: [], callbacks: [], externalDocs: null, ref: null } as never,
+          place: "get /a",
+          index: { servers: [], security: [] } as never,
+          file: "repo\nopenapi.yaml",
+        },
+      }),
+    }),
+  },
+  {
+    /** Settings › API servers (ux31): the saved servers answer late. */
+    name: "TfApiServersSection",
+    source: "lib/tf/settings/TfApiServersSection.svelte",
+    open: (target) => ({ app: mount(TfApiServersSection, { target, props: {} }) }),
   },
   {
     /** A Java archive (ux19): its listing and the Java it decompiles with answer late, the *Reading …* clock armed. */
