@@ -245,7 +245,11 @@ jobs:
 
       - name: vite build
         working-directory: app
-        run: npm run build
+        # A Svelte compile warning in a .svelte.ts module fails it: svelte-check misses those.
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/build.log"
+          ! grep '\[vite-plugin-svelte\]' "$RUNNER_TEMP/build.log"
 
   vitest:
     name: vitest (${{ matrix.shard }}/3)

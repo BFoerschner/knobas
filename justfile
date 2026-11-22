@@ -268,7 +268,17 @@ front-changed base="origin/main": deps
         echo "front-changed: vitest related to ${#changed[@]} changed files, plus ${#guards[@]} fs-reading guard tests"
         npx vitest related --run --maxWorkers "$workers" ${changed[@]+"${changed[@]}"} "${guards[@]}"
     fi
-    npm run build
+    # A Svelte compile warning in a `.svelte.ts` module fails the build step:
+    # svelte-check reads `.svelte` files and misses them (the final suite,
+    # 2026-11-22: two state_referenced_locally only the build printed).
+    build_log=$(mktemp)
+    npm run build 2>&1 | tee "$build_log"
+    if grep -q '\[vite-plugin-svelte\]' "$build_log"; then
+        rm -f "$build_log"
+        echo "front-changed: the build printed a Svelte warning (above)" >&2
+        exit 1
+    fi
+    rm -f "$build_log"
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
 # `just shot 3 shots time job/PAY-231`; the leading `#/` is optional but quote it
