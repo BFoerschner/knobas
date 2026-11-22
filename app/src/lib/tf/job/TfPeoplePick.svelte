@@ -105,6 +105,9 @@
   let at = $state(0);
   let box: HTMLElement | null = null;
   let field: HTMLInputElement | null = $state(null);
+  /** When it opened, and how long an `Enter` with nothing typed is taken as the opener's second press. */
+  let openedAt = 0;
+  const ARRIVAL_MS = 500;
   let asked: ReturnType<typeof setTimeout> | undefined;
 
   /** One row: an option, or *Unassigned* (`value: null`). */
@@ -181,10 +184,13 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      openedAt = 0;
       event.preventDefault();
       void move(event.key === "ArrowDown" ? 1 : -1);
     } else if (event.key === "Enter") {
       event.preventDefault();
+      // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
+      if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
       const hit = drawn[at];
       if (hit !== undefined) pick(hit.option);
     } else if (event.key === "Escape") {
@@ -231,6 +237,7 @@
       open = false;
     };
     window.addEventListener("mousedown", away, true);
+    openedAt = performance.now();
     queueMicrotask(() => field?.focus({ preventScroll: true }));
     return () => {
       untrack(off);

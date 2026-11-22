@@ -114,6 +114,18 @@ test("Unassigned picks nobody, and ↓ moves to it", () => {
   expect(p.onpick).toHaveBeenCalledWith(null, "Unassigned");
 });
 
+test("an Enter on arrival, the opener's second press, picks nobody; one after the hold picks the row", () => {
+  vi.useFakeTimers();
+  const p = props({ options: PEOPLE, complete: true, asking: false });
+  view = mount(TfPeoplePick, { target, props: p });
+  flushSync();
+  key("Enter");
+  expect(p.onpick).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(600);
+  key("Enter");
+  expect(p.onpick).toHaveBeenCalledTimes(1);
+});
+
 test("Esc clears the words, then closes", () => {
   const p = props({ options: PEOPLE, complete: true, asking: false });
   view = mount(TfPeoplePick, { target, props: p });

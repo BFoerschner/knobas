@@ -139,6 +139,8 @@ const HL_PLACES = [
   })),
 ];
 
+/** The fixture's Jira-like ticket whose fields the dev fake answers (`fake/ticket-fields.ts`). */
+const TICKET = "#/ticket/mock%3APAY-231";
 const PLACES = [
   { name: "tickets", start: "#/time", nav: "tickets", hash: "#/tickets", away: "time", tabs: true },
   { name: "tickets-list", start: "#/tickets", press: `${shown} button, ${shown} [role=tab]`, text: "List", hash: "#/tickets", away: "time", returnBy: { nav: "tickets" } },
@@ -146,6 +148,20 @@ const PLACES = [
   // A letter on the board (the ux19 overs pass): nothing on screen changes until its answer draws, nothing moves after.
   { name: "tickets-key", start: "#/tickets", type: { into: `${shown} input[placeholder="Filter tickets"]`, key: "e" }, still: `${shown} .tf-tcard`, changes: `${shown} .tf-col h3 .tf-count`, hash: "#/tickets", away: "clear" },
   { name: "ticket", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", away: "Escape", tabs: true },
+  // A ticket's fields as controls (ADR-0054, 2026-11-22): the page moves nothing when its fields land late, when its
+  // adapter offers no edits (the line under the facts is held with the sections) or when a credential is refused; and
+  // each control opens over the page without moving it.
+  ...[
+    ["late", { late: "ticket_fields:400" }],
+    ["none", { fake: "fake-noedits" }],
+    ["readonly", { fake: "fake-readonly", late: "refused_writes:300" }],
+  ].map(([how, more]) => ({ name: `ticket-fields-${how}`, fixture: true, ...more, start: "#/tickets", go: TICKET, hash: TICKET, away: "#/tickets" })),
+  ...[
+    ["assignee", `${shown} button[aria-label="Assignee: change it"]`, ".tf-pick .tf-pick-opt"],
+    ["priority", `${shown} button[aria-label="Priority: change it"]`, "[role=menu] [role=menuitemradio]"],
+    ["labels", `${shown} button[aria-label="Labels: change it"]`, ".tf-pick .tf-pick-opt"],
+    ["title", `${shown} .tf-tktitlepen`, `${shown} .tf-tktitleedit input`],
+  ].map(([field, press, ready]) => ({ name: `ticket-edit-${field}`, fixture: true, start: TICKET, press, hash: null, ready, away: "Escape" })),
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },

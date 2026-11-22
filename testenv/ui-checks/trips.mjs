@@ -886,6 +886,13 @@ const PAGES = [
     { id: "resolve-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thread button", text: "Resolve" } },
     { id: "unresolve-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thread button", text: "Unresolve" } },
   ] },
+  // A ticket's fields as controls (ADR-0054, 2026-11-22): a double Enter on a field's control opens it once and writes nothing.
+  { page: "A ticket's fields", route: "ticket/mock%3APAY-231", trips: [
+    { id: "field-assignee-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: "button[aria-label='Assignee: change it']" } },
+    { id: "field-priority-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: "button[aria-label='Priority: change it']" } },
+    { id: "field-labels-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: "button[aria-label='Labels: change it']" } },
+    { id: "field-title-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: ".tf-tktitlepen" } },
+  ] },
   { page: "A ticket's connections", route: "ticket/mock%3APAY-231", trips: [
     { id: "ticket-comment", kind: "enter-twice", strict: true, finding: "F-266", prep: [{ fill: ".tf-compose textarea", text: "Looks right to me." }, { wait: 150 }], press: { sel: ".tf-compose .tf-primary", text: "Comment" }, returns: "Comment on PAY-231" },
     { id: "set-save", kind: "enter-twice", finding: "F-544", prep: [{ click: "button", starts: "Link something to it" }, { wait: 700 }, { click: "button", text: "Save as a link set…" }, { wait: 900 }], press: { sel: ".tf-dialog footer button", text: "Save link set" }, returns: "Save as a link set…" },
