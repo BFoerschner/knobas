@@ -116,3 +116,27 @@ test.skipIf(real === undefined)("GitHub's and Stripe's collections are read back
     for (const r of requests.values()) expect(r.http.url.startsWith("{{baseUrl}}")).toBe(true);
   }
 });
+
+test("an operation that needs no sign-in says so; two servers of one description get environments of their own", () => {
+  const files = written(
+    JSON.stringify({
+      openapi: "3.0.3",
+      info: { title: "Open", version: "1" },
+      servers: [
+        { url: "https://a.example.com", description: "Hosted" },
+        { url: "https://b.example.com", description: "Hosted" },
+      ],
+      components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
+      security: [{ bearer: [] }],
+      paths: {
+        "/health": { get: { summary: "Health", security: [], responses: { "200": { description: "ok" } } } },
+        "/me": { get: { summary: "Me", responses: { "200": { description: "ok" } } } },
+      },
+    }),
+  );
+  const requests = [...files].filter(([p]) => /\/(Health|Me)\.bru$/.test(p)).map(([p, t]) => [p.replace(/^.*\//, ""), /auth: (\w+)/.exec(t)?.[1]]);
+  expect(Object.fromEntries(requests)).toEqual({ "Health.bru": "none", "Me.bru": "inherit" });
+  const envs = [...files.keys()].filter((p) => p.startsWith("environments/")).sort();
+  expect(envs).toEqual(["environments/Hosted 2.bru", "environments/Hosted.bru"]);
+  expect(lang.bruToEnvJsonV2(files.get("environments/Hosted 2.bru")!).variables.find((v) => v.name === "baseUrl")?.value).toBe("https://b.example.com");
+});

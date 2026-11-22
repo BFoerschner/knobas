@@ -71,7 +71,8 @@ export function bruRequest(op: Operation, draft: RequestDraft, seq: number): str
   const kind = media === null || draft.body.trim() === "" ? "none" : /json/.test(media) ? "json" : /xml/.test(media) ? "xml" : /x-www-form-urlencoded/.test(media) ? "formUrlEncoded" : /multipart/.test(media) ? "multipartForm" : "text";
   const url = `{{baseUrl}}${op.path.replace(/\{([^}]+)\}/g, ":$1")}`;
   const name = op.summary || `${op.method.toUpperCase()} ${op.path}`;
-  const anonymous = op.security.length > 0 && op.security.every((r) => r.length === 0);
+  // `security` is the operation's own, else the spec's: none at all, or only `{}`, is an operation that needs no sign-in.
+  const anonymous = op.security.every((r) => r.length === 0);
   let out = block("meta", [`name: ${bruOne(name)}`, "type: http", `seq: ${seq}`]);
   out += block(op.method.toLowerCase(), [`url: ${url}`, `body: ${kind}`, `auth: ${anonymous ? "none" : "inherit"}`]);
   const kv = (p: RequestDraft["params"][number]) => `${p.on || p.required ? "" : "~"}${bruKey(p.name)}: ${bruOne(p.value)}`;
