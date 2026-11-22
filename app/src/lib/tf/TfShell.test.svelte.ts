@@ -42,6 +42,33 @@ const boardReads = vi.hoisted(() => ({ n: 0 }));
 /** Every item `refresh_entity` was asked to read (#2156). */
 const refreshed = vi.hoisted(() => [] as string[]);
 
+/** The sites' settings as `site_settings` answers, when a test turns them on; the bridge's own read otherwise. */
+const siteReads = vi.hoisted(() => ({ on: false, n: 0, sources: [] as string[] }));
+vi.mock("../ipc/site", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../ipc/site")>();
+  return {
+    ...real,
+    siteSettings: () => {
+      if (!siteReads.on) return real.siteSettings();
+      siteReads.n += 1;
+      return Promise.resolve(
+        siteReads.sources.map((source) => ({
+          source,
+          open_inside: false,
+          base: `http://127.0.0.1/${source}`,
+          own: "http://127.0.0.1",
+          allowed: [],
+          suggested: [],
+          kept_since: null,
+          offered: true,
+          persists: true,
+          sign_in_user: null,
+        })),
+      );
+    },
+  };
+});
+
 // An item's *Refresh* reads the bridge's `refresh_entity` (#2107).
 vi.mock("../ipc/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../ipc/sources")>()),
@@ -104,6 +131,7 @@ vi.mock("../ipc/entity", async (importOriginal) => ({
 }));
 
 import { docsChoices as heldDocsChoices } from "./docs/docs-choices.svelte";
+import { siteStore } from "./site/site.svelte";
 
 let target: HTMLElement;
 let shell: ReturnType<typeof mount> | null = null;
@@ -1741,6 +1769,39 @@ test("a source removed or added leaves or joins the status bar without a reload 
   store.replace([health("jira", "ok"), health("tide", "ok")]);
   await settle();
   expect(bar()).toContain("Tidewater Gitea not synced yet");
+});
+
+test("a source added while knobas runs gets its Site settings without a restart", async () => {
+  // The final suite's real window (2026-11-22): XWiki added through Add a source had no Site section on its Settings
+  // page, and its pages opened the browser, until knobas started again. The sites' settings were read once.
+  siteReads.on = true;
+  siteReads.n = 0;
+  try {
+    const store = createHealth({ credentialHealth: () => Promise.resolve([]), listen: () => Promise.resolve(() => {}) });
+    store.replace([health("jira", "ok")]);
+    let listed = [{ id: "jira", display_name: "Jira" }];
+    siteReads.sources = ["jira"];
+    start({ health: store, listSources: () => Promise.resolve(listed.map((s) => ({ roles: [], role_misses: [], ...s }))) });
+    await settle();
+    expect(siteStore.settings.has("jira")).toBe(true);
+    const first = siteReads.n;
+
+    // Add source: the list gains the wiki, and the bridge now has its setting.
+    listed = [...listed, { id: "wiki", display_name: "XWiki" }];
+    siteReads.sources = ["jira", "wiki"];
+    store.replace([health("jira", "ok"), health("wiki", "ok")]);
+    await settle();
+    expect(siteStore.settings.has("wiki")).toBe(true);
+    expect(siteReads.n).toBe(first + 1);
+
+    // The list read again with nothing new reads no settings.
+    store.replace([health("wiki", "ok"), health("jira", "ok")]);
+    await settle();
+    expect(siteReads.n).toBe(first + 1);
+  } finally {
+    siteReads.on = false;
+    siteStore.reset();
+  }
 });
 
 test("the queued-writes count opens the queue list (R-1.5)", async () => {

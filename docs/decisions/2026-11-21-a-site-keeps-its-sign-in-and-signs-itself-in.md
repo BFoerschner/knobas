@@ -126,3 +126,7 @@ dialog, the bar's button and notes.
   `crates/knobas-site/tests/mac_forget.rs` loads a page that sets a lasting and a session cookie into a store, beside
   a second view on the default store, forgets the store, and asks it for cookies: both were still there before, none
   after. In the window after the fix: cleared, removed 0.5 s later, and the next open went to `/login.action`.
+- **A source added while knobas ran had no Site section** until the next start (the Mac's real window, XWiki added
+  through *Add a source*), so its pages opened the browser. The page read the sites' settings once. It now reads them
+  again when the source list gains a source it has no setting for (`siteStore.lacks`), and not on a list with nothing
+  new. `TfShell.test.svelte.ts` adds a source to a running shell: no setting before, its setting after one more read.

@@ -679,6 +679,15 @@
         sources = rows;
         // The sites' nameplates (ADR-0050).
         siteStore.nameAll(rows);
+        // A source added since the sites' settings were read has none: its Settings page would have no Site section,
+        // and its pages would open the browser, until the next start (the final suite's real window, 2026-11-22).
+        if (siteStore.lacks(rows.map((row) => row.id))) {
+          void siteSettings()
+            .then((list) => {
+              if (!dead) siteStore.hold(list);
+            })
+            .catch(() => {});
+        }
         // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
         sourceRoles.take(rows);
       })

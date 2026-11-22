@@ -3,7 +3,7 @@
  * is answered in its own task with no read.
  *
  * - **settings**: each source's *Open its pages inside knobas*, base, own and allowed origins (`site_settings`), filled
- *   once the database answers and again after each write in Settings;
+ *   once the database answers, again after each write in Settings, and again when the source list gains a source;
  * - **status**: each live site's state, from `site:status`, dropped on `site:closed`;
  * - **names**: each source's display name, from the source list the status bar reads;
  * - **asking**: the question the bar asks in its row (decisions §10), per source;
@@ -46,6 +46,8 @@ export interface SiteStore {
   readonly loaded: boolean;
   hold(settings: readonly SiteSetting[]): void;
   holdOne(setting: SiteSetting): void;
+  /** Whether the settings were read and one of `sources` has none: a source added since, whose settings to read again. */
+  lacks(sources: readonly string[]): boolean;
   nameAll(names: readonly { id: string; display_name: string }[]): void;
   /** A source's name, its id while none is known. */
   name(source: string): string;
@@ -102,6 +104,9 @@ export function createSiteStore(): SiteStore {
     hold(list) {
       settings = new Map(list.map((one) => [one.source, one]));
       loaded = true;
+    },
+    lacks(sources) {
+      return loaded && sources.some((source) => !settings.has(source));
     },
     holdOne(setting) {
       settings = set(settings, setting.source, setting);
