@@ -80,6 +80,7 @@
   import type { BoardReaderPorts, ViewSessions } from "./board-reader.svelte";
   import type { MovePorts, NotePorts } from "./moves.svelte";
   import type { EchoListen } from "../queued.svelte";
+  import type { CardFieldsHost } from "./card-fields.svelte";
 
   /** The reads this page makes, injectable so a test needs no bridge: the board reader's, and the views'. */
   export interface TicketsPorts extends BoardReaderPorts {
@@ -100,6 +101,8 @@
     moves?: Partial<MovePorts> & Partial<NotePorts>;
     /** Hears `item:refreshed` and `sync:state`, which read the board again for its moves' echoes; the bridge's when left out. */
     listen?: EchoListen;
+    /** A card's field edits' reads and write (ADR-0054, section 26); the bridge's when left out. */
+    fields?: Pick<CardFieldsHost, "submitWrite" | "refused" | "fields" | "follower">;
   }
 
   /** What the page keeps for the session: each view's switches, and the selection. */
@@ -208,7 +211,9 @@
   import { filterKeys } from "../filter-keys";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { sameStatus } from "./drop";
-  import { withStatusEchoes, withStatusRows } from "./echo-board";
+  import { withFieldEchoes, withFieldRows, withStatusEchoes, withStatusRows, type LanedBy } from "./echo-board";
+  import { createCardFields, offerFields } from "./card-fields.svelte";
+  import TfPeoplePick from "../job/TfPeoplePick.svelte";
   import { askReach, asking as reachAsking, moveRefusal, noteObserved, reachOf } from "./reach.svelte";
   import { dismissNote, movedStatus, moveTicket, moveWaits, MOVE_KEY, offerMoves, ticketNotes, undoLastMove, watchTicketNotes, type MoveOffer } from "./moves.svelte";
   import StatusMenu from "./StatusMenu.svelte";
@@ -392,6 +397,50 @@
 
   // ---- the board: its reads are the reader's (#1319) ----
   // svelte-ignore state_referenced_locally
+  // ---- a card's fields (ADR-0054, section 26): *Assign to…*, *Priority ▸*, `a`, and lanes that take a drop ----
+  /** The card the people picker stands at, and the element it opened from. */
+  let picking = $state<{ card: MiniBoardCard; opener: HTMLElement } | null>(null);
+  let pickOpen = $state(false);
+  const cardFields = createCardFields({
+    cardOf: (entityId) => cardById(entityId),
+    sourceName: (sourceId) => sourceRoles.nameOf(sourceId),
+    edits: (sourceId) => sourceRoles.writes(sourceId, "edit_ticket"),
+    openPicker: (card) => openPicker(card),
+    get submitWrite() {
+      return ports.fields?.submitWrite;
+    },
+    get refused() {
+      return ports.fields?.refused;
+    },
+    get fields() {
+      return ports.fields?.fields;
+    },
+    get follower() {
+      return ports.fields?.follower;
+    },
+  });
+  /** What the board's lanes are by, `null` without lanes. */
+  function lanedBy(): LanedBy {
+    const by = reader.lanes;
+    return by === "none" ? null : by;
+  }
+  /** The people picker at `card`'s card or row, its fields asked. */
+  function openPicker(card: MiniBoardCard) {
+    if (cardFields.why(card, "assignee") !== null) return;
+    const opener = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(card.entity_id)}"]`);
+    if (opener === null) return;
+    cardFields.ask(card.entity_id);
+    picking = { card, opener };
+    pickOpen = true;
+  }
+  // The picker's list, once the ticket's assignee field is known.
+  $effect(() => {
+    const at = picking;
+    if (at === null || !pickOpen) return;
+    const field = cardFields.assignee(at.card);
+    if (field !== null && field.kind.type === "search") untrack(() => cardFields.search(at.card, field, ""));
+  });
+
   // Read once: the reader owns the typing pause and the generations.
   const reader = createBoardReader(ports, {
     typingPause,
@@ -404,8 +453,11 @@
       showAll: view?.show_all ?? false,
       sort: session.views[sessionKey]?.sort ?? saved.sort,
     }),
-    // A move is drawn in its new column at once, over every read (ADR-0054).
-    overlay: { board: (board) => withStatusEchoes(board, movedStatus), rows: (rows) => withStatusRows(rows, movedStatus) },
+    // A move is drawn in its new column at once, over every read (ADR-0054); a field edit on its card, in its new lane.
+    overlay: {
+      board: (board) => withFieldEchoes(withStatusEchoes(board, movedStatus), cardFields.echoed, lanedBy()),
+      rows: (rows) => withFieldRows(withStatusRows(rows, movedStatus), cardFields.echoed),
+    },
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
@@ -724,6 +776,7 @@
         settleEchoes(card.entity_id, (one) => one.kind === "status" && sameStatus(card.status, one.text));
         movedFrom.delete(card.entity_id);
       }
+      cardFields.settle(cards);
     });
   });
 
@@ -731,6 +784,12 @@
   function cardById(entityId: string): MiniBoardCard | null {
     for (const column of reader.board?.columns ?? []) for (const card of column.cards) if (card.entity_id === entityId) return card;
     return reader.rows?.find((card) => card.entity_id === entityId) ?? null;
+  }
+
+  /** The lane key `card` stands in on the board, `""` without lanes. */
+  function laneOf(card: MiniBoardCard): string {
+    const entry = heldBoard.rows.find((one) => one.card.entity_id === card.entity_id);
+    return entry === undefined ? "" : (boardHold.tagOf(entry).split("\u0001")[0] ?? "");
   }
 
   /** Why `card` cannot be moved from here, or `null`. */
@@ -800,7 +859,8 @@
   /** The chip a moved card draws on its head line, in a column holding `listed` statuses (several: it names the one picked). */
   function writeOf(card: MiniBoardCard, listed: readonly string[]): { words: string; other: string; tone: "info" | "muted"; title?: string } | null {
     const echo = echoOn(card.entity_id, "status");
-    if (echo === null) return null;
+    // No move: the newest field edit's chip, where it has one (section 26).
+    if (echo === null) return cardFields.chip(card.entity_id);
     const sent = echo.state === "sent";
     const several = listed.length > 1;
     const queued = several ? `${echo.text}, queued` : "Queued";
@@ -842,6 +902,25 @@
     );
   });
 
+  // While shown, *Assign to…* and *Priority ▸* on a ticket are this page's (section 26).
+  $effect(() => {
+    if (!pageShown()) return;
+    return untrack(() =>
+      offerFields({
+        offer: (id) => cardFields.offer(id),
+        ask: (id) => cardFields.ask(id),
+        assign: (id) => {
+          const card = cardById(id);
+          if (card !== null) openPicker(card);
+        },
+        priority: (id, value, label) => {
+          const card = cardById(id);
+          if (card !== null) cardFields.priority(card, value, label);
+        },
+      }),
+    );
+  });
+
   // -- the drag (sections 7 to 10) --
   /** What the live region says: each step of a carry, a drop, a put back. */
   let said = $state("");
@@ -874,14 +953,31 @@
       source: sourceRoles.nameOf(card.source_id),
       moves: sourceRoles.writes(card.source_id, "transition"),
       refused: moveRefusal(card.entity_id) ?? null,
+      lane: (key) => cardFields.lane(card, lanedBy(), key),
     }),
-    drop: (card, to) => moveCard(card, to.status, { place: to.place, before: to.before }),
+    drop: (card, to) => {
+      const moving = !sameStatus(to.status, card.status);
+      const from = laneOf(card);
+      if (moving) moveCard(card, to.status, { place: to.place, before: to.before });
+      if (to.lane === from) return;
+      // Across lanes (section 26): the move first, then the edit of the field the board is laned by.
+      if (!moving) {
+        const was = boardHold.move(card.entity_id, to.place, to.before);
+        if (was !== null && !movedFrom.has(card.entity_id)) movedFrom.set(card.entity_id, was);
+      }
+      return cardFields.relane(card, lanedBy(), to.lane) ?? undefined;
+    },
     choose: (card, statuses, at) =>
       new Promise((answer) => {
         dropMenu = { card, statuses, at, answer };
         dropMenuOpen = true;
       }),
-    ask: (card, when) => askReach(card, when, ports.moves?.reachableTransitions),
+    ask: (card, when) => {
+      // Laned by a field a drop edits: whether the lanes take it is asked at pickup too (section 26).
+      const by = lanedBy();
+      if (when === "pickup" && (by === "assignee" || by === "priority")) cardFields.ask(card.entity_id);
+      return askReach(card, when, ports.moves?.reachableTransitions);
+    },
     scroller: () => {
       const wrap = document.querySelector<HTMLElement>(".tf-tickets .tf-board-wrap");
       const cols = wrap?.querySelectorAll<HTMLElement>(".tf-cols") ?? [];
@@ -1129,6 +1225,12 @@
           event.preventDefault();
           openStatusMenu(entry.card, cell);
         }
+        return;
+      }
+      // `a` on the selected card or row opens the people picker at it (section 26), as `a` does on the ticket's page.
+      if (event.key === "a" && current !== null && layers.open.length === 0 && sourceRoles.writes(current.card.source_id, "edit_ticket")) {
+        event.preventDefault();
+        openPicker(current.card);
         return;
       }
       const by = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key] as 1 | -1 | undefined;
@@ -1555,6 +1657,35 @@
       asking={reachAsking(menuCard)}
       onpick={(status) => moveCard(menuCard, status)}
       onretry={() => void askReach(menuCard, "press", ports.moves?.reachableTransitions)}
+    />
+  {/if}
+
+  {#if picking !== null}
+    {@const pick = picking}
+    {@const field = cardFields.assignee(pick.card)}
+    {@const held = field === null ? null : cardFields.options(pick.card, field)}
+    {@const source = sourceRoles.nameOf(pick.card.source_id)}
+    <TfPeoplePick
+      bind:open={pickOpen}
+      opener={pick.opener}
+      label="Assignee"
+      current={pick.card.assignee ? { value: pick.card.assignee, shown: pick.card.assignee_name ?? pick.card.assignee } : null}
+      person={field?.kind.type === "search" ? field.kind.person : true}
+      required={field?.required ?? false}
+      options={field?.kind.type === "choice" ? field.kind.options : (held?.options ?? [])}
+      complete={field?.kind.type === "choice" ? true : (held?.complete ?? false)}
+      asking={field === null || (held?.asking ?? false)}
+      failed={held?.failed ?? null}
+      sourceName={source}
+      scope={field?.kind.type === "search" ? field.kind.scope : source}
+      onpick={(value, shown) => {
+        pickOpen = false;
+        cardFields.assign(pick.card, value, shown);
+      }}
+      onsearch={(typed) => {
+        if (field !== null) cardFields.search(pick.card, field, typed);
+      }}
+      {layers}
     />
   {/if}
 

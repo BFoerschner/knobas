@@ -6,7 +6,10 @@
  * The rules, first match wins; statuses compare trimmed and ignoring ASCII case, as the adapters do:
  *
  * 1. the column the card stands in: `own`, a drop puts it back;
- * 2. another lane: `no`, a move changes the status only;
+ * 2. another lane: on a board laned by assignee or priority, the lane's value must be one the ticket's field takes
+ *    (`lane`, section 26): `no` in the source's words where it is not, `ask` while that is not known; then the card's
+ *    own status there takes it as is (the edit alone), and any other column answers by the rules below. A board laned
+ *    by anything else: `no`, knobas does not change that;
  * 3. a source that declares no `transition`: `no`;
  * 4. a credential that may not move it: `no`, in the source's words;
  * 5. the *No status* column: `no`;
@@ -34,7 +37,12 @@ export interface DropColumn {
   own: boolean;
   /** In the card's own lane (always, on a board without lanes). */
   sameLane: boolean;
+  /** Its lane's key, `""` for the lane of tickets with none (and on a board without lanes). */
+  lane?: string;
 }
+
+/** Whether a lane's value is one the ticket's field takes: known `yes`, not yet known `ask`, or `no` and why. */
+export type LaneTakes = { kind: "yes" } | { kind: "ask" } | { kind: "no"; why: string };
 
 export interface DropFacts {
   /** The source's display name. */
@@ -43,6 +51,8 @@ export interface DropFacts {
   moves: boolean;
   /** `refused_writes`' reason for the move, or `null`. */
   refused: string | null;
+  /** Another lane's answer, on a laned board (section 26); left out, another lane takes no drop. */
+  lane?: (key: string) => LaneTakes;
 }
 
 /** How the adapters compare a status's name. */
@@ -58,7 +68,14 @@ export function either(names: readonly string[]): string {
 
 export function dropOn(ticket: { status: string | null }, column: DropColumn, reach: Reach | null, facts: DropFacts): Drop {
   if (column.own) return { kind: "own" };
-  if (!column.sameLane) return { kind: "no", why: "A move changes the status. Drop it in its own lane." };
+  if (!column.sameLane) {
+    const lane = facts.lane?.(column.lane ?? "") ?? { kind: "no", why: "A move changes the status. Drop it in its own lane." };
+    if (lane.kind === "no") return lane;
+    const own = column.statuses.find((status) => sameStatus(status, ticket.status));
+    if (own !== undefined) return { kind: lane.kind, statuses: [own] };
+    const there = dropOn(ticket, { ...column, sameLane: true }, reach, facts);
+    return there.kind === "yes" && lane.kind === "ask" ? { kind: "ask", statuses: there.statuses } : there;
+  }
   if (!facts.moves) return { kind: "no", why: `${facts.source} tickets cannot be moved from knobas: its adapter offers no moves.` };
   if (facts.refused !== null) return { kind: "no", why: facts.refused };
   const statuses = column.statuses.filter((status) => status.trim() !== "");

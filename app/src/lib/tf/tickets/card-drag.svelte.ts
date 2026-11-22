@@ -40,8 +40,12 @@ export interface CardDragHost {
   /** Every drawn column, in reading order: its place, lane, what it holds, and its `.tf-col` element. */
   columns(): { place: string; lane: string; column: Omit<DropColumn, "own" | "sameLane">; node: HTMLElement }[];
   facts(card: MiniBoardCard): DropFacts;
-  /** The card was dropped: move it to `status`, standing before the drawn card `before` (or at the column's end). */
-  drop(card: MiniBoardCard, to: { place: string; before: string | null; status: string }): void;
+  /**
+   * The card was dropped: move it to `status`, standing before the drawn card `before` (or at the column's end), in the
+   * lane `lane` (another lane edits the field it is laned by, section 26). Answers what the live region says, or nothing
+   * for *moved to ⟨status⟩*.
+   */
+  drop(card: MiniBoardCard, to: { place: string; before: string | null; status: string; lane: string }): string | void;
   /** Several statuses to choose from, at the drop point: answers the pick, or `null` for none. */
   choose(card: MiniBoardCard, statuses: string[], at: { x: number; y: number }): Promise<string | null>;
   /** Ask where a card can go: the pointer rested on it, it was pressed, or picked up. */
@@ -122,7 +126,7 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     const reach = reachOf(held.card);
     const facts = host.facts(held.card);
     for (const one of held.columns) {
-      const column = { ...one.column, own: one.place === held.place, sameLane: one.lane === held.lane };
+      const column = { ...one.column, own: one.place === held.place, sameLane: one.lane === held.lane, lane: one.lane };
       one.column = column;
       one.drop = dropOn(held.card, column, reach, facts);
       if (one.drop.kind === "own") delete one.node.dataset.drop;
@@ -172,7 +176,7 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     const columns = host.columns().map(
       (one): Column => ({
         ...one,
-        column: { ...one.column, own: one.place === found.place, sameLane: one.lane === found.lane },
+        column: { ...one.column, own: one.place === found.place, sameLane: one.lane === found.lane, lane: one.lane },
         box: (one.node.querySelector(".tf-stack") ?? one.node).getBoundingClientRect(),
         cards: null,
         drop: { kind: "own" },
@@ -371,8 +375,8 @@ export function createCardDrag(host: CardDragHost): CardDrag {
   function land(hit: Column, status: string) {
     const was = letGo();
     if (was === null) return;
-    host.drop(was.card, { place: hit.place, before: was.before, status });
-    host.say(`${was.card.key} moved to ${status}. Queued.`);
+    const said = host.drop(was.card, { place: hit.place, before: was.before, status, lane: hit.lane });
+    host.say(said ?? `${was.card.key} moved to ${status}. Queued.`);
     queueMicrotask(() => focusCard(was.card.entity_id));
   }
 

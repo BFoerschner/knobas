@@ -18,6 +18,16 @@ describe("dropOn", () => {
     expect(dropOn(ticket, column(["Done"], { sameLane: false }), exact(["Done"]), facts)).toEqual({ kind: "no", why: "A move changes the status. Drop it in its own lane." });
   });
 
+  test("2, laned by a field the ticket takes: its own status takes the edit alone, another column answers as in its own lane", () => {
+    const laned = { ...facts, lane: (key: string) => (key === "nobody-can" ? { kind: "no" as const, why: "Tidewater Jira does not let you assign tickets." } : key === "later" ? { kind: "ask" as const } : { kind: "yes" as const }) };
+    expect(dropOn(ticket, column(["in progress"], { sameLane: false, lane: "mara" }), exact([]), laned)).toEqual({ kind: "yes", statuses: ["in progress"] });
+    expect(dropOn(ticket, column(["Done"], { sameLane: false, lane: "mara" }), exact(["Done"]), laned)).toEqual({ kind: "yes", statuses: ["Done"] });
+    expect(dropOn(ticket, column(["Done"], { sameLane: false, lane: "mara" }), exact(["To Do"]), laned)).toEqual({ kind: "no", why: "Tidewater Jira offers no move from In Progress to Done." });
+    expect(dropOn(ticket, column(["Done"], { sameLane: false, lane: "later" }), exact(["Done"]), laned)).toEqual({ kind: "ask", statuses: ["Done"] });
+    expect(dropOn(ticket, column(["In Progress"], { sameLane: false, lane: "later" }), null, laned)).toEqual({ kind: "ask", statuses: ["In Progress"] });
+    expect(dropOn(ticket, column(["In Progress"], { sameLane: false, lane: "nobody-can" }), null, laned)).toEqual({ kind: "no", why: "Tidewater Jira does not let you assign tickets." });
+  });
+
   test("3: a source whose adapter offers no moves", () => {
     expect(dropOn(ticket, column(["Done"]), exact(["Done"]), { ...facts, moves: false })).toEqual({
       kind: "no",

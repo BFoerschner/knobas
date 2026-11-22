@@ -2643,3 +2643,194 @@ test("s on the board carries the selected card: Enter on a one-status column mov
   await settle();
   expect(sent).toEqual([{ Transition: { entity: "jira:PAY-2", status: "In Progress" } }]);
 });
+
+// ---- a ticket's fields from its card (ADR-0054, ticket-edit decisions section 26) ----
+
+const PEOPLE = [
+  { value: "mara.lindqvist", label: "Mara Lindqvist" },
+  { value: "jonas.becker", label: "Jonas Becker" },
+];
+
+/** Moves and field edits on, every write into one list in the order queued; the ticket's fields as a Jira answers them. */
+function editable(h: Harness, reach: string[] = ["In Progress", "Done"]) {
+  const moving = movable(h, reach);
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition", "edit_ticket"] }]);
+  let id = 500;
+  const asked: string[] = [];
+  h.ports.fields = {
+    submitWrite: (payload) => {
+      moving.sent.push(payload);
+      return Promise.resolve({ id: id++, state: "pending" } as never);
+    },
+    refused: () => Promise.resolve([]),
+    fields: {
+      ticketFields: (entityId) => {
+        asked.push(entityId);
+        const one = CORPUS.find((entry) => entry.card.entity_id === entityId)?.card;
+        return Promise.resolve({
+          fields: [
+            { id: "assignee", label: "Assignee", kind: { type: "search", scope: "PAY", person: true }, value: one?.assignee ?? null, required: false },
+            { id: "priority", label: "Priority", kind: { type: "choice", options: [{ value: "High", label: "High" }, { value: "Low", label: "Low" }] }, value: one?.priority ?? null, required: true },
+          ],
+        });
+      },
+      fieldOptions: () => Promise.resolve({ options: PEOPLE, complete: true }),
+    },
+    follower: { follow: () => () => {} },
+  };
+  // The page's moves' writes are counted in the same list: `movable` pushes them.
+  return { ...moving, asked };
+}
+
+const avatarOf = (key: string) => target.querySelector<HTMLElement>(`[data-entity="jira:${key}"] .tf-av`)?.title ?? null;
+
+test("Assign to… on a card opens the people picker at it; a pick queues EditTicket and the card draws the person with Assigning, queued", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  const { fieldProvider } = await import("./card-fields.svelte");
+  fieldProvider()!.ask("jira:PAY-3");
+  await settle();
+  expect(fieldProvider()!.offer("jira:PAY-3")).toEqual({
+    assign: { disabled: null },
+    priority: { options: [{ value: "High", label: "High" }, { value: "Low", label: "Low" }], current: "High", asking: null, disabled: null },
+  });
+  fieldProvider()!.assign("jira:PAY-3");
+  await settle();
+  const options = [...document.querySelectorAll<HTMLElement>(".tf-pick [role=option]")].map((one) => one.textContent!.trim());
+  expect(options.some((one) => one.includes("Mara Lindqvist"))).toBe(true);
+  const mara = [...document.querySelectorAll<HTMLElement>(".tf-pick [role=option]")].find((one) => one.textContent!.includes("Mara Lindqvist"))!;
+  mara.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  mara.click();
+  flushSync();
+  expect(avatarOf("PAY-3")).toBe("Mara Lindqvist");
+  expect(chipOf("PAY-3")).toBe("Assigning, queued");
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-3", title: null, assignee: { account: "mara.lindqvist" }, priority: null, labels: null, fields: {} } }]);
+});
+
+test("Priority from a card's menu queues EditTicket with that priority alone, drawn on the card at once", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  const { fieldProvider } = await import("./card-fields.svelte");
+  fieldProvider()!.priority("jira:PAY-3", "Low", "Low");
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-tkind')?.textContent ?? "").not.toContain("High");
+  expect(chipOf("PAY-3")).toBe("Setting, queued");
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-3", title: null, assignee: null, priority: "Low", labels: null, fields: {} } }]);
+});
+
+test("a on the selected card opens the people picker; a source whose adapter offers no edits opens nothing and offers nothing", async () => {
+  const h = harness();
+  editable(h);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+  await settle();
+  expect(document.querySelector(".tf-pick")).not.toBeNull();
+  press("Escape");
+  press("Escape");
+  await settle();
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  flushSync();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+  await settle();
+  expect(document.querySelector(".tf-pick")).toBeNull();
+  const { fieldProvider } = await import("./card-fields.svelte");
+  expect(fieldProvider()!.offer("jira:PAY-2")).toBeNull();
+});
+
+const rect = (left: number, top: number, width: number, height: number) =>
+  ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+const pointer = (type: string, x: number, y: number, on: EventTarget = window) =>
+  on.dispatchEvent(new PointerEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+
+/** Every drawn column side by side, 200 px wide and 10 apart, cards 80 px tall from y 100: the drag's arithmetic, in jsdom. */
+function laidOut() {
+  const cols = () => [...target.querySelectorAll<HTMLElement>(".tf-col[data-place]")];
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const col = this.closest<HTMLElement>(".tf-col[data-place]");
+    if (col === null) return rect(0, 0, 4000, 2000);
+    const left = cols().indexOf(col) * 210;
+    if (this.classList.contains("tf-tcard")) return rect(left + 5, 100 + [...col.querySelectorAll(".tf-tcard")].indexOf(this) * 86, 190, 80);
+    return rect(left, 90, 200, 400);
+  });
+  onTestFinished(() => vi.mocked(Element.prototype.getBoundingClientRect).mockRestore());
+  return cols;
+}
+
+/** Drag `key`'s card into the column at `place`, through the pointer. */
+async function dragTo(key: string, place: string) {
+  const node = target.querySelector<HTMLElement>(`.tf-tcard[data-entity="jira:${key}"]`)!;
+  const box = node.getBoundingClientRect();
+  pointer("pointerdown", box.left + 40, box.top + 20, node);
+  pointer("pointermove", box.left + 50, box.top + 20);
+  await settle();
+  const to = target.querySelector<HTMLElement>(`.tf-col[data-place="${CSS.escape(place)}"]`)!.querySelector(".tf-stack")!.getBoundingClientRect();
+  pointer("pointermove", to.left + 100, 300);
+  pointer("pointerup", to.left + 100, 300);
+  flushSync();
+}
+
+const laneCards = (lane: string) =>
+  [...target.querySelectorAll<HTMLElement>(".tf-lane")]
+    .find((one) => one.querySelector("h2")!.textContent!.trim().startsWith(lane))
+    ?.querySelectorAll<HTMLElement>(".tf-col") ?? [];
+const placeIn = (lane: string, status: string) =>
+  [...laneCards(lane)].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith(status))!.dataset.place!;
+const keysIn = (lane: string, status: string) =>
+  [...[...laneCards(lane)].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith(status))!.querySelectorAll<HTMLElement>(".tf-tcard")].map((one) =>
+    one.dataset.entity!.replace("jira:", ""),
+  );
+
+test("laned by assignee, a drop in another lane's other column queues the move, then the edit, and the card stands there at once", async () => {
+  const h = harness();
+  const { sent } = editable(h, ["Done"]);
+  await open(h);
+  chooseLanes("assignee");
+  await settle();
+  laidOut();
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS.find((entry) => entry.card.key === "PAY-40")!.card, status: "In Progress" }, "press", h.ports.moves!.reachableTransitions);
+  await dragTo("PAY-40", placeIn("jonas.becker", "Done"));
+  expect(keysIn("jonas.becker", "Done")).toEqual(["PAY-40"]);
+  await settle();
+  expect(sent).toEqual([
+    { Transition: { entity: "jira:PAY-40", status: "Done" } },
+    { EditTicket: { entity: "jira:PAY-40", title: null, assignee: { account: "jonas.becker" }, priority: null, labels: null, fields: {} } },
+  ]);
+});
+
+test("laned by assignee, a drop in another lane's column of its own status is the edit alone", async () => {
+  const h = harness();
+  const { sent } = editable(h, []);
+  await open(h);
+  chooseLanes("assignee");
+  await settle();
+  laidOut();
+  await dragTo("PAY-40", placeIn("jonas.becker", "In progress"));
+  expect(keysIn("jonas.becker", "In progress")).toEqual(["PAY-40"]);
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-40", title: null, assignee: { account: "jonas.becker" }, priority: null, labels: null, fields: {} } }]);
+});
+
+test("laned by issue type, a drop in another lane is refused with the sentence and queues nothing", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  chooseLanes("issuetype");
+  await settle();
+  laidOut();
+  const lanes = [...target.querySelectorAll<HTMLElement>(".tf-lane")];
+  expect(lanes.length).toBeGreaterThan(1);
+  // PAY-40 has no issue type: its lane is the second; the first is the stories'.
+  const other = [...lanes[0]!.querySelectorAll<HTMLElement>(".tf-col")].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith("In progress"))!;
+  await dragTo("PAY-40", other.dataset.place!);
+  expect(target.querySelector(".tf-sr")!.textContent).toContain("knobas does not change a ticket's issue type. Drop it in its own lane.");
+  await settle();
+  expect(sent).toEqual([]);
+});

@@ -51,6 +51,8 @@ export interface EditWords {
   base: string | null;
   /** What the toast and a refusal call it: *Assign PAY-231 to Mara Lindqvist*. */
   name: string;
+  /** The value as the board keys it, where the words differ: the assignee's account, `""` for nobody. */
+  into?: string;
 }
 
 export interface EditPorts {
@@ -94,7 +96,8 @@ export async function editTicket(
   const id = ticket.entity_id;
   const kind = fieldKind(words.field);
   const many = words.field === "labels";
-  echoWrite(id, kind, words.text, { base: words.base, surface, source: ticket.source.id, many });
+  const into = words.into === undefined ? {} : { into: words.into };
+  echoWrite(id, kind, words.text, { base: words.base, surface, source: ticket.source.id, many, ...into });
   let write: QueuedWrite;
   try {
     write = await ports.submitWrite(editPayload(id, change));
@@ -111,6 +114,7 @@ export async function editTicket(
     surface,
     source: ticket.source.id,
     many,
+    ...into,
     following: { name: words.name },
     follower: ports.follower ?? writeFollower(),
   });
