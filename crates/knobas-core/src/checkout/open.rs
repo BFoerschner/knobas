@@ -1191,12 +1191,12 @@ mod tests {
             |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
         assert_eq!(
             names("macos"),
-            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]
+            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA", "Bruno"]
         );
-        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files"]);
+        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files", "Bruno"]);
         assert_eq!(
             names("windows"),
-            ["VS Code", "Windows Terminal", "File Explorer"]
+            ["VS Code", "Windows Terminal", "File Explorer", "Bruno"]
         );
         for os in ["freebsd", "MACOS", "Linux", ""] {
             assert!(shipped_on(os).is_empty(), "{os}");
@@ -1227,8 +1227,10 @@ mod tests {
             code: &code,
         };
         let file: &'static Path = Box::leak(Path::new(file).to_path_buf().into_boxed_path());
+        // Bruno takes a spec only (its repository command is blank): `bruno_takes_a_spec_on_each_platform` fills it.
         shipped_on(os)
             .iter()
+            .filter(|a| !a.command.trim().is_empty())
             .map(|a| {
                 [
                     Some(filled(&a.command, &at(None))),
@@ -1275,6 +1277,37 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    /// Bruno (ux31): on a spec only, its collection on macOS, brought to the front elsewhere; nothing else offered.
+    #[test]
+    fn bruno_takes_a_spec_on_each_platform() {
+        let file = Path::new("/scratch/payouts/openapi.yaml");
+        let collection = Path::new("/scratch/payouts/collection");
+        let argv = |os: &str| {
+            let bruno = shipped_on(os)
+                .into_iter()
+                .find(|a| a.id == BRUNO)
+                .unwrap_or_else(|| panic!("{os} ships Bruno"));
+            assert!(
+                bruno.command.is_empty()
+                    && bruno.file_command.is_none()
+                    && bruno.pull_request_command.is_none()
+            );
+            fill_api(
+                bruno.api_command.as_deref().unwrap_or_default(),
+                file,
+                collection,
+                "Payouts",
+            )
+            .unwrap_or_else(|error| panic!("{os}: {error}"))
+        };
+        assert_eq!(
+            argv("macos"),
+            ["open", "-a", "Bruno", "/scratch/payouts/collection"]
+        );
+        assert_eq!(argv("linux"), ["xdg-open", "bruno://app"]);
+        assert_eq!(argv("windows"), ["explorer", "bruno://app"]);
     }
 
     /// A path with a space stays one argument, and `{file}:{line}` is one.

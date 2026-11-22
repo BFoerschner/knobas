@@ -62,9 +62,23 @@ file: string, operation: string, };
 export type AuthPlace = "bearer" | "basic" | "header" | "query" | "cookie";
 
 /**
+ * Which shipped API clients are installed.
+ */
+export type ClientsFound = { bruno: boolean, };
+
+/**
  * One redirect followed.
  */
 export type Hop = { status: number, url: string, };
+
+/**
+ * What an open did: the argument vector, the folder, and what was left out.
+ */
+export type OpenedSpec = { argv: Array<string>, folder: string, 
+/**
+ * Whether the folder was written now; `false` where it was opened as it was.
+ */
+wrote: boolean, left_out: Array<[string, string]>, };
 
 /**
  * One saved server.
@@ -100,20 +114,6 @@ export type SentLine = { id: number, at_ms: number, send: ApiSend, answer: ApiAn
  * The body is still kept and can be drawn again.
  */
 kept: boolean, };
-
-/**
- * Which shipped API clients are installed.
- */
-export type ClientsFound = { bruno: boolean, };
-
-/**
- * What an open did: the argument vector, the folder, and what was left out.
- */
-export type OpenedSpec = { argv: Array<string>, folder: string, 
-/**
- * Whether the folder was written now; `false` where it was opened as it was.
- */
-wrote: boolean, left_out: Array<[string, string]>, };
 
 /**
  * What the page hands over: the spec as shown and, where asked, its collection.

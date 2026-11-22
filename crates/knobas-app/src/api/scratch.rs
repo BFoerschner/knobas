@@ -185,10 +185,8 @@ pub fn sweep(root: &Path, max_age: Duration) -> usize {
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| now.duration_since(t).ok());
-        if half || age.is_none_or(|a| a > max_age) {
-            if std::fs::remove_dir_all(&path).is_ok() {
-                gone += 1;
-            }
+        if (half || age.is_none_or(|a| a > max_age)) && std::fs::remove_dir_all(&path).is_ok() {
+            gone += 1;
         }
     }
     gone

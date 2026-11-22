@@ -1460,6 +1460,7 @@ fn every_object(stub: &Path) -> Draft {
         pull_request_command: Some(format!(
             "{s} pull-request {{pr}} {{base}} {{head}} {{branch}} {{url}}"
         )),
+        api_command: None,
     }
 }
 
