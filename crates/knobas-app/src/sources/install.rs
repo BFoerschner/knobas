@@ -177,7 +177,10 @@ pub enum InstallError {
     #[error("cannot remove the source {id}: {error}")]
     Remove {
         id: String,
-        error: super::SourcesError,
+        /// Boxed: a `SourcesError` is large on Windows (128 bytes and more),
+        /// and would make every install's `Result` as large
+        /// (`clippy::result_large_err`, found by `cargo xwin clippy`).
+        error: Box<super::SourcesError>,
         /// The sources removed before this one, which the scheduler must
         /// still be told about.
         removed: Vec<super::installed::Removal>,

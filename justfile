@@ -652,6 +652,18 @@ wasm-fixture:
 clippy *PKGS:
     env -u RUSTUP_TOOLCHAIN cargo clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --all-targets -- -D warnings
 
+# The same lint pass for Windows, cross-checked with `cargo xwin` (on the Mac:
+# `cargo install cargo-xwin`, and the x86_64-pc-windows-msvc target). Code
+# behind `cfg(windows)` and Windows' own type sizes are seen by nothing else:
+# an error variant large only there passed every gate until the final suite
+# (2026-11-22). Its own target folder, so the host build stays warm. No CI job
+# runs it (a Windows build on every push); run it when a change touches
+# Windows code. The library and binaries only: the integration tests drive
+# `/bin/sh` stubs and Unix modes, and are built on macOS and Linux.
+# `just clippy-windows -p knobas-app`
+clippy-windows *PKGS:
+    env -u RUSTUP_TOOLCHAIN CARGO_TARGET_DIR=target/xwin cargo xwin clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --lib --bins --target x86_64-pc-windows-msvc -- -D warnings
+
 # The same lint pass over the libraries alone -- which is the only way to see
 # them the way something that merely *depends* on them does.
 #
