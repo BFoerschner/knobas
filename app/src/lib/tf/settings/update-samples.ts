@@ -30,18 +30,25 @@ function base(): UpdateState {
   };
 }
 
-const OFFER = {
-  version: "3.2.9-ux28",
-  pre_release: true,
-  published_at: AT(240),
-  bytes: 89 * MB,
-  changes_schema: true,
-  page_url: "https://releases.example/knobas/v3.2.9-ux28",
-};
+/**
+ * The build on offer. Made when a state is asked for, like {@link base}, never when this file loads: a test pins its
+ * clock after its imports run, so a time taken at load would be the wall clock's (light CI, 22 Nov 00:01).
+ */
+function offer() {
+  return {
+    version: "3.2.9-ux28",
+    pre_release: true,
+    published_at: AT(240),
+    bytes: 89 * MB,
+    changes_schema: true,
+    page_url: "https://releases.example/knobas/v3.2.9-ux28",
+  };
+}
 
 /** One named state. */
 export function updateSample(name: string | null): UpdateState {
   const up = base();
+  const OFFER = offer();
   const offered: UpdateState = {
     ...up,
     newest: { version: OFFER.version, pre_release: true, published_at: OFFER.published_at, page_url: OFFER.page_url },
