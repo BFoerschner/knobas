@@ -26,8 +26,18 @@ use crate::fetch;
 /// The ticket kind, the ticket-system role's.
 pub const KIND: &str = "ticket";
 
-/// `(key, summary, status, priority, assignee, labels)` per ticket.
-pub const TICKETS: [(&str, &str, &str, &str, Option<&str>, &[&str]); 2] = [
+/// One ticket: `(key, summary, status, priority, assignee, labels)`.
+pub type Ticket = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    &'static [&'static str],
+);
+
+/// The fixture's tickets.
+pub const TICKETS: [Ticket; 2] = [
     (
         "BERTH-1",
         "Fender panels cracked at berth 7",
@@ -133,15 +143,6 @@ pub fn write_ops() -> Vec<String> {
     }
     ops
 }
-
-type Ticket = (
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    Option<&'static str>,
-    &'static [&'static str],
-);
 
 pub fn item(source: &str, ticket: &Ticket) -> SyncItem {
     let (key, summary, status, priority, assignee, labels) = *ticket;
