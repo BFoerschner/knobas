@@ -804,6 +804,8 @@ test("Keyboard lists the fixed shortcuts", async () => {
   ]);
   const said = rows.map((row) => row.querySelector("td")?.textContent?.trim());
   for (const key of ["⌘D", "Tab", "⌘?", "⌘B", "⌘Enter", "J K", "N P", "V", "C", "S"]) expect(said, "F-062, F-633").toContain(key);
+  // A ticket's assign and summary keys (ADR-0054); labels have none, `L` being the drawer's (2026-11-22).
+  for (const key of ["A", "E", "L"]) expect(said, "ADR-0054").toContain(key);
   expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",

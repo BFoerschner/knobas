@@ -136,6 +136,8 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["S", "Tickets and a ticket", "Move the ticket: carry its card on the board, or its status menu (ADR-0054)"],
   ["⌘Z", "Tickets and a ticket", "Undo the last move while its toast stands"],
   ["L", "Job", "Connections"],
+  ["A", "A ticket's page, Tickets", "Assign it: the people picker (ADR-0054)"],
+  ["E", "A ticket's page", "Edit the summary (ADR-0054)"],
   ["J K", "A diff", "Next and previous file"],
   ["N P", "A diff", "Next and previous change"],
   ["V", "A diff", "Mark the file viewed"],
