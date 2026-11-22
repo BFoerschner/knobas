@@ -441,7 +441,9 @@
     if (field !== null && field.kind.type === "search") untrack(() => cardFields.search(at.card, field, ""));
   });
 
-  // Read once: the reader owns the typing pause and the generations.
+  // svelte-ignore state_referenced_locally
+  // Read once, on purpose: the reader owns the typing pause and the generations, so a bridge or a pause swapped
+  // mid-life would drop both. Nothing changes these props: production omits them and tests pass fakes at mount.
   const reader = createBoardReader(ports, {
     typingPause,
     sessions: session,

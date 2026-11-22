@@ -241,7 +241,7 @@ jobs:
       # The same commands as `just front-changed`.
       - name: svelte-check
         working-directory: app
-        run: npx svelte-check --tsconfig ./tsconfig.json
+        run: npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
 
       - name: vite build
         working-directory: app

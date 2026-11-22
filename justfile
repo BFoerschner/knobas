@@ -243,7 +243,7 @@ front-changed base="origin/main": deps
     workers=${VITEST_WORKERS:-4}
     mb=$(git merge-base "{{base}}" HEAD)
     cd app
-    npx svelte-check --tsconfig ./tsconfig.json
+    npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
     # Captured before the loop, not read from a process substitution, so a
     # failing git stops the recipe instead of leaving `changed` empty.
     # Untracked files count as added (`A`).
@@ -597,7 +597,7 @@ pre-gate:
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
     (cd app && npx vitest run src/lib/shell/a11y.test.ts)
     (cd app && npx vitest run src/lib/shell/browser-globals.test.ts)
-    (cd app && npx svelte-check --tsconfig ./tsconfig.json)
+    (cd app && npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings)
     echo
     if [ "$before" = "$(snapshot)" ]; then
         echo "pre-gate: green, nothing changed."
