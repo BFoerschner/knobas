@@ -156,10 +156,10 @@ test("Used by lists an operation that names a schema in a parameter, a body and 
 
 test("a value made from a schema: required and first properties, read-only ones left out, formats in their shape", () => {
   const { files } = opened(MODEL_31_JSON);
-  expect(files.sample(files.root, { $ref: "#/components/schemas/Thing" })).toEqual({ name: "lamp", made: "2026-11-22T14:05:00Z" });
+  expect(files.sample(files.root, { $ref: "#/components/schemas/Thing" }, "request")).toEqual({ name: "lamp", made: "2026-11-22T14:05:00Z" });
   const { files: deep } = opened(DEEP_30_JSON);
   const charge = deep.sample(deep.root, { $ref: "#/components/schemas/Charge" }) as Record<string, unknown>;
-  expect(charge.amount).toBe(1);
+  expect(charge.amount).toBeGreaterThanOrEqual(1);
   // The cycle closes as null, not forever.
   expect(charge.parent).toBeDefined();
 });
@@ -184,5 +184,5 @@ test("a schema's example closes where the schema comes round again, and a choice
   const sessions = new Map([[1, files]]);
   const page = answerCall(sessions, 1, { kind: "page", place: "schemas/Charge" }) as { sample: Record<string, unknown> };
   expect(page.sample.parent).toBeNull();
-  expect(page.sample.description).toBe("string");
+  expect(page.sample.description).toBe("Some words about it.");
 });

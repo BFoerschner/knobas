@@ -69,12 +69,14 @@ const timed = (act, selector, text = null, watch = null) =>
 const go = (hash) => `() => { location.hash = ${JSON.stringify(hash)}; }`;
 const click = (sel, text = null) =>
   `() => [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)})).click()`;
-const typeIn = (value) =>
-  `() => { const box = document.querySelector('.tf-oas-railhead input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
+const typeInBody = (value) =>
+  `const box = document.querySelector('.tf-oas-railhead input'); if (box.value !== ${JSON.stringify(value)}) { box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
+const typeIn = (value) => `() => { ${typeInBody(value)} }`;
 const settle = () => sleep(700);
 /** Shuts every fold of the rail that is open, then opens `key`'s where given. */
+/** Empties the filter, then (once that is drawn) shuts every fold of the rail that is open and opens `key`'s where given. */
 const folds = (open = null) =>
-  `() => { for (const b of document.querySelectorAll('.tf-oas-row.tf-oas-g[aria-expanded=true]')) b.click(); ${open === null ? "" : `document.querySelector(${JSON.stringify(`.tf-oas-row[data-k="${open}"]`)})?.click();`} }`;
+  `() => { ${typeInBody("")} setTimeout(() => { for (const b of document.querySelectorAll('.tf-oas-row.tf-oas-g[aria-expanded=true]')) b.click(); ${open === null ? "" : `setTimeout(() => document.querySelector(${JSON.stringify(`.tf-oas-row[data-k="${open}"]`)})?.click(), 50);`} }, 50); }`;
 
 const SMALL = "api/openapi.yaml";
 const BIG = "api/big.yaml";

@@ -100,6 +100,7 @@
         where={paramWhere(p)}
         words={p.description}
         example={p.example}
+        made={p.example === undefined ? st.samples.get(`${k}/p:${p.in}:${p.name}`) : undefined}
         deprecated={p.deprecated}
         {prose}
         {onfollow}
@@ -118,7 +119,7 @@
       <p class="tf-oas-fd">Kept in <code>{op.body.ref}</code>.</p>
     {:else}
       {#if op.body.description !== ""}<div class="tf-oas-fd"><TfOasWords text={op.body.description} {st} k="{k}/b#desc" {prose} /></div>{/if}
-      <TfOasMedia {st} list={op.body.content} k="{k}/b" base={op.base} {prose} {onfollow} onuse={op.webhook ? null : onuse} />
+      <TfOasMedia {st} list={op.body.content} k="{k}/b" base={op.base} {prose} {onfollow} onuse={op.webhook ? null : onuse} direction="request" />
     {/if}
   </section>
 {/if}

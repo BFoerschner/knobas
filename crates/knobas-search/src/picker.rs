@@ -1310,6 +1310,7 @@ mod held_tests {
     #[test]
     fn four_lists_are_held_and_the_least_lately_used_goes_first() {
         let held = Mutex::new(HeldLists::default());
+        assert!(held.lock().unwrap().is_empty());
         for id in ["a", "b", "c", "d"] {
             held.lock().unwrap().hold(id.into(), texts());
         }
@@ -1326,6 +1327,7 @@ mod held_tests {
         held.lock().unwrap().hold("a".into(), vec!["only".into()]);
         assert_eq!(rank_held(&held, "a", "only").map(|r| r.len()), Some(1));
         assert_eq!(held.lock().unwrap().len(), 3);
+        assert!(!held.lock().unwrap().is_empty());
     }
 }
 

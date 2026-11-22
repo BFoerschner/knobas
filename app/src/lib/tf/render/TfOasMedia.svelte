@@ -21,6 +21,7 @@
     prose = null,
     onfollow,
     onuse = null,
+    direction = "response",
   }: {
     st: OasState;
     list: readonly Media[];
@@ -32,6 +33,8 @@
     onfollow: (name: string) => void;
     /** Fills the request's body with the example shown (a request body, where the request column stands). */
     onuse?: ((type: string, value: unknown) => void) | null;
+    /** Which way the content goes, for an example made from its schema: a request leaves out read-only fields. */
+    direction?: "request" | "response";
   } = $props();
 
   const shown = $derived(list.find((m) => m.type === st.picked.get(k)) ?? list[0]);
@@ -46,7 +49,14 @@
     return t.ok && t.file !== base;
   });
   const exIndex = $derived(shown === undefined ? 0 : Math.min(Number(st.picked.get(`${sk}#ex`) ?? 0), Math.max(0, shown.examples.length - 1)));
-  const example = $derived(shown?.examples[exIndex]);
+  const given = $derived(shown?.examples[exIndex]);
+  /** The top choice the shape's switch picked: the made example follows it. */
+  const choice = $derived(shape?.variants == null ? 0 : Number(st.picked.get(`${sk}|`) ?? 0));
+  const made = $derived(shown === undefined || given !== undefined ? undefined : choice === 0 ? st.samples.get(sk) : st.samples.get(`${sk}|${choice}`));
+  const example = $derived(given ?? (made === undefined ? undefined : { name: "", summary: "", value: made, external: null }));
+  $effect(() => {
+    if (shown !== undefined && given === undefined && shown.schema !== null && choice > 0) void st.sampleChoice(sk, base, shown.schema, direction, choice);
+  });
 
   // A shape the page's one answer did not bring (a path item read from another file) is asked for once.
   $effect(() => {
@@ -84,7 +94,8 @@
   {#if example !== undefined}
     <div class="tf-oas-exbar">
       <span>Example</span>
-      {#if shown.examples.length > 1}
+      <span class="tf-oas-exfrom">{given !== undefined ? "From the spec" : "Made from the schema"}</span>
+      {#if given !== undefined && shown.examples.length > 1}
         <select aria-label="Example" value={String(exIndex)} onchange={(e) => st.picked.set(`${sk}#ex`, (e.currentTarget as HTMLSelectElement).value)}>
           {#each shown.examples as ex, i (i)}<option value={String(i)}>{ex.summary || ex.name || `Example ${i + 1}`}</option>{/each}
         </select>

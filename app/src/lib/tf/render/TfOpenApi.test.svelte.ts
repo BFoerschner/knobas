@@ -208,7 +208,7 @@ test("a ref's name follows to the schema's page, which pushes the place; Back re
   expect(text(page().querySelector(".tf-oas-back"))).toBe("Back to GET /pets/{petId}");
   // The schema's page: merged properties, an example made from it, and who uses it.
   expect(names().slice(0, 5)).toEqual(["id", "name", "status", "parent", "owner"]);
-  expect(text(page())).toContain("An example, made from the schema");
+  expect(text(page())).toContain("ExampleMade from the schema");
   expect(text(page())).toContain("Used by 3");
   expect(text(page())).toContain("Part of 1");
   // A followed name on the schema's page follows again, and Back steps back twice.
@@ -459,4 +459,35 @@ test("a spec that does not parse says why and on which line, and offers Source",
   expect(text(target.querySelector(".tf-oas-bad"))).toContain("This spec could not be read.");
   button("Show source")!.click();
   expect(source).toBe(1);
+});
+
+test("an example says where it comes from: the spec's own, or made from the schema for bodies, answers and parameters", async () => {
+  draw("api/openapi.yaml", PETS_30_YAML);
+  await settle();
+  row("POST /pets").click();
+  await settle();
+  const body = [...page().querySelectorAll("section")].find((s) => text(s.querySelector("h3")).startsWith("Request body"))!;
+  expect(text(body.querySelector(".tf-oas-exfrom"))).toBe("From the spec");
+  row("GET /pets").click();
+  await settle();
+  const answers = [...page().querySelectorAll("section")].find((s) => text(s.querySelector("h3")).startsWith("Responses"))!;
+  expect(text(answers.querySelector(".tf-oas-exfrom"))).toBe("Made from the schema");
+  const made = JSON.parse(text(answers.querySelector(".tf-oas-ex"))) as Record<string, unknown>[];
+  // Realistic and in its schema's shape: an integer id, a person's name, the first of the enum, the cycle closed.
+  expect(Object.keys(made[0]!)).toEqual(["id", "name", "status", "parent", "owner"]);
+  expect(Number.isInteger(made[0]!.id)).toBe(true);
+  expect(made[0]!.name).toMatch(/^\S+ \S+/);
+  expect(made[0]!.status).toBe("available");
+  expect(made[0]!.parent).toBeNull();
+  const limit = [...page().querySelectorAll<HTMLElement>(".tf-oas-f")].find((f) => text(f.querySelector(".tf-oas-fname")) === "limit")!;
+  expect(text(limit)).toContain("Example 1 made from the schema");
+});
+
+test("a line an address names (a search hit's) opens the operation that holds it, and the address says so", async () => {
+  const places: string[] = [];
+  const line = PETS_30_YAML.split("\n").findIndex((l) => l.includes("How many to return")) + 1;
+  draw("api/openapi.yaml", PETS_30_YAML, { line, onplace: (p: string, how: string) => places.push(`${how} ${p}`) });
+  await settle();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("GET /pets");
+  expect(places).toEqual(["replace get /pets"]);
 });

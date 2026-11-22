@@ -13,7 +13,7 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
 import { refTarget, type OpRow, type PageAnswer, type Resolved, type Shape, type SpecIndex } from "../../render/openapi";
-import { firstOpen, groupsOf, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
+import { firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
 import type { SpecSession } from "../../render/openapi-port";
 
 type Obj = Record<string, unknown>;
@@ -24,6 +24,9 @@ export type RefState = Resolved | { reading: string };
 
 /** How many answered pages are kept (section 29). */
 export const KEPT_PAGES = 30;
+/** How deep *Expand all* and Alt-click open, and how many carets at most. */
+export const OPEN_ALL_DEPTH = 4;
+export const OPEN_ALL_MOST = 300;
 /** After this long a page still asked for says *Reading…* (section 29). */
 export const READING_AFTER_MS = 200;
 
@@ -73,6 +76,8 @@ export class OasState {
   backs = $state<Back[]>([]);
   /** Shapes a caret opened, by its key. */
   readonly shapes = new SvelteMap<string, Shape>();
+  /** Examples made from a schema where the spec gives none, by the key of the part they stand in. */
+  readonly samples = new SvelteMap<string, unknown>();
   /** Refs resolved or being read, by `base\nref`: a ref into another file. */
   readonly refs = new SvelteMap<string, RefState>();
   /** Carets open, *Show all* pressed: by key. */
@@ -180,6 +185,7 @@ export class OasState {
     if (answer.kind === "op") {
       // The shapes the page draws unopened came with it: kept where its parts look for them.
       for (const [key, shape] of Object.entries(answer.shapes)) if (!this.shapes.has(`${page}/${key}`)) this.shapes.set(`${page}/${key}`, shape);
+      for (const [key, sample] of Object.entries(answer.samples)) if (!this.samples.has(`${page}/${key}`)) this.samples.set(`${page}/${key}`, sample);
     } else if (answer.kind === "schema" && !this.shapes.has(page)) this.shapes.set(page, answer.shape);
     this.shown = { place, answer };
     return place;
@@ -217,10 +223,83 @@ export class OasState {
     this.expand.add(key);
   }
 
+  /** The example made for choice `choice` of the part at `key`, asked once (a switch over the top `oneOf`). */
+  async sampleChoice(key: string, base: string, node: unknown, direction: "request" | "response" | "any", choice: number): Promise<void> {
+    const at = `${key}|${choice}`;
+    if (this.samples.has(at)) return;
+    this.samples.set(at, await this.session.sample(base, node, direction, choice));
+  }
+
   /** Opens or shuts the caret at `key`. */
   toggleShape(key: string, base: string, node: unknown): void {
     if (this.expand.has(key)) this.expand.delete(key);
     else void this.openShape(key, base, node);
+  }
+
+  /**
+   * Opens the caret at `key` and everything below it (Alt-click, *Expand all*), {@link OPEN_ALL_DEPTH} levels deep and
+   * at most {@link OPEN_ALL_MOST} carets, never into a ref the row already sits inside.
+   */
+  async openAll(key: string, base: string, node: unknown, trail: readonly string[] = []): Promise<void> {
+    let left = OPEN_ALL_MOST;
+    const walk = async (k: string, b: string, n: unknown, seen: readonly string[], depth: number): Promise<void> => {
+      if (left <= 0 || depth > OPEN_ALL_DEPTH) return;
+      const ref = innerRef(n);
+      if (ref !== null && seen.includes(`${b}#${ref}`)) return;
+      if (!hasInside(n)) return;
+      left -= 1;
+      await this.openShape(k, b, n);
+      const shape = this.shapes.get(k);
+      if (shape === undefined) return;
+      const below = ref === null ? seen : [...seen, `${b}#${ref}`];
+      await this.openBelow(k, shape, below, depth, walk);
+    };
+    await walk(key, base, node, trail, 0);
+  }
+
+  /** Opens what a shape holds, as {@link openAll} walks: its properties, its picked choice, its items, any other key. */
+  async openBelow(
+    k: string,
+    shape: Shape,
+    seen: readonly string[],
+    depth: number,
+    walk: (k: string, b: string, n: unknown, seen: readonly string[], depth: number) => Promise<void>,
+  ): Promise<void> {
+    for (const p of shape.props) await walk(`${k}/${p.name}`, shape.base, p.node, seen, depth + 1);
+    if (shape.variants !== null) {
+      const pick = Number(this.picked.get(`${k}|`) ?? 0);
+      const at = `${k}|${pick}`;
+      if (!this.shapes.has(at)) this.shapes.set(at, await this.session.shape(shape.base, shape.variants.list[pick]));
+      const choice = this.shapes.get(at)!;
+      await this.openBelow(at, choice, seen, depth, walk);
+    }
+    if (shape.props.length === 0 && shape.variants === null && shape.items !== undefined) {
+      const at = `${k}/[]`;
+      if (!this.shapes.has(at)) this.shapes.set(at, await this.session.shape(shape.base, shape.items));
+      await this.openBelow(at, this.shapes.get(at)!, seen, depth, walk);
+    }
+    if (shape.extra !== undefined) await walk(`${k}/{}`, shape.base, shape.extra, seen, depth + 1);
+  }
+
+  /** Shuts the caret at `key` and everything below it. */
+  closeAll(key: string): void {
+    for (const k of [...this.expand]) if (k === key || k.startsWith(`${key}/`) || k.startsWith(`${key}|`)) this.expand.delete(k);
+  }
+
+  /** Opens everything a shape at `key` holds (*Expand all*), the shape itself drawn already. */
+  async expandShape(key: string, shape: Shape, trail: readonly string[] = []): Promise<void> {
+    let left = OPEN_ALL_MOST;
+    const walk = async (k: string, b: string, n: unknown, seen: readonly string[], depth: number): Promise<void> => {
+      if (left <= 0 || depth > OPEN_ALL_DEPTH) return;
+      const ref = innerRef(n);
+      if (ref !== null && seen.includes(`${b}#${ref}`)) return;
+      if (!hasInside(n)) return;
+      left -= 1;
+      await this.openShape(k, b, n);
+      const sh = this.shapes.get(k);
+      if (sh !== undefined) await this.openBelow(k, sh, ref === null ? seen : [...seen, `${b}#${ref}`], depth, walk);
+    };
+    await this.openBelow(key, shape, trail, 0, walk);
   }
 
   /** The ref as it draws now, or `undefined` before anything asked for it. */

@@ -47,6 +47,7 @@
     path,
     read = null,
     at = null,
+    line = null,
     fileHref = () => null,
     oncopylink = null,
     onsource = null,
@@ -62,6 +63,11 @@
     read?: ReadFile | null;
     /** The place an address names: an operation (`get /pets/{petId}`), a schema (`schemas/Pet`), a fold (`tags/pets`). */
     at?: string | null;
+    /**
+     * A line of the file an address names (a search hit's): where no place is named, the explorer opens at the
+     * operation or schema that holds it, and the address says that place.
+     */
+    line?: number | null;
     /** A file on the Code page, at a place in it. */
     fileHref?: (file: string, place: string | null) => string | null;
     oncopylink?: ((place: string, label: string) => void) | null;
@@ -260,9 +266,21 @@
   // The address's place: shown when it differs from what the explorer drew, and a step back when it is the last left.
   $effect(() => {
     const place = at;
+    const hit = line;
     const state = st;
     if (state === null || index === null) return;
     untrack(() => {
+      // A line and no place (an Everything hit): the place that holds the line, once, put in the address.
+      if (place === null && hit !== null && shownAt === undefined) {
+        shownAt = null;
+        void state.session.placeAt(hit).then((found) => {
+          if (st !== state || found === null || shownAt !== null) return;
+          shownAt = found;
+          void land(found, 0);
+          onplace?.(found, "replace", labelOf(found));
+        });
+        return;
+      }
       if (place === shownAt) return;
       if (shownAt !== undefined && state.backs.length > 0 && (place ?? OVERVIEW) === state.backs.at(-1)!.place) {
         stepBack();

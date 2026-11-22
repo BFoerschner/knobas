@@ -20,6 +20,7 @@
     shape,
     uses,
     sample,
+    given = false,
     prose = null,
     onfollow,
     ongo,
@@ -31,6 +32,8 @@
     shape: Shape;
     uses: Uses;
     sample: unknown;
+    /** The example is the schema's own, not made from it. */
+    given?: boolean;
     prose?: Snippet<[string]> | null;
     onfollow: (name: string) => void;
     ongo: (place: Place, label: string) => void;
@@ -68,7 +71,7 @@
 {/if}
 {#if sample !== null && typeof sample === "object"}
   <section class="tf-oas-sec">
-    <h3 class="tf-oas-lab">An example, made from the schema</h3>
+    <h3 class="tf-oas-lab">Example<span class="tf-oas-exfrom">{given ? "From the spec" : "Made from the schema"}</span></h3>
     <pre class="tf-oas-ex">{exampleText(sample)}</pre>
   </section>
 {/if}

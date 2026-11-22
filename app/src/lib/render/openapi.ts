@@ -19,6 +19,8 @@
  */
 import { JSON_SCHEMA, load } from "js-yaml";
 
+import { makeExample, type Direction } from "./openapi-example";
+import { pathAtLine, placeOfPath } from "./openapi-line";
 import { fastYaml } from "./yaml-fast";
 
 export const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
@@ -262,8 +264,8 @@ export interface Uses {
 
 /** A page's first screen in one answer (section 29): an operation and the shapes it shows, or a schema's page. */
 export type PageAnswer =
-  | { kind: "op"; op: Operation; shapes: Record<string, Shape> }
-  | { kind: "schema"; name: string; node: unknown; base: string; shape: Shape; uses: Uses; sample: unknown }
+  | { kind: "op"; op: Operation; shapes: Record<string, Shape>; samples: Record<string, unknown> }
+  | { kind: "schema"; name: string; node: unknown; base: string; shape: Shape; uses: Uses; sample: unknown; given: boolean }
   | { kind: "missing" };
 
 /** One call of the view to where its spec is kept (`openapi-port.ts`). */
@@ -276,8 +278,9 @@ export type SpecCall =
   | { kind: "addFile"; path: string; text: string }
   | { kind: "shape"; base: string; node: unknown }
   | { kind: "uses"; name: string }
-  | { kind: "sample"; base: string; node: unknown }
-  | { kind: "page"; place: string };
+  | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number }
+  | { kind: "page"; place: string }
+  | { kind: "placeAt"; line: number };
 
 /** Answers `call` for `session` among `sessions`: the spec worker's and this thread's one dispatch. */
 export function answerCall(sessions: Map<number, SpecFiles>, session: number, call: SpecCall): unknown {
@@ -297,8 +300,9 @@ export function answerCall(sessions: Map<number, SpecFiles>, session: number, ca
   if (call.kind === "resolve") return files.resolve(call.base, call.ref);
   if (call.kind === "shape") return files.shape(call.base, call.node);
   if (call.kind === "uses") return files.uses(call.name);
-  if (call.kind === "sample") return files.sample(call.base, call.node);
+  if (call.kind === "sample") return files.sample(call.base, call.node, call.direction ?? "any", call.choice ?? 0);
   if (call.kind === "page") return files.page(call.place);
+  if (call.kind === "placeAt") return files.placeAt(call.line);
   return files.addFile(call.path, call.text);
 }
 
@@ -309,6 +313,8 @@ export class SpecFiles {
   /** How many other files are kept, the least lately used dropped first (Fable's bound: 64). */
   readonly #keep: number;
   #index: SpecIndex | null = null;
+  /** The spec's text, for a line's place (`placeAt`). */
+  #text = "";
 
   constructor(root: string, keep = 64) {
     this.root = root;
@@ -332,6 +338,7 @@ export class SpecFiles {
     if (!checked.ok) return checked;
     this.#docs.set(this.root, parsed.doc);
     this.#index = checked.index;
+    this.#text = text;
     return checked;
   }
 
@@ -418,7 +425,10 @@ export class SpecFiles {
       if (Array.isArray(n.required)) for (const r of n.required) required.add(str(r));
       if (isObj(n.properties)) {
         for (const [name, schema] of Object.entries(n.properties)) {
-          if (!out.props.some((p) => p.name === name)) out.props.push({ name, node: schema, required: false, words: "" });
+          const had = out.props.find((p) => p.name === name);
+          if (had === undefined) out.props.push({ name, node: schema, required: false, words: "" });
+          // A property two parts define is both: GitHub's forkee says `created_at` is `oneOf [integer, string]`, then `string`.
+          else had.node = { allOf: [had.node, schema] };
         }
       }
       for (const key of ["oneOf", "anyOf"] as const) {
@@ -455,9 +465,23 @@ export class SpecFiles {
   }
   #uses: { ops: Map<string, number[]>; schemas: Map<string, string[]> } | null = null;
 
-  /** A value schema `node` allows: its example, default or first choice, else one made from its shape. */
-  sample(base: string, node: unknown): unknown {
-    return sampleOf(this, base, node, 0, new Set());
+  /** An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic. */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true): unknown {
+    const reader = {
+      resolve: (b: string, ref: string) => {
+        const r = this.resolve(b, ref);
+        return "ok" in r && r.ok ? { node: r.node, base: r.base } : null;
+      },
+      shape: (b: string, n: unknown) => this.shape(b, n),
+    };
+    return makeExample(reader, base, node, { direction, choice, given });
+  }
+
+  /** The place line `line` (1-based) of the spec's text stands in: an operation, a schema, or `null` (`openapi-line.ts`). */
+  placeAt(line: number): string | null {
+    const index = this.#index;
+    if (index === null || line < 1) return null;
+    return placeOfPath(pathAtLine(this.#text, line), (p) => index.ops.find((o) => o.path === p)?.anchor ?? null);
   }
 
   /** A page's first screen in one answer: `get /pets` an operation, `schemas/Pet` a schema. */
@@ -471,13 +495,26 @@ export class SpecFiles {
       if (!("ok" in r) || !r.ok) return { kind: "missing" };
       // The sample starts from the ref, so a schema that holds itself closes where it comes round again.
       const sample = this.sample(this.root, { $ref: index.schemaBase + encodePointer(name) });
-      return { kind: "schema", name, node: r.node, base: r.base, shape: this.shape(r.base, r.node), uses: this.uses(name), sample };
+      const given = isObj(r.node) && (r.node.example !== undefined || (Array.isArray(r.node.examples) && r.node.examples.length > 0));
+      return { kind: "schema", name, node: r.node, base: r.base, shape: this.shape(r.base, r.node), uses: this.uses(name), sample, given };
     }
     const row = index.ops.find((o) => o.anchor === place) ?? index.webhooks.find((o) => o.anchor === place);
     if (row === undefined) return { kind: "missing" };
     const op = this.operation(row.i);
     if (op === null) return { kind: "missing" };
-    return { kind: "op", op, shapes: this.pageShapes(op) };
+    return { kind: "op", op, shapes: this.pageShapes(op), samples: this.pageSamples(op) };
+  }
+
+  /**
+   * The examples an operation's page makes where the spec gives none (Björn, 2026-11-22): each body's media (as a
+   * request), each response's media (as an answer), each parameter (as a request), by the same keys as the shapes.
+   */
+  pageSamples(op: Operation): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const m of op.body?.content ?? []) if (m.examples.length === 0 && m.schema !== null) out[`b:${m.type}`] = this.sample(op.base, m.schema, "request");
+    for (const r of op.responses) for (const m of r.content) if (m.examples.length === 0 && m.schema !== null) out[`r:${r.status}:${m.type}`] = this.sample(op.base, m.schema, "response");
+    for (const p of op.parameters) if (p.ref === null && p.example === undefined && p.schema !== null) out[`p:${p.in}:${p.name}`] = this.sample(op.base, p.schema, "request");
+    return out;
   }
 
   /** The shapes an operation's page draws unopened: each body's and each response's media, and its items or first choice. */
@@ -873,73 +910,6 @@ function buildUses(files: SpecFiles): { ops: Map<string, number[]>; schemas: Map
     }
   }
   return { ops, schemas };
-}
-
-/** The usual shape of a string of each format, for a value made from a schema. */
-const FORMAT_SAMPLES: Record<string, string> = {
-  "date-time": "2026-11-22T14:05:00Z",
-  date: "2026-11-22",
-  time: "14:05:00",
-  uuid: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  uri: "https://example.test/",
-  url: "https://example.test/",
-  email: "name@example.test",
-  hostname: "example.test",
-  ipv4: "192.0.2.1",
-  ipv6: "2001:db8::1",
-};
-
-/**
- * A value schema `node` allows (section 14): its example, default or first `enum` value, else one made from its
- * shape: required properties and the first few others, read-only and deprecated ones left out, a format's usual
- * shape. A cycle answers `null` where it closes.
- */
-function sampleOf(files: SpecFiles, base: string, node: unknown, depth: number, seen: ReadonlySet<string>): unknown {
-  let n = node;
-  let at = base;
-  let trail = seen;
-  const ref = refOf(n);
-  if (ref !== null) {
-    if (seen.has(ref) || depth > 6) return null;
-    trail = new Set(seen).add(ref);
-    const r = files.resolve(base, ref);
-    if (!("ok" in r) || !r.ok) return null;
-    n = r.node;
-    at = r.base;
-  }
-  if (!isObj(n)) return null;
-  if (n.example !== undefined) return n.example;
-  if (Array.isArray(n.examples) && n.examples.length > 0) return n.examples[0];
-  if (n.const !== undefined) return n.const;
-  if (n.default !== undefined) return n.default;
-  if (Array.isArray(n.enum) && n.enum.length > 0) return n.enum[0];
-  const sh = files.shape(at, n);
-  const type = Array.isArray(n.type) ? n.type.find((t) => t !== "null") : n.type;
-  if (sh.props.length > 0 || (sh.variants === null && (type === "object" || Array.isArray(n.allOf)))) {
-    const out: Record<string, unknown> = {};
-    const wanted = sh.props
-      .filter((p) => p.required || depth < 2)
-      .filter((p) => {
-        const own = isObj(p.node) ? p.node : {};
-        return own.readOnly !== true && own.deprecated !== true;
-      })
-      .slice(0, depth === 0 ? 14 : 6);
-    for (const p of wanted) out[p.name] = sampleOf(files, at, p.node, depth + 1, trail);
-    return out;
-  }
-  if (sh.variants !== null) return sampleOf(files, at, sh.variants.list[0], depth + 1, trail);
-  // A choice of one schema and null, or the empty string, is that schema.
-  for (const key of ["oneOf", "anyOf"] as const) {
-    const list = n[key];
-    if (!Array.isArray(list)) continue;
-    const real = list.find((m) => !isNullSchema(local(files, at, m).node));
-    if (real !== undefined) return sampleOf(files, at, real, depth + 1, trail);
-  }
-  if (type === "array" || sh.items !== undefined) return depth > 4 ? [] : [sampleOf(files, at, sh.items, depth + 1, trail)];
-  if (type === "integer" || type === "number") return typeof n.minimum === "number" ? n.minimum : 0;
-  if (type === "boolean") return true;
-  if (type === "string") return FORMAT_SAMPLES[str(n.format)] ?? "string";
-  return null;
 }
 
 /** A node that is a `{ $ref }`: its ref, else `null`. */

@@ -2595,6 +2595,7 @@
             path={spec.path}
             read={imageRead}
             at={path === spec.path ? place : null}
+            line={path === spec.path ? line : null}
             fileHref={placeLink}
             oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
             onsource={() => picks.set(spec.path, "source")}

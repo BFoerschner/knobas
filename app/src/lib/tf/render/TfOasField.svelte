@@ -24,6 +24,8 @@
     where?: string;
     words?: string;
     example?: unknown;
+    /** An example made from the schema, where the spec gives none (a parameter's). */
+    made?: unknown;
     deprecated?: boolean;
     /** The refs the row sits inside: one of them opening again would never end. */
     trail?: readonly string[];
@@ -42,6 +44,7 @@
     where = "",
     words = "",
     example = undefined,
+    made = undefined,
     deprecated = false,
     trail = [],
     prose = null,
@@ -84,6 +87,9 @@
   {#if words !== ""}<div class="tf-oas-fd"><TfOasWords text={words} {st} {k} max={420} {prose} /></div>{/if}
   {#if facts.length > 0}
     <div class="tf-oas-fd">{#each facts as fact, n (n)}{#if n > 0}. {/if}{#each fact as run, m (m)}{#if run.code}<code>{run.text}</code>{:else}{run.text}{/if}{/each}{/each}</div>
+  {/if}
+  {#if made !== undefined && made !== null && example === undefined}
+    <div class="tf-oas-fd">Example <code>{typeof made === "string" ? made : JSON.stringify(made)}</code> <span class="tf-oas-exfrom">made from the schema</span></div>
   {/if}
   {#if cycle && inner !== null}
     <div class="tf-oas-fd">It holds itself: follow {#if named !== null}<button type="button" class="tf-oas-ref" onclick={() => onfollow(named)}>{label}</button>{:else}<b>{refName(inner)}</b>{/if} to read it.</div>

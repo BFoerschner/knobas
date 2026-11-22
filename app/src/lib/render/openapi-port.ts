@@ -8,6 +8,7 @@
  * {@link IN_FLIGHT} reads at once, each file once per session. A ref to a URL is never read.
  */
 import type { Opened, Operation, PageAnswer, PathRef, Resolved, Shape, SpecCall, SpecFiles, Uses } from "./openapi";
+import type { Direction } from "./openapi-example";
 
 export type { SpecCall };
 
@@ -61,7 +62,12 @@ function workerEngine(): SpecEngine | null {
 /** The spec kept on this thread: tests, and the fallback. js-yaml loads with the first call. */
 export function localEngine(): SpecEngine {
   const sessions = new Map<number, SpecFiles>();
-  return async (session, call) => (await import("./openapi")).answerCall(sessions, session, call);
+  return async (session, call) => {
+    const model = await import("./openapi");
+    // As the worker does: an example waits for Faker and randexp (`openapi-fakes.ts`).
+    if (call.kind === "page" || call.kind === "sample") await (await import("./openapi-fakes")).loadFakes(globalThis.navigator?.language).catch(() => {});
+    return model.answerCall(sessions, session, call);
+  };
 }
 
 /** The app's engine: the worker, else this thread. */
@@ -134,9 +140,14 @@ export class SpecSession {
     return this.#engine(this.#id, { kind: "uses", name }) as Promise<Uses>;
   }
 
-  /** A value the schema allows. */
-  sample(base: string, node: unknown): Promise<unknown> {
-    return this.#engine(this.#id, { kind: "sample", base, node });
+  /** An example the schema allows, made from it where it names none; `choice` picks the top `oneOf`'s. */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0): Promise<unknown> {
+    return this.#engine(this.#id, { kind: "sample", base, node, direction, choice });
+  }
+
+  /** The place a line of the spec's text stands in, for a search hit at that line; `null` for none. */
+  placeAt(line: number): Promise<string | null> {
+    return this.#engine(this.#id, { kind: "placeAt", line }) as Promise<string | null>;
   }
 
   /** Everything a page's first screen draws, in one message (section 29). */

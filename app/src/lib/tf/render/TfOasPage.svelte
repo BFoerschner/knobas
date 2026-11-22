@@ -70,6 +70,6 @@
     <TfOasOperation {st} {op} k={shown.place} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, labelOf(shown.place))} {onuse} />
   {:else if shown.answer.kind === "schema"}
     {@const s = shown.answer}
-    <TfOasSchemaPage {st} name={s.name} node={s.node} shape={s.shape} uses={s.uses} sample={s.sample} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, s.name)} />
+    <TfOasSchemaPage {st} name={s.name} node={s.node} shape={s.shape} uses={s.uses} sample={s.sample} given={s.given} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, s.name)} />
   {/if}
 </div>

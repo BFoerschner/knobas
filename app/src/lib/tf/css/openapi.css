@@ -201,3 +201,6 @@
 .tf-oas-link:hover { text-decoration-color: currentColor; }
 .tf-oas-page:focus { outline: none; }
 .tf-oas-list > * { flex: none; }
+/* Where an example comes from: the spec's own, or made from the schema. Quiet, as a fact is. */
+.tf-oas-exfrom { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-weight: var(--wt-ui, 400); }
+.tf-oas-lab .tf-oas-exfrom { margin-left: 4px; }
