@@ -992,9 +992,8 @@ fn after_of(payload: &serde_json::Value, after: &mut serde_json::Map<String, ser
     for field in TICKET_FIELDS {
         let value = match (field, edit.get(field)) {
             (_, None | Some(serde_json::Value::Null)) => continue,
-            ("assignee", Some(serde_json::Value::String(word))) if word == "nobody" => {
-                serde_json::Value::Null
-            }
+            // `{"account": …}` is a person; `"nobody"`, which carries no
+            // account, reads as null.
             ("assignee", Some(who)) => who.get("account").cloned().unwrap_or_default(),
             (_, Some(value)) => value.clone(),
         };
