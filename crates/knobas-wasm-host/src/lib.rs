@@ -749,9 +749,13 @@ fn new_store(
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
 /// fixture is a test adapter and nothing ships it, hence `test-util`.
 ///
-/// Panics when the component at the default path is older than a source it
-/// was built from (#2442): a test on a stale fixture can pass without
-/// seeing what the fixture now does, as a mutant once survived that way.
+/// **Built here when it is missing or stale** (the final suite, 2026-11-22):
+/// a plain `cargo test -p knobas-app` in a fresh clone failed 61 tests until
+/// `just wasm-fixture` had run, and so did every copy `cargo mutants` makes,
+/// since a copy has no `target`. [`build_fixture`] does what the recipe does.
+/// A stale one matters as much as a missing one (#2442): a test on a stale
+/// fixture can pass without seeing what the fixture now does, as a mutant once
+/// survived that way.
 #[cfg(feature = "test-util")]
 #[must_use]
 pub fn fixture_component() -> std::path::PathBuf {
@@ -759,37 +763,103 @@ pub fn fixture_component() -> std::path::PathBuf {
         || {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm");
-            assert_fixture_fresh(&path);
+            if fixture_stale(&path).is_some() {
+                build_fixture(&path);
+            }
             path
         },
         std::path::PathBuf::from,
     )
 }
 
-/// Panics naming a source newer than the component at `path`, read from
-/// the dep-info file cargo writes beside it (every source the build read,
-/// the WIT included). A component or dep-info that is missing is left to
-/// the load, which names the recipe.
+/// Why the component at `path` needs building: it is missing, or a source it
+/// was built from (read from the dep-info file cargo writes beside it, the WIT
+/// included) is newer. `None` when it is fresh.
 #[cfg(feature = "test-util")]
-fn assert_fixture_fresh(path: &Path) {
+fn fixture_stale(path: &Path) -> Option<String> {
     let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let Some(built) = modified(path) else {
-        return;
+        return Some("it is not there".to_owned());
     };
     let Ok(dep_info) = std::fs::read_to_string(path.with_extension("d")) else {
+        return Some("its dep-info is not there".to_owned());
+    };
+    let (_, sources) = dep_info.lines().next().and_then(|l| l.split_once(": "))?;
+    sources
+        .split_whitespace()
+        .map(Path::new)
+        .find(|source| modified(source).is_some_and(|changed| changed > built))
+        .map(|source| format!("{} is newer", source.display()))
+}
+
+/// The variants `just wasm-fixture` builds, in its order, each kept beside
+/// the current one under its feature's name; the current one last.
+#[cfg(feature = "test-util")]
+const FIXTURE_VARIANTS: [Option<&str>; 5] =
+    [Some("v1_0"), Some("v1_3"), Some("v1_5"), Some("v1_6"), None];
+
+/// Build the fixture component and its older-world variants into `path`'s
+/// folder, as `just wasm-fixture` does, once across every test thread and
+/// binary: a file lock beside it, and a second look once it is held.
+///
+/// In a target folder of its own (`target/wasm-fixture`), then copied: the
+/// `cargo test` that runs this holds its own target folder's lock, and a
+/// build there would wait on it for ever.
+///
+/// # Panics
+/// When cargo cannot build it: the tests that load it cannot go on.
+#[cfg(feature = "test-util")]
+fn build_fixture(path: &Path) {
+    static BUILT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _thread = BUILT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let folder = path.parent().expect("the fixture's folder");
+    std::fs::create_dir_all(folder).expect("the fixture's folder can be made");
+    let lock = std::fs::File::create(folder.join("knobas_wasm_fixture.lock"))
+        .expect("the fixture's lock file");
+    lock.lock().expect("the fixture's lock");
+    let Some(why) = fixture_stale(path) else {
         return;
     };
-    let Some((_, sources)) = dep_info.lines().next().and_then(|l| l.split_once(": ")) else {
-        return;
-    };
-    for source in sources.split_whitespace().map(Path::new) {
-        if modified(source).is_some_and(|changed| changed > built) {
-            panic!(
-                "the fixture component at {} is older than {}, which it is built from; \
-                 `just wasm-fixture` rebuilds it",
-                path.display(),
-                source.display()
-            );
+    eprintln!("knobas-wasm-host: building the fixture component ({why})");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let own = root.join("target/wasm-fixture");
+    let built = own.join("wasm32-wasip2/release/knobas_wasm_fixture");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for feature in FIXTURE_VARIANTS {
+        let mut command = std::process::Command::new(&cargo);
+        command
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &own)
+            .args([
+                "build",
+                "-p",
+                "knobas-wasm-fixture",
+                "--target",
+                "wasm32-wasip2",
+            ])
+            .args(["--release", "--quiet"]);
+        if let Some(feature) = feature {
+            command.args(["--features", feature]);
+        }
+        let status = command.status().expect("cargo runs");
+        assert!(
+            status.success(),
+            "cargo could not build the fixture component ({feature:?})"
+        );
+        let name = feature.map_or_else(
+            || "knobas_wasm_fixture".to_owned(),
+            |feature| format!("knobas_wasm_fixture_{feature}"),
+        );
+        std::fs::copy(
+            built.with_extension("wasm"),
+            folder.join(format!("{name}.wasm")),
+        )
+        .expect("copy the built fixture");
+        if feature.is_none() {
+            std::fs::copy(built.with_extension("d"), path.with_extension("d"))
+                .expect("copy the fixture's dep-info");
         }
     }
 }
@@ -885,6 +955,52 @@ pub fn load_fixture() -> WasmAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A missing component, or one older than a source its dep-info names,
+    /// is built; one newer than every source is left alone.
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_missing_or_older_fixture_is_built_and_a_fresh_one_kept() {
+        let dir = std::env::temp_dir().join(format!("knobas-fixture-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let component = dir.join("fixture.wasm");
+        let source = dir.join("lib.rs");
+        assert_eq!(
+            fixture_stale(&component).as_deref(),
+            Some("it is not there")
+        );
+        std::fs::write(&source, "// source").unwrap();
+        std::fs::write(&component, b"\0asm").unwrap();
+        assert_eq!(
+            fixture_stale(&component).as_deref(),
+            Some("its dep-info is not there")
+        );
+        std::fs::write(
+            component.with_extension("d"),
+            format!("{}: {}\n", component.display(), source.display()),
+        )
+        .unwrap();
+        let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
+        assert_eq!(fixture_stale(&component), None, "newer than its source");
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(
+            fixture_stale(&component).is_some_and(|why| why.ends_with("is newer")),
+            "older than its source"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// A component exporting `interface` with one function `function`, or
     /// with none when `interface` is `None`; `knobas:adapter/source@1.0.0`
