@@ -1,7 +1,11 @@
 /* ---------- the job: the card on the left, the work on the right (R-4.1) ---------- */
 .tf-ws { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
+/* The card keeps its scrollbar's room whether its rows fill it or not (`overflow-y: scroll`; the track is unpainted,
+   `tokens.css`), so a ticket's fields landing and lengthening the card move nothing across it: under `auto` the bar
+   came with them and took 8 px from every row, the key's copy button and *Resume work* (the final suite's `just moves`,
+   2026-11-22, ticket-fields-late and -none). `overflow-y: scroll` and not `scrollbar-gutter`, as the views list (`views.css`). */
 .tf-jobcard {
-  padding: 26px 22px 18px; overflow: auto; position: relative; display: flex; flex-direction: column; gap: 14px;
+  padding: 26px 22px 18px; overflow-x: auto; overflow-y: scroll; position: relative; display: flex; flex-direction: column; gap: 14px;
   border-right: 1px solid var(--card-2);
 }
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
