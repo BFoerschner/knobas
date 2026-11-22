@@ -77,7 +77,8 @@ export interface CardFieldsHost {
 
 export interface CardFields {
   offer(entityId: string): FieldOffer | null;
-  ask(entityId: string): void;
+  /** Ask its fields: a menu about to offer an edit, or `ahead` (a lane pickup) in the background lane. */
+  ask(entityId: string, when?: "menu" | "ahead"): void;
   /** The ticket's assignee field, where its source lists one. */
   assignee(card: MiniBoardCard): TicketField | null;
   /** Why its field `id` cannot be changed, or `null`. */
@@ -181,10 +182,10 @@ export function createCardFields(host: CardFieldsHost): CardFields {
       // Not answered yet: offered, and the menu redraws when it is.
       return { assign: { disabled: null }, priority: { options: [], current: null, asking: `Asking ${source}…`, disabled: null } };
     },
-    ask(entityId) {
+    ask(entityId, when = "menu") {
       const card = host.cardOf(entityId);
       if (card === null || !host.edits(card.source_id)) return;
-      void askFields(card, "menu", port());
+      void askFields(card, when, port());
       if (refusals.has(entityId)) return;
       void askRefused(
         [

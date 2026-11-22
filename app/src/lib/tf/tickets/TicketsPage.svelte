@@ -975,7 +975,7 @@
     ask: (card, when) => {
       // Laned by a field a drop edits: whether the lanes take it is asked at pickup too (section 26).
       const by = lanedBy();
-      if (when === "pickup" && (by === "assignee" || by === "priority")) cardFields.ask(card.entity_id);
+      if (when === "pickup" && (by === "assignee" || by === "priority")) cardFields.ask(card.entity_id, "ahead");
       return askReach(card, when, ports.moves?.reachableTransitions);
     },
     scroller: () => {
