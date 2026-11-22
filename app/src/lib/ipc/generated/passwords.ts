@@ -16,6 +16,29 @@ export type AttachmentMeta = { id: string, name: string, size: number | null, };
 export type Attachments = { "state": "none" } | { "state": "listed", "files": Array<AttachmentMeta> } | { "state": "unlisted" };
 
 /**
+ * What the clipboard holds for knobas now, for the status bar: what it is,
+ * whose, and until when. `None` fields when it holds nothing of knobas's.
+ */
+export type ClipState = { 
+/**
+ * *password*, *one-time code*, or a field's name.
+ */
+what: string | null, 
+/**
+ * The entry it came from.
+ */
+entity_id: string | null, 
+/**
+ * When it leaves the clipboard, RFC 3339.
+ */
+until: string | null, };
+
+/**
+ * What a code ask answered.
+ */
+export type CodeAnswer = { "kind": "code", code: string, digits: number, period: number, left_ms: number, } | { "kind": "needs_sync" } | { "kind": "hidden" } | { "kind": "unreadable" } | { "kind": "not_offered" };
+
+/**
  * What a usage comment is asked for, as the source says it for this entry
  * or folder. Pleasant's `AskForCommentOnViewPassword` and
  * `AskForCommentOnModifyEntries`.
@@ -29,6 +52,11 @@ read: boolean,
  * *Edit*, *Change password* and a new entry in that folder.
  */
 modify: boolean, };
+
+/**
+ * Where a copy of a code or a typed secret stays.
+ */
+export type Copied = { until: string, };
 
 /**
  * What `sync.item.payload` holds of an entry, and nothing else.
@@ -80,6 +108,15 @@ parent: string | null,
 path?: Array<PathStep>, comment: CommentRules, can_add: boolean, };
 
 /**
+ * Everything the page draws from.
+ */
+export type Held = { sources: Array<PwSource>, folders: Array<PwFolder>, entries: Array<PwRow>, 
+/**
+ * The entries used last, newest first, at most four.
+ */
+recent: Array<string>, };
+
+/**
  * What an entry's history is, where a source offers one.
  */
 export type HistoryKind = "log" | "earlier";
@@ -122,6 +159,66 @@ format: string, digits: number, period: number, algorithm: OtpAlgorithm, };
  * read *Payments / Prod / Databases* with no code of their own.
  */
 export type PathStep = { id: string, name: string, };
+
+/**
+ * The rest of one entry.
+ */
+export type PwEntry = { id: string, source: string, title: string, username: string | null, address: string | null, folder: string | null, notes: string | null, fields: Array<FieldRecord>, otp: OtpInfo | null, expires: string | null, changed: string | null, changed_by: string | null, comment: CommentRules, approval: Approval, attachments: Attachments, can_read: boolean, can_modify: boolean, };
+
+/**
+ * One folder.
+ */
+export type PwFolder = { id: string, 
+/**
+ * The index of its source in [`Held::sources`].
+ */
+source: number, 
+/**
+ * Its parent folder, `None` at its source's top.
+ */
+parent: string | null, name: string, comment_read: boolean, can_add: boolean, };
+
+/**
+ * One entry's row: `[id, source index, folder id, title, username, address,
+ * changed (RFC 3339), flags, expires (a date), also in]`. An array, so 2,000
+ * rows stay small on the bridge.
+ */
+export type PwRow = [string, number, string | null, string, string | null, string | null, string | null, number, string | null, Array<string>];
+
+/**
+ * One password source, as the page names it.
+ */
+export type PwSource = { id: string, name: string, 
+/**
+ * The account it signs in as: the name the source's log keeps reads under.
+ */
+account: string | null, by_hand: boolean, 
+/**
+ * When its last run that succeeded ended, RFC 3339.
+ */
+synced_at: string | null, 
+/**
+ * When it last failed to answer: the last run ended unreachable, or a
+ * live read just did. `None` once a call to it succeeds.
+ */
+down_at: string | null, 
+/**
+ * It has never finished a run.
+ */
+never_synced: boolean, offers: Offers, 
+/**
+ * The folder every other one of its sat under, left out.
+ */
+skipped_root: string | null, 
+/**
+ * Its kind's display name, for Settings and nowhere on the page.
+ */
+adapter_name: string, };
+
+/**
+ * What a show or a copy answered.
+ */
+export type ReadAnswer = { "kind": "shown", value: string, read_at: string, until: string, } | { "kind": "copied", read_at: string, until: string, } | { "kind": "comment_required", scope: Array<string>, } | { "kind": "approval_required", approver: string | null, } | { "kind": "not_offered" } | { "kind": "unreachable", message: string, };
 
 /**
  * Which secret of an entry is asked for.

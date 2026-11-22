@@ -70,6 +70,13 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_source::passwords::FolderRecord::export_all(cfg)?;
     knobas_source::passwords::SecretRef::export_all(cfg)?;
     knobas_source::passwords::Write::export_all(cfg)?;
+    crate::passwords::reads::Held::export_all(cfg)?;
+    crate::passwords::reads::PwEntry::export_all(cfg)?;
+    crate::passwords::clipboard::ClipState::export_all(cfg)?;
+    crate::commands::passwords::ReadAnswer::export_all(cfg)?;
+    crate::commands::passwords::CodeAnswer::export_all(cfg)?;
+    crate::commands::passwords::Copied::export_all(cfg)?;
+
     // site.ts
     crate::site::SiteSetting::export_all(cfg)?;
 

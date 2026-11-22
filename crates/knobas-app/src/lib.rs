@@ -128,6 +128,11 @@ pub mod events {
     /// The files pass's progress (the everything-search decisions, D7), at
     /// each repository's end: `knobas_sync::code_files::FilesProgress`.
     pub const CODE_FILES: &str = "code:files";
+    /// Payload: `passwords::clipboard::ClipState` -- what the clipboard holds
+    /// for knobas now: a secret it put there, whose and until when, or
+    /// nothing once it was cleared or the person copied something else
+    /// (ADR-0056). Broadcast: the status bar draws it on every page.
+    pub const CLIPBOARD_STATE: &str = "clipboard:state";
     /// Payload: `checkout::fetch::Fetched` -- a branch's tip, fetched into
     /// its checkout behind a read that found it missing, landed (ADR-0041):
     /// the page showing that tree reads it again at the checkout. Broadcast.
@@ -459,6 +464,15 @@ pub fn manage_app_state<R: tauri::Runtime>(
     // The clones running in this process, which `clone_repo` starts
     // and stops and the quit stops with their folders (#1633).
     handle.manage(checkout::clone::Clones::global());
+    // The Passwords page's hold and clipboard (ADR-0056), managed here so
+    // the quit can take back a copied secret however far bring-up got.
+    let clipped_to = handle.clone();
+    handle.manage(passwords::PasswordsState::new(
+        Box::new(passwords::clipboard::SystemClipboard::default()),
+        std::sync::Arc::new(move |clip| {
+            events::emit(&clipped_to, None, events::CLIPBOARD_STATE, clip);
+        }),
+    ));
     // A fetch behind a local read that landed (ADR-0041): the page
     // showing that tree reads it again, now at the checkout.
     let fetched_to = handle.clone();
@@ -570,6 +584,17 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::sources::credential_health,
         commands::sources::sync_now,
         commands::sources::sync_now_with_progress,
+        commands::passwords::passwords_held,
+        commands::passwords::passwords_entry,
+        commands::passwords::password_show,
+        commands::passwords::password_copy,
+        commands::passwords::password_hide,
+        commands::passwords::otp_code,
+        commands::passwords::otp_copy,
+        commands::passwords::clipboard_copy_secret,
+        commands::passwords::clipboard_clear,
+        commands::passwords::clipboard_forget,
+        commands::passwords::clipboard_state,
         commands::sources::backfill_source,
         commands::sources::sync_all,
         commands::sources::sync_status,
@@ -1001,6 +1026,11 @@ fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     folder_render::runs::kill_all();
     if let Some(clones) = app.try_state::<std::sync::Arc<checkout::clone::Clones>>() {
         tauri::async_runtime::block_on(checkout::clone::stop_all(&clones));
+    }
+    // A shown secret is forgotten and a copied one taken back, if the
+    // clipboard still holds it (ADR-0056).
+    if let Some(passwords) = app.try_state::<passwords::PasswordsState>() {
+        passwords.quit();
     }
     sources::shutdown(app);
     backup::shutdown(app);

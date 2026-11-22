@@ -33,6 +33,7 @@ pub mod app;
 pub mod assets;
 pub mod backup;
 pub mod entity;
+pub mod passwords;
 pub mod search;
 pub mod site;
 pub mod sources;
