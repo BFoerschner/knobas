@@ -355,6 +355,21 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-facts .tf-fact-note > span { flex: 1 1 auto; }
 .tf-facts .tf-fact-note button { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
 .tf-facts .tf-fact-note .tf-fact-x { text-decoration: none; padding: 0 2px; }
+/* A source's own fields (ADR-0054, step 10): a fold under the facts, closed, in the facts' grid. Its line is held with the
+   card's sections (`rowsHeld`), so it lands with them. */
+.tf-tkmore > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); border-radius: 4px; font-weight: 600; }
+.tf-tkmore > summary::-webkit-details-marker { display: none; }
+.tf-tkmore > summary .tf-tkmark { width: 12px; height: 12px; color: var(--card-ink-2); transition: transform 120ms ease-out; }
+.tf-tkmore[open] > summary .tf-tkmark { transform: rotate(90deg); }
+.tf-tkmore > summary:hover > span:first-child { text-decoration: underline; text-underline-offset: 3px; }
+.tf-sheetcard .tf-tkmore > summary .tf-tkmark { color: var(--ink-2); }
+.tf-tkmore > .tf-facts { margin-top: 4px; }
+/* A text or number field while it is edited, a date field and a flag: each in the value's 22 px line. */
+.tf-ownedit { display: flex; min-width: 0; flex: 1 1 auto; }
+.tf-ownedit input, .tf-owndate { height: 22px; min-width: 0; max-width: 100%; padding: 0 6px; margin: -1px -6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); font: inherit; }
+.tf-ownedit input { width: 100%; }
+.tf-ownflag { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; cursor: pointer; }
+.tf-ownflag input { margin: 0; }
 /* An adapter that offers no edits: one muted line under the facts. */
 .tf-tknoedits { margin: 0; font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.4; color: var(--card-ink-2); }
 .tf-sheetcard .tf-tknoedits { color: var(--ink-2); }

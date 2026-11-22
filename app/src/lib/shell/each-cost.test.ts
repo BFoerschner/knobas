@@ -186,6 +186,8 @@ const SMALL: Record<string, string> = {
   "tf/job/TfFactControl.svelte  field.kind.options": "named small: the choices of one field its source sends with the ticket (a priority's handful); a long list is a searched field, read through field_options",
   "tf/job/TfPeoplePick.svelte  drawn": "cut: the people picker draws at most DRAWN_MOST rows, and typing narrows the rest into reach",
   "tf/job/TfPeoplePick.svelte  cut(runs, row.label.length)": "named small: the marked runs of one person's name",
+  "tf/job/TfJobCard.svelte  own": "named small: the fields of its own one ticket's source lets a person change (Jira's custom fields on one edit screen, a handful)",
+  "tf/job/TfOwnField.svelte  kind.options": "named small: the choices of one field its source sends with the ticket; a long list is a searched field, read through field_options",
   "tf/job/TfLabelsPick.svelte  drawn": "cut: the labels picker draws at most DRAWN_MOST rows, and typing narrows the rest into reach",
   "tf/job/TfLabelsPick.svelte  cut(runs, name.length)": "named small: the marked runs of one label's name",
   "tf/job/TfJobCard.svelte  others": "a handful by what it is: the other sources holding one ticket",

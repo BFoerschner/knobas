@@ -428,6 +428,41 @@ mod tests {
             )],
         };
         assert!(fault(&not_a_person).is_some());
+        // The priority is a choice or a search, the labels are labels: any
+        // other kind under those ids breaks the rule.
+        for (id, kind, value) in [
+            ("priority", TicketFieldKind::Text, json!("High")),
+            ("labels", TicketFieldKind::Text, json!("sepa")),
+        ] {
+            let wrong = TicketFields {
+                fields: vec![field(id, kind, value)],
+            };
+            assert!(
+                fault(&wrong).is_some_and(|why| why.contains(&format!("{id:?}"))),
+                "{id}"
+            );
+        }
+        let right = TicketFields {
+            fields: vec![
+                field(
+                    "priority",
+                    TicketFieldKind::Search {
+                        scope: "PAY".into(),
+                        person: false,
+                    },
+                    json!("High"),
+                ),
+                field(
+                    "labels",
+                    TicketFieldKind::Labels {
+                        scope: None,
+                        create: true,
+                    },
+                    json!(["sepa"]),
+                ),
+            ],
+        };
+        assert_eq!(fault(&right), None);
         let unfit = TicketFields {
             fields: vec![field("due", TicketFieldKind::Date, json!("soon"))],
         };

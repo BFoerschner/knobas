@@ -14,6 +14,12 @@
  *   Issues*: `refused_writes` refuses each edit ask with Jira's reason.
  * - `?fake-refuse-edits`: every edit is refused by the source with Jira's
  *   sentence, so the note under its field can be drawn.
+ *
+ * Each ticket also answers six fields of its own (step 10 of the ruling), one
+ * of each kind but labels, as a Jira screen with custom fields would: a due
+ * date, story points, a customer reference, an environment, a reviewer and
+ * whether it needs a release note. Their values are kept on the ticket's
+ * payload under `own`, so an edit changes what the next read answers.
  */
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
 import type { FieldOptions, TicketFields } from "../../../ipc/entity";
@@ -45,6 +51,30 @@ const ASSIGNABLE: [string, string][] = [
 ];
 
 const PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
+
+/** A fixture ticket's own fields as a Jira screen lists them, with what they hold before any edit. */
+const OWN: { id: string; label: string; kind: TicketFields["fields"][number]["kind"]; start: unknown }[] = [
+  { id: "duedate", label: "Due date", kind: { type: "date" }, start: "2026-12-04" },
+  { id: "customfield_10106", label: "Story Points", kind: { type: "number" }, start: 5 },
+  { id: "customfield_10100", label: "Customer ref", kind: { type: "text" }, start: "ACME-7" },
+  {
+    id: "customfield_10200",
+    label: "Environment",
+    kind: { type: "choice", options: ["Staging", "Production"].map((value) => ({ value, label: value })) },
+    start: "Staging",
+  },
+  { id: "customfield_10300", label: "Reviewer", kind: { type: "search", scope: "people", person: true }, start: null },
+  { id: "customfield_10400", label: "Release note", kind: { type: "flag" }, start: false },
+];
+
+/** The ticket's own fields' values, kept on its payload. */
+function ownOf(payload: Record<string, unknown>): Record<string, unknown> {
+  const held = payload["own"];
+  if (typeof held === "object" && held !== null) return held as Record<string, unknown>;
+  const fresh = Object.fromEntries(OWN.map((field) => [field.id, field.start]));
+  payload["own"] = fresh;
+  return fresh;
+}
 
 function ticketOf(entityId: string) {
   return CORPUS.find((entry) => entry.entity_id === entityId && entry.kind === "ticket");
@@ -84,13 +114,18 @@ export function fakeTicketFields(entityId: string): TicketFields | null {
         required: false,
       },
       { id: "labels", label: "Labels", kind: { type: "labels", scope: null, create: true }, value: labels, required: false },
+      ...OWN.map((field) => {
+        const value = ownOf(entry.payload)[field.id] ?? null;
+        const shown = field.kind.type === "search" && typeof value === "string" ? { shown: fakePersonName(value) ?? ASSIGNABLE.find(([a]) => a === value)?.[1] ?? value } : {};
+        return { id: field.id, label: field.label, kind: field.kind, value, ...shown, required: false };
+      }),
     ],
   };
 }
 
 /** `field_options`: the people of the fixture, those whose name or account holds `typed`. */
 export function fakeFieldOptions(entityId: string, field: string, typed: string): FieldOptions | null {
-  if (ticketOf(entityId) === undefined || field !== "assignee") return null;
+  if (ticketOf(entityId) === undefined || (field !== "assignee" && field !== "customfield_10300")) return null;
   const words = typed.trim().toLowerCase();
   const options = ASSIGNABLE.filter(([account, name]) => words === "" || account.includes(words) || name.toLowerCase().includes(words)).map(
     ([account, name]) => ({ value: account, label: name, hint: account }),
@@ -114,6 +149,8 @@ function apply(op: Record<string, unknown>): void {
     for (const name of change.add ?? []) if (!now.includes(name)) now.push(name);
     entry.payload["labels"] = now.filter((name) => !(change.remove ?? []).includes(name));
   }
+  const own = op["fields"];
+  if (typeof own === "object" && own !== null) Object.assign(ownOf(entry.payload), own);
   entry.updated_at = new Date().toISOString();
 }
 
