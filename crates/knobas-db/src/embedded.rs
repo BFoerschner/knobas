@@ -4843,8 +4843,10 @@ esac
             std::os::unix::fs::symlink(install.join(dir), hold_dir.join(dir)).unwrap();
         }
         let copy = hold_dir.join("bin").join("initdb");
-        std::fs::copy(initdb, &copy).unwrap();
-        let postgres = write(&hold_dir.join("bin"), "postgres", HELD_POSTGRES);
+        executable_copy(initdb, &copy);
+        let script = write(hold_dir, "postgres-script", HELD_POSTGRES);
+        let postgres = hold_dir.join("bin").join("postgres");
+        executable_copy(&script, &postgres);
         std::fs::set_permissions(&postgres, std::fs::Permissions::from_mode(0o755)).unwrap();
         write(
             hold_dir,
@@ -4858,6 +4860,22 @@ esac
         };
         write(hold_dir, "point", point);
         copy
+    }
+
+    /// `from` copied to `to` by a `cp` of its own, for a file this test then
+    /// executes. Written from this process, its descriptor is open for a
+    /// moment in which a parallel test's `fork` inherits it, and until that
+    /// child execs, executing the file fails with *Text file busy* (ETXTBSY:
+    /// about 1 run in 2 on WSL, the small-fixes list). Written by `cp`, no
+    /// descriptor of this process ever points at it.
+    #[cfg(unix)]
+    fn executable_copy(from: &Path, to: &Path) {
+        let status = std::process::Command::new("cp")
+            .arg(from)
+            .arg(to)
+            .status()
+            .expect("cp runs");
+        assert!(status.success(), "cp {} {}", from.display(), to.display());
     }
 
     /// The pids of the processes running `program`.
