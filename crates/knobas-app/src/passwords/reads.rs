@@ -426,6 +426,41 @@ pub async fn recent(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
         .unwrap_or_default())
 }
 
+/// When the source's last run that ended ok finished: the one-time-code keys
+/// read before it still hold, and a newer run reads them again.
+///
+/// # Errors
+/// The database's.
+pub async fn last_ok_run(
+    pool: &PgPool,
+    source_id: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error> {
+    sqlx::query_scalar(
+        "select max(finished_at) from knobas.sync_run where source_id = $1 and outcome = 'ok'",
+    )
+    .bind(source_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// The folder path the mirror holds for an entry: one listing of a write does
+/// not carry the entry's ancestors, so a written entry that stays in its folder
+/// keeps this one. `None` when the mirror has no entry or no readable path.
+///
+/// # Errors
+/// The database's.
+pub async fn mirrored_path(
+    pool: &PgPool,
+    entity_id: &str,
+) -> Result<Option<Vec<knobas_source::passwords::PathStep>>, sqlx::Error> {
+    let path: Option<serde_json::Value> =
+        sqlx::query_scalar("select payload->'path' from sync.item where entity_id = $1")
+            .bind(entity_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(path.and_then(|value| serde_json::from_value(value).ok()))
+}
+
 /// Put `entity_id` first among the recent entries. Ids only, so no title or
 /// value reaches `knobas.setting`.
 ///

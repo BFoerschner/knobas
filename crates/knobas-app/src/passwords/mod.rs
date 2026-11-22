@@ -22,6 +22,23 @@ use knobas_secrets::otp::OtpKeys;
 /// clipboard. Mirrored in the window's `tf/passwords/hold.ts`.
 pub const HOLD_SECS: u64 = knobas_source::passwords::HOLD_SECS;
 
+/// Put what a source answered a write with into the mirror at once, on a run
+/// connection of its own, so the page reads the change without waiting for
+/// the next sync. The connection is closed whatever the write did.
+///
+/// # Errors
+/// The connection's, or the mirror write's, in words.
+pub async fn mirror_written(
+    connections: &dyn knobas_sync::scheduler::RunConnections,
+    source: &dyn knobas_source::Source,
+    item: knobas_source::SyncItem,
+) -> Result<(), String> {
+    let mut conn = connections.open().await.map_err(|e| e.to_string())?;
+    let wrote = knobas_sync::refresh::write_direct(&mut conn, source, item).await;
+    let _ = sqlx::Connection::close(conn).await;
+    wrote.map_err(|e| e.to_string())
+}
+
 /// What the app keeps for the Passwords page: one per process.
 pub struct PasswordsState {
     pub hold: hold::Hold,

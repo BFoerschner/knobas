@@ -348,13 +348,9 @@ async fn code_for<R: tauri::Runtime>(
     }
     let sources = crate::sources::state(app)?;
     let pw = state(app)?;
-    let last_run: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-        "select max(finished_at) from knobas.sync_run where source_id = $1 and outcome = 'ok'",
-    )
-    .bind(&entry.source)
-    .fetch_one(&sources.pool)
-    .await
-    .map_err(IpcError::internal)?;
+    let last_run = reads::last_ok_run(&sources.pool, &entry.source)
+        .await
+        .map_err(IpcError::internal)?;
     let keys = match pw.cached_keys(&entry.source, last_run) {
         Some(keys) => keys,
         None => {
@@ -550,29 +546,22 @@ pub async fn passwords_write<R: tauri::Runtime>(
             let mut record: passwords::EntryRecord =
                 serde_json::from_value(item.payload.clone()).unwrap_or_default();
             if record.path.is_empty() && record.folder == old.folder {
-                let path: Option<Vec<passwords::PathStep>> =
-                    sqlx::query_scalar::<_, serde_json::Value>(
-                        "select payload->'path' from sync.item where entity_id = $1",
-                    )
-                    .bind(&entity_id)
-                    .fetch_optional(&sources.pool)
+                let path = reads::mirrored_path(&sources.pool, &entity_id)
                     .await
                     .ok()
-                    .flatten()
-                    .and_then(|v| serde_json::from_value(v).ok());
+                    .flatten();
                 record.path = path.unwrap_or_default();
                 item.payload = serde_json::to_value(&record).unwrap_or(item.payload);
             }
         }
         let deps = sources.scheduler.deps();
-        let mut conn = deps.connections.open().await.map_err(IpcError::internal)?;
-        let wrote = knobas_sync::refresh::write_direct(&mut conn, lent.source.as_ref(), item).await;
-        let _ = sqlx::Connection::close(conn).await;
-        wrote.map_err(|e| {
-            IpcError::internal(format!(
-                "the source took the change; the mirror did not: {e}"
-            ))
-        })?;
+        crate::passwords::mirror_written(deps.connections.as_ref(), lent.source.as_ref(), item)
+            .await
+            .map_err(|e| {
+                IpcError::internal(format!(
+                    "the source took the change; the mirror did not: {e}"
+                ))
+            })?;
     }
     if let Some(key) = written.otp_key {
         let keys: knobas_secrets::otp::OtpKeys = [(entity_id.clone(), key)].into_iter().collect();
