@@ -69,13 +69,13 @@ test("a command renderer draws a binary file's diff nowhere: it is handed text",
   expect(renderedChoices(PNG, { offered: [command, IMAGE], renderer: command, pattern: null }, bytes)).toEqual([IMAGE]);
 });
 
-test("an .html file, which opens as Source, offers Page; an OpenAPI file offers nothing", () => {
+test("an .html file, which opens as Source, offers Page; an OpenAPI file offers its API (ux31)", () => {
   const page = file({ path: "site/index.html" });
   expect(opened(page).renderer).toBe(SOURCE);
   expect(renderedChoices(page, opened(page), bytes)).toEqual([HTML]);
   const spec = file({ path: "api/openapi.yaml" });
   const specOpened = { offered: [OPENAPI, SOURCE], renderer: OPENAPI, pattern: null };
-  expect(renderedChoices(spec, specOpened, bytes)).toEqual([]);
+  expect(renderedChoices(spec, specOpened, bytes)).toEqual([OPENAPI]);
 });
 
 test("the renderer a file opens with is the first choice, the rest in the registry's order", () => {

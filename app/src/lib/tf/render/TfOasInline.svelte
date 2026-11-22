@@ -10,9 +10,14 @@
   holds the list to the rows marked; the rows it opens are the comparison's (`open`), so a changed operation opens on
   both sides at once.
 -->
+<script lang="ts" module>
+  /** What a comparison says of a row: its mark, and for an operation changed through a schema, that schema's name. */
+  export type InlineMark = { mark: "added" | "removed" | "changed"; via?: string };
+</script>
+
 <script lang="ts">
   import "../css/openapi.css";
-  import { untrack, type Snippet } from "svelte";
+  import { flushSync, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { Windowed } from "../../shell/windowed.svelte";
   import TfOasOperation from "./TfOasOperation.svelte";
@@ -21,9 +26,6 @@
   import type { PageAnswer, SpecIndex } from "../../render/openapi";
   import { shortMethod } from "../../render/openapi-view";
   import { SpecSession, specEngine, type SpecEngine } from "../../render/openapi-port";
-
-  /** What a comparison says of a row: its mark, and for an operation changed through a schema, that schema's name. */
-  export type InlineMark = { mark: "added" | "removed" | "changed"; via?: string };
 
   let {
     text,
@@ -113,6 +115,7 @@
     }
   });
 
+  let list = $state<HTMLElement | null>(null);
   const win = new Windowed<string>({ count: () => rows.length, key: (i) => rows[i]!.k, estimate: 30, scrolls: true, from: 60 });
 
   function toggle(k: string) {
@@ -126,6 +129,18 @@
     if (at < 0) return;
     open.add(k);
     win.reveal(at);
+  }
+
+  /** Brings row `k` into view, where this side has it: a comparison's `n` and `p`. Answers whether it does. */
+  export function revealKey(k: string): boolean {
+    const at = rows.findIndex((r) => r.k === k);
+    if (at < 0) return false;
+    win.reveal(at);
+    flushSync();
+    const box = list;
+    const row = box?.querySelector<HTMLElement>(`[data-k="${CSS.escape(k)}"]`);
+    if (box && row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top - 4;
+    return true;
   }
 
   const markWords = (m: InlineMark) => (m.mark === "added" ? "Added" : m.mark === "removed" ? "Removed" : m.via !== undefined ? `Changed through ${m.via}` : "Changed");
@@ -149,7 +164,7 @@
     {#if rows.length === 0}
       <p class="tf-oas-fnote">{typed.trim() !== "" ? "Nothing here holds those words." : marks !== null ? "No endpoint or schema differs." : "The spec lists no endpoint."}</p>
     {:else}
-      <div class="tf-oas-ilist" {@attach win.list}>
+      <div class="tf-oas-ilist" bind:this={list} {@attach win.list}>
         {#if win.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach win.room("before")}></div>{/if}
         {#each win.slice(rows) as row (row.k)}
           {@const mark = marks?.get(row.k)}

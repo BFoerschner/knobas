@@ -17,6 +17,7 @@
  * Nodes are the document's own values: a schema is drawn from its JSON, and its `$ref`s stay refs until the view
  * opens one.
  */
+import { specChanges, type SpecChanges } from "./openapi-changes";
 import { JSON_SCHEMA, load } from "js-yaml";
 
 import { makeExample, type Direction } from "./openapi-example";
@@ -284,7 +285,8 @@ export type SpecCall =
   | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number }
   | { kind: "page"; place: string }
   | { kind: "placeAt"; line: number }
-  | { kind: "collection"; specFile: string };
+  | { kind: "collection"; specFile: string }
+  | { kind: "changes"; path: string; before: string };
 
 /** Answers `call` for `session` among `sessions`: the spec worker's and this thread's one dispatch. */
 export function answerCall(sessions: Map<number, SpecFiles>, session: number, call: SpecCall): unknown {
@@ -308,6 +310,7 @@ export function answerCall(sessions: Map<number, SpecFiles>, session: number, ca
   if (call.kind === "page") return files.page(call.place);
   if (call.kind === "placeAt") return files.placeAt(call.line);
   if (call.kind === "collection") return files.collection(call.specFile);
+  if (call.kind === "changes") return files.changes(call.path, call.before);
   return files.addFile(call.path, call.text);
 }
 
@@ -345,6 +348,16 @@ export class SpecFiles {
     this.#index = checked.index;
     this.#text = text;
     return checked;
+  }
+
+  /**
+   * What changed in the API from the spec `before` (its text, at `path`) to this one (section 13): read once, the
+   * comparison's other side having parsed it lately (`recent`).
+   */
+  changes(path: string, before: string): { ok: true; changes: SpecChanges } | { ok: false; error: string } {
+    const parsed = recentParse(before, path);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    return { ok: true, changes: specChanges(parsed.doc, this.doc) };
   }
 
   /** Whether the file at `path` is held. */

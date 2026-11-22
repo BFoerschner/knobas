@@ -39,6 +39,7 @@
   import TfDiagram from "../render/TfDiagram.svelte";
   import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import TfPdfDiff from "../render/TfPdfDiff.svelte";
+  import TfOasDiff from "../render/TfOasDiff.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import { imageMode as sharedImageMode, type ImageModeChoice } from "./image-mode.svelte";
   import { meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
@@ -141,6 +142,8 @@
    * is none that way. `entering`: from another file, so its first going down, its last going up.
    */
   export function nextChange(step: 1 | -1, entering = false): boolean {
+    // An API spec steps through its marked operations and schemas (ux31, section 13).
+    if (id === "openapi") return oasStage?.nextChange(step, entering) ?? false;
     readChanges();
     const to = entering ? (step === 1 ? 0 : changes.length - 1) : at + step;
     if (!marksOn || to < 0 || to >= changes.length || stage === null) return false;
@@ -169,8 +172,11 @@
   const twoImages = $derived(image && sides.length === 2);
   const shownMode = $derived<ImageMode>(twoImages ? imageMode.current : "sides");
   const overlaid = $derived(shownMode !== "sides");
-  /** The columns the stage draws: one for a PDF (its own two), a swipe or an onion, else one a side. */
-  const columns = $derived(id === "pdf" || overlaid ? 1 : sides.length);
+  /** The columns the stage draws: one for a PDF or an API spec (their own two), a swipe or an onion, else one a side. */
+  const columns = $derived(id === "pdf" || id === "openapi" || overlaid ? 1 : sides.length);
+  /** An API spec's stage (`TfOasDiff`), and what it says for the foot. */
+  let oasStage = $state<ReturnType<typeof TfOasDiff> | null>(null);
+  let oasSay = $state("");
 
   /** A side's bytes once read, `null` where there is no file on that side; `undefined` while it is read. */
   const bytesOf = (side: Side): Uint8Array | null | undefined => {
@@ -230,6 +236,7 @@
     if (unread.length === 2) return "Reading both sides…";
     if (unread[0] === "old") return "Reading the side before…";
     if (unread[0] === "new") return ends?.new === "working tree" ? "Reading the working tree's side…" : "Reading the side after…";
+    if (id === "openapi") return oasSay;
     if (image) return sides.flatMap((side) => (sizes[side] ? [`${NAME[side]} ${sizes[side]}`] : [])).join(", ");
     if (marksOn && changes.length > 0) {
       const count = `Change ${Math.max(1, at + 1)} of ${changes.length}`;
@@ -295,6 +302,18 @@
         <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
       {:else if old !== undefined && nu !== undefined}
         <TfPdfDiff before={old} after={nu} {path} {render} />
+      {:else}
+        {@render waiting(sides[0] ?? "new")}
+      {/if}
+    </div>
+  {:else if id === "openapi"}
+    {@const failed = sides.find((side) => failure(side) !== null)}
+    {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
+    <div class="tf-rside">
+      {#if failed !== undefined}
+        <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
+      {:else if old !== undefined && nu !== undefined}
+        <TfOasDiff bind:this={oasStage} before={old === null ? null : textOf(old)} after={nu === null ? null : textOf(nu)} {path} onsay={(words) => (oasSay = words)} />
       {:else}
         {@render waiting(sides[0] ?? "new")}
       {/if}

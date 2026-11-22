@@ -793,3 +793,12 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-full.tf-zen > .tf-crumbs, .tf-full.tf-zen > .tf-repohead, .tf-full.tf-zen > .tf-tabs { display: none; }
 .tf-repo.tf-zen { grid-template-columns: minmax(0, 1fr); }
 .tf-repo.tf-zen > .tf-sedge, .tf-repo.tf-zen > .tf-ftreebox { display: none; }
+/* An API spec in a comparison (ux31, `TfOasDiff`): each side's inline form scrolls on its own inside the stage's
+   height, so the stage itself does not scroll; *Show all of it* gives it a tall fixed box, not its content's height. */
+.tf-rstage[data-renderer="openapi"] { overflow: hidden; }
+.tf-rstage[data-renderer="openapi"] > .tf-rside { padding: 0; }
+.tf-oasd { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); height: calc(var(--tf-rstage) - 1px); }
+.tf-oasd.tf-oasd-one, .tf-oasd:has(> .tf-oas-wait, > .tf-stepfail) { grid-template-columns: minmax(0, 1fr); }
+.tf-oasd > .tf-oas-inline + .tf-oas-inline { border-left: 1px solid var(--rule); }
+.tf-oasd > .tf-oas-wait, .tf-oasd > .tf-stepfail { padding: 12px; }
+.tf-rstage-open .tf-oasd { height: 85vh; }

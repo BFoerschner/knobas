@@ -145,7 +145,7 @@ export const OPENAPI: Renderer = {
   fences: [],
   input: "text",
   output: "html",
-  diff: false,
+  diff: true,
   sniff: isOpenApi,
 };
 

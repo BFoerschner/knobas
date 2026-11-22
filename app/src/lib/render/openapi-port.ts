@@ -7,6 +7,7 @@
  * only when a person opens it, one file at a time per ref, at most {@link FILE_CAP} bytes, at most
  * {@link IN_FLIGHT} reads at once, each file once per session. A ref to a URL is never read.
  */
+import type { SpecChanges } from "./openapi-changes";
 import type { Opened, Operation, PageAnswer, PathRef, Resolved, Shape, SpecCall, SpecFiles, Uses } from "./openapi";
 import type { Direction } from "./openapi-example";
 
@@ -148,6 +149,11 @@ export class SpecSession {
   /** The spec as a Bruno collection: its files, by path from its folder. */
   collection(specFile: string): Promise<[string, string][]> {
     return this.#engine(this.#id, { kind: "collection", specFile }) as Promise<[string, string][]>;
+  }
+
+  /** What changed in the API from the spec `before` (its text) to this one: a comparison's marks (section 13). */
+  changes(path: string, before: string): Promise<{ ok: true; changes: SpecChanges } | { ok: false; error: string }> {
+    return this.#engine(this.#id, { kind: "changes", path, before }) as Promise<{ ok: true; changes: SpecChanges } | { ok: false; error: string }>;
   }
 
   /** The place a line of the spec's text stands in, for a search hit at that line; `null` for none. */

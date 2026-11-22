@@ -914,14 +914,30 @@
     // band's *Rendered* plans every file of a list for its room, and 10,000 files asked the registry's globs each.
     const byName = can.bytes && !all.some((r) => r.patterns.some((p) => p.includes("/"))) && !list.some((d) => d.pattern.includes("/")) ? new Map<string, { opened: Opened; choices: Renderer[] }>() : null;
     const madeList = [...list, ...MADE_DEFAULTS];
+    const heard = sniffed;
+    /**
+     * A YAML or JSON file's text, for a renderer that knows its files by content (an API spec, ux31 section 13): the
+     * side the stage would read, read once as the card is planned and kept for the stage, its first MiB sniffed.
+     * `undefined` until it lands, and for every other file.
+     */
+    const textOf = (file: DrawnFile): string | undefined => {
+      if (!can.bytes || file.change === "binary" || file.made !== undefined || !BY_CONTENT.test(file.path)) return undefined;
+      const key = keyOf(file);
+      if (!(key in heard)) {
+        untrack(() => sniff(file));
+        return undefined;
+      }
+      return heard[key] ?? undefined;
+    };
     const choicesOf = (file: DrawnFile) => {
       const binary = file.change === "binary";
       // A generated file opens as the Files tab opens it in a generated folder (a page as a page), read as bytes.
       const gen = file.made !== undefined;
-      const name = byName === null ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
+      const text = textOf(file);
+      const name = byName === null || BY_CONTENT.test(file.path) ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
       const had = name === null ? undefined : byName!.get(name);
       if (had !== undefined) return had;
-      const opened = openWith({ path: file.path, binary }, all, gen ? madeList : list);
+      const opened = openWith({ path: file.path, binary, ...(text !== undefined ? { text } : {}) }, all, gen ? madeList : list);
       const made = { opened, choices: renderedChoices(file, opened, gen ? MADE_CAN : can) };
       if (name !== null) byName!.set(name, made);
       return made;
@@ -970,15 +986,39 @@
     realFolders = new Set();
     lateGroups = false;
   }
+  /** The files a renderer may know by content (an API spec): their side is read to be sniffed (`plans`' `textOf`). */
+  const BY_CONTENT = /\.(ya?ml|json)$/i;
+  /** How much of such a side the sniff reads. */
+  const SNIFF_BYTES = 1024 * 1024;
+  const headDecoder = new TextDecoder("utf-8", { fatal: false });
+  /**
+   * Each such file's head as text, by `keyOf`, `null` where its side could not be read: what `plans` reads, set once a
+   * file, so a side read elsewhere (a PDF's, a failed one read again) never plans every card again.
+   */
+  let sniffed = $state.raw<Record<string, string | null>>({});
+  const sniffing = new Set<string>();
+  function sniff(file: DrawnFile) {
+    const key = keyOf(file);
+    if (sniffing.has(key)) return;
+    sniffing.add(key);
+    const side: Side = file.change === "deleted" ? "old" : "new";
+    void (loadSide(file, side) ?? Promise.resolve()).then(() => {
+      const read = got[`${side}\n${key}`];
+      const head = read?.kind !== "drawn" ? null : typeof read.content === "string" ? read.content : headDecoder.decode(read.content.subarray(0, SNIFF_BYTES));
+      sniffed = { ...sniffed, [key]: head };
+    });
+  }
   /** Each side a rendered diff read, under `side\nkey`, and the reads made. */
   let got = $state.raw<Record<string, SideGot>>({});
   const asked = new Set<string>();
   const NAMES = { old: "before", new: "after" } as const;
 
-  function loadSide(file: DrawnFile, side: Side) {
+  /** Each side's read while it is out, so a second asker waits for the same one. */
+  const reading = new Map<string, Promise<void>>();
+  function loadSide(file: DrawnFile, side: Side): Promise<void> | undefined {
     const name = `${side}\n${keyOf(file)}`;
     const reader = context;
-    if (asked.has(name)) return;
+    if (asked.has(name)) return reading.get(name);
     asked.add(name);
     // A pipeline's outputs are in hand (ux26): drawn from the run, with no read.
     if (pipedOf(file) !== null) {
@@ -1006,12 +1046,17 @@
       const text = (await readWhole(file, reader))[side];
       return text === null ? { kind: "failed", why: `the file ${NAMES[side]} the change is not readable whole` } : { kind: "drawn", content: text };
     };
-    read()
+    const done = read()
       .catch((cause): SideGot => {
         asked.delete(name);
         return { kind: "failed", why: ipcErrorMessage(cause) };
       })
-      .then((side) => (got = { ...got, [name]: side }));
+      .then((side) => {
+        got = { ...got, [name]: side };
+        reading.delete(name);
+      });
+    reading.set(name, done);
+    return done;
   }
   const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => {
     const piped = pipedOf(file);
