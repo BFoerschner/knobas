@@ -50,6 +50,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Every guard runs whatever the one before it did (`!cancelled()`), so
+      # one red run names every slip, not only the first. The freeze checks
+      # need the release found by the `base` step.
+      #
       # Full history and every tag: the freeze checks compare HEAD with the
       # newest release tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,6 +92,7 @@ jobs:
       # the last release may never be modified, deleted or renamed, comments
       # and whitespace included; a schema change is a new file.
       - name: Released migrations are unchanged
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
         env:
           BASE: ${{ steps.base.outputs.tag }}
         run: |
@@ -106,6 +111,7 @@ jobs:
       # line with the right checksum, every line names a file, and the
       # released lines are still there unchanged (append only).
       - name: The migration checksum list matches and only grows
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
         env:
           BASE: ${{ steps.base.outputs.tag }}
         run: |
@@ -150,6 +156,7 @@ jobs:
       # the release tag must still be declared at HEAD, byte for byte. The
       # unreleased 1.6.0 in `wit/` stays free to change until a tag has it.
       - name: Released WIT worlds are unchanged
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
         env:
           BASE: ${{ steps.base.outputs.tag }}
         run: |
@@ -188,6 +195,7 @@ jobs:
       # (as in check.yml), minimal profile plus rustfmt only: a bare `cargo
       # fmt` would install everything that file lists, wasm target included.
       - name: Rust formatting
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
@@ -198,6 +206,7 @@ jobs:
       # `just docs-check`: the hand-written tables against the tree (#1919)
       # and the conflict-marker scan. Seconds, no node_modules.
       - name: Doc lists and conflict markers
+        if: ${{ !cancelled() }}
         run: |
           python3 -I scripts/doc-lists.py
           scripts/conflict-markers.sh
