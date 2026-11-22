@@ -3015,9 +3015,14 @@ fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
 /// that is fixed too: `C.UTF-8` where the C library has it, and on Windows,
 /// which has none, `en-US`, a name every Windows 10 and 11 install has.
 ///
-/// The other categories (`lc_numeric`, ...) are server settings, not fixed
-/// per database, and still come from the environment, except
-/// [`MESSAGES_LOCALE`].
+/// The other categories (`lc_monetary`, `lc_numeric`, `lc_time`) are server
+/// settings, not fixed per database, and get this one too (the final suite,
+/// 2026-11-22): left to the environment, an `LC_ALL` or `LANG` naming a
+/// locale the machine does not have (`de_DE.UTF-8` on a box with only `C`
+/// locales, as a fresh WSL or a container has) failed `initdb` with *invalid
+/// locale settings*, so knobas could not make its database at all. Nothing
+/// knobas reads depends on them: its one `to_char` uses no `TM` field.
+/// Messages are [`MESSAGES_LOCALE`].
 const LIBC_LOCALE: &str = if cfg!(windows) { "en-US" } else { "C.UTF-8" };
 
 /// The language the server and `initdb` write their messages in: `C`, so
@@ -3097,6 +3102,9 @@ async fn run_initdb_stopping(
         .arg(format!("--lc-collate={LIBC_LOCALE}"))
         .arg(format!("--lc-ctype={LIBC_LOCALE}"))
         .arg(format!("--lc-messages={MESSAGES_LOCALE}"))
+        .arg(format!("--lc-monetary={LIBC_LOCALE}"))
+        .arg(format!("--lc-numeric={LIBC_LOCALE}"))
+        .arg(format!("--lc-time={LIBC_LOCALE}"))
         // Its own output, which a failure carries: `LC_ALL` is not set over
         // it, since that would also override the categories above.
         .env("LC_MESSAGES", MESSAGES_LOCALE)

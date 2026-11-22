@@ -113,6 +113,39 @@ async fn a_new_cluster_lowercases_and_keeps_non_ascii_letters_whatever_it_was_st
     );
 }
 
+/// A cluster comes up under a language the machine does not have: no
+/// category `initdb` reads is left to such an environment (the final suite,
+/// 2026-11-22: `de_DE.UTF-8` on the WSL box, which has only `C` locales,
+/// failed `initdb` with *invalid locale settings*). `xx_XX.UTF-8` is no
+/// machine's.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cluster_comes_up_under_a_language_the_machine_does_not_have() {
+    let test = "locale::a_cluster_comes_up_under_a_language_the_machine_does_not_have";
+    if std::env::var_os(CHILD).is_none() {
+        let env = [
+            (CHILD, "1"),
+            ("LC_ALL", "xx_XX.UTF-8"),
+            ("LANG", "xx_XX.UTF-8"),
+            ("LC_NUMERIC", "xx_XX.UTF-8"),
+            ("LC_TIME", "xx_XX.UTF-8"),
+            ("LC_MONETARY", "xx_XX.UTF-8"),
+        ];
+        let (_, output) = super::run_a_child_with(test, None, &env);
+        print!("{}", super::stdout_of_a_passed_child(test, &output));
+        return;
+    }
+    let (db, _dir) = fresh_cluster().await;
+    let row: Result<(String,), _> = sqlx::query_as("show lc_numeric").fetch_one(db.pool()).await;
+    db.stop().await.unwrap();
+    println!("lc_numeric {row:?}");
+    assert_eq!(
+        row.unwrap().0,
+        "C.UTF-8",
+        "the fixed one, not the environment's"
+    );
+}
+
 /// The server writes its messages and its log in English whatever language
 /// the machine is set to (the ux12 Windows pass, 2026-11-15: Björn's
 /// server log was German, `Dauer:` for `duration:`). knobas reads one thing
