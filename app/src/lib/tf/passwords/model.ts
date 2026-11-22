@@ -60,7 +60,12 @@ export interface Model {
 /** The id of a source's top node. */
 export const sourceNode = (sourceId: string): string => `src:${sourceId}`;
 
-const byTitle = (a: Entry, b: Entry): number => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id);
+/**
+ * One collator for every sort: `localeCompare` with options builds a collator per call, which made the model of
+ * 20,000 entries cost half a second (the page probe, 2026-11-22).
+ */
+const collate = new Intl.Collator(undefined, { sensitivity: "base" }).compare;
+const byTitle = (a: Entry, b: Entry): number => collate(a.title, b.title) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** The page's model over `held`. With more than one source, each source's folders sit under a top named after it. */
 export function model(held: Held): Model {
@@ -99,7 +104,7 @@ export function model(held: Held): Model {
   // Depth, order and counts, top down.
   const visit = (node: Node, depth: number): number => {
     node.depth = depth;
-    node.kids.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    node.kids.sort((a, b) => collate(a.name, b.name));
     node.own.sort(byTitle);
     let total = node.own.length;
     for (const kid of node.kids) total += visit(kid, depth + 1);
@@ -111,7 +116,17 @@ export function model(held: Held): Model {
   root.total = all.length;
   all.sort(byTitle);
   const m: Model = { held, root, nodes, entries, all };
-  for (const e of all) e.hay = [e.title, e.user ?? "", e.address ?? "", pathOf(m, e).join(" ")].join("\n").toLowerCase();
+  // Each folder's path as the filter reads it, once per folder rather than once per entry.
+  const paths = new Map<string | null, string>();
+  const pathText = (folder: string | null): string => {
+    let text = paths.get(folder);
+    if (text === undefined) {
+      text = chainOf(m, folder !== null ? nodes.get(folder) ?? null : null).map((n) => n.name).join(" ").toLowerCase();
+      paths.set(folder, text);
+    }
+    return text;
+  };
+  for (const e of all) e.hay = `${e.title.toLowerCase()}\n${(e.user ?? "").toLowerCase()}\n${(e.address ?? "").toLowerCase()}\n${pathText(e.folder)}`;
   return m;
 }
 

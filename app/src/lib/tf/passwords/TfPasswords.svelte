@@ -76,7 +76,9 @@
   } = $props();
 
   // ---- the read ----
-  let held = $state<Held | null>(heldNow());
+  // Raw: the read is replaced whole, never changed in place. A deep proxy over 20,000 rows made every read of the
+  // model a reactive lookup: the first open took 1.6 s at 6x (the page probe, 2026-11-22).
+  let held = $state.raw<Held | null>(heldNow());
   let failed = $state<string | null>(null);
   const m = $derived(held ? model(held) : null);
 
@@ -103,7 +105,17 @@
   });
 
   // ---- where the reader is ----
+  /**
+   * The folder a press is going to, drawn in the press's own task rather than after the address comes back through
+   * the router (four frames at 4x: the page probe, 2026-11-22). The address catching up clears it.
+   */
+  let going = $state<string | null>(null);
+  $effect.pre(() => {
+    void rest;
+    going = null;
+  });
   const where = $derived.by(() => {
+    if (going !== null) return { folder: going as string | null, entry: null as string | null };
     const [kind, id] = rest;
     if (kind === "in" && id) return { folder: id, entry: null as string | null };
     if (kind === "source" && id) return { folder: sourceNode(id), entry: null };
@@ -160,6 +172,7 @@
   function go(target: Node): void {
     picked = null;
     query = "";
+    going = target.id;
     location.hash = hashOf(target);
   }
 
@@ -192,8 +205,25 @@
     | { kind: "more"; key: string; node: Node; count: number }
     | { kind: "none"; key: string; text: string };
 
+  /**
+   * The folders whose panel the open entry sits beyond the cut of, so that panel shows whole: a string, so `lines`
+   * is built again only when it changes, never on every move of the selection (at 20,000 entries a move rebuilt
+   * every panel's lines: the page probe, 2026-11-22).
+   */
+  const lifted = $derived.by((): string => {
+    const e = openId && m ? m.entries.get(openId) : undefined;
+    if (!e || !m) return "";
+    const out: string[] = [];
+    for (const home of [e.folder, ...e.also]) {
+      const at = home !== null ? m.nodes.get(home) : undefined;
+      if (at && at.own.length > CUT_OVER && at.own.indexOf(e) >= CUT) out.push(at.id);
+    }
+    return out.join("\n");
+  });
+
   const lines = $derived.by((): Line[] => {
     if (!m || !node) return [];
+    const liftedIds = new Set(lifted.split("\n"));
     const out: Line[] = [];
     shownPanels.forEach((p, i) => {
       if (p.kind === "hits") {
@@ -214,7 +244,7 @@
       const rel = chainOf(m, at).slice(chainOf(m, node).length);
       const title = rel.length > 0 ? rel[rel.length - 1]!.name : node.kids.length > 0 ? `Directly in ${node.name}` : node.name;
       const pre = rel.length > 1 ? `${rel.slice(0, -1).map((r) => r.name).join(" / ")} / ` : "";
-      const cut = rel.length > 0 && p.rows.length > CUT_OVER && !p.rows.slice(CUT).some((e) => e.id === openId) ? CUT : p.rows.length;
+      const cut = rel.length > 0 && p.rows.length > CUT_OVER && !liftedIds.has(at.id) ? CUT : p.rows.length;
       out.push({ kind: "head", key: `h:${at.id}`, panel: i, title, pre, href: rel.length > 0 ? hashOf(at) : null, count: p.rows.length, comment: commentFolder(at) !== null, first: i === 0 });
       p.rows.slice(0, cut).forEach((e, n) => out.push({ kind: "row", key: `r:${at.id}:${e.id}`, e, path: false, last: n === cut - 1 && cut === p.rows.length }));
       if (cut < p.rows.length) out.push({ kind: "more", key: `m:${at.id}`, node: at, count: p.rows.length });

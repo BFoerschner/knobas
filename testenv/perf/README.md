@@ -105,6 +105,7 @@ an SSH tunnel.
 | `extremes.mjs`, `extremes-items.json` | the extremes an `--extremes` run seeds, syncs, presses and removes (*The extremes*, below) |
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
 | `syncing.mjs`, `lane-probe.mjs` | one source kept syncing for a run's length, and the felt waits a sync can hold timed at the backend per adapter (*With a sync running*, below) |
+| `passwords.mjs` | the Passwords page's lines (ADR-0056, the design's section 28) over the dev fake at `?pw-scale=<n>`: first open, return, folder presses, a filter keystroke, `↓` held through 600 rows, the tree's folds opened and scrolled, at 1x, 4x and 6x, over the probes' build (`KNOBAS_PERF=1 testenv/ui-checks/build-app.sh`) |
 | `monitors.mjs`, `budget-monitors.json`, `monitors-budget.sh` | Monitors' moments against a 239 Hz frame, and the lines (*Monitors at 239 Hz*, below) |
 | `keys.mjs`, `budget-keys.json`, `keys-budget.sh` | how long a key that keeps most of a page takes to draw the rows it asks for, the lines, and what `just keys-budget` runs (below) |
 | `card-drag.mjs` | a pickup, a drop and the carry's keys on the ticket board, with real mouse and key input, to the frame that shows them (ADR-0054); its lines are `budget-keys.json`'s `drag` |
