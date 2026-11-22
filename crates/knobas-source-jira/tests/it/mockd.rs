@@ -1369,6 +1369,21 @@ async fn a_ticket_is_edited_field_by_field_and_reads_back() {
         .expect("the assignable search")
         .expect("the assignee has a list");
     assert!(people.complete);
+    // Typed words find a person by their username or by their name, either
+    // alone (the final suite's mutants in mockd's assignable search: either
+    // `||` turned into `&&` went unseen).
+    for typed in ["mara.lind", "mara lind"] {
+        let found = source
+            .field_options("jira:PAY-231", "assignee", typed)
+            .await
+            .expect("the assignable search")
+            .expect("the assignee has a list");
+        assert!(
+            found.options.iter().any(|o| o.value == "mara.lindqvist"),
+            "{typed:?} finds Mara: {:?}",
+            found.options.iter().map(|o| &o.value).collect::<Vec<_>>()
+        );
+    }
     // A field whose options ride in the fields' answer has no list to ask
     // for (the final suite's mutants: the custom-field test turned around
     // sent the assignable search for every field).
