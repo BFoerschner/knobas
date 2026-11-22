@@ -74,6 +74,18 @@ GitHub's spec, every schema and every operation's page made as the worker makes 
 
 In the real app (Mac, scratch profile, a scratch Gitea with GitHub's spec), GitHub's spec filtered by *list repositories* with `GET /orgs/{org}/repos` open, at one window size: 14 adjacent pairs of the 46 rows read the same before, none after; 4 rows still run past the rail, their kept parts alone too long (`…/personal-access-token-requests/…`); `org`'s example read `example` and reads an org's login now.
 
+## The house rules, and the request's rows (2026-11-22, night)
+
+Five house-rule tests failed on the branch since the explorer landed, and the real app showed the request's form broken (labels a row off their fields, the path field empty under a red edge, filled query rows unticked).
+
+1. **The request's rows.** An empty spacer after each section's label took a cell of the form's two-column grid, so every label after it stood in the field column and every field one row down. A row is one element now (`.tf-oas-prow`, a subgrid of the form), the label first and its field after, so nothing above can shift a pair. A query or header row's tick stands before its name. An empty path value says *required*, and is marked in `--err` once a send is asked for, as the mock draws it.
+2. **Filled query rows stay unticked** (Fable, xhigh): the design's `on: required`. A value from a default or an enum is not sent until ticked or typed (GitHub's `direction` would otherwise send `asc` where the server's own default is `desc`, and the museum's examples would filter). An unticked row's value is drawn in `--ink-2`, its name in ink.
+3. **Controls are the shared ones** (the style gate): the rail's *Tags / Paths / Schemas*, a section's switch and a choice's buttons are `.tf-seg` at its own size, and *Expand all* is `.tf-btn.tf-sm` at its own; the inline form's filter answers `Esc` as every filter does (`filterKeys`, never taken by ⌘F). No rule lays out `*`: the page's measure is one box (`.tf-oas-measure`).
+4. **Code areas** (code-face, Fable, xhigh): the explorer's areas that stack code lines are an example (`.tf-oas-ex`), an answer's body (`.tf-oas-ansbody`), the request's body and a parse error, each at Code's weight and line spacing and in `tokens.css`'s list for Code's letter spacing; an answer's line numbers keep their own. An answer's windowed rows take code's row height (`codeRows(12, 1.6)`). Every `--mono` rule sets the ligature switch, and a spec's Markdown takes its words' size by role, not by `inherit`.
+5. **The rail releases what it holds** (residue): enrolled, its `ResizeObserver` and window listeners checked over three unmounts.
+
+In the real Mac window (fake corpus with GitHub's spec added in a local, uncommitted patch), before and after at 1728 x 1080: `GET /orgs/{org}/repos`'s request, its reference, `Charge` with `source`'s choice open, `POST /v1/charges` and its request. The explorer reads as before but for the rows and the shared controls' sizes (the rail's switch 2 px taller, *Expand all* in the interface's small size).
+
 ## Reversing it
 
 Each part stands alone. The explorer: `TfOpenApi` as it was at `87b4e568`, with `openapi.css`. Sending: the request column is drawn only where `api_send` is registered, so taking the command out takes the column out. *Open in*: remove `api_command` from the shipped Bruno entry and no menu offers a client. Zen mode: drop the button and the key in `TfRepoFiles` and the two classes; `tf/zen.svelte.ts` holds nothing else. A spec in a comparison: `OPENAPI.diff = false`, and the diff's sniff reads (`BY_CONTENT` in `TfDiffView`) stop with it. The settings row and the scratch folder can stay; nothing reads them.

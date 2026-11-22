@@ -3,6 +3,9 @@
  * changes something on another host is asked about in place and nothing is sent until the yes, a typed secret is
  * handed to the app once and the page keeps none, a refusal is drawn, and curl is copied with variables.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -35,7 +38,7 @@ const SPEC = JSON.stringify({
   security: [{ bearer: [] }],
   paths: {
     "/orders/{id}": {
-      get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }, { name: "expand", in: "query", schema: { type: "string" } }], responses: { "200": { description: "OK" } } },
+      get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }, { name: "expand", in: "query", schema: { type: "string" } }, { name: "limit", in: "query", schema: { type: "integer", default: 20 } }], responses: { "200": { description: "OK" } } },
       post: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], requestBody: { content: { "application/json": { schema: { type: "object", properties: { qty: { type: "integer", minimum: 1 } } } } } }, responses: { "201": { description: "Made" } } },
     },
   },
@@ -98,6 +101,78 @@ test("the line follows every key, a missing path value blocks Send, and a typed 
   expect(calls[1]!.args).toMatchObject({ method: "GET", auth: { origin: "https://shop.example.com", scheme: "bearer", place: "bearer" }, confirmed_host: null });
   expect(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')).toBeNull();
   expect(text(target.querySelector(".tf-oas-status"))).toContain("201");
+});
+
+test("each field stands in one row with its label: the name, a query row's tick, then the value", async () => {
+  // The real app drew labels a row off their fields (2026-11-22): a stray cell in the shared grid moved every pair
+  // after it. A row is one element now, so a field's label is in its own row whatever stands above it.
+  await openRequest("get /orders/{id}");
+  const grid = target.querySelector(".tf-oas-req .tf-oas-grid")!;
+  for (const child of grid.children) expect(child.matches(".tf-oas-prow, .tf-oas-sect, .tf-oas-hint"), child.outerHTML.slice(0, 80)).toBe(true);
+  const rows = [...grid.querySelectorAll<HTMLElement>(":scope > .tf-oas-prow")];
+  const fields = [...grid.querySelectorAll<HTMLElement>("input:not([type=checkbox]), select, .tf-oas-row2")];
+  expect(fields.length).toBeGreaterThanOrEqual(4);
+  for (const field of fields) {
+    const row = field.closest(".tf-oas-prow")!;
+    expect(rows, field.id).toContain(row);
+    // Two cells, the label first; the label names its own field.
+    expect(row.children).toHaveLength(2);
+    const [label, value] = [...row.children];
+    expect(label!.matches("label, .tf-oas-k")).toBe(true);
+    expect(value!.contains(field)).toBe(true);
+    if (label instanceof HTMLLabelElement && field.id !== "") expect(label.htmlFor).toBe(field.id);
+  }
+  const byName = (name: string) => rows.find((row) => text(row.firstElementChild) === name)!;
+  // The path's `id` and the query's `expand`, each beside its own field, the query row's tick before its name.
+  expect(byName("id").querySelector<HTMLInputElement>("input.tf-oas-inp")!.id).toMatch(/-path-id$/);
+  const expand = byName("expand");
+  expect(expand.querySelector<HTMLInputElement>("input.tf-oas-inp")!.id).toMatch(/-query-expand$/);
+  expect(expand.firstElementChild!.firstElementChild!.matches("input[type=checkbox]")).toBe(true);
+  expect(expand.querySelector("input[type=checkbox]")!.getAttribute("aria-label")).toBe("Send expand");
+  // A row lays its two cells on the grid's own columns (jsdom draws nothing, so the rule is read).
+  const css = readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8");
+  expect(css).toMatch(/\n\.tf-oas-prow \{ grid-column: 1 \/ -1; display: grid; grid-template-columns: subgrid;/);
+  expect(css).toMatch(/\n\.tf-oas-grid \{ display: grid; grid-template-columns: [^;]+ minmax\(0, 1fr\);/);
+});
+
+test("a query row the spec fills starts unticked and in second ink, and a tick or a key sends it", async () => {
+  // Fable's ruling (2026-11-22, option A): the design's `on: required`; the value only shows what one looks like.
+  await openRequest("get /orders/{id}");
+  const line = () => [...target.querySelectorAll(".tf-oas-line > span")].map((e) => text(e)).join(" ");
+  const row = () => target.querySelector<HTMLInputElement>('[id$="-query-limit"]')!.closest(".tf-oas-prow")!;
+  const tick = () => row().querySelector<HTMLInputElement>("input[type=checkbox]")!;
+  expect(row().querySelector<HTMLInputElement>("input.tf-oas-inp")!.value).toBe("20");
+  expect(tick().checked).toBe(false);
+  expect(row().classList.contains("tf-oas-off")).toBe(true);
+  expect(line()).toBe("GET https://shop.example.com/api/orders/{id}");
+  tick().click();
+  flushSync();
+  expect(row().classList.contains("tf-oas-off")).toBe(false);
+  expect(line()).toBe("GET https://shop.example.com/api/orders/{id}?limit=20");
+  tick().click();
+  flushSync();
+  expect(row().classList.contains("tf-oas-off")).toBe(true);
+  input(row().querySelector<HTMLInputElement>("input.tf-oas-inp")!, "50");
+  expect(tick().checked).toBe(true);
+  expect(row().classList.contains("tf-oas-off")).toBe(false);
+  expect(line()).toBe("GET https://shop.example.com/api/orders/{id}?limit=50");
+  // The rule draws it: an off row's value in second ink.
+  expect(readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8")).toContain(".tf-oas-prow.tf-oas-off > .tf-oas-inp { color: var(--ink-2); }");
+});
+
+test("an empty path value says required, and is marked once a send is asked for", async () => {
+  await openRequest("get /orders/{id}");
+  const id = () => target.querySelector<HTMLInputElement>('[id$="-path-id"]')!;
+  expect(id().placeholder).toBe("required");
+  expect(id().classList.contains("tf-oas-missing")).toBe(false);
+  expect(text(target.querySelector(".tf-oas-send"))).toContain("Fill in id.");
+  target.querySelector(".tf-oas")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+  await settle();
+  expect(calls).toEqual([]);
+  expect(id().classList.contains("tf-oas-missing")).toBe(true);
+  expect(id().getAttribute("aria-invalid")).toBe("true");
+  input(id(), "7");
+  expect(id().classList.contains("tf-oas-missing")).toBe(false);
 });
 
 test("a POST to another host is asked about in place, and nothing is sent until the yes", async () => {

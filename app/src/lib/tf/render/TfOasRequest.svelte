@@ -116,7 +116,11 @@
 
   const why = $derived(out.blocked ?? (out.missing.length > 0 ? `Fill in ${out.missing.join(", ")}.` : scheme !== null && !isHeld && secret === "" ? null : null));
 
+  /** A send was asked for with a path value missing: the empty fields are marked until filled (the mock's `missing`). */
+  let tried = $state(false);
+
   async function sendNow(confirmed: string | null) {
+    if (out.missing.length > 0) tried = true;
     if (running || out.blocked !== null || out.missing.length > 0 || op.webhook) return;
     if (!out.safe && !out.local && confirmed === null && !confirmedHosts.has(out.host)) {
       asking = { host: out.host };
@@ -196,6 +200,7 @@
     <p class="tf-oas-fnote">A webhook is what the API sends to you; knobas has nothing to send.</p>
   {:else}
     <div class="tf-oas-grid">
+      <div class="tf-oas-prow">
       <label for="oas-server-{place}">Server</label>
       <select
         id="oas-server-{place}"
@@ -216,9 +221,11 @@
           </optgroup>
         {/if}
       </select>
+      </div>
       {#if specServer !== undefined && draft.server.kind === "spec"}
         {@const vars = draft.server.variables}
         {#each Object.entries(specServer.variables) as [name, v] (name)}
+          <div class="tf-oas-prow">
           <label class="tf-oas-code" for="oas-var-{place}-{name}">{`{${name}}`}</label>
           {#if v.enum.length > 0}
             <select id="oas-var-{place}-{name}" value={vars[name] ?? v.default} onchange={(e) => edit((d) => { if (d.server.kind === "spec") d.server.variables = { ...d.server.variables, [name]: (e.currentTarget as HTMLSelectElement).value }; })}>
@@ -227,6 +234,7 @@
           {:else}
             <input class="tf-oas-inp" id="oas-var-{place}-{name}" value={vars[name] ?? v.default} oninput={(e) => edit((d) => { if (d.server.kind === "spec") d.server.variables = { ...d.server.variables, [name]: (e.currentTarget as HTMLInputElement).value }; })} />
           {/if}
+          </div>
         {/each}
       {/if}
       {#if op.servers.length === 0 && saved.length === 0}
@@ -234,47 +242,60 @@
       {/if}
 
       {#if accepted.length > 0}
+        <div class="tf-oas-prow">
         <label for="oas-scheme-{place}">Sign in with</label>
         <select id="oas-scheme-{place}" value={draft.scheme ?? ""} onchange={(e) => edit((d) => (d.scheme = (e.currentTarget as HTMLSelectElement).value || null))}>
           {#each accepted as s (s.name)}<option value={s.name}>{schemeWords(s)} ({s.name})</option>{/each}
           <option value="">Nothing</option>
         </select>
+        </div>
         {#if scheme !== null}
           {#if isHeld && secret === ""}
+            <div class="tf-oas-prow">
             <span class="tf-oas-k">Secret</span>
             <div class="tf-oas-row2"><span class="tf-oas-inp tf-oas-dots" aria-label="Held">••••••••••••</span></div>
+            </div>
             <p class="tf-oas-hint">Held for {out.host || origin} until knobas quits, and sent nowhere else. Type again to change it.</p>
           {:else}
             {#if scheme.type === "http" && scheme.scheme === "basic"}
+              <div class="tf-oas-prow">
               <label for="oas-user-{place}">User name</label>
               <input class="tf-oas-inp" id="oas-user-{place}" autocomplete="off" bind:value={user} />
+              </div>
             {/if}
+            <div class="tf-oas-prow">
             <label for="oas-secret-{place}">{scheme.type === "http" && scheme.scheme === "basic" ? "Password" : scheme.type === "apiKey" ? scheme.keyName : "Token"}</label>
             <input class="tf-oas-inp" id="oas-secret-{place}" type="password" autocomplete="off" spellcheck="false" bind:value={secret} />
+            </div>
             <p class="tf-oas-hint">Kept in memory until knobas quits, for {out.host || "this server"} only. Never saved.</p>
           {/if}
         {/if}
       {/if}
 
       {#each groups as [where, list] (where)}
-        <span class="tf-oas-k tf-oas-sect">{WHERE[where]}</span><span></span>
+        <span class="tf-oas-k tf-oas-sect">{WHERE[where]}</span>
         {#each list as p (`${p.in}:${p.name}`)}
-          {#if where === "path"}
-            <label class="tf-oas-k tf-oas-code" for="oas-p-{place}-{p.in}-{p.name}">{p.name}</label>
-          {:else}
-            <label class="tf-oas-k tf-oas-code">
-              <input type="checkbox" checked={p.on || p.required} disabled={p.required} onchange={(e) => edit((d) => (d.params.find((x) => x.name === p.name && x.in === p.in)!.on = (e.currentTarget as HTMLInputElement).checked))} />
-              {p.name}
+          <!-- One row a parameter, on the grid's two columns: its tick and name, then its value (the mock's `reqHtml`). -->
+          <!-- A row not sent draws its value in second ink: the spec's value shows what one looks like, the tick says it goes (Fable, 2026-11-22). -->
+          <div class="tf-oas-prow" class:tf-oas-off={!(p.on || p.required)}>
+            <label class="tf-oas-k tf-oas-code" for="oas-p-{place}-{p.in}-{p.name}" title={p.name}>
+              {#if where !== "path"}
+                <input type="checkbox" aria-label="Send {p.name}" checked={p.on || p.required} disabled={p.required} onchange={(e) => edit((d) => (d.params.find((x) => x.name === p.name && x.in === p.in)!.on = (e.currentTarget as HTMLInputElement).checked))} />
+              {/if}
+              <span class="tf-oas-pname">{p.name}</span>
             </label>
-          {/if}
-          <input
-            class="tf-oas-inp"
-            class:tf-oas-missing={where === "path" && p.value === ""}
-            id="oas-p-{place}-{p.in}-{p.name}"
-            value={p.value}
-            spellcheck="false"
-            oninput={(e) => setParam(p, (e.currentTarget as HTMLInputElement).value)}
-          />
+            <input
+              class="tf-oas-inp"
+              class:tf-oas-missing={tried && where === "path" && p.value === ""}
+              id="oas-p-{place}-{p.in}-{p.name}"
+              value={p.value}
+              placeholder={p.required ? "required" : ""}
+              aria-required={p.required}
+              aria-invalid={tried && where === "path" && p.value === ""}
+              spellcheck="false"
+              oninput={(e) => setParam(p, (e.currentTarget as HTMLInputElement).value)}
+            />
+          </div>
         {/each}
       {/each}
     </div>

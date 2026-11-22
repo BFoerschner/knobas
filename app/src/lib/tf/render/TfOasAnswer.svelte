@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { Windowed } from "../../shell/windowed.svelte";
+  import { codeRows } from "../fonts.svelte";
   import { apiAnswerBody, apiSaveAnswer, type ApiAnswer, type SentLine } from "../../ipc/api";
   import { ipcErrorMessage } from "../../ipc";
   import { push } from "../../shell/toasts.svelte";
@@ -58,7 +59,9 @@
   });
 
   const lines = $derived(body === null ? [] : body.text.split("\n"));
-  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 19, scrolls: true });
+  // An answer's line is 12 px of code at its code row height (`codeRows`), and follows code's size and spacing.
+  const rowsOf = codeRows(12, 1.6);
+  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: rowsOf.estimate, scrolls: true, textSize: rowsOf.textSize });
 
   async function copy() {
     if (body === null) return;

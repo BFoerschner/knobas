@@ -51,6 +51,8 @@
 </script>
 
 <div class="tf-oas-col tf-oas-page" bind:this={scroller} tabindex="-1" aria-label="Reference">
+  <!-- The page keeps a reading measure in a wide column; one box holds it, so no rule lays out `*`. -->
+  <div class="tf-oas-measure">
   {#if st.backs.length > 0 && pref === null}
     <div class="tf-oas-back"><button type="button" class="tf-btn tf-sm" onclick={onback}>Back to {st.backs.at(-1)?.label}</button></div>
   {/if}
@@ -81,4 +83,5 @@
     {@const s = shown.answer}
     <TfOasSchemaPage {st} name={s.name} node={s.node} shape={s.shape} uses={s.uses} sample={s.sample} given={s.given} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, s.name)} />
   {/if}
+  </div>
 </div>

@@ -485,6 +485,7 @@ const TfOasDiff = (await import("../tf/render/TfOasDiff.svelte")).default;
 const TfOasMedia = (await import("../tf/render/TfOasMedia.svelte")).default;
 const TfOasShape = (await import("../tf/render/TfOasShape.svelte")).default;
 const TfOasRequest = (await import("../tf/render/TfOasRequest.svelte")).default;
+const TfOasRail = (await import("../tf/render/TfOasRail.svelte")).default;
 const TfApiServersSection = (await import("../tf/settings/TfApiServersSection.svelte")).default;
 const { OasState } = await import("../tf/render/oas.svelte");
 const { SpecSession } = await import("../render/openapi-port");
@@ -1843,6 +1844,36 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /**
+     * The explorer's rail (ux31): its row widths are read on resize through a `ResizeObserver` it disconnects, its
+     * window of rows listens on the window, and a place it did not pick scrolls its row into view after a tick.
+     */
+    name: "TfOasRail",
+    source: "lib/tf/render/TfOasRail.svelte",
+    open: (target) => {
+      const st = oasState();
+      st.take({
+        key: "openapi",
+        version: "3.0.0",
+        title: "T",
+        apiVersion: "1",
+        description: "",
+        servers: [],
+        security: [],
+        info: { contact: null, license: null, terms: "", externalDocs: null },
+        webhooks: [],
+        tags: [],
+        ops: [{ i: 0, method: "get", path: "/a", summary: "", operationId: null, tags: [], deprecated: false, anchor: "get /a" }],
+        pathRefs: [],
+        schemas: [],
+        schemaBase: "#/components/schemas/",
+        problems: [],
+      } as never);
+      st.current = "get /a";
+      return { app: mount(TfOasRail, { target, props: { st, ranked: null, onpick: () => {}, onpref: () => {} } }) };
+    },
   },
   {
     /** Settings › API servers (ux31): the saved servers answer late. */

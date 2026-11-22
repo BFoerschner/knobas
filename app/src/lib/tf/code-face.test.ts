@@ -475,8 +475,10 @@ const CODE_AREAS: Record<string, string> = {
   "lib/tf/css/jar.css .tf-jar-bad pre, .tf-jar-pending pre": "1.6",
   "lib/tf/css/markdown.css .tf-md .tf-fence .tf-stepfail pre": "1.5",
   "lib/tf/css/markdown.css .tf-md .tf-fence pre": "1.6",
+  "lib/tf/css/openapi.css .tf textarea.tf-oas-body": "1.6",
+  "lib/tf/css/openapi.css .tf-oas-ansbody": "1.6",
   "lib/tf/css/openapi.css .tf-oas-bad pre": "1.6",
-  "lib/tf/css/openapi.css .tf-oas-ex pre": "1.6",
+  "lib/tf/css/openapi.css .tf-oas-ex": "1.6",
   "lib/tf/css/pr.css .tf-log": "1.5",
 };
 
@@ -511,7 +513,7 @@ test("(n) every area that stacks code lines draws its rows at Code's line spacin
   expect(areas, "the areas' letter spacing rule").not.toBeNull();
   const named = new Set(areas![1]!.split(",").map((selector) => selector.trim()));
   for (const key of Object.keys(CODE_AREAS)) for (const selector of key.split(" ").slice(1).join(" ").split(", ")) expect(named, selector).toContain(selector);
-  expect(tokens).toMatch(/\.tf-code \.tf-l > span:first-child, \.tf-diff \.tf-no, \.tf-ll :is\(\.tf-no, \.tf-ts\), :is\(\.tf-was-hunk, \.tf-pdfd-hunk\) \.tf-no, \.tf-editor \.tf-nums \{ letter-spacing: normal; \}/);
+  expect(tokens).toMatch(/\.tf-code \.tf-l > span:first-child, \.tf-diff \.tf-no, \.tf-ll :is\(\.tf-no, \.tf-ts\), :is\(\.tf-was-hunk, \.tf-pdfd-hunk\) \.tf-no, \.tf-editor \.tf-nums, \.tf-oas-ln \{ letter-spacing: normal; \}/);
 });
 
 test("(o) words inside a code area keep the line spacing they had: a file's head, a comment box, a banner, a log's step", () => {

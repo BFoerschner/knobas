@@ -20,6 +20,7 @@
   import { flushSync, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { filterKeys } from "../filter-keys";
   import TfOasOperation from "./TfOasOperation.svelte";
   import TfOasSchemaPage from "./TfOasSchemaPage.svelte";
   import { OasState, type Place } from "./oas.svelte";
@@ -157,7 +158,8 @@
       <div class="tf-oas-api"><b title={index.title}>{index.title}</b>{#if index.apiVersion !== ""}<span class="tf-lab">{index.apiVersion}</span>{/if}<span class="tf-lab">{index.key === "swagger" ? "Swagger" : "OpenAPI"} {index.version}</span></div>
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input placeholder="Filter endpoints and schemas" aria-label="Filter endpoints and schemas" bind:value={typed} />
+        <!-- `Esc` clears it as it clears every filter; it narrows this block's own list, so ⌘F keeps the page's meaning. -->
+        <input placeholder="Filter endpoints and schemas" aria-label="Filter endpoints and schemas" bind:value={typed} {@attach filterKeys({ rail: true })} />
       </label>
       <span class="tf-oas-count">{marks === null ? `${opCount.toLocaleString("en")} ${opCount === 1 ? "endpoint" : "endpoints"} · ${index.schemas.length.toLocaleString("en")} ${index.schemas.length === 1 ? "schema" : "schemas"}` : `${rows.length.toLocaleString("en")} changed`}</span>
     </div>
