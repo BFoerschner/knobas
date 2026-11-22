@@ -5508,7 +5508,10 @@ async fn a_tickets_fields_are_edited_and_read_back_on_a_real_jira() {
         .as_str()
         .unwrap()
         .to_owned();
-    if let Some(to) = reach.first().cloned() {
+    // Jira lists the status a ticket stands in among those it can reach: a move is to another one.
+    let to = reach.iter().find(|s| **s != was).cloned();
+    assert!(to.is_some(), "{key} can go somewhere from {was}: {reach:?}");
+    if let Some(to) = to {
         source
             .write(WriteOp::Transition {
                 entity: id.clone(),
@@ -5526,6 +5529,7 @@ async fn a_tickets_fields_are_edited_and_read_back_on_a_real_jira() {
                 })
                 .await
                 .expect("Jira takes the move back");
+            assert_eq!(issue("status").await["status"]["name"], was.as_str());
         }
         println!("{key} moved {was} -> {to} and back where Jira lets it; reachable: {reach:?}");
     }
