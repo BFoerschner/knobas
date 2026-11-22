@@ -354,6 +354,7 @@ mod tests {
                         username: user.into(),
                         password: NEEDS_ESCAPING.into(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

@@ -25,6 +25,7 @@ export type {
   SiteRouted,
   SiteRoutedTo,
   SiteSetting,
+  SiteSignIn,
   SiteStatus,
 } from "./generated/site";
 
@@ -121,4 +122,19 @@ export function sitesKept(): Promise<number> {
 /** Store *Sites kept open* (1 to 6). */
 export function setSitesKept(count: number): Promise<number> {
   return invoke<number>("set_sites_kept", { count });
+}
+
+/** Save or change the web sign-in typed into the site's own form (ux29). Nothing reads the password back. */
+export function siteSignInSave(id: string, username: string, password: string): Promise<SiteSetting> {
+  return invoke<SiteSetting>("site_sign_in_save", { id, username, password });
+}
+
+/** Remove the site's saved web sign-in. */
+export function siteSignInRemove(id: string): Promise<SiteSetting> {
+  return invoke<SiteSetting>("site_sign_in_remove", { id });
+}
+
+/** *Fill sign-in*: the saved sign-in into the site's page now, if it is on the source's own origin. */
+export function siteFill(source: string): Promise<void> {
+  return invoke<void>("site_fill", { source });
 }

@@ -4,7 +4,7 @@ edition.workspace = true
 # The `knobas:adapter` interface version this SDK binds (#2028), not the
 # workspace's: `wit/adapter.wit`'s package version, which a test holds it to.
 # A WIT minor bumps this with it, in the same §10.8 entry.
-version = "1.6.0"
+version = "1.7.0"
 license.workspace = true
 
 # The Rust SDK of the adapter standard (spec #1192, ADR-0028): the
@@ -41,5 +41,10 @@ v1_3 = []
 # `tickets`, so `Adapter` has no `ticket_fields` or `field_options`. What the
 # host's hold on a component built against the minor before ticket fields is
 # tested with (ADR-0054): the fixture's `v1_5` turns it on. `v1_0` wins over
-# `v1_3` wins over `v1_5`.
+# `v1_3` wins over `v1_5` wins over `v1_6`.
 v1_5 = []
+# Build against the frozen 1.6.0 world (`wit-1.6.0/`), the minor before the
+# descriptor's `web_sign_in` is read (ADR-0050, ux30): the same types, and
+# the host drops a sign-in page such a component declares. The fixture's
+# `v1_6` turns it on.
+v1_6 = []

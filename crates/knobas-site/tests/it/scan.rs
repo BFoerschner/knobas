@@ -65,8 +65,9 @@ fn a_site_is_handed_no_ipc_no_scheme_and_no_script_at_load() {
     );
 }
 
-/// The scripts knobas may run in a site: `scripts.rs`'s named constants.
-const SCRIPTS: &[&str] = &["DIRTY_PROBE"];
+/// The scripts knobas may run in a site: `scripts.rs`'s named constant, and
+/// the function that applies the other (`FILL_SIGN_IN`) to its values.
+const SCRIPTS: &[&str] = &["DIRTY_PROBE", "fill_sign_in"];
 
 #[test]
 fn a_site_runs_only_the_named_scripts() {

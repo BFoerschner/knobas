@@ -176,6 +176,7 @@ mod tests {
                         username: "admin".into(),
                         password: "pw".into(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

@@ -77,6 +77,7 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_sign_in: template.web_sign_in.clone(),
         code_pages: None,
         write_ops: if writes { write_ops() } else { Vec::new() },
         ..template
@@ -134,6 +135,8 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        // A single-page app: its sign-in dialog stands on whatever page loads (ADR-0050).
+        web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::any_page()),
         code_pages: None,
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {

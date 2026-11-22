@@ -1,0 +1,483 @@
+<!-- xwiki's sign-in page (XWiki 17.10.15), recorded 2026-11-22 from the testenv's XWiki (scripts, styles and icons removed; hidden values emptied). The external adapter's proof (knobas-adapter-xwiki). -->
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en" data-xwiki-paged-media="screen" data-xwiki-reference="xwiki:XWiki.XWikiLogin" data-xwiki-document="XWiki.XWikiLogin" data-xwiki-wiki="xwiki" data-xwiki-space="XWiki" data-xwiki-page="XWikiLogin" data-xwiki-isnew="true" data-xwiki-version="1.1" data-xwiki-rest-url="/xwiki/rest/wikis/xwiki/spaces/XWiki/pages/XWikiLogin" data-xwiki-locale="" data-xwiki-real-locale="" data-xwiki-form-token="jSgmETzIgAHcGx24YrEd1g" data-xwiki-action="login">
+  <head>
+                                                    <title>XWikiLogin - XWiki</title>
+  </head>
+    <body id="body" class="skin-flamingo wiki-xwiki loginbody panel-left-width-Medium panel-right-width-Medium drawer drawer--right preference-underlining-only-inline-links
+   space-XWiki   hidelefthideright    ">
+<div id="xwikimaincontainer">
+<div id="xwikimaincontainerinner">
+<div class="skip-nav">
+          <a class="btn btn-default" href="#mainContentArea">Skip to Content</a>
+</div>
+  <div id="menuview">
+        <header class="navbar navbar-default actionmenu"
+  aria-label="Wiki main menu ">
+    <div class="container-fluid">
+            <div class="navbar-header">
+                        <div id="companylogo">
+  <a href="/xwiki/bin/view/Main/" rel="home"     title="Home"     class="navbar-brand">    <span class="sr-only">Home</span>
+    <img src="/xwiki/skins/flamingo/logo.svg?cache-version=1794307718000"       alt="Logo of the wiki"/>  </a>
+</div>
+              </div>
+            <div id="xwikimainmenu">
+          <ul class='nav navbar-nav navbar-left'>
+                </ul>
+          <ul class="nav navbar-nav navbar-right">
+                                                        <li>
+    <a
+      id="tmRegister"
+      href="/xwiki/bin/register/XWiki/XWikiRegister?xredirect=%2Fxwiki%2Fbin%2Flogin%2FXWiki%2FXWikiLogin"
+      rel="nofollow"
+    >Register</a>
+  </li>
+                                                  <li>
+    <a
+      id="tmLogin"
+      href="/xwiki/bin/login/XWiki/XWikiLogin?xredirect=%2Fxwiki%2Fbin%2Flogin%2FXWiki%2FXWikiLogin&loginLink=1"
+      rel="nofollow"
+    >Log-in</a>
+  </li>
+                                         <li>
+<form class='navbar-form globalsearch globalsearch-close form-inline' id='globalsearch' action='/xwiki/bin/view/Main/Search'
+role='search'>
+<label class='hidden' for='headerglobalsearchinput'>Search</label>
+<button type='submit' class='btn' title="Search"
+aria-expanded='false' aria-controls='headerglobalsearchinput'><span class="fa fa-search" aria-hidden="true"></span></button>
+<input type='text' name='text' placeholder="search..." id='headerglobalsearchinput' disabled />
+</form>
+</li>
+              <li>
+    <button type="button" id="tmDrawerActivator" class="btn btn-link icon-navbar drawer-opener" aria-controls="tmDrawer"
+      aria-expanded="false" title="Drawer"
+      ><span class="sr-only">Toggle navigation</span
+      ><span class="fa fa-bars" aria-hidden="true"></span></button>
+<dialog class="drawer-nav" id="tmDrawer"
+aria-label="Top drawer menu">
+  <ul class="drawer-menu">
+                <li class="drawer-brand clearfix">
+      <a href="/xwiki/bin/view/XWiki/XWikiGuest">
+                                        <img class='avatar avatar_120' src='/xwiki/bin/skin/resources/icons/xwiki/noavatar.png?cache-version=1794307722000' alt='XWikiGuest' title='XWikiGuest'/>      </a>
+      <div class="brand-links">
+                                                              </div>
+      <button class="btn btn-primary drawer-close" title="Close the drawer"><span class="fa fa-times" aria-hidden="true"></span></button>
+    </li>
+                                  <li class="drawer-category-header"><hr class="hidden"/>Home</li>
+                                        <li class="drawer-category-header"><hr class="hidden"/>Global</li>
+  <li>
+    <a class="drawer-menu-item" href="/xwiki/bin/view/XWiki/XWikiLogin?xpage=whatsnew">
+      <span class="drawer-menu-item-icon">
+        <span class="fa fa-question-circle" aria-hidden="true"></span>
+      </span>
+      <span class="drawer-menu-item-text">What&#39;s New</span>
+    </a>
+  </li>
+                                          <li class="drawer-menuseparator"></li>
+      </ul>
+</dialog>
+  </li>
+      </ul>
+          </div>    </div>   </header>
+  </div>
+ <div id="headerglobal">
+  <div id="globallinks">
+  </div>   <div class="clearfloats"></div>
+                                                                                                                                                                                                                                                                            <template id="realtime-edit-toolbar">
+<div class="realtime-edit-toolbar" data-user-id="">
+<div class="realtime-edit-toolbar-left">
+<input type="hidden" name="preventEmptyRevision" value="" />
+<div class="btn-group dropup">
+<button
+type="button"
+class="btn btn-primary realtime-action-done"
+title="Save and return to view mode"
+>
+<span class="fa fa-check" aria-hidden="true"></span>
+Done
+</button>
+<button
+type="button"
+class="btn btn-primary dropdown-toggle"
+data-toggle="dropdown"
+aria-haspopup="true"
+aria-expanded="false"
+>
+<span class="caret"></span>
+<span class="sr-only">Toggle dropdown</span>
+</button>
+<ul class="dropdown-menu">
+<li>
+<a
+href="#"
+class="realtime-action-summarize"
+title="Summarize your changes and return to view mode"
+data-continue="false"
+data-toggle="modal"
+data-target="#realtime-changeSummaryModal"
+>Summarize &#38; Done</a>
+</li>
+<li>
+<a
+href="#"
+class="realtime-action-leave"
+title="Leave the realtime collaboration and continue editing alone"
+data-toggle="modal"
+data-target="#realtime-leave-modal"
+>Leave Collaboration</a>
+</li>
+</ul>
+</div>
+<realtime-status
+class="realtime-connection-status"
+data-status-dirty="Disconnected"
+data-status-cleaning="Connecting"
+></realtime-status>
+<ul
+class="realtime-users"
+data-limit="4"
+>
+<li><!-- User --></li>
+</ul>
+<div class="btn-group dropup realtime-users-dropdown">
+<button
+type="button"
+class="btn dropdown-toggle realtime-action-users badge"
+title="See who&#39;s editing"
+data-toggle="dropdown"
+aria-haspopup="true"
+aria-expanded="false"
+data-more=""
+>
+<span class="sr-only">Users</span>
+</button>
+<ul class="dropdown-menu">
+<li><!-- User --></li>
+</ul>
+</div>
+</div>
+<div class="realtime-edit-toolbar-right">
+<realtime-status
+class="realtime-save-status"
+data-status-dirty="Unsaved"
+data-status-cleaning="Saving"
+data-status-clean="Saved"
+></realtime-status>
+<div class="btn-group dropup">
+<button
+type="button"
+class="btn btn-default dropdown-toggle realtime-action-history"
+title="Recent versions"
+data-toggle="dropdown"
+aria-haspopup="true"
+aria-expanded="false"
+>
+<span class="fa fa-clock-o" aria-hidden="true"></span>
+<span class="sr-only">History</span>
+</button>
+<ul
+class="dropdown-menu dropdown-menu-right realtime-versions"
+data-limit="5"
+>
+<li class="dropdown-header">
+Recent versions
+</li>
+<li role="separator" class="divider"></li>
+<li>
+<a
+href="#"
+class="realtime-action-summarize"
+title="Summarize your changes and continue editing"
+data-continue="true"
+data-toggle="modal"
+data-target="#realtime-changeSummaryModal"
+>Summarize Changes</a>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</template>
+<template id="realtime-user">
+<a
+href="#"
+class="realtime-user"
+data-id=""
+data-reference=""
+>
+<span class="realtime-user-avatar-wrapper" data-abbr="">
+<img
+class="realtime-user-avatar"
+src="/xwiki/bin/skin/resources/icons/xwiki/noavatar.png?cache-version=1794307722000"
+alt="Username"
+title=""
+/>
+</span>
+<span class="realtime-user-name" data-count=""></span>
+</a>
+</template>
+<template id="realtime-spinner">
+</template>
+<template id="realtime-status">
+<realtime-spinner></realtime-spinner>
+</template>
+<template id="realtime-version">
+<a
+href=""
+class="realtime-version"
+data-toggle="modal"
+data-target="#realtime-version-modal"
+data-remote="false"
+>
+<span class="realtime-version-icon">
+<span class="fa fa-clock-o" aria-hidden="true"></span>
+</span>
+<span class="realtime-version-info">
+<span class="realtime-version-number"></span>
+<span class="realtime-version-date"></span>
+</span>
+</a>
+</template>
+<template id="realtime-changeSummaryModal-template">
+<div id="realtime-changeSummaryModal" class="modal fade" tabindex="-1" role="dialog">
+<div class="modal-dialog" role="document">
+<div class="modal-content">
+<div class="modal-header">
+<button type="button" class="close" data-dismiss="modal"
+aria-label="Close">
+<span aria-hidden="true">&times;</span>
+</button>
+<div class="modal-title">
+Summarize Changes
+</div>
+</div>
+<div class="modal-body xform">
+<ul class="nav nav-tabs" role="tablist">
+<li role="presentation" class="active">
+<a
+href="#realtime-changeSummaryModal-summaryTab"
+aria-controls="realtime-changeSummaryModal-summaryTab"
+role="tab"
+data-toggle="tab"
+>
+Summary
+</a>
+</li>
+<li role="presentation">
+<a
+href="#realtime-changeSummaryModal-changesTab"
+aria-controls="realtime-changeSummaryModal-changesTab"
+role="tab"
+data-toggle="tab"
+>
+Changes
+</a>
+</li>
+</ul>
+<div class="tab-content">
+<div
+role="tabpanel"
+class="tab-pane active"
+id="realtime-changeSummaryModal-summaryTab"
+>
+<dl>
+<dt>
+<label for="realtime-changeSummaryModal-summary" hidden>
+Summary
+</label>
+<span class="xHint">
+Enter a brief description of your changes
+(Required)
+</span>
+</dt>
+<dd>
+<textarea
+id="realtime-changeSummaryModal-summary"
+name="summary"
+maxlength="1023"
+rows="10"
+title="Summary"
+></textarea>
+</dd>
+<dt id="realtime-changeSummaryModal-minorChange" data-continue="false">
+<label>
+<input type="checkbox" name="minorChange" />
+Minor change
+</label>
+<span class="xHint">
+Minor changes are by default collapsed in the page history.
+</span>
+</dt>
+<dd></dd>
+</dl>
+</div>
+<div
+role="tabpanel"
+class="tab-pane"
+id="realtime-changeSummaryModal-changesTab"
+>
+<realtime-spinner></realtime-spinner>
+<div class="diff-group"></div>
+<div class="box infomessage noChange">
+No changes
+</div>
+<div class="box infomessage isNew">
+The page does not exist yet.
+</div>
+<div class="box errormessage">
+Failed to load changes
+</div>
+</div>
+</div>
+</div>
+<div class="modal-footer">
+<button type="button" class="btn btn-primary">
+<span data-continue="true">Save</span>
+<span data-continue="false">Done</span>
+</button>
+<button type="button" class="btn btn-default" data-dismiss="modal">
+Cancel
+</button>
+</div>
+</div>
+</div>
+</div>
+</template>
+<template id="realtime-version-modal-template">
+<div id="realtime-version-modal" class="modal fade" tabindex="-1" role="dialog">
+<div class="modal-dialog modal-lg" role="document">
+<div class="modal-content">
+<div class="modal-header">
+<button type="button" class="close" data-dismiss="modal"
+aria-label="Close">
+<span aria-hidden="true">&times;</span>
+</button>
+<div class="modal-title">
+Version <span class="realtime-version-number"></span> by <span class="realtime-version-author"></span> on <span class="realtime-version-date"></span>
+</div>
+</div>
+<div class="modal-body">
+<realtime-document-viewer
+reference="xwiki:XWiki.XWikiLogin"
+locale=""
+version=""
+alt="Failed to load version."
+></realtime-document-viewer>
+</div>
+<div class="modal-footer">
+<button type="button" class="btn btn-default" data-dismiss="modal">
+Close
+</button>
+</div>
+</div>
+</div>
+</div>
+</template>
+<template id="realtime-leave-modal-template">
+<div id="realtime-leave-modal" class="modal fade" tabindex="-1" role="dialog">
+<div class="modal-dialog" role="document">
+<div class="modal-content">
+<div class="modal-header">
+<button type="button" class="close" data-dismiss="modal"
+aria-label="Close">
+<span aria-hidden="true">&times;</span>
+</button>
+<div class="modal-title">
+Leave Collaboration
+</div>
+</div>
+<div class="modal-body">
+Are you sure you want to leave the realtime collaboration and continue editing alone? The changes you save while editing alone will lead to merge conflicts with the changes auto-saved by the realtime editing session.
+</div>
+<div class="modal-footer">
+<button type="button" class="btn btn-primary" data-dismiss="modal">
+Leave
+</button>
+<button type="button" class="btn btn-default" data-dismiss="modal">
+Cancel
+</button>
+</div>
+</div>
+</div>
+</div>
+</template>
+<template id="realtime-warning">
+<button
+type="button"
+class="btn btn-link realtime-warning realtime-warning-connected"
+data-toggle="popover"
+data-placement="top"
+title="Concurrent editing warning"
+data-content="Someone is editing this page outside the realtime collaboration session. Their changes could cause merge conflicts on save."
+>
+<span class="fa fa-exclamation-triangle" aria-hidden="true"></span>
+</button>
+<button
+type="button"
+class="btn btn-link realtime-warning realtime-warning-disconnected"
+data-toggle="popover"
+data-placement="top"
+title="Concurrent editing warning"
+data-content="You&#39;re editing outside the realtime collaboration session. Your changes can cause merge conflicts on save."
+>
+<span class="fa fa-exclamation-triangle" aria-hidden="true"></span>
+</button>
+</template>
+      <div class="hidden">
+<input id="defaultImageStylesRestURL" name="defaultImageStylesRestURL" type="hidden" value="" />
+<input id="imageStylesRestURL" name="imageStylesRestURL" type="hidden" value="" />
+</div>
+  </div> 
+<div class="contenthidelefthideright" id="contentcontainer">
+  <div id="contentcolumn"> 
+<div class="main layoutsubsection">
+<main id="mainContentArea">
+<form id="loginForm" action="/xwiki/bin/loginsubmit/XWiki/XWikiLogin" method="post" class="xform xwiki-submit-once">
+<div class="hidden"><input type="hidden" name="xredirect" value=""/>
+  <input type="hidden" name="form_token" value=""/>
+</div>
+  <div class="centered panel panel-default xwikimessage">
+    <div class="panel-heading">
+      <div class="panel-title">Log-in</div>
+    </div>
+    <div class="panel-body">
+      <dl>
+  <dt>
+    <label for="j_username">Username</label>
+  </dt>
+  <dd class="input-group">
+    <span class="input-group-addon"><span class="fa fa-user" aria-hidden="true"></span></span>
+        <input class="form-control" type="text" id="j_username" size="60" name="j_username" value=""
+      autocomplete='username' autofocus />
+  </dd>
+  <dt>
+    <label for="j_password">Password</label>
+  </dt>
+  <dd class="input-group">
+    <span class="input-group-addon"><span class="fa fa-lock" aria-hidden="true"></span></span>
+    <input type="password" id="j_password" size="60" name="j_password" value="" autocomplete='current-password'/>
+  </dd>
+  <dt></dt>
+  <dd>
+    <label class="xHint" for="rememberme">
+      <input id="rememberme" type="checkbox" name="j_rememberme" value="true" /> Remember me
+    </label>
+  </dd>
+    </dl>
+<div class="submitSection">
+  <input type="submit" class="btn btn-primary col-xs-12" value="Log-in"/>
+        <span class="xAdditional"><a href="/xwiki/authenticate/wiki/xwiki/retrieveusername">Forgot your username?</a></span>
+        <span class="xAdditional recoverPassword"><a href="/xwiki/authenticate/wiki/xwiki/resetpassword" >Forgot your password?</a></span>
+  </div>
+    </div>  </div></form>
+</main></div></div>
+</div><footer id="footerglobal">
+  <div id="xwikilicence"></div>
+            <div id="xwikiplatformversion">
+                    <a href="https://extensions.xwiki.org?id=org.xwiki.platform:xwiki-platform-distribution-war:17.10.15:::/xwiki-commons-pom/xwiki-platform/xwiki-platform-distribution/xwiki-platform-distribution-war">
+                XWiki 17.10.15
+              </a>
+          </div>
+  </footer>
+</div></div></body>
+</html>

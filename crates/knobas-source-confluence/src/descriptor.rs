@@ -60,6 +60,9 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: url_forms(),
+        web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::at(&[
+            "/login.action",
+        ])),
         code_pages: None,
         write_ops: vec![
             "comment".to_owned(),

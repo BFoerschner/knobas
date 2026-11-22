@@ -132,6 +132,8 @@ const SCREENS = [
   { id: "launcher-file-names", route: "tickets", launcher: "#r deployment" },
   // A source's site at a long address (ADR-0050): the host whole, the rest given up at its end, the whole in the title.
   { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
+  // A site's saved sign-in (ux29): Settings' row naming a long username, held to its column.
+  { id: "settings-site-signin", route: "settings/source/confluence" },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
@@ -181,7 +183,7 @@ const UNDER = ([control, table]) => String.raw`(() => {
 
 // Runs in the page: what of a path's text leaves its boxes, and which boxes scroll sideways.
 const CHECK = String.raw`(() => {
-  const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer/;
+  const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer|service-account-with-a-long-name/;
   // What gives way on purpose, its whole in a title: a path's start, a toast's middle, and a command's program start and its
   // arguments after the program's file (TfCommand, the renderers-columns pass).
   const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-site-path"];

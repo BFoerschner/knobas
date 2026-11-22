@@ -10,9 +10,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use knobas_secrets::{KeychainAccount, SecretStore, WebSignIn};
 use knobas_site::policy::{Base, Origin, OtherSite, SiteRules};
+use knobas_site::sign_in::SignInRule;
 use knobas_site::sites::{Config, Shell, SiteEvent};
 use knobas_site::state::{KEPT_DEFAULT, KEPT_MAX, KEPT_MIN};
+use knobas_sync::scheduler::AdapterRegistry;
 use serde::Serialize;
 use sqlx::PgPool;
 use tauri::Manager;
@@ -82,6 +85,81 @@ pub struct SiteSetting {
     pub offered: bool,
     /// The sign-in outlives knobas here (macOS 14 and later, Windows).
     pub persists: bool,
+    /// The username of the saved web sign-in (ux29), when one is saved. The
+    /// password never leaves the keychain item.
+    pub sign_in_user: Option<String>,
+}
+
+/// What `settings_and_rules` reads the saved web sign-ins with: the keychain
+/// and the adapters' declarations of their sign-in pages. Absent before
+/// bring-up, when no sign-in is read.
+#[derive(Clone, Copy)]
+pub struct SignInReads<'a> {
+    pub secrets: &'a Arc<dyn SecretStore>,
+    pub registry: &'a dyn AdapterRegistry,
+}
+
+impl<'a> SignInReads<'a> {
+    /// From the sources' state.
+    #[must_use]
+    pub fn of(state: &'a crate::sources::SourcesState) -> Self {
+        Self {
+            secrets: &state.secrets,
+            registry: state.registry.as_ref(),
+        }
+    }
+}
+
+/// The saved web sign-in of `source`, read from its keychain item.
+///
+/// # Errors
+///
+/// The keychain's.
+pub async fn read_sign_in(
+    secrets: &Arc<dyn SecretStore>,
+    source: &str,
+) -> Result<Option<WebSignIn>, IpcError> {
+    let stored = knobas_secrets::spawn::get(secrets, &KeychainAccount::source(source))
+        .await
+        .map_err(|error| IpcError::internal(format!("keychain: {error}")))?;
+    Ok(stored.and_then(|secret| secret.web))
+}
+
+/// Save, change or remove `source`'s web sign-in, in its keychain item beside
+/// its credential, which stays as it is.
+///
+/// # Errors
+///
+/// `Invalid` for an empty username or password, or a source with no stored
+/// credential; the keychain's.
+pub async fn write_sign_in(
+    secrets: &Arc<dyn SecretStore>,
+    source: &str,
+    web: Option<WebSignIn>,
+) -> Result<(), IpcError> {
+    if let Some(web) = &web
+        && (web.username.trim().is_empty() || web.password.is_empty())
+    {
+        return Err(IpcError::invalid(
+            "a sign-in needs a username and a password",
+        ));
+    }
+    let account = KeychainAccount::source(source);
+    let stored = knobas_secrets::spawn::get(secrets, &account)
+        .await
+        .map_err(|error| IpcError::internal(format!("keychain: {error}")))?;
+    let Some(mut secret) = stored else {
+        if web.is_none() {
+            return Ok(());
+        }
+        return Err(IpcError::invalid(
+            "this source has no stored credential to keep the sign-in beside",
+        ));
+    };
+    secret.web = web;
+    knobas_secrets::spawn::put(secrets, &account, secret)
+        .await
+        .map_err(|error| IpcError::internal(format!("keychain: {error}")))
 }
 
 async fn read_allowed(pool: &PgPool, source: &str) -> Result<Vec<Origin>, IpcError> {
@@ -109,10 +187,13 @@ async fn read_open_inside(pool: &PgPool, source: &str) -> Result<bool, IpcError>
         .unwrap_or(false))
 }
 
-/// The sources' ids and base URLs.
-async fn sources(pool: &PgPool) -> Result<Vec<(String, String)>, IpcError> {
+/// The sources' ids, base URLs and adapter kinds.
+async fn sources(pool: &PgPool) -> Result<Vec<(String, String, String)>, IpcError> {
     let rows = knobas_sync::config::list(pool).await?;
-    Ok(rows.into_iter().map(|row| (row.id, row.base_url)).collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.id, row.base_url, row.adapter_kind))
+        .collect())
 }
 
 /// Every source's site setting, and the rules of the ones that open inside
@@ -124,10 +205,46 @@ async fn sources(pool: &PgPool) -> Result<Vec<(String, String)>, IpcError> {
 pub async fn settings_and_rules(
     pool: &PgPool,
     sites: Option<&knobas_site::Sites>,
+    reads: Option<SignInReads<'_>>,
 ) -> Result<Vec<SiteSetting>, IpcError> {
     let mut out = Vec::new();
     let mut bases: Vec<(String, Base, Vec<Origin>)> = Vec::new();
-    for (source, base_url) in sources(pool).await? {
+    let listed = sources(pool).await?;
+    // Each source's saved sign-in, read at once: one keychain read a source.
+    let users: Vec<Option<String>> = match reads {
+        Some(reads) => {
+            futures_util::future::join_all(listed.iter().map(|(source, _, _)| async move {
+                match read_sign_in(reads.secrets, source).await {
+                    Ok(web) => web.map(|web| web.username),
+                    Err(error) => {
+                        tracing::warn!(source = %source, %error, "a site's sign-in could not be read");
+                        None
+                    }
+                }
+            }))
+            .await
+        }
+        None => vec![None; listed.len()],
+    };
+    let mut sign_ins = HashMap::new();
+    for ((source, base_url, kind), user) in listed.into_iter().zip(users) {
+        if let Some(reads) = reads {
+            let declared = reads
+                .registry
+                .descriptors()
+                .into_iter()
+                .find(|template| template.adapter_kind == kind)
+                .and_then(|template| template.web_sign_in)
+                .unwrap_or_default();
+            sign_ins.insert(
+                source.clone(),
+                SignInRule {
+                    saved: user.is_some(),
+                    paths: declared.paths,
+                    any_page: declared.any_page,
+                },
+            );
+        }
         let open_inside = read_open_inside(pool, &source).await?;
         let allowed = read_allowed(pool, &source).await?;
         let kept_since = crate::settings::read_value(pool, &kept_since_key(&source))
@@ -156,6 +273,7 @@ pub async fn settings_and_rules(
             kept_since,
             offered: knobas_site::OFFERED && base.is_some(),
             persists: knobas_site::sessions_persist(),
+            sign_in_user: user,
         });
         if open_inside && let Some(base) = base {
             bases.push((source, base, allowed));
@@ -182,6 +300,9 @@ pub async fn settings_and_rules(
             );
         }
         sites.set_rules(rules);
+        if reads.is_some() {
+            sites.set_sign_ins(sign_ins);
+        }
     }
     Ok(out)
 }
@@ -194,9 +315,10 @@ pub async fn settings_and_rules(
 pub async fn setting_of(
     pool: &PgPool,
     sites: Option<&knobas_site::Sites>,
+    reads: Option<SignInReads<'_>>,
     source: &str,
 ) -> Result<SiteSetting, IpcError> {
-    settings_and_rules(pool, sites)
+    settings_and_rules(pool, sites, reads)
         .await?
         .into_iter()
         .find(|setting| setting.source == source)
@@ -357,6 +479,24 @@ impl<R: tauri::Runtime> Shell for TauriShell<R> {
             }
         });
     }
+
+    fn sign_in(&self, source: &str) {
+        let app = self.app.clone();
+        let source = source.to_owned();
+        tauri::async_runtime::spawn(async move {
+            let (Ok(sites), Ok(sources)) = (state(&app), crate::sources::state(&app)) else {
+                return;
+            };
+            match read_sign_in(&sources.secrets, &source).await {
+                Ok(Some(web)) => sites.fill_with(&source, web.username, web.password),
+                Ok(None) => sites.fill_none(&source),
+                Err(error) => {
+                    tracing::warn!(source = %source, %error, "a site's sign-in could not be read");
+                    sites.fill_none(&source);
+                }
+            }
+        });
+    }
 }
 
 /// When the last quit was asked for: a second request within
@@ -483,6 +623,77 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn store_with(secret: Option<knobas_secrets::Secret>) -> Arc<dyn SecretStore> {
+        let store: Arc<dyn SecretStore> = Arc::new(knobas_secrets::MemoryStore::new());
+        if let Some(secret) = secret {
+            store
+                .put(&KeychainAccount::source("wiki"), &secret)
+                .unwrap();
+        }
+        store
+    }
+
+    fn web(username: &str, password: &str) -> WebSignIn {
+        WebSignIn {
+            username: username.into(),
+            password: password.into(),
+        }
+    }
+
+    /// A saved sign-in rides in the source's item and leaves its credential
+    /// as it was; removing it removes it alone.
+    #[tokio::test]
+    async fn a_sign_in_is_kept_beside_the_credential_and_removed_alone() {
+        let store = store_with(Some(knobas_secrets::Secret::just(
+            knobas_source::AuthMethod::Pat,
+            "token",
+        )));
+        write_sign_in(&store, "wiki", Some(web("bjorn", "pw")))
+            .await
+            .unwrap();
+        let kept = store
+            .get(&KeychainAccount::source("wiki"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.value, "token");
+        assert_eq!(
+            read_sign_in(&store, "wiki").await.unwrap(),
+            Some(web("bjorn", "pw"))
+        );
+        write_sign_in(&store, "wiki", None).await.unwrap();
+        let kept = store
+            .get(&KeychainAccount::source("wiki"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.value, "token", "the credential stays");
+        assert!(kept.web.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_empty_field_or_a_source_with_no_credential_is_refused() {
+        let store = store_with(Some(knobas_secrets::Secret::just(
+            knobas_source::AuthMethod::Pat,
+            "token",
+        )));
+        for (user, pass) in [("", "pw"), ("  ", "pw"), ("bjorn", "")] {
+            let error = write_sign_in(&store, "wiki", Some(web(user, pass)))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                crate::IpcErrorCode::Invalid,
+                "{user:?} {pass:?}"
+            );
+        }
+        let empty = store_with(None);
+        let error = write_sign_in(&empty, "wiki", Some(web("bjorn", "pw")))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
+        // Removing what is not there is no error.
+        write_sign_in(&empty, "wiki", None).await.unwrap();
+    }
 
     #[test]
     fn the_keys_are_per_source() {

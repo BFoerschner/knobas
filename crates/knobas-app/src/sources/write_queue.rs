@@ -1460,6 +1460,7 @@ mod tests {
                         username: "knobas".to_owned(),
                         password: "knobas-dev".to_owned(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

@@ -973,6 +973,11 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::update::update_install,
         commands::update::update_later,
         commands::update::update_notes,
+        // A site's saved web sign-in (ADR-0050, ux29), appended at the foot
+        // (§10.8).
+        commands::site::site_sign_in_save,
+        commands::site::site_sign_in_remove,
+        commands::site::site_fill,
     ]
 }
 

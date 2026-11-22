@@ -25,6 +25,7 @@ function world(answer: SiteAsked, over: Partial<SiteStatus> = {}) {
     asks_origin: null,
     failure: null,
     esc_again_ms: 500,
+    fill: false,
     ...over,
   });
   const ports: SiteActionPorts = {

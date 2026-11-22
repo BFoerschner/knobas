@@ -223,8 +223,8 @@ async fn older_components_load_and_answer_no_fields() {
 #[tokio::test]
 async fn edit_ticket_without_tickets_is_refused_and_tickets_without_edit_ticket_offers_none() {
     let unexported = patched_fixture(
-        "knobas:adapter/tickets@1.6.0",
-        "knobas:adapter/tickits@1.6.0",
+        "knobas:adapter/tickets@1.7.0",
+        "knobas:adapter/tickits@1.7.0",
     );
     let error = WasmAdapter::from_bytes(&unexported).expect_err("the write without the export");
     let LoadError::Link(message) = &error else {

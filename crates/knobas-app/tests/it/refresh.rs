@@ -231,6 +231,7 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_sign_in: None,
         code_pages: None,
         write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
         entity_kinds: vec![kind("ticket"), kind("build"), kind("repo")],

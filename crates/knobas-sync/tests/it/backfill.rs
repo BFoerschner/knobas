@@ -76,6 +76,7 @@ impl Source for Widening {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             write_ops: Vec::new(),
             // Jira's `ticket` declares `true`, which is exactly what makes a

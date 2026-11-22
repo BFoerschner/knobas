@@ -44,6 +44,46 @@ unsafe extern "system" {
     fn MapVirtualKeyW(code: u32, map_type: u32) -> u32;
 }
 
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+    fn WaitForSingleObject(handle: isize, millis: u32) -> u32;
+    fn CloseHandle(handle: isize) -> i32;
+}
+
+/// `SYNCHRONIZE`: the right to wait on a process.
+const SYNCHRONIZE: u32 = 0x0010_0000;
+
+/// The site's browser process: the one that writes its cookies to the
+/// session folder (ux29).
+pub fn browser_process(view: &WebView) -> Option<u32> {
+    let core = view.webview();
+    let mut pid = 0_u32;
+    // SAFETY: a WebView2 COM read on the main thread.
+    unsafe { core.BrowserProcessId(&raw mut pid) }.ok()?;
+    (pid != 0).then_some(pid)
+}
+
+/// Wait, until `deadline`, for each browser process to end after its views
+/// closed. Chromium writes its cookie store when its browser process shuts
+/// down, and commits it only every 30 seconds before; a knobas that exits
+/// first may leave a sign-in of the last half minute unwritten (ux29).
+pub fn wait_for_exit(pids: &[u32], deadline: std::time::Instant) {
+    for pid in pids {
+        // SAFETY: plain Win32 calls on a process handle this function owns.
+        unsafe {
+            let handle = OpenProcess(SYNCHRONIZE, 0, *pid);
+            if handle == 0 {
+                continue;
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let millis = u32::try_from(left.as_millis()).unwrap_or(u32::MAX);
+            let _ = WaitForSingleObject(handle, millis);
+            CloseHandle(handle);
+        }
+    }
+}
+
 /// wry's default arguments, which `with_additional_browser_args` replaces,
 /// and the cache's cap of 100 MB a site.
 const BROWSER_ARGS: &str =

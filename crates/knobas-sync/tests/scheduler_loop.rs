@@ -100,6 +100,7 @@ impl Source for Slow {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             // The comment its writes are: the flush refuses an op the source
             // does not declare (#1950).

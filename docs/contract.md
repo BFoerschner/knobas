@@ -71,6 +71,8 @@ account = "source:<source_id>"            e.g. "source:jira", "source:jira-eu"
 value   = {"v":1,"kind":"pat","secret":"…"}   JSON envelope
 ```
 
+*Amended (ux29, ADR-0050):* the envelope is read at versions 1, 2 and 3. Version 2 (#452) carries Uptime Kuma's optional `account`; version 3 carries an optional `web` (`{"username":…,"password":…}`), a site's saved web sign-in, and is written only when one is saved, so an item without one keeps the v2 bytes an older build reads.
+
 Rationale: one item per source (not per auth method) means changing PAT → password rewrites in place instead of orphaning an item; the envelope's `kind`/`v` leave room for OAuth (access + refresh + expiry) without a naming change (§3 "OAuth later"); a dev-suffixed service keeps `just dev` off the real credentials, and gotcha 10 (unsigned dev builds re-prompt every run) is then at least survivable.
 
 **One exception: a debug build on the demo profile** keeps its credentials in `<demo profile dir>/dev-secrets.json` (mode 0600, same envelope, one key per account) through `knobas_secrets::FileStore`, not the keychain (#2384). The `knobas-dev` certificate has no Apple team ID, so macOS partitions a dev build's keychain items by the writer's cdhash and every rebuild prompted once per item. `FileStore` is compiled only under `debug_assertions`, the demo profile holds testenv credentials only, and `sources::secret_store` is the one place that picks it (`uses_dev_secret_file`, pinned by test). Release builds and the user's own profile, debug or release, keep the keychain.
@@ -266,6 +268,8 @@ Each of the following is a frozen surface. A change to one is ruled by the agent
 - `crates/knobas-app/src/{error,profile}.rs`.
 
 **How a change to one of these lands (since 2026-10-29).** The PR that touches a frozen surface says so in its body under a heading **Frozen surface**: which of the five it touches, what changed (one line per migration, command, event, DTO field, `WriteOp` variant or SPI method, naming the file), and the test that pins it. That section is what the merge-manager's deep pass reviews against the ADRs and this document. Nothing else is written down: no applied migration is ever edited, the generated IPC mirror carries the shapes, and the issue and the PR carry the argument. Where an ADR or an older document says "a §10.8 entry", read "a frozen-surface change announced this way". The 307 entries written before this rule, one file per change from 2026-08-25 to 2026-10-27, are archived verbatim under `docs/archive/contract-10.8/`.
+
+**Additive changes, ux30 (branch `ux30-signin`, ADR-0050 amended, a site's saved web sign-in):** `SourceDescriptor.web_sign_in` (`Option<WebSignInPages { paths, any_page }>`, `#[serde(default)]`, battery clause 16, `crates/knobas-source/src/web_sign_in.rs`); `knobas:adapter@1.7.0` (1.6.0 frozen beside it in the SDK as `wit-1.6.0/`) documents that key of the descriptor's JSON, which the host reads from a 1.7.0 component and drops from an older one (`WasmAdapter::declares_web_sign_in`, `tests/it/web_sign_in.rs`); the keychain envelope's version 3 (§3); IPC `site_sign_in_save`, `site_sign_in_remove`, `site_fill`, `SiteSetting.sign_in_user`, `SiteStatus.fill` and `SiteStatus.sign_in`, appended to the handler list.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

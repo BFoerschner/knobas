@@ -64,6 +64,7 @@ function blank(source: string, escMs = 500): SiteStatus {
     asks_origin: null,
     failure: null,
     esc_again_ms: escMs,
+    fill: false,
   };
 }
 
@@ -130,6 +131,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         kept_since: source === "confluence" ? "2026-11-12T09:30:00Z" : null,
         offered: true,
         persists: true,
+        // Confluence has a saved web sign-in, so the bar's *Fill sign-in* and Settings' row are drawn (ux29).
+        // `?fake-long-paths`: a long username, for the row in `long-paths.mjs`.
+        sign_in_user:
+          source === "confluence" ? (params.has("fake-long-paths") ? "tidewater.confluence-service-account-with-a-long-name@payments.platform.tidewater.example" : "knobas") : null,
       },
     ]),
   );
@@ -149,6 +154,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       phase: "live",
       url,
       own,
+      fill: own && settings.get(site.status.source)?.sign_in_user != null,
       title: TITLES[site.status.source] ?? new URL(url).host,
       loading: false,
       can_back: site.history.length > 1,
@@ -296,6 +302,33 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     set_sites_kept: (args) => {
       kept = Math.min(6, Math.max(1, Math.round(Number(args["count"]))));
       return kept;
+    },
+    site_sign_in_save: (args) => {
+      const id = String(args["id"]);
+      const username = String(args["username"] ?? "");
+      if (username.trim() === "" || String(args["password"] ?? "") === "") throw { code: "invalid", message: "a sign-in needs a username and a password" };
+      const one = { ...settings.get(id)!, sign_in_user: username };
+      settings.set(id, one);
+      return one;
+    },
+    site_sign_in_remove: (args) => {
+      const id = String(args["id"]);
+      const one = { ...settings.get(id)!, sign_in_user: null };
+      settings.set(id, one);
+      return one;
+    },
+    // `?fake-site-not-taken`: the site does not take the saved sign-in, for the bar's note.
+    site_fill: (args) => {
+      const site = sites.get(String(args["source"]));
+      if (site === undefined) throw { code: "not_found", message: "the site is not open" };
+      site.status = { ...site.status, fill: false, sign_in: "filling" };
+      emit(site);
+      setTimeout(() => {
+        const { sign_in: _filling, ...rest } = site.status;
+        site.status = params.has("fake-site-not-taken") ? { ...rest, fill: true, sign_in: "not_taken" } : { ...rest, fill: true };
+        emit(site);
+      }, 300);
+      return null;
     },
   };
 }
