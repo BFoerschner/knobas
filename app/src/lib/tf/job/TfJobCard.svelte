@@ -343,7 +343,7 @@
       <summary><span>More fields</span> <span class="tf-count">{own.length}</span><svg class="tf-tkmark" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" /></svg></summary>
       <dl class="tf-facts">
         {#each own as field (field.id)}
-          <dt>{field.label}</dt>
+          <dt title={field.label}>{field.label}</dt>
           <dd class:tf-fwriting={!!edits?.control(field.id).chip}><TfOwnField {edits} {field} sourceName={detail.source.display_name} {layers} /></dd>
           {@render fieldNote(field.id)}
         {/each}

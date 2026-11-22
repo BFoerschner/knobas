@@ -116,10 +116,10 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
   },
 ];
 
-// A ticket system the fixture draws moves and comments on its tickets (ADR-0054), as Jira's and Gitea's adapters
-// declare; a Kestrel, whose adapter does not exist, declares nothing.
+// A ticket system the fixture draws moves, edits and comments on its tickets (ADR-0054), as Jira's and Gitea's
+// adapters declare (`fake/ticket-fields.ts` answers their fields); a Kestrel, whose adapter does not exist, declares nothing.
 for (const source of FIXTURE_SOURCES) {
-  if (source.id !== "kestrel" && source.roles.some((claim) => claim.role === "ticket-system")) source.write_ops = ["comment", "transition"];
+  if (source.id !== "kestrel" && source.roles.some((claim) => claim.role === "ticket-system")) source.write_ops = ["comment", "transition", "edit_ticket"];
 }
 
 /**

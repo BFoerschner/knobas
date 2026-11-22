@@ -363,7 +363,10 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tkmore[open] > summary .tf-tkmark { transform: rotate(90deg); }
 .tf-tkmore > summary:hover > span:first-child { text-decoration: underline; text-underline-offset: 3px; }
 .tf-sheetcard .tf-tkmore > summary .tf-tkmark { color: var(--ink-2); }
-.tf-tkmore > .tf-facts { margin-top: 4px; }
+/* A source names its own fields at its own length (*Story Points*, *Environment*): their labels take the width they need,
+   up to a cap past which one gives way with an ellipsis, its whole name in its title. */
+.tf-ticketcard .tf-tkmore > .tf-facts { margin-top: 4px; grid-template-columns: max-content minmax(0, 1fr); }
+.tf-tkmore > .tf-facts > dt { max-width: calc(120px * var(--size-ui)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A text or number field while it is edited, a date field and a flag: each in the value's 22 px line. */
 .tf-ownedit { display: flex; min-width: 0; flex: 1 1 auto; }
 .tf-ownedit input, .tf-owndate { height: 22px; min-width: 0; max-width: 100%; padding: 0 6px; margin: -1px -6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); font: inherit; }
