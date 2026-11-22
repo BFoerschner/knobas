@@ -49,7 +49,7 @@ page's module missed the first paint in 5 of 5 loads at each speed. Set by a scr
 
 ## Not in this pass
 
-JetBrains schemes (Björn wants them last in ux29, time allowing). A chart palette, since there is no chart with series. Fonts, radius or
+A chart palette, since there is no chart with series. Fonts, radius or
 density in a theme. Changing knobas's own state colours for colour-blind readers.
 
 ## Reversing it
@@ -90,7 +90,10 @@ Section 11, answered, and built:
 4. **An import arrives as published, with *Fix all*:** as built.
 5. **Themes are in backups.** The store is mirrored into one `knobas.setting` row (`themes.kept`), which the database's
    dump carries; a restore puts it back. A share export carries no setting, so none carries themes.
-6. **JetBrains `.icls`** (code colours only): wanted, last in ux29 if time allows.
+6. **JetBrains `.icls`** (code colours only): wanted, last in ux29 if time allows. Built last: the scheme's attributes are
+   read onto the seventeen roles, the first one present winning and an empty one taking its base's (`ICLS` in
+   `theme/themes.ts`). A scheme lists only what differs from Darcula or Default, so a role it leaves out draws in ink.
+   Its side is its page colour, else its parent. Tested against Dracula's own JetBrains scheme.
 7. **No reset key.** The button, the launcher action and `knobas --default-theme` stay.
 8. **The built-ins keep their published code colours.** The nine are not lightened. On their own window a few fall
    under 4.5:1 and are marked; the editor's *Fix all* and each row's fix work on a built-in too, by making a copy with

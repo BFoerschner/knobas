@@ -173,7 +173,7 @@
   </div>
   <div class="tf-acts">
     <button type="button" class="tf-btn" onclick={() => picker?.click()}>Import…</button>
-    <input type="file" accept=".json,.jsonc,.yaml,.yml,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
+    <input type="file" accept=".json,.jsonc,.yaml,.yml,.icls,.xml,application/json" hidden bind:this={picker} onchange={imported} aria-label="Theme file" />
   </div>
 </header>
 {#if themes.startedDefault}

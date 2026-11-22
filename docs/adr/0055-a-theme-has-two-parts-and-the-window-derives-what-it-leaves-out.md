@@ -41,6 +41,10 @@ the code slots follow the window's unless set apart.**
 Every other key, and every guard, is in `app/src/lib/tf/theme/app-import.ts`. *Pressed* is never read: GitHub's green
 filling every pressed segment and selected row is what the split of the primary button from it is for.
 
+A JetBrains scheme (`.icls`) brings a code part only: it holds no window colours knobas can read onto these keys, and
+it lists only the attributes that differ from its parent, so a role it leaves out draws in ink (`ICLS` in
+`app/src/lib/tf/theme/themes.ts`).
+
 ## Rejected
 
 - **Renaming the tokens to role names**: thousands of edits for no pixel.
