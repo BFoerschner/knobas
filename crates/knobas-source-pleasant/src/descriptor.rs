@@ -74,8 +74,11 @@ fn web_sign_in() -> knobas_source::web_sign_in::WebSignInPages {
     knobas_source::web_sign_in::WebSignInPages::at(&SIGN_IN_PATHS).with_credential()
 }
 
-/// Where the web client shows an entry or a folder (9.5.4): `/WebClient/Main?
-/// itemId=<GUID>` opens either, an entry in its read-only dialog. Each goes
+/// Where the web client shows a folder (9.5.4): `/WebClient/Main?itemId=<GUID>`
+/// selects it. The same address opens an entry in its read-only dialog, and
+/// that dialog's load writes "Password Fetched" under the account (measured
+/// in knobas's window, 2026-11-22), so no entry page is declared: an entry
+/// opens its folder (Fable's ruling while Björn was busy). Each goes
 /// through `/SignIn/Direct?ReturnUrl=…`, which draws the form when signed out
 /// (so the fill needs no press on *Connect*) and answers a 302 to the page
 /// when signed in. `{key}` is encoded once inside the encoded `ReturnUrl`;
@@ -89,11 +92,7 @@ pub const WEB_HOME: &str = "/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain";
 fn web_links() -> knobas_source::web_links::WebLinks {
     knobas_source::web_links::WebLinks {
         home: Some(WEB_HOME.to_owned()),
-        pages: [
-            (passwords::ENTRY_KIND.to_owned(), WEB_ITEM.to_owned()),
-            (passwords::FOLDER_KIND.to_owned(), WEB_ITEM.to_owned()),
-        ]
-        .into(),
+        pages: [(passwords::FOLDER_KIND.to_owned(), WEB_ITEM.to_owned())].into(),
     }
 }
 
@@ -137,8 +136,9 @@ mod tests {
         assert_eq!(keys, wire.as_object().unwrap().keys().collect::<Vec<_>>());
     }
 
-    /// The web client's sign-in pages and item links hold to their rules, and
-    /// an entry's link returns, once signed in, to the entry's own page.
+    /// The web client's sign-in pages and folder link hold to their rules, a
+    /// folder's link returns, once signed in, to the folder's own page, and no
+    /// entry page is declared: opening one writes "Password Fetched".
     #[test]
     fn the_web_client_is_declared() {
         let d = descriptor_template();
@@ -150,7 +150,8 @@ mod tests {
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
         assert_eq!(knobas_source::web_links::check(links, &kinds), Ok(()));
         let guid = "07c469c8-e880-4927-8c31-a8342cd66d98";
-        for kind in [passwords::ENTRY_KIND, passwords::FOLDER_KIND] {
+        assert_eq!(links.page(passwords::ENTRY_KIND), None);
+        for kind in [passwords::FOLDER_KIND] {
             let url = knobas_source::web_links::page(
                 "https://pw.example:10001/",
                 links.page(kind).unwrap(),

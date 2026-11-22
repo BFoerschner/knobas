@@ -66,7 +66,8 @@ password manager's audit log with the person's name.**
 ## Amended 2026-11-22 (ux30): the password manager's own web interface
 
 - The page opens the password manager's own web interface from a link template its adapter declares (`web_links`); a
-  password item still carries no `web_url`.
+  password item still carries no `web_url`. Pleasant declares folder pages alone: its web client's entry dialog writes
+  "Password Fetched" when it opens, so an entry opens its folder.
 - A password manager's web session is the site's own. knobas ticks its "remember me" as for any site, so the session
   rests in the site's store, outside the keychain, for as long as the server allows. Pleasant 9.5.4 allows 4 hours.
   *Forget…* removes it. What this ADR names as a secret still never rests.

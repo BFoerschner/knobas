@@ -325,7 +325,13 @@ pub async fn sign_in_for_fill(
         return Ok(None);
     };
     if secret.web.is_some() {
-        return Ok(fill_from(secret, None, None, &serde_json::Value::Null, false));
+        return Ok(fill_from(
+            secret,
+            None,
+            None,
+            &serde_json::Value::Null,
+            false,
+        ));
     }
     let Some(row) = knobas_sync::config::get(pool, source).await? else {
         return Ok(None);
@@ -914,7 +920,11 @@ mod tests {
             knobas_source::AuthMethod::ApiToken,
             knobas_source::AuthMethod::OAuth,
         ] {
-            assert_eq!(own_user(Some(&pages()), Some(method), &config), None, "{method:?}");
+            assert_eq!(
+                own_user(Some(&pages()), Some(method), &config),
+                None,
+                "{method:?}"
+            );
         }
         assert_eq!(own_user(Some(&pages()), None, &config), None);
         for config in [

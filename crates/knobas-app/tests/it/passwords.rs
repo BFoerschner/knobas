@@ -1043,8 +1043,9 @@ async fn an_attachment_is_read_live_by_its_id() {
 }
 
 /// *Open web interface* (ux30): the address is the source's typed base URL
-/// and its adapter's declared template, for an entry, a folder or the front
-/// page, and nothing for an id that is no entry or folder of the source.
+/// and its adapter's declared template, for a folder or the front page; an
+/// entry opens its folder, since Pleasant declares no entry page (opening one
+/// writes "Password Fetched").
 #[tokio::test]
 async fn the_web_interface_opens_an_entry_a_folder_or_the_front_page() {
     use knobas_app::passwords::web::WebAt;
@@ -1053,10 +1054,10 @@ async fn the_web_interface_opens_an_entry_a_folder_or_the_front_page() {
     assert_eq!(
         held.sources[0].web,
         knobas_app::passwords::web::WebPages {
-            entry: true,
+            entry: false,
             folder: true
         },
-        "Pleasant declares both pages"
+        "Pleasant declares folder pages alone"
     );
     let link = |item: Option<&str>| {
         let item = item.map(str::to_owned);
@@ -1068,10 +1069,10 @@ async fn the_web_interface_opens_an_entry_a_folder_or_the_front_page() {
         }
     };
     let entry = link(Some("pw:e1")).await.expect("an entry's link");
-    assert_eq!(entry.at, WebAt::Entry);
+    assert_eq!(entry.at, WebAt::Folder, "an entry opens its folder");
     assert_eq!(
         entry.url,
-        "https://vault.example/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain%3FitemId%3De1"
+        "https://vault.example/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain%3FitemId%3Dpay"
     );
     let folder = link(Some("pw:pay")).await.expect("a folder's link");
     assert_eq!(folder.at, WebAt::Folder);
