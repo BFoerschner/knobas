@@ -136,7 +136,7 @@ test("Undo after the send asks the source and queues the way back where it is of
   await flush();
   await flush();
   expect(sent).toEqual([{ Transition: { entity: "jira:PAY-231", status: "Done" } }, { Transition: { entity: "jira:PAY-231", status: "In Progress" } }]);
-  expect(toasts.items.at(-1)?.text).toBe("Moving PAY-231 back to In Progress.");
+  expect(toasts.items.at(-1)?.text).toBe("Moving PAY-231 back to In progress.");
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
 });
 
@@ -148,7 +148,7 @@ test("Undo after the send queues nothing where the source offers no way back, an
   await flush();
   await flush();
   expect(sent).toHaveLength(1);
-  expect(toasts.items.at(-1)?.text).toBe("Tidewater Jira offers no move from Done back to In Progress. PAY-231 stays in Done.");
+  expect(toasts.items.at(-1)?.text).toBe("Tidewater Jira offers no move from Done back to In progress. PAY-231 stays in Done.");
 });
 
 test("Undo by key does nothing once the toast has gone", async () => {
@@ -156,4 +156,16 @@ test("Undo by key does nothing once the toast has gone", async () => {
   await moveTicket(ticket, "Done", { ports: p });
   toasts.items.length = 0;
   expect(undoLastMove()).toBe(false);
+});
+
+test("a refused move drops its echo, puts the card back, and its toast names the ticket and the source's reason", async () => {
+  const hears: ((row: QueuedWrite | undefined) => void)[] = [];
+  const follower: WriteFollower = { follow: (_id, hear) => (hears.push(hear), () => {}) };
+  const back = vi.fn();
+  await moveTicket(ticket, "Done", { ports: { ...ports().ports, follower }, onstop: back });
+  const reason = 'PAY-231 cannot move to "Done" from where it stands: this workflow offers ["In Review"]';
+  for (const hear of hears) hear(row({ state: "refused", detail: reason }));
+  expect(echoesOn("jira:PAY-231", "status")).toHaveLength(0);
+  expect(back).toHaveBeenCalledOnce();
+  expect(toasts.items.some((one) => one.tone === "err" && one.text === `Move of PAY-231 to Done was refused: ${reason}`)).toBe(true);
 });

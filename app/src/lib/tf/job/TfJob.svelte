@@ -93,7 +93,7 @@
   import TfJobCard from "./TfJobCard.svelte";
   import TfStatusMove from "./TfStatusMove.svelte";
   import { askReach, asking as reachAsking, forgetReach, moveRefusal, reachOf, type ReachKey } from "../tickets/reach.svelte";
-  import { dismissNote, moveTicket, ticketNotes, undoLastMove, watchTicketNotes } from "../tickets/moves.svelte";
+  import { dismissNote, MOVE_KEY, moveTicket, ticketNotes, undoLastMove, watchTicketNotes } from "../tickets/moves.svelte";
   import { sourceRoles } from "../roles.svelte";
   import { echoOn } from "../queued.svelte";
   import TfTitleEdit from "./TfTitleEdit.svelte";
@@ -575,8 +575,8 @@
         if (undoLastMove()) event.preventDefault();
         return;
       }
-      // `m` opens the status menu (ADR-0054), as `L` opens the drawer.
-      if (event.key === "m" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented) {
+      // The move key opens the status menu (ADR-0054, `MOVE_KEY`), as `L` opens the drawer.
+      if (event.key === MOVE_KEY && !event.metaKey && !event.ctrlKey && !event.altKey && !event.defaultPrevented) {
         if (!detail || drawer || layers.open.length > 0 || inTextField(document.activeElement) || !statusMoves.can) return;
         event.preventDefault();
         statusOpen = true;

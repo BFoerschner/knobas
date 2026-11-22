@@ -220,6 +220,7 @@
 /* A status menu: its heading, and each status's number for a pick without a second aim. */
 .tf-menu .tf-menu-h { padding: 4px 10px 6px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-menu .tf-menu-line { padding: 4px 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); max-width: 300px; }
+.tf-move-m [role="menuitem"] { display: flex; align-items: center; gap: 16px; }
 .tf-menu kbd { --fs: var(--size-code); margin-left: auto; font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 
 /* ---- a held card (ADR-0054; ticket-edit decisions, section 9). Nothing moves during a drag: what follows the hand is
