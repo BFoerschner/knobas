@@ -61,7 +61,7 @@ pub fn browser_process(view: &WebView) -> Option<u32> {
     let mut pid = 0_u32;
     // SAFETY: a WebView2 COM read on the main thread.
     unsafe { core.BrowserProcessId(&raw mut pid) }.ok()?;
-    (pid != 0).then_some(pid)
+    crate::glue::known_process(pid)
 }
 
 /// Wait, until `deadline`, for each browser process to end after its views

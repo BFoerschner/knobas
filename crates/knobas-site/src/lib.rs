@@ -15,6 +15,7 @@
 //! scripts and its schemes (decisions §3). `tests/scan.rs` holds that line.
 
 pub mod failures;
+pub mod glue;
 pub mod host;
 pub mod keys;
 pub mod menu;

@@ -38,12 +38,10 @@ impl<W: HasWindowHandle + 'static> WryHost<W> {
 fn placed(view: &WebView, bounds: Rect) -> wry::Rect {
     #[cfg(target_os = "macos")]
     {
-        let down = crate::mac::under_title(view);
-        wry_rect(Rect {
-            y: bounds.y + down,
-            height: (bounds.height - down).max(1.0),
-            ..bounds
-        })
+        wry_rect(crate::glue::under_bar(
+            bounds,
+            crate::mac::under_title(view),
+        ))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -182,10 +180,9 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         #[cfg(target_os = "macos")]
         crate::mac::forget(spec.data_store, done);
         #[cfg(windows)]
-        done(match std::fs::remove_dir_all(&spec.data_dir) {
-            Ok(()) => true,
-            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-        });
+        done(crate::glue::removed(&std::fs::remove_dir_all(
+            &spec.data_dir,
+        )));
     }
 }
 
@@ -256,7 +253,7 @@ impl SiteView for WryView {
     }
 
     fn url(&self) -> Option<String> {
-        self.view.url().ok().filter(|url| !url.is_empty())
+        self.view.url().ok().and_then(crate::glue::page_address)
     }
 
     fn sign_in(&self, call: &SignInCall, answer: Box<dyn FnOnce(String) + Send>) {

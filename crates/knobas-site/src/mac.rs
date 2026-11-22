@@ -124,7 +124,7 @@ pub fn under_title(view: &WebView) -> f64 {
         };
         let full = content.frame().size.height;
         let layout = window.contentLayoutRect().size.height;
-        (full - layout).max(0.0)
+        crate::glue::title_room(full, layout)
     }
 }
 
