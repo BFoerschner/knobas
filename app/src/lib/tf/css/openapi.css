@@ -303,3 +303,29 @@
 .tf-oas-para { margin: 0 0 6px; }
 .tf-oas-para:last-of-type { margin-bottom: 0; }
 .tf-oas-desc code { --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); background: var(--sheet-2); padding: 0 3px; border-radius: 3px; }
+
+/* ---- the inline form (section 13): a Docs block's box, a comparison's side ---- */
+.tf-oas-inline { display: flex; flex-direction: column; height: 420px; min-height: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); overflow: clip; }
+.tf-oas-inline.tf-oas-ifill { height: 100%; border: 0; border-radius: 0; }
+.tf-oas-inline > .tf-oas-fnote, .tf-oas-inline > .tf-oas-wait { padding: 10px 12px; }
+.tf-oas-ihead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 10px; border-bottom: 1px solid var(--rule-2); }
+.tf-oas-ihead .tf-oas-api { flex: 1 1 auto; }
+.tf-oas-ihead .tf-minif { flex: 0 1 260px; }
+.tf-oas-ihead .tf-oas-count { margin-left: 0; }
+.tf-oas-ilist { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 6px; display: flex; flex-direction: column; }
+.tf-oas-ilist > .tf-oas-fnote { padding: 8px; }
+.tf-oas-irow + .tf-oas-irow { border-top: 1px solid var(--rule-2); }
+.tf-oas-ibtn {
+  width: 100%; min-height: 30px; box-sizing: border-box; display: grid; grid-template-columns: 52px minmax(0, max-content) minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
+  padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs));
+}
+.tf-oas-ibtn:hover { background: var(--sheet-2); }
+.tf-oas-ibtn .tf-oas-rsum { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); }
+.tf-oas-mschema { font-weight: 600; color: var(--ink-2); }
+/* A comparison's mark: the stage's own marks, words first, the edge second. */
+.tf-oas-imark { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
+.tf-oas-irow[data-mark] > .tf-oas-ibtn { box-shadow: inset 3px 0 0 var(--mark-edge, var(--rule)); }
+.tf-oas-irow[data-mark="added"] { --mark-edge: var(--ok); }
+.tf-oas-irow[data-mark="removed"] { --mark-edge: var(--err); }
+.tf-oas-irow[data-mark="changed"] { --mark-edge: var(--warn); }
+.tf-oas-iopen { padding: 4px 10px 14px 18px; }

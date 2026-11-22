@@ -203,23 +203,33 @@ export class OasState {
         if (ask === this.#asked) this.reading = true;
       }, READING_AFTER_MS);
       try {
-        answer = await this.session.page(page);
+        answer = await this.load(page);
       } finally {
         clearTimeout(timer);
       }
-      this.#keep(page, answer);
       if (ask !== this.#asked) return null;
     } else {
       this.#keep(page, answer);
     }
     this.reading = false;
+    this.shown = { place, answer };
+    return place;
+  }
+
+  /**
+   * Page `page`'s answer, read once and kept, with the shapes and examples it came with put where its parts look for
+   * them. The explorer shows one page at a time (`show`); the inline form opens several (`TfOasInline`).
+   */
+  async load(page: Place): Promise<PageAnswer> {
+    const kept = this.#pages.get(page);
+    if (kept !== undefined) return kept;
+    const answer = await this.session.page(page);
+    this.#keep(page, answer);
     if (answer.kind === "op") {
-      // The shapes the page draws unopened came with it: kept where its parts look for them.
       for (const [key, shape] of Object.entries(answer.shapes)) if (!this.shapes.has(`${page}/${key}`)) this.shapes.set(`${page}/${key}`, shape);
       for (const [key, sample] of Object.entries(answer.samples)) if (!this.samples.has(`${page}/${key}`)) this.samples.set(`${page}/${key}`, sample);
     } else if (answer.kind === "schema" && !this.shapes.has(page)) this.shapes.set(page, answer.shape);
-    this.shown = { place, answer };
-    return place;
+    return answer;
   }
 
   /** Keeps `answer` as the newest of the last {@link KEPT_PAGES}. */

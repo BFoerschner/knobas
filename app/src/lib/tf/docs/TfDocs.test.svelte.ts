@@ -806,6 +806,58 @@ test("a code block's language and Copy sit in a strip above the code, and nothin
   expect(io.copy).toHaveBeenCalledWith("ls -la");
 });
 
+const SPEC_YAML = [
+  "openapi: 3.0.3",
+  "info:",
+  "  title: Payouts",
+  "  version: 2.1.0",
+  "paths:",
+  "  /payouts/{id}:",
+  "    get:",
+  "      summary: One payout",
+  "      parameters:",
+  "        - { name: id, in: path, required: true, schema: { type: string } }",
+  "      responses:",
+  "        '200': { description: The payout }",
+  "components:",
+  "  schemas:",
+  "    Payout: { type: object, properties: { id: { type: string } } }",
+].join("\n");
+
+test("a code block holding an API spec offers API beside Copy, draws its code first, and the inline form on the press (ux31)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "code", code: SPEC_YAML, language: "yaml" },
+    { type: "code", code: "version: '3.8'\nservices:\n  web:\n    image: nginx", language: "yaml" },
+    { type: "code", code: SPEC_YAML, language: "bash" },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const bars = [...target.querySelectorAll(".tf-doc .tf-pre-bar")];
+  expect(bars.map((bar) => [...bar.querySelectorAll("button")].map((b) => b.textContent))).toEqual([["API", "Copy"], ["Copy"], ["Copy"]]);
+  // The code is the default: nothing on the page changes its height by itself.
+  expect(target.querySelectorAll(".tf-doc pre")).toHaveLength(3);
+  expect(target.querySelector(".tf-oas-inline")).toBeNull();
+
+  const api = bars[0]!.querySelector("button")!;
+  api.click();
+  await vi.waitFor(() => expect(target.querySelector(".tf-oas-inline .tf-oas-ibtn")).not.toBeNull());
+  expect(api.textContent).toBe("Source");
+  expect(api.getAttribute("aria-pressed")).toBe("true");
+  expect(target.querySelectorAll(".tf-doc pre")).toHaveLength(2);
+  const form = target.querySelector(".tf-oas-inline")!;
+  expect(form.querySelector(".tf-oas-api")?.textContent).toBe("Payouts2.1.0OpenAPI 3.0.3");
+  expect(form.querySelector(".tf-oas-count")?.textContent).toBe("1 endpoint · 1 schema");
+  expect([...form.querySelectorAll(".tf-oas-ibtn")].map((b) => b.textContent?.replace(/\s+/g, " ").trim())).toEqual(["GET /payouts/{id} One payout", "Schema Payout"]);
+  // A row opens its reference in place under it.
+  form.querySelector<HTMLButtonElement>(".tf-oas-ibtn")!.click();
+  await vi.waitFor(() => expect(form.querySelector(".tf-oas-iopen")?.textContent).toContain("id"));
+  expect(form.querySelector(".tf-oas-ibtn")?.getAttribute("aria-expanded")).toBe("true");
+
+  api.click();
+  flushSync();
+  expect(target.querySelector(".tf-oas-inline")).toBeNull();
+  expect(target.querySelectorAll(".tf-doc pre")).toHaveLength(3);
+});
+
 test("comments are listed with their author, or say there are none", async () => {
   await draw(["confluence:2"]);
   const cmts = target.querySelector(".tf-cmts")!;

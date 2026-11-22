@@ -22,6 +22,8 @@
   import TfDocCode from "./TfDocCode.svelte";
   import TfMarked from "./TfMarked.svelte";
   import type { DocBlock, TableCell } from "../../ipc/entity";
+  import { SvelteSet } from "svelte/reactivity";
+  import { specBlock } from "./doc-spec";
   import { DOC_BLOCKS_FIRST, TABLE_ROWS_FIRST, headed, headerColumn, includeMiss, pageHash, panelLabel, panelTone } from "./docs";
 
   let {
@@ -50,6 +52,14 @@
      */
     whole?: boolean;
   } = $props();
+
+  /**
+   * The code blocks drawn as an API spec's inline form (ux31, section 13): a block whose text is a spec gains *API*
+   * beside *Copy*, and its code is drawn first, so a page of YAML never changes its height by itself. The explorer's
+   * chunk loads on the first press.
+   */
+  const asApi = new SvelteSet<DocBlock>();
+  const inline = () => import("../render/TfOasInline.svelte");
 
   /** A table's rows drawn at first, and how many more each task after. */
   const ROWS_FIRST = TABLE_ROWS_FIRST;
@@ -129,9 +139,20 @@
     <div class="tf-pre">
       <div class="tf-pre-bar">
         {#if block.language}<span>{block.language}</span>{/if}
+        {#if specBlock(block.language ?? null, code)}
+          <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={asApi.has(block)} onclick={() => (asApi.has(block) ? asApi.delete(block) : asApi.add(block))}>{asApi.has(block) ? "Source" : "API"}</button>
+        {/if}
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => oncopy(code)}>Copy</button>
       </div>
-      {#key code}<TfDocCode {code} language={block.language ?? null} {stems} />{/key}
+      {#if asApi.has(block)}
+        {#await inline()}
+          <div class="tf-oas-inline-wait" role="status">Reading the spec…</div>
+        {:then { default: TfOasInline }}
+          {#key code}<TfOasInline text={code} label="API spec" />{/key}
+        {/await}
+      {:else}
+        {#key code}<TfDocCode {code} language={block.language ?? null} {stems} />{/key}
+      {/if}
     </div>
   {:else if block.type === "table"}
     <!-- A cell holds blocks and spans what it spans; a header row heads columns and a header column rows (#2436).
