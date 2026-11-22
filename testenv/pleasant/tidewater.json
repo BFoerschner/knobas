@@ -1,0 +1,649 @@
+{
+ "note": "The clickdummy's Pleasant entries (mockups/passwords-2/data.js, 2026-11-22). Made up: Tidewater is the mockups' fictional company, every password and key is invented.",
+ "entries": [
+  {
+   "id": "pl-payout-db",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "Databases"
+   ],
+   "title": "payout-service database user",
+   "user": "payout_app",
+   "url": "postgres://vm-db-01.tidewater.internal:5432/payments",
+   "pw": "Tq8#mVx2-Lr7!pZeW",
+   "notes": "Read and write on payments.*, no DDL.\nThe service reads it from PAYOUT_DB_PASSWORD.",
+   "fields": [
+    [
+     "Secret path",
+     "kv/payments/prod/payout-db"
+    ]
+   ],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-ledger-db",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "Databases"
+   ],
+   "title": "ledger-api database user",
+   "user": "ledger_app",
+   "url": "postgres://vm-db-01.tidewater.internal:5432/ledger",
+   "pw": "Lg3!rA-pi9Qv#x2M",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-pg-prod",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "Databases"
+   ],
+   "title": "pg-payments-prod superuser",
+   "user": "postgres",
+   "url": "postgres://vm-db-01.tidewater.internal:5432",
+   "pw": "pG-prod!Sup3r#Wk81",
+   "notes": "Break glass only. Use the service users for everything else.",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": "2026-11-26",
+   "approver": null
+  },
+  {
+   "id": "pl-ledger-key",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "Keys"
+   ],
+   "title": "ledger-api signing key",
+   "user": "",
+   "url": "",
+   "pw": "corvid-Ankle-71-fennel",
+   "notes": "The password is the PEM's passphrase.",
+   "fields": [
+    [
+     "Key id",
+     "led-2026-08"
+    ],
+    [
+     "Algorithm",
+     "Ed25519"
+    ],
+    [
+     "Recovery PIN",
+     "4471-9026",
+     true
+    ]
+   ],
+   "files": [
+    {
+     "name": "ledger-signing.pem",
+     "size": "3.2 KB",
+     "kind": "PEM"
+    }
+   ],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-webhook",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "Keys"
+   ],
+   "title": "PSP webhook signing secret",
+   "user": "",
+   "url": "https://dashboard.psp.example/webhooks",
+   "pw": "whsec_T1dewaterQ2vW8nR4kX0",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-psp-live",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "PSP"
+   ],
+   "title": "PSP live secret key",
+   "user": "",
+   "url": "https://dashboard.psp.example",
+   "pw": "sk_live_51Hx9TidewaterQ2vW8",
+   "notes": "Moves money. Use the sandbox key for anything you can.",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": "Priya Nair"
+  },
+  {
+   "id": "pl-psp-dash",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Prod",
+    "PSP"
+   ],
+   "title": "PSP dashboard, finance sign-in",
+   "user": "finance@tidewater.example",
+   "url": "https://dashboard.psp.example",
+   "pw": "Fin-dash!72xKe#Lo",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": true,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-pg-stage",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Stage",
+    "Databases"
+   ],
+   "title": "pg-payments-stage superuser",
+   "user": "postgres",
+   "url": "postgres://vm-pay-stage-01:5432/payments",
+   "pw": "stage-Wl9!kd2Q",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-payout-stage",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Stage",
+    "Databases"
+   ],
+   "title": "payout-service stage database user",
+   "user": "payout_app",
+   "url": "postgres://vm-pay-stage-01:5432/payments",
+   "pw": "Ry4-stage-Hq88",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-psp-sandbox",
+   "path": [
+    "Tidewater",
+    "Payments",
+    "Stage",
+    "PSP"
+   ],
+   "title": "PSP sandbox key",
+   "user": "",
+   "url": "https://sandbox.psp.example",
+   "pw": "sk_test_4eC39HqLyjWDarjtT1zd",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-teamcity",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Service accounts"
+   ],
+   "title": "TeamCity service account",
+   "user": "svc-knobas",
+   "url": "https://ci.tidewater.internal",
+   "pw": "Jb7!vQ3x-Nc5$Ke1",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-deploy-bot",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Service accounts"
+   ],
+   "title": "Gitea deploy bot",
+   "user": "deploy-bot",
+   "url": "https://git.tidewater.internal",
+   "pw": "gta_d3pl0y-9f2c7a11be",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-1",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-01 root",
+   "user": "root",
+   "url": "ssh://10.20.8.11",
+   "pw": "bA01!rt-Kq7x#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-2",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-02 root",
+   "user": "root",
+   "url": "ssh://10.20.8.12",
+   "pw": "bA02!rt-Wm2p#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-3",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-03 root",
+   "user": "root",
+   "url": "ssh://10.20.8.13",
+   "pw": "bA03!rt-Zd9c#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-4",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-04 root",
+   "user": "root",
+   "url": "ssh://10.20.8.14",
+   "pw": "bA04!rt-Hv4s#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-5",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-05 root",
+   "user": "root",
+   "url": "ssh://10.20.8.15",
+   "pw": "bA05!rt-Lp6n#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-6",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-06 root",
+   "user": "root",
+   "url": "ssh://10.20.8.16",
+   "pw": "bA06!rt-Xr3j#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-agent-7",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "CI",
+    "Agents"
+   ],
+   "title": "build-agent-07 root",
+   "user": "root",
+   "url": "ssh://10.20.8.17",
+   "pw": "bA07!rt-Tg8w#92",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-kuma",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Monitoring"
+   ],
+   "title": "Uptime Kuma admin",
+   "user": "admin",
+   "url": "https://status.tidewater.internal",
+   "pw": "kum4-Upt!me9",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-grafana",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Monitoring"
+   ],
+   "title": "Grafana admin",
+   "user": "admin",
+   "url": "https://grafana.tidewater.internal",
+   "pw": "gr4f-Ana!77Xp",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": true,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-ops-mail",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Mail"
+   ],
+   "title": "ops@ shared mailbox",
+   "user": "ops@tidewater.example",
+   "url": "https://mail.tidewater.example",
+   "pw": "0ps-Mailbox!4qRt",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": true,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-smtp",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Mail"
+   ],
+   "title": "SMTP relay",
+   "user": "relay@tidewater.example",
+   "url": "smtp://mail.tidewater.example:587",
+   "pw": "smtp-Re1ay#58vN",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-edge",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Network",
+    "Edge"
+   ],
+   "title": "vm-edge-01 root",
+   "user": "root",
+   "url": "ssh://10.20.1.5",
+   "pw": "Edg3!r00t-Vn5w",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-traefik",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Network",
+    "Edge"
+   ],
+   "title": "Traefik dashboard",
+   "user": "admin",
+   "url": "https://edge.tidewater.internal:8443",
+   "pw": "tr43fik-Dash#1",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-wg",
+   "path": [
+    "Tidewater",
+    "Platform",
+    "Network",
+    "VPN"
+   ],
+   "title": "WireGuard hub",
+   "user": "",
+   "url": "wg://vpn.tidewater.example:51820",
+   "pw": "wg-hub-Pr1v!Key-pass",
+   "notes": "",
+   "fields": [],
+   "files": [
+    {
+     "name": "wg-hub.conf",
+     "size": "612 B",
+     "kind": "CONF"
+    }
+   ],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-fr-prod",
+   "path": [
+    "Tidewater",
+    "Integrations",
+    "Flowrun",
+    "Prod"
+   ],
+   "title": "Flowrun admin (prod)",
+   "user": "admin",
+   "url": "https://flows.tidewater.internal",
+   "pw": "Fl0w-prod!x8Rv",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": "2026-12-04",
+   "approver": null
+  },
+  {
+   "id": "pl-fr-stage",
+   "path": [
+    "Tidewater",
+    "Integrations",
+    "Flowrun",
+    "Stage"
+   ],
+   "title": "Flowrun admin (stage)",
+   "user": "admin",
+   "url": "https://flows-stage.tidewater.internal",
+   "pw": "Fl0w-stage!k2Pn",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-ebics",
+   "path": [
+    "Tidewater",
+    "Integrations",
+    "Bank",
+    "SEPA gateway"
+   ],
+   "title": "EBICS user",
+   "user": "TIDEWTR1",
+   "url": "https://ebics.bank.example",
+   "pw": "Eb1cs!Tw-2026#qL",
+   "notes": "",
+   "fields": [],
+   "files": [
+    {
+     "name": "ebics-keys.zip",
+     "size": "18 KB",
+     "kind": "ZIP"
+    }
+   ],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-sepa-portal",
+   "path": [
+    "Tidewater",
+    "Integrations",
+    "Bank",
+    "SEPA gateway"
+   ],
+   "title": "SEPA gateway portal",
+   "user": "treasury@tidewater.example",
+   "url": "https://portal.bank.example",
+   "pw": "S3pa-Port!al77",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": true,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-alarm",
+   "path": [
+    "Tidewater",
+    "Office",
+    "Building"
+   ],
+   "title": "Alarm panel",
+   "user": "",
+   "url": "",
+   "pw": "4-7-1-9-0-2",
+   "notes": "Front door panel. Changes with the facility contract.",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  },
+  {
+   "id": "pl-wifi",
+   "path": [
+    "Tidewater",
+    "Office",
+    "Building"
+   ],
+   "title": "Guest Wi-Fi",
+   "user": "tidewater-guest",
+   "url": "",
+   "pw": "harbour-lights-2026",
+   "notes": "",
+   "fields": [],
+   "files": [],
+   "totp": false,
+   "expires": null,
+   "approver": null
+  }
+ ],
+ "files": {
+  "ledger-signing.pem": "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIGbMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAhNb3RBUmVhbEtleQIC\nCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEE1vY2t1cE9ubHlOb3RSZWFs\nBEBUaGlzSXNBTW9ja3VwTm90QVJlYWxLZXlUaWRld2F0ZXJMZWRnZXJTaWduaW5n\nS2V5MjAyNjA4\n-----END ENCRYPTED PRIVATE KEY-----\n",
+  "wg-hub.conf": "[Interface]\nAddress = 10.99.0.1/24\nListenPort = 51820\nPrivateKey = bW9ja3VwLW9ubHktbm90LWEtcmVhbC1rZXktMDAwMDA=\n\n[Peer]\n# vm-edge-01\nPublicKey = bW9ja3VwLXBlZXItcHVibGljLWtleS0wMDAwMDAwMDA=\nAllowedIPs = 10.99.0.2/32\n",
+  "recovery-codes.txt": "Hetzner Cloud recovery codes, each works once\n\n4f2k-91qx   p0d3-mm7a\nz81c-ka24   0qwe-77lv\nn3r8-xy5t   c6b1-ud90\n"
+ }
+}

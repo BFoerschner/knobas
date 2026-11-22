@@ -1,0 +1,21 @@
+{
+ "name": "attachments-list",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": [
+  {
+   "CredentialObjectId": "{entry:pl-ledger-key}",
+   "AttachmentId": "{attachment:pl-ledger-key:0}",
+   "FileName": "ledger-signing.pem",
+   "FileData": "<base64 282 bytes>",
+   "FileSize": 282
+  }
+ ],
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-ledger-key}/attachments"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "write-put-with-comment",
+ "status": 204,
+ "headers": {},
+ "body": "",
+ "request": {
+  "as": "writer",
+  "method": "PUT",
+  "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "name": "token-ok",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json;charset=utf-8"
+ },
+ "body": {
+  "access_token": "<token>",
+  "token_type": "bearer",
+  "expires_in": 43199
+ },
+ "request": {
+  "as": "none",
+  "method": "POST",
+  "path": "/OAuth2/Token"
+ }
+}

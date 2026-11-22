@@ -1,0 +1,20 @@
+{
+ "name": "server-info",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "ServerVersion": "<ServerVersion>",
+  "NetVersion": "<NetVersion>",
+  "OsVersion": "<OsVersion>",
+  "PortSettings": "",
+  "DnsInformation": "<DnsInformation>",
+  "Ping": null
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/GetServerInfo"
+ }
+}

@@ -1,0 +1,15 @@
+{
+ "name": "write-reader-refused",
+ "status": 403,
+ "headers": {
+  "content-type": "text/plain; charset=utf-8"
+ },
+ "body": {
+  "error_message": "Access denied. <mara.lindqvist> does not have permission to update the entry <Guest Wi-Fi>."
+ },
+ "request": {
+  "as": "reader",
+  "method": "PATCH",
+  "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+ }
+}

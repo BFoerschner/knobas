@@ -1,0 +1,63 @@
+{
+ "name": "search-v6",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "Credentials": [
+   {
+    "Id": "{entry:pl-payout-db}",
+    "Name": "payout-service database user",
+    "Username": "payout_app",
+    "Url": "postgres://vm-db-01.tidewater.internal:5432/payments",
+    "Notes": "Read and write on payments.*, no DDL.\nThe service reads it from PAYOUT_DB_PASSWORD.",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Path": "Root/Tidewater/Payments/Prod/Databases/"
+   },
+   {
+    "Id": "{entry:pl-ledger-db}",
+    "Name": "ledger-api database user",
+    "Username": "ledger_app",
+    "Url": "postgres://vm-db-01.tidewater.internal:5432/ledger",
+    "Notes": "",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Path": "Root/Tidewater/Payments/Prod/Databases/"
+   },
+   {
+    "Id": "{entry:deep0}",
+    "Name": "ledger-prod database user",
+    "Username": "ledger_app",
+    "Url": "postgres://ledger-prod-db.tidewater.internal:5432/ledger",
+    "Notes": "",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases}",
+    "Path": "Root/Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases/"
+   }
+  ],
+  "Groups": [
+   {
+    "Id": "{folder:Tidewater/Payments/Prod/Databases}",
+    "Name": "Databases",
+    "FullPath": "Root/Tidewater/Payments/Prod/Databases/"
+   },
+   {
+    "Id": "{folder:Tidewater/Payments/Stage/Databases}",
+    "Name": "Databases",
+    "FullPath": "Root/Tidewater/Payments/Stage/Databases/"
+   },
+   {
+    "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases}",
+    "Name": "Databases",
+    "FullPath": "Root/Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases/"
+   }
+  ]
+ },
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v6/rest/search"
+ }
+}

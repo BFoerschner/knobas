@@ -1,0 +1,47 @@
+{
+ "name": "entry-comment-folder",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {
+   "Secret path": "kv/payments/prod/payout-db"
+  },
+  "CustomApplicationFields": {},
+  "Attachments": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasViewEntryPasswordAccess": true,
+  "HasViewTOTPAccess": true,
+  "HasModifyTOTPAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": true,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{entry:pl-payout-db}",
+  "Name": "payout-service database user",
+  "Username": "payout_app",
+  "Password": null,
+  "Url": "postgres://vm-db-01.tidewater.internal:5432/payments",
+  "Notes": "Read and write on payments.*, no DDL.\nThe service reads it from PAYOUT_DB_PASSWORD.",
+  "GroupId": "{folder:Tidewater/Payments/Prod/Databases}",
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null,
+  "TOTPIssuer": null,
+  "TOTPSecret": null,
+  "TOTPDigits": 0,
+  "TOTPPeriod": 0
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-payout-db}"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "write-delete",
+ "status": 204,
+ "headers": {},
+ "body": "",
+ "request": {
+  "as": "writer",
+  "method": "DELETE",
+  "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+ }
+}
