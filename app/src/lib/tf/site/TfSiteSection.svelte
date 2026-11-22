@@ -4,6 +4,10 @@
 
   The switch is saved as it changes, with a toast. *Forget…* asks first, then closes the site (asking its page if it
   holds changes) and removes what the site stored here.
+
+  *Saved sign-in* (decisions §13 (b), ux29): a username and password knobas types into the site's own sign-in form,
+  kept in the source's keychain item. The row knows only that one is saved and for which name; the password is never
+  read back.
 -->
 <script lang="ts" module>
   import type { SiteAsked, SiteSetting } from "../../ipc/site";
@@ -14,12 +18,14 @@
     allow: (id: string, origin: string) => Promise<SiteSetting>;
     disallow: (id: string, origin: string) => Promise<SiteSetting>;
     forget: (id: string, force: boolean) => Promise<SiteAsked>;
+    saveSignIn: (id: string, username: string, password: string) => Promise<SiteSetting>;
+    removeSignIn: (id: string) => Promise<SiteSetting>;
   }
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { setSiteOpenInside, siteAllow, siteDisallow, siteForget } from "../../ipc/site";
+  import { setSiteOpenInside, siteAllow, siteDisallow, siteForget, siteSignInRemove, siteSignInSave } from "../../ipc/site";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { siteStore, type SiteStore } from "./site.svelte";
@@ -29,6 +35,8 @@
     allow: (id, origin) => siteAllow(id, origin),
     disallow: (id, origin) => siteDisallow(id, origin),
     forget: (id, force) => siteForget(id, force),
+    saveSignIn: (id, username, password) => siteSignInSave(id, username, password),
+    removeSignIn: (id) => siteSignInRemove(id),
   };
 
   let {
@@ -46,6 +54,47 @@
   const setting = $derived(store.settings.get(source));
   let saving = $state(false);
   let forgetting = $state(false);
+  /** The sign-in dialog is open. */
+  let signing = $state(false);
+  let signUser = $state("");
+  let signPassword = $state("");
+  let signError = $state<string | null>(null);
+  const canSave = $derived(!saving && signUser.trim() !== "" && signPassword !== "");
+
+  function openSignIn() {
+    signUser = setting?.sign_in_user ?? "";
+    signPassword = "";
+    signError = null;
+    signing = true;
+  }
+
+  function closeSignIn() {
+    signing = false;
+    signPassword = "";
+  }
+
+  async function saveSignIn() {
+    if (!canSave) return;
+    saving = true;
+    signError = null;
+    try {
+      const next = await ports.saveSignIn(source, signUser.trim(), signPassword);
+      store.holdOne(next);
+      closeSignIn();
+      push({ text: `${name}'s sign-in is saved. knobas fills it into ${name}'s own sign-in page.` });
+    } catch (cause) {
+      signError = ipcErrorMessage(cause);
+    } finally {
+      saving = false;
+    }
+  }
+
+  function removeSignIn() {
+    void write(
+      () => ports.removeSignIn(source),
+      () => `${name}'s saved sign-in is removed.`,
+    );
+  }
 
   const kept = $derived.by(() => {
     const since = setting?.kept_since;
@@ -145,11 +194,59 @@
         </ul>
       </div>
     </div>
+    <div class="tf-stg-row">
+      <div class="tf-stg-l">Saved sign-in<small>Typed into {name}'s own sign-in page</small></div>
+      <div class="tf-stg-c">
+        {#if setting.sign_in_user}
+          <span>Saved for <span class="tf-mono">{setting.sign_in_user}</span>, never shown</span>
+          <button class="tf-btn tf-sm" disabled={saving} onclick={openSignIn}>Change…</button>
+          <button class="tf-btn tf-sm tf-ghost" disabled={saving} onclick={removeSignIn}>Remove</button>
+        {:else}
+          <span class="tf-stg-hint">None</span>
+          <button class="tf-btn tf-sm" disabled={saving || !setting.offered} onclick={openSignIn}>Save one…</button>
+        {/if}
+      </div>
+    </div>
     <p class="tf-stg-note">
       On, Open in {name} shows the page here, under knobas's bar, and you sign in there once. The site cannot reach knobas, and
-      knobas does not read the site. Off, it opens your browser. The sign-in is in no backup.
+      knobas does not read the site. Off, it opens your browser. The sign-in is in no backup. A saved sign-in stays in this
+      computer's keychain and goes only into {name}'s own sign-in form, with "remember me" ticked; a sign-in through another
+      provider or a code is yours to type.
     </p>
   </section>
+{/if}
+
+{#if signing && setting !== undefined}
+  <TfDialog
+    why={!canSave && !saving ? "Type the username and the password to save them." : null}
+    title="{setting.sign_in_user ? 'Change' : 'Save'} {name}'s sign-in"
+    onclose={closeSignIn}
+  >
+    {#snippet body()}
+      <form
+        class="tf-formgrid"
+        id="tf-site-signin"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void saveSignIn();
+        }}
+      >
+        <label for="tf-site-signin-user">Username</label>
+        <input id="tf-site-signin-user" type="text" autocomplete="off" spellcheck="false" bind:value={signUser} />
+        <label for="tf-site-signin-pass">Password</label>
+        <input id="tf-site-signin-pass" type="password" autocomplete="new-password" bind:value={signPassword} />
+      </form>
+      {#if signError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{signError}</p>{/if}
+      <p class="tf-dlg-note">
+        Kept in this computer's keychain beside {name}'s credential, never shown again. knobas types it into {name}'s own sign-in
+        page when it opens there, and when you press Fill sign-in.
+      </p>
+    {/snippet}
+    {#snippet footer()}
+      <button type="button" class="tf-btn tf-ghost" onclick={closeSignIn}>Cancel</button>
+      <button type="submit" class="tf-btn tf-primary" form="tf-site-signin" disabled={!canSave}>Save sign-in</button>
+    {/snippet}
+  </TfDialog>
 {/if}
 
 {#if forgetting}

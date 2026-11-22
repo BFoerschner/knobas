@@ -61,7 +61,7 @@ impl crate::Sink for Walking {
 
 /// An in-memory [`Sink`](crate::Sink) that keeps the items and every
 /// one-time-code key handed to [`otp_key`](crate::Sink::otp_key) (ADR-0056):
-/// what clause 16 scans for a key that leaked into the mirror.
+/// what clause 17 scans for a key that leaked into the mirror.
 #[derive(Default)]
 pub struct KeySink {
     pub items: Vec<crate::SyncItem>,
@@ -559,14 +559,21 @@ where
     //     and an edit of a field the answer does not offer refused before
     //     anything is sent, and every searched field's list answered.
     check_ticket_fields(&*s, &d, &sink.0).await;
-    // 16. Passwords (ADR-0056): the records are the role's and nothing else,
+    // 16. The web sign-in's pages (ADR-0050): paths after the base URL, each
+    //     starting with `/` -- see `web_sign_in::check`.
+    if let Some(pages) = &d.web_sign_in
+        && let Err(error) = crate::web_sign_in::check(pages)
+    {
+        panic!("descriptor.web_sign_in: {error}");
+    }
+    // 17. Passwords (ADR-0056): the records are the role's and nothing else,
     //     no code key reached an item, a secret read answers for an entry and
     //     only for one, and a write the source does not perform is refused
     //     before anything is sent.
     check_passwords(&*s, &d, &sink.0, &otp_keys).await;
 }
 
-/// Clause 16: the Passwords role (ADR-0056), over what the adapter's own
+/// Clause 17: the Passwords role (ADR-0056), over what the adapter's own
 /// full sync emitted and the code keys it handed the sink. Each rule panics
 /// with its number, so a fake that breaks one names it.
 ///
@@ -597,7 +604,7 @@ pub async fn check_passwords(
                 .await;
             assert!(
                 matches!(answer, Ok(SecretAnswer::NotOffered)),
-                "clause 16 rule 7: a source with no passwords claim must answer read_secret with \
+                "clause 17 rule 7: a source with no passwords claim must answer read_secret with \
                  NotOffered, got {answer:?}"
             );
         }
@@ -612,13 +619,13 @@ pub async fn check_passwords(
                 refused,
                 Err(crate::SourceError::Protocol { status: None, .. })
             ),
-            "clause 16 rule 7: a source with no passwords claim must refuse passwords_write by \
+            "clause 17 rule 7: a source with no passwords claim must refuse passwords_write by \
              name with no status, got {:?}",
             refused.map(|_| ())
         );
         assert!(
             keys.is_empty(),
-            "clause 16 rule 7: a source with no passwords claim handed {} code keys to the sink",
+            "clause 17 rule 7: a source with no passwords claim handed {} code keys to the sink",
             keys.len()
         );
         return;
@@ -633,7 +640,7 @@ pub async fn check_passwords(
     for item in items {
         if let Err(why) = crate::passwords::check_payload(&item.kind, &item.payload) {
             panic!(
-                "clause 16 rule 1: {} of kind {:?} carries a payload that is not its record: {why}",
+                "clause 17 rule 1: {} of kind {:?} carries a payload that is not its record: {why}",
                 item.entity, item.kind
             );
         }
@@ -657,7 +664,7 @@ pub async fn check_passwords(
                 .to_ascii_lowercase();
             assert!(
                 !haystack.contains(&needle),
-                "clause 16 rule 2: the code key handed over for {entity} appears in {}'s title, \
+                "clause 17 rule 2: the code key handed over for {entity} appears in {}'s title, \
                  body text or payload",
                 item.entity
             );
@@ -676,7 +683,7 @@ pub async fn check_passwords(
         assert_eq!(
             says,
             keyed.contains(id.as_str()),
-            "clause 16 rule 3: {id}'s record says otp {:?}, and the sink {} a key for it",
+            "clause 17 rule 3: {id}'s record says otp {:?}, and the sink {} a key for it",
             record.otp.as_ref().map(|o| o.format.as_str()),
             if keyed.contains(id.as_str()) {
                 "was handed"
@@ -690,7 +697,7 @@ pub async fn check_passwords(
             entries
                 .iter()
                 .any(|(item, _)| item.entity.to_string() == *entity),
-            "clause 16 rule 3: a code key was handed over for {entity}, which the sync emitted \
+            "clause 17 rule 3: a code key was handed over for {entity}, which the sync emitted \
              no entry for"
         );
     }
@@ -701,7 +708,7 @@ pub async fn check_passwords(
         assert_eq!(
             item.body_text,
             crate::passwords::entry_body_text(record),
-            "clause 16 rule 4: {}'s body text is not the role's (username, address, notes and \
+            "clause 17 rule 4: {}'s body text is not the role's (username, address, notes and \
              the custom fields the listing sent)",
             item.entity
         );
@@ -725,7 +732,7 @@ pub async fn check_passwords(
                     | SecretAnswer::CommentRequired { .. }
                     | SecretAnswer::ApprovalRequired { .. })
             ),
-            "clause 16 rule 5: read_secret for the password of {} must answer a value, a \
+            "clause 17 rule 5: read_secret for the password of {} must answer a value, a \
              comment or an approval to ask for, got {:?}",
             item.entity,
             answer.as_ref().map(|_| "an answer")
@@ -747,7 +754,7 @@ pub async fn check_passwords(
         .await;
     assert!(
         matches!(answer, Ok(SecretAnswer::NotOffered)),
-        "clause 16 rule 6: read_secret for {not_an_entry}, which is no entry, must answer \
+        "clause 17 rule 6: read_secret for {not_an_entry}, which is no entry, must answer \
          NotOffered"
     );
 
@@ -804,7 +811,7 @@ pub async fn check_passwords(
                 refused,
                 Err(crate::SourceError::Protocol { status: None, .. })
             ),
-            "clause 16 rule 8: passwords_write of {kind:?}, which descriptor.passwords.writes \
+            "clause 17 rule 8: passwords_write of {kind:?}, which descriptor.passwords.writes \
              does not list, must be refused with SourceError::Protocol and no status, got {:?}",
             refused.map(|_| ())
         );
@@ -2682,6 +2689,7 @@ mod tests {
                     _ => Vec::new(),
                 },
                 url_forms: Vec::new(),
+                web_sign_in: None,
                 code_pages: None,
                 by_hand_by_default: false,
                 passwords: None,
@@ -4674,6 +4682,7 @@ mod password_tests {
                 clone_from: vec![],
                 url_forms: vec![],
                 code_pages: None,
+                web_sign_in: None,
                 by_hand_by_default: true,
                 passwords: claimed.then(|| Offers {
                     one_time_codes: true,
@@ -4827,55 +4836,55 @@ mod password_tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 1")]
+    #[should_panic(expected = "clause 17 rule 1")]
     async fn rule_1_a_key_beside_the_record() {
         clause(Pw::RawKeyInPayload).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 2")]
+    #[should_panic(expected = "clause 17 rule 2")]
     async fn rule_2_a_code_key_left_in_a_field() {
         clause(Pw::KeyInAField).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 3")]
+    #[should_panic(expected = "clause 17 rule 3")]
     async fn rule_3_a_key_the_record_does_not_mention() {
         clause(Pw::KeyWithoutOtp).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 3")]
+    #[should_panic(expected = "clause 17 rule 3")]
     async fn rule_3_a_code_with_no_key() {
         clause(Pw::OtpWithoutKey).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 4")]
+    #[should_panic(expected = "clause 17 rule 4")]
     async fn rule_4_a_hidden_field_in_the_body_text() {
         clause(Pw::HiddenFieldInBody).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 5")]
+    #[should_panic(expected = "clause 17 rule 5")]
     async fn rule_5_a_password_not_offered() {
         clause(Pw::PasswordNotOffered).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 6")]
+    #[should_panic(expected = "clause 17 rule 6")]
     async fn rule_6_a_folder_that_answers_a_password() {
         clause(Pw::FolderAnswers).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 7")]
+    #[should_panic(expected = "clause 17 rule 7")]
     async fn rule_7_a_source_with_no_claim_that_answers_a_secret() {
         clause(Pw::UnclaimedAnswers).await;
     }
 
     #[tokio::test]
-    #[should_panic(expected = "clause 16 rule 8")]
+    #[should_panic(expected = "clause 17 rule 8")]
     async fn rule_8_an_undeclared_write_that_was_sent() {
         clause(Pw::UndeclaredWriteSent).await;
     }

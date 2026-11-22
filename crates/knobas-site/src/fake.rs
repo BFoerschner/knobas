@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::host::{Hooks, HostError, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
 use crate::keys::{Claim, Press};
-use crate::scripts::Dirty;
+use crate::scripts::{Dirty, SignInCall};
 use crate::sites::{Shell, SiteEvent};
 
 /// How a fake view answers the unsaved-changes probe.
@@ -35,6 +35,13 @@ pub struct FakeViewState {
     pub hooks: Option<Hooks>,
     /// Probes never answered, held so the caller's channel stays open.
     pub unanswered: Vec<Box<dyn FnOnce(Dirty) + Send>>,
+    /// The view's own address, as the engine would read it: the last page
+    /// reported committed, or what a test set.
+    pub url: Option<String>,
+    /// How the fill script answers, in turn; `"no form"` when empty.
+    pub fill_answers: VecDeque<String>,
+    /// Every fill script run, in order.
+    pub sign_ins: Vec<SignInCall>,
 }
 
 /// A view that records every call.
@@ -101,6 +108,20 @@ impl SiteView for FakeView {
     fn poll(&self) -> Option<ViewEvent> {
         None
     }
+    fn url(&self) -> Option<String> {
+        self.state.borrow().url.clone()
+    }
+    fn sign_in(&self, call: &SignInCall, answer: Box<dyn FnOnce(String) + Send>) {
+        let text = {
+            let mut state = self.state.borrow_mut();
+            state.sign_ins.push(call.clone());
+            state
+                .fill_answers
+                .pop_front()
+                .unwrap_or_else(|| "\"no form\"".to_owned())
+        };
+        answer(text);
+    }
     fn leave_freely(&self) {
         self.state.borrow_mut().calls.push("leave freely".into());
     }
@@ -123,6 +144,10 @@ pub struct FakeHost {
     pub fail: Rc<RefCell<Option<String>>>,
     /// `forget` answers this.
     pub forget_holds: Rc<RefCell<bool>>,
+    /// `forget` holds for this many tries first, as WebKit does for a
+    /// moment after a view closed.
+    pub forget_held_for: Rc<RefCell<u32>>,
+    forget_tries: Rc<RefCell<u32>>,
 }
 
 impl FakeHost {
@@ -159,8 +184,11 @@ impl FakeHost {
         (hooks.navigate)(url)
     }
 
-    /// The view reports `event`.
+    /// The view reports `event`. A commit moves the view's own address.
     pub fn report(&self, source: &str, event: ViewEvent) {
+        if let ViewEvent::Committed(url) = &event {
+            self.view(source).borrow_mut().url = Some(url.clone());
+        }
         let hooks = self.hooks(source);
         (hooks.event)(event);
     }
@@ -204,11 +232,23 @@ impl SiteHost for FakeHost {
         self.calls.borrow_mut().push("focus shell".into());
     }
 
-    fn forget(&self, spec: &ViewSpec) -> bool {
+    fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
+        let ahead = deadline > std::time::Instant::now();
+        self.calls
+            .borrow_mut()
+            .push(format!("flush {} ahead={ahead}", processes.len()));
+    }
+
+    fn forget(&self, spec: &ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {
         self.calls
             .borrow_mut()
             .push(format!("forget {}", spec.source));
-        !*self.forget_holds.borrow()
+        let holds = {
+            let mut tries = self.forget_tries.borrow_mut();
+            *tries += 1;
+            *self.forget_holds.borrow() || *tries <= *self.forget_held_for.borrow()
+        };
+        done(!holds);
     }
 }
 
@@ -222,6 +262,8 @@ pub struct FakeShell {
     pub events: Mutex<Vec<SiteEvent>>,
     pub quits: AtomicU64,
     pub landed: Mutex<Vec<String>>,
+    /// Each source whose site asked for its saved sign-in.
+    pub sign_ins: Mutex<Vec<String>>,
     clock: AtomicU64,
     pub size: Mutex<(f64, f64)>,
 }
@@ -279,5 +321,8 @@ impl Shell for FakeShell {
     }
     fn landed(&self, source: &str) {
         self.landed.lock().unwrap().push(source.to_owned());
+    }
+    fn sign_in(&self, source: &str) {
+        self.sign_ins.lock().unwrap().push(source.to_owned());
     }
 }

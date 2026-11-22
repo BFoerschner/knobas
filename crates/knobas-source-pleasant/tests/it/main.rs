@@ -1,5 +1,5 @@
 //! The Pleasant adapter over a replayed server (ADR-0056): the contract
-//! battery with clause 16, the mapping, the four code-key formats, and **the
+//! battery with clause 17, the mapping, the four code-key formats, and **the
 //! request budget, which is the audit promise as a test**.
 
 mod recorded;

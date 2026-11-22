@@ -629,6 +629,32 @@ async fn a_forget_that_cannot_delete_yet_goes_on_the_list() {
     std::fs::remove_dir_all(&w._dir).unwrap();
 }
 
+/// WebKit holds a store for a moment after its last view closed: *Forget…*
+/// tries again until it is gone, and lists nothing (ux30, measured on the
+/// Mac: "data store is currently opened" right after the close).
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_forget_tries_again_while_the_store_is_held_for_a_moment() {
+    let w = world();
+    open_live(&w, "jira", "https://jira.example/").await;
+    *w.host.forget_held_for.borrow_mut() = 2;
+    let started = tokio::time::Instant::now();
+    w.sites.forget("jira", true).await.unwrap();
+    assert_eq!(
+        started.elapsed(),
+        knobas_site::sites::FORGET_AGAIN * 2,
+        "a pause before each try after the first, and none before it"
+    );
+    let tries = w
+        .host
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| *c == "forget jira")
+        .count();
+    assert_eq!(tries, 3, "held twice, gone the third time");
+    assert!(!w._dir.join("sites").join("forget.list").exists());
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn quitting_asks_only_the_pages_that_object() {
     let w = world();
@@ -780,4 +806,371 @@ async fn leave_anyway_answers_the_pages_own_leave_dialog_and_nothing_else_does()
         "{calls:?}"
     );
     assert_eq!(calls.last().map(String::as_str), Some("reload"));
+}
+
+// -- the saved web sign-in (ADR-0050, decisions §13 (b), ux29) ---------------
+
+fn sign_ins(w: &World, saved: bool) {
+    use knobas_site::sign_in::SignInRule;
+    let mut map = HashMap::new();
+    map.insert(
+        "jira".to_owned(),
+        SignInRule {
+            saved,
+            paths: vec!["/login.jsp".into()],
+            any_page: false,
+        },
+    );
+    map.insert(
+        "kuma".to_owned(),
+        SignInRule {
+            saved,
+            paths: vec![],
+            any_page: true,
+        },
+    );
+    w.sites.set_sign_ins(map);
+    w.shell.drain();
+}
+
+fn asked(w: &World) -> Vec<String> {
+    std::mem::take(&mut *w.shell.sign_ins.lock().unwrap())
+}
+
+fn last_status(w: &World, source: &str) -> knobas_site::state::SiteStatus {
+    w.sites
+        .statuses()
+        .into_iter()
+        .find(|status| status.source == source)
+        .expect("the site is open")
+}
+
+/// What the shell does when asked: hand over the saved sign-in.
+fn hand_over(w: &World, source: &str) {
+    w.sites
+        .fill_with(source, "bjorn".into(), "s3cr3t-Pa55".into());
+    w.shell.drain();
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_declared_sign_in_page_is_filled_by_itself_once_per_landing() {
+    use knobas_site::scripts::FillMode;
+    use knobas_site::sign_in::SiteSignIn;
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    assert!(asked(&w).is_empty(), "a commit alone is no loaded page");
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    assert_eq!(asked(&w), ["jira"]);
+    // The same page reported loaded again asks nothing more.
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    assert!(asked(&w).is_empty(), "never twice per landing");
+    let view = w.host.view("jira");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "jira");
+    assert_eq!(view.borrow().sign_ins.len(), 1);
+    assert_eq!(view.borrow().sign_ins[0].mode, FillMode::Fill);
+    assert_eq!(view.borrow().sign_ins[0].username, "bjorn");
+    assert_eq!(last_status(&w, "jira").sign_in, Some(SiteSignIn::Filling));
+    // The site answers with its sign-in page again: not taken.
+    w.host.report(
+        "jira",
+        ViewEvent::Committed("https://jira.example/login.jsp?os_error=1".into()),
+    );
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp?os_error=1".into()),
+    );
+    w.shell.drain();
+    view.borrow_mut().fill_answers.push_back("\"form\"".into());
+    w.shell.set_now(1000);
+    w.sites.tick().await;
+    w.shell.drain();
+    assert_eq!(view.borrow().sign_ins.last().unwrap().mode, FillMode::Look);
+    assert!(
+        view.borrow().sign_ins.last().unwrap().password.is_empty(),
+        "a look carries no password"
+    );
+    assert_eq!(last_status(&w, "jira").sign_in, Some(SiteSignIn::NotTaken));
+    assert!(
+        asked(&w).is_empty(),
+        "one try: nothing more until he presses"
+    );
+    // He presses Fill sign-in.
+    assert!(last_status(&w, "jira").fill);
+    w.sites.press_fill("jira").unwrap();
+    w.shell.drain();
+    assert_eq!(asked(&w), ["jira"]);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_taken_sign_in_clears_the_bar() {
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    let view = w.host.view("jira");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "jira");
+    w.host.report(
+        "jira",
+        ViewEvent::Committed("https://jira.example/secure/Dashboard.jspa".into()),
+    );
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/secure/Dashboard.jspa".into()),
+    );
+    w.shell.drain();
+    w.shell.set_now(400);
+    w.sites.tick().await;
+    w.shell.drain();
+    let status = last_status(&w, "jira");
+    assert_eq!(status.sign_in, None);
+    assert!(status.fill);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn the_fill_is_refused_natively_off_the_own_origin_in_a_redirect_and_with_nothing_saved() {
+    let w = world();
+    sign_ins(&w, false);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    assert!(asked(&w).is_empty(), "nothing saved, nothing asked");
+    assert!(!last_status(&w, "jira").fill);
+    assert!(matches!(
+        w.sites.press_fill("jira"),
+        Err(SiteError::Invalid(_))
+    ));
+    // Even if a sign-in reached it, nothing saved is nothing typed.
+    hand_over(&w, "jira");
+    assert!(w.host.view("jira").borrow().sign_ins.is_empty());
+
+    sign_ins(&w, true);
+    let view = w.host.view("jira");
+    // In a redirect: committed on its own origin, the engine already
+    // elsewhere.
+    view.borrow_mut().url = Some("https://sso.example/login".into());
+    hand_over(&w, "jira");
+    assert!(
+        view.borrow().sign_ins.is_empty(),
+        "never into a page in a redirect"
+    );
+    // On an allowed address: a provider's page is the provider's.
+    let mut map = HashMap::new();
+    let mut jira = rules("https://jira.example");
+    jira.allowed = vec![knobas_site::policy::Origin::parse("https://sso.example").unwrap()];
+    map.insert("jira".to_owned(), jira);
+    w.sites.set_rules(map);
+    w.host.report(
+        "jira",
+        ViewEvent::Committed("https://sso.example/login".into()),
+    );
+    w.shell.drain();
+    hand_over(&w, "jira");
+    assert!(
+        view.borrow().sign_ins.is_empty(),
+        "never on an allowed origin"
+    );
+    let status = last_status(&w, "jira");
+    assert!(!status.fill);
+    assert_eq!(
+        status.sign_in,
+        Some(knobas_site::sign_in::SiteSignIn::Provider)
+    );
+    assert!(matches!(
+        w.sites.press_fill("jira"),
+        Err(SiteError::Invalid(_))
+    ));
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_form_on_any_page_is_looked_for_while_the_page_draws_it() {
+    use knobas_site::sign_in::LOOK_EVERY_MS;
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "kuma", "https://kuma.example/dashboard").await;
+    w.host.report(
+        "kuma",
+        ViewEvent::Finished("https://kuma.example/dashboard".into()),
+    );
+    w.shell.drain();
+    assert_eq!(asked(&w), ["kuma"]);
+    let view = w.host.view("kuma");
+    // The dialog is not drawn yet.
+    hand_over(&w, "kuma");
+    assert_eq!(view.borrow().sign_ins.len(), 1);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    w.shell.set_now(LOOK_EVERY_MS as u64);
+    w.sites.tick().await;
+    w.shell.drain();
+    assert_eq!(asked(&w), ["kuma"], "looked for again");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "kuma");
+    assert_eq!(view.borrow().sign_ins.len(), 2);
+}
+
+/// No log line holds the password, at every level, through a whole fill:
+/// asked, handed over, typed, answered, judged.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn no_log_line_holds_the_password() {
+    use std::io::Write;
+    #[derive(Clone, Default)]
+    struct Lines(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl Write for Lines {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let lines = Lines::default();
+    let writer = lines.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    let view = w.host.view("jira");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "jira");
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    w.shell.set_now(1000);
+    w.sites.tick().await;
+    w.shell.drain();
+    // Refused fills log too.
+    view.borrow_mut().url = Some("https://sso.example/".into());
+    hand_over(&w, "jira");
+    let text = String::from_utf8(lines.0.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("site sign-in"), "the fill was logged: {text}");
+    assert!(
+        !text.contains("s3cr3t-Pa55"),
+        "a log line holds the password:\n{text}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn quitting_drops_every_view_then_waits_for_the_sessions_ahead() {
+    let w = world();
+    // Nothing alive: nothing to wait for.
+    w.sites.shutdown();
+    assert!(!w.host.calls.borrow().iter().any(|c| c.starts_with("flush")));
+    open_live(&w, "jira", "https://jira.example/").await;
+    let view = w.host.view("jira");
+    w.sites.shutdown();
+    assert!(view.borrow().calls.contains(&"dropped".to_owned()));
+    assert!(w.sites.statuses().is_empty());
+    assert_eq!(
+        w.host
+            .calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("flush"))
+            .collect::<Vec<_>>(),
+        ["flush 0 ahead=true"]
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_shell_with_no_saved_sign_in_turns_the_button_off() {
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "jira", "https://jira.example/secure/Dashboard.jspa").await;
+    assert!(last_status(&w, "jira").fill);
+    w.sites.press_fill("jira").unwrap();
+    w.shell.drain();
+    w.sites.fill_none("jira");
+    w.shell.drain();
+    let status = last_status(&w, "jira");
+    assert!(!status.fill, "nothing is saved after all");
+    assert_eq!(status.sign_in, None);
+    assert!(matches!(
+        w.sites.press_fill("jira"),
+        Err(SiteError::Invalid(_))
+    ));
+}
+
+/// A page on another origin, a provider's, judges nothing: the fill is
+/// judged when the site is back on its own page.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_provider_page_after_a_fill_judges_nothing() {
+    use knobas_site::sign_in::SiteSignIn;
+    let w = world();
+    sign_ins(&w, true);
+    let mut map = HashMap::new();
+    let mut jira = rules("https://jira.example");
+    jira.allowed = vec![knobas_site::policy::Origin::parse("https://sso.example").unwrap()];
+    map.insert("jira".to_owned(), jira);
+    w.sites.set_rules(map);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    let view = w.host.view("jira");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "jira");
+    w.host.report(
+        "jira",
+        ViewEvent::Committed("https://sso.example/mfa".into()),
+    );
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://sso.example/mfa".into()),
+    );
+    w.shell.drain();
+    w.shell.set_now(400);
+    w.sites.tick().await;
+    w.shell.drain();
+    assert_eq!(
+        view.borrow().sign_ins.len(),
+        1,
+        "no look on the provider's page"
+    );
+    assert_eq!(
+        last_status(&w, "jira").sign_in,
+        Some(SiteSignIn::Filling),
+        "still waiting to judge the fill on the source's own page"
+    );
 }

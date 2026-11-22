@@ -50,6 +50,7 @@ impl Source for Recorder {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             by_hand_by_default: false,
             passwords: None,

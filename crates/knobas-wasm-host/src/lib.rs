@@ -83,9 +83,13 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 6,
+    minor: 7,
     patch: 0,
 };
+
+/// The minor of 1.x from which the host reads the descriptor's
+/// `web_sign_in` (ADR-0050, ux30).
+const WEB_SIGN_IN_FROM_MINOR: u64 = 7;
 
 /// The interface the component exports, without its version.
 const SOURCE_EXPORT: &str = "knobas:adapter/source";
@@ -337,6 +341,11 @@ impl WasmAdapter {
         let template = adapter
             .describe(&probe.adapter_kind, &probe.adapter_kind)
             .map_err(|e| LoadError::Descriptor(e.to_string()))?;
+        if let Some(pages) = &template.web_sign_in
+            && let Err(error) = knobas_source::web_sign_in::check(pages)
+        {
+            return Err(LoadError::Descriptor(format!("web_sign_in: {error}")));
+        }
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
@@ -412,6 +421,16 @@ impl WasmAdapter {
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.inner.refresh.is_some()
+    }
+
+    /// Whether the host reads the descriptor's `web_sign_in` (1.7.0,
+    /// ADR-0050): where the source's own website shows its sign-in form, so
+    /// a saved web sign-in is filled there by itself. A component built
+    /// against an older minor has it dropped, and its site offers *Fill
+    /// sign-in* alone.
+    #[must_use]
+    pub fn declares_web_sign_in(&self) -> bool {
+        self.inner.version.major > 1 || self.inner.version.minor >= WEB_SIGN_IN_FROM_MINOR
     }
 
     /// Whether the component exports a ticket's fields (1.6.0, ADR-0054).
@@ -783,6 +802,16 @@ fn assert_fixture_fresh(path: &Path) {
 pub fn fixture_component_v1_5() -> std::path::PathBuf {
     let current = fixture_component();
     current.with_file_name("knobas_wasm_fixture_v1_5.wasm")
+}
+
+/// The fixture built against the frozen 1.6.0 world, the minor before the
+/// descriptor's `web_sign_in` is read, which `just wasm-fixture` keeps beside
+/// [`fixture_component`] (ADR-0050, ux30).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_6() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_6.wasm")
 }
 
 /// The fixture built against the frozen 1.0.0 world, which `just

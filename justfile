@@ -642,6 +642,8 @@ wasm-fixture:
     cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_3.wasm
     env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_5
     cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_5.wasm
+    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_6
+    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_6.wasm
     env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet
 
 # The gate's lint pass. PKGS narrows it to the given cargo package selection

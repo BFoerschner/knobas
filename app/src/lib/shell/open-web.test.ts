@@ -19,6 +19,7 @@ function setting(source: string, base: string, on = true, extra: Partial<SiteSet
     kept_since: null,
     offered: true,
     persists: true,
+    sign_in_user: null,
     ...extra,
   };
 }

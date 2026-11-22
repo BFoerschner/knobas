@@ -786,6 +786,14 @@ const PAGES = [
     { id: "list-filter", kind: "column-filter", strict: true, finding: "F-151", prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], filter: "payo", sizes: [[1440, 900], [1100, 800], [860, 760]] },
     { id: "list-pill", kind: "column-filter", strict: true, finding: "F-151", prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], pill: { sel: ".tf-main button", text: "Bug" } },
   ] },
+  // A site's saved sign-in (ux29): *Fill sign-in* pressed twice by key fills once (the fake's Confluence has one saved),
+  // and Settings' *Save one…* pressed twice opens its dialog once and saves nothing.
+  { page: "A site, Confluence", route: "site/confluence", trips: [
+    { id: "site-fill-twice", kind: "enter-twice", strict: true, finding: "site-signin", prep: [{ wait: 400 }, { click: ".tf-site button", starts: "Open " }, { wait: 900 }], press: { sel: ".tf-sitebar button", text: "Fill sign-in" } },
+  ] },
+  { page: "A source's site sign-in", route: "settings/source/jira", trips: [
+    { id: "site-signin-save-opens", kind: "enter-twice", strict: true, finding: "site-signin", press: { sel: ".tf-stg-row button", text: "Save one…" }, opens: true },
+  ] },
   { page: "A source", route: "settings/source/gitea", trips: [
     { id: "syncing-undo", kind: "undo-stale", strict: true, finding: "F-648", changes: [{ sel: '.tf-main button[aria-label="Syncing"]' }, { sel: '.tf-main button[aria-label="Syncing"]' }], value: "document.querySelector('.tf-main button[aria-label=\"Syncing\"]')?.getAttribute('aria-checked') ?? null" },
     // Owners waits for its Save, and its draft stays on Esc by design, so it is swept and not typed into.
@@ -1258,7 +1266,7 @@ const PAGES = [
 ];
 
 // Commands that change something. shell/dev/fake's reads, syncs' progress and heartbeats are left out.
-const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|complete_first_run$|sync_now$|sync_all$|clone_all$)/;
+const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|complete_first_run$|sync_now$|sync_all$|clone_all$|site_fill$|site_sign_in_save$|site_sign_in_remove$)/;
 
 // Runs in the page, once per document, before the app.
 const LIB = String.raw`(() => {

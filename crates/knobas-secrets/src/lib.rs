@@ -13,6 +13,8 @@
 //! value   = {"v":2,"kind":"pat","secret":"…"}
 //!         = {"v":2,"kind":"api_token","secret":"…",
 //!            "account":{"username":"…","password":"…"}}
+//!         = {"v":3,"kind":"pat","secret":"…",
+//!            "web":{"username":"…","password":"…"}}
 //! ```
 //!
 //! One item per source rather than per auth method, so changing PAT → password
@@ -43,6 +45,19 @@
 //! [`decode`] makes is of a version this build has *not heard of*, which is
 //! still the rule: a reader that guessed at a newer shape would hand an
 //! adapter half a credential.
+//!
+//! # Version 3: a saved web sign-in in the same item (ADR-0050, ux29)
+//!
+//! `web` is an **optional** username and password for the source's own
+//! website shown inside knobas: the site's sign-in form is filled with it
+//! (decisions §13 (b)). It rides in the source's item for the account's
+//! reason: one item, one lifetime, gone with the source.
+//!
+//! **Written as v3 only when it is there.** An item with no `web` is still
+//! written as v2, byte for byte what it was, so an older knobas keeps reading
+//! every credential a newer one stored for a source with no saved sign-in. An
+//! item with one is v3, which an older build refuses rather than reads with
+//! the sign-in silently dropped and rewritten without it.
 //!
 //! # Who names the service
 //!
@@ -162,6 +177,30 @@ pub struct Secret {
     ///
     /// [`SourceInstance::account`]: knobas_source::instance::SourceInstance::account
     pub account: Option<Account>,
+    /// The saved web sign-in of envelope version 3 (ADR-0050): typed into
+    /// the source's own sign-in form inside knobas, never sent anywhere
+    /// else and never read back to knobas's page. `None` until the person
+    /// saves one in Settings.
+    pub web: Option<WebSignIn>,
+}
+
+/// A username and password for a source's own website (ADR-0050, decisions
+/// §13 (b)). Not the [`Account`], which an adapter's API traffic uses.
+#[derive(Clone, PartialEq, Eq)]
+pub struct WebSignIn {
+    pub username: String,
+    pub password: String,
+}
+
+/// The password never prints: whose sign-in it is is what a log line is read
+/// for.
+impl std::fmt::Debug for WebSignIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebSignIn")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Secret {
@@ -173,6 +212,7 @@ impl Secret {
             kind,
             value: value.into(),
             account: None,
+            web: None,
         }
     }
 }
@@ -190,6 +230,7 @@ impl std::fmt::Debug for Secret {
             .field("kind", &self.kind)
             .field("value", &"<redacted>")
             .field("account", &self.account)
+            .field("web", &self.web)
             .finish()
     }
 }
@@ -305,14 +346,20 @@ pub trait SecretStore: Send + Sync {
 /// version this build knows is listed in [`READABLE_VERSIONS`], and a stored
 /// item is upgraded by being written, never by a migration: there is nothing
 /// to migrate *to* -- a v1 item decodes as the credential it always was.
-const ENVELOPE_VERSION: u8 = 2;
+///
+/// **3 since ux29**, when it grew an optional `web` sign-in. An item without
+/// one is still written at [`PLAIN_VERSION`], so older builds read it.
+const ENVELOPE_VERSION: u8 = 3;
+
+/// The version an item with no `web` sign-in is written at.
+const PLAIN_VERSION: u8 = 2;
 
 /// The envelope versions this build can read.
 ///
 /// A list rather than `<= ENVELOPE_VERSION`, so that dropping support for a
 /// shape is a deletion here and reads as one, and so the refusal below can
 /// name what it does understand.
-const READABLE_VERSIONS: &[u8] = &[1, 2];
+const READABLE_VERSIONS: &[u8] = &[1, 2, 3];
 
 /// The stored account half, owned for the reason [`Envelope`] is.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -340,6 +387,9 @@ struct Envelope {
     /// it always was but for its `v`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     account: Option<StoredAccount>,
+    /// v3: the saved web sign-in. Absent otherwise, and then the item is v2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    web: Option<StoredAccount>,
 }
 
 /// The envelope name for an auth method.
@@ -369,17 +419,27 @@ fn kind_from_envelope(name: &str) -> Option<AuthMethod> {
 
 /// Serialize a secret into the stored envelope.
 ///
-/// Always at [`ENVELOPE_VERSION`], account or no account: the version names
-/// the *shape a reader must understand*, and a v1 item that grew an `account`
-/// would be one an older build silently read as a Kuma with no write half.
+/// Account or no account, never at v1: the version names the *shape a reader
+/// must understand*, and a v1 item that grew an `account` would be one an
+/// older build silently read as a Kuma with no write half. At
+/// [`ENVELOPE_VERSION`] when it holds a web sign-in, else at
+/// [`PLAIN_VERSION`].
 fn encode(secret: &Secret) -> Result<String, SecretError> {
     serde_json::to_string(&Envelope {
-        v: ENVELOPE_VERSION,
+        v: if secret.web.is_some() {
+            ENVELOPE_VERSION
+        } else {
+            PLAIN_VERSION
+        },
         kind: envelope_kind(secret.kind).to_owned(),
         secret: secret.value.clone(),
         account: secret.account.as_ref().map(|a| StoredAccount {
             username: a.username.clone(),
             password: a.password.clone(),
+        }),
+        web: secret.web.as_ref().map(|w| StoredAccount {
+            username: w.username.clone(),
+            password: w.password.clone(),
         }),
     })
     .map_err(|e| SecretError::Backend(e.to_string()))
@@ -411,6 +471,10 @@ fn decode(raw: &str) -> Result<Secret, SecretError> {
         account: envelope.account.map(|a| Account {
             username: a.username,
             password: a.password,
+        }),
+        web: envelope.web.map(|w| WebSignIn {
+            username: w.username,
+            password: w.password,
         }),
     })
 }
@@ -474,7 +538,7 @@ mod tests {
         // types without a version, which holds only while a build writes
         // exactly the bytes an older one reads.
         assert_eq!(json, r#"{"v":2,"kind":"pat","secret":"abc123"}"#);
-        assert_eq!(READABLE_VERSIONS, [1, 2]);
+        assert_eq!(READABLE_VERSIONS, [1, 2, 3]);
         let back = decode(&json).unwrap();
         assert_eq!(back.kind, AuthMethod::Pat);
         assert_eq!(back.value, "abc123");
@@ -492,6 +556,7 @@ mod tests {
                 username: "knobas".into(),
                 password: "knobas-dev".into(),
             }),
+            web: None,
         };
         let json = encode(&secret).unwrap();
         assert_eq!(
@@ -556,6 +621,67 @@ mod tests {
         }
     }
 
+    /// **v3 (ADR-0050): a saved web sign-in rides in the same item**, and
+    /// only an item that holds one is written as v3. Byte for byte, both
+    /// ways, since the point of keeping v2 for the rest is that an older
+    /// build reads exactly those bytes.
+    #[test]
+    fn a_web_sign_in_makes_the_item_v3_and_round_trips() {
+        let mut secret = Secret::just(AuthMethod::Pat, "abc123");
+        assert_eq!(
+            encode(&secret).unwrap(),
+            r#"{"v":2,"kind":"pat","secret":"abc123"}"#,
+            "no sign-in: the v2 bytes an older build reads"
+        );
+        secret.web = Some(WebSignIn {
+            username: "bjorn".into(),
+            password: "pa\"ss".into(),
+        });
+        let json = encode(&secret).unwrap();
+        assert_eq!(
+            json,
+            r#"{"v":3,"kind":"pat","secret":"abc123","web":{"username":"bjorn","password":"pa\"ss"}}"#
+        );
+        let back = decode(&json).unwrap();
+        assert_eq!(back.value, "abc123");
+        assert_eq!(back.web, secret.web);
+        assert!(back.account.is_none());
+    }
+
+    /// A v2 item, account and all, reads as before with no sign-in, and is
+    /// v3 once one is stored beside it.
+    #[test]
+    fn a_v2_item_reads_with_no_sign_in_and_becomes_v3_when_one_is_stored() {
+        let mut back = decode(
+            r#"{"v":2,"kind":"api_token","secret":"k","account":{"username":"u","password":"p"}}"#,
+        )
+        .unwrap();
+        assert!(back.web.is_none());
+        assert_eq!(back.account.as_ref().unwrap().username, "u");
+        back.web = Some(WebSignIn {
+            username: "w".into(),
+            password: "x".into(),
+        });
+        let json = encode(&back).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["v"], 3);
+        assert_eq!(value["account"]["username"], "u", "the account stays");
+        assert_eq!(value["web"]["username"], "w");
+    }
+
+    /// The sign-in's password never prints.
+    #[test]
+    fn debug_never_prints_the_web_password() {
+        let mut s = Secret::just(AuthMethod::Pat, "t");
+        s.web = Some(WebSignIn {
+            username: "bjorn".into(),
+            password: "hunter4".into(),
+        });
+        let shown = format!("{s:?}");
+        assert!(!shown.contains("hunter4"), "{shown}");
+        assert!(shown.contains("bjorn"), "{shown}");
+    }
+
     /// A secret that prints itself is a secret in a log file.
     #[test]
     fn debug_never_prints_the_value() {
@@ -566,6 +692,7 @@ mod tests {
                 username: "knobas".into(),
                 password: "hunter3".into(),
             }),
+            web: None,
         };
         let shown = format!("{s:?}");
         assert!(
@@ -620,6 +747,7 @@ mod tests {
                         username: "knobas".into(),
                         password: "knobas-dev".into(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

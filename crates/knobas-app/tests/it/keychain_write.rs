@@ -59,6 +59,7 @@ fn descriptor(account: bool) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_sign_in: None,
         code_pages: None,
         by_hand_by_default: false,
         passwords: None,
@@ -319,6 +320,7 @@ async fn fixture_with(name: &str, account: bool) -> Fixture {
                     username: "admin".to_owned(),
                     password: "a-password".to_owned(),
                 }),
+                web: None,
             },
         )
         .expect("the credential is stored");

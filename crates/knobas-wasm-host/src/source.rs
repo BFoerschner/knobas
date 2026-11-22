@@ -723,7 +723,8 @@ pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> 
 /// [`Capability::Refresh`] whatever its JSON says: the app reads the
 /// declaration to choose between *Refresh* and *Sync now*, and between a
 /// refresh and the run alone after a landed write, and the host would answer
-/// *not offered* to every refresh of it (#2101).
+/// *not offered* to every refresh of it (#2101). One built against 1.6.0 or
+/// earlier declares no `web_sign_in` (ux30).
 pub(crate) async fn descriptor(
     adapter: &WasmAdapter,
     instance: wit::Instance,
@@ -743,6 +744,11 @@ pub(crate) async fn descriptor(
             descriptor
                 .capabilities
                 .retain(|c| *c != Capability::Refresh);
+        }
+        // A sign-in page is read from 1.7.0 on: an older component keeps
+        // *Fill sign-in* alone, whatever its JSON says (ADR-0050).
+        if !adapter.declares_web_sign_in() {
+            descriptor.web_sign_in = None;
         }
         Ok(descriptor)
     })

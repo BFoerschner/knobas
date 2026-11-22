@@ -128,7 +128,17 @@ offered: boolean,
 /**
  * The sign-in outlives knobas here (macOS 14 and later, Windows).
  */
-persists: boolean, };
+persists: boolean, 
+/**
+ * The username of the saved web sign-in (ux29), when one is saved. The
+ * password never leaves the keychain item.
+ */
+sign_in_user: string | null, };
+
+/**
+ * What the bar says about the sign-in (`SiteStatus::sign_in`).
+ */
+export type SiteSignIn = "filling" | "not_taken" | "second_factor" | "no_form" | "ambiguous" | "provider";
 
 /**
  * One live site, as the page draws it (`site:status`). Every field is text
@@ -154,4 +164,13 @@ shown: boolean, keyboard: SiteKeyboard,
 /**
  * The origin the rectangle asks about, while [`SitePhase::Asks`].
  */
-asks_origin: string | null, failure: SiteFailure | null, esc_again_ms: number, };
+asks_origin: string | null, failure: SiteFailure | null, esc_again_ms: number, 
+/**
+ * *Fill sign-in* is drawn: a web sign-in is saved, the page is on the
+ * source's own origin, and no fill is under way (ux29).
+ */
+fill: boolean, 
+/**
+ * What the bar says about the saved sign-in.
+ */
+sign_in?: SiteSignIn, };

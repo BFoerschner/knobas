@@ -398,6 +398,7 @@ const SITE_STATUS = {
   asks_origin: null,
   failure: null,
   esc_again_ms: 500,
+  fill: false,
 } as const;
 const siteResidueStore = createSiteStore();
 const TfAck = (await import("../tf/TfAck.svelte")).default;

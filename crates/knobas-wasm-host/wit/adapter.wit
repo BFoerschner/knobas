@@ -15,7 +15,7 @@
 /// round-trip tested there, and it is what spec §3a made the SPI's types for:
 /// plain data that can leave the process without a contract change. Each
 /// such parameter or result names the Rust type whose JSON it is.
-package knobas:adapter@1.6.0;
+package knobas:adapter@1.7.0;
 
 interface types {
     /// The serde JSON of the `knobas-source` type its use names.
@@ -161,6 +161,13 @@ interface source {
         constructor(instance: instance);
 
         /// `SourceDescriptor` as JSON.
+        ///
+        /// Since 1.7.0 the host reads its optional `web_sign_in`
+        /// (`{"paths": ["/login"], "any_page": false}`): where the source's
+        /// own website shows its sign-in form, paths after the base URL. A
+        /// saved web sign-in is typed into that form by the host, inside its
+        /// own web view; the component never sees it. A component built
+        /// against 1.6.0 or earlier has the key dropped.
         descriptor: func() -> json;
 
         test-connection: func() -> result<connection-info, source-error>;

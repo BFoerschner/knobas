@@ -470,6 +470,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         source_actions: vec!["add_label".to_owned()],
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_sign_in: None,
         code_pages: None,
         by_hand_by_default: false,
         passwords: None,

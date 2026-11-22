@@ -763,6 +763,7 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: vec![crate::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
+            web_sign_in: None,
             code_pages: None,
             by_hand_by_default: false,
             passwords: None,

@@ -37,6 +37,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         code_pages: None,
         // Each read may be a line in the server's audit log under the
         // person's name: nothing is read in the background.
+        web_sign_in: None,
         by_hand_by_default: true,
         passwords: Some(Offers {
             one_time_codes: true,

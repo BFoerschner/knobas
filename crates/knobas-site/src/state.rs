@@ -86,6 +86,13 @@ pub struct SiteStatus {
     pub asks_origin: Option<String>,
     pub failure: Option<SiteFailure>,
     pub esc_again_ms: u32,
+    /// *Fill sign-in* is drawn: a web sign-in is saved, the page is on the
+    /// source's own origin, and no fill is under way (ux29).
+    pub fill: bool,
+    /// What the bar says about the saved sign-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sign_in: Option<crate::sign_in::SiteSignIn>,
 }
 
 /// One site's state.
@@ -129,6 +136,10 @@ pub struct Site {
     /// The page asked for the keyboard in the site while nothing was on
     /// screen yet: it takes it when the view first shows.
     pub focus_wanted: bool,
+    /// A web sign-in is saved for the source (ux29).
+    pub sign_in_saved: bool,
+    /// The saved sign-in's one-try rule.
+    pub filler: crate::sign_in::Filler,
 }
 
 impl Site {
@@ -158,6 +169,8 @@ impl Site {
             asleep: false,
             landed_own: false,
             focus_wanted: false,
+            sign_in_saved: false,
+            filler: crate::sign_in::Filler::default(),
         }
     }
 
@@ -301,6 +314,15 @@ impl Site {
             asks_origin: self.asks.as_ref().map(|(origin, _)| origin.to_string()),
             failure: self.failure.clone(),
             esc_again_ms: ESC_AGAIN_MS,
+            fill: self.sign_in_saved
+                && self.own
+                && self.committed
+                && self.phase == SitePhase::Live
+                && !self.filler.busy(),
+            sign_in: self.filler.said.or_else(|| {
+                (self.sign_in_saved && self.committed && !self.own && self.url.is_some())
+                    .then_some(crate::sign_in::SiteSignIn::Provider)
+            }),
         }
     }
 }

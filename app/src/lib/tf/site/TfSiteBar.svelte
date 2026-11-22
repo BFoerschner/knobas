@@ -13,6 +13,10 @@
   (`site.svelte.ts`).
 
   The first `Esc` (decisions §9) draws the first cap down while the second still counts; nothing else changes.
+
+  *Fill sign-in* (ux29) stands before *Open in browser* while a web sign-in is saved and the page is on the source's
+  own origin; what came of a fill is said where the address was, as a link's fate is. On another origin, a sign-in
+  provider's, the warning chip says knobas does not fill it there.
 -->
 <script lang="ts">
   import { tick } from "svelte";
@@ -20,6 +24,8 @@
   import type { SiteSetting, SiteStatus } from "../../ipc/site";
   import { openInBrowser } from "../../shell/external-links"; // browser on purpose: the bar's *Open in browser*
   import { keyHint } from "../../shell/platform";
+  import { push } from "../../shell/toasts.svelte";
+  import { ipcErrorMessage } from "../../ipc";
   import type { EscTargetOf } from "../escape";
   import { backStep } from "../page-name.svelte";
   import { answerAnyway, answerKeep, BRIDGE_ACTIONS, closeSite, reloadSite, siteBack, siteForward, type SiteActionPorts } from "./actions";
@@ -131,6 +137,29 @@
     selection?.addRange(range);
   }
 
+  /** What came of a fill, said where the address is; `null` when nothing is to say. */
+  const signInNote = $derived.by(() => {
+    switch (status?.sign_in) {
+      case "not_taken":
+        return `${name} did not take the saved sign-in.`;
+      case "second_factor":
+        return `${name} asks for a code. That one is yours to type.`;
+      case "no_form":
+        return "No sign-in form on this page.";
+      case "ambiguous":
+        return "This form has two password fields. knobas fills only a sign-in form.";
+      default:
+        return null;
+    }
+  });
+  const filling = $derived(status?.sign_in === "filling");
+
+  function fill() {
+    const run = actions.fill;
+    if (run === undefined) return;
+    run(source).catch((cause: unknown) => push({ text: `Could not fill ${name}'s sign-in: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  }
+
   function browse() {
     const url = status?.url ?? setting?.base ?? null;
     if (url !== null) openInBrowser(url); // browser on purpose: the bar's *Open in browser*
@@ -179,18 +208,23 @@
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => action.run()}>{action.label}</button>
         {/if}
       </span>
+    {:else if signInNote !== null}
+      <span class="tf-site-says" role="status"><span class="tf-site-says-t">{signInNote}</span></span>
     {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions: a press selects the text to copy; it is not a control -->
       <span class="tf-site-at" tabindex="-1" class:tf-foreign={at !== null && status?.own === false} title={at?.whole ?? ""} onclick={selectAddress}>
         {#if at !== null}
           {#if at.plain}<span class="tf-site-plain">{at.plain}</span>{/if}<span class="tf-site-host">{at.host}</span><span class="tf-site-path">{at.rest}</span>
-          {#if status?.own === false}<span class="tf-chip tf-warn">not {name}'s own address</span>{/if}
+          {#if status?.own === false}<span class="tf-chip tf-warn">{status.sign_in === "provider" ? `not ${name}'s own address, so its sign-in is not filled` : `not ${name}'s own address`}</span>{/if}
         {/if}
       </span>
     {/if}
     <span class="tf-site-acts">
       {#if match !== null}
         <a class="tf-btn tf-sm tf-ghost" href={entityAddress(match.kind, match.entity_id)}>Open in knobas</a>
+      {/if}
+      {#if status?.fill || filling}
+        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={filling} title="Type {name}'s saved sign-in into this page" onclick={fill}>{filling ? "Filling…" : "Fill sign-in"}</button>
       {/if}
       <button type="button" class="tf-btn tf-sm tf-ghost" disabled={status?.url == null && !setting?.base} onclick={browse}>Open in browser</button>
       {#if back !== null}

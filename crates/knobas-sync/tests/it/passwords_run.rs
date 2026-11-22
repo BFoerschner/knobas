@@ -66,6 +66,7 @@ impl Source for Vault {
             clone_from: vec![],
             url_forms: vec![],
             code_pages: None,
+            web_sign_in: None,
             by_hand_by_default: true,
             passwords: Some(Offers {
                 one_time_codes: true,
