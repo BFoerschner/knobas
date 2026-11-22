@@ -29,7 +29,7 @@ The judgment calls went to Fable (xhigh) under Björn's standing instruction, an
 
 ## Not in this pass
 
-A source's own fields on the ticket page (the build's step 10, cut from the first pass on 2026-11-22: the write, the reads and the WIT carry them; the page does not draw them yet). Rank order on a Jira view. The description. Sprint, epic, parent, type, components, versions, links. A drag in the list or by touch. Several cards at once. A new ticket from a column.
+Rank order on a Jira view. The description. Sprint, epic, parent, type, components, versions, links. A drag in the list or by touch. Several cards at once. A new ticket from a column.
 
 ## Measured
 
