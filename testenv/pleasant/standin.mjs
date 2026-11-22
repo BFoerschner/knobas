@@ -49,7 +49,7 @@ const byPath = new Map([["", rootId]]);
 for (const f of p.folders) {
   const id = uuid(`folder:${f.key}`);
   const parentId = byPath.get(f.path.slice(0, -1).join("/"));
-  folders.set(id, { id, name: f.path.at(-1), parentId, children: [], entries: [], commentRequired: f.commentRequired, path: f.path });
+  folders.set(id, { id, name: f.path.at(-1), parentId, children: [], entries: [], commentRequired: f.commentRequired, restricted: f.restricted, path: f.path });
   folders.get(parentId).children.push(id);
   byPath.set(f.key, id);
 }
@@ -65,15 +65,21 @@ const entryCount = () => entries.size;
 
 /** Whether a password read in this folder (or below it) needs a usage comment: the rule is inherited. */
 const commentRule = (folderId) => {
-  for (let f = folders.get(folderId); f; f = folders.get(f.parentId)) if (f.commentRequired) return true;
+  for (let f = folders.get(folderId); f; f = folders.get(f.parentId)) {
+    if (f.commentRequired) return true;
+    if (f.restricted) return false; // blocking access inheritance blocks the inherited comment rule too (recorded)
+  }
   return false;
 };
+/** Whether this folder (or one above it) blocks inheritance and leaves the reader only "Request only". */
+const restricted = (folderId) => { for (let f = folders.get(folderId); f; f = folders.get(f.parentId)) if (f.restricted) return true; return false; };
 const fullPath = (folderId) => `Root/${folders.get(folderId).path.map((s) => `${s}/`).join("")}`;
 
 // ---------------------------------------------------------------- the shapes
 
 const role = (u) => users.get(u.toLowerCase())?.role;
 const canWrite = (u) => ["admin", "writer"].includes(role(u));
+const canSee = (u, groupId) => role(u) !== "reader" || !restricted(groupId);
 
 function entryJson(id, user) {
   const { e, groupId, files, modified } = entries.get(id);
@@ -81,7 +87,7 @@ function entryJson(id, user) {
     id, groupId, name: e.name, username: e.user, url: e.url, notes: e.notes, fields: e.fields, totp: e.totp,
     attachments: files.map((a) => SHAPES.attachmentMeta({ entryId: id, id: a.id, name: a.name, size: a.data.length })),
     created, modified, expires: e.expires ? stamp(Date.parse(`${e.expires}T00:00:00Z`) - 3600_000) : null,
-    canModify: canWrite(user), comment: commentRule(groupId),
+    canModify: canWrite(user), canSee: canSee(user, groupId), comment: commentRule(groupId),
   });
 }
 
@@ -147,7 +153,9 @@ async function handle(req, res) {
   if (head === "getserverinfo" && req.method === "GET") return send(res, 200, SHAPES.serverInfo());
   if (head === "search" && req.method === "POST") {
     const q = String(json().Search ?? "").toLowerCase();
-    const hits = [...entries.values()].filter((x) => x.e.name.toLowerCase().includes(q));
+    // recorded: name, username, URL, notes and custom-field values match, case-insensitively; folders by name
+    const hay = (x) => [x.e.name, x.e.user, x.e.url, x.e.notes, ...Object.values(x.e.fields)].map((v) => String(v ?? "").toLowerCase());
+    const hits = [...entries.values()].filter((x) => hay(x).some((v) => v.includes(q)));
     const groups = [...folders.values()].filter((f) => !f.root && f.name.toLowerCase().includes(q));
     return send(res, 200, {
       Credentials: hits.map((x) => SHAPES.searchEntry({ id: x.id, name: x.e.name, username: x.e.user, url: x.e.url, notes: x.e.notes, groupId: x.groupId, path: fullPath(x.groupId) })),
@@ -161,8 +169,10 @@ async function handle(req, res) {
   }
   if (head === "iscommentrequired" && req.method === "POST") {
     if (!GUID.test(seg[1] ?? "")) return SHAPES.notFound(send, res);
-    // the real server answers false for "ViewPassword" even where a comment is required (recorded)
-    return send(res, 200, false);
+    // recorded: only "ViewEntryPassword" (exact case) answers the rule; every other name answers false
+    const id = seg[1];
+    const g = entries.get(id)?.groupId ?? (folders.has(id) ? id : null);
+    return send(res, 200, json().ActionName === "ViewEntryPassword" && g !== null && commentRule(g));
   }
 
   if (kind === "folders" && req.method === "GET") {
@@ -218,6 +228,7 @@ async function handle(req, res) {
     }
     if (sub === "password" && (req.method === "GET" || req.method === "POST")) {
       const comment = req.method === "POST" ? String(json().Comment ?? "").trim() : "";
+      if (!canSee(user, x.groupId)) return SHAPES.mayNotView(send, res, user, x.e.name);
       if (commentRule(x.groupId) && !comment) return SHAPES.commentRequired(send, res);
       return send(res, 200, x.e.password);
     }

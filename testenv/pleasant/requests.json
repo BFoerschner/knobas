@@ -1,63 +1,462 @@
 {
-  "note": "The one request list the contract sends to the real server and to the stand-in, in this order (testenv/pleasant/README.md). {entry:KEY}, {folder:PATH}, {root} and {attachment:KEY:N} name the plan's objects; 'as' is who asks: admin, writer, reader (a token from a sign-in as that user), none (no Authorization header), garbage (a made-up bearer token), expired (a token from before the clock moved, the last step). 'step' runs a contract step instead of a request.",
-  "requests": [
-    { "name": "token-ok", "as": "none", "method": "POST", "path": "/OAuth2/Token", "form": { "grant_type": "password", "username": "{user:reader}", "password": "{password:reader}" } },
-    { "name": "token-wrong-password", "as": "none", "method": "POST", "path": "/OAuth2/Token", "form": { "grant_type": "password", "username": "{user:reader}", "password": "not-the-password" } },
-    { "name": "token-unknown-user", "as": "none", "method": "POST", "path": "/OAuth2/Token", "form": { "grant_type": "password", "username": "nobody-here", "password": "not-the-password" } },
-    { "name": "token-no-grant-type", "as": "none", "method": "POST", "path": "/OAuth2/Token", "form": { "username": "{user:reader}", "password": "{password:reader}" } },
-
-    { "name": "server-info", "as": "reader", "method": "GET", "path": "/api/v5/rest/GetServerInfo" },
-    { "name": "no-token", "as": "none", "method": "GET", "path": "/api/v5/rest/folders/root" },
-    { "name": "garbage-token", "as": "garbage", "method": "GET", "path": "/api/v5/rest/folders/root" },
-
-    { "name": "root-id", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/root" },
-    { "name": "tree-reader", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders" },
-    { "name": "tree-writer", "as": "writer", "method": "GET", "path": "/api/v5/rest/folders" },
-    { "name": "folder-level0", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod/Keys}?recurseLevel=0" },
-    { "name": "folder-level1", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod/Keys}?recurseLevel=1" },
-    { "name": "folder-default", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Payments}" },
-    { "name": "folder-comment-rule", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod}?recurseLevel=2" },
-    { "name": "folder-deep", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Engineering}?recurseLevel=10" },
-    { "name": "folder-totp", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/{folder:Tidewater/Platform}?recurseLevel=2" },
-    { "name": "folder-missing", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/00000000-0000-4000-8000-000000000000" },
-    { "name": "folder-not-a-guid", "as": "reader", "method": "GET", "path": "/api/v5/rest/folders/not-a-guid" },
-
-    { "name": "entry-plain", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-teamcity}" },
-    { "name": "entry-protected-field", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-ledger-key}" },
-    { "name": "entry-comment-folder", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-payout-db}" },
-    { "name": "entry-missing", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/00000000-0000-4000-8000-000000000000" },
-    { "name": "entry-legacy-route", "as": "reader", "method": "GET", "path": "/api/v5/rest/credential/{entry:pl-teamcity}" },
-
-    { "name": "password-get", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-teamcity}/password" },
-    { "name": "password-get-comment-required", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password" },
-    { "name": "password-post-comment", "as": "reader", "method": "POST", "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password", "body": { "Comment": "OPS-77 rotation check" } },
-    { "name": "password-post-empty-comment", "as": "reader", "method": "POST", "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password", "body": { "Comment": "" } },
-    { "name": "password-post-no-comment-needed", "as": "reader", "method": "POST", "path": "/api/v5/rest/entries/{entry:pl-teamcity}/password", "body": { "Comment": "not needed" } },
-    { "name": "password-missing-entry", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/00000000-0000-4000-8000-000000000000/password" },
-    { "name": "password-no-access", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-psp-live}/password" },
-    { "name": "comment-required-view", "as": "reader", "method": "POST", "path": "/api/v5/rest/IsCommentRequired/{entry:pl-payout-db}", "body": { "ActionName": "ViewPassword" } },
-    { "name": "comment-not-required-view", "as": "reader", "method": "POST", "path": "/api/v5/rest/IsCommentRequired/{entry:pl-teamcity}", "body": { "ActionName": "ViewPassword" } },
-
-    { "name": "attachments-list", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-ledger-key}/attachments" },
-    { "name": "attachments-none", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-teamcity}/attachments" },
-    { "name": "attachment-one", "as": "reader", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-ledger-key}/attachments/{attachment:pl-ledger-key:0}" },
-
-    { "name": "search-v5", "as": "reader", "method": "POST", "path": "/api/v5/rest/search", "body": { "Search": "database" } },
-    { "name": "search-v6", "as": "reader", "method": "POST", "path": "/api/v6/rest/search", "body": { "Search": "database" } },
-    { "name": "can-add-entry-reader", "as": "reader", "method": "GET", "path": "/api/v5/rest/CanUserAddEntry/{folder:Tidewater/Platform/CI/Agents}" },
-    { "name": "can-add-entry-writer", "as": "writer", "method": "GET", "path": "/api/v5/rest/CanUserAddEntry/{folder:Tidewater/Platform/CI/Agents}" },
-
-    { "name": "write-over-limit", "as": "writer", "method": "POST", "path": "/api/v5/rest/entries", "body": { "CustomUserFields": {}, "CustomApplicationFields": {}, "Tags": [], "Name": "contract: entry 21", "Username": "", "Password": "Made-up-21!", "Url": "", "Notes": "", "GroupId": "{folder:Tidewater/Office/Building}", "Expires": null } },
-    { "name": "write-reader-refused", "as": "reader", "method": "PATCH", "path": "/api/v5/rest/entries/{entry:pl-wifi}", "body": { "Notes": "a reader may not" } },
-    { "name": "write-patch-notes", "as": "writer", "method": "PATCH", "path": "/api/v5/rest/entries/{entry:pl-wifi}", "body": { "Notes": "Changes with the facility contract." } },
-    { "name": "write-after-patch", "as": "writer", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-wifi}" },
-    { "name": "write-delete", "as": "writer", "method": "DELETE", "path": "/api/v5/rest/entries/{entry:pl-wifi}", "body": { "Action": "Delete", "Comment": "contract round trip" } },
-    { "name": "write-create", "as": "writer", "method": "POST", "path": "/api/v5/rest/entries", "rebind": "pl-wifi", "body": { "CustomUserFields": {}, "CustomApplicationFields": {}, "Tags": [], "Name": "Guest Wi-Fi", "Username": "tidewater-guest", "Password": "harbour-lights-2026", "Url": "", "Notes": "", "GroupId": "{folder:Tidewater/Office/Building}", "Expires": null } },
-    { "name": "write-put-with-comment", "as": "writer", "method": "PUT", "path": "/api/v5/rest/entries/{entry:pl-wifi}", "body": { "Item": { "CustomUserFields": {}, "CustomApplicationFields": {}, "Tags": [], "Id": "{entry:pl-wifi}", "Name": "Guest Wi-Fi", "Username": "tidewater-guest", "Password": null, "Url": "", "Notes": "", "GroupId": "{folder:Tidewater/Office/Building}", "Expires": null }, "Comment": "contract round trip" } },
-    { "name": "write-after-put", "as": "writer", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-wifi}" },
-    { "name": "write-password-after-put", "as": "writer", "method": "GET", "path": "/api/v5/rest/entries/{entry:pl-wifi}/password" },
-
-    { "step": "expire-tokens" },
-    { "name": "expired-token", "as": "expired", "method": "GET", "path": "/api/v5/rest/folders/root" }
-  ]
+ "note": "The one request list the contract sends to the real server and to the stand-in, in this order (testenv/pleasant/README.md). {entry:KEY}, {folder:PATH}, {root} and {attachment:KEY:N} name the plan's objects; 'as' is who asks: admin, writer, reader (a token from a sign-in as that user), none (no Authorization header), garbage (a made-up bearer token), expired (a token from before the clock moved, the last step). 'step' runs a contract step instead of a request.",
+ "requests": [
+  {
+   "name": "token-ok",
+   "as": "none",
+   "method": "POST",
+   "path": "/OAuth2/Token",
+   "form": {
+    "grant_type": "password",
+    "username": "{user:reader}",
+    "password": "{password:reader}"
+   }
+  },
+  {
+   "name": "token-wrong-password",
+   "as": "none",
+   "method": "POST",
+   "path": "/OAuth2/Token",
+   "form": {
+    "grant_type": "password",
+    "username": "{user:reader}",
+    "password": "not-the-password"
+   }
+  },
+  {
+   "name": "token-unknown-user",
+   "as": "none",
+   "method": "POST",
+   "path": "/OAuth2/Token",
+   "form": {
+    "grant_type": "password",
+    "username": "nobody-here",
+    "password": "not-the-password"
+   }
+  },
+  {
+   "name": "token-no-grant-type",
+   "as": "none",
+   "method": "POST",
+   "path": "/OAuth2/Token",
+   "form": {
+    "username": "{user:reader}",
+    "password": "{password:reader}"
+   }
+  },
+  {
+   "name": "server-info",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/GetServerInfo"
+  },
+  {
+   "name": "no-token",
+   "as": "none",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/root"
+  },
+  {
+   "name": "garbage-token",
+   "as": "garbage",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/root"
+  },
+  {
+   "name": "root-id",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/root"
+  },
+  {
+   "name": "tree-reader",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders"
+  },
+  {
+   "name": "tree-writer",
+   "as": "writer",
+   "method": "GET",
+   "path": "/api/v5/rest/folders"
+  },
+  {
+   "name": "folder-level0",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod/Keys}?recurseLevel=0"
+  },
+  {
+   "name": "folder-level1",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod/Keys}?recurseLevel=1"
+  },
+  {
+   "name": "folder-default",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Payments}"
+  },
+  {
+   "name": "folder-comment-rule",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Payments/Prod}?recurseLevel=2"
+  },
+  {
+   "name": "folder-deep",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Engineering}?recurseLevel=10"
+  },
+  {
+   "name": "folder-totp",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/{folder:Tidewater/Platform}?recurseLevel=2"
+  },
+  {
+   "name": "folder-missing",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/00000000-0000-4000-8000-000000000000"
+  },
+  {
+   "name": "folder-not-a-guid",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/not-a-guid"
+  },
+  {
+   "name": "entry-plain",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-teamcity}"
+  },
+  {
+   "name": "entry-protected-field",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-ledger-key}"
+  },
+  {
+   "name": "entry-comment-folder",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-payout-db}"
+  },
+  {
+   "name": "entry-missing",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/00000000-0000-4000-8000-000000000000"
+  },
+  {
+   "name": "entry-legacy-route",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/credential/{entry:pl-teamcity}"
+  },
+  {
+   "name": "entry-native-totp",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-psp-dash}"
+  },
+  {
+   "name": "password-get",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-teamcity}/password"
+  },
+  {
+   "name": "password-get-comment-required",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password"
+  },
+  {
+   "name": "password-post-comment",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password",
+   "body": {
+    "Comment": "OPS-77 rotation check"
+   }
+  },
+  {
+   "name": "password-post-empty-comment",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/entries/{entry:pl-payout-db}/password",
+   "body": {
+    "Comment": ""
+   }
+  },
+  {
+   "name": "password-post-no-comment-needed",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/entries/{entry:pl-teamcity}/password",
+   "body": {
+    "Comment": "not needed"
+   }
+  },
+  {
+   "name": "password-missing-entry",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/00000000-0000-4000-8000-000000000000/password"
+  },
+  {
+   "name": "password-no-access",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-psp-live}/password"
+  },
+  {
+   "name": "comment-required-view",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/IsCommentRequired/{entry:pl-payout-db}",
+   "body": {
+    "ActionName": "ViewPassword"
+   }
+  },
+  {
+   "name": "comment-not-required-view",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/IsCommentRequired/{entry:pl-teamcity}",
+   "body": {
+    "ActionName": "ViewPassword"
+   }
+  },
+  {
+   "name": "comment-required-view-entry-password",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/IsCommentRequired/{entry:pl-payout-db}",
+   "body": {
+    "ActionName": "ViewEntryPassword"
+   }
+  },
+  {
+   "name": "comment-not-required-view-entry-password",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/IsCommentRequired/{entry:pl-teamcity}",
+   "body": {
+    "ActionName": "ViewEntryPassword"
+   }
+  },
+  {
+   "name": "attachments-list",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-ledger-key}/attachments"
+  },
+  {
+   "name": "attachments-none",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-teamcity}/attachments"
+  },
+  {
+   "name": "attachment-one",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-ledger-key}/attachments/{attachment:pl-ledger-key:0}"
+  },
+  {
+   "name": "search-v5",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "database"
+   }
+  },
+  {
+   "name": "search-v6",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v6/rest/search",
+   "body": {
+    "Search": "database"
+   }
+  },
+  {
+   "name": "search-notes",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "PAYOUT_DB_PASSWORD"
+   }
+  },
+  {
+   "name": "search-url",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "vm-db-01"
+   }
+  },
+  {
+   "name": "search-username",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "svc-knobas"
+   }
+  },
+  {
+   "name": "search-field-value",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "led-2026-08"
+   }
+  },
+  {
+   "name": "search-case-and-folder",
+   "as": "reader",
+   "method": "POST",
+   "path": "/api/v5/rest/search",
+   "body": {
+    "Search": "payments"
+   }
+  },
+  {
+   "name": "can-add-entry-reader",
+   "as": "reader",
+   "method": "GET",
+   "path": "/api/v5/rest/CanUserAddEntry/{folder:Tidewater/Platform/CI/Agents}"
+  },
+  {
+   "name": "can-add-entry-writer",
+   "as": "writer",
+   "method": "GET",
+   "path": "/api/v5/rest/CanUserAddEntry/{folder:Tidewater/Platform/CI/Agents}"
+  },
+  {
+   "name": "write-over-limit",
+   "as": "writer",
+   "method": "POST",
+   "path": "/api/v5/rest/entries",
+   "body": {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Tags": [],
+    "Name": "contract: entry 21",
+    "Username": "",
+    "Password": "Made-up-21!",
+    "Url": "",
+    "Notes": "",
+    "GroupId": "{folder:Tidewater/Office/Building}",
+    "Expires": null
+   }
+  },
+  {
+   "name": "write-reader-refused",
+   "as": "reader",
+   "method": "PATCH",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}",
+   "body": {
+    "Notes": "a reader may not"
+   }
+  },
+  {
+   "name": "write-patch-notes",
+   "as": "writer",
+   "method": "PATCH",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}",
+   "body": {
+    "Notes": "Changes with the facility contract."
+   }
+  },
+  {
+   "name": "write-after-patch",
+   "as": "writer",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+  },
+  {
+   "name": "write-delete",
+   "as": "writer",
+   "method": "DELETE",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}",
+   "body": {
+    "Action": "Delete",
+    "Comment": "contract round trip"
+   }
+  },
+  {
+   "name": "write-create",
+   "as": "writer",
+   "method": "POST",
+   "path": "/api/v5/rest/entries",
+   "rebind": "pl-wifi",
+   "body": {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Tags": [],
+    "Name": "Guest Wi-Fi",
+    "Username": "tidewater-guest",
+    "Password": "harbour-lights-2026",
+    "Url": "",
+    "Notes": "",
+    "GroupId": "{folder:Tidewater/Office/Building}",
+    "Expires": null
+   }
+  },
+  {
+   "name": "write-put-with-comment",
+   "as": "writer",
+   "method": "PUT",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}",
+   "body": {
+    "Item": {
+     "CustomUserFields": {},
+     "CustomApplicationFields": {},
+     "Tags": [],
+     "Id": "{entry:pl-wifi}",
+     "Name": "Guest Wi-Fi",
+     "Username": "tidewater-guest",
+     "Password": null,
+     "Url": "",
+     "Notes": "",
+     "GroupId": "{folder:Tidewater/Office/Building}",
+     "Expires": null
+    },
+    "Comment": "contract round trip"
+   }
+  },
+  {
+   "name": "write-after-put",
+   "as": "writer",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+  },
+  {
+   "name": "write-password-after-put",
+   "as": "writer",
+   "method": "GET",
+   "path": "/api/v5/rest/entries/{entry:pl-wifi}/password"
+  },
+  {
+   "step": "expire-tokens"
+  },
+  {
+   "name": "expired-token",
+   "as": "expired",
+   "method": "GET",
+   "path": "/api/v5/rest/folders/root"
+  }
+ ]
 }

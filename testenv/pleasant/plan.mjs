@@ -51,6 +51,10 @@ export function totpFields(format, r, label) {
 /** Folders whose passwords need a usage comment to view (set on the real server by `seed.mjs`). */
 export const COMMENT_FOLDERS = ["Tidewater/Payments/Prod", "Tidewater/Customers/Tenants/EU"];
 
+/** Folders that block access inheritance, where the reader holds only "Request only" (names, contents, Request
+ *  Access; no password, no TOTP). Set on the real server through the web client (README, "Setting up a fresh VM"). */
+export const RESTRICTED_FOLDERS = ["Tidewater/Payments/Prod/PSP"];
+
 /** The protected custom field (KeePass's protected string); the real server's answer for it is in the recordings. */
 export const PROTECTED = "Recovery PIN";
 
@@ -153,7 +157,7 @@ function estate(entries) {
   for (const e of entries) {
     for (let i = 1; i <= e.path.length; i++) {
       const key = e.path.slice(0, i).join("/");
-      if (!seen.has(key)) { seen.add(key); folders.push({ key, path: e.path.slice(0, i), commentRequired: COMMENT_FOLDERS.includes(key) }); }
+      if (!seen.has(key)) { seen.add(key); folders.push({ key, path: e.path.slice(0, i), commentRequired: COMMENT_FOLDERS.includes(key), restricted: RESTRICTED_FOLDERS.includes(key) }); }
     }
   }
   return { entries, folders };

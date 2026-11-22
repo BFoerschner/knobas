@@ -33,7 +33,9 @@ export const SHAPES = {
   tokenRefused: (send, res, error) => send(res, 400, error === "invalid_grant"
     ? { error, error_description: "The username or password is incorrect." } : { error }, { "content-type": JSON_TOKEN }),
 
-  /** an entry as listings and GET entries/{id} both answer it (Password is always null here) */
+  /** an entry as listings and GET entries/{id} both answer it (Password is always null here). Recorded: where the
+   *  user may not see the password or the TOTP (`canSee` false), the flags say so, yet TOTPSecret and the custom
+   *  fields are still sent in full. The client must honour HasViewTOTPAccess itself. */
   entry: (x) => ({
     CustomUserFields: x.fields,
     CustomApplicationFields: {},
@@ -41,9 +43,9 @@ export const SHAPES = {
     Tags: [],
     HasModifyEntriesAccess: x.canModify,
     HasViewEntryContentsAccess: true,
-    HasViewEntryPasswordAccess: true,
-    HasViewTOTPAccess: true,
-    HasModifyTOTPAccess: x.canModify,
+    HasViewEntryPasswordAccess: x.canSee,
+    HasViewTOTPAccess: x.canSee,
+    HasModifyTOTPAccess: x.canModify && x.canSee,
     CommentPrompts: prompts(x.comment),
     Id: x.id,
     Name: x.name,
@@ -100,6 +102,7 @@ export const SHAPES = {
   noFolder: (send, res) => fail(send, res, 400, "Cannot find the requested folder."),
   noEntry: (send, res) => fail(send, res, 400, "Cannot find the requested entry."),
   commentRequired: (send, res) => fail(send, res, 400, "Comment required."),
+  mayNotView: (send, res, user, entry) => fail(send, res, 403, `Access denied. "${user}" does not have permission to view the password for "${entry}".`),
   overLimit: (send, res) => fail(send, res, 403, "Access denied. The 20 entry limit in trial mode has been reached. Please register to remove this limit."),
   mayNotUpdate: (send, res, user, entry) => fail(send, res, 403, `Access denied. <${user}> does not have permission to update the entry <${entry}>.`),
 };

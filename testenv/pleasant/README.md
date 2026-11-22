@@ -76,6 +76,10 @@ turns sshd on. Then:
 4. `node testenv/pleasant/seed.mjs` writes `plan(20)` (20 entries, 31 folders, 3 attachments, one native TOTP).
 5. Advanced › Comment Triggers: add "View password" (View Entry Password). In the web client, on
    `Tidewater/Payments/Prod`: Comment Requirements › Add, that trigger, role "Users".
+6. Access Levels › Add New Access Level "Request only": View Entry Names, View Folders, View Entry Contents, Request
+   Access, and nothing else. Grant it to `mara.lindqvist` on `Tidewater/Payments/Prod/PSP` with `useraccess`, the
+   writer *Full* and `admin` *Full + Grant + Block*. Then, in the web client, open that folder's User Access dialog and
+   choose Block Access Inheritance, leaving "make inherited permissions explicit" unticked.
 
 ## What the real server answers (Pleasant 9.5.4.0, recorded 2026-11-22)
 
@@ -96,6 +100,12 @@ Shapes the docs don't show, all in `recorded/` and `shapes.mjs`:
 - `GET entries/{id}` answers `Password: null`; only `…/password` returns it;
 - custom fields come back in plain text in every listing, and no field is marked protected;
 - the comment rule is inherited and entries carry it, but folder objects carry it only in the whole-tree `GET folders`;
+  blocking access inheritance on a folder blocks the inherited comment rule too;
+- where a user may not see a password or TOTP (`HasViewEntryPasswordAccess`/`HasViewTOTPAccess` false), the listing
+  **still sends `TOTPSecret` and every custom field**, so the client has to honour the flags itself; the password read
+  answers `403 {"error_message":"Access denied. \"<user>\" does not have permission to view the password for \"<entry>\"."}`;
+- `IsCommentRequired` answers the rule only for `ActionName: "ViewEntryPassword"` (exact case); every other name answers false;
+- search matches name, username, URL, notes and custom-field values, case-insensitively, and folders by name;
 - the API's errors are `text/plain` bodies holding `{"error_message": …}`, for example `400 {"error_message":"Comment required."}`;
   authorization failures, an expired token among them, are `401` JSON with `WWW-Authenticate: Bearer`;
 - a token lasts 12 hours (`expires_in: 43199`).
