@@ -45,6 +45,8 @@
   import type { Attachment } from "svelte/attachments";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { storedWhere } from "../../shell/secret-store";
+
   import type { AdapterPreview, AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
   import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport, noteAfterFill } from "../../sources/connection";
@@ -503,6 +505,14 @@
       <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
         {idError ?? "Permanent: everything from this source is named with it."}
       </p>
+      {#if chosen.passwords}
+        <!-- A password manager's credential is its master password, kept and never asked again (ADR-0056, Björn's decision 3). -->
+        <p class="tf-dlg-note">{storedWhere(false)}. Nothing locks, and you are not asked for it again.</p>
+      {/if}
+      {#if chosen.by_hand_by_default}
+        <p class="tf-dlg-note">It syncs only when you press Sync now, so nothing is read from it in the background. Its page changes that.</p>
+      {/if}
+
       {#if inFold.length > 0}
         <!-- Open while something in it is wrong, so what the footer names can be reached. -->
         <details class="tf-add-more" open={inFold.some((field) => validated.errors[field.key])}>

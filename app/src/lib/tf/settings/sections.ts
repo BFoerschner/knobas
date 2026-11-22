@@ -148,7 +148,18 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘L", "A site", "The keyboard to knobas's bar, and back"],
   ["⌘⇧⌫", "Anywhere, a field too", "Put knobas's own themes back; yours are kept (ADR-0055)"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
+  // The Passwords page (ADR-0056). `R` does nothing there: a sync is something a password manager logs, so it is a button.
+  ["/", "Passwords", "Filter every folder"],
+  ["J K ↑ ↓", "Passwords", "Move the selection; the entry follows"],
+  ["→ ←", "Passwords, the folder tree", "Open a fold and step in; close it and step out"],
+  ["C", "Passwords", "Copy the open entry's password"],
+  ["S", "Passwords", "Show or hide it"],
+  ["U", "Passwords", "Copy the username"],
+  ["O", "Passwords", "Copy the one-time code"],
+  ["A", "Passwords", "Open or copy the address"],
+  ["Esc", "Passwords", "Clear the filter, else up one folder"],
 ];
+
 
 /** Keys only the Mac has: history's arrows go with ⌘ alone (`historyStep`), which off the Mac is the Windows key's. */
 export const MAC_ONLY: ReadonlySet<string> = new Set(["⌘←", "⌘→"]);
