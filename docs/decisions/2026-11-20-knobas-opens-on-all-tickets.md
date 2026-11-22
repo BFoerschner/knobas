@@ -25,7 +25,7 @@ job is the only place it remembers.
   not hidden: nothing reaches it any more. The choice can only end by being forgotten as above, so that empty page
   had no other way in.
 
-The first-run wizard is unchanged (it lands on Tickets with the launcher open).
+The first-run wizard is unchanged (it lands on Tickets with the launcher open). *Superseded 2026-11-22 (ux31): the wizard is gone, and a fresh profile opens on All tickets here like any other, drawing its zero-source state (`2026-11-22-no-first-run-screen.md`).*
 
 ## Checked by
 

@@ -587,6 +587,86 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
   expect(target.querySelector('[role="dialog"]')).toBeNull();
   // The list is read again, so the new source has its row.
   expect(p.listSources).toHaveBeenCalledTimes(2);
+  // And its page opens (ux31), where its first sync's walk draws.
+  expect(location.hash).toBe("#/settings/source/jira-2");
+});
+
+/**
+ * `#/settings/sources/add` (ux31): where Tickets' zero-source state sends a fresh profile. Sources with *Add a source*
+ * already open; closing it puts `#/settings/sources` in place of the address, so a back step does not open it again;
+ * a source added from it opens its page in place too.
+ */
+test("#/settings/sources/add opens Sources with Add a source open, and closing it leaves #/settings/sources in place", async () => {
+  location.hash = "#/settings/sources/add";
+  const historyAt = history.length;
+  const props = await openMovable(["sources", "add"], ports({ listSources: vi.fn(() => Promise.resolve([])) }));
+  expect(dialog().textContent).toContain("Add a source");
+  expect(target.querySelector(".tf-stg-h h1")?.textContent).toBe("Sources");
+  dialog().querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.click() ?? dialogButton("Cancel").click();
+  flushSync();
+  expect(location.hash).toBe("#/settings/sources");
+  expect(history.length, "replaced, not pushed").toBe(historyAt);
+  props.rest = ["sources"];
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+});
+
+test("a source added from #/settings/sources/add opens its page in place of the address", async () => {
+  location.hash = "#/settings/sources/add";
+  const added = summary("jira-2", "Jira Data Center", "ok");
+  const historyAt = history.length;
+  await openMovable(["sources", "add"], ports({ listSources: vi.fn(() => Promise.resolve([])), addSource: vi.fn(() => Promise.resolve(added)) }));
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  type("#tf-add-address", "https://jira2.tidewater.example");
+  type("#tf-add-secret", "hunter2");
+  dialogButton("Test connection").click();
+  await settle();
+  dialogButton("Add source").click();
+  await settle();
+  expect(location.hash).toBe("#/settings/source/jira-2");
+  expect(history.length, "replaced, not pushed").toBe(historyAt);
+});
+
+/**
+ * The demo profile's Tidewater dataset (ux31, from the first-run wizard): beside *Add a source…* while there is no
+ * source, with the restore line under the list; a load reads the list again, and the button goes with the last
+ * empty answer. Never on another profile, and never once a source exists.
+ */
+test("Sources with no source offers the restore line, and on the demo profile Load the Tidewater dataset", async () => {
+  let loaded = false;
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve(loaded ? SOURCES : [])),
+    demoLoad: vi.fn(() => {
+      loaded = true;
+      return Promise.resolve({});
+    }),
+  });
+  view = mount(TfSettings, { target, context, props: { rest: [], ready: true, ports: p, health: createHealthStub(), layers: createLayers(), now: () => NOW, demo: true } });
+  await settle();
+  const restore = [...target.querySelectorAll<HTMLAnchorElement>(".tf-stg-p a")].find((link) => link.textContent === "Backup and export");
+  expect(restore?.getAttribute("href")).toBe("#/settings/backup");
+  expect(target.textContent).toContain("Restore it before you add a source: knobas restores only into a database that holds no data yet.");
+  const demo = target.querySelector<HTMLButtonElement>(".tf-stg-h .tf-acts .tf-ld-demo")?.closest("button");
+  expect(demo, "the demo button stands in the header").not.toBeNull();
+  expect(demo!.previousElementSibling?.textContent?.trim()).toBe("Add a source…");
+  demo!.click();
+  await settle();
+  await settle();
+  expect(p.demoLoad).toHaveBeenCalledOnce();
+  expect(toasts.items.map((toast) => toast.text)).toContain("Loaded the Tidewater dataset.");
+  expect(p.listSources).toHaveBeenCalledTimes(2);
+  expect(target.querySelector(".tf-ld-demo")).toBeNull();
+});
+
+test("off the demo profile, or with a source, Sources offers no Tidewater dataset", async () => {
+  await open([], ports({ listSources: vi.fn(() => Promise.resolve([])) }));
+  expect(target.querySelector(".tf-ld-demo")).toBeNull();
+  if (view) unmount(view);
+  view = mount(TfSettings, { target, context, props: { rest: [], ready: true, ports: ports(), health: createHealthStub(), layers: createLayers(), now: () => NOW, demo: true } });
+  await settle();
+  expect(target.querySelector(".tf-ld-demo")).toBeNull();
+  expect(target.textContent).not.toContain("Restore it before you add a source");
 });
 
 /** The fixture component's template as `list_adapters` answers it once installed (#1202). */

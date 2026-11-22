@@ -53,6 +53,7 @@ import {
   dbStats,
   reindexFts,
   deleteSource,
+  demoLoad,
   installAdapter,
   previewInstallAdapter,
   listInstalledAdapters,
@@ -97,6 +98,8 @@ import {
 
 export interface SettingsPorts {
   listSources: () => Promise<SourceSummary[]>;
+  /** `demo_load`, *Load the Tidewater dataset* on the demo profile with no source (ux31); `demoLoad` when absent. */
+  demoLoad?: () => Promise<unknown>;
   listAdapters: () => Promise<SourceDescriptor[]>;
   syncStatus: () => Promise<SourceSyncStatus[]>;
   listSyncRuns: (sourceId: string, limit: number) => Promise<SyncRunRow[]>;
@@ -150,6 +153,7 @@ export interface SettingsPorts {
  */
 export const realSettingsPorts: SettingsPorts = {
   listSources: () => listSources(),
+  demoLoad: () => demoLoad(),
   listAdapters: () => listAdapters(),
   syncStatus: () => syncStatus(),
   listSyncRuns: (sourceId, limit) => listSyncRuns(sourceId, limit),

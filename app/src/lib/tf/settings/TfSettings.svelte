@@ -36,7 +36,9 @@
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
   import { sourceDrafts } from "./source-drafts.svelte";
-  import { settingsHash, settingsKnows, settingsName, settingsParent, settingsPlace, sourceState } from "./settings";
+  import { addsSource, settingsHash, settingsKnows, settingsName, settingsParent, settingsPlace, sourceHash, sourceState } from "./settings";
+  import { lifecycle } from "../../shell/lifecycle.svelte";
+  import { replaceAddress } from "../opener";
   import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
@@ -79,6 +81,7 @@
     health = sharedHealth,
     layers = sharedLayers,
     now = () => new Date(),
+    demo = lifecycle.status?.demo ?? false,
   }: {
     /** What follows `#/settings` in the address. */
     rest: string[];
@@ -96,6 +99,8 @@
     health?: Pick<Health, "get" | "patch" | "replace">;
     layers?: Layers;
     now?: () => Date;
+    /** The `--demo` profile (P13): Sources offers the Tidewater dataset while it has no source (ux31). */
+    demo?: boolean;
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
@@ -180,12 +185,16 @@
     };
   });
 
-  /** Whether *Add a source* is open (#903); a source it adds is a new row. */
+  /** Whether *Add a source* is open (#903) by its button; a source it adds opens its page (ux31). */
   let adding = $state(false);
+  /** `#/settings/sources/add` (ux31): Sources with the dialog already open, where Tickets' empty state sends a fresh profile. */
+  const addressAdds = $derived(addsSource(rest));
 
   /** *Add a source* closed: an install there adds an Installed adapters row and a descriptor. */
   function closeAdd() {
     adding = false;
+    // The dialog's address goes with it, in place, so `Esc` or a back step does not open it again.
+    if (addsSource(rest)) replaceAddress(settingsHash("sources"));
     installs += 1;
     void loadAdapters();
   }
@@ -350,6 +359,8 @@
           onstarted={(ids) => ids.forEach(markStarted)}
           onstopped={(ids) => ids.forEach(stopped)}
           onadd={() => (adding = true)}
+          {demo}
+          onloaded={() => void load()}
         />
         <TfInstalledAdapters
           {ports}
@@ -389,16 +400,21 @@
     </TfScroller>
   </div>
 </div>
-{#if adding}
+{#if adding || (addressAdds && sources !== null)}
   <TfAddSource
     {ports}
     {layers}
     taken={(sources ?? []).map((source) => source.id)}
     onclose={closeAdd}
     onsaved={(added) => {
-      closeAdd();
+      adding = false;
+      installs += 1;
+      void loadAdapters();
       push({ text: added.sync_by_hand ? `Added ${added.display_name}. It syncs only when you press Sync now.` : "Added. The first sync is running." });
-
+      // The new source's page (ux31): its run's walk draws there as the first sync goes, and a by-hand source's
+      // Sync now is there. In place of the add address, so a back step does not open the dialog again.
+      if (addsSource(rest)) replaceAddress(sourceHash(added.id));
+      else location.hash = sourceHash(added.id);
       void load();
     }}
   />

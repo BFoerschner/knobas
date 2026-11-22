@@ -10,8 +10,9 @@ import { claims, createSourceRoles, fills } from "./roles.svelte";
 test("the role module offers no row filter: a surface draws what its read answered (#1300)", () => {
   // `nameOf` names a source (#1476), `syncs` says whether a role view draws *Sync now* (#2106) and `filledBy` whether a
   // run of a source can bring a role's views something new (PR #2479), `displayName` is what *Open in* names (the
-  // build-header pass, 2026-11-20), `writes` whether its adapter declares a write (ADR-0054); none filters a row.
-  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "displayName", "filledBy", "forget", "nameOf", "syncs", "take", "writes"]);
+  // build-header pass, 2026-11-20), `writes` whether its adapter declares a write (ADR-0054), `knows` whether the list
+  // names a source at all (ux31: a run of one added since counts once it is named); none filters a row.
+  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "displayName", "filledBy", "forget", "knows", "nameOf", "syncs", "take", "writes"]);
 });
 
 test("a source fills a role by its claims and misses; not knowing is no (PR #2479)", () => {
@@ -24,6 +25,8 @@ test("a source fills a role by its claims and misses; not knowing is no (PR #247
   ]);
   expect(roles.filledBy("wiki", "wiki")).toBe(true);
   expect(roles.filledBy("ticket-system", "wiki")).toBe(false);
+  expect(roles.knows("wiki")).toBe(true);
+  expect(roles.knows("gone")).toBe(false);
   expect(roles.filledBy("ci", "ci")).toBe(false);
   expect(roles.filledBy("wiki", "gone")).toBe(false);
 });

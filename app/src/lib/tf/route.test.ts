@@ -136,3 +136,10 @@ test("only the item's bare address reopens what was left: not a tab's, and not a
   expect(reopens("#/pr/1/diff", "#/repo/1")).toBe(false);
   expect(reopens("#/repo/x/files/a", "#/repo/x/files/a")).toBe(false);
 });
+
+test("Add a source's address is a place in Settings: no section tab to come back to, and Sources above it (ux31)", async () => {
+  const { parentOf, sectionTabOf } = await import("./route");
+  expect(sectionTabOf(parseTfHash("#/settings/sources/add"))).toBeNull();
+  expect(sectionTabOf(parseTfHash("#/settings/sources"))).toBe("settings");
+  expect(parentOf(parseTfHash("#/settings/sources/add"))).toBe("#/settings/sources");
+});

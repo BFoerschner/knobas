@@ -100,8 +100,6 @@ pub struct Blocked {
 #[ts(export_to = "app.ts")]
 pub struct AppStatus {
     pub db: DbState,
-    /// No source configured and the first run was never completed (§14a).
-    pub first_run: bool,
     /// The `--demo` profile: its own data dir, port and keychain suffix (P13).
     pub demo: bool,
     pub source_count: u32,
@@ -446,20 +444,17 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
     let app_version = app.package_info().version.to_string();
 
     // Counted live rather than cached, so adding a source is reflected without
-    // a restart. Before the pool exists there is nothing to count -- and "0
-    // sources while starting" is *not* the same claim as "this is a first
-    // run", so both stay false-y until the database can answer.
+    // a restart. Before the pool exists there is nothing to count.
     let pool = app.state::<Lifecycle>().app_state();
-    let (source_count, first_run) = match pool {
-        Some(state) => crate::settings::sources_and_first_run(&state.pool)
+    let source_count = match pool {
+        Some(state) => crate::settings::source_count(&state.pool)
             .await
-            .unwrap_or((0, false)),
-        None => (0, false),
+            .unwrap_or(0),
+        None => 0,
     };
 
     AppStatus {
         db,
-        first_run,
         demo,
         source_count,
         app_version,
@@ -514,40 +509,6 @@ pub fn retry_database<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
         }
     }
     Ok(())
-}
-
-/// Record that the §14a wizard finished.
-///
-/// `app_status.first_run` is `source_count == 0 && !completed` -- two facts,
-/// because they are different ones. Without this row, a person who finished
-/// the wizard and later removed their only source would be shown the wizard
-/// again, which is the app forgetting something it was told.
-///
-/// It lives in `knobas.setting` rather than in the webview's `localStorage`
-/// because §14 makes the database the thing an export carries: a flag outside
-/// it would not survive the export/import round trip the milestone is built
-/// around.
-///
-/// Idempotent by `on conflict`: finishing the wizard twice -- a double click,
-/// a second window -- is the same as finishing it once.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while PostgreSQL
-/// is still coming up, and
-/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
-/// fails.
-#[tauri::command]
-pub async fn complete_first_run<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-) -> Result<(), IpcError> {
-    // Through `Lifecycle`, not `State<'_, AppState>`: a command declaring the
-    // latter is rejected by Tauri itself during bring-up with a bare "state
-    // not managed" that the frontend cannot branch on. See [`Lifecycle`].
-    let pool = app.state::<Lifecycle>().pool()?;
-    crate::settings::complete_first_run(&pool)
-        .await
-        .map_err(IpcError::internal)
 }
 
 /// *Pages kept open* (#2247): how many pages the shell keeps mounted and hidden

@@ -52,6 +52,10 @@ export interface RoleSync {
    * Moves each time a run of a source that fills the role ends having changed something, whoever started it: a scheduled
    * sync, a write's follow-up run (the third smoothness pass of PR #2479). A shown role view reads again on it, so a
    * ticket made elsewhere comes onto the board without leaving it. Heard from the first time it is read.
+   *
+   * A run of a source the shell's list does not name yet counts once the list names it as filling the role (ux31): a
+   * fresh profile's *Load the Tidewater dataset* ends its run before the shell has read the list again, so a run judged
+   * only as it ended was lost, and Tickets stayed empty over a full mirror.
    */
   readonly ran: number;
   /** Why the last ask was refused, or `null`. */
@@ -76,7 +80,7 @@ export const ROLE_SYNC_BRIDGE: RoleSyncPorts = {
 };
 
 export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
-  return createSyncs(ports, (role) => ports.syncRole(role), (role, sourceId) => sourceRoles.filledBy(role, sourceId));
+  return createSyncs(ports, (role) => ports.syncRole(role), (role, sourceId) => sourceRoles.filledBy(role, sourceId), (sourceId) => sourceRoles.knows(sourceId));
 }
 
 /**
@@ -107,13 +111,14 @@ function createSyncs(
   ports: Pick<RoleSyncPorts, "syncStatus" | "listen">,
   ask: (name: string) => Promise<RoleRun[]>,
   counts: (name: string, sourceId: string) => boolean,
+  known: (sourceId: string) => boolean = () => true,
 ): RoleSyncs {
   const held = new Map<string, RoleSync>();
   return {
     of(name) {
       let sync = held.get(name);
       if (sync === undefined) {
-        sync = createRoleSync(ports, name, () => ask(name), (sourceId) => counts(name, sourceId));
+        sync = createRoleSync(ports, name, () => ask(name), (sourceId) => counts(name, sourceId), known);
         held.set(name, sync);
       }
       return sync;
@@ -129,14 +134,18 @@ function createRoleSync(
   role: string,
   ask: () => Promise<AskedRun[]>,
   counts: (sourceId: string) => boolean,
+  known: (sourceId: string) => boolean = () => true,
 ): RoleSync {
-  const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null; ran: number }>({
+  const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null; ran: number; early: string[] }>({
     asking: false,
     pending: {},
     revision: 0,
     failed: null,
     ran: 0,
+    early: [],
   });
+  /** The runs of sources the list did not name when they ended, each counted once the list says it fills the role. */
+  const late = $derived(state.early.filter((sourceId) => counts(sourceId)).length);
   /** Whether `ran` is heard yet: from its first read, for as long as the window lives. */
   let hearing = false;
   function hearRuns() {
@@ -145,7 +154,9 @@ function createRoleSync(
     void ports
       .listen(EVENTS.syncState, ({ payload }) => {
         const row = payload as SourceSyncStatus;
-        if (!row.running && row.run_id !== null && row.last_changed !== false && counts(row.source_id)) state.ran += 1;
+        if (row.running || row.run_id === null || row.last_changed === false) return;
+        if (counts(row.source_id)) state.ran += 1;
+        else if (!known(row.source_id) && !state.early.includes(row.source_id)) state.early = [...state.early, row.source_id];
       })
       .catch(() => {
         hearing = false;
@@ -208,7 +219,7 @@ function createRoleSync(
     },
     get ran() {
       hearRuns();
-      return state.ran;
+      return state.ran + late;
     },
     get failed() {
       return state.failed;

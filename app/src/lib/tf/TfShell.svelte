@@ -410,8 +410,8 @@
   const lastPipeline = sessionValue("builds-last-pipeline");
   $effect(() => {
     const onRun = route.view === "full" && route.head === "build";
-    // A source's page is not a section of Settings: the cog goes to Sources from there.
-    if (route.view === "full" && route.head === "settings" && route.rest[0] === "source") sectionTabs.settings = "#/settings/sources";
+    // A source's page and *Add a source*'s address are not sections of Settings: the cog goes to Sources from there.
+    if (route.view === "full" && route.head === "settings" && (route.rest[0] === "source" || (route.rest[0] === "sources" && route.rest[1] === "add"))) sectionTabs.settings = "#/settings/sources";
     const section = onRun ? "builds" : sectionTabOf(route);
     if (section === null || untrack(() => scopedTicket.section) === section) return;
     // Builds remembers only a pipeline it holds, so an address it doesn't is nothing to come back to, and a run leads back to its own.

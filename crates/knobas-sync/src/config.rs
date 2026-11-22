@@ -181,8 +181,8 @@ pub struct PatchConfig {
 #[derive(Debug, Clone)]
 pub struct DueSource {
     pub id: String,
-    /// No run has ever finished for it, so this run is the initial sync --
-    /// which is what the first-run wizard shows progress for.
+    /// No run has ever finished for it, so this run is the initial sync,
+    /// logged as `first_run`.
     pub first_run: bool,
 }
 

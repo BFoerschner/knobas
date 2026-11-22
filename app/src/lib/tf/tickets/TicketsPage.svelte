@@ -168,7 +168,10 @@
   import TfScroller from "../TfScroller.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { sourceHash } from "../settings/settings";
+  import { ADD_SOURCE_HASH, settingsHash, sourceHash } from "../settings/settings";
+  import TfLoadDemo from "../settings/TfLoadDemo.svelte";
+  import { health as sharedHealth, type Health } from "../../shell/health.svelte";
+  import { lifecycle } from "../../shell/lifecycle.svelte";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
   import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
@@ -238,6 +241,8 @@
     back = null,
     sync,
     syncRevision = 0,
+    health = sharedHealth,
+    demo = lifecycle.status?.demo ?? false,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
@@ -248,7 +253,18 @@
     typingPause?: number;
     /** Where `Esc` goes, which the sub-tasks bar's hint names. */
     back?: EscTarget | null;
+    /** The sources knobas knows, which says when there are none at all (ux31: a fresh profile's first page). */
+    health?: Pick<Health, "phase" | "all" | "reseed">;
+    /** The `--demo` profile (P13), which offers the Tidewater dataset while it has no source. */
+    demo?: boolean;
   } & RoleFrameProps = $props();
+
+  /**
+   * No source at all, as an answer rather than a store not read yet (#746: an empty store is a claim only in
+   * `ready`). What a fresh profile opens on since the first-run wizard went (ux31): the way to add one, and to
+   * restore a backup first, which knobas takes only into a database with no data.
+   */
+  const noSources = $derived(health.phase === "ready" && health.all.length === 0);
 
   /** The key whose sub-tasks a ticket card's row narrowed this view to (`job/scoped.svelte.ts`), or `null`. */
   const subtasksOf = $derived(viewId === null && scopedTicket.subtasksOf !== null ? keyOf(scopedTicket.subtasksOf) : null);
@@ -1455,6 +1471,18 @@
           {:else}
             <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
           {/if}
+        </div>
+      {:else if noSources}
+        <div class="tf-empty tf-nosources">
+          <p>No sources yet. Add one and its tickets, pull requests, builds and pages come into knobas.</p>
+          <div class="tf-empty-acts">
+            <a class="tf-btn tf-sm tf-primary" href={ADD_SOURCE_HASH}>Add a source…</a>
+            {#if demo}<TfLoadDemo small {health} />{/if}
+          </div>
+          <p class="tf-empty-note">
+            Have a backup or a share export? Restore it before you add a source: knobas restores only into a database that holds no data yet.
+            <a href={settingsHash("backup")}>Open Settings › Backup and export</a>
+          </p>
         </div>
       {:else}
         <div class="tf-empty">

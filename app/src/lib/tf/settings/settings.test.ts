@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import type { CredentialHealth, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import {
+  ADD_SOURCE_HASH,
+  addsSource,
   BACKFILL_HINT,
   BY_HAND,
   bareAddress,
@@ -330,4 +332,13 @@ test("a child's page sits under its parent's address, Fonts' old address still l
   const keys = SETTINGS_SECTIONS.map(([key]) => key);
   expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 4)).toEqual(["appearance", "theme", "code-colours", "fonts"]);
   expect(new Set(keys).size).toBe(keys.length);
+});
+
+test("#/settings/sources/add is Sources with Add a source open, a page Settings knows (ux31)", () => {
+  expect(ADD_SOURCE_HASH).toBe("#/settings/sources/add");
+  expect(addsSource(["sources", "add"])).toBe(true);
+  for (const rest of [["sources"], ["sources", "add", "x"], ["source", "add"], ["add"], []]) expect(addsSource(rest), rest.join("/")).toBe(false);
+  expect(settingsKnows(["sources", "add"])).toBe(true);
+  expect(settingsKnows(["sources", "other"])).toBe(false);
+  expect(settingsPlace(["sources", "add"])).toEqual({ section: "sources" });
 });

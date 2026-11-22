@@ -14,7 +14,8 @@ import { hashFor, parseHash } from "./router";
 test("parses the M1 addresses", () => {
   expect(parseHash("#/sources")).toEqual({ view: "sources" });
   expect(parseHash("#/settings")).toEqual({ view: "settings" });
-  expect(parseHash("#/first-run")).toEqual({ view: "first-run" });
+  // The first-run wizard went in ux31, and its address with it.
+  expect(parseHash("#/first-run")).toEqual({ view: "unknown", hash: "#/first-run" });
 });
 
 /**
@@ -178,7 +179,6 @@ test("round-trips every address it produces", () => {
     "#/standup",
     "#/sources",
     "#/settings",
-    "#/first-run",
     "#/start-work/mock:PAY-231",
     "#/inbox",
     "#/inbox/ctx/ctx:5b1c",

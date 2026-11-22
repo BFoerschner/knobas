@@ -93,6 +93,8 @@ export interface SourceRoles {
   syncs(role: string): boolean;
   /** Whether `sourceId` fills `role` (a run of it can bring that role's views something new). Not knowing is no. */
   filledBy(role: string, sourceId: string): boolean;
+  /** Whether the list the shell read last names `sourceId` at all (a source added since is not known yet). */
+  knows(sourceId: string): boolean;
   /**
    * Whether `sourceId`'s adapter declares the write `op` (ADR-0054: `transition`, a ticket's move). Not knowing is no:
    * an undeclared write is not drawn (ADR-0020). Whether this instance's credential may make it is `refused_writes`'.
@@ -134,6 +136,9 @@ export function createSourceRoles(): SourceRoles {
     filledBy(role, sourceId) {
       const source = state.sources?.find((row) => row.id === sourceId);
       return source !== undefined && fills(source, role);
+    },
+    knows(sourceId) {
+      return state.sources?.some((row) => row.id === sourceId) ?? false;
     },
     writes(sourceId, op) {
       return state.sources?.find((row) => row.id === sourceId)?.write_ops?.includes(op) ?? false;

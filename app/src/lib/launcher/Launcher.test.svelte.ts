@@ -177,7 +177,7 @@ function open(props: Record<string, unknown> = {}) {
  * file, and {@link debounced} moves its clock past the debounce, so no test
  * waits on the wall clock (#2048). The same reading applies to the other
  * microtask-count `settle()` helpers in this repo (`SourcesView`,
- * `Diagnostics`, `AddSource`, `FirstRun`): none of the components they drive
+ * `Diagnostics`, `AddSource`): none of the components they drive
  * dynamically imports anything either.
  */
 async function settle() {

@@ -679,14 +679,24 @@ test("link sets on the job (#867): each set that applies with its first matching
   expect(read("mock:NOPE-1")).toEqual({ sets: [], parent: null });
 });
 
-test("boot: ?fake-first-run holds app_status on the wizard until complete_first_run, and without it there is no wizard (#1396)", () => {
-  type Status = { first_run: boolean; source_count: number };
-  const h = demoHandlers(new URLSearchParams("fake-first-run")) as Calls;
-  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: true, source_count: 0 });
-  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: true, source_count: 0 });
-  h["complete_first_run"]!({});
-  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
-  expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
+test("boot: ?fake-empty=sources is a fresh profile, no source and no ticket, and app_status carries no first-run flag (ux31)", () => {
+  type Status = { source_count: number };
+  const fresh = demoHandlers(new URLSearchParams("fake-empty=sources")) as Calls;
+  expect(fresh["app_status"]!({}) as Status).toMatchObject({ source_count: 0 });
+  expect(fresh["app_status"]!({})).not.toHaveProperty("first_run");
+  expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ source_count: 1 });
+  // The lists read the address, as a dev server's do.
+  const before = location.href;
+  history.replaceState(null, "", "?fake-ipc&fake-empty=sources");
+  try {
+    const h = demoHandlers(new URLSearchParams(location.search)) as Calls;
+    expect(h["list_sources"]!({})).toEqual([]);
+    expect(h["credential_health"]!({})).toEqual([]);
+    expect(h["mini_board"]!({ perColumn: null })).toMatchObject({ columns: [] });
+  } finally {
+    history.replaceState(null, "", before);
+  }
+  expect(((demoHandlers() as Calls)["list_sources"]!({}) as unknown[]).length).toBeGreaterThan(0);
 });
 
 test("boot: ?fake-secret-store=memory answers credentials for this session only, and without it the keychain (#1585)", () => {

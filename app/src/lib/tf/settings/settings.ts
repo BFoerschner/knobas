@@ -137,9 +137,21 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   return { section: topOf(head) ?? "sources" };
 }
 
+/**
+ * `#/settings/sources/add`: Settings › Sources with *Add a source* already open (ux31), the address Tickets' empty
+ * state sends a fresh profile to. Closing the dialog replaces it with `#/settings/sources`, so the dialog keeps one host.
+ */
+export const ADD_SOURCE_HASH = "#/settings/sources/add";
+
+/** Whether what follows `#/settings` is {@link ADD_SOURCE_HASH}. */
+export function addsSource(rest: readonly string[]): boolean {
+  return rest.length === 2 && rest[0] === "sources" && rest[1] === "add";
+}
+
 /** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
 export function settingsKnows(rest: readonly string[]): boolean {
   const [head, arg] = rest;
+  if (addsSource(rest)) return true;
   // Checkouts' application page (PR #2479, 2026-11-13); anything else under it names nothing.
   if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
   // A folder renderer's page (ADR-0044); anything else under Renderers names nothing.
@@ -435,7 +447,7 @@ export function startedWords(iso: string, now: Date = new Date()): string {
 }
 
 /**
- * A watched run's line (#1384), the wizard's reading on a source's page:
+ * A watched run's line (#1384), the reading on a source's page (once the first-run wizard's too):
  * *120 of 300 repositories · 1,240 items · 1m 23s*, without the walk until the
  * run reports one and without the total when the adapter has none.
  */

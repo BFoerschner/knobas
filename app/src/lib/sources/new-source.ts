@@ -2,7 +2,7 @@
  * What *Add a source* (`tf/settings/TfAddSource.svelte`, #903) is held to: the
  * rules a new source must meet, and the one fill *Test connection* applies.
  * The rooms UI's `AddSource.svelte` shared them until the first-run wizard,
- * its last mount, moved to TfAddSource (#1400).
+ * its last mount, moved to TfAddSource (#1400); the wizard itself went in ux31.
  */
 import type { AuthMethod, SourceDescriptor } from "../ipc/sources";
 import type { SchemaField } from "./schema-form";

@@ -70,5 +70,5 @@
 {/each}
 
 {#if home.recent.length === 0}
-  <p class="tf-ln-none">Nothing has been synced yet. Add a source from the gear, or start knobas with <strong>--demo</strong>.</p>
+  <p class="tf-ln-none">Nothing has been synced yet. Add a source under Settings › Sources.</p>
 {/if}

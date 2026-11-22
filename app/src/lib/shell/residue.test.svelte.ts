@@ -277,11 +277,9 @@ vi.mock("../ipc/app", () => ({
       db: { state: "ready", detail: null },
       app_version: "0.0.0-test",
       demo: false,
-      first_run: false,
     }),
   frontendReady: () => deferred(undefined),
   retryDatabase: () => deferred(undefined),
-  completeFirstRun: () => deferred(undefined),
   ping: () => deferred("pong"),
   // The pick per folder (ux26): read once by the Files tree, nothing kept.
   folderRenderPicks: () => deferred([]),
@@ -560,7 +558,6 @@ const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const LinkAssetDialog = (await import("../assets/LinkAssetDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
-const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const TfPasswords = (await import("../tf/passwords/TfPasswords.svelte")).default;
 const TfPwCode = (await import("../tf/passwords/TfPwCode.svelte")).default;
 const TfPwComb = (await import("../tf/passwords/TfPwComb.svelte")).default;
@@ -819,7 +816,6 @@ function readyLifecycle() {
     db: { state: "ready" as const },
     status: {
       db: { state: "ready" as const },
-      first_run: false,
       demo: true,
       source_count: 1,
       app_version: "0.1.0",
@@ -3534,11 +3530,6 @@ const CASES: Case[] = [
       }),
     }),
     exercise: (target) => typeInto(target, 'input[aria-label="Search for a ticket"]'),
-  },
-  {
-    name: "FirstRun",
-    source: "lib/sources/FirstRun.svelte",
-    open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
   },
   {
     /** Passwords (ADR-0056): its one read and the open entry's record, answering late. */
