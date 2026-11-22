@@ -6,7 +6,7 @@
 //! | [`fields`] | `GET api/2/issue/{key}?expand=editmeta&fields=*navigable` |
 //! | [`assignable`] | `GET api/2/user/assignable/search?issueKey={key}&username={typed}&maxResults=1000` |
 //! | [`edit`]: summary, priority, labels, own fields | `PUT api/2/issue/{key}`, `{"fields": {…}, "update": {"labels": [{"add": …}, {"remove": …}]}}` |
-//! | [`edit`] with own fields, first | `GET api/2/issue/{key}?expand=editmeta&fields=summary`, to shape each value |
+//! | [`edit`] with own fields, first | `GET api/2/issue/{key}?expand=editmeta&fields=<their ids>`, to shape each value |
 //! | [`edit`]: assignee | `PUT api/2/issue/{key}/assignee`, `{"name": …}` or `{"name": null}` |
 //!
 //! Every resource is in `testenv/specs/jira-dc-rest.wadl` (`getIssue`'s
@@ -406,8 +406,9 @@ impl Edit<'_> {
         Some(Value::Object(body))
     }
 
-    /// Refuse an edit with nothing in it before anything is sent. A source's
-    /// own field is held to the issue's screen by [`shape_own`].
+    /// Refuse an edit with nothing in it, or an own field that cannot be one
+    /// of Jira's ([`jira_field_id`]), before anything is sent. One that can is
+    /// held to the issue's screen by [`shape_own`].
     fn check(&self, key: &str) -> Result<(), SourceError> {
         if self.title.is_none()
             && self.assignee.is_none()
@@ -419,8 +420,27 @@ impl Edit<'_> {
                 "jira: an edit of {key} with nothing to change"
             )));
         }
+        if let Some(id) = self.fields.keys().find(|id| !jira_field_id(id)) {
+            return Err(SourceError::protocol(format!(
+                "jira: {id:?} is not a field knobas edits on {key}"
+            )));
+        }
         Ok(())
     }
+}
+
+/// Whether `id` can name a field of Jira's own this module edits: the due
+/// date, or a custom field (`customfield_<n>`).
+fn jira_field_id(id: &str) -> bool {
+    id == "duedate"
+        || id
+            .strip_prefix("customfield_")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The `fields` a write's screen read asks for: the own fields it sets, by id.
+fn screen_fields(own: &std::collections::BTreeMap<String, Value>) -> String {
+    own.keys().map(String::as_str).collect::<Vec<_>>().join(",")
 }
 
 /// Edit issue `key`: the issue's `PUT` first, then the assignee's, each
@@ -437,12 +457,15 @@ pub(crate) async fn edit(http: &HttpClient, key: &str, edit: &Edit<'_>) -> Resul
     let own = if edit.fields.is_empty() {
         serde_json::Map::new()
     } else {
+        // `editmeta` covers only the fields the read asks for (witnessed on Jira 10.3.24,
+        // 2026-11-22: asked with `fields=summary` it left the due date out), so the read
+        // asks for exactly the fields this edit sets.
         let screen: Value = http::get_json(
             http,
             &issue_path(key),
             &[
                 ("expand", "editmeta".to_owned()),
-                ("fields", "summary".to_owned()),
+                ("fields", screen_fields(edit.fields)),
             ],
         )
         .await?;
@@ -742,6 +765,28 @@ mod tests {
         );
         for left in ["description", "customfield_10101", "customfield_10400"] {
             assert!(fields.get(left).is_none(), "{left} is left out");
+        }
+    }
+
+    /// The write's screen read names exactly the fields it sets: Jira's
+    /// `editmeta` leaves out every field the read does not ask for.
+    #[test]
+    fn the_writes_screen_read_asks_for_the_fields_it_sets() {
+        let own: std::collections::BTreeMap<String, Value> = [
+            ("duedate".to_owned(), json!("2026-12-01")),
+            ("customfield_10106".to_owned(), json!(3)),
+        ]
+        .into();
+        assert_eq!(screen_fields(&own), "customfield_10106,duedate");
+        for (id, can) in [
+            ("duedate", true),
+            ("customfield_10106", true),
+            ("customfield_", false),
+            ("customfield_10x", false),
+            ("contract_battery_probe", false),
+            ("summary", false),
+        ] {
+            assert_eq!(jira_field_id(id), can, "{id}");
         }
     }
 
