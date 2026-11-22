@@ -162,7 +162,7 @@ fn open_bruno_on_mac(argv: &[String]) -> std::io::Result<()> {
 
 /// Whether Bruno runs, by Launch Services' list of running applications.
 fn bruno_running() -> bool {
-    std::process::Command::new("pgrep")
+    knobas_db::console::command("pgrep")
         .args(["-x", "Bruno"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
