@@ -951,6 +951,21 @@ pub async fn folder_render_file_bytes(
         .map(tauri::ipc::Response::new)
 }
 
+/// A generated archive listed for the JAR view (ADR-0046; ux19's view on a folder renderer's output): its entries,
+/// manifest, Maven coordinates and nested JARs, under a handle the `archive_*` reads name it by.
+///
+/// # Errors
+///
+/// As [`folder_render_file`]; [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid)
+/// past the archive cap or for a file that is no archive.
+#[tauri::command]
+pub async fn folder_render_archive_open(
+    token: String,
+    path: String,
+) -> Result<knobas_jar::ArchiveIndex, IpcError> {
+    crate::folder_render::made::archive_open(&token, &path).await
+}
+
 /// Run a saved *Open in…* application on a generated folder, or a file in it
 /// (ADR-0046); the default when `application` is `None`. Answers the argument
 /// vector started.

@@ -860,6 +860,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::folder_render_tree,
         commands::app::folder_render_file,
         commands::app::folder_render_file_bytes,
+        commands::app::folder_render_archive_open,
         commands::app::folder_render_open,
         commands::app::folder_render_store,
         commands::app::set_folder_render_store,

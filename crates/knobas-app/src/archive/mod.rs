@@ -294,6 +294,28 @@ pub async fn open_bytes(bytes: Vec<u8>, name: &str) -> Result<ArchiveIndex, IpcE
         .map(|i| (*i).clone())
 }
 
+/// An archive a folder renderer made (ADR-0046), listed: `read` hands its bytes, read only where no listing is kept under
+/// `key`. A generated folder is never rewritten, so its file is the same bytes for as long as its token names it.
+///
+/// # Errors
+///
+/// As `read`, and `invalid` for bytes that are no archive, with why.
+pub async fn open_kept<F>(key: String, name: &str, read: F) -> Result<ArchiveIndex, IpcError>
+where
+    F: std::future::Future<Output = Result<Vec<u8>, IpcError>>,
+{
+    let kept = lock().by_key.get(&key).cloned();
+    if let Some(handle) = kept
+        && let Ok(o) = opened(&handle)
+    {
+        return Ok((*o.index).clone());
+    }
+    let bytes = read.await?;
+    take_in(bytes, name.to_owned(), Some(key))
+        .await
+        .map(|i| (*i).clone())
+}
+
 /// Opens the archive at `path` in `entity_id`'s tree, at `commit` (a file block's, handed back) or the entity's own
 /// reference: its listing, under a handle the other reads name it by.
 ///
@@ -591,10 +613,10 @@ pub async fn download(handle: &str, entry: Option<&str>, dir: &Path) -> Result<S
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn tiny_jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn tiny_jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         // Stored entries: enough for the store's own paths; `knobas-jar`'s tests hold the reader to real archives.
         let mut out = Vec::new();
         let mut central = Vec::new();
@@ -676,7 +698,7 @@ mod tests {
     }
 
     /// The store is the process's: its tests take turns, so one's evictions do not reach another's handles.
-    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    pub(crate) static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     async fn an_archive_opens_reads_its_entries_and_its_nested_jar() {

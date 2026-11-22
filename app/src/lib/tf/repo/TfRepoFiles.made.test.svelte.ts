@@ -5,7 +5,7 @@
  * under the folder, or a new branch.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { FolderAsk, FolderRenderer, FolderRenderView, MadeTree } from "../../ipc/app";
 import type { SourceView, TreeEntry, ViewBlock } from "../../ipc/entity";
@@ -16,6 +16,8 @@ import { pageContext } from "../kept-pages.svelte";
 import type { FolderRenderPorts } from "../render/TfFolderRender.svelte";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import { folderPicks } from "../../render/folder-picks.svelte";
+import { jarAnswers } from "../../render/jar-fixture";
+import type { ArchivePorts } from "../../render/jar-ports";
 
 const REPO = "gitea:tidewater/payout-service";
 const HASH = "#/repo/gitea%3Atidewater%2Fpayout-service";
@@ -74,6 +76,11 @@ const MADE: Record<string, Record<string, string>> = {
     "docs/steps.md": "# Steps\n",
     "img/flow.png": "PNG",
   },
+  /** A run whose output holds an archive (a build's JAR). */
+  J: {
+    "app.jar": "PK\u0003\u0004",
+    "index.md": "# Index\n",
+  },
 };
 const treeOf = (token: string): MadeTree => ({
   dir: `/s/knobas-rendered/x/orders.site.${token}`,
@@ -92,13 +99,30 @@ const madePorts: MadePorts = {
   file: (t, path): Promise<ViewBlock> => {
     const text = MADE[t]?.[path];
     if (text === undefined) return Promise.reject({ code: "not_found", message: "no" });
-    const binary = path.endsWith(".png");
+    const binary = path.endsWith(".png") || path.endsWith(".jar");
     return Promise.resolve({ type: "file", trail: [], path, text: binary ? "" : text, language: null, size: text.length, truncated: false, binary, url: null, sha: null, commit: null });
   },
   fileBytes: (t, path) => {
     madeBytes.push(`${t}:${path}`);
     return Promise.resolve(new TextEncoder().encode(MADE[t]?.[path] ?? ""));
   },
+  archive: (t, path) => {
+    archivesOpened.push(`${t}:${path}`);
+    return archiveCall("archive_open", { path: "build/libs/ledger-core-2.3.1.jar" });
+  },
+};
+let archivesOpened: string[] = [];
+const archiveAnswers = jarAnswers() as unknown as Record<string, (args: Record<string, unknown>) => unknown>;
+const archiveCall = <T>(name: string, args: Record<string, unknown>) => Promise.resolve(archiveAnswers[name]!(args) as T);
+/** The JAR view's reads by handle, as the repository page hands them down; `open` is never asked for a generated file. */
+const archive: ArchivePorts = {
+  open: () => Promise.reject(new Error("a generated archive is listed through the made ports")),
+  nested: (handle, entry) => archiveCall("archive_nested", { handle, entry }),
+  entry: (handle, entry) => archiveCall("archive_entry", { handle, entry }),
+  cls: (handle, entry) => archiveCall("archive_class", { handle, entry }),
+  decompile: (handle, entry) => archiveCall("archive_decompile", { handle, entry }),
+  download: (handle, entry) => archiveCall("archive_download", { handle, entry }),
+  java: () => archiveCall("java_runtime", {}),
 };
 
 function folderPorts() {
@@ -135,6 +159,7 @@ beforeEach(() => {
   views = 0;
   bytesOfRepo = 0;
   madeBytes = [];
+  archivesOpened = [];
   token = "A";
   location.hash = "";
 });
@@ -153,7 +178,7 @@ interface Place {
   changed: Set<string>;
 }
 
-function draw(start: Partial<Place>) {
+function draw(start: Partial<Place>, archives: ArchivePorts | null = archive) {
   const place: Place = $state({ at: REPO, path: null, rendered: null, folderRender: null, changed: new Set<string>(), ...start });
   const fp = folderPorts();
   app = mount(TfRepoFiles, {
@@ -168,6 +193,7 @@ function draw(start: Partial<Place>) {
           bytesOfRepo += 1;
           return new Uint8Array();
         },
+        ...(archives === null ? {} : { archive: archives }),
       },
       repoId: REPO,
       get at() {
@@ -343,6 +369,30 @@ test("the arrow keys step from the folder's row onto the band, and Enter there s
   band()!.click();
   await settle();
   expect(rowPaths()).toContain("flows/orders/main.flow");
+});
+
+test("a generated JAR opens in the JAR view, listed from the generated folder, never through the byte read", async () => {
+  token = "J";
+  draw({ rendered: RENDERED, path: "app.jar" });
+  await vi.waitFor(
+    () => {
+      flushSync();
+      expect(target.querySelector(".tf-jar-name")).not.toBeNull();
+    },
+    { timeout: 10_000, interval: 20 },
+  );
+  expect(archivesOpened).toEqual(["J:app.jar"]);
+  expect(madeBytes).toEqual([]);
+  expect(target.textContent).not.toContain("A binary file, not drawn.");
+});
+
+test("a generated JAR where no archive read is wired stays a binary file, not drawn", async () => {
+  token = "J";
+  draw({ rendered: RENDERED, path: "app.jar" }, null);
+  await settle();
+  expect(target.querySelector(".tf-jar-name")).toBeNull();
+  expect(archivesOpened).toEqual([]);
+  expect(target.textContent).toContain("A binary file, not drawn.");
 });
 
 test("a generated file the run did not make says so, with the way to the folder", async () => {

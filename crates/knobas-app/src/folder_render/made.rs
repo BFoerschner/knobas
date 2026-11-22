@@ -325,6 +325,37 @@ pub async fn file_bytes(token: &str, path: &str) -> Result<Vec<u8>, IpcError> {
     read(made, path.to_owned(), BYTES_CAP).await
 }
 
+/// A generated archive (a `.jar`, `.war`, `.ear` or `.aar` a folder renderer wrote) listed for the JAR view, read
+/// past the view's byte cap up to [`crate::archive::ARCHIVE_CAP`], as a repository's archive is. Kept by the token and
+/// the path, so the same file opened again answers with no read.
+///
+/// # Errors
+///
+/// As [`file`]; [`Invalid`](crate::IpcErrorCode::Invalid) past the cap or for a file that is no archive.
+pub async fn archive_open(token: &str, path: &str) -> Result<knobas_jar::ArchiveIndex, IpcError> {
+    archive_of(made(token)?, token, path).await
+}
+
+/// [`archive_open`] on the generated folder `made`, kept under `token`.
+async fn archive_of(
+    made: Arc<Made>,
+    token: &str,
+    path: &str,
+) -> Result<knobas_jar::ArchiveIndex, IpcError> {
+    use crate::archive::ARCHIVE_CAP;
+    let size = made.file(path).ok_or_else(|| not_held(path))?.size;
+    if size > ARCHIVE_CAP {
+        return Err(IpcError::invalid(format!(
+            "{path} is {}; knobas reads an archive up to {}",
+            mebibytes(size),
+            mebibytes(ARCHIVE_CAP)
+        )));
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let key = format!("made\u{1f}{token}\u{1f}{path}");
+    crate::archive::open_kept(key, name, read(made, path.to_owned(), ARCHIVE_CAP)).await
+}
+
 /// Point the runner at the store as the settings say now: at bring-up, and
 /// after the setting or the clones root changed. A store that moved is
 /// removed at its old place.
@@ -429,6 +460,61 @@ mod tests {
             assert_eq!(error.code, crate::IpcErrorCode::NotFound, "{outside}");
         }
         assert_eq!(tree_of(&made).files.len(), 2);
+    }
+
+    /// A generated JAR is listed for the JAR view and read by its handle; a second open answers from what is kept with
+    /// no read; a path outside the manifest and a file that is no archive are refused.
+    #[tokio::test]
+    async fn a_generated_archive_is_listed_and_kept_by_its_token_and_path() {
+        let _turn = crate::archive::tests::SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(out.join("libs")).unwrap();
+        let jar =
+            crate::archive::tests::tiny_jar(&[("a.txt", b"hello"), ("b/C.class", b"\xca\xfe")]);
+        std::fs::write(out.join("libs").join("app.jar"), &jar).unwrap();
+        std::fs::write(out.join("notes.jar"), b"not an archive").unwrap();
+        let progress: keep::Progress = Arc::new(|_, _| {});
+        let made = Arc::new(
+            keep::keep(
+                &out,
+                &dir.path().join("kept"),
+                &progress,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .unwrap(),
+        );
+        let token = format!("t-{}", std::process::id());
+        let ix = archive_of(made.clone(), &token, "libs/app.jar")
+            .await
+            .unwrap();
+        assert_eq!(ix.names, "a.txt\nb/C.class");
+        assert_eq!(
+            crate::archive::entry_bytes(&ix.handle, "a.txt")
+                .await
+                .unwrap(),
+            b"hello"
+        );
+        // Kept: the file gone from disk, the same open still answers, under the same handle.
+        std::fs::remove_file(made.dir.join("libs").join("app.jar")).unwrap();
+        let again = archive_of(made.clone(), &token, "libs/app.jar")
+            .await
+            .unwrap();
+        assert_eq!(again.handle, ix.handle);
+        // Another token is another folder: read again (and here, gone).
+        assert!(
+            archive_of(made.clone(), "other", "libs/app.jar")
+                .await
+                .is_err()
+        );
+        let error = archive_of(made.clone(), &token, "libs/none.jar")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::IpcErrorCode::NotFound);
+        let error = archive_of(made.clone(), &token, "notes.jar")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
     }
 }
 

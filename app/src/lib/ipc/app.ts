@@ -7,7 +7,7 @@
  * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "./invoke";
-import type { ViewBlock } from "./generated/entity";
+import type { ArchiveIndex, ViewBlock } from "./generated/entity";
 import type {
   AppStatus,
   CommandStep,
@@ -293,6 +293,11 @@ export function folderRenderFile(token: string, path: string): Promise<ViewBlock
 export async function folderRenderFileBytes(token: string, path: string): Promise<Uint8Array> {
   const answer = await invoke<RawBytes>("folder_render_file_bytes", { token, path });
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/** A generated archive listed for the JAR view (ADR-0046), as `archive_open` lists a repository's; `path` from the folder's top. */
+export function folderRenderArchiveOpen(token: string, path: string): Promise<ArchiveIndex> {
+  return invoke<ArchiveIndex>("folder_render_archive_open", { token, path });
 }
 
 /** Run an *Open in…* application on a generated folder, or a file in it; `null` the default. Answers the arguments run. */
