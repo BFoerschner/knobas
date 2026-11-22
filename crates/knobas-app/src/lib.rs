@@ -597,6 +597,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::passwords::clipboard_state,
         commands::passwords::password_source_facts,
         commands::passwords::passwords_write,
+        commands::passwords::password_attachment,
+        commands::passwords::password_attachment_save,
         commands::sources::backfill_source,
         commands::sources::sync_all,
         commands::sources::sync_status,

@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { Held, PwEntry, PwRow, ReadAnswer, SecretRef, WriteAnswer } from "../../ipc/passwords";
+import type { AttachmentAnswer, Held, PwEntry, PwRow, ReadAnswer, SecretRef, WriteAnswer } from "../../ipc/passwords";
 import TfPasswords from "./TfPasswords.svelte";
 import { forgetHeld } from "./held.svelte";
 import { forgetComment, type PasswordPorts } from "./ports";
@@ -62,6 +62,8 @@ function ports(over: Partial<PasswordPorts> = {}, view: Held = held()): Password
     openExternal: vi.fn(async () => {}),
     write: vi.fn(async (): Promise<WriteAnswer> => ({ kind: "written", entity_id: "pw:graf" })),
     copySecret: vi.fn(async () => {}),
+    attachment: vi.fn(async (): Promise<AttachmentAnswer> => ({ kind: "read", name: "wg-hub.conf", size: 21, data: btoa("[Interface]\nPort = 1"), text: "[Interface]\nPort = 1" })),
+    saveAttachment: vi.fn(async () => "/home/mara/Downloads/wg-hub.conf"),
     ...over,
   };
 }
@@ -285,4 +287,40 @@ test("no write is offered where the source performs none, the account may not ch
   await open(ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true })) }, writable("2026-11-22T10:40:00Z")), ["entry", "pw:graf"]);
   expect(button("Change password…").disabled).toBe(true);
   expect(button("New entry")).toBeUndefined();
+});
+
+test("an entry's attachments are listed by name and size; Open reads one live into the viewer, Save puts it in Downloads", async () => {
+  const listed = { state: "listed" as const, files: [{ id: "a1", name: "wg-hub.conf", size: 612 }] };
+  const p = ports({ entry: vi.fn(async (id: string) => record(id, { attachments: listed })) }, (() => {
+    const v = held();
+    v.sources[0] = { ...v.sources[0]!, offers: { ...offers, attachments: true } };
+    return v;
+  })());
+  await open(p, ["entry", "pw:graf"]);
+  const row = target.querySelector(".tf-pw-file")!;
+  expect([...row.querySelectorAll(".tf-tkkind, .tf-t, .tf-rsub")].map((el) => el.textContent)).toEqual(["CONF", "wg-hub.conf", "612 B"]);
+  // Nothing is read until Open is pressed.
+  expect(p.attachment).not.toHaveBeenCalled();
+  [...row.querySelectorAll("button")].find((b) => b.textContent === "Open")!.click();
+  await settle();
+  expect(p.attachment).toHaveBeenCalledWith("pw:graf", "a1");
+  expect(document.body.querySelector(".tf-viewer")?.textContent).toContain("[Interface]");
+  [...row.querySelectorAll("button")].find((b) => b.textContent === "Save")!.click();
+  await settle();
+  expect(p.saveAttachment).toHaveBeenCalledWith("pw:graf", "a1");
+});
+
+test("a source that offers no attachments draws no row, whatever the record says", async () => {
+  const listed = { state: "listed" as const, files: [{ id: "a1", name: "wg-hub.conf", size: 612 }] };
+  await open(ports({ entry: vi.fn(async (id: string) => record(id, { attachments: listed })) }), ["entry", "pw:graf"]);
+  expect(target.querySelector(".tf-pw-file")).toBeNull();
+});
+
+test("a read the server refuses for this account says the server's own sentence", async () => {
+  const reason = 'Access denied. "mara.lindqvist" does not have permission to view the password for "grafana".';
+  const p = ports({ show: vi.fn(async (): Promise<ReadAnswer> => ({ kind: "refused", reason })) });
+  await open(p, ["entry", "pw:graf"]);
+  button("Show").click();
+  await settle();
+  expect(target.querySelector(".tf-pw-f .tf-pw-fh")?.textContent).toContain(reason);
 });

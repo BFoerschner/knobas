@@ -7,10 +7,11 @@
  */
 import { invoke } from "./invoke";
 
-import type { ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts, Write, WriteAnswer } from "./generated/passwords";
+import type { AttachmentAnswer, ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts, Write, WriteAnswer } from "./generated/passwords";
 
 export type {
   Approval,
+  AttachmentAnswer,
   AttachmentMeta,
   Attachments,
   ClipState,
@@ -102,4 +103,14 @@ export function passwordSourceFacts(sourceId: string): Promise<SourceFacts> {
 /** A direct write (ADR-0056): sent at once, answered when the source has; nothing is kept if it does not answer. */
 export function passwordsWrite(write: Write): Promise<WriteAnswer> {
   return invoke<WriteAnswer>("passwords_write", { write });
+}
+
+/** One of an entry's attachments, read live for the viewer (step 9a); nothing keeps it but the open viewer. */
+export function passwordAttachment(entityId: string, attachmentId: string): Promise<AttachmentAnswer> {
+  return invoke<AttachmentAnswer>("password_attachment", { entityId, attachmentId });
+}
+
+/** One of an entry's attachments saved to the Downloads folder; answers its path. */
+export function passwordAttachmentSave(entityId: string, attachmentId: string): Promise<string> {
+  return invoke<string>("password_attachment_save", { entityId, attachmentId });
 }

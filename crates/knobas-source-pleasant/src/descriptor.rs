@@ -29,7 +29,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         payload_paths: passwords::payload_paths(),
         roles: vec![RoleClaim::new(
             passwords::PASSWORDS,
-            [passwords::READ_SECRET],
+            [passwords::READ_SECRET, passwords::ENTRY_ATTACHMENTS],
         )],
         source_actions: Vec::new(),
         clone_from: Vec::new(),
@@ -44,7 +44,8 @@ pub fn descriptor_template() -> SourceDescriptor {
             usage_comments: true,
             audit_log: true,
             history: None,
-            attachments: false,
+            // Listed by every listing, read one at a time (9.5.4, §6.3).
+            attachments: true,
             access_requests: false,
             // Confirmed on 9.5.4: a listing sends every custom field's value
             // and marks none protected (`S/pleasant-server.md` §6.3).

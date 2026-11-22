@@ -76,6 +76,8 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         auth: Auth::None,
+        body_message: Some(error_message),
+        forbidden: Some(forbidden_refusal),
         ..HttpConfig::default()
     })?;
     Ok(Box::new(PleasantSource {
@@ -109,6 +111,34 @@ fn key_of<'a>(source: &str, entity: &'a str) -> Option<&'a str> {
         .filter(|k| !k.is_empty())
 }
 
+/// The words of a Pleasant error body. 9.5.4 sends JSON in a `text/plain`
+/// body (§6.5): `{"error_message": …}` from the API, `{"error": …,
+/// "error_description": …}` from the sign-in, `{"Message": …}` with a 401.
+fn error_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    if let Some(message) = text("error_message").or_else(|| text("Message")) {
+        return Some(message);
+    }
+    match (text("error"), text("error_description")) {
+        (Some(code), Some(words)) => Some(format!("{code}: {words}")),
+        (Some(code), None) => Some(code),
+        (None, words) => words,
+    }
+}
+
+/// A 403 that refuses this request for this account ("Access denied. …"),
+/// not the credential: a password the account's level holds none of, an
+/// entry it may not change, the free edition's entry cap.
+fn forbidden_refusal(body: &str) -> Option<String> {
+    error_message(body).filter(|m| m.starts_with("Access denied"))
+}
+
 /// How a refused secret read says what it needs, read by its words: 9.5.4
 /// sends its errors as JSON in a `text/plain` body (`400 {"error_message":
 /// "Comment required."}`, `S/pleasant-server.md` §6.5), so the body decides,
@@ -129,6 +159,13 @@ fn refusal(error: &SourceError) -> Option<SecretAnswer> {
     // requested entry."}` in a text/plain body (§6.5): gone, not a fault.
     if lower.contains("cannot find the requested") {
         return Some(SecretAnswer::NotOffered);
+    }
+    if *status == 403 && lower.contains("access denied") {
+        let reason = message
+            .split_once(": ")
+            .map_or(message.as_str(), |(_, words)| words)
+            .to_owned();
+        return Some(SecretAnswer::Refused { reason });
     }
     if lower.contains("comment") {
         return Some(SecretAnswer::CommentRequired { scope: Vec::new() });
@@ -325,6 +362,43 @@ impl PleasantSource {
 }
 
 impl PleasantSource {
+    /// One attachment's name and bytes, read live (step 9a): one request to
+    /// `entries/{id}/attachments/{aid}`, which writes no audit line on 9.5.4
+    /// (`S/pleasant-server.md` §6.1). `aid` is an id the mirror listed; one
+    /// that could leave the path (a `/`, a `?`, a `#`, a `..`) is refused
+    /// before anything is sent.
+    async fn attachment(&self, entity: &str, aid: &str) -> Result<(String, Vec<u8>), SourceError> {
+        let key = key_of(&self.id, entity).ok_or_else(|| {
+            SourceError::protocol(format!("{entity:?} is not an entry of {:?}", self.id))
+        })?;
+        let plain =
+            |t: &str| !t.is_empty() && !t.contains(['/', '?', '#', '\\']) && !t.contains("..");
+        if !plain(key) || !plain(aid) {
+            return Err(SourceError::protocol(format!(
+                "{aid:?} is not an attachment id"
+            )));
+        }
+        let file: crate::api::ApiFile = self
+            .call(
+                Method::GET,
+                &format!("entries/{key}/attachments/{aid}"),
+                |r| r,
+            )
+            .await?
+            .json()
+            .await
+            .map_err(|e| SourceError::protocol(format!("the attachment did not decode: {e}")))?;
+        let bytes = data_encoding::BASE64
+            .decode(file.file_data.trim().as_bytes())
+            .map_err(|e| {
+                SourceError::protocol(format!("the attachment's bytes are not base64: {e}"))
+            })?;
+        Ok((
+            file.file_name.unwrap_or_else(|| "attachment".to_owned()),
+            bytes,
+        ))
+    }
+
     /// The root folder's id: where an entry with no folder goes.
     async fn root_id(&self) -> Result<String, SourceError> {
         self.call(Method::GET, "folders/root", |r| r)
@@ -636,6 +710,37 @@ impl Source for PleasantSource {
 
     /// A change to an entry, sent at once (ADR-0056). A kind the descriptor
     /// does not list is refused before anything is sent.
+    /// An attachment's bytes for the Passwords page's viewer: read live and
+    /// handed over, never kept (ADR-0056, a secret never rests).
+    async fn attachment_bytes(
+        &self,
+        entity: &str,
+        url: &str,
+        cap: u64,
+    ) -> Result<Option<knobas_source::view::FileBytes>, SourceError> {
+        let (_, bytes) = self.attachment(entity, url).await?;
+        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        Ok(Some(if size > cap {
+            knobas_source::view::FileBytes::TooLarge { size }
+        } else {
+            knobas_source::view::FileBytes::Read(bytes)
+        }))
+    }
+
+    /// An attachment saved where the person asked: read live, written once.
+    async fn download_attachment(
+        &self,
+        entity: &str,
+        url: &str,
+        name: &str,
+        sink: &mut dyn knobas_source::run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        let (_, bytes) = self.attachment(entity, url).await?;
+        sink.start(name).await?;
+        sink.write(&bytes).await?;
+        Ok(true)
+    }
+
     async fn passwords_write(&self, write: Write) -> Result<Written, SourceError> {
         let offers = crate::descriptor::descriptor_template()
             .passwords

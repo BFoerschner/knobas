@@ -236,6 +236,10 @@ async fn a_sync_of_the_real_tree_reads_its_codes_attachments_rules_and_fields_in
         || n.starts_with("TimeOtp-")));
     // Every entry with a key in the recording has its key beside its record,
     // never in it.
+    // The listing sends the PSP dashboard's key in full though the reader's
+    // level withholds it (HasViewTOTPAccess false): knobas keeps none.
+    assert!(by_title("PSP dashboard, finance sign-in").otp.is_none());
+    assert!(!by_title("PSP live secret key").can_read);
     let coded = entries.values().filter(|(_, r)| r.otp.is_some()).count();
     assert!(coded >= 3, "{coded} entries with codes");
     assert_eq!(sink.keys.len(), coded);
@@ -251,6 +255,7 @@ async fn a_password_read_is_answered_as_the_real_server_refuses_and_answers() {
         "password-get-comment-required",
         "password-missing-entry",
         "password-post-comment",
+        "password-no-access",
     ])
     .await;
     let s = source(&server.uri());
@@ -289,6 +294,14 @@ async fn a_password_read_is_answered_as_the_real_server_refuses_and_answers() {
             .await
             .unwrap(),
         SecretAnswer::NotOffered
+    );
+    // A level that holds no password: refused for this entry in the server's
+    // words, not the account's credential.
+    assert_eq!(
+        s.read_secret(&ask("password-no-access", None)).await.unwrap(),
+        SecretAnswer::Refused {
+            reason: "Access denied. \"mara.lindqvist\" does not have permission to view the password for \"PSP live secret key\".".into()
+        }
     );
 }
 
@@ -341,21 +354,64 @@ async fn the_real_servers_refused_sign_in_and_expired_token_are_the_credential()
 #[tokio::test]
 async fn the_folder_walk_takes_the_comment_rule_from_the_entry_where_folders_say_false() {
     // Under `GET folders/{id}` every folder object says false (§6.4); the
-    // entries inside still say true, and the rule is taken from them.
+    // entries inside still carry the inherited rule, and it is taken from
+    // them. PSP blocks inheritance, which drops the rule there too: its
+    // entries say false, and so does knobas.
     let r = load("folder-comment-rule");
     let folder: knobas_source_pleasant::api::ApiFolder = serde_json::from_str(&r.body).unwrap();
     let walked = knobas_source_pleasant::map::walk("pw", &folder);
-    let asks: Vec<bool> = walked
+    let asks: BTreeMap<String, bool> = walked
         .items
         .iter()
         .filter(|i| i.kind == knobas_source::passwords::ENTRY_KIND)
         .map(|i| {
-            serde_json::from_value::<EntryRecord>(i.payload.clone())
-                .unwrap()
-                .comment
-                .read
+            let record: EntryRecord = serde_json::from_value(i.payload.clone()).unwrap();
+            let under = record
+                .path
+                .last()
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            (format!("{under}/{}", i.title), record.comment.read)
         })
         .collect();
-    assert!(!asks.is_empty());
-    assert!(asks.iter().all(|a| *a), "{asks:?}");
+    assert!(asks.len() >= 5, "{asks:?}");
+    for (at, asks) in &asks {
+        assert_eq!(*asks, !at.starts_with("PSP/"), "{at}");
+    }
+    assert!(asks.keys().any(|k| k.starts_with("PSP/")), "{asks:?}");
+}
+
+#[tokio::test]
+async fn an_attachment_is_read_live_in_one_request_and_an_id_that_leaves_the_path_is_refused() {
+    let server = serve(&["attachment-one"]).await;
+    let s = source(&server.uri());
+    let r = load("attachment-one");
+    let mut parts = r
+        .path
+        .trim_start_matches("/api/v5/rest/entries/")
+        .split("/attachments/");
+    let (entry, aid) = (
+        parts.next().unwrap().to_owned(),
+        parts.next().unwrap().to_owned(),
+    );
+    let entity = format!("pw:{entry}");
+    let (read, sent) =
+        knobas_http::counted::counted(s.attachment_bytes(&entity, &aid, 1 << 20)).await;
+    assert_eq!(sent, 2, "a sign-in and the one file");
+    assert_eq!(
+        read.unwrap(),
+        Some(knobas_source::view::FileBytes::Read(b"AAAA".to_vec()))
+    );
+    // Over the cap: too large, with its size.
+    assert_eq!(
+        s.attachment_bytes(&entity, &aid, 2).await.unwrap(),
+        Some(knobas_source::view::FileBytes::TooLarge { size: 4 })
+    );
+    for bad in ["../password", "x/y", "a?b", ""] {
+        assert!(
+            s.attachment_bytes(&entity, bad, 1 << 20).await.is_err(),
+            "{bad}"
+        );
+    }
+    assert!(s.attachment_bytes("other:e1", &aid, 1 << 20).await.is_err());
 }

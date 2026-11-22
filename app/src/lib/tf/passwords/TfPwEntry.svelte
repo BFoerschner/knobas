@@ -8,6 +8,13 @@
   import type { PwEntry, PwSource } from "../../ipc/passwords";
   import TfPwCode from "./TfPwCode.svelte";
   import TfPwSecret from "./TfPwSecret.svelte";
+  import TfPwFile from "./TfPwFile.svelte";
+  import type { Layers } from "../layers.svelte";
+  import { attachmentKind } from "../job/attachments";
+  import { ipcErrorMessage } from "../../ipc";
+  import { push } from "../../shell/toasts.svelte";
+  import { savedText } from "../builds/run-reads";
+  import { formatBytes } from "../../sources/diagnostics";
   import { chainOf, commentFolder, expiry, isWeb, type Model } from "./model";
   import { PASSWORD, type PasswordPorts } from "./ports";
   import { stampLabel } from "../../time/format";
@@ -25,6 +32,7 @@
     copied,
     onchange,
     onedit,
+    layers,
   }: {
     entry: PwEntry;
     source: PwSource;
@@ -40,7 +48,22 @@
     /** *Change password…* and *Edit*, drawn where the source performs them and the account may change the entry. */
     onchange?: () => void;
     onedit?: () => void;
+    layers?: Layers | undefined;
   } = $props();
+  /** The attachments the listing named (step 9a): each read live when opened or saved, never kept. */
+  const files = $derived(source.offers.attachments && entry.attachments.state === "listed" ? entry.attachments.files : []);
+  let viewing = $state<{ id: string; name: string; size: number | null } | null>(null);
+  let saving = $state<string | null>(null);
+  async function save(file: { id: string; name: string }): Promise<void> {
+    saving = file.id;
+    try {
+      push({ text: savedText(await ports.saveAttachment(entry.id, file.id)) });
+    } catch (cause) {
+      push({ text: `Could not save ${file.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      saving = null;
+    }
+  }
   const canChange = $derived(entry.can_modify && source.offers.writes.includes("set_password"));
   const canEdit = $derived(entry.can_modify && source.offers.writes.includes("edit_entry"));
 
@@ -160,9 +183,32 @@
       </div>
     {/if}
   {/each}
+  {#if files.length > 0}
+    <div class="tf-pw-f tf-pw-top">
+      <div class="tf-pw-fl">Attachments</div>
+      <div class="tf-pw-fv tf-pw-wide">
+        <div class="tf-pw-files">
+          {#each files as file (file.id)}
+            <div class="tf-pw-file">
+              <span class="tf-tkkind" aria-hidden="true">{attachmentKind({ name: file.name, mime: null })}</span>
+              <span class="tf-pw-filename"><span class="tf-t">{file.name}</span>{#if file.size !== null}<span class="tf-rsub">{formatBytes(file.size)}</span>{/if}</span>
+              <span class="tf-pw-fa">
+                <button type="button" class="tf-btn tf-sm" disabled={down || blocked} title={down ? `${source.name} does not answer` : undefined} onclick={() => (viewing = file)}>Open</button>
+                <button type="button" class="tf-btn tf-sm" disabled={down || blocked || saving === file.id} title={down ? `${source.name} does not answer` : undefined} onclick={() => void save(file)}>{saving === file.id ? "Saving…" : "Save"}</button>
+              </span>
+            </div>
+          {/each}
+        </div>
+      </div>
+    </div>
+  {/if}
   <footer class="tf-pw-efoot">
     {#if entry.changed}Changed {when(entry.changed)}{entry.changed_by ? ` by ${entry.changed_by}` : ""}.{/if}
     Listed at the last sync{source.synced_at ? `, ${source.by_hand ? "by hand " : ""}at ${when(source.synced_at)}` : ""}.
     {#if !entry.can_modify}You can read this entry but not change it.{/if}
   </footer>
 </article>
+
+{#if viewing}
+  <TfPwFile entityId={entry.id} file={viewing} {word} entryTitle={entry.title} {ports} {layers} onsave={() => viewing && void save(viewing)} onclose={() => (viewing = null)} />
+{/if}

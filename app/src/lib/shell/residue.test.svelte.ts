@@ -562,6 +562,7 @@ const TfPasswords = (await import("../tf/passwords/TfPasswords.svelte")).default
 const TfPwCode = (await import("../tf/passwords/TfPwCode.svelte")).default;
 const TfPwComb = (await import("../tf/passwords/TfPwComb.svelte")).default;
 const TfPwWrite = (await import("../tf/passwords/TfPwWrite.svelte")).default;
+const TfPwFile = (await import("../tf/passwords/TfPwFile.svelte")).default;
 const { model: passwordModel } = await import("../tf/passwords/model");
 const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svelte")).default;
 
@@ -585,6 +586,8 @@ function passwordPorts() {
     show: () => deferred({ kind: "not_offered" } as never),
     write: () => deferred({ kind: "unreachable", message: "" } as never),
     copySecret: async () => {},
+    attachment: () => deferred({ kind: "not_offered" } as never),
+    saveAttachment: async () => "",
     copy: () => deferred({ kind: "not_offered" } as never),
     hide: () => deferred(undefined),
     code: () => deferred({ kind: "code", code: "123456", digits: 6, period: 30, left_ms: 20_000 } as never),
@@ -3523,6 +3526,20 @@ const CASES: Case[] = [
     name: "TfPwComb",
     source: "lib/tf/passwords/TfPwComb.svelte",
     open: (target) => ({ app: mount(TfPwComb, { target, props: { until: Date.now() + 30_000 } }) }),
+  },
+  {
+    /** An attachment in the viewer (step 9a): its live read answering late, dropped on close. */
+    name: "TfPwFile",
+    source: "lib/tf/passwords/TfPwFile.svelte",
+    open: (target) => ({
+      app: mount(TfPwFile, {
+        target,
+        props: {
+          entityId: "pw:e1", file: { id: "a1", name: "wg-hub.conf", size: 612 }, word: "the password manager", entryTitle: "wg hub",
+          ports: passwordPorts() as never, onsave: () => {}, onclose: () => {},
+        },
+      }),
+    }),
   },
   {
     /** A write dialog (ADR-0056): its generator's first value, and a write answering late. */

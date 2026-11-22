@@ -803,6 +803,7 @@ export class SheetMode {
 /** Why a password's copy did not land, in the page's words. */
 function readRefusal(answer: ReadAnswer, title: string): string {
   if (answer.kind === "unreachable") return "The password manager does not answer. Nothing was copied.";
+  if (answer.kind === "refused") return answer.reason;
   return `${title}'s password cannot be read here.`;
 }
 

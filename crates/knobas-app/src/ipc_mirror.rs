@@ -78,6 +78,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::passwords::Copied::export_all(cfg)?;
     crate::passwords::reads::SourceFacts::export_all(cfg)?;
     crate::commands::passwords::WriteAnswer::export_all(cfg)?;
+    crate::commands::passwords::AttachmentAnswer::export_all(cfg)?;
 
     // site.ts
     crate::site::SiteSetting::export_all(cfg)?;

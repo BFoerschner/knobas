@@ -116,6 +116,10 @@
         case "not_offered":
           failed = `${Word} has no ${what} for this entry.`;
           break;
+        case "refused":
+          // The server's own sentence: "Access denied. … does not have permission to view the password for …".
+          failed = answer.reason;
+          break;
       }
     } catch (cause) {
       failed = cause instanceof Error ? cause.message : String((cause as { message?: string })?.message ?? cause);

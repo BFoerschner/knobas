@@ -42,6 +42,10 @@ pub enum ReadAnswer {
     },
     /// No such secret, or this source reads none.
     NotOffered,
+    /// The source refused this read for this account, in its words.
+    Refused {
+        reason: String,
+    },
     /// The source did not answer.
     Unreachable {
         message: String,
@@ -145,6 +149,7 @@ async fn read<R: tauri::Runtime>(
                     Read::Ask(ReadAnswer::ApprovalRequired { approver })
                 }
                 SecretAnswer::NotOffered => Read::Ask(ReadAnswer::NotOffered),
+                SecretAnswer::Refused { reason } => Read::Ask(ReadAnswer::Refused { reason }),
             })
         }
         Err(error @ (SourceError::Unreachable(_) | SourceError::Unconfirmed { .. })) => {
@@ -592,4 +597,169 @@ pub async fn passwords_write<R: tauri::Runtime>(
         tracing::warn!(entity = %entity_id, %error, "the write's activity line was not kept");
     }
     Ok(WriteAnswer::Written { entity_id })
+}
+
+/// What opening one attachment answered (step 9a).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "passwords.ts")]
+pub enum AttachmentAnswer {
+    /// The bytes, read just now, for the viewer to hold while it is open.
+    /// `text` is the file as text where it is UTF-8 with no NUL.
+    Read {
+        name: String,
+        #[ts(type = "number")]
+        size: u64,
+        /// Base64.
+        data: String,
+        text: Option<String>,
+    },
+    /// Over the viewer's cap: *Save* still saves it.
+    TooLarge {
+        #[ts(type = "number")]
+        size: u64,
+    },
+    /// The entry lists no such attachment, or its source reads none.
+    NotOffered,
+    /// The source did not answer.
+    Unreachable { message: String },
+}
+
+/// The attachment `attachment_id` as the mirror lists it on `entry`, or `None`.
+fn listed<'a>(entry: &'a PwEntry, attachment_id: &str) -> Option<&'a passwords::AttachmentMeta> {
+    match &entry.attachments {
+        passwords::Attachments::Listed(files) => files.iter().find(|f| f.id == attachment_id),
+        _ => None,
+    }
+}
+
+/// Open one of an entry's attachments (step 9a): its bytes read live through
+/// the source, once, and handed to the window. Nothing keeps them here: not
+/// the live-read cache the ticket page's previews use (ADR-0042), not a file.
+///
+/// # Errors
+/// [`IpcError`] for the source's refusal, or when the engine is not up.
+#[tauri::command]
+pub async fn password_attachment<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    attachment_id: String,
+) -> Result<AttachmentAnswer, IpcError> {
+    use base64::Engine as _;
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let Some(entry) = entry_of(&app, &entity_id).await? else {
+        return Ok(AttachmentAnswer::NotOffered);
+    };
+    let Some(file) = listed(&entry, &attachment_id) else {
+        return Ok(AttachmentAnswer::NotOffered);
+    };
+    let sources = crate::sources::state(&app)?;
+    let pw = state(&app)?;
+    let lent = sources
+        .live
+        .source(
+            &sources.pool,
+            &sources.secrets,
+            &sources.registry,
+            &entry.id,
+        )
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entry.source)))?;
+    match lent
+        .source
+        .attachment_bytes(&entry.id, &file.id, ATTACHMENT_CAP)
+        .await
+    {
+        Ok(Some(FileBytes::Read(bytes))) => {
+            pw.mark_up(&entry.source);
+            used(&app, &entry.id).await;
+            let text = std::str::from_utf8(&bytes)
+                .ok()
+                .filter(|t| !t.contains('\0'))
+                .map(str::to_owned);
+            Ok(AttachmentAnswer::Read {
+                name: file.name.clone(),
+                size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                text,
+            })
+        }
+        Ok(Some(FileBytes::TooLarge { size })) => {
+            pw.mark_up(&entry.source);
+            Ok(AttachmentAnswer::TooLarge { size })
+        }
+        Ok(None) => Ok(AttachmentAnswer::NotOffered),
+        Err(error @ (SourceError::Unreachable(_) | SourceError::Unconfirmed { .. })) => {
+            pw.mark_down(&entry.source);
+            Ok(AttachmentAnswer::Unreachable {
+                message: error.to_string(),
+            })
+        }
+        Err(error) => Err(IpcError::from_source_error(&error, Some(&entry.source))),
+    }
+}
+
+/// Save one of an entry's attachments into the Downloads folder (step 9a),
+/// read live and written once, where the person asked; answers its path.
+///
+/// # Errors
+/// [`IpcError`]: `not_found` for an attachment the entry does not list, the
+/// source's refusal, a file that cannot be written, no downloads folder.
+#[tauri::command]
+pub async fn password_attachment_save<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    attachment_id: String,
+) -> Result<String, IpcError> {
+    let entry = entry_of(&app, &entity_id)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("no entry {entity_id}")))?;
+    let file = listed(&entry, &attachment_id)
+        .ok_or_else(|| {
+            IpcError::not_found(format!("{entity_id} lists no attachment {attachment_id}"))
+        })?
+        .clone();
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| IpcError::internal(format!("no downloads folder: {error}")))?;
+    let sources = crate::sources::state(&app)?;
+    let pw = state(&app)?;
+    let lent = sources
+        .live
+        .source(
+            &sources.pool,
+            &sources.secrets,
+            &sources.registry,
+            &entry.id,
+        )
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entry.source)))?;
+    let mut sink = crate::downloads::FileSink::new(&dir);
+    let streamed = lent
+        .source
+        .download_attachment(&entry.id, &file.id, &file.name, &mut sink)
+        .await;
+    let finished = match streamed {
+        Ok(true) => sink.finish().await.map(Some),
+        Ok(false) => Ok(None),
+        Err(error) => Err(error),
+    };
+    match finished {
+        Ok(Some(path)) => {
+            pw.mark_up(&entry.source);
+            Ok(path.display().to_string())
+        }
+        Ok(None) => Err(IpcError::invalid(format!(
+            "{}'s source reads no attachments",
+            entry.source
+        ))),
+        Err(error) => {
+            sink.discard().await;
+            if matches!(error, SourceError::Unreachable(_)) {
+                pw.mark_down(&entry.source);
+            }
+            Err(IpcError::from_source_error(&error, Some(&entry.source)))
+        }
+    }
 }

@@ -14,6 +14,9 @@ import {
   passwordsEntry,
   passwordsHeld,
   passwordsWrite,
+  passwordAttachment,
+  passwordAttachmentSave,
+  type AttachmentAnswer,
   type CodeAnswer,
   type Held,
   type PwEntry,
@@ -39,6 +42,10 @@ export interface PasswordPorts {
   write: (write: Write) => Promise<WriteAnswer>;
   /** Copy a value typed or generated in a dialog, as a secret. */
   copySecret: (text: string, what: string) => Promise<unknown>;
+  /** One attachment, read live for the viewer (step 9a). */
+  attachment: (entityId: string, attachmentId: string) => Promise<AttachmentAnswer>;
+  /** One attachment saved to the Downloads folder; answers its path. */
+  saveAttachment: (entityId: string, attachmentId: string) => Promise<string>;
 }
 
 export const realPasswordPorts: PasswordPorts = {
@@ -56,6 +63,8 @@ export const realPasswordPorts: PasswordPorts = {
   openExternal: (url) => openWebPort()(url),
   write: (write) => passwordsWrite(write),
   copySecret: (text, what) => clipboardCopySecret(text, what),
+  attachment: (id, aid) => passwordAttachment(id, aid),
+  saveAttachment: (id, aid) => passwordAttachmentSave(id, aid),
 };
 
 /** The password, as a secret ref. */

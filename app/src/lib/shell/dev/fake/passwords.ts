@@ -28,6 +28,20 @@ interface Raw {
   path: string[];
   pw: string;
   changed: string;
+  /** Attachments, as the clickdummy names them: `size` in its words ("3.2 KB"). */
+  files?: { name: string; size: string; kind: string }[];
+}
+
+/** "3.2 KB" as bytes. */
+function bytesOf(size: string): number {
+  const [n, unit] = size.split(" ");
+  const scale = unit === "MB" ? 1024 * 1024 : unit === "KB" ? 1024 : 1;
+  return Math.round(Number(n) * scale);
+}
+
+/** What a text attachment holds in the fake: made up, and saying so. */
+function fakeText(name: string): string {
+  return `# ${name}\n# Made up for the dev fake: no real key, no real host.\n[Interface]\nAddress = 10.99.0.1/24\nListenPort = 51820\n`;
 }
 
 const SOURCE = "team";
@@ -100,7 +114,7 @@ function held(entries: Raw[], params: URLSearchParams): Held {
     sources: [{
       id: SOURCE, name: "Team passwords", account: "mara.lindqvist", by_hand: true,
       synced_at: unsynced ? null : SYNCED_AT, down_at: params.has("pw-offline") ? "2026-11-22T10:40:00Z" : null, never_synced: unsynced,
-      offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
+      offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: true, access_requests: false, marks_protected_fields: false, writes: ["create_entry", "edit_entry", "set_password"] },
       skipped_root: `${SOURCE}:f/Tidewater`, adapter_name: "Pleasant Password Server",
     }],
     folders: unsynced ? [] : [...folders.values()],
@@ -158,9 +172,25 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         expires: e.expires, changed: `${e.changed}T09:00:00Z`, changed_by: e.by || null,
         comment: { read: (row[7] & 4) !== 0, modify: false },
         approval: e.approver ? { state: "required", approver: e.approver } : { state: "none" },
-        attachments: { state: "none" }, can_read: !(e.readonly && e.approver), can_modify: !e.readonly,
+        attachments: e.files?.length ? { state: "listed", files: e.files.map((f, i) => ({ id: `${e.id}-file-${i}`, name: f.name, size: bytesOf(f.size) })) } : { state: "none" },
+        can_read: !(e.readonly && e.approver), can_modify: !e.readonly,
       };
       return entry;
+    },
+    password_attachment: (args) => {
+      if (offline) return { kind: "unreachable", message: "unreachable: the server did not answer" };
+      const e = byId.get(String(args["entityId"]));
+      const at = Number(String(args["attachmentId"]).split("-file-")[1]);
+      const f = e?.files?.[at];
+      if (!f) return { kind: "not_offered" };
+      const text = /\.(pem|conf|txt)$/.test(f.name) ? fakeText(f.name) : null;
+      return { kind: "read", name: f.name, size: bytesOf(f.size), data: btoa(text ?? "PK"), text };
+    },
+    password_attachment_save: (args) => {
+      if (offline) throw new Error("unreachable: the server did not answer");
+      const e = byId.get(String(args["entityId"]));
+      const f = e?.files?.[Number(String(args["attachmentId"]).split("-file-")[1])];
+      return `/home/mara/Downloads/${f?.name ?? "attachment"}`;
     },
     password_show: (args) => read(args, true) as never,
     password_copy: (args) => read(args, false) as never,

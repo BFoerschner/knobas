@@ -333,6 +333,19 @@ mod tests {
         (keeper, fake, told)
     }
 
+    #[test]
+    fn a_copy_says_until_when_as_an_instant_the_hold_away() {
+        let (keeper, _fake, told) = keeper(Duration::from_secs(30));
+        let wall = keeper.copy("hunter2", "password", None).unwrap();
+        let until = told.lock().unwrap()[0].until.clone().unwrap();
+        let at = chrono::DateTime::parse_from_rfc3339(&until).unwrap();
+        let wall = chrono::DateTime::<chrono::Utc>::from(wall);
+        assert!((at.timestamp() - wall.timestamp()).abs() <= 1, "{until}");
+        let left = at.timestamp() - chrono::Utc::now().timestamp();
+        assert!((28..=31).contains(&left), "{left}");
+        assert_eq!(keeper.state().until, Some(until));
+    }
+
     #[tokio::test]
     async fn a_copy_is_cleared_after_the_hold() {
         let (keeper, fake, told) = keeper(Duration::from_millis(60));

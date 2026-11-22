@@ -6,6 +6,15 @@
 export type Approval = { "state": "none" } | { "state": "required", approver: string | null, } | { "state": "unknown" };
 
 /**
+ * What opening one attachment answered (step 9a).
+ */
+export type AttachmentAnswer = { "kind": "read", name: string, size: number, 
+/**
+ * Base64.
+ */
+data: string, text: string | null, } | { "kind": "too_large", size: number, } | { "kind": "not_offered" } | { "kind": "unreachable", message: string, };
+
+/**
  * One attachment, as a listing names it. Never its bytes.
  */
 export type AttachmentMeta = { id: string, name: string, size: number | null, };
@@ -225,7 +234,7 @@ adapter_name: string, };
 /**
  * What a show or a copy answered.
  */
-export type ReadAnswer = { "kind": "shown", value: string, read_at: string, until: string, } | { "kind": "copied", read_at: string, until: string, } | { "kind": "comment_required", scope: Array<string>, } | { "kind": "approval_required", approver: string | null, } | { "kind": "not_offered" } | { "kind": "unreachable", message: string, };
+export type ReadAnswer = { "kind": "shown", value: string, read_at: string, until: string, } | { "kind": "copied", read_at: string, until: string, } | { "kind": "comment_required", scope: Array<string>, } | { "kind": "approval_required", approver: string | null, } | { "kind": "not_offered" } | { "kind": "refused", reason: string, } | { "kind": "unreachable", message: string, };
 
 /**
  * Which secret of an entry is asked for.

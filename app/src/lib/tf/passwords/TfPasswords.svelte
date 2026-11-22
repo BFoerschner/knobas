@@ -604,7 +604,7 @@
             <div class="tf-pw-entrycol">
               {#if record && source && openEntry}
                 {#key record.id}
-                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} />
+                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} {layers} />
                 {/key}
               {:else}
                 <div class="tf-panel"><div class="tf-empty tf-pw-blank"><p>{query ? "No entry matches the filter." : "No entry is open."}</p></div></div>

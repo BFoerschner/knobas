@@ -71,6 +71,24 @@ pub struct ApiAttachment {
     pub file_size: Option<u64>,
 }
 
+/// One attachment with its bytes, as `entries/{id}/attachments/{aid}`
+/// answers it (9.5.4: `FileData` is base64; reading it writes no audit line).
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ApiFile {
+    pub file_name: Option<String>,
+    pub file_data: String,
+}
+
+impl std::fmt::Debug for ApiFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiFile")
+            .field("file_name", &self.file_name)
+            .field("file_data", &"<redacted>")
+            .finish()
+    }
+}
+
 /// One folder ("credential group") with what it holds.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]

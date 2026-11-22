@@ -545,6 +545,12 @@ pub enum SecretAnswer {
     },
     /// This source answers no such read, or the entity is no entry.
     NotOffered,
+    /// The source refused this read for this account, in its own words
+    /// (Pleasant: "Access denied. … does not have permission to view the
+    /// password for …"). The credential is fine; the page says the sentence.
+    Refused {
+        reason: String,
+    },
 }
 
 /// A one-time code key, as the sync hands it to the sink. **Never mirrored.**
