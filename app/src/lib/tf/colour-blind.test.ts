@@ -23,7 +23,8 @@ test("knobas Light's Attention and Failed read the same under deuteranopia, and 
 test("knobas for colour blindness has no state pair that reads alike, under any of the three", () => {
   for (const id of ["knobas-light-cb", "knobas-dark-cb"]) {
     const theme = BUILTINS.find((t) => t.id === id)!;
-    expect(confusions(derive(theme.kind, theme.app).colours).filter((p) => p.a !== "muted" && p.b !== "muted"), id).toEqual([]);
+    // Unknown too: the mode names a pair with it, so the theme it offers has none (the final suite, 2026-11-22).
+    expect(confusions(derive(theme.kind, theme.app).colours), id).toEqual([]);
   }
 });
 

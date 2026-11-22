@@ -114,7 +114,12 @@
     delete next.okBg;
     delete next.warnBg;
     delete next.errBg;
-    setMany(next, `Passed, Attention and Failed moved ${got.reached.toFixed(2)} apart.`);
+    const running = got.info !== colours.info;
+    if (running) {
+      next.info = got.info;
+      delete next.infoBg;
+    }
+    setMany(next, `${running ? "Passed, Attention, Failed and Running" : "Passed, Attention and Failed"} moved ${got.reached.toFixed(2)} apart.`);
   }
 
   // ---------- rename ----------

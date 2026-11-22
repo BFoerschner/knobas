@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 import { apartLine, closestStates, failures, fixAll, fixRow, fixWords, lowSentence, pairs, rowFigure, tellApart, unreadable } from "./app-check";
 import { derive, KNOBAS } from "./app-derive";
 import { appFromVsCode } from "./app-import";
-import { contrast, worst } from "./colour";
+import { contrast, toOklch, worst } from "./colour";
 
 const FIXTURES = join(process.cwd(), "src/lib/tf/theme/fixtures");
 const fixture = (id: string) => JSON.parse(readFileSync(join(FIXTURES, `${id}.colors.json`), "utf8")) as Record<string, unknown>;
@@ -98,12 +98,18 @@ test("the closest states: knobas Light's Attention and Failed for a red-green co
 
 test("Tell them apart moves knobas Light's states to 0.08 apart, each still 4.5:1, and leaves a theme already apart alone", () => {
   const got = tellApart(KNOBAS.light);
-  expect([got.ok, got.warn, got.err]).toEqual(["#00604F", "#905C0C", "#9B0618"]);
+  // Running moves in lightness only, and Unknown's grey stays: all five states apart (the final suite, 2026-11-22).
+  expect([got.ok, got.warn, got.err, got.info]).toEqual(["#004D3F", "#905C0C", "#890012", "#1C3BB9"]);
   expect(got.reached).toBeGreaterThanOrEqual(0.08);
   const three = { paper: KNOBAS.light.paper, sheet: KNOBAS.light.sheet, sheet2: KNOBAS.light.sheet2 };
-  for (const hex of [got.ok, got.warn, got.err]) expect(worst(hex, three).ratio).toBeGreaterThanOrEqual(4.5);
-  const apart = { ...KNOBAS.light, ok: got.ok, warn: got.warn, err: got.err };
-  expect(tellApart(apart)).toMatchObject({ ok: got.ok, warn: got.warn, err: got.err });
+  for (const hex of [got.ok, got.warn, got.err, got.info]) expect(worst(hex, three).ratio).toBeGreaterThanOrEqual(4.5);
+  const [, c0, h0] = toOklch(KNOBAS.light.info);
+  const [, c1, h1] = toOklch(got.info);
+  expect(Math.abs(c1 - c0), "its chroma").toBeLessThan(0.01);
+  expect(Math.abs(h1 - h0), "its hue").toBeLessThan(0.03);
+  const apart = { ...KNOBAS.light, ok: got.ok, warn: got.warn, err: got.err, info: got.info };
+  expect(closestStates(apart).delta).toBeGreaterThanOrEqual(0.08);
+  expect(tellApart(apart)).toMatchObject({ ok: got.ok, warn: got.warn, err: got.err, info: got.info });
   expect(apartLine(apart)).toMatch(/^Told apart: the closest two, \w+ and \w+, are 0\.\d\d apart\.$/);
 });
 

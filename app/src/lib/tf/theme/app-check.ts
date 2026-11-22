@@ -183,28 +183,36 @@ export function fixAll(kind: ThemeKind, set: AppColours): AppColours {
 /** How far apart two states must be, in OKLab, to read as two colours side by side. */
 export const APART = 0.08;
 
-export const TONE_NAME: Record<(typeof TONES)[number], string> = { ok: "Passed", warn: "Attention", err: "Failed", info: "Running" };
+/**
+ * The five states a reader tells apart: the four tones, and Unknown, whose grey is also the window's quiet text, so it
+ * stays where it is (a Fable ruling in the final suite, 2026-11-22: a state pill comes in five tones, and colour-blind
+ * mode names a pair with Unknown too).
+ */
+export const STATES = [...TONES, "muted"] as const;
+export type State = (typeof STATES)[number];
+
+export const TONE_NAME: Record<State, string> = { ok: "Passed", warn: "Attention", err: "Failed", info: "Running", muted: "Unknown" };
 
 export interface Closest {
   delta: number;
   under: "full colour vision" | Vision;
-  a: (typeof TONES)[number];
-  b: (typeof TONES)[number];
+  a: State;
+  b: State;
 }
 
-/** The closest two of the four states, over full colour vision and Machado's three simulations. */
-export function closestStates(c: Pick<Colours, "ok" | "warn" | "err" | "info">): Closest {
+/** The closest two of the five states, over full colour vision and Machado's three simulations. */
+export function closestStates(c: Pick<Colours, State>): Closest {
   let low: Closest = { delta: Infinity, under: "full colour vision", a: "ok", b: "warn" };
-  for (let i = 0; i < TONES.length; i += 1)
-    for (let j = i + 1; j < TONES.length; j += 1) {
-      const a = apart(c[TONES[i]!], c[TONES[j]!]);
-      if (a.delta < low.delta) low = { ...a, a: TONES[i]!, b: TONES[j]! };
+  for (let i = 0; i < STATES.length; i += 1)
+    for (let j = i + 1; j < STATES.length; j += 1) {
+      const a = apart(c[STATES[i]!], c[STATES[j]!]);
+      if (a.delta < low.delta) low = { ...a, a: STATES[i]!, b: STATES[j]! };
     }
   return low;
 }
 
 /** The line under the States rows. */
-export function apartLine(c: Pick<Colours, "ok" | "warn" | "err" | "info">): string {
+export function apartLine(c: Pick<Colours, State>): string {
   const cs = closestStates(c);
   const who = cs.under === "full colour vision" ? "everyone" : cs.under === "tritan" ? "blue-yellow colour blindness" : "red-green colour blindness";
   const d = cs.delta.toFixed(2);
@@ -214,20 +222,21 @@ export function apartLine(c: Pick<Colours, "ok" | "warn" | "err" | "info">): str
 }
 
 /**
- * Passed, Attention and Failed moved as little as makes every two of the four states {@link APART} or more under full
- * colour vision and the three simulations, each still 4.5:1 on the page, the panel and the inset. Running stays. A
- * bounded search: Passed over nine hues (its own, and 11, 21, 31 and 41 degrees either way), Attention and Failed over
- * three (10 degrees either way), each over up to six lightnesses of the band where it reads, at most 0.14 from where
- * it is. Where nothing reaches the mark, the furthest apart found.
+ * Passed, Attention and Failed moved, and Running in lightness only, as little as makes every two of the five states
+ * {@link APART} or more under full colour vision and the three simulations, each still 4.5:1 on the page, the panel and
+ * the inset. Unknown's grey stays: it is the window's quiet text too. A bounded search: Passed over nine hues (its own,
+ * and 11, 21, 31 and 41 degrees either way), Attention and Failed over three (10 degrees either way), Running over its
+ * own hue, each over up to six lightnesses of the band where it reads, at most 0.14 from where it is. Where nothing
+ * reaches the mark, the furthest apart found.
  */
-export function tellApart(c: Colours): { ok: string; warn: string; err: string; reached: number } {
+export function tellApart(c: Colours): { ok: string; warn: string; err: string; info: string; reached: number } {
   const now = closestStates(c).delta;
-  if (now >= APART) return { ok: c.ok, warn: c.warn, err: c.err, reached: now };
+  if (now >= APART) return { ok: c.ok, warn: c.warn, err: c.err, info: c.info, reached: now };
   const surfaces = { paper: c.paper, sheet: c.sheet, sheet2: c.sheet2 };
   const rad = (d: number) => (d * Math.PI) / 180;
   type Cand = { hex: string; moved: number; sim: Triple[] };
   const sims = (hex: string) => [hex, ...CVD_KINDS.map((k) => simulate(hex, k))].map(toOklab);
-  const cand = (key: "ok" | "warn" | "err", hues: number[]): Cand[] => {
+  const cand = (key: "ok" | "warn" | "err" | "info", hues: number[]): Cand[] => {
     const [L, C, H] = toOklch(c[key]);
     const from = toOklab(c[key]);
     const out: Cand[] = [];
@@ -248,28 +257,40 @@ export function tellApart(c: Colours): { ok: string; warn: string; err: string; 
   const oks = cand("ok", [0, 11, -11, 21, -21, 31, -31, 41, -41]);
   const warns = cand("warn", [0, 10, -10]);
   const errs = cand("err", [0, 10, -10]);
-  const info = { sim: sims(c.info) };
+  // Running keeps its hue and chroma: its lightness alone moves, and not at all while it already stands apart.
+  const infos = [{ hex: c.info, moved: 0, sim: sims(c.info) }, ...cand("info", [0])];
+  const muted = { sim: sims(c.muted) };
   const gap = (a: { sim: Triple[] }, b: { sim: Triple[] }) => {
     let low = Infinity;
     for (let i = 0; i < 4; i += 1) low = Math.min(low, Math.hypot(a.sim[i]![0] - b.sim[i]![0], a.sim[i]![1] - b.sim[i]![1], a.sim[i]![2] - b.sim[i]![2]));
     return low;
   };
-  let best: { score: number; low: number; ok: string; warn: string; err: string } | null = null;
-  for (const o of oks) {
-    const oi = gap(o, info);
-    for (const w of warns) {
-      const ow = gap(o, w);
-      const wi = gap(w, info);
-      for (const e of errs) {
-        const low = Math.min(oi, ow, wi, gap(o, e), gap(w, e), gap(e, info));
-        const moved = o.moved + w.moved + e.moved;
-        const score = low >= APART ? 10 - moved : low;
-        if (!best || score > best.score) best = { score, low, ok: o.hex, warn: w.hex, err: e.hex };
+  // Every distance once, before the search: the search itself is then minima and sums.
+  const table = (xs: Cand[], ys: { sim: Triple[] }[]) => xs.map((x) => ys.map((y) => gap(x, y)));
+  const ow = table(oks, warns);
+  const oe = table(oks, errs);
+  const we = table(warns, errs);
+  const toMuted = (xs: Cand[]) => xs.map((x) => gap(x, muted));
+  const [om, wm, em] = [toMuted(oks), toMuted(warns), toMuted(errs)];
+  let best: { score: number; low: number; ok: string; warn: string; err: string; info: string } | null = null;
+  for (const n of infos) {
+    const nm = gap(n, muted);
+    const [on, wn, en] = [oks, warns, errs].map((xs) => xs.map((x) => gap(x, n))) as [number[], number[], number[]];
+    for (let i = 0; i < oks.length; i += 1) {
+      const lo = Math.min(nm, on[i]!, om[i]!);
+      for (let j = 0; j < warns.length; j += 1) {
+        const lw = Math.min(lo, ow[i]![j]!, wn[j]!, wm[j]!);
+        for (let k = 0; k < errs.length; k += 1) {
+          const low = Math.min(lw, oe[i]![k]!, we[j]![k]!, en[k]!, em[k]!);
+          const moved = oks[i]!.moved + warns[j]!.moved + errs[k]!.moved + n.moved;
+          const score = low >= APART ? 10 - moved : low;
+          if (!best || score > best.score) best = { score, low, ok: oks[i]!.hex, warn: warns[j]!.hex, err: errs[k]!.hex, info: n.hex };
+        }
       }
     }
   }
-  if (!best) return { ok: c.ok, warn: c.warn, err: c.err, reached: closestStates(c).delta };
-  return { ok: best.ok, warn: best.warn, err: best.err, reached: best.low };
+  if (!best) return { ok: c.ok, warn: c.warn, err: c.err, info: c.info, reached: closestStates(c).delta };
+  return { ok: best.ok, warn: best.warn, err: best.err, info: best.info, reached: best.low };
 }
 
 /** A colour's words in a low row: its name. */
