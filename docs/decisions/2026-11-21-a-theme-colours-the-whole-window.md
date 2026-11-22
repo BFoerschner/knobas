@@ -133,3 +133,19 @@ No unit test covers the configuration itself: WebKit's configuration is made on 
 never runs a test on, and a `harness = false` test binary is outside ADR-0017's layout. The side and colour a
 kept look gives are tested (`a_kept_look_gives_the_window_its_side_and_colour`). Why a window built hidden and shown
 later never loaded its page was not pursued, because the visible build now has no wrong frame.
+
+## The bare window on Windows and Linux (2026-11-22, the ux29 boot check)
+
+The ux29 Windows boot check found the page area wrong until the page's first paint on a dark system: white on a fresh profile, knobas Light's colour on a second start. The title bar was right. There were two causes. A look that follows the system was built with the light side's colour, and the dark one was set only once the window existed. WebView2 takes its background only when its controller is made, so a colour set later shows only after the page's first paint. A profile with no kept look got no colour at all, so WebView2 drew its white.
+
+**The fix.** On Windows the system's side is read before the window is built, from `AppsUseLightTheme`, the setting WebView2's `prefers-color-scheme` and tao's title bar follow (`window_look::system_dark`). A profile with no kept look is built with knobas's own themes following the system (`WindowLook::knobas_own`, `#E4E8EC` and `#12171C`, checked against `tokens.css`). The same holds on Linux, where the side is still set after the build, as before. macOS is unchanged: a fresh profile keeps the system's window colour there, which was not checked in a Mac window.
+
+**Recorded on Björn's PC.** knobas's window only (PrintWindow on its handle), the system on dark, Björn idle, debug builds of the same head cross-compiled on the Mac, a fresh scratch profile per start:
+
+| Start | Before | After |
+| --- | --- | --- |
+| Fresh profile | white from the first frame (709 ms) to 1,267 ms, then `#12171c` | `#12171c` from the first frame (748 ms) |
+| Second start of that profile (the page's own `window-look.json`, mode system) | `#e4e8ec` from 78 to 312 ms, then `#12171c` | `#12171c` from the first frame (67 ms) |
+| A kept dark look (Dracula's `#21222c`) | `#21222c` from the first frame | the same |
+
+The light side was not tested on Windows: that would have meant changing Björn's system theme. Linux under Xvfb (light, since there is no portal there): a fresh profile was GTK's `#f6f5f4` from 1,233 to 1,781 ms before the fix. After it, `#e4e8ec` showed from the first frame. The mode-follows-system test was the same before and after.

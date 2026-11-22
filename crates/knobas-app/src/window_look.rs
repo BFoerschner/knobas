@@ -4,7 +4,9 @@
 //! window is the system's default, white on Windows, and its title bar follows the system even when knobas is set
 //! dark. So the page tells this side its mode and each side's page colour (`window_look_set`), kept in
 //! `window-look.json` in the profile's folder; the main window is built with the title bar's side and that colour.
-//! Any failure on that path shows the window as before. On macOS the web view would still paint its own white over
+//! Before a look is kept, it is built with knobas's own themes ([`WindowLook::knobas_own`]; not on macOS). Where the
+//! look follows the system, the side is read before the window is built on Windows ([`system_dark`]), because WebView2
+//! takes its colour only when it is made. Any failure on that path shows the window as before. On macOS the web view would still paint its own white over
 //! the window until the page's first paint, so it is built to draw none ([`without_white`]).
 //!
 //! `knobas --default-theme` (or `KNOBAS_DEFAULT_THEME=1`) starts one run on knobas's own themes: the window is given
@@ -129,6 +131,68 @@ impl WindowLook {
     }
 }
 
+/// knobas Light's and knobas Dark's page colour (`--paper` in `tf/css/tokens.css`).
+pub const KNOBAS_LIGHT_PAGE: &str = "#E4E8EC";
+pub const KNOBAS_DARK_PAGE: &str = "#12171C";
+
+impl WindowLook {
+    /// knobas's own themes following the system: what a profile shows before its page has kept a look.
+    #[must_use]
+    pub fn knobas_own() -> Self {
+        Self {
+            mode: Mode::System,
+            light: KNOBAS_LIGHT_PAGE.to_owned(),
+            dark: KNOBAS_DARK_PAGE.to_owned(),
+        }
+    }
+}
+
+/// The system's side before any window exists, where the platform says it. On Windows that is *Choose your app
+/// mode* (`AppsUseLightTheme`), which WebView2's `prefers-color-scheme` and tao's title bar follow. WebView2 takes its
+/// background only when its controller is made: one set after the window is built is not drawn before the page's
+/// first paint (the ux29 boot check, 2026-11-22). Elsewhere `None`, and the side is read from the window once it
+/// exists, which draws nothing before then.
+#[must_use]
+pub fn system_dark() -> Option<bool> {
+    #[cfg(windows)]
+    {
+        dark_from_apps_use_light_theme(apps_use_light_theme())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// The side `AppsUseLightTheme` names: `0` is dark, anything else light, `None` where it cannot be read.
+#[must_use]
+pub fn dark_from_apps_use_light_theme(value: Option<u32>) -> Option<bool> {
+    value.map(|light| light == 0)
+}
+
+/// `HKCU\…\Themes\Personalize\AppsUseLightTheme`, read as tao reads it for the title bar.
+#[cfg(windows)]
+fn apps_use_light_theme() -> Option<u32> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows_core::w;
+    let mut data: u32 = 0;
+    let mut size = u32::try_from(std::mem::size_of::<u32>()).ok()?;
+    // SAFETY: a DWORD read into a `u32` whose size is given; the key and value names are static wide strings.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(std::ptr::from_mut(&mut data).cast()),
+            Some(&mut size),
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(data)
+}
+
 /// Where the look is kept for a profile.
 #[must_use]
 pub fn path_in(profile_dir: &Path) -> PathBuf {
@@ -239,6 +303,36 @@ mod tests {
         )
         .expect("write");
         assert_eq!(read(dir.path()), None);
+    }
+
+    /// `AppsUseLightTheme` is `0` on the dark side and `1` on the light; a value that cannot be read says nothing.
+    #[test]
+    fn apps_use_light_theme_zero_is_the_dark_side_and_a_missing_value_says_nothing() {
+        assert_eq!(dark_from_apps_use_light_theme(Some(0)), Some(true));
+        assert_eq!(dark_from_apps_use_light_theme(Some(1)), Some(false));
+        assert_eq!(dark_from_apps_use_light_theme(None), None);
+    }
+
+    /// Off Windows no side is claimed before the window exists: the main window reads it from the window once built.
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_the_system_s_side_is_read_from_the_window_not_before_it() {
+        assert_eq!(system_dark(), None);
+    }
+
+    /// knobas's own look is the page colours `tokens.css` draws for knobas Light and knobas Dark, following the system.
+    #[test]
+    fn knobas_s_own_look_is_the_page_colours_the_page_draws() {
+        let own = WindowLook::knobas_own();
+        assert_eq!(
+            WindowLook::new("system", KNOBAS_LIGHT_PAGE, KNOBAS_DARK_PAGE).as_ref(),
+            Ok(&own)
+        );
+        let tokens = include_str!("../../../app/src/lib/tf/css/tokens.css");
+        assert!(tokens.contains(&format!(
+            "--paper: var(--paper-light, {KNOBAS_LIGHT_PAGE});"
+        )));
+        assert!(tokens.contains(&format!("--paper: var(--paper-dark, {KNOBAS_DARK_PAGE});")));
     }
 
     #[test]
