@@ -29,8 +29,11 @@
 
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
+  import TfOasAnswer from "./TfOasAnswer.svelte";
   import TfOasPage from "./TfOasPage.svelte";
   import TfOasRail from "./TfOasRail.svelte";
+  import TfOasRequest from "./TfOasRequest.svelte";
+  import { apiSent, apiServers, type SavedServer, type SentLine } from "../../ipc/api";
   import { OasState, OVERVIEW, labelOf, pageOf, type Place } from "./oas.svelte";
   import type { Opened, Operation, OpRow, PathRef } from "../../render/openapi";
   import type { RailInput } from "../../render/openapi-view";
@@ -48,6 +51,7 @@
     read = null,
     at = null,
     line = null,
+    repo = "",
     fileHref = () => null,
     oncopylink = null,
     onsource = null,
@@ -68,6 +72,8 @@
      * operation or schema that holds it, and the address says that place.
      */
     line?: number | null;
+    /** The repository the spec is read from: with its path, what *Sent since knobas started* is kept by. */
+    repo?: string;
     /** A file on the Code page, at a place in it. */
     fileHref?: (file: string, place: string | null) => string | null;
     oncopylink?: ((place: string, label: string) => void) | null;
@@ -292,6 +298,61 @@
     });
   });
 
+  // ---- The request and the answer (sections 14 to 21) ----
+  const fileKey = $derived(`${repo}\n${path}`);
+  let saved = $state<SavedServer[]>([]);
+  let sent = $state<SentLine[]>([]);
+  /** Under 1,480 px an operation's page shows its reference or its request, picked at its head. */
+  let view = $state<"reference" | "request">("reference");
+  let sendKey = $state<(() => void) | null>(null);
+  $effect(() => {
+    void apiServers().then((list) => (saved = list.servers), () => (saved = []));
+  });
+  function readSent() {
+    const at = fileKey;
+    void apiSent(at).then((lines) => {
+      if (at === fileKey) sent = lines;
+    }, () => {});
+  }
+  $effect(() => {
+    void fileKey;
+    untrack(readSent);
+  });
+  /** The operation shown, where it can be sent: not a webhook, not a path item kept elsewhere. */
+  const shownOp = $derived(st !== null && pref === null && st.shown.answer?.kind === "op" && !st.shown.answer.op.webhook ? st.shown.answer.op : null);
+  /** Each media type's starting body: the spec's example, else the one made from the schema. */
+  const bodies = $derived.by((): Record<string, unknown> => {
+    const op = shownOp;
+    const state = st;
+    if (op === null || state === null) return {};
+    const out: Record<string, unknown> = {};
+    for (const m of op.body?.content ?? []) out[m.type] = m.examples[0]?.value ?? state.samples.get(`${state.shown.place}/b:${m.type}`);
+    return out;
+  });
+  function useExample(type: string, value: unknown) {
+    const state = st;
+    const op = shownOp;
+    if (state === null || op === null) return;
+    const place = state.shown.place;
+    const was = state.drafts.get(place);
+    if (was !== undefined) state.drafts.set(place, { ...was, media: type, body: typeof value === "string" ? value : JSON.stringify(value, null, 2) });
+    else state.drafts.delete(place);
+    if (cols === 2) view = "request";
+  }
+  function openSent(line: SentLine) {
+    const state = st;
+    if (state === null) return;
+    state.answers.set(line.send.operation, { state: "done", id: line.id, line: `${line.send.method} ${line.send.url}`, answer: line.answer });
+    pick(line.send.operation);
+    if (cols === 2) view = "request";
+  }
+  function keys(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && sendKey !== null && shownOp !== null) {
+      event.preventDefault();
+      sendKey();
+    }
+  }
+
   async function showPref(ref: PathRef) {
     const state = st;
     if (state === null) return;
@@ -328,7 +389,8 @@
   </div>
 {:else if index !== null && st !== null}
   {@const state = st}
-  <div class="tf-oas" data-cols={cols} bind:this={box} {@attach pane} {@attach sideWidth("oas-rail")}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-oas tf-oas-{cols}" data-cols={cols} bind:this={box} onkeydown={keys} {@attach pane} {@attach sideWidth("oas-rail")}>
     <TfOasRail st={state} {ranked} onpick={pick} onpref={(ref) => void showPref(ref)} />
     <TfSideEdge side="oas-rail" />
     <TfOasPage
@@ -341,7 +403,40 @@
       onback={back}
       onopengroup={(key) => void openGroup(key)}
       {oncopylink}
+      onuse={shownOp === null ? null : useExample}
+      head={cols === 2 && shownOp !== null ? pageSeg : null}
+      reference={!(cols === 2 && shownOp !== null && view === "request")}
       bind:scroller={pageCol}
     />
+    {#if cols >= 3}
+      {#if shownOp !== null}
+        {#key state.shown.place}
+          <div class="tf-oas-col tf-oas-reqcol">
+            <TfOasRequest st={state} op={shownOp} place={state.shown.place} {index} file={fileKey} {saved} {bodies} onsent={readSent} bind:sendKey />
+            {#if cols === 3}<TfOasAnswer sending={state.answers.get(state.shown.place)} {sent} onopen={openSent} />{/if}
+          </div>
+        {/key}
+      {:else}
+        <div class="tf-oas-col tf-oas-req"><p class="tf-oas-fnote">Pick an endpoint, and its request stands here.</p>{#if cols === 3 && sent.length > 0}<TfOasAnswer sending={undefined} {sent} onopen={openSent} />{/if}</div>
+      {/if}
+      {#if cols === 4}
+        <div class="tf-oas-col tf-oas-anscol"><TfOasAnswer sending={shownOp === null ? undefined : state.answers.get(state.shown.place)} {sent} onopen={openSent} /></div>
+      {/if}
+    {/if}
   </div>
 {/if}
+
+{#snippet pageSeg()}
+  <div class="tf-oas-pageseg">
+    <span class="tf-seg" role="group" aria-label="Show">
+      <button type="button" aria-pressed={view === "reference"} onclick={() => (view = "reference")}>Reference</button>
+      <button type="button" aria-pressed={view === "request"} onclick={() => (view = "request")}>Request</button>
+    </span>
+  </div>
+  {#if view === "request" && shownOp !== null && st !== null}
+    {#key st.shown.place}
+      <TfOasRequest st={st} op={shownOp} place={st.shown.place} index={index!} file={fileKey} {saved} {bodies} onsent={readSent} bind:sendKey />
+      <TfOasAnswer sending={st.answers.get(st.shown.place)} {sent} onopen={openSent} />
+    {/key}
+  {/if}
+{/snippet}

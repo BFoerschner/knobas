@@ -35,7 +35,8 @@ serde.workspace = true
 serde_json.workspace = true
 # `sync` for the lane's hand-back to the sync once a person's requests
 # have gone (`limiter::Slot::yielded`).
-tokio = { workspace = true, features = ["time", "sync"] }
+# `macros` for the person client's `select!` between an answer, its time and Stop (ux31).
+tokio = { workspace = true, features = ["time", "sync", "macros"] }
 tracing = "0.1"
 url = "2"
 

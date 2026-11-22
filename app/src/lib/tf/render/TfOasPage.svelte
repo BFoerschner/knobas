@@ -24,6 +24,8 @@
     onopengroup,
     oncopylink = null,
     onuse = null,
+    head = null,
+    reference = true,
     scroller = $bindable(null),
   }: {
     st: OasState;
@@ -37,6 +39,10 @@
     onopengroup: (key: string) => void;
     oncopylink?: ((place: Place, label: string) => void) | null;
     onuse?: ((type: string, value: unknown) => void) | null;
+    /** What stands at the page's head: the *Reference / Request* switch under 1,480 px. */
+    head?: Snippet | null;
+    /** Whether the page draws its reference; under 1,480 px the head's *Request* stands in its place. */
+    reference?: boolean;
     scroller?: HTMLElement | null;
   } = $props();
 
@@ -48,7 +54,10 @@
   {#if st.backs.length > 0 && pref === null}
     <div class="tf-oas-back"><button type="button" class="tf-btn tf-sm" onclick={onback}>Back to {st.backs.at(-1)?.label}</button></div>
   {/if}
-  {#if st.reading}
+  {#if head !== null}{@render head()}{/if}
+  {#if !reference}
+    <!-- The request stands in the reference's place. -->
+  {:else if st.reading}
     <p class="tf-oas-reading" role="status">Reading…</p>
   {:else if pref !== null}
     {@const href = st.hrefOf(st.root, pref.ref)}

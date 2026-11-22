@@ -28,6 +28,7 @@
 //! (the highlighters, Graphviz, pdf.js) run under no CSP at all and rely on
 //! it. A test below pins that and names the policy they would need (#2312).
 
+pub mod api;
 pub mod archive;
 pub mod assets;
 pub mod backup;
@@ -973,6 +974,16 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::search::fuzzy_hold,
         commands::search::fuzzy_rank_held,
         commands::search::fuzzy_drop,
+        commands::api::api_send,
+        commands::api::api_cancel,
+        commands::api::api_answer_body,
+        commands::api::api_sent,
+        commands::api::api_hold_secret,
+        commands::api::api_held,
+        commands::api::api_forget_held,
+        commands::api::api_servers,
+        commands::api::api_set_servers,
+        commands::api::api_save_answer,
         // A source's own website inside knobas (ADR-0050), appended at the
         // foot (§10.8).
         commands::site::site_settings,

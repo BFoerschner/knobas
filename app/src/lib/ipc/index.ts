@@ -24,6 +24,7 @@ export * from "./search";
 export * from "./sources";
 export * from "./time";
 export * from "./assets";
+export * from "./api";
 
 // `IpcError.code`'s type: `knobas_app::IpcErrorCode`, generated, and exported by
 // the sources barrel because `ConnectionReport.code` reaches it (#1372).

@@ -53,6 +53,7 @@
   import TfAppPage from "../openin/TfAppPage.svelte";
   import TfFolderRendererPage from "./TfFolderRendererPage.svelte";
   import { folderPagePlace } from "./folder-page";
+  import TfApiServersSection from "./TfApiServersSection.svelte";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
@@ -318,6 +319,8 @@
         {/key}
       {:else if place.section === "renderers"}
         <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
+      {:else if place.section === "api-servers"}
+        <TfApiServersSection />
       {:else if place.section === "keyboard"}
         <TfKeyboardSection />
       {:else if place.section === "logs"}

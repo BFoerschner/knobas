@@ -42,7 +42,8 @@
   const kept = $derived(ranked === null ? total : st.mode === "schemas" ? ranked.schemas.length : ranked.ops.length);
   const noun = $derived(st.mode === "schemas" ? (["schema", "schemas"] as const) : (["endpoint", "endpoints"] as const));
 
-  const win = new Windowed<string>({ count: () => rows.length, key: (i) => rows[i]!.k, estimate: 28, scrolls: true });
+  // Every row is 28 px, so the rail windows from 40 rows: a fold of 200 opened draws what the rail shows, not 200.
+  const win = new Windowed<string>({ count: () => rows.length, key: (i) => rows[i]!.k, estimate: 28, scrolls: true, from: 40 });
 
   let list = $state<HTMLElement | null>(null);
   let filter = $state<HTMLInputElement | null>(null);
@@ -175,7 +176,8 @@
 
   function setMode(mode: RailMode) {
     if (st.mode === mode) return;
-    st.mode = mode;
+    if (mode === "paths") st.showPaths();
+    else st.mode = mode;
     st.cursor = null;
     if (list !== null) list.scrollTop = 0;
   }

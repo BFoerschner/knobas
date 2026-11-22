@@ -117,9 +117,9 @@ test("a large spec opens with every fold shut: its first screen is the table of 
   expect(railText()[1]).toBe("tag0 200");
   expect(text(target.querySelector(".tf-oas-count"))).toBe("5,000 endpoints");
   // Two folds of 200 opened draw a window of their rows, not 400.
-  row("tag0").click();
-  flushSync();
   row("tag1").click();
+  flushSync();
+  row("tag0").click();
   flushSync();
   expect(row("tag0").getAttribute("aria-expanded")).toBe("true");
   expect(rail().length).toBeLessThan(200);
@@ -369,8 +369,15 @@ test("the filter draws a flat list; clearing it returns the folds and the scroll
   expect(text(target.querySelector(".tf-oas-count"))).toMatch(/^\d+ of 400$/);
   type("");
   await settle();
-  expect(row("tag3").getAttribute("aria-expanded")).toBe("true");
   expect(list.scrollTop).toBe(84);
+  // The rail is windowed: back at its top, the fold opened before the filter is open still.
+  list.scrollTop = 0;
+  list.dispatchEvent(new Event("scroll"));
+  // The window draws its rows over a frame or two; wait for them, not for a count of ticks.
+  await vi.waitFor(() => {
+    flushSync();
+    expect(row("tag3")?.getAttribute("aria-expanded")).toBe("true");
+  });
 });
 
 test("⌘F goes to the filter with its words selected; ↓ then Enter opens the first row", async () => {

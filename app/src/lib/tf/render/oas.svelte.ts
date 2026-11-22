@@ -15,6 +15,13 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { refTarget, type OpRow, type PageAnswer, type Resolved, type Shape, type SpecIndex } from "../../render/openapi";
 import { firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
 import type { SpecSession } from "../../render/openapi-port";
+import type { RequestDraft } from "../../render/openapi-request";
+
+/** A send as the request column draws it: running, answered or failed, refused before it went. */
+export type Sending =
+  | { state: "running"; id: number; line: string }
+  | { state: "done"; id: number; line: string; answer: unknown }
+  | { state: "refused"; line: string; words: string };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -32,6 +39,12 @@ export const READING_AFTER_MS = 200;
 
 /** A place in the explorer: `""` the overview, `get /pets` an operation, `schemas/Pet` a schema, `tags/pets` a fold. */
 export type Place = string;
+
+/**
+ * Hosts a request that changes something was confirmed for, with *Don't ask again*: kept until knobas quits, for
+ * every spec (Björn, 2026-11-22: once per host until restart). The one place the rule's memory lives.
+ */
+export const confirmedHosts = new SvelteSet<string>();
 
 /** The overview's place. */
 export const OVERVIEW: Place = "";
@@ -78,6 +91,12 @@ export class OasState {
   readonly shapes = new SvelteMap<string, Shape>();
   /** Examples made from a schema where the spec gives none, by the key of the part they stand in. */
   readonly samples = new SvelteMap<string, unknown>();
+  /** What a person typed in each operation's request, by its place, while the spec is open (section 14). */
+  readonly drafts = new SvelteMap<Place, RequestDraft>();
+  /** A value typed for a parameter, offered for the same name on the next operation of the same server. */
+  readonly sticky = new Map<string, string>();
+  /** Each operation's last answer, by its place. */
+  readonly answers = new SvelteMap<Place, Sending>();
   /** Refs resolved or being read, by `base\nref`: a ref into another file. */
   readonly refs = new SvelteMap<string, RefState>();
   /** Carets open, *Show all* pressed: by key. */
@@ -100,14 +119,26 @@ export class OasState {
     this.index = index;
     this.groups = groupsOf(index);
     this.#tree = null;
-    this.folds = firstOpen(index, this.groups, this.tree);
+    // The path tree waits for *Paths*: a 5,000-operation spec's open does not build it on the page's thread.
+    this.folds = firstOpen(index, this.groups, null);
   }
 
-  /** The path tree, built once. */
+  /** The path tree, built the first time it is asked for. */
   get tree(): Dir {
     const index = this.index;
     if (this.#tree === null) this.#tree = pathTree(index === null ? [] : index.ops);
     return this.#tree;
+  }
+
+  /** Shows *Paths*: the tree built, the first time, with its first folds open in the same frame. */
+  showPaths(): void {
+    const first = this.#tree === null;
+    const tree = this.tree;
+    if (first && this.index !== null) {
+      const more = [...firstOpen(this.index, [], tree)].filter((k) => k.startsWith("p:"));
+      if (more.length > 0) this.folds = new Set([...this.folds, ...more]);
+    }
+    this.mode = "paths";
   }
 
   get schemaSet(): ReadonlySet<string> {

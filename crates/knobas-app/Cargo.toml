@@ -167,6 +167,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 # download's path taken apart, an artifact's URL joined beside its manifest.
 # The copy `knobas-http` already resolves.
 url = "2"
+# A secret typed in the API explorer is zeroed when it is dropped (ux31, ADR-0057); the copy knobas-source resolves.
+zeroize = "1.9"
 # A release download's tag and file, read out of their path segments, and
 # a tag or file name put back into one. The copy `url` itself depends on.
 percent-encoding = "2"

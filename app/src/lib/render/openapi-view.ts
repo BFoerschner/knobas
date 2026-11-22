@@ -241,13 +241,13 @@ export const OPEN_ALL_UP_TO = 60;
  * first screen is the table of contents. In *Paths* a chain of single folders at the top is open, and so is the top
  * level where it has three folders or fewer.
  */
-export function firstOpen(index: SpecIndex, groups: readonly Group[], tree: Dir): Set<string> {
+export function firstOpen(index: SpecIndex, groups: readonly Group[], tree: Dir | null): Set<string> {
   const open = new Set<string>();
   if (index.ops.length <= OPEN_ALL_UP_TO) {
     for (const g of groups) open.add(g.key);
     open.add("w");
   }
-  if (tree.dirs.length <= 3) {
+  if (tree !== null && tree.dirs.length <= 3) {
     let level = tree.dirs;
     while (level.length > 0 && level.length <= 3) {
       for (const d of level) open.add(`p:${d.path}`);
@@ -548,4 +548,46 @@ export function pathParts(p: string): { text: string; param: boolean }[] {
 /** A count in words: `1 endpoint`, `1,281 endpoints`. */
 export function counted(n: number, one: string, many: string): string {
   return `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
+}
+
+/** Whether `text` holds Markdown that is more than a line's: a list, a heading, a fence, a table, a quote. */
+export function needsBlocks(text: string): boolean {
+  return /^\s*([-*+]|\d+\.)\s|^\s*#{1,6}\s|```|^\s*\||^\s*>/m.test(text);
+}
+
+/** One run of inline Markdown: text, `code`, *em*, **strong**, or a link's words with its address. */
+export interface InlineRun {
+  t: string;
+  k: "" | "code" | "em" | "strong" | "link";
+  href?: string;
+}
+
+const INLINE = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\[([^\]]+)\]\(([^)\s]+)[^)]*\)|(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])|(?<![\w_])_([^_\s][^_]*?)_(?![\w_])|<br\s*\/?>/g;
+
+/**
+ * A description's paragraphs as runs of inline Markdown, read as text, never markup (ux31): a field's words are
+ * mostly a line or two with `code`, *emphasis* and [links](…), and drawing each through the page's whole Markdown
+ * renderer made a schema of 86 fields cost 150 ms at 4x. Anything more than inline goes to the renderer.
+ */
+export function inlineMarkdown(text: string): InlineRun[][] {
+  return text
+    .replace(/\r/g, "")
+    .split(/\n{2,}/)
+    .map((para) => {
+      const runs: InlineRun[] = [];
+      const flat = para.replace(/\n/g, " ");
+      let at = 0;
+      for (const m of flat.matchAll(INLINE)) {
+        if (m.index > at) runs.push({ t: flat.slice(at, m.index), k: "" });
+        if (m[1] !== undefined) runs.push({ t: m[1], k: "code" });
+        else if (m[2] !== undefined || m[3] !== undefined) runs.push({ t: (m[2] ?? m[3])!, k: "strong" });
+        else if (m[4] !== undefined) runs.push({ t: m[4], k: "link", href: m[5]! });
+        else if (m[6] !== undefined || m[7] !== undefined) runs.push({ t: (m[6] ?? m[7])!, k: "em" });
+        else runs.push({ t: " ", k: "" });
+        at = m.index + m[0].length;
+      }
+      if (at < flat.length) runs.push({ t: flat.slice(at), k: "" });
+      return runs;
+    })
+    .filter((runs) => runs.length > 0);
 }

@@ -3,6 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
+import type { apiAnswerBody, apiCancel, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers } from "../../ipc/api";
 import type { appStatus, commandSteps, completeFirstRun, diffPipelines, folderRender, folderRenderers, folderRenderPicks, folderRenderCompare, setFolderRenderPick, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, folderRenderTree, folderRenderFile, folderRenderFileBytes, folderRenderOpen, folderRenderStore, setFolderRenderStore, clearFolderRenderStore, setFolderRenderers, setJavaPath, frontendReady, installedFonts, javaRuntime, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
@@ -75,6 +76,16 @@ export interface Answers {
   fuzzy_hold: Answer<typeof fuzzyHold>;
   fuzzy_rank_held: Answer<typeof fuzzyRankHeld>;
   fuzzy_drop: Answer<typeof fuzzyDrop>;
+  api_send: Answer<typeof apiSend>;
+  api_cancel: Answer<typeof apiCancel>;
+  api_answer_body: Answer<typeof apiAnswerBody>;
+  api_sent: Answer<typeof apiSent>;
+  api_hold_secret: Answer<typeof apiHoldSecret>;
+  api_held: Answer<typeof apiHeld>;
+  api_forget_held: Answer<typeof apiForgetHeld>;
+  api_servers: Answer<typeof apiServers>;
+  api_set_servers: Answer<typeof apiSetServers>;
+  api_save_answer: Answer<typeof apiSaveAnswer>;
   unack_alert: Answer<typeof unackAlert>;
   set_monitor_hidden: Answer<typeof setMonitorHidden>;
   action_item_ticket: Answer<typeof actionItemTicket>;

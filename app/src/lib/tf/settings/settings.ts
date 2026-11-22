@@ -34,6 +34,7 @@ export type SettingsSection =
   | "fonts"
   | "performance"
   | "renderers"
+  | "api-servers"
   | "keyboard"
   | "logs"
   | "updates";
@@ -74,6 +75,8 @@ export const SETTINGS_TREE: readonly SettingsNode[] = [
   },
   { key: "performance", name: "Performance" },
   { key: "renderers", name: "Renderers" },
+  // The API explorer's servers (ux31): a name and an address, no secret.
+  { key: "api-servers", name: "API servers" },
   { key: "keyboard", name: "Keyboard" },
   { key: "logs", name: "Logs and database" },
   // knobas updates itself (ADR-0052): last, at the top level; it needs no database.
