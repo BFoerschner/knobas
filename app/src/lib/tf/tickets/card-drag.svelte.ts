@@ -464,10 +464,11 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     press = null;
     if (held === null || held.keys || held.choosing || event.pointerId !== held.pointer) return;
     place(event.clientX, event.clientY);
-    // The click the release makes is the drag's end, not a press on the card.
+    // The click the release makes is the drag's end, not a press on the card, nor a press outside the status menu the
+    // drop may open in this handler: no other listener of the window hears it (the menu's outside-click is one).
     const swallow = (click: MouseEvent) => {
       click.preventDefault();
-      click.stopPropagation();
+      click.stopImmediatePropagation();
     };
     window.addEventListener("click", swallow, { capture: true, once: true });
     setTimeout(() => window.removeEventListener("click", swallow, { capture: true }));
