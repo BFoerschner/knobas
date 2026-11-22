@@ -30,6 +30,7 @@ test("a spec with one untagged path groups by its first part; a shared start nev
   const index = indexOf(PETS_30_YAML);
   expect(groupsOf(index).at(-1)?.name).toBe("/health");
   expect(commonSegments(["/a/{id}", "/a/{id}/b"])).toBe(1);
+  expect(commonSegments(["/a/{id}/b", "/a/{id}/c"])).toBe(1);
   expect(commonSegments(["/v1/charges", "/v1/charges/{charge}"])).toBe(1);
   // Never the whole of the shortest path.
   expect(commonSegments(["/v1/charges", "/v1/charges/x"])).toBe(1);
@@ -67,6 +68,8 @@ test("a long path keeps its first and last whole parts; a short one or one of tw
   const fitted = fitPath("/a/bbbbbbbbbb/cccccccccc/dddddddddd/eeeeeeeeee", 30);
   expect(fitted).toBe("/a/…/dddddddddd/eeeeeeeeee");
   expect(fitted.length).toBeLessThanOrEqual(30);
+  // As many whole parts at the end as fit, and not one more.
+  expect(fitPath("/a/bb/cc/dd/ee", 11)).toBe("/a/…/dd/ee");
   expect(fitPath("/short", 4)).toBe("/short");
   expect(fitPath("/very-long-part/another-very-long-part", 10)).toBe("/very-long-part/another-very-long-part");
   // A part is never cut inside: every part of the answer is a whole part of the path.

@@ -367,7 +367,6 @@ export const FORM_20_JSON = JSON.stringify(
     paths: {
       "/pets/{id}/photo": {
         post: {
-          consumes: ["multipart/form-data"],
           parameters: [
             { name: "id", in: "path", required: true, type: "integer" },
             { name: "caption", in: "formData", type: "string", description: "Words under it" },
