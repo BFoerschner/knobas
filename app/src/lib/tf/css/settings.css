@@ -590,3 +590,7 @@ button.tf-thm-sw { cursor: pointer; }
    (`scopeValues`), so it reads whatever the window has become. */
 .tf-apt-keep { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--sheet); color: var(--ink); border: 2px solid var(--ink); box-shadow: 0 12px 40px -10px color-mix(in srgb, var(--scrim) 60%, transparent); font-size: calc(var(--t-md) * var(--fs)); }
 .tf-apt-keep b { font-variant-numeric: tabular-nums; }
+
+/* *Syncs* (ADR-0056): sized to its longest choice, *Only when I press Sync now*; the note while by hand goes under the row. */
+.tf-stg-in.tf-stg-syncs { width: auto; min-width: 0; }
+.tf-stg-note.tf-stg-byhand { margin: 0 0 10px; max-width: 72ch; }

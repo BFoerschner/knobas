@@ -684,7 +684,7 @@
     <div class="tf-stg-c">
       <select
         id="tf-src-every"
-        class="tf-stg-in"
+        class="tf-stg-in tf-stg-syncs"
         value={source.sync_by_hand ? BY_HAND : String(source.sync_interval_secs)}
         disabled={saving}
         onchange={async (event) => {
@@ -704,11 +704,11 @@
         {/each}
         <option value={BY_HAND}>{syncsWords(BY_HAND)}</option>
       </select>
-      {#if source.sync_by_hand}
-        <p class="tf-stg-note">{byHandNote(name, isPasswordSource)}</p>
-      {/if}
     </div>
   </div>
+  {#if source.sync_by_hand}
+    <p class="tf-stg-note tf-stg-byhand">{byHandNote(name, isPasswordSource)}</p>
+  {/if}
 
   <div class="tf-stg-row">
     <div class="tf-stg-l">Syncing</div>

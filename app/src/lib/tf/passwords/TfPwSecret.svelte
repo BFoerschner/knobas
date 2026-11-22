@@ -192,7 +192,7 @@
       </p>
     </form>
   {:else}
-    <div class="tf-pw-fh" role="status">
+    <div class="tf-pw-fh" class:tf-pw-two={main} role="status">
       {#if reading}
         Reading from {word}…
       {:else if failed}
