@@ -1029,3 +1029,14 @@ test("a float's class is its own: no other stylesheet has a bare rule for it", (
   expect(shared).toEqual([]);
   expect(floats.size, "the scan finds the floats").toBeGreaterThan(5);
 });
+
+/**
+ * The ticket's card keeps its scrollbar's room (the final suite's `just moves`, 2026-11-22): under `overflow: auto` a
+ * ticket's fields landing and lengthening the card brought the bar, which took 8 px from every row, the key's copy
+ * button and *Resume work*. `overflow-y: scroll`, as the views list keeps its room.
+ */
+test("the job card keeps its scrollbar's room, so a card that grows moves nothing across it", () => {
+  const card = block(code, ".tf-jobcard");
+  expect(card).toMatch(/overflow-y:\s*scroll/);
+  expect(card).not.toMatch(/overflow:\s*auto/);
+});

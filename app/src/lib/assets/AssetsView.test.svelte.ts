@@ -744,7 +744,13 @@ test("selecting an asset that holds something opens the next column", async () =
   vm?.click();
   flushSync();
 
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
+  // The address moves once the asset is read, and the pane names it in that same update: never a frame of the asset
+  // it left under the new address (the final suite's `just moves`, 2026-11-22).
+  const heading = () => target.querySelector(".pane h2")?.textContent?.trim();
+  expect(nav.route.view === "assets" && nav.route.assetId === VM.id ? heading() : "vm-db-01").toBe("vm-db-01");
+  await waitFor(() => expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id }));
+  flushSync();
+  expect(heading()).toBe("vm-db-01");
   await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );

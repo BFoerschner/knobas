@@ -2100,7 +2100,24 @@
    * a folder of ten thousand entries opens in a frame. A row is 24 px (`code.css`, `.tf-ftree a`).
    */
   const rows = $derived(treeRows(treeListings, open, bands));
-  const treeWin = new Windowed<string>({ count: () => (going ? 0 : rows.length), key: (i) => rows[i]!.path, estimate: 24, from: TREE_WINDOW_FROM });
+  /**
+   * While a link to a file is still reading the folders on its path, the tree draws down to the first open folder
+   * whose listing has not landed, and holds the rows after it: drawn whole as each landed, the root's files came first
+   * and the folders above the file opened above them a read later, pushing them down (the final suite's `just moves`,
+   * 2026-11-22: 96 px, `older-cascadia-file`). So it still fills in as its folders arrive, but only below what is
+   * drawn. Once the path is read (or a folder on it is missing), the tree draws as it reads: an unfold is the reader's.
+   */
+  let pathDone = false;
+  const pathRead = $derived(path === null || fileSection === MISSING || ancestors(path).every((dir) => treeListings[dir] !== undefined));
+  const drawnRows = $derived.by(() => {
+    if (pathDone || pathRead) {
+      pathDone = true;
+      return rows;
+    }
+    const pending = rows.findIndex((row) => row.kind === "dir" && row.open && treeListings[row.path] === undefined);
+    return pending < 0 ? rows : rows.slice(0, pending + 1);
+  });
+  const treeWin = new Windowed<string>({ count: () => (going ? 0 : drawnRows.length), key: (i) => drawnRows[i]!.path, estimate: 24, from: TREE_WINDOW_FROM });
   /** The row that last had focus, while focus is in the tree. */
   let focusedPath: string | null = null;
   function treeFocus(event: FocusEvent) {
@@ -2156,7 +2173,7 @@
 
 {#snippet listing()}
   <div class="tf-ftrows" {@attach treeWin.list}>
-    {#each treeWin.slice(rows) as row (row.path)}
+    {#each treeWin.slice(drawnRows) as row (row.path)}
       {@const full = row.path}
       {#if row.kind === "dir"}
         <button

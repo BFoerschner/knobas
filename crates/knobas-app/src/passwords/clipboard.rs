@@ -403,6 +403,49 @@ mod tests {
         assert_eq!(fake.0.lock().unwrap().as_deref(), None);
     }
 
+    /// The one test that touches a real clipboard. **Never run by `just
+    /// check`**, and never against a person's desktop: only under a private
+    /// X display (Linux, as arboard has no other backend there), named twice
+    /// so a stale export cannot reach WSLg's `:0`, which shares its clipboard
+    /// with Windows. Run it by hand on the WSL box with:
+    ///
+    /// ```text
+    /// xvfb-run -n 99 env -u WAYLAND_DISPLAY KNOBAS_PRIVATE_DISPLAY=:99 \
+    ///     cargo test -p knobas-app --lib system_clipboard -- --ignored
+    /// ```
+    ///
+    /// It is what kills the mutants of [`SystemClipboard`]'s three methods
+    /// (2026-11-22 note *the system clipboard is proven by hand*): an
+    /// automated `cargo mutants` run skips it and lists them as missed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "touches an X clipboard: run under a private Xvfb, see its doc comment"]
+    fn the_system_clipboard_holds_reads_and_clears_a_secret() {
+        let display = std::env::var("DISPLAY").unwrap_or_default();
+        let private = std::env::var("KNOBAS_PRIVATE_DISPLAY").unwrap_or_default();
+        assert!(
+            !display.is_empty() && private == display && display != ":0",
+            "run under a private Xvfb: KNOBAS_PRIVATE_DISPLAY must name DISPLAY, \
+             and :0 is WSLg's, which reaches the Windows clipboard \
+             (DISPLAY={display:?}, KNOBAS_PRIVATE_DISPLAY={private:?})"
+        );
+        assert!(
+            std::env::var_os("WAYLAND_DISPLAY").is_none(),
+            "unset WAYLAND_DISPLAY"
+        );
+        let mut board = SystemClipboard::default();
+        assert_eq!(
+            board.text().unwrap(),
+            None,
+            "the display's clipboard holds something: not a fresh Xvfb"
+        );
+        let secret = format!("knobas-clipboard-test-{}", std::process::id());
+        board.set_secret(&secret).unwrap();
+        assert_eq!(board.text().unwrap().as_deref(), Some(secret.as_str()));
+        board.clear().unwrap();
+        assert_eq!(board.text().unwrap(), None, "the secret stayed");
+    }
+
     #[test]
     fn clear_now_and_quit_clear_only_what_is_ours() {
         let (keeper, fake, _) = keeper(Duration::from_secs(30));

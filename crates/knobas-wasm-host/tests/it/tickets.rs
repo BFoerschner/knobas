@@ -114,6 +114,40 @@ async fn a_1_6_component_answers_its_fields_and_options_and_its_edit_reaches_the
         .await
         .expect("the move lands");
     assert_eq!(accepted.load(Ordering::SeqCst), 2);
+
+    // A label added or removed alone is a change, and is sent; labels that
+    // add and remove nothing are not, and nothing leaves (the final suite's
+    // mutants in the fixture's own check went unseen here).
+    let labels = |add: &[&str], remove: &[&str]| WriteOp::EditTicket {
+        entity: "berths:BERTH-1".to_owned(),
+        title: None,
+        assignee: None,
+        priority: None,
+        labels: Some(knobas_source::LabelChange {
+            add: add.iter().map(|s| (*s).to_owned()).collect(),
+            remove: remove.iter().map(|s| (*s).to_owned()).collect(),
+        }),
+        fields: std::collections::BTreeMap::new(),
+    };
+    source
+        .write(labels(&["quay"], &[]))
+        .await
+        .expect("a label added lands");
+    source
+        .write(labels(&[], &["fenders"]))
+        .await
+        .expect("a label removed lands");
+    assert_eq!(accepted.load(Ordering::SeqCst), 4);
+    let empty = source.write(labels(&[], &[])).await;
+    assert!(
+        matches!(&empty, Err(knobas_source::SourceError::Protocol { message, .. }) if message.contains("nothing to change")),
+        "{empty:?}"
+    );
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        4,
+        "nothing left for an empty edit"
+    );
 }
 
 /// Clause 15 over the 1.6.0 fixture's tickets: answered for each, an empty

@@ -612,6 +612,12 @@
       failure = null;
       return;
     }
+    if (pressed !== null && pressed.asset.id === id) {
+      detail = pressed;
+      failure = null;
+      pressed = null;
+      return;
+    }
     void detailRead(() => io.getAsset(id), {
       ok: (answer) => {
         detail = answer;
@@ -731,8 +737,22 @@
     onholder?.(held === null ? null : { id: held.id, name: held.name });
   });
 
+  /**
+   * The read a press made before it moved the address. The address still decides what the pane shows; a press only
+   * moves it once the asset it names is read, so the address's first frame draws that asset. Moved first, the pane
+   * drew the asset it left under the new address for a frame and then swapped, which moved its crumbs, heading and
+   * buttons (the final suite's `just moves`, 2026-11-22, the `asset` place). A read that fails moves it all the same.
+   */
+  let pressed: AssetDetail | null = null;
   function select(row: AssetRow) {
-    nav.go(addressOf(row));
+    const address = addressOf(row);
+    void io.getAsset(row.id).then(
+      (answer) => {
+        pressed = answer;
+        nav.go(address);
+      },
+      () => nav.go(address),
+    );
   }
 
   /** A press that leaves the asset being read for another: `Esc` comes back to this one, where a walk climbs its holders. */
