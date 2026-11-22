@@ -369,6 +369,44 @@ mod password_tests {
         serde_json::from_value(wire).unwrap()
     }
 
+    /// The descriptor must name the manifest's kind and version; a host
+    /// template must name a key its config declares (the final suite's
+    /// mutants: the whole check replaced by `Ok` went unseen in this crate).
+    #[test]
+    fn a_descriptor_that_disagrees_with_its_manifest_is_refused() {
+        let manifest = |hosts: &str| {
+            Manifest::parse(&format!(
+                r#"{{"adapter_kind": "vault", "adapter_version": "1.0.0",
+                    "interface_version": "1.7.0", "hosts": [{hosts}],
+                    "artifact": {{"file": "vault.wasm", "sha256": "{}"}}}}"#,
+                "a".repeat(64)
+            ))
+            .unwrap()
+        };
+        let agrees = descriptor(serde_json::json!({}));
+        assert!(check_descriptor(&manifest(""), &agrees).is_ok());
+        let other_kind = descriptor(serde_json::json!({ "adapter_kind": "safe" }));
+        assert!(matches!(
+            check_descriptor(&manifest(""), &other_kind),
+            Err(Refusal::Disagrees {
+                field: "adapter_kind",
+                ..
+            })
+        ));
+        let other_version = descriptor(serde_json::json!({ "adapter_version": "2.0.0" }));
+        assert!(matches!(
+            check_descriptor(&manifest(""), &other_version),
+            Err(Refusal::Disagrees {
+                field: "adapter_version",
+                ..
+            })
+        ));
+        assert!(matches!(
+            check_descriptor(&manifest(r#""{tenant}""#), &agrees),
+            Err(Refusal::UndeclaredTemplate { .. })
+        ));
+    }
+
     /// ADR-0056: a component that claims the Passwords role, or says what it
     /// offers as one, is refused at install by this sentence.
     #[test]

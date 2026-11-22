@@ -430,7 +430,7 @@ impl WasmAdapter {
     /// sign-in* alone.
     #[must_use]
     pub fn declares_web_sign_in(&self) -> bool {
-        self.inner.version.major > 1 || self.inner.version.minor >= WEB_SIGN_IN_FROM_MINOR
+        reads_web_sign_in(&self.inner.version)
     }
 
     /// Whether the component exports a ticket's fields (1.6.0, ADR-0054).
@@ -745,6 +745,12 @@ fn new_store(
     store
 }
 
+/// Whether a component built against `version` has its descriptor's
+/// `web_sign_in` read: 1.7.0 and every later minor, and any later major.
+fn reads_web_sign_in(version: &Version) -> bool {
+    version.major > 1 || version.minor >= WEB_SIGN_IN_FROM_MINOR
+}
+
 /// Where `just wasm-fixture` writes the fixture component, or
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
 /// fixture is a test adapter and nothing ships it, hence `test-util`.
@@ -956,6 +962,47 @@ pub fn load_fixture() -> WasmAdapter {
 mod tests {
     use super::*;
 
+    /// The web sign-in pages are read from 1.7.0 on, and from any later
+    /// major whatever its minor.
+    #[test]
+    fn web_sign_in_is_read_from_1_7_and_every_later_major() {
+        let at = |major, minor| {
+            reads_web_sign_in(&Version {
+                major,
+                minor,
+                patch: 0,
+            })
+        };
+        assert!(!at(1, 6) && !at(1, 0));
+        assert!(at(1, 7) && at(1, 8));
+        assert!(at(2, 0) && at(3, 1));
+    }
+
+    /// The build does what `just wasm-fixture` does: the component, its
+    /// dep-info and the four older worlds' variants, beside the path asked
+    /// for.
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn the_fixture_is_built_with_its_older_worlds_beside_it() {
+        let dir = std::env::temp_dir().join(format!("knobas-fixture-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let component = dir.join("knobas_wasm_fixture.wasm");
+        build_fixture(&component);
+        for name in [
+            "knobas_wasm_fixture.wasm",
+            "knobas_wasm_fixture.d",
+            "knobas_wasm_fixture_v1_0.wasm",
+            "knobas_wasm_fixture_v1_3.wasm",
+            "knobas_wasm_fixture_v1_5.wasm",
+            "knobas_wasm_fixture_v1_6.wasm",
+        ] {
+            let bytes = std::fs::read(dir.join(name)).unwrap_or_default();
+            assert!(!bytes.is_empty(), "{name} was built");
+        }
+        assert_eq!(fixture_stale(&component), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// A missing component, or one older than a source its dep-info names,
     /// is built; one newer than every source is left alone.
     #[cfg(feature = "test-util")]
@@ -988,6 +1035,14 @@ mod tests {
             .set_modified(earlier)
             .unwrap();
         assert_eq!(fixture_stale(&component), None, "newer than its source");
+        let same = std::fs::metadata(&component).unwrap().modified().unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(same)
+            .unwrap();
+        assert_eq!(fixture_stale(&component), None, "as old as its source");
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         std::fs::File::options()
             .write(true)

@@ -146,6 +146,10 @@ async fn a_1_5_component_moves_its_tickets_offers_no_edits_and_is_never_handed_o
     let old = WasmAdapter::load(&knobas_wasm_host::fixture_component_v1_5()).expect("1.5.0 loads");
     assert!(!old.edits_tickets());
     assert!(
+        knobas_wasm_host::load_fixture().edits_tickets(),
+        "the current fixture exports the fields"
+    );
+    assert!(
         !old.template()
             .write_ops
             .iter()

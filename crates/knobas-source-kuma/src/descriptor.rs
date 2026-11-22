@@ -77,10 +77,9 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
-        web_sign_in: template.web_sign_in.clone(),
+        // Its sign-in pages, by-hand default and passwords claim are the
+        // template's (`..template`).
         code_pages: None,
-        by_hand_by_default: false,
-        passwords: None,
         write_ops: if writes { write_ops() } else { Vec::new() },
         ..template
     }

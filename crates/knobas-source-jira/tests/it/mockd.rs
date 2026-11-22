@@ -1369,6 +1369,16 @@ async fn a_ticket_is_edited_field_by_field_and_reads_back() {
         .expect("the assignable search")
         .expect("the assignee has a list");
     assert!(people.complete);
+    // A field whose options ride in the fields' answer has no list to ask
+    // for (the final suite's mutants: the custom-field test turned around
+    // sent the assignable search for every field).
+    assert_eq!(
+        source
+            .field_options("jira:PAY-231", "priority", "")
+            .await
+            .expect("no request to fail"),
+        None
+    );
     let someone = people
         .options
         .iter()

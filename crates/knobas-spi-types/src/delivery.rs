@@ -109,3 +109,25 @@ impl ArrivalLink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Projection;
+
+    /// Only a status move looks the kind's status path up; a declared state,
+    /// and a record whole or per field, look up the state paths instead (the
+    /// final suite's mutants: either constant answer went unseen).
+    #[test]
+    fn only_a_status_projection_reads_the_declared_status() {
+        assert!(Projection::Status.reads_declared_status());
+        for other in [
+            Projection::Liveness,
+            Projection::DeclaredState,
+            Projection::WHOLE,
+            Projection::Whole { per_field: true },
+        ] {
+            assert!(!other.reads_declared_status(), "{other:?}");
+        }
+        assert!(!Projection::Status.reads_declared_state());
+    }
+}
