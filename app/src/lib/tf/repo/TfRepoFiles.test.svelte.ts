@@ -183,7 +183,9 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   release("files");
   release("files:src");
   await settle();
-  expect(tree()).toEqual(["src", "psp", "README.md"]);
+  // Down to the first open folder still reading: README.md waits below it, so nothing drawn moves when psp opens
+  // (the final suite's `just moves`, 2026-11-22).
+  expect(tree()).toEqual(["src", "psp"]);
 
   for (const section of ["files:src/psp", "files:src/psp/gateway", "files:src/psp/gateway/sepa"]) release(section);
   await settle();
