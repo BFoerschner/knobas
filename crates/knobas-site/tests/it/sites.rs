@@ -1358,6 +1358,24 @@ async fn where_a_view_takes_its_confinement_only_when_made_allowing_while_landin
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_site_closed_or_made_again_while_its_remake_waits_is_not_made_twice() {
+    let w = vault_world();
+    *w.host.remakes.borrow_mut() = true;
+    open_live(&w, "vault", "https://vault.example:8443/").await;
+    w.sites.set_rules(vault_rules(&[]));
+    // Closed before the remake runs: nothing is made for it.
+    w.sites.close("vault", true).await.unwrap();
+    w.shell.drain();
+    assert_eq!(makes(&w, "vault").len(), 1);
+    // Retry made it before the remake ran: it is not made a second time.
+    open_live(&w, "vault", "https://vault.example:8443/").await;
+    w.sites.set_rules(vault_rules(&["https://idp.example"]));
+    w.sites.act("vault", SiteAct::Reload, true).await.unwrap();
+    w.shell.drain();
+    assert_eq!(makes(&w, "vault").len(), 3);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_view_that_cannot_be_made_again_loads_nothing_says_so_and_retry_makes_it() {
     let w = vault_world();
     *w.host.remakes.borrow_mut() = true;
