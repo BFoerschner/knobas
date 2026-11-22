@@ -21,6 +21,7 @@ import { inbox } from "../inbox/inbox.svelte";
 import { clones } from "../tf/openin/clones.svelte";
 import { repoName } from "../tf/openin/openin";
 import { branchOptions, readAllRows, repoOfRow } from "../tf/repo/repo";
+import { realPasswordPorts, type PasswordPorts } from "../tf/passwords/ports";
 
 export interface SheetPorts {
   createLink: (fromId: string, toId: string, relation: string) => Promise<unknown>;
@@ -48,12 +49,15 @@ export interface SheetPorts {
   mergeAction: (prId: string) => Promise<ViewAction | null>;
   /** A repository's branches, from its Branches view (`branchOptions`), in the view's order. */
   branches: (repoId: string) => Promise<{ name: string; isDefault: boolean }[]>;
+  /** A password entry's three copies (ADR-0056), through the Passwords page's own commands. */
+  passwords: Pick<PasswordPorts, "entry" | "copy" | "copyCode" | "copyPlain">;
 }
 
 /** One read's rows, as the pull request page reads its repository (`TfPr.readRepo`). */
 const LIMIT = 1000;
 
 export const realSheetPorts: SheetPorts = {
+  passwords: realPasswordPorts,
   createLink: (fromId, toId, relation) => createLink(fromId, toId, relation),
   submitWrite: (payload) => submitWrite(payload),
   ackAlert: (monitorId) => ackAlert(monitorId),

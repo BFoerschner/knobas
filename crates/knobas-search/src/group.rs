@@ -569,8 +569,12 @@ fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
     let title = row.title.unwrap_or_default();
     // A ticket's or a pull request's own text is its description (D10).
     let lead = matches!(row.group_kind.as_str(), "ticket" | "pr").then_some("Description");
+    // A password entry's text (its notes, its fields' values) finds it and is
+    // never quoted: the preview draws its username and address from the
+    // Passwords page's own read (ADR-0056, the decisions' section 26).
+    let quotes = !knobas_source::passwords::is_password_kind(&row.group_kind);
     let mut excerpts = match &row.excerpt_text {
-        Some(text) if !needles.is_empty() => {
+        Some(text) if quotes && !needles.is_empty() => {
             crate::excerpt::excerpts(&title, text, row.excerpt_line, needles, lead)
         }
         _ => Vec::new(),
@@ -597,6 +601,7 @@ fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
         snippet: row
             .snippet
             .as_deref()
+            .filter(|_| quotes)
             .map(snippet::segments)
             .unwrap_or_default(),
         excerpts,
@@ -661,6 +666,30 @@ mod tests {
             marks: Vec::new(),
             in_files: None,
         }
+    }
+
+    #[test]
+    fn a_password_entry_is_found_by_its_notes_and_quotes_none_of_them() {
+        let needles = vec!["rotated".to_owned()];
+        let mut entry = detail("password_entry", 1, "pw:e1", 0.9);
+        entry.excerpt_text =
+            Some("payout_svc\nhttps://pay.example\nRotated quarterly by Priya.".into());
+        let mut page = detail("page", 1, "cf:1", 0.8);
+        page.excerpt_text = Some("The keys are rotated quarterly.".into());
+        let groups = with_excerpts(vec![entry, page], &KindCatalog::default(), &needles, &[]);
+        let hit_of = |kind: &str| {
+            groups
+                .iter()
+                .find(|g| g.kind == kind)
+                .and_then(|g| g.hits.first())
+                .unwrap()
+        };
+        let pw = hit_of("password_entry");
+        assert!(pw.excerpts.is_empty(), "{:?}", pw.excerpts);
+        assert!(pw.snippet.is_empty(), "{:?}", pw.snippet);
+        // Another kind still quotes the same words.
+        assert!(!hit_of("page").excerpts.is_empty());
+        assert!(!hit_of("page").snippet.is_empty());
     }
 
     #[test]

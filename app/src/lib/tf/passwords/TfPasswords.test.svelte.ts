@@ -221,7 +221,7 @@ test("Change password… sends the new value once, with a comment where the entr
   await open(p, ["entry", "pw:graf"], "PLAT-7");
   button("Change password…").click();
   await settle();
-  const dialog = target.ownerDocument.querySelector<HTMLElement>(".tf-pw-form")!;
+  const dialog = target.ownerDocument.querySelector<HTMLFormElement>(".tf-pw-form")!;
   const value = dialog.querySelector<HTMLInputElement>("#tf-pw-new")!;
   // It starts with a generated password.
   expect(value.value.length).toBeGreaterThanOrEqual(16);

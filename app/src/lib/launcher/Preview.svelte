@@ -16,6 +16,11 @@
   rule misses or a property, and the pane cannot tell them apart, so its
   sentence names no place (#2481).
 
+  **A password entry** (ADR-0056, the decisions' section 26): its title, its
+  folder path, its username and its address, and nothing else of it. Search
+  quotes none of its text, so the pane draws those four from the Passwords
+  page's own read of the mirror (`credential`), which asks the source nothing.
+
   The text is the source's and is printed as text, never as markup; a mark is
   a `hit` segment (roadmap §4 gotcha 7, `knobas_search::snippet`).
 -->
@@ -33,6 +38,7 @@
     excerpts,
     files = null,
     more = null,
+    credential = null,
     onopen,
   }: {
     /** The selected row's title, or `null` when no row is selected or it is no hit. */
@@ -42,6 +48,8 @@
     files?: FilesFound | null;
     /** The repository's other files, as `search_files` answered them; `null` until it lands. */
     more?: FilesInRepo | null;
+    /** A password entry's or folder's four lines; `undefined` fields are still being read. */
+    credential?: { path: string | null; username?: string | null | undefined; address?: string | null | undefined } | null;
     /** Open the row at the excerpt pressed. */
     onopen: (excerpt: Excerpt) => void;
   } = $props();
@@ -62,7 +70,13 @@
   {:else}
     <p class="tf-ln-pv-h">{title}</p>
     {#if files}<p class="tf-ln-pv-n">{countLine(files, more, fileExcerpts.length)}</p>{/if}
-    {#if excerpts.length === 0}
+    {#if credential}
+      <dl class="tf-ln-pv-cred">
+        <dt>Folder</dt><dd>{credential.path ?? "Not in a folder"}</dd>
+        {#if credential.username !== undefined}<dt>Username</dt><dd class="tf-mono">{credential.username ?? "None"}</dd>{/if}
+        {#if credential.address !== undefined}<dt>Address</dt><dd class="tf-mono">{credential.address ?? "None"}</dd>{/if}
+      </dl>
+    {:else if excerpts.length === 0}
       <p class="tf-ln-none">No passage to quote.</p>
     {:else}
       {#each fileExcerpts as excerpt (excerpt.file!.path)}

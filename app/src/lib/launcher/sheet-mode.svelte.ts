@@ -42,6 +42,8 @@ import {
   subjectOf,
 } from "./sheet";
 import type { SheetPorts } from "./sheet-ports";
+import type { ReadAnswer } from "../ipc/passwords";
+import { itemHash } from "../tf/job/job";
 
 /**
  * A flow in the sheet: `id` tells one flow's late answer from another's,
@@ -390,6 +392,10 @@ export class SheetMode {
         return navigate(does.hash);
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
+      case "pw-copy": {
+        if (subject.kind !== "entity") return;
+        return void this.#passwordCopy(subject, does.what);
+      }
       case "write":
         return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null, does.where);
       case "ack":
@@ -513,6 +519,51 @@ export class SheetMode {
   #refusal(cause: unknown, name?: string): { text: string; tone?: "err" } {
     if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: leftTheInbox(name) };
     return { text: ipcErrorMessage(cause), tone: "err" };
+  }
+
+  /**
+   * A password entry's copy (ADR-0056). The entry is read from the mirror first, which asks the source nothing: one
+   * that asks a usage comment or an approval for a read opens on the Passwords page instead, as the decisions' section
+   * 26 says, so the launcher never asks a comment and never reads a password it would have to refuse.
+   */
+  async #passwordCopy(subject: Extract<SheetSubject, { kind: "entity" }>, what: "password" | "username" | "code"): Promise<void> {
+    const { io, close, navigate } = this.#host;
+    const pw = io.passwords;
+    let opened = false;
+    await this.#settled(
+      async () => {
+        const entry = await pw.entry(subject.entityId);
+        if (entry === null) throw new Error(`${subject.title} is gone from the last sync.`);
+        if (what === "username") {
+          if (entry.username === null) throw new Error(`${subject.title} has no username.`);
+          return pw.copyPlain(entry.username);
+        }
+        if (what === "code") {
+          if (entry.otp === null) throw new Error(`${subject.title} has no one-time code.`);
+          const answer = await pw.copyCode(subject.entityId);
+          if (answer.kind === "needs_sync") throw new Error("Sync now to make codes here.");
+          if (answer.kind === "unreadable") throw new Error(`${subject.title}'s code key is in a form knobas cannot read.`);
+          if (answer.kind === "hidden") throw new Error(`${subject.title} is hidden until your request is approved.`);
+          return;
+        }
+        if (entry.comment.read || entry.approval.state !== "none" || !entry.can_read) {
+          opened = true;
+          return;
+        }
+        const answer = await pw.copy(subject.entityId, { kind: "password" }, null);
+        if (answer.kind === "copied") return;
+        if (answer.kind === "comment_required" || answer.kind === "approval_required") {
+          opened = true;
+          return;
+        }
+        throw new Error(readRefusal(answer, subject.title));
+      },
+      () => (opened ? null : what === "password" ? `Copied the password of ${subject.title}. It clears in 30 seconds.` : what === "username" ? `Copied the username of ${subject.title}` : `Copied the code of ${subject.title}. It clears in 30 seconds.`),
+    );
+    if (opened) {
+      close();
+      navigate(itemHash({ entity_id: subject.entityId, kind: subject.entityKind }));
+    }
   }
 
   /** A write or a read is out: a second press before it answers sends nothing (F-340's trip, by key). */
@@ -747,6 +798,12 @@ export class SheetMode {
   #mergeOf(subject: SheetSubject | undefined): ViewAction | null {
     return subject?.kind === "entity" && this.#merge?.prId === subject.entityId ? this.#merge.action : null;
   }
+}
+
+/** Why a password's copy did not land, in the page's words. */
+function readRefusal(answer: ReadAnswer, title: string): string {
+  if (answer.kind === "unreachable") return "The password manager does not answer. Nothing was copied.";
+  return `${title}'s password cannot be read here.`;
 }
 
 /** A fresh sheet on `row`: the actions, unnarrowed, the first selected. */
