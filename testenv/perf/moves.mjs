@@ -256,9 +256,10 @@ const PLACES = [
   // Appearance's children (the subtrees ruling, 2026-11-21), pressed in the nav's tree.
   ...["theme", "code-colours", "fonts"].map((s) => ({ name: `settings-${s}`, start: "#/settings", press: `${shown} a[href="#/settings/appearance/${s}"]`, hash: `#/settings/appearance/${s}`, away: "#/settings" })),
   // Settings › Appearance › Theme (ADR-0055): a theme changing moves nothing. A copy taking the slot (a theme change of the
-  // whole window), a code slot set apart, and Dracula drawn while dark by its kept slot.
+  // whole window), a code slot set apart, and Dracula drawn while dark by its kept slot. `once`: the press changes what it
+  // pressed (an own copy offers no duplicate, a slot set apart no Set apart), so there is no return.
   ...[["theme-duplicate", "Duplicate and edit", ".tf-thm-edh button"], ["theme-set-apart", "Set apart", ".tf-apt-code button"]].map(([name, text, sel]) => ({
-    name, start: "#/settings/appearance/theme", press: `${shown} ${sel}`, text, hash: "#/settings/appearance/theme", away: "#/settings",
+    name, once: true, start: "#/settings/appearance/theme", press: `${shown} ${sel}`, text, hash: "#/settings/appearance/theme", away: "#/settings",
   })),
   { name: "theme-dracula", fixture: true, store: { "knobas.app-theme.dark": "dracula", "knobas.theme.mode": "dark" }, start: "#/settings", press: `${shown} a[href="#/settings/appearance/theme"]`, hash: "#/settings/appearance/theme", away: "#/settings" },
   // Settings › Updates (ADR-0052): `update:state` lands while the page is drawn, an update found, a download ending, a
@@ -287,10 +288,10 @@ const PLACES = [
   // `fake-move`), on the ticket page; the list's status menu; the board lit for a card carried by `s`. The moved ticket's own
   // chip and note come; nothing else may move. `once`: a moved ticket offers another status, so there is no return.
   { name: "ticket-status-menu", fixture: true, start: MOVE_TICKET, press: `${shown} .tf-statebtn`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
-  { name: "ticket-move-queued", fixture: true, once: true, fake: "fake-move=slow", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
-  { name: "ticket-move-sent", fixture: true, once: true, start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
-  { name: "ticket-move-refused", fixture: true, once: true, fake: "fake-move=refused", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
-  { name: "ticket-move-held", fixture: true, once: true, fake: "fake-move=held", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In Progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
+  { name: "ticket-move-queued", fixture: true, once: true, fake: "fake-move=slow", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
+  { name: "ticket-move-sent", fixture: true, once: true, start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
+  { name: "ticket-move-refused", fixture: true, once: true, fake: "fake-move=refused", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
+  { name: "ticket-move-held", fixture: true, once: true, fake: "fake-move=held", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
   { name: "list-status-menu", fixture: true, start: "#/tickets", before: [{ eval: TO_LIST }], press: `${shown} .tf-statecell`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "board-carry", fixture: true, start: "#/tickets", before: [{ eval: SELECT_TODO }], key: { key: "s", code: "KeyS", windowsVirtualKeyCode: 83 }, hash: null, ready: ".tf-board-wrap[data-held]", anywhere: true, away: "Escape" },
   { name: "ticket-menu", start: "#/tickets", right: `${shown} .tf-tcard`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
@@ -337,22 +338,29 @@ function addressFor(p) {
   // The fixture's switches are bare words (`?fake-ipc&fake-scale`), as `URLSearchParams` writes them with an `=`.
   return url.toString().replace(/=(?=&|$)/g, "");
 }
-async function fresh(hash, p = null) {
+/**
+ * `hash` opened on a new page. Each place starts from nothing kept (`clear`): what an earlier place stored (an own theme
+ * it duplicated, a highlighter, a moved ticket's queue) is not this place's start (the final suite, 2026-11-22:
+ * theme-duplicate found an own copy in the editor, the ticket moves found the ticket moved). A place's own `store` is
+ * written after the clear, and the reload that reads it keeps it.
+ */
+async function fresh(hash, p = null, clear = true) {
   const blank = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: "about:blank" });
   await blank;
+  if (clear) await c.send("Storage.clearDataForOrigin", { origin: new URL(base).origin, storageTypes: "local_storage,session_storage,indexeddb" });
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: `${addressFor(p)}${hash}` });
   await loaded;
   for (let i = 0; i < 300; i++) { if (await js("!!document.querySelector('.tf-nav')").catch(unlessStalled(false))) break; await sleep(50); }
   if (p?.store) {
     await js(`(Object.entries(${JSON.stringify(p.store)}).forEach(([k, v]) => localStorage.setItem(k, v)), 1)`);
-    return fresh(hash, { ...p, store: null });
+    return fresh(hash, { ...p, store: null }, false);
   }
   if (p?.forget?.length) {
     // Removed, then the app loaded again, so nothing it read at start-up holds what was removed.
     await js(`(${JSON.stringify(p.forget)}.forEach((k) => localStorage.removeItem(k)), 1)`);
-    return fresh(hash, { ...p, forget: null });
+    return fresh(hash, { ...p, forget: null }, false);
   }
   // `soon`: pressed this soon after what it names is drawn, not once the page has been quiet, so before anything a page
   // builds once the reader is still (Compare built ahead of its press, the compare-first-open pass, 2026-11-20).

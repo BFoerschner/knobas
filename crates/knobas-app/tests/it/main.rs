@@ -118,6 +118,7 @@ mod unauthorized_write;
 mod uncommitted_diff;
 mod url_resolve;
 mod week_ipc;
+mod window_ipc;
 mod wiring;
 mod working_reads;
 mod working_tree;

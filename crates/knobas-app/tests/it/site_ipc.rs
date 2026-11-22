@@ -61,6 +61,7 @@ fn invoke(
             knobas_app::commands::site::site_suggest,
             knobas_app::commands::site::site_reveal_download,
             knobas_app::commands::site::site_zoom,
+            knobas_app::commands::site::site_fill,
             knobas_app::commands::site::sites,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -208,4 +209,87 @@ fn before_the_sites_are_up_every_command_is_not_ready() {
         let answer = invoke(cmd, body, false);
         assert_eq!(code_of(&answer.expect_err(cmd)), "not_ready", "{cmd}");
     }
+}
+
+/// *Fill sign-in* for a site that is not open says so: nothing was filled.
+#[test]
+fn filling_a_site_that_is_not_open_is_not_found() {
+    let answer = invoke("site_fill", json!({ "source": "jira" }), true);
+    assert_eq!(code_of(&answer.expect_err("jira is not open")), "not_found");
+}
+
+/// Settings' Site section reads every source's setting through the command, over the database bring-up installed
+/// (the final suite's mutants: `site_settings` answering nothing, and `sources` answering no source or a made-up one,
+/// survived the lib's tests).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_settings_name_every_source_with_what_is_stored() {
+    let pool = knobas_db::test_util::scratch_database("site-settings-ipc")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    crate::support::source_config(&pool, "jira", "jira", "Jira", &json!({})).await;
+    crate::support::source_config(&pool, "wiki", "confluence", "Wiki", &json!({})).await;
+    knobas_app::site::set_open_inside(&pool, "wiki", true)
+        .await
+        .expect("open inside");
+    let lifecycle = knobas_app::commands::app::Lifecycle::new();
+    lifecycle.install(knobas_app::AppState::over_pool(pool.clone()));
+    lifecycle.set(knobas_app::DbState::Ready);
+    // Off the test's runtime: the command runs on Tauri's, and this thread waits for it.
+    let answer = tokio::task::spawn_blocking(move || {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                knobas_app::commands::site::site_settings
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(lifecycle);
+        let webview = tauri::WebviewWindowBuilder::<MockRuntime, _>::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::default(),
+        )
+        .build()
+        .expect("mock webview");
+        tauri::test::get_ipc_response(
+            &webview,
+            tauri::webview::InvokeRequest {
+                cmd: "site_settings".to_owned(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: LOCAL_ORIGIN.parse().expect("url"),
+                body: json!({}).into(),
+                headers: HashMap::new().into_iter().collect(),
+                invoke_key: tauri::test::INVOKE_KEY.to_string(),
+            },
+        )
+        .map_err(|error| format!("{error:?}"))
+        .and_then(|body| {
+            body.deserialize::<serde_json::Value>()
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+    .unwrap()
+    .expect("site_settings answers");
+    let rows: Vec<(String, bool, String)> = answer
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|row| {
+            (
+                row["source"].as_str().unwrap_or_default().to_owned(),
+                row["open_inside"].as_bool().unwrap_or_default(),
+                row["base"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("jira".to_owned(), false, "http://x".to_owned()),
+            ("wiki".to_owned(), true, "http://x".to_owned()),
+        ]
+    );
 }

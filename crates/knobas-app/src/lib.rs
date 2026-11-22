@@ -2029,4 +2029,41 @@ mod tests {
         );
         assert!(hits[0].starts_with("lib.rs:"), "{hits:?}");
     }
+
+    /// A channel's send is the same synchronous script as an emit (#747), so
+    /// it too goes from the main thread: `sources::progress::ChannelSink`
+    /// hands it there. The one channel type is the progress one, made in
+    /// `commands/sources.rs` and wrapped in `sources/progress.rs`; a channel
+    /// anywhere else would send from whatever thread holds it (the final
+    /// suite's quit that never ended, 2026-11-22).
+    #[test]
+    fn only_the_progress_sink_holds_a_channel() {
+        // Spelled in two halves so this test is not itself a hit.
+        let needle = concat!("Chan", "nel<");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src.clone()];
+        let mut files = std::collections::BTreeSet::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("src is readable") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let text = std::fs::read_to_string(&path).expect("a source file");
+                    if text.contains(needle) {
+                        let file = path.strip_prefix(&src).expect("under src");
+                        files.insert(file.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            files.into_iter().collect::<Vec<_>>(),
+            vec![
+                "commands/sources.rs".to_owned(),
+                "sources/progress.rs".to_owned()
+            ],
+            "a channel sends from the main thread only: through sources::progress::ChannelSink"
+        );
+    }
 }

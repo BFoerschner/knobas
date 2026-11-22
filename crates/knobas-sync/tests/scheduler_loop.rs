@@ -814,6 +814,122 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     retire(&pool, &ids).await;
 }
 
+/// Events whose `sync_state` blocks its thread once the quit has begun, until
+/// the test lets it go: as knobas-app's did on Windows (2026-11-22), where an
+/// event to the page is a blocking round trip to the main thread, and the
+/// main thread was the quit, waiting for this run.
+struct StuckAtQuit {
+    quitting: Arc<std::sync::atomic::AtomicBool>,
+    release: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    stuck: Arc<AtomicUsize>,
+}
+impl SyncEvents for StuckAtQuit {
+    fn sync_state(&self, _s: SourceSyncStatus) {
+        if !self.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        self.stuck.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (lock, wake) = &*self.release;
+        let mut free = lock.lock().unwrap();
+        while !*free {
+            free = wake.wait(free).unwrap();
+        }
+    }
+    fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+    fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+}
+
+/// A quit with one run stuck in a blocking call, as the app quits: the
+/// scheduler's shutdown spawned and waited for by the wall clock
+/// (`finish_within`) from a thread that is not a worker. Answers what
+/// `finish_within` answered, how long it took, and how many calls were stuck.
+async fn quit_with_a_stuck_run(grace: Duration, bound: Duration) -> (Option<()>, Duration, usize) {
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (mut deps, held) = held_deps(sched_pool).await;
+    let quitting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let stuck = Arc::new(AtomicUsize::new(0));
+    deps.events = Arc::new(StuckAtQuit {
+        quitting: Arc::clone(&quitting),
+        release: Arc::clone(&release),
+        stuck: Arc::clone(&stuck),
+    });
+    deps.timing.shutdown_grace = grace;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    await_inside(&held.inside).await;
+
+    quitting.store(true, std::sync::atomic::Ordering::SeqCst);
+    let runtime = tokio::runtime::Handle::current();
+    let quitter = scheduler.clone();
+    let started = std::time::Instant::now();
+    let stopped = tokio::task::block_in_place(|| {
+        knobas_sync::scheduler::finish_within(&runtime, bound, async move {
+            quitter.shutdown().await;
+        })
+    });
+    let took = started.elapsed();
+    // Let the stuck thread go whatever the answer, so the runtime can end.
+    {
+        let (lock, wake) = &*release;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+    }
+    let stuck = stuck.load(std::sync::atomic::Ordering::SeqCst);
+    // A quit cut short leaves its run to finish now that it is let go.
+    tokio::time::timeout(HANG_GUARD, scheduler.shutdown())
+        .await
+        .expect("the run, let go, ends and the scheduler with it");
+    retire(&pool, &ids).await;
+    (stopped, took, stuck)
+}
+
+/// The final suite's real window (Windows, 2026-11-22): knobas never quit.
+/// A run cancelled by the quit reported its end through an event that waited
+/// on the thread running the quit, and the quit waited for the run. With a
+/// worker so blocked the runtime's timers stopped firing, for a `block_on`
+/// quit and (measured here) for a spawned one too, so no timeout inside
+/// `Scheduler::shutdown` ends it: the quit's wall clock does. At the app's own
+/// bound it answers by `QUIT_BOUND` (before `finish_within`, this hung for
+/// good).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_stuck_in_a_blocking_call_does_not_hold_the_quit() {
+    let _serial = serially().await;
+    let bound = knobas_sync::scheduler::QUIT_BOUND;
+    let (_stopped, took, stuck) = quit_with_a_stuck_run(Duration::from_millis(300), bound).await;
+    assert!(
+        stuck > 0,
+        "the run never reported its end, so nothing was stuck"
+    );
+    assert!(
+        took < bound + Duration::from_secs(2),
+        "the quit took {took:?}, past its bound of {bound:?}"
+    );
+}
+
+/// And past every grace the wall clock still ends the wait: `finish_within`
+/// answers `None` at its bound, so the app goes on to its database.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_quits_wall_clock_ends_the_wait_for_a_stuck_scheduler() {
+    let _serial = serially().await;
+    let (stopped, took, stuck) =
+        quit_with_a_stuck_run(PATIENT_GRACE, Duration::from_millis(300)).await;
+    assert!(
+        stuck > 0,
+        "the run never reported its end, so nothing was stuck"
+    );
+    assert!(stopped.is_none(), "an hour's grace cannot have ended");
+    assert!(
+        took < Duration::from_secs(5),
+        "the bound of 300 ms took {took:?}"
+    );
+}
+
 /// The other half of the same carry-over, and the one worth measuring: a
 /// cancelled run must not leave its connection holding the source's advisory
 /// lock, or the *next* launch's first run of that source blocks for ever.

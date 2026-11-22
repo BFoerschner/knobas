@@ -108,5 +108,9 @@ mod tests {
         assert!(super::check_snapshot("not json").is_err());
         let big = format!(r#"{{"v":"{}"}}"#, "x".repeat(super::LARGEST_THEMES));
         assert!(super::check_snapshot(&big).is_err());
+        // Exactly 2 MiB is kept: `{"v":""}` is eight bytes.
+        let whole = format!(r#"{{"v":"{}"}}"#, "x".repeat(2_097_152 - 8));
+        assert_eq!(whole.len(), 2_097_152);
+        assert!(super::check_snapshot(&whole).is_ok());
     }
 }

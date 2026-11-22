@@ -6,12 +6,15 @@
 #
 #   testenv/perf/moves.sh [--real <port>] [--fixture-only] [--throttle 1,4] [--sizes "1440x868@1 2560x1440@1.25"]
 #                         [--sync] [--only a,b] [--workers 3] [--attach <debug port>] [--out <dir>] [--no-columns]
+#                         [--part k/m]
 #
 # By default the fixture (`?fake-scale`, each read landing late with `fake-late`, so a late read shows as a move) at 1x
 # and 4x at both sizes. `--real <port>` adds the windowless backend on the saved scale database
 # (examples/headless_ipc.rs), the same throttles and sizes. `--sync`: every source ends a run that changed something
 # every 1.5 s while each place records. `--workers` runs that many browsers at once, each a share of the places (a
-# move is a frame order, not a time, so the share does not change what moves).
+# move is a frame order, not a time, so the share does not change what moves). `--part k/m`: the k-th of m runs that
+# share the places between them, so a run too long for one turn on a machine's queue is m runs (the final suite,
+# 2026-11-22); the scroll case runs with the last.
 #
 # Then the scroll case (`columns.mjs`, the code-list-columns pass, 2026-11-20): each windowed list wheeled to its end
 # and back, failing when a column's left edge or width changes while it scrolls. `--only` picks its lists too (their
@@ -19,7 +22,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-real="" throttle="1,4" sizes="1440x868@1 2560x1440@1.25" sync="" only="" workers=3 out="" fixture=1 attach="" columns=1
+real="" throttle="1,4" sizes="1440x868@1 2560x1440@1.25" sync="" only="" workers=3 out="" fixture=1 attach="" columns=1 part=1/1
 while [ $# -gt 0 ]; do
   case $1 in
     --real) real=$2; shift 2 ;;
@@ -33,9 +36,13 @@ while [ $# -gt 0 ]; do
     --attach) attach=$2; workers=1; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --no-columns) columns=""; shift ;;
-    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --part) part=$2; shift 2 ;;
+    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
+pk=${part%/*} pm=${part#*/}
+[[ "$pk" =~ ^[0-9]+$ && "$pm" =~ ^[0-9]+$ && "$pk" -ge 1 && "$pk" -le "$pm" ]] || { echo "moves: --part is k/m with 1 <= k <= m" >&2; exit 2; }
+[ "$pk" -eq "$pm" ] || columns=""
 out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/knobas-moves.XXXXXX")}
 mkdir -p "$out"
 port=${KNOBAS_PERF_PORT:-5363}
@@ -58,7 +65,7 @@ for corpus in "${corpora[@]}"; do
     pids=()
     for shard in $(seq 1 "$workers"); do
       node "$here/moves.mjs" --app "$url" --out "$out/$name-$size-$shard.json" --size "$size" --throttle "$throttle" \
-        --shard "$shard/$workers" ${sync:+"$sync"} ${only:+--only "$only"} ${attach:+--attach "$attach"} --check --max-minutes 120 \
+        --shard "$(( (pk - 1) * workers + shard ))/$(( pm * workers ))" ${sync:+"$sync"} ${only:+--only "$only"} ${attach:+--attach "$attach"} --check --max-minutes 120 \
         > "$out/$name-$size-$shard.log" 2>&1 &
       pids+=($!)
     done

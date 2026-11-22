@@ -4255,6 +4255,7 @@ dependencies = [
  "uuid",
  "wat",
  "webview2-com",
+ "windows",
  "windows-core 0.61.2",
  "wiremock",
 ]

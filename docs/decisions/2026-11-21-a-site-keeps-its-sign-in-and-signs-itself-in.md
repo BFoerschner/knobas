@@ -130,3 +130,31 @@ dialog, the bar's button and notes.
   through *Add a source*), so its pages opened the browser. The page read the sites' settings once. It now reads them
   again when the source list gains a source it has no setting for (`siteStore.lacks`), and not on a list with nothing
   new. `TfShell.test.svelte.ts` adds a source to a running shell: no setting before, its setting after one more read.
+- **The quit's wait for the sites' browser processes (Windows) had two surviving mutants**: `win::wait_for_exit`
+  emptied, and `win::browser_process` / `WryView::browser_process` answering `None`. No automated run reaches them
+  (nothing runs a test on Windows; off Windows `browser_process` is `None` already), so a mutants run lists them as
+  missed whatever tests exist. In the app on Björn's PC, Gitea filled, quit 2 s later, started again: signed in with
+  each mutant (3 of 3 and 2 of 2) as without; but the app quit takes 0.2 to 0.4 s after the wait (it stops the
+  scheduler, the clones and the database), so its host may never have exited before the browser process did. Fable's
+  ruling: keep the wait and kill the mutants in the probe binary. `examples/site_probe.rs` now quits its first run
+  with both sites open, through a host that watches `flush`, and checks:
+  - **11**, Windows: each live site names its browser process at the quit;
+  - **11b**, Windows: the list is not empty and every named process has ended when the wait returns, before its
+    deadline;
+  - **12**: a lasting cookie set one second before the quit is back in the second run (the probe has no database to
+    stop, so its host exits milliseconds after the wait).
+
+  Run on Björn's PC (2026-11-22, WebView2 157.0.4341.60, debug builds of the probe at 87b4e568), each first run with
+  the build named and its second run unmutated:
+
+  | First run's build | 11 | 11b | 12 | The wait |
+  |---|---|---|---|---|
+  | unmutated | PASS | PASS | PASS | 168 ms, both processes ended |
+  | `wait_for_exit` emptied | PASS | **FAIL** | PASS | 0.0002 ms, both still running |
+  | `win::browser_process` → `None` | **FAIL** | **FAIL** | PASS | nothing named |
+  | `WryView::browser_process` → `None` | **FAIL** | **FAIL** | PASS | nothing named |
+
+  Every other check of the probe passed in all four. Check 12 passing under every mutant means WebView2 wrote the
+  cookie store even when the host did not wait: the wait is not shown to be needed on this machine. Removing it would
+  amend the ux29 decision above, so it is Björn's call; until then it stays. **A diff touching `win::wait_for_exit`,
+  `browser_process` or `Sites::shutdown` reruns the probe on Windows with each of these mutants applied by hand.**

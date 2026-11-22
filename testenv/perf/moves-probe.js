@@ -109,7 +109,9 @@
       r.changedTo = now;
     }
     if (r.drawn === null) {
-      const gate = r.expectHash ? r.hashAt : r.press;
+      // The address moved off the one armed on, though the place's prefix matched both (one asset to another under
+      // `#/asset/`): its `hashchange` gates as a new address's does (the final suite, 2026-11-22, the `asset` place).
+      const gate = r.expectHash || location.hash !== r.fromHash ? r.hashAt : r.press;
       if (gate === null || r.mutAt === null || r.mutAt < gate) return;
       // Drawn: the place's own content is on screen (`ready`, or anything in the shown page that is not a skeleton).
       const ok = r.ready ? !!document.querySelector(r.ready) : list.some((x) => !x.e.closest(".tf-skel"));
@@ -239,7 +241,7 @@
     arm({ hash = null, ms = 5000, px = 2, ready = null, anywhere = false, anyKey = false, still = null, changes = null, trace = null, answer = null, track = null } = {}) {
       const expectHash = hash !== null && ![].concat(hash).some((h) => location.hash.startsWith(h));
       const stillBoxes = new Map(still === null ? [] : inView(still).map((x) => [x.e, x]));
-      run = { hash, ms, px, ready, anywhere, track, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), answer, answerFrom: answer === null ? null : words(answer.changes), answered: null, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
+      run = { hash, ms, px, ready, anywhere, track, anyKey, still, changes, stillBoxes, changedFrom: changes === null ? null : words(changes), answer, answerFrom: answer === null ? null : words(answer.changes), answered: null, trace, traced: [], animatedAt: new Map(), swapped: 0, usefulFrame: null, expectHash, fromHash: location.hash, hashAt: null, mutAt: null, press: null, drawn: null, useful: null, done: false, frames: 0, boxes: new WeakMap(), last: new Map(), departed: new Map(), moves: [], animated: 0, caused: 0, inputAfter: null, shifts0: shifts.length };
       requestAnimationFrame(frame);
       return 1;
     },

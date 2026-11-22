@@ -92,6 +92,20 @@ async fn a_1_6_component_answers_its_fields_and_options_and_its_edit_reaches_the
     assert_eq!(people.options.len(), 1);
     assert_eq!(people.options[0].value, "pilot-ana");
     assert!(people.complete);
+    // Typed words a person's name holds and their account does not still find them.
+    let by_name = source
+        .field_options("berths:BERTH-1", "assignee", "ines")
+        .await
+        .unwrap()
+        .expect("the assignee has a list");
+    assert_eq!(
+        by_name
+            .options
+            .iter()
+            .map(|o| o.value.as_str())
+            .collect::<Vec<_>>(),
+        ["harbourmaster"]
+    );
     assert!(
         source
             .field_options("berths:BERTH-1", "due", "")

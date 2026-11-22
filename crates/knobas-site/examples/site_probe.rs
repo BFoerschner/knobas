@@ -34,7 +34,19 @@
 //! 7. a key typed in the site reaches it, a claimed key does not, Esc is
 //!    passed once and taken the second time;
 //! 9. microphone, location, clipboard read and notifications are refused;
-//! 10. making a view, and the shell page's longest frame around it.
+//! 10. making a view, and the shell page's longest frame around it;
+//! 11. (Windows) at the quit each live site names its browser process, and
+//!     (11b) the quit's wait returns once every named browser process has
+//!     ended, before its deadline (`win::wait_for_exit`, ux29);
+//! 12. a lasting cookie a site set one second before the quit is there in the
+//!     second run.
+//!
+//! The first run quits with its two sites still open, as knobas quits, so the
+//! quit's own path (`Sites::shutdown`, then the host's `flush`) runs. Checks
+//! 11 and 11b have no automated run (nothing runs a test on Windows): a diff
+//! touching `win::wait_for_exit`, `browser_process` or `Sites::shutdown`
+//! reruns this probe on Windows with each mutant of them applied by hand
+//! (the decision note `2026-11-21-a-site-keeps-its-sign-in-and-signs-itself-in.md`).
 //!
 //! Item 8 (`confirm()`'s sheet on the Mac, WebView2's dialog on Windows) asks
 //! for a person and is on the hand list.
@@ -63,6 +75,8 @@ static START: OnceLock<Instant> = OnceLock::new();
 static PORT: AtomicU16 = AtomicU16::new(0);
 static RECORD: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 static LOG: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+/// How many sites were open when the first run quit (checks 11 and 11b).
+static LIVE: Mutex<usize> = Mutex::new(0);
 
 fn ms() -> u64 {
     u64::try_from(START.get().map_or(0, |s| s.elapsed().as_millis())).unwrap_or(0)
@@ -242,6 +256,22 @@ fn handle(mut stream: TcpStream) {
                 "200 OK",
                 &extra,
                 PAGE.replace("__PORT__", &port().to_string()).as_bytes(),
+            );
+        }
+        "/late" => {
+            log(
+                "request",
+                json!({ "host": host, "query": "late", "cookie": cookie }),
+            );
+            respond(
+                &mut stream,
+                "200 OK",
+                &[
+                    ("Content-Type", "text/html; charset=utf-8".to_string()),
+                    ("Cache-Control", "no-store".to_string()),
+                    ("Set-Cookie", "late=1; Max-Age=86400; Path=/".to_string()),
+                ],
+                b"<!doctype html><title>late</title><p>a lasting cookie, set just before the quit",
             );
         }
         "/redirect-out" => {
@@ -462,6 +492,84 @@ mod post {
     pub const CLAIMED: (&str, u16, bool) = ("", 0x74, false);
 }
 
+// ----------------------------------------------------------- the quit's wait
+
+/// `WryHost` with the quit's wait watched (checks 11 and 11b): what `flush`
+/// is handed, how long it takes, and which of the named browser processes
+/// still run when it returns.
+struct ProbeHost<H>(H);
+
+impl<H: knobas_site::host::SiteHost> knobas_site::host::SiteHost for ProbeHost<H> {
+    fn make(
+        &self,
+        spec: &knobas_site::host::ViewSpec,
+        hooks: knobas_site::host::Hooks,
+    ) -> Result<Box<dyn knobas_site::host::SiteView>, knobas_site::host::HostError> {
+        self.0.make(spec, hooks)
+    }
+    fn focus_shell(&self) {
+        self.0.focus_shell();
+    }
+    fn forget(&self, spec: &knobas_site::host::ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {
+        self.0.forget(spec, done);
+    }
+    fn flush(&self, processes: &[u32], deadline: Instant) {
+        let started = Instant::now();
+        self.0.flush(processes, deadline);
+        let took = started.elapsed();
+        let running: Vec<u32> = processes
+            .iter()
+            .copied()
+            .filter(|pid| still_runs(*pid))
+            .collect();
+        let live = *LIVE.lock().unwrap();
+        log(
+            "flush",
+            json!({ "processes": processes, "live": live, "ms": took.as_secs_f64() * 1000.0, "running": running, "deadline_hit": Instant::now() >= deadline }),
+        );
+        if cfg!(windows) && live > 0 {
+            check(
+                "11 each live site names its browser process at the quit",
+                processes.len() == live && processes.iter().all(|pid| *pid != 0),
+                json!({ "processes": processes, "live": live }),
+            );
+            check(
+                "11b the quit waits until every named browser process has ended",
+                !processes.is_empty() && running.is_empty() && Instant::now() < deadline,
+                json!({ "ms": took.as_secs_f64() * 1000.0, "running": running }),
+            );
+        }
+    }
+}
+
+/// Whether a process still runs: a zero-wait on its handle (Windows); off Windows nothing is named, so nothing runs.
+#[cfg(windows)]
+fn still_runs(pid: u32) -> bool {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn WaitForSingleObject(handle: isize, millis: u32) -> u32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+    // SAFETY: plain Win32 calls on a handle this function opens and closes.
+    unsafe {
+        let handle = OpenProcess(SYNCHRONIZE, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        let state = WaitForSingleObject(handle, 0);
+        CloseHandle(handle);
+        state == WAIT_TIMEOUT
+    }
+}
+
+#[cfg(not(windows))]
+fn still_runs(_pid: u32) -> bool {
+    false
+}
+
 // --------------------------------------------------------------- the steps
 
 fn on_main(proxy: &EventLoopProxy<Task>, f: impl FnOnce() + Send + 'static) {
@@ -513,6 +621,7 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
         sleep(1500);
         return finish(&sites, &proxy, &rt);
     }
+    let _ = &rt;
     sites.hide("b");
     sites.show("a", INSETS, true, true);
     let _ = open("a", url("other"), true);
@@ -564,14 +673,25 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
     let _ = open("a", url("perms"), true);
     sleep(14000);
     verdicts(false);
-    finish(&sites, &proxy, &rt);
+    // Check 12's cookie, one second before the quit; both sites stay open for checks 11 and 11b.
+    let _ = open("a", format!("{base}/late"), true);
+    sleep(1000);
+    *LIVE.lock().unwrap() = sites.statuses().len();
+    log("quitting", json!({ "live": *LIVE.lock().unwrap() }));
+    quit(&sites, &proxy);
 }
 
+/// The second run's end: both sites closed (they were forgotten), then the quit.
 fn finish(sites: &Sites, proxy: &EventLoopProxy<Task>, rt: &tokio::runtime::Runtime) {
     for source in ["a", "b"] {
         let _ = rt.block_on(sites.close(source, true));
     }
     sleep(800);
+    quit(sites, proxy);
+}
+
+/// knobas's quit: `Sites::shutdown` on the main thread, with whatever sites are still open, then the exit.
+fn quit(sites: &Sites, proxy: &EventLoopProxy<Task>) {
     let done = sites.clone();
     on_main(proxy, move || {
         done.shutdown();
@@ -602,6 +722,11 @@ fn verdicts(second: bool) {
             .first()
             .map(|l| l["data"]["cookie"].as_str().unwrap_or_default().to_owned())
             .unwrap_or_default();
+        check(
+            "12 a lasting cookie set one second before the quit is back",
+            a_cookie.contains("late=1"),
+            json!({ "a": a_cookie }),
+        );
         check(
             "2b the second run gets each site's own cookies back",
             a_cookie.contains("sid=a")
@@ -875,10 +1000,10 @@ fn main() {
     ]));
     let focus_window = Rc::clone(&window);
     let _ = focus_window;
-    install_host(Box::new(WryHost::new(
+    install_host(Box::new(ProbeHost(WryHost::new(
         Rc::clone(&window),
         Rc::new(|| log("focus-shell", json!({}))),
-    )));
+    ))));
     #[cfg(target_os = "macos")]
     {
         let keys = sites.clone();
