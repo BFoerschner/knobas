@@ -6075,6 +6075,198 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
     println!("{id} filed, closed, reopened and commented on");
 }
 
+/// A ticket's fields against the real server (ADR-0054): a test issue
+/// filed, its fields read, then assigned to someone the repository's
+/// assignees list, labelled with a label made for the run, and retitled,
+/// each read back from the server; then unassigned, unlabelled and given its
+/// title back. The issue and the label are deleted at the end, so the
+/// repository is left as it was found.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_tickets_fields_are_edited_and_read_back() {
+    use knobas_source::{Assignee, LabelChange, WriteOp};
+
+    let env = env();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    clear_test_issues(&http, &env, &auth).await;
+    let source = env.one_repo();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let title = format!("{TEST_ISSUE}{stamp}");
+    let label = format!("knobas-live-{stamp}");
+    let made: serde_json::Value = http
+        .post(format!("{api}/labels"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": label, "color": "#123456" }))
+        .send()
+        .await
+        .expect("make the run's label")
+        .json()
+        .await
+        .expect("a label");
+    let label_id = made["id"].as_u64().expect("the label's id");
+
+    let key = source
+        .write(WriteOp::CreateTicket {
+            entity: format!("gitea:{}", env.full_name()),
+            title: title.clone(),
+            body: "Filed by the live suite.".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("Gitea takes the issue")
+        .remote_id
+        .expect("the receipt names the issue");
+    let id = format!("gitea:{key}");
+    let number = key.rsplit('/').next().unwrap().to_owned();
+    let read = || {
+        let http = &http;
+        let auth = &auth;
+        let url = format!("{api}/issues/{number}");
+        async move {
+            http.get(url)
+                .header("Authorization", auth)
+                .send()
+                .await
+                .expect("read the issue")
+                .json::<serde_json::Value>()
+                .await
+                .expect("an issue")
+        }
+    };
+    let edit = |change: Box<dyn FnOnce(&mut WriteOp)>| {
+        let mut op = WriteOp::EditTicket {
+            entity: id.clone(),
+            title: None,
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: std::collections::BTreeMap::new(),
+        };
+        change(&mut op);
+        op
+    };
+
+    // 1. The fields, and who can be assigned.
+    let fields = source
+        .ticket_fields(&id)
+        .await
+        .expect("the fields read")
+        .expect("an issue edits");
+    assert_eq!(knobas_source::ticket::fault(&fields), None);
+    assert_eq!(fields.get("title").unwrap().value, serde_json::json!(title));
+    let people = source
+        .field_options(&id, "assignee", "")
+        .await
+        .expect("the assignees read")
+        .expect("the assignee has a list");
+    let who = people
+        .options
+        .first()
+        .expect("somebody can be assigned")
+        .value
+        .clone();
+    let labels = source
+        .field_options(&id, "labels", "")
+        .await
+        .expect("the labels read")
+        .expect("the labels have a list");
+    assert!(
+        labels.options.iter().any(|o| o.value == label),
+        "{labels:?}"
+    );
+
+    // 2. Assigned, labelled and retitled in one edit, read back.
+    let retitled = format!("{title} (edited)");
+    source
+        .write(edit(Box::new({
+            let (who, label, retitled) = (who.clone(), label.clone(), retitled.clone());
+            move |op| {
+                if let WriteOp::EditTicket {
+                    title,
+                    assignee,
+                    labels,
+                    ..
+                } = op
+                {
+                    *title = Some(retitled);
+                    *assignee = Some(Assignee::Account(who));
+                    *labels = Some(LabelChange {
+                        add: vec![label],
+                        remove: vec![],
+                    });
+                }
+            }
+        })))
+        .await
+        .expect("Gitea takes the edit");
+    let after = read().await;
+    assert_eq!(after["title"], retitled);
+    assert_eq!(after["assignees"][0]["login"], who);
+    assert_eq!(after["assignees"].as_array().map(Vec::len), Some(1));
+    assert!(
+        after["labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["name"] == label),
+        "{after}"
+    );
+    let fields = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(
+        fields.get("assignee").unwrap().value,
+        serde_json::json!(who)
+    );
+
+    // 3. Back as it was: unassigned, the label off, the title restored.
+    source
+        .write(edit(Box::new({
+            let (label, title) = (label.clone(), title.clone());
+            move |op| {
+                if let WriteOp::EditTicket {
+                    title: t,
+                    assignee,
+                    labels,
+                    ..
+                } = op
+                {
+                    *t = Some(title);
+                    *assignee = Some(Assignee::Nobody);
+                    *labels = Some(LabelChange {
+                        add: vec![],
+                        remove: vec![label],
+                    });
+                }
+            }
+        })))
+        .await
+        .expect("Gitea takes the edit back");
+    let back = read().await;
+    assert_eq!(back["title"], title);
+    assert!(
+        back["assignees"].as_array().is_none_or(Vec::is_empty),
+        "{back}"
+    );
+    assert!(
+        back["labels"].as_array().is_none_or(Vec::is_empty),
+        "{back}"
+    );
+
+    clear_test_issues(&http, &env, &auth).await;
+    let gone = http
+        .delete(format!("{api}/labels/{label_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("delete the run's label");
+    assert!(gone.status().is_success(), "{}", gone.status());
+    println!("{id} assigned to {who}, labelled, retitled and put back");
+}
+
 /// The item a refresh answers for `id`, or a panic naming what it answered.
 async fn refreshed(source: &dyn knobas_source::Source, id: &str) -> SyncItem {
     match source.refresh(id).await {
