@@ -197,6 +197,42 @@ async fn a_same_origin_redirect_is_followed_for_a_get_and_listed() {
 }
 
 #[tokio::test]
+async fn five_redirects_are_followed_and_the_sixth_is_the_answer() {
+    let server = MockServer::builder().start().await;
+    // /r0 -> /r1 -> ... -> /r6 -> /end: six hops would reach /r6, five stop at /r5's redirect.
+    for n in 0..7 {
+        Mock::given(path(format!("/r{n}")))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("Location", format!("/r{}", n + 1)),
+            )
+            .mount(&server)
+            .await;
+    }
+    let answer = send::send(request(710, "GET", format!("{}/r0", server.uri())), None)
+        .await
+        .expect("sent");
+    let ApiAnswer::Answered {
+        status,
+        hops,
+        follow,
+        ..
+    } = answer
+    else {
+        panic!()
+    };
+    assert_eq!(status, 302);
+    assert_eq!(hops.len(), send::MAX_HOPS);
+    assert_eq!(
+        follow.as_deref(),
+        Some(format!("{}/r6", server.uri()).as_str())
+    );
+    assert_eq!(
+        server.received_requests().await.expect("recorded").len(),
+        send::MAX_HOPS + 1
+    );
+}
+
+#[tokio::test]
 async fn a_redirect_to_another_origin_is_the_answer_and_carries_nothing_there() {
     let away = MockServer::builder().start().await;
     let home = MockServer::builder().start().await;
