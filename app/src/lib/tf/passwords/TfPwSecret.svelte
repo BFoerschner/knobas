@@ -28,6 +28,7 @@
     timedTicket,
     blocked = false,
     ports,
+    ondown,
   }: {
     entry: PwEntry;
     which: SecretRef;
@@ -43,6 +44,8 @@
     /** Behind an access request that is not approved. */
     blocked?: boolean;
     ports: PasswordPorts;
+    /** The source did not answer a read: the page reads its state again, so every read turns off with the reason. */
+    ondown?: (() => void) | undefined;
   } = $props();
 
   type Verb = "show" | "copy";
@@ -112,6 +115,7 @@
           break;
         case "unreachable":
           failed = `${Word} did not answer, so nothing was read.`;
+          ondown?.();
           break;
         case "not_offered":
           failed = `${Word} has no ${what} for this entry.`;

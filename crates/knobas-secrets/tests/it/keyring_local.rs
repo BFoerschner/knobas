@@ -77,3 +77,38 @@ fn the_keyring_store_honours_the_store_contract() {
     store.delete(id).unwrap();
     assert!(store.get(id).unwrap().is_none());
 }
+
+/// The Passwords role's code keys (ADR-0056) through the real keychain: a
+/// whole set written in chunks under one write id, read back whole, and
+/// deleted, on whatever store this OS gives (the Mac's keychain, Windows'
+/// credential manager, Linux's kernel keyutils).
+#[test]
+#[ignore = "touches the real OS keychain; run by hand"]
+fn the_code_keys_round_trip_through_the_real_keychain() {
+    use knobas_source::passwords::{OtpAlgorithm, OtpKey, SecretText};
+    let service = format!("dev.knobas.desktop.test.otp.{}", std::process::id());
+    let store = KeyringStore::new(&service);
+    let key = |s: &str| OtpKey {
+        secret: SecretText::new(s),
+        digits: 6,
+        period: 30,
+        algorithm: OtpAlgorithm::Sha1,
+    };
+    let keys: knobas_secrets::otp::OtpKeys = (0..40)
+        .map(|i| {
+            (
+                format!("pw:{i:036}"),
+                key("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"),
+            )
+        })
+        .collect();
+    knobas_secrets::otp::replace(&store, "pw", &keys).unwrap();
+    let back = knobas_secrets::otp::read(&store, "pw").unwrap();
+    assert_eq!(
+        back.len(),
+        keys.len(),
+        "the keys read back are not the keys written"
+    );
+    knobas_secrets::otp::delete(&store, "pw").unwrap();
+    assert!(knobas_secrets::otp::read(&store, "pw").unwrap().is_empty());
+}

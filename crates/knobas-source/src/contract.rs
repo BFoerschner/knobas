@@ -66,6 +66,8 @@ impl crate::Sink for Walking {
 pub struct KeySink {
     pub items: Vec<crate::SyncItem>,
     pub keys: Vec<(String, crate::passwords::OtpKey)>,
+    /// The kinds the run said it walked whole (`Sink::walked_whole`).
+    pub whole: Vec<String>,
 }
 
 #[async_trait::async_trait]
@@ -73,6 +75,10 @@ impl crate::Sink for KeySink {
     async fn item(&mut self, item: crate::SyncItem) -> Result<(), crate::SourceError> {
         self.items.push(item);
         Ok(())
+    }
+
+    async fn walked_whole(&mut self, kind: &str) {
+        self.whole.push(kind.to_owned());
     }
 
     async fn otp_key(&mut self, entity: &EntityRef, key: crate::passwords::OtpKey) {

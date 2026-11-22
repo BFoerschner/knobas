@@ -170,14 +170,20 @@ async fn a_sync_is_one_sign_in_and_one_tree_and_nothing_else() {
 }
 
 #[tokio::test]
-async fn an_unchanged_tree_emits_nothing_and_keeps_its_cursor() {
+async fn an_unchanged_tree_emits_no_item_keeps_its_cursor_and_hands_its_keys_on_again() {
     let server = server().await;
     let s = source(&server.uri());
-    let cursor = s.sync(None, &mut KeySink::default()).await.unwrap();
+    let mut first = KeySink::default();
+    let cursor = s.sync(None, &mut first).await.unwrap();
     let mut sink = KeySink::default();
     let again = s.sync(Some(cursor.clone()), &mut sink).await.unwrap();
     assert_eq!(again, cursor);
-    assert!(sink.items.is_empty() && sink.keys.is_empty());
+    assert!(sink.items.is_empty(), "an unchanged tree emitted items");
+    // The keys come again, so a keychain that lost them gets them back; no
+    // walk is declared whole, so nothing is swept and the keys merge.
+    assert_eq!(sink.keys.len(), first.keys.len());
+    assert!(!sink.keys.is_empty());
+    assert!(sink.whole.is_empty(), "{:?}", sink.whole);
 }
 
 #[tokio::test]

@@ -324,3 +324,20 @@ test("a read the server refuses for this account says the server's own sentence"
   await settle();
   expect(target.querySelector(".tf-pw-f .tf-pw-fh")?.textContent).toContain(reason);
 });
+
+test("New entry is drawn only where the account may add to a folder", async () => {
+  const none = writable();
+  none.folders = none.folders.map((f) => ({ ...f, can_add: false }));
+  await open(ports({}, none), ["in", "pw:plat"]);
+  expect(button("New entry")).toBeUndefined();
+});
+
+test("a read the source does not answer reads the page again, so every read turns off with the reason", async () => {
+  const p = ports({ copy: vi.fn(async (): Promise<ReadAnswer> => ({ kind: "unreachable", message: "unreachable" })) });
+  await open(p, ["entry", "pw:graf"]);
+  expect(p.held).toHaveBeenCalledTimes(1);
+  inRow("Password", "Copy").click();
+  await settle();
+  expect(target.querySelector(".tf-pw-f .tf-pw-fh")?.textContent).toContain("did not answer, so nothing was read");
+  expect(p.held).toHaveBeenCalledTimes(2);
+});

@@ -77,6 +77,8 @@
   const folders = $derived(
     [...m.nodes.values()]
       .filter((n) => n.id !== "" && !n.top && n.src === m.held.sources.findIndex((s) => s.id === source.id))
+      // A new entry, or a move, goes only where the account may add.
+      .filter((n) => m.held.folders.some((f) => f.id === n.id && f.can_add) || n.id === start?.folder)
       .map((n) => ({ id: n.id, path: chainOf(m, n).filter((x) => !x.top).map((x) => x.name).join(" / ") }))
       .sort((a, b) => a.path.localeCompare(b.path)),
   );

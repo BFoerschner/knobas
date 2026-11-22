@@ -430,11 +430,15 @@
   let writing = $state<"change" | "new" | "edit" | null>(null);
   /** The source a new entry goes to: the folder's, else the first that performs creates. */
   const newSource = $derived.by((): PwSource | null => {
-    if (!held) return null;
-    const at = node && node.src >= 0 ? held.sources[node.src] : null;
-    const performs = (s: PwSource) => s.offers.writes.includes("create_entry") && s.down_at === null && !s.never_synced;
+    const h = held;
+    if (!h) return null;
+    const at = node && node.src >= 0 ? h.sources[node.src] : null;
+    // A folder the account may add to: the one the list stands in, else any of the source's (Pleasant's reader may
+    // add to none, and its root takes nothing from anyone: seen in the real app, 2026-11-22).
+    const adds = (src: number) => h.folders.some((f) => f.source === src && f.can_add && (!node || node.id === "" || node.top || f.id === node.id));
+    const performs = (s: PwSource) => s.offers.writes.includes("create_entry") && s.down_at === null && !s.never_synced && adds(h.sources.indexOf(s));
     if (at) return performs(at) ? at : null;
-    return held.sources.find(performs) ?? null;
+    return h.sources.find(performs) ?? null;
   });
 
   async function written(entityId: string, words: string): Promise<void> {
@@ -634,7 +638,7 @@
             <div class="tf-pw-entrycol">
               {#if record && source && openEntry}
                 {#key record.id}
-                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} {layers} />
+                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} {layers} ondown={() => void read()} />
                 {/key}
               {:else}
                 <div class="tf-panel"><div class="tf-empty tf-pw-blank"><p>{query ? "No entry matches the filter." : "No entry is open."}</p></div></div>

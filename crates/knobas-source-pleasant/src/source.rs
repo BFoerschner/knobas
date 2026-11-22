@@ -679,20 +679,37 @@ impl Source for PleasantSource {
             Walk::Folders => self.tree_by_folders().await?,
         };
         let next = format!("tree:{print}");
+        let walked = crate::map::walk(&self.id, &tree);
+        let keys = |walked: crate::map::Walked| {
+            walked.keys.into_iter().map(|(entity, key)| {
+                knobas_source::EntityRef::parse(&entity)
+                    .map(|entity| (entity, key))
+                    .map_err(|e| SourceError::protocol(e.to_string()))
+            })
+        };
         if cursor.as_deref() == Some(next.as_str()) {
+            // An unchanged tree emits no item, but its code keys are handed on
+            // all the same: the tree was read anyway, and a keychain that lost
+            // them (cleared by hand, or a run that dropped them) gets them
+            // back on the next press. No `walked_whole`: nothing is swept, and
+            // the keys are merged, not replaced.
+            for pair in keys(walked) {
+                let (entity, key) = pair?;
+                sink.otp_key(&entity, key).await;
+            }
             return Ok(next);
         }
-        let walked = crate::map::walk(&self.id, &tree);
-        let of = walked.items.len() as u64;
-        for (done, item) in walked.items.into_iter().enumerate() {
+        let mut walked = walked;
+        let items = std::mem::take(&mut walked.items);
+        let of = items.len() as u64;
+        for (done, item) in items.into_iter().enumerate() {
             sink.item(item).await?;
             if done % 200 == 199 {
                 sink.walked(done as u64 + 1, Some(of), "items").await;
             }
         }
-        for (entity, key) in walked.keys {
-            let entity = knobas_source::EntityRef::parse(&entity)
-                .map_err(|e| SourceError::protocol(e.to_string()))?;
+        for pair in keys(walked) {
+            let (entity, key) = pair?;
             sink.otp_key(&entity, key).await;
         }
         sink.walked(of, Some(of), "items").await;

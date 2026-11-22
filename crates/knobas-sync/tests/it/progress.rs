@@ -586,3 +586,69 @@ async fn the_decorator_hands_on_a_kind_walked_whole() {
     observed.sync(Some("at".into()), &mut sink).await.unwrap();
     assert_eq!(sink.0, ["ticket"]);
 }
+
+/// The progress decorator hands a code key on to the engine's sink
+/// (ADR-0056): the scheduler keeps the run's keys from there. A wrapper that
+/// kept the trait's default dropped every one of them.
+#[tokio::test]
+async fn the_decorator_hands_code_keys_on() {
+    struct Keyed;
+    #[async_trait::async_trait]
+    impl Source for Keyed {
+        async fn view(
+            &self,
+            _entity: &str,
+            _section: Option<&str>,
+        ) -> Result<Option<knobas_source::view::SourceView>, knobas_source::SourceError> {
+            Ok(None)
+        }
+        fn descriptor(&self) -> SourceDescriptor {
+            Flood(0).descriptor()
+        }
+        async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+            Ok(ConnectionInfo::default())
+        }
+        async fn sync(
+            &self,
+            _c: Option<Cursor>,
+            sink: &mut (dyn Sink + Send),
+        ) -> Result<Cursor, SourceError> {
+            sink.otp_key(
+                &knobas_core::entity::EntityRef::new("flood", "F-0"),
+                knobas_source::passwords::OtpKey {
+                    secret: knobas_source::passwords::SecretText::new("GEZDGNBVGY3TQOJQ"),
+                    digits: 6,
+                    period: 30,
+                    algorithm: knobas_source::passwords::OtpAlgorithm::Sha1,
+                },
+            )
+            .await;
+            Ok("done".into())
+        }
+        async fn write(
+            &self,
+            _op: knobas_source::WriteOp,
+        ) -> Result<knobas_source::WriteReceipt, SourceError> {
+            Err(SourceError::protocol("no writes"))
+        }
+        async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
+            Ok(Vec::new())
+        }
+    }
+    let inner = Keyed;
+    let observed = Observed::new(
+        &inner,
+        "flood",
+        1,
+        Instant::now(),
+        Arc::new(Recorder::default()),
+    );
+    let mut sink = knobas_source::contract::KeySink::default();
+    observed.sync(None, &mut sink).await.unwrap();
+    assert_eq!(
+        sink.keys.len(),
+        1,
+        "the code key did not reach the engine's sink"
+    );
+    assert_eq!(sink.keys[0].0, "flood:F-0");
+}

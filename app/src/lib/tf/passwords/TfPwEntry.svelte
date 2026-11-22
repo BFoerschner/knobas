@@ -33,6 +33,7 @@
     onchange,
     onedit,
     layers,
+    ondown,
   }: {
     entry: PwEntry;
     source: PwSource;
@@ -49,6 +50,8 @@
     onchange?: () => void;
     onedit?: () => void;
     layers?: Layers | undefined;
+    /** A read found the source down: the page reads its state again. */
+    ondown?: (() => void) | undefined;
   } = $props();
   /** The attachments the listing named (step 9a): each read live when opened or saved, never kept. */
   const files = $derived(source.offers.attachments && entry.attachments.state === "listed" ? entry.attachments.files : []);
@@ -142,7 +145,7 @@
       <div class="tf-pw-fa"><button type="button" class="tf-btn tf-sm" aria-label="Copy the username" aria-keyshortcuts="U" onclick={() => void copyUsername()}>Copy<kbd>U</kbd></button></div>
     </div>
   {/if}
-  <TfPwSecret bind:this={password} {entry} which={PASSWORD} label="Password" main {source} {word} {scope} {timedTicket} {blocked} {ports} />
+  <TfPwSecret bind:this={password} {entry} which={PASSWORD} label="Password" main {source} {word} {scope} {timedTicket} {blocked} {ports} {ondown} />
   {#if entry.otp && source.offers.one_time_codes}
     <TfPwCode bind:this={code} {entry} {word} {ports} {visible} />
   {/if}
@@ -172,7 +175,7 @@
   {/if}
   {#each entry.fields as field (field.name)}
     {#if field.value === null}
-      <TfPwSecret {entry} which={{ kind: "field", name: field.name }} label={field.name} {source} {word} {scope} {timedTicket} {blocked} {ports} />
+      <TfPwSecret {entry} which={{ kind: "field", name: field.name }} label={field.name} {source} {word} {scope} {timedTicket} {blocked} {ports} {ondown} />
     {:else}
       <div class="tf-pw-f">
         <div class="tf-pw-fl">{field.name}</div>
