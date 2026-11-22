@@ -1276,6 +1276,7 @@ test("badges: inbox and failing builds in err tone; nothing drawn at zero", asyn
     Code: null,
     Builds: "2 err",
     Docs: null,
+    Passwords: null,
     Monitors: null,
     Assets: null,
     "Link sets": null,
@@ -1289,7 +1290,7 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Monitors", "Assets", "Link sets", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Passwords", "Monitors", "Assets", "Link sets", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 

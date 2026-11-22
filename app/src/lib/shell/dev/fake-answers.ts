@@ -12,12 +12,24 @@ import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapte
 import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
 import type { updateCancel, updateCheck, updateDownload, updateInstall, updateLater, updateNotes, updateSet, updateState } from "../../ipc/update";
 import type { windowLookSet } from "../../ipc/window";
+import type { clipboardClear, clipboardCopySecret, clipboardForget, clipboardState, otpCode, otpCopy, passwordCopy, passwordHide, passwordShow, passwordsEntry, passwordsHeld } from "../../ipc/passwords";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
 
 /** Command name to the shape its barrel function resolves to. */
 export interface Answers {
+  passwords_held: Answer<typeof passwordsHeld>;
+  passwords_entry: Answer<typeof passwordsEntry>;
+  password_show: Answer<typeof passwordShow>;
+  password_copy: Answer<typeof passwordCopy>;
+  password_hide: Answer<typeof passwordHide>;
+  otp_code: Answer<typeof otpCode>;
+  otp_copy: Answer<typeof otpCopy>;
+  clipboard_copy_secret: Answer<typeof clipboardCopySecret>;
+  clipboard_clear: Answer<typeof clipboardClear>;
+  clipboard_forget: Answer<typeof clipboardForget>;
+  clipboard_state: Answer<typeof clipboardState>;
   field_options: Answer<typeof fieldOptions>;
   ticket_fields: Answer<typeof ticketFields>;
   update_state: Answer<typeof updateState>;

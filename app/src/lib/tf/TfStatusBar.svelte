@@ -20,6 +20,10 @@
   import { keyHint } from "../shell/platform";
   import { healthyRollup, queueLabel, type SourceReading } from "./status";
   import { percent, zoom as windowZoom, type Zoom } from "./zoom.svelte";
+  import { clip as clipNow } from "./passwords/clip.svelte";
+  import { clipboardClear } from "../ipc/passwords";
+  import TfPwComb from "./passwords/TfPwComb.svelte";
+  import type { ClipState } from "../ipc/passwords";
 
   let {
     readings,
@@ -27,6 +31,8 @@
     decisions,
     onqueue,
     zoom = windowZoom,
+    clip = clipNow,
+    onclearclip = () => void clipboardClear().catch(() => {}),
   }: {
     readings: SourceReading[];
     /** Writes still waiting to be sent. */
@@ -36,7 +42,12 @@
     onqueue: () => void;
     /** The window's zoom (`zoom.svelte.ts`): while it is not 100 % the bar ends in it, and a press puts it back. */
     zoom?: Pick<Zoom, "level" | "reset">;
+    /** What the clipboard holds for knobas (ADR-0056): a secret it put there, until it clears. */
+    clip?: () => ClipState;
+    onclearclip?: () => void;
   } = $props();
+  const held = $derived(clip());
+  const clipUntil = $derived(held.until ? Date.parse(held.until) : 0);
 
   const label = $derived(queueLabel(pending, decisions));
   const healthy = $derived(readings.filter((reading) => reading.fix === null));
@@ -59,7 +70,16 @@
       <a href="#/settings/source/{encodeURIComponent(reading.id)}/reenter">{reading.fix}…</a>
     </span>
   {/each}
+  {#if held.what !== null && clipUntil > 0}
+    <!-- A secret on the clipboard and how long it stays (ADR-0056): before the queue control, never pushing it off. -->
+    <span class="tf-pw-clip" role="status">
+      <span class="tf-pw-what">Clipboard: <b>{held.what}</b></span>
+      <TfPwComb until={clipUntil} size="sm" label={["", ""]} />
+      <button type="button" class="tf-linkish" onclick={onclearclip}>Clear now</button>
+    </span>
+  {/if}
   <span class="tf-queue">
+
     {#if pending > 0 || decisions > 0}
       <button class="tf-queued" title="Writes knobas still owes a source. Open to see what is queued." onclick={onqueue}>
         {label.queued}{#if label.decide !== null}{" · "}<span class="tf-need">{label.decide}</span>{/if}

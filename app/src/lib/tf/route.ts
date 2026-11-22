@@ -22,6 +22,7 @@ export type Section =
   | "code"
   | "builds"
   | "docs"
+  | "passwords"
   | "monitors"
   | "assets"
   | "sets"
@@ -36,6 +37,7 @@ export const SECTION_NAME: Record<Section, string> = {
   code: "Code",
   builds: "Builds",
   docs: "Docs",
+  passwords: "Passwords",
   monitors: "Monitors",
   assets: "Assets",
   sets: "Link sets",
@@ -73,6 +75,7 @@ export const NAV: readonly Exclude<Section, "job">[] = [
   "code",
   "builds",
   "docs",
+  "passwords",
   "monitors",
   "assets",
   "sets",
@@ -97,8 +100,11 @@ const SECTION_OF: Record<string, Section> = {
   build: "builds",
   docs: "docs",
   page: "docs",
+  // A password manager's entries (ADR-0056): `#/passwords[/in/<folder>|/source/<id>|/entry/<entry>]`.
+  passwords: "passwords",
   monitors: "monitors",
   // The asset tree (#871). A route's address (#432) opens it at the asset
+
   // exposing the route.
   assets: "assets",
   asset: "assets",
