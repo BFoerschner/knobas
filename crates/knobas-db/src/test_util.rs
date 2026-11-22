@@ -429,11 +429,10 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static SHELF: recycle::Shelf = recycle::Shelf::new();
 
     let next_name = || {
-        format!(
-            "knobas_scratch_{}_{}_{}",
-            identifier_slug(label),
+        scratch_name(
+            label,
             std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         )
     };
     let server = &shared_server().await.connector;
@@ -455,6 +454,26 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     let name = next_name();
     create_database(server, &name, Some(&template.name)).await;
     recycle::lease(&SHELF, server, name, template.snapshot.clone())
+}
+
+/// The longest name PostgreSQL keeps: `NAMEDATALEN` less its terminator. It
+/// truncates a longer one silently.
+const NAME_MAX: usize = 63;
+
+/// A scratch database's name: `label`'s slug, the pid and the counter, with
+/// the slug shortened so the whole name stays within [`NAME_MAX`].
+///
+/// PostgreSQL truncates a longer name silently, so a long label's counter 140
+/// met its counter 14 on one database (the final suite, 2026-11-22:
+/// `knobas_scratch_background_write_quit_cut_inbackground_605729_14 already
+/// exists`). The pid and the counter are what keep two names apart, so they
+/// are the part that is always kept whole.
+fn scratch_name(label: &str, pid: u32, counter: u32) -> String {
+    const PREFIX: &str = "knobas_scratch_";
+    let suffix = format!("_{pid}_{counter}");
+    let mut slug = identifier_slug(label);
+    slug.truncate(NAME_MAX.saturating_sub(PREFIX.len() + suffix.len()));
+    format!("{PREFIX}{slug}{suffix}")
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:
@@ -1035,6 +1054,27 @@ pub fn kill_server(root_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A long label's names stay within what PostgreSQL keeps, and the
+    /// counters that a truncation used to merge (14 and 140) stay apart.
+    #[test]
+    fn a_long_labels_scratch_names_fit_and_keep_their_counters_apart() {
+        let label = "background_write_quit_cut_inbackground";
+        let fourteen = scratch_name(label, 605_729, 14);
+        let hundred_forty = scratch_name(label, 605_729, 140);
+        for name in [&fourteen, &hundred_forty] {
+            assert!(name.len() <= NAME_MAX, "{name} is {} bytes", name.len());
+        }
+        assert_ne!(fourteen, hundred_forty);
+        assert!(hundred_forty.ends_with("_605729_140"), "{hundred_forty}");
+        let short = scratch_name("files", 7, 3);
+        assert_eq!(
+            short, "knobas_scratch_files_7_3",
+            "a short label is kept whole"
+        );
+        let huge = scratch_name(&"x".repeat(200), u32::MAX, u32::MAX);
+        assert!(huge.len() <= NAME_MAX && huge.ends_with(&format!("_{}_{}", u32::MAX, u32::MAX)));
+    }
 
     /// A scratch directory under `parent`, stamped with `nonce` if given.
     ///
