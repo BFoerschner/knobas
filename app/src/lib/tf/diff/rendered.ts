@@ -10,7 +10,7 @@
  * draws where no reader is offered, unless the ceiling cut it. A modified file without a byte reader offers no rendered
  * mode: its hunks hold only the lines near the change.
  */
-import type { DiffFile } from "../../ipc/entity";
+import type { ArchiveIndex, DiffFile } from "../../ipc/entity";
 import type { Opened } from "../../render/defaults";
 import type { Renderer } from "../../render/registry";
 
@@ -22,10 +22,14 @@ export interface RenderedPlan {
   sides: Side[];
 }
 
-/** What the caller can read: each side's text whole (expanded context), each side's bytes (every rendered side). */
+/**
+ * What the caller can read: each side's text whole (expanded context), each side's bytes (every rendered side), each
+ * side's archive listed (a JAR's comparison, `DiffContext.archive`).
+ */
 export interface Readable {
   whole: boolean;
   bytes: boolean;
+  archive?: boolean;
 }
 
 /** How a file's card shows it: its lines (or a binary file's *Bytes* note), or rendered in the stage. */
@@ -33,8 +37,17 @@ export type DiffMode = "lines" | "rendered";
 /** How an image changed on both sides is drawn in the stage: side by side, swiped across, or onion-skinned. */
 export type ImageMode = "sides" | "swipe" | "onion";
 
-/** One side as read: its text or bytes, no file on that side (an added or deleted binary), or why it could not be read. */
-export type SideGot = { kind: "drawn"; content: string | Uint8Array } | { kind: "absent" } | { kind: "failed"; why: string };
+/**
+ * One side as read: its text or bytes (a JAR's: its listing), no file on that side (an added or deleted binary), or why
+ * it could not be read.
+ */
+export type SideGot = { kind: "drawn"; content: string | Uint8Array | ArchiveIndex } | { kind: "absent" } | { kind: "failed"; why: string };
+
+/** Whether a side's content is an archive's listing (a JAR's side), not its text or bytes. */
+export function isListing(content: string | Uint8Array | ArchiveIndex): content is ArchiveIndex {
+  // `ArrayBuffer.isView`, not `instanceof`: bytes made in another realm (a worker, a test's encoder) are no `Uint8Array` here.
+  return typeof content === "object" && !ArrayBuffer.isView(content);
+}
 
 const COMMAND = "command:";
 
@@ -46,6 +59,8 @@ export function sidesOfChange(file: DiffFile): Side[] {
 /** Whether `renderer` can draw `file` on both sides, given what the caller can read. */
 function drawsBoth(file: DiffFile, renderer: Renderer, can: Readable): boolean {
   if (!renderer.diff || renderer.output === "lines") return false;
+  // A JAR is compared by its two listings, read by the backend (`archive_open`), never through the byte read.
+  if (renderer.id === "jar") return can.archive === true;
   if (file.change === "binary") {
     // A command renderer is handed the file as text (`TfCommandOutput`): a binary file's bytes are not that.
     return can.bytes && renderer.input === "bytes" && !renderer.id.startsWith(COMMAND);
@@ -67,6 +82,35 @@ export function renderedChoices(file: DiffFile, opened: Opened, can: Readable): 
 export function renderedPlan(file: DiffFile, renderer: Renderer | null, can: Readable): RenderedPlan | null {
   if (renderer === null || !drawsBoth(file, renderer, can)) return null;
   return { renderer, sides: sidesOfChange(file) };
+}
+
+/** A name a spec goes by: `openapi`, `swagger` or `.oas.` in it, ending `.json`, `.yaml` or `.yml`. */
+const SPEC_NAME = /(openapi|swagger)[^/]*\.(json|ya?ml)$|\.oas\.(json|ya?ml)$/i;
+const SPEC_EXT = /\.(json|ya?ml)$/i;
+/** A version key at a line's start, as a YAML spec's top level writes it. */
+const SPEC_KEY = /^(["']?)(openapi|swagger)\1[ \t]*:/;
+
+/**
+ * Text a diff's file holds that tells whether it is an OpenAPI or Swagger spec, with no read (2026-11-22, Fable's ruling
+ * 9): an added or deleted file whole, the first hunk where it starts at line 1, a hunk's line that is a YAML spec's
+ * version key, or a name a spec goes by. `undefined` where none tells: such a file offers no OpenAPI (a modified spec
+ * with a plain name, changed away from its first lines, keeps *Lines*).
+ */
+export function specHint(file: DiffFile): string | undefined {
+  if (!SPEC_EXT.test(file.path) || file.change === "binary") return undefined;
+  if (SPEC_NAME.test(file.path)) return "openapi: 3.0.0";
+  for (const side of ["new", "old"] as const) {
+    const whole = hunkText(file, side);
+    if (whole !== null) return whole;
+  }
+  const first = file.hunks[0];
+  if (first !== undefined && first.lines[0]?.new === 1)
+    return first.lines
+      .filter((l) => l.kind !== "del")
+      .map((l) => l.text)
+      .join("\n");
+  for (const hunk of file.hunks) for (const line of hunk.lines) if (SPEC_KEY.test(line.text)) return line.text;
+  return undefined;
 }
 
 /** An added file's new side, or a deleted file's old one, from its hunks: `null` where they hold less than the file. */

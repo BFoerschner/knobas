@@ -103,7 +103,7 @@
   import { MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, type Opened, type RendererDefault } from "../../render/defaults";
   import { rendererDefaults } from "../../render/defaults.svelte";
   import { allRenderers, type Renderer } from "../../render/registry";
-  import { hunkText, renderedChoices, renderedPlan, renderedRoom, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
+  import { hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
@@ -121,7 +121,9 @@
   import { FolderCompare, ipcFolderComparePorts, type Compared, type FolderComparePorts } from "../../render/folder-compare.svelte";
   import { folderRenderers as appFolderRenderers } from "../../render/folders.svelte";
   import { folderPicks as appFolderPicks, type FolderPicks } from "../../render/folder-picks.svelte";
-  import { folderRenderFileBytes, folderRenderMarks, type FolderMarks, type FolderRenderer } from "../../ipc/app";
+  import { folderRenderArchiveOpen, folderRenderFileBytes, folderRenderMarks, type FolderMarks, type FolderRenderer } from "../../ipc/app";
+  import type { ArchiveIndex } from "../../ipc/entity";
+  import { bridgeArchive, type ArchivePorts } from "../../render/jar-ports";
   import { heldWrite } from "../../shell/held-write";
   import { renderersFor } from "../../render/folder";
   import { lineDiff } from "./line-diff";
@@ -159,6 +161,8 @@
     picks = appFolderPicks,
     folderMarks = folderRenderMarks,
     madeBytes = folderRenderFileBytes,
+    madeArchive = folderRenderArchiveOpen,
+    archives = bridgeArchive(),
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -241,6 +245,10 @@
     folderMarks?: (entityId: string, commit: string | null, paths: string | null) => Promise<FolderMarks[]>;
     /** A generated file's bytes by its folder's token: the IPC, a fake in tests. */
     madeBytes?: (token: string, path: string) => Promise<Uint8Array>;
+    /** A generated archive listed by its folder's token (a JAR's comparison): the IPC, a fake in tests. */
+    madeArchive?: (token: string, path: string) => Promise<ArchiveIndex>;
+    /** The archive reads by handle a JAR's comparison makes once each side is listed: the bridge's, a fake in tests. */
+    archives?: Omit<ArchivePorts, "open">;
   } = $props();
 
   // ---- A folder renderer in a comparison (ux26, rulings 7 and 8; the decision list's sections 8 to 11) ----
@@ -399,7 +407,7 @@
   }
 
   /** A generated file's two sides are read by bytes, never by a whole text or the forge. */
-  const MADE_CAN = { whole: false, bytes: true } as const;
+  const MADE_CAN = { whole: false, bytes: true, archive: true } as const;
   /** A generated file over this many bytes on a side is not diffed as lines in the window (section 9). */
   const MADE_LINES_CAP = 2 * 1024 * 1024;
   const madeMemo = new WeakMap<Compared, DrawnFile[]>();
@@ -906,7 +914,7 @@
   /** Each file's rendered mode, where one of its renderers draws both sides and they can be read (by `keyOf`). */
   const plans = $derived.by(() => {
     // Worked out per file as it is drawn, not for every file of a change of thousands as it opens.
-    const can = { whole: context !== null, bytes: typeof context?.bytes === "function" };
+    const can = { whole: context !== null, bytes: typeof context?.bytes === "function", archive: typeof context?.archive === "function" };
     const list = defaults.list;
     const chosen = picked;
     const all = allRenderers();
@@ -918,10 +926,12 @@
       const binary = file.change === "binary";
       // A generated file opens as the Files tab opens it in a generated folder (a page as a page), read as bytes.
       const gen = file.made !== undefined;
-      const name = byName === null ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
+      // A JSON or YAML file whose diff shows it a spec is planned by that text, not by its name alone.
+      const text = specHint(file);
+      const name = byName === null || text !== undefined ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
       const had = name === null ? undefined : byName!.get(name);
       if (had !== undefined) return had;
-      const opened = openWith({ path: file.path, binary }, all, gen ? madeList : list);
+      const opened = openWith(text === undefined ? { path: file.path, binary } : { path: file.path, binary, text }, all, gen ? madeList : list);
       const made = { opened, choices: renderedChoices(file, opened, gen ? MADE_CAN : can) };
       if (name !== null) byName!.set(name, made);
       return made;
@@ -975,6 +985,16 @@
   const asked = new Set<string>();
   const NAMES = { old: "before", new: "after" } as const;
 
+  /** A JAR's side listed by the backend (2026-11-22): a generated one by its folder's token; `null` for no file there. */
+  async function listingAt(file: DrawnFile, side: Side): Promise<ArchiveIndex | null> {
+    if (file.made !== undefined) {
+      const token = file.made[side];
+      return token === null ? null : madeArchive(token, file.path);
+    }
+    if (context?.archive === undefined) throw new Error("nothing reads this diff's archives");
+    return context.archive(file, side);
+  }
+
   function loadSide(file: DrawnFile, side: Side) {
     const name = `${side}\n${keyOf(file)}`;
     const reader = context;
@@ -986,6 +1006,11 @@
       return;
     }
     const read = async (): Promise<SideGot> => {
+      // A JAR (2026-11-22): each side its archive listed by the backend, never its bytes here.
+      if (planOf(file)?.plan.renderer.id === "jar") {
+        const index = await listingAt(file, side);
+        return index === null ? { kind: "absent" } : { kind: "drawn", content: index };
+      }
       // A generated file (ux26): its side is the generated folder's, by its token; none on a side it is not on.
       if (file.made !== undefined) {
         const token = file.made[side];
@@ -1858,6 +1883,8 @@
         onmakedefault={(r) => planned && void makeDefault(file, planned.opened, r, planned.path ?? file.path)}
         {frame}
         {commands}
+        {archives}
+        reopen={(side) => listingAt(file, side)}
         expandable={context !== null && piped === null && file.made === undefined}
         expanded={piped ? undefined : expandedOf(key)}
         onexpand={(hunk, how) => void expand(lineOf(file), hunk, how)}

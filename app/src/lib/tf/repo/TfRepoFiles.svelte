@@ -1551,11 +1551,8 @@
     if (drawn === null) return null;
     if (fileMade === null) return openWith(drawn, allRenderers(), defaults.list);
     // A generated file (ADR-0046): a page opens as one after the person's own defaults. A JAR opens in the JAR view,
-    // its archive read from the generated folder (`folder_render_archive_open`), where the ports read one.
-    const made = openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
-    if (madePorts.archive !== undefined && ports.archive !== undefined) return made;
-    const offered = made.offered.filter((r) => r.id !== "jar");
-    return { ...made, offered, renderer: made.renderer?.id === "jar" ? (offered[0] ?? null) : made.renderer };
+    // its archive read from the generated folder (`folder_render_archive_open`); with no archive reads it stays binary.
+    return openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
   });
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();

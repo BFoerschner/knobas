@@ -145,7 +145,8 @@ export const OPENAPI: Renderer = {
   fences: [],
   input: "text",
   output: "html",
-  diff: false,
+  // A comparison draws the two sides' views next to each other (2026-11-22), planned by `rendered.ts`' `specHint`.
+  diff: true,
   sniff: isOpenApi,
 };
 
@@ -153,7 +154,9 @@ export const OPENAPI: Renderer = {
  * JAR (ux19, `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`): a Java archive drawn as what it holds,
  * its manifest, its Maven coordinates, its classes outlined and its nested JARs (`tf/render/TfJar.svelte`). It reads
  * no bytes here: the backend reads and lists the archive (`archive_open`) and hands the view one entry at a time. A
- * binary file, so *Source* is not offered; the view offers *Save to Downloads*.
+ * binary file, so *Source* is not offered; the view offers *Save to Downloads*. In a comparison it is the entries
+ * that differ (`render/jar-diff.ts`, `tf/diff/TfJarDiff.svelte`; Fable's ruling of 2026-11-22), each side listed by
+ * the backend as the view lists it.
  */
 export const JAR: Renderer = {
   id: "jar",
@@ -162,7 +165,7 @@ export const JAR: Renderer = {
   fences: [],
   input: "bytes",
   output: "html",
-  diff: false,
+  diff: true,
 };
 
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */

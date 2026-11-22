@@ -17,7 +17,7 @@
  *   the file's old path, so a rename that changes the language highlights
  *   each side in its own.
  */
-import type { DiffFile, DiffLine, Hunk, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
+import type { ArchiveIndex, DiffFile, DiffLine, Hunk, LineThread, PipeRun, PipeStep } from "../../ipc/entity";
 import type { PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { wordMarks, type Range } from "./words";
 
@@ -46,6 +46,11 @@ export interface DiffContext {
    * that side. Absent: this diff runs no pipelines.
    */
   piped?(file: DiffFile, side: "old" | "new", steps: PipeStep[]): Promise<PipeRun | null>;
+  /**
+   * A side's archive listed for a JAR's comparison (`archive_open`, past the byte read's cap): `null` where the file is
+   * not on that side. Absent: no JAR is compared rendered.
+   */
+  archive?(file: DiffFile, side: "old" | "new"): Promise<ArchiveIndex | null>;
 }
 
 /**

@@ -431,3 +431,47 @@ test("a Markdown file's changed blocks are marked on their own side, and n steps
     Element.prototype.getBoundingClientRect = real;
   }
 });
+
+/** A one-line change in a YAML or JSON file, as a forge's diff gives it. */
+const changedAt = (path: string, n: number, was: string, now: string): DiffFile => ({
+  path,
+  old_path: null,
+  change: "modified",
+  additions: 1,
+  deletions: 1,
+  hunks: [{ header: `@@ -${n} +${n} @@`, lines: [{ kind: "del", old: n, new: null, text: was }, { kind: "add", old: null, new: n, text: now }] }],
+  truncated: false,
+  threads: [],
+});
+
+test("an OpenAPI spec offers Rendered where its diff or its name shows it one; a plain config file does not (2026-11-22)", () => {
+  const { context } = reader({});
+  draw({
+    files: [
+      changedAt("api/openapi.yaml", 9, "a", "b"),
+      // A plain file of the same name first: what one name plans is not kept for the other.
+      changedAt("old/spec.yaml", 9, "a", "b"),
+      changedAt("api/spec.yaml", 1, "openapi: 3.0.0", "openapi: 3.1.0"),
+      changedAt("config/app.json", 3, '"a": 1', '"a": 2'),
+      changedAt("docker-compose.yml", 9, "a", "b"),
+    ],
+    context,
+  });
+  expect(modes("old/spec.yaml")).toEqual([]);
+  expect(modes("api/openapi.yaml")).toEqual(["Lines*", "Rendered"]);
+  expect(modes("api/spec.yaml")).toEqual(["Lines*", "Rendered"]);
+  expect(modes("config/app.json")).toEqual([]);
+  expect(modes("docker-compose.yml")).toEqual([]);
+});
+
+test("an OpenAPI comparison says which side is no spec, and once where neither is", async () => {
+  const { context } = reader({ "api/openapi.yaml": ["title: not a spec\n", "openapi: 3.0.0\ninfo:\n  title: x\n"], "api/swagger.json": ['{"a": 1}', '{"a": 2}'] });
+  draw({ files: [changedAt("api/openapi.yaml", 1, "title: not a spec", "openapi: 3.0.0"), changedAt("api/swagger.json", 1, '{"a": 1}', '{"a": 2}')], context });
+  mode("api/openapi.yaml", "Rendered");
+  mode("api/swagger.json", "Rendered");
+  await settle();
+  expect(side("api/openapi.yaml", "old").textContent).toContain("Not an OpenAPI or Swagger spec on this side.");
+  expect(side("api/openapi.yaml", "new").textContent).not.toContain("Not an OpenAPI");
+  expect(stage("api/swagger.json").textContent?.trim()).toBe("Neither side is an OpenAPI or Swagger spec: Lines has the change.");
+  expect(stage("api/swagger.json").classList.contains("tf-rstage-one")).toBe(true);
+});

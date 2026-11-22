@@ -311,6 +311,7 @@ vi.mock("../ipc/app", () => ({
   folderRenderTree: () => deferred({ dir: "/s/knobas-rendered/x/f.site.0123abcd", files: [{ path: "README.md", size: 1 }], bytes: 1, left_out: [], left_out_total: 0 }),
   folderRenderFile: () => new Promise(() => {}),
   folderRenderFileBytes: () => deferred(new Uint8Array()),
+  folderRenderArchiveOpen: () => new Promise(() => {}),
   folderRenderOpen: () => deferred([]),
   folderRenderStore: () =>
     deferred({ dir: "/s/knobas-rendered", set: null, default_dir: "/s", place: "clones", folders: 0, bytes: 0, cap_bytes: 4 * 1024 ** 3 }),
@@ -450,6 +451,7 @@ const TfJar = (await import("../tf/render/TfJar.svelte")).default;
 const TfJarCode = (await import("../tf/render/TfJarCode.svelte")).default;
 const TfDecompilerSetting = (await import("../tf/settings/TfDecompilerSetting.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
+const TfJarDiff = (await import("../tf/diff/TfJarDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
 const TfHtmlPage = (await import("../tf/render/TfHtmlPage.svelte")).default;
 const TfMadeBar = (await import("../tf/render/TfMadeBar.svelte")).default;
@@ -1767,6 +1769,41 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** A JAR in a comparison (2026-11-22): a changed entry opened, both sides' reads answering late. */
+    name: "TfJarDiff",
+    source: "lib/tf/diff/TfJarDiff.svelte",
+    open: (target) => {
+      const side = (handle: string, crc: number) => ({
+        handle, kind: "jar", size: 10, total: 5, packed: 5, names: "a.txt", sizes: [5], packed_sizes: [5], crcs: [crc], flags: [0],
+        manifest: [], maven: [], release: null, releases: [], libs: [], prefix: 0, warnings: [],
+      });
+      const row = { key: "a.txt", change: "changed" as const, kind: "file" as const, old: { path: "a.txt", size: 5, members: ["a.txt"] }, new: { path: "a.txt", size: 5, members: ["a.txt"] }, lib: null };
+      const app = mount(TfJarDiff, {
+        target,
+        props: {
+          path: "build/app.jar",
+          before: side("a1", 1),
+          after: side("a2", 2),
+          compare: { rows: [row], same: 0, changed: 1, added: 0, removed: 0 },
+          java: null,
+          mode: "source",
+          render: { highlight: () => ({ focus() {}, cancel() {} }) },
+          archives: {
+            nested: () => deferred(null as never),
+            entry: () => deferred(new Uint8Array([104, 105])),
+            cls: () => deferred(null as never),
+            decompile: () => deferred(""),
+            download: () => deferred(""),
+            java: () => deferred({ java: null, decompiler: null, needs: null, can_decompile: false, reason: null, set_path: null }),
+          },
+        },
+      });
+      flushSync();
+      target.querySelector<HTMLButtonElement>(".tf-jdiff-row")?.click();
+      return { app };
+    },
   },
   {
     /** Text inside a JAR (ux19): its highlighting answers late, a job held meanwhile. */

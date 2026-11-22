@@ -447,6 +447,10 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-rstage .tf-rframe, .tf-rstage .tf-rstage-frame { min-height: 0; height: calc(var(--tf-rstage) - 1px); }
 .tf-rstage.tf-rstage-open .tf-rframe, .tf-rstage.tf-rstage-open .tf-rstage-frame { height: 640px; }
 .tf-rside-doc:has(> .tf-rframe, > .tf-rstage-frame) { padding: 0; }
+/* An OpenAPI comparison (2026-11-22): each side's view in a scroller of its own at the stage's height, as a page's frame. */
+.tf-rstage[data-renderer="openapi"] .tf-rside-doc { height: calc(var(--tf-rstage) - 1px); overflow: auto; padding: 0 14px; box-sizing: border-box; background: var(--under); }
+.tf-rstage.tf-rstage-open[data-renderer="openapi"] .tf-rside-doc { height: 640px; }
+.tf-roas-no { padding: 10px 0; }
 /* A PDF's own head names the sides the caption already names. */
 .tf-rstage .tf-pdfd-head { display: none; }
 .tf-rfoot { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 31px; padding: 0 12px; border-top: 1px solid var(--rule-2); --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); }
