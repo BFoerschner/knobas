@@ -551,8 +551,11 @@ async fn a_reviews_verdict_is_its_tone_in_the_conversation() {
 /// pull request's own `.diff`, and no other request.
 #[tokio::test]
 async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
-    let server = gitea(open_pull(), reviews()).await;
-    let view = source(&server)
+    // A token of its own (the rule above): the reads it expects include `/user`, which a test before it on the
+    // same port and token would have left remembered (failed so in the ux30 end gate's `just test` on WSL).
+    let token = "files-tab-token";
+    let server = slow_gitea(open_pull(), reviews(), None, token).await;
+    let view = built(&server, token)
         .view(PR, Some("files"))
         .await
         .unwrap()
