@@ -56,15 +56,19 @@ carries the next start, and a fill signs in again when it has run out.
 - **Not filled**: a one-time code ("⟨source⟩ asks for a code. That one is yours to type."), a change-password form, a
   form in a frame, a hidden password field, and a provider's page (the bar's chip: "not ⟨source⟩'s own address, so its
   sign-in is not filled").
-- **External adapters** (Björn: "how am i supposed to open xwiki as nicely as confluence"): `knobas:adapter@1.6.0`
+- **External adapters** (Björn: "how am i supposed to open xwiki as nicely as confluence"): `knobas:adapter@1.7.0`
   reads the same `web_sign_in` from a component's descriptor JSON (the descriptor crosses the WIT as its serde JSON, so
-  the key is the WIT's equivalent of a `web-sign-in-paths` field; the 1.6.0 `descriptor` doc names it). The host reads
-  it from a 1.6.0 component and drops it from one built against 1.0 to 1.5, which keeps *Fill sign-in* alone, and
+  the key is the WIT's equivalent of a `web-sign-in-paths` field; the 1.7.0 `descriptor` doc names it). 1.7.0 and not
+  1.6.0 because ux29 ships 1.6.0 and freezes it (Björn, 2026-11-22): the 1.7.0 world has 1.6.0's types, the SDK keeps
+  the 1.6.0 world as `wit-1.6.0/` (feature `v1_6`), and this work is on the branch `ux30-signin`. The host reads the
+  key from a 1.7.0 component, drops it from one built against 1.0 to 1.6, which keeps *Fill sign-in* alone, and
   refuses a malformed one at load. The component only says where its sign-in page is: the sign-in stays in the host's
   keychain item and is typed by the host into its own web view, so the sandbox is unchanged. The SDK re-exports
-  `WebSignInPages`; the fixture declares `/login` in every build (the host test holds 1.6.0 to it and 1.5.0 and 1.3.0
-  to none), and an app test installs the 1.6.0 fixture and sees its declared page ask for the fill. The XWiki adapter
-  (`knobas-adapter-xwiki`) declares XWiki's login page, whose "Remember me" (`j_rememberme`) the fill ticks.
+  `WebSignInPages`; the fixture declares `/login` in every build (the host test holds 1.7.0 to it and 1.6.0, 1.5.0 and
+  1.3.0 to none), and an app test installs the 1.7.0 fixture and sees its declared page ask for the fill. The XWiki
+  adapter (`knobas-adapter-xwiki`, branch `web-sign-in`) declares `/bin/login/XWiki/XWikiLogin` after its base URL,
+  whose "Remember me" (`j_rememberme`) the fill ticks; it builds against 1.7.0, and against 1.6.0 and 1.5.0 with
+  `INTERFACE=`.
 - **Quitting** drops every view and waits up to 3 s for each site's browser process to end on Windows, when Chromium
   writes its cookie store.
 - **Found on the way (macOS 27)**: a site's view covered its own bar. The window's content view runs under the title
