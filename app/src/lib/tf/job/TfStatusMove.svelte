@@ -1,7 +1,7 @@
 <!--
   The ticket page's status, as a control (ticket-edit decisions, section 13; ADR-0054). Björn: "inside the ticket, you
   can just change the status on the field after clicking them". The chip as it reads and a small chevron: a press, or
-  `m` anywhere on the page outside a field, opens a menu of the statuses the ticket can reach from where it stands, in
+  `s` anywhere on the page outside a field, opens a menu of the statuses the ticket can reach from where it stands, in
   the source's order. A pick moves it (`moveTicket`): the chip shows the new status at once, with *Moving, queued*
   then *Moved, sent* beside it, gone when the page's read shows the status.
 
@@ -73,8 +73,8 @@
   aria-haspopup={moves.can ? "menu" : undefined}
   aria-expanded={moves.can ? open : undefined}
   aria-disabled={moves.can ? undefined : "true"}
-  aria-label={moves.can ? `Status: ${shown ?? "No status"}. Change it (M)` : undefined}
-  title={moves.can ? "Change the status (M)" : (moves.why ?? undefined)}
+  aria-label={moves.can ? `Status: ${shown ?? "No status"}. Change it (S)` : undefined}
+  title={moves.can ? "Change the status (S)" : (moves.why ?? undefined)}
   onclick={() => {
     if (moves.can) open = !open;
   }}

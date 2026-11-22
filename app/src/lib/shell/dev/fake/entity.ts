@@ -370,7 +370,8 @@ function fakeTransitions(args: Record<string, unknown>): string[] {
   const entry = CORPUS.find((candidate) => candidate.entity_id === String(args["entityId"] ?? ""));
   const status = fakeText(entry?.payload["status"]);
   const WORKFLOW: Record<string, string[]> = {
-    "To Do": ["In Progress"],
+    // Two ways out of To Do, so a drop on a view's column of both (*In flight*, *Working*) asks which (ADR-0054).
+    "To Do": ["In Progress", "In Review"],
     "In Progress": ["In Review", "To Do"],
     "In Review": ["Done", "In Progress"],
     Done: ["In Progress"],

@@ -42,10 +42,10 @@
 
   **Moving a ticket** (ADR-0054, ticket-edit decisions sections 3 to 13): a
   card is dragged to a column, which lights where it can go (`card-drag.svelte.ts`;
-  `m` carries the selected card by key); a column of several statuses asks
+  `s` carries the focused or selected card by key); a column of several statuses asks
   which, at the drop point. A card's right-click menu offers *Move to ▸* with
   the statuses it can reach,
-  and the list's Status cell is a button that opens them (`m` on the selected
+  and the list's Status cell is a button that opens them (`s` on the selected
   row). A move is drawn at once, the card in its new column with *Queued*
   then *Sent* (`moves.svelte.ts`, laid over the board's read by
   `echo-board.ts`); a refused or held one puts the card back with a note.
@@ -210,7 +210,7 @@
   import { sameStatus } from "./drop";
   import { withStatusEchoes, withStatusRows } from "./echo-board";
   import { askReach, asking as reachAsking, moveRefusal, noteObserved, reachOf } from "./reach.svelte";
-  import { dismissNote, movedStatus, moveTicket, moveWaits, offerMoves, ticketNotes, undoLastMove, watchTicketNotes, type MoveOffer } from "./moves.svelte";
+  import { dismissNote, movedStatus, moveTicket, moveWaits, MOVE_KEY, offerMoves, ticketNotes, undoLastMove, watchTicketNotes, type MoveOffer } from "./moves.svelte";
   import StatusMenu from "./StatusMenu.svelte";
   import { createCardDrag } from "./card-drag.svelte";
 
@@ -756,12 +756,31 @@
     return null;
   }
 
-  /** The card back where it stood: its move was refused, held or withdrawn. */
+  /**
+   * The card back where it stood: its move was refused, held or withdrawn. The one move on the board nobody's hand made,
+   * so it is shown (Björn, 2026-11-22: "it must be obvious what happened"): the card glides from where it stood into its
+   * old place, and its note says why. Under `prefers-reduced-motion` it is simply there.
+   */
   function putBack(entityId: string) {
     const was = movedFrom.get(entityId);
     movedFrom.delete(entityId);
-    if (was !== undefined) boardHold.restore(entityId, was);
+    if (was === undefined) return;
+    const find = () => document.querySelector<HTMLElement>(`.tf-tickets .tf-tcard[data-entity="${CSS.escape(entityId)}"]`);
+    const from = find()?.getBoundingClientRect() ?? null;
+    boardHold.restore(entityId, was);
+    if (from === null || typeof matchMedia === "undefined" || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    void tick().then(() => {
+      const card = find();
+      const to = card?.getBoundingClientRect();
+      if (!card || !to || typeof card.animate !== "function") return;
+      const dx = from.left - to.left;
+      const dy = from.top - to.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      card.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: RETURN_MS, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+    });
   }
+  /** How long a refused card takes to glide back to its column. */
+  const RETURN_MS = 260;
 
   /**
    * Move `card` to `status`: on the board it stands at once where it was dropped (`at`, section 8), or at the top of its
@@ -1095,17 +1114,20 @@
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;
-      // `m` on the board picks the selected card up (the carry, section 10).
-      if (event.key === "m" && showing.layout === "board" && current !== null && layers.open.length === 0) {
-        if (drag.carry(current.card.entity_id)) event.preventDefault();
-        return;
-      }
-      // `m` on the list's selected row opens its status menu under the cell (section 10).
-      if (event.key === "m" && showing.layout === "list" && current !== null && layers.open.length === 0) {
-        const cell = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(current.card.entity_id)}"] .tf-statecell`);
+      // The move key on the board picks up the focused card, else the selected one (the carry, section 10); on the list it
+      // opens the row's status menu under its cell. The focused one first, as `Enter` reads it: a drop leaves focus on the
+      // card it moved while the selection stays where it was.
+      if (event.key === MOVE_KEY && current !== null && layers.open.length === 0) {
+        const focused = at instanceof HTMLElement ? at.closest<HTMLElement>("[data-entity]") : null;
+        const entry = (focused === null ? null : visible.find((one) => one.card.entity_id === focused.dataset.entity)) ?? current;
+        if (showing.layout === "board") {
+          if (drag.carry(entry.card.entity_id)) event.preventDefault();
+          return;
+        }
+        const cell = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(entry.card.entity_id)}"] .tf-statecell`);
         if (cell !== null) {
           event.preventDefault();
-          openStatusMenu(current.card, cell);
+          openStatusMenu(entry.card, cell);
         }
         return;
       }
@@ -1457,7 +1479,7 @@
                         aria-haspopup={blocked === null ? "menu" : undefined}
                         aria-expanded={blocked === null ? statusMenuOpen && statusMenu?.card.entity_id === card.entity_id : undefined}
                         aria-disabled={blocked === null ? undefined : "true"}
-                        title={blocked ?? `${columnName(card.status)}. Change the status (M)`}
+                        title={blocked ?? `${columnName(card.status)}. Change the status (S)`}
                         onclick={(event) => {
                           event.stopPropagation();
                           openStatusMenu(card, event.currentTarget);

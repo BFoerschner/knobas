@@ -292,3 +292,28 @@ test("a card whose source answers later lights from what the window holds and fo
     COLUMNS[0]!.cards[1] = late;
   }
 });
+
+test("a capture lost with the button still down keeps the card held; lost with none down puts it back", () => {
+  lift();
+  const lost = (buttons: number) => wrap.dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 1, pointerType: "mouse", buttons, bubbles: true }));
+  lost(1);
+  expect(drag.holding()).toBe(true);
+  lost(0);
+  expect(drag.holding()).toBe(false);
+  expect(floats.children).toHaveLength(0);
+});
+
+test("the release's click reaches no other window listener, so the status menu a drop opens is not closed by it", async () => {
+  lift();
+  pointer("pointermove", 310, 200);
+  pointer("pointerup", 310, 200);
+  expect(chosen?.statuses).toEqual(["In Progress", "In Review"]);
+  // As the menu's outside-click listener is added once it opens: on the window, in the capture phase.
+  const outside = vi.fn();
+  window.addEventListener("click", outside, true);
+  node("PAY-1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  window.removeEventListener("click", outside, true);
+  expect(outside).not.toHaveBeenCalled();
+  chosen!.answer(null);
+  await flush();
+});

@@ -13,6 +13,7 @@
   import TfMenu from "../TfMenu.svelte";
   import type { Reach } from "./reach.svelte";
   import { sameStatus } from "./drop";
+  import { columnName } from "./tickets";
 
   let {
     open = $bindable(false),
@@ -96,9 +97,9 @@
   {:else}
     {#if unsure}<p class="tf-menu-line">{source} did not answer; it decides when the move is sent.</p>{/if}
     {#each items as item, place (item)}
-      <button type="button" role="menuitem" onclick={() => pick(item)} onkeydown={digits}>{item}{#if place < 9}<kbd>{place + 1}</kbd>{/if}</button>
+      <button type="button" role="menuitem" onclick={() => pick(item)} onkeydown={digits}>{columnName(item)}{#if place < 9}<kbd>{place + 1}</kbd>{/if}</button>
     {:else}
-      <button type="button" role="menuitem" aria-disabled="true">{source} offers no move from {status ?? "no status"}.</button>
+      <button type="button" role="menuitem" aria-disabled="true">{source} offers no move from {columnName(status)}.</button>
     {/each}
   {/if}
 </TfMenu>

@@ -270,7 +270,7 @@ test("a ticket's Move to: the statuses it can reach as a submenu, after what it 
   expect(ids(entries).slice(0, 4)).toEqual(["open", "work", "timer", "move"]);
   const move = item(entries, "move");
   expect(move.label).toBe("Move to");
-  expect(move.sub!.map((one) => ("rule" in one ? "|" : one.label))).toEqual(["In Review", "Done"]);
+  expect(move.sub!.map((one) => ("rule" in one ? "|" : one.label))).toEqual(["In review", "Done"]);
   expect((move.sub![1] as Item).act).toEqual({ do: "move", entityId: TICKET.id, status: "Done" });
 
   const asking = item(menuFor(TICKET, null, ctx({ moves: () => ({ ...offer, statuses: [], asking: "Asking Jira…" }) })), "move");

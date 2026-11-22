@@ -1419,7 +1419,7 @@ test("the status opens a menu of where the ticket can go, and a pick moves it at
     button.click();
     await settle();
     const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-move-m [role=menuitem]")];
-    expect(items.map((one) => one.textContent)).toEqual(["In Review1", "To Do2"]);
+    expect(items.map((one) => one.textContent)).toEqual(["In review1", "To do2"]);
     items[0]!.click();
     flushSync();
     expect(target.querySelector(".tf-jobrow .tf-statebtn")!.textContent).toBe("In review");
@@ -1432,12 +1432,12 @@ test("the status opens a menu of where the ticket can go, and a pick moves it at
   }
 });
 
-test("m opens the status menu from anywhere on the page outside a field", async () => {
+test("s opens the status menu from anywhere on the page outside a field", async () => {
   sourceRoles.take([{ id: "jira", display_name: "Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
   try {
     open("PAY-231", { ports: ports({ reachableTransitions: () => Promise.resolve(["Done"]) }) });
     await settle();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true }));
     await settle();
     expect([...document.querySelectorAll(".tf-move-m [role=menuitem]")].map((one) => one.textContent)).toEqual(["Done1"]);
   } finally {

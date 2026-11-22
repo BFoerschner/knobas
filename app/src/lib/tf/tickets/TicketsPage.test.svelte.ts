@@ -2550,7 +2550,7 @@ test("the list's Status cell opens the statuses the ticket can reach, and a pick
   cell.click();
   await settle();
   const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-move-m [role=menuitem]")];
-  expect(items.map((one) => one.textContent)).toEqual(["In Progress1", "Done2"]);
+  expect(items.map((one) => one.textContent)).toEqual(["In progress1", "Done2"]);
   items[1]!.click();
   flushSync();
   expect(target.querySelector('[data-entity="jira:PAY-2"] .tf-statecell')!.textContent).toBe("Done");
@@ -2620,7 +2620,7 @@ test("a refused move puts the card back in its column at its place, with the sou
   expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-trefused')?.textContent).toContain("Not moved to Done. No move from To Do to Done.");
 });
 
-test("m on the board carries the selected card: Enter on a one-status column moves it there at the top, Queued, with no menu", async () => {
+test("s on the board carries the selected card: Enter on a one-status column moves it there at the top, Queued, with no menu", async () => {
   const h = harness();
   const { sent } = movable(h, ["In Progress"]);
   await open(h);
@@ -2630,7 +2630,7 @@ test("m on the board carries the selected card: Enter on a one-status column mov
   // Asked where it can go as it was selected.
   const { askReach } = await import("./reach.svelte");
   await askReach({ ...CORPUS[1]!.card, status: "To Do" }, "press", h.ports.moves!.reachableTransitions);
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true }));
   flushSync();
   expect(target.querySelector(".tf-board-wrap")!.hasAttribute("data-held")).toBe(true);
   expect(target.querySelector(".tf-sr")!.textContent).toContain("PAY-2 picked up. PAY-2 over In progress.");

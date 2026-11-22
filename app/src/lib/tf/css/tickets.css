@@ -220,6 +220,7 @@
 /* A status menu: its heading, and each status's number for a pick without a second aim. */
 .tf-menu .tf-menu-h { padding: 4px 10px 6px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-menu .tf-menu-line { padding: 4px 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); max-width: 300px; }
+.tf-move-m [role="menuitem"] { display: flex; align-items: center; gap: 16px; }
 .tf-menu kbd { --fs: var(--size-code); margin-left: auto; font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
 
 /* ---- a held card (ADR-0054; ticket-edit decisions, section 9). Nothing moves during a drag: what follows the hand is
@@ -246,7 +247,7 @@
 .tf-col[data-drop="no"][data-over] { cursor: not-allowed; }
 .tf-col:is([data-drop="yes"], [data-drop="ask"])[data-over] .tf-stack { outline: 2px solid var(--ink); outline-offset: -2px; }
 /* A column of several statuses says them while a card is held, at its head's right end: room the line always had. */
-.tf-col h3 .tf-colsts { margin-left: auto; min-width: 0; flex: 0 1 auto; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-col h3 .tf-colsts { margin-left: auto; min-width: 0; flex: 1 1 0; text-align: right; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-col h3 .tf-colsts:empty { display: none; }
 /* A write chip's words, each it can say stacked in one cell: it keeps the longest's width, so it never moves as it turns. */
 .tf-wwords { display: inline-grid; }
