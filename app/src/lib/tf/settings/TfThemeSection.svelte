@@ -75,11 +75,13 @@
     then();
   }
 
-  function chooseSlot(id: string): void {
-    const t = themes.find(id);
+  function chooseSlot(select: HTMLSelectElement): void {
+    const t = themes.find(select.value);
     if (!t) return;
-    editingId = id;
+    editingId = t.id;
     useForWindow(t);
+    // A theme that asks first is not in the slot yet: the select shows what the slot draws until it is.
+    select.value = themes.appDrawn(t.kind).id;
   }
 
   function fixAndUse(): void {
@@ -179,7 +181,7 @@
     {@const code = themes.drawn(kind)}
     <div class="tf-thm-slot" class:tf-cur={kind === drawnSide} data-slot={kind}>
       <h3>{slotLabel}</h3>
-      <select class="tf-thm-sel" aria-label="Window theme {slotLabel.toLowerCase()}" value={held.id} onchange={(event) => chooseSlot((event.currentTarget as HTMLSelectElement).value)}>
+      <select class="tf-thm-sel" aria-label="Window theme {slotLabel.toLowerCase()}" value={held.id} onchange={(event) => chooseSlot(event.currentTarget as HTMLSelectElement)}>
         {#each themes.appOf(kind) as t (t.id)}
           <option value={t.id}>{label(t)}</option>
         {/each}

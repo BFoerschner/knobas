@@ -176,6 +176,7 @@ test("a theme that cannot be read asks first: Cancel leaves the slot, Fix and us
   button("Cancel")!.click();
   flushSync();
   expect(storage.data.has(APP_SLOT_KEY.light)).toBe(false);
+  expect(q<HTMLSelectElement>('select[aria-label="Window theme while light"]')!.value).toBe("knobas-light");
   choose("light", FAINT.id);
   button("Fix and use")!.click();
   flushSync();
