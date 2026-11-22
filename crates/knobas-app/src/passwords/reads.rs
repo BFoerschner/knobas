@@ -605,6 +605,44 @@ mod tests {
         assert_eq!(held.sources[0].account.as_deref(), Some("mara"));
     }
 
+    /// Down is the last run's unreachable end, or a health check's: a
+    /// source whose run and check both went fine is not down, whenever it
+    /// was checked.
+    #[test]
+    fn a_source_is_down_by_its_last_run_or_its_health_check() {
+        let ask = |down: &HashMap<String, chrono::DateTime<chrono::Utc>>, s: SourceRow| {
+            assemble(
+                &[s],
+                &[],
+                &Ask {
+                    fillers: &[],
+                    templates: &[],
+                    down,
+                },
+                vec![],
+            )
+            .sources[0]
+                .down_at
+                .clone()
+        };
+        let none = HashMap::new();
+        let checked = chrono::Utc::now();
+        let fine = SourceRow {
+            last_outcome: Some("ok".into()),
+            auth_state: "ok".into(),
+            auth_checked_at: Some(checked),
+            ..source("pw")
+        };
+        assert_eq!(ask(&none, fine), None);
+        let unhealthy = SourceRow {
+            last_outcome: Some("ok".into()),
+            auth_state: "unreachable".into(),
+            auth_checked_at: Some(checked),
+            ..source("pw")
+        };
+        assert_eq!(ask(&none, unhealthy), Some(rfc3339(checked)));
+    }
+
     #[test]
     fn two_top_folders_keep_both() {
         let sources = [source("pw")];

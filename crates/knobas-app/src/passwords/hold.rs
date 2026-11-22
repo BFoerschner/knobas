@@ -150,6 +150,7 @@ mod tests {
         hold.show("pw:e1", &SecretRef::Password, SecretText::new("a"));
         hold.show("pw:e2", &SecretRef::Password, SecretText::new("b"));
         hold.show("pw2:e1", &SecretRef::Password, SecretText::new("c"));
+        assert!(!hold.is_empty());
         hold.hide("pw:e1", &SecretRef::Password);
         assert_eq!(hold.len(), 2);
         hold.hide_source("pw");
@@ -172,5 +173,8 @@ mod tests {
         // The Mac slept: the monotonic clock stood still, the wall clock did not.
         assert!(!shown.live(now, wall + Duration::from_secs(31)));
         assert!(!shown.live(now + Duration::from_secs(31), wall));
+        // At its deadline on either clock it is gone.
+        assert!(!shown.live(now + Duration::from_secs(30), wall));
+        assert!(!shown.live(now, wall + Duration::from_secs(30)));
     }
 }
