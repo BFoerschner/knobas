@@ -3476,6 +3476,13 @@ mod tests {
         assert_eq!(op.identifier(), "edit_ticket");
         assert_eq!(op.target(), "jira:PAY-231");
         assert!(!op.receipt_names_an_entity());
+        // A create's receipt names what it made (the final suite's mutants:
+        // the whole answer replaced by `false` went unseen).
+        let create: WriteOp = serde_json::from_value(serde_json::json!({
+            "CreateTicket": { "entity": "jira:PAY", "title": "t", "body": "", "ticket_type": "Task" }
+        }))
+        .unwrap();
+        assert!(create.receipt_names_an_entity());
         let WriteOp::EditTicket {
             title,
             assignee,

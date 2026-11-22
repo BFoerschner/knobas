@@ -579,6 +579,30 @@ where
     check_passwords(&*s, &d, &sink.0, &otp_keys).await;
 }
 
+/// Clause 17 rule 2: the first code key handed over that appears in an
+/// item's title, body text or payload, in any case, with the item. A key
+/// under four characters is not looked for: it would be found by chance.
+fn leaked_key<'a>(
+    keys: &'a [(String, crate::passwords::OtpKey)],
+    items: &'a [crate::SyncItem],
+) -> Option<(&'a str, &'a crate::SyncItem)> {
+    keys.iter().find_map(|(entity, key)| {
+        let secret = key.secret.expose();
+        if secret.len() < 4 {
+            return None;
+        }
+        let needle = secret.to_ascii_lowercase();
+        items
+            .iter()
+            .find(|item| {
+                format!("{}\n{}\n{}", item.title, item.body_text, item.payload)
+                    .to_ascii_lowercase()
+                    .contains(&needle)
+            })
+            .map(|item| (entity.as_str(), item))
+    })
+}
+
 /// Clause 17: the Passwords role (ADR-0056), over what the adapter's own
 /// full sync emitted and the code keys it handed the sink. Each rule panics
 /// with its number, so a fake that breaks one names it.
@@ -659,22 +683,12 @@ pub async fn check_passwords(
 
     // Rule 2: no key handed over appears in any title, body text or payload
     // string, in any case.
-    for (entity, key) in keys {
-        let secret = key.secret.expose();
-        if secret.len() < 4 {
-            continue;
-        }
-        let needle = secret.to_ascii_lowercase();
-        for item in items {
-            let haystack = format!("{}\n{}\n{}", item.title, item.body_text, item.payload)
-                .to_ascii_lowercase();
-            assert!(
-                !haystack.contains(&needle),
-                "clause 17 rule 2: the code key handed over for {entity} appears in {}'s title, \
-                 body text or payload",
-                item.entity
-            );
-        }
+    if let Some((entity, item)) = leaked_key(keys, items) {
+        panic!(
+            "clause 17 rule 2: the code key handed over for {entity} appears in {}'s title, \
+             body text or payload",
+            item.entity
+        );
     }
 
     // Rule 3: an entry says it has a readable code key exactly when one was
@@ -2485,6 +2499,8 @@ mod tests {
         EditsTicketsAcceptingAReadOnlyField,
         /// The same, answering no list for its assignee.
         EditsTicketsWithoutOptions,
+        /// The same, refusing an unlisted field without naming it.
+        EditsTicketsRefusingAnUnlistedFieldVaguely,
         /// A read-only ticket system (`ClaimsTicketSystem`) that answers
         /// `ticket_fields` all the same.
         AnswersFieldsWithoutEdit,
@@ -2599,7 +2615,8 @@ mod tests {
                     | Behavior::EditsTicketsAcceptingAnEmptyEdit
                     | Behavior::EditsTicketsAcceptingAnUnlistedField
                     | Behavior::EditsTicketsAcceptingAReadOnlyField
-                    | Behavior::EditsTicketsWithoutOptions => {
+                    | Behavior::EditsTicketsWithoutOptions
+                    | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
                         vec![Capability::Search, Capability::Write]
                     }
                     Behavior::Refreshes
@@ -2638,10 +2655,13 @@ mod tests {
                         | Behavior::EditsTicketsAcceptingAnEmptyEdit
                         | Behavior::EditsTicketsAcceptingAnUnlistedField
                         | Behavior::EditsTicketsAcceptingAReadOnlyField
-                        | Behavior::EditsTicketsWithoutOptions => vec![RoleClaim::new(
-                            TICKET_SYSTEM,
-                            ["reachable_transitions", crate::role::TICKET_FIELDS],
-                        )],
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
+                            vec![RoleClaim::new(
+                                TICKET_SYSTEM,
+                                ["reachable_transitions", crate::role::TICKET_FIELDS],
+                            )]
+                        }
                         Behavior::ClaimsCi => vec![RoleClaim::new(CI, ["run_log", "run_tests"])],
                         Behavior::ClaimsCiWithoutRunLog => vec![RoleClaim::new(CI, ["run_tests"])],
                         Behavior::ClaimsWikiWithoutParent => {
@@ -2671,7 +2691,10 @@ mod tests {
                     | Behavior::EditsTicketsAcceptingAnEmptyEdit
                     | Behavior::EditsTicketsAcceptingAnUnlistedField
                     | Behavior::EditsTicketsAcceptingAReadOnlyField
-                    | Behavior::EditsTicketsWithoutOptions => vec!["edit_ticket".into()],
+                    | Behavior::EditsTicketsWithoutOptions
+                    | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
+                        vec!["edit_ticket".into()]
+                    }
                     Behavior::DeclaresASourceAction
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionOpWithoutActions
@@ -2993,7 +3016,10 @@ mod tests {
                         | Behavior::EditsTicketsAcceptingAnEmptyEdit
                         | Behavior::EditsTicketsAcceptingAnUnlistedField
                         | Behavior::EditsTicketsAcceptingAReadOnlyField
-                        | Behavior::EditsTicketsWithoutOptions => vec![ticket_system(true)],
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
+                            vec![ticket_system(true)]
+                        }
                         Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
                         Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
                             use knobas_spi_types::payload::Frame;
@@ -3257,6 +3283,7 @@ mod tests {
                         | Behavior::EditsTicketsAcceptingAnUnlistedField
                         | Behavior::EditsTicketsAcceptingAReadOnlyField
                         | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely
                 )
             {
                 if crate::edit_is_empty(
@@ -3274,6 +3301,9 @@ mod tests {
                 if let Some(id) = fields.keys().next() {
                     if self.behavior == Behavior::EditsTicketsAcceptingAnUnlistedField {
                         return Ok(crate::WriteReceipt::none());
+                    }
+                    if self.behavior == Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely {
+                        return Err(SourceError::protocol("that field cannot be set"));
                     }
                     return Err(SourceError::protocol(format!(
                         "the test adapter has no field {id:?} on test:1"
@@ -3369,6 +3399,7 @@ mod tests {
                         | Behavior::EditsTicketsAcceptingAnUnlistedField
                         | Behavior::EditsTicketsAcceptingAReadOnlyField
                         | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely
                 )
                 || self.behavior == Behavior::EditsTicketsAnsweringNone
             {
@@ -4237,6 +4268,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_an_adapter_that_refuses_an_unlisted_field_without_naming_it() {
+        rejects(
+            Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely,
+            "must be refused by name",
+        )
+        .await;
+    }
+
+    /// Clause 15 asks a live ticket for its fields and skips a deleted one,
+    /// and holds a live item of another kind to `None` (the final suite's
+    /// mutants: either filter turned around went unseen, since the fake's
+    /// one item is a live ticket).
+    #[tokio::test]
+    async fn clause_15_asks_live_tickets_and_holds_other_kinds_to_none() {
+        let item = |key: &str, kind: &str, deleted: bool| SyncItem {
+            entity: EntityRef::new("test", key),
+            kind: kind.into(),
+            title: "One".into(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload: serde_json::json!({}),
+            web_url: None,
+            deleted,
+        };
+        let check = |items: Vec<SyncItem>| async move {
+            tokio::spawn(async move {
+                let source = TestSource {
+                    fault: Fault::None,
+                    behavior: Behavior::EditsTickets,
+                };
+                crate::contract::check_ticket_fields(&source, &source.descriptor(), &items).await;
+            })
+            .await
+            .map_err(|err| {
+                let payload = err.into_panic();
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+        };
+        // A deleted ticket, which the fake has no fields for, is not asked.
+        check(vec![item("1", "ticket", false), item("9", "ticket", true)])
+            .await
+            .expect("a deleted ticket is not asked for its fields");
+        // A live page the fake answers fields for is caught.
+        let caught = check(vec![item("1", "page", false)])
+            .await
+            .expect_err("fields answered for a page are refused");
+        assert!(caught.contains("and so not a ticket"), "{caught}");
+        // A deleted one is not looked at.
+        check(vec![item("1", "page", true)])
+            .await
+            .expect("a deleted page is not asked");
+    }
+
+    #[tokio::test]
     async fn rejects_an_adapter_that_takes_a_read_only_field() {
         rejects(
             Behavior::EditsTicketsAcceptingAReadOnlyField,
@@ -4834,6 +4923,55 @@ mod password_tests {
         let mut sink = KeySink::default();
         source.sync(None, &mut sink).await.unwrap();
         check_passwords(&source, &d, &sink.items, &sink.keys).await;
+    }
+
+    /// Rule 2 looks for a key of four characters or more, in any case, and
+    /// not for a shorter one, which a title holds by chance.
+    #[test]
+    fn rule_2_looks_for_keys_of_four_characters_or_more() {
+        let key = |secret: &str| crate::passwords::OtpKey {
+            secret: SecretText::new(secret),
+            digits: 6,
+            period: 30,
+            algorithm: OtpAlgorithm::Sha1,
+        };
+        let item = |title: &str| crate::SyncItem {
+            entity: crate::EntityRef::new("vault", "e1"),
+            kind: "entry".into(),
+            title: title.into(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload: serde_json::json!({}),
+            web_url: None,
+            deleted: false,
+        };
+        let items = [item("Root ABCD login")];
+        let four = [("vault:e1".to_owned(), key("abcd"))];
+        assert_eq!(
+            crate::contract::leaked_key(&four, &items).map(|(e, _)| e),
+            Some("vault:e1")
+        );
+        let three = [("vault:e1".to_owned(), key("bcd"))];
+        assert_eq!(
+            crate::contract::leaked_key(&three, &items).map(|(e, _)| e),
+            None
+        );
+        let absent = [("vault:e1".to_owned(), key("wxyz"))];
+        assert_eq!(
+            crate::contract::leaked_key(&absent, &items).map(|(e, _)| e),
+            None
+        );
+    }
+
+    /// The key sink keeps what a run said it walked whole, beside its keys,
+    /// as `Walking` does: a test reads both off one run.
+    #[tokio::test]
+    async fn the_key_sink_keeps_the_kinds_walked_whole() {
+        let mut sink = KeySink::default();
+        crate::Sink::walked_whole(&mut sink, "entry").await;
+        crate::Sink::walked_whole(&mut sink, "folder").await;
+        assert_eq!(sink.whole, ["entry", "folder"]);
     }
 
     #[tokio::test]
