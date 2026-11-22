@@ -1041,3 +1041,57 @@ async fn an_attachment_is_read_live_by_its_id() {
         );
     }
 }
+
+/// *Open web interface* (ux30): the address is the source's typed base URL
+/// and its adapter's declared template, for an entry, a folder or the front
+/// page, and nothing for an id that is no entry or folder of the source.
+#[tokio::test]
+async fn the_web_interface_opens_an_entry_a_folder_or_the_front_page() {
+    use knobas_app::passwords::web::WebAt;
+    let fx = Fixture::new("pw_web_link").await;
+    let held = fx.held().await;
+    assert_eq!(
+        held.sources[0].web,
+        knobas_app::passwords::web::WebPages {
+            entry: true,
+            folder: true
+        },
+        "Pleasant declares both pages"
+    );
+    let link = |item: Option<&str>| {
+        let item = item.map(str::to_owned);
+        let handle = fx.handle();
+        async move {
+            cmd::password_web_link(handle, SOURCE.into(), item)
+                .await
+                .expect("the link answers")
+        }
+    };
+    let entry = link(Some("pw:e1")).await.expect("an entry's link");
+    assert_eq!(entry.at, WebAt::Entry);
+    assert_eq!(
+        entry.url,
+        "https://vault.example/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain%3FitemId%3De1"
+    );
+    let folder = link(Some("pw:pay")).await.expect("a folder's link");
+    assert_eq!(folder.at, WebAt::Folder);
+    assert!(folder.url.ends_with("itemId%3Dpay"), "{}", folder.url);
+    let home = link(None).await.expect("the front page");
+    assert_eq!(
+        (home.at, home.url.as_str()),
+        (
+            WebAt::Home,
+            "https://vault.example/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain"
+        )
+    );
+    // Another source's id, or one that is gone, opens the front page.
+    let other = link(Some("jira:PAY-1")).await.expect("the front page");
+    assert_eq!(other.at, WebAt::Home);
+    // A source that is no password source has no web interface here.
+    assert_eq!(
+        cmd::password_web_link(fx.handle(), "nothing".into(), None)
+            .await
+            .unwrap(),
+        None
+    );
+}
