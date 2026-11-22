@@ -89,6 +89,7 @@
 {#if params.length > 0 || unread.length > 0}
   <section class="tf-oas-sec">
     <h3 class="tf-oas-lab">Parameters <span class="tf-oas-n">{params.length + unread.length}</span></h3>
+    <div class="tf-oas-fs">
     {#each params as p (`${p.in}:${p.name}`)}
       <TfOasField
         {st}
@@ -107,8 +108,9 @@
       />
     {/each}
     {#each unread as p (p.ref)}
-      <div class="tf-oas-f"><span></span><div class="tf-oas-fl"><span class="tf-oas-fname">{p.ref}</span><span class="tf-oas-fwhere">kept in another file</span></div></div>
+      <div class="tf-oas-fnote"><code>{p.ref}</code> kept in another file</div>
     {/each}
+    </div>
   </section>
 {/if}
 
@@ -140,9 +142,11 @@
       {#if status.description !== ""}<div class="tf-oas-fd"><TfOasWords text={status.description} {st} k="{rk}#desc" {prose} /></div>{/if}
       {#if status.headers.length > 0}
         <div class="tf-oas-sub">Headers</div>
-        {#each status.headers as h (h.name)}
-          <TfOasField {st} name={h.name} node={h.schema} base={op.base} k="{rk}/h:{h.name}" words={h.description} {prose} {onfollow} />
-        {/each}
+        <div class="tf-oas-fs">
+          {#each status.headers as h (h.name)}
+            <TfOasField {st} name={h.name} node={h.schema} base={op.base} k="{rk}/h:{h.name}" words={h.description} {prose} {onfollow} />
+          {/each}
+        </div>
       {/if}
       {#key rk}<TfOasMedia {st} list={status.content} k={rk} base={op.base} {prose} {onfollow} />{/key}
       {#if status.links.length > 0}

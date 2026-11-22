@@ -8,7 +8,7 @@
   import type { Snippet } from "svelte";
 
   import type { Shape, Uses } from "../../render/openapi";
-  import { exampleText, factsOf, pathParts, summary } from "../../render/openapi-view";
+  import { exampleText, factsOf, hasInside, pathParts, summary } from "../../render/openapi-view";
   import TfOasShape from "./TfOasShape.svelte";
   import TfOasWords from "./TfOasWords.svelte";
   import type { OasState, Place } from "./oas.svelte";
@@ -50,6 +50,12 @@
   const used = $derived(st.expand.has(`${k}#uses`) ? ops : ops.slice(0, USED));
   const facts = $derived(factsOf(shape.facts));
   const trail = $derived([`${shape.base}#${st.index?.schemaBase ?? ""}${name}`]);
+  const opens = $derived(shape.props.some((p) => hasInside(p.node)) || shape.variants !== null || shape.items !== undefined);
+  const anyOpen = $derived([...st.expand].some((x) => x.startsWith(`${k}/`) || x.startsWith(`${k}|`)));
+  function flipAll() {
+    if (anyOpen) st.closeAll(k);
+    else void st.expandShape(k, shape, trail);
+  }
   const hasBody = $derived(shape.props.length > 0 || shape.variants !== null || shape.items !== undefined || shape.extra !== undefined);
 </script>
 
@@ -65,13 +71,16 @@
 {/if}
 {#if hasBody}
   <section class="tf-oas-sec">
-    <h3 class="tf-oas-lab">Properties{#if shape.props.length > 0}<span class="tf-oas-n">{shape.props.length}</span>{/if}</h3>
+    <h3 class="tf-oas-lab">
+      Properties{#if shape.props.length > 0}<span class="tf-oas-n">{shape.props.length}</span>{/if}
+      {#if opens}<span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={flipAll}>{anyOpen ? "Collapse all" : "Expand all"}</button></span>{/if}
+    </h3>
     <TfOasShape {st} {shape} {k} {trail} {prose} {onfollow} />
   </section>
 {/if}
 {#if sample !== null && typeof sample === "object"}
   <section class="tf-oas-sec">
-    <h3 class="tf-oas-lab">Example<span class="tf-oas-exfrom">{given ? "From the spec" : "Made from the schema"}</span></h3>
+    <h3 class="tf-oas-lab">Example <span class="tf-oas-n">{given ? "From the spec" : "Made from the schema"}</span></h3>
     <pre class="tf-oas-ex">{exampleText(sample)}</pre>
   </section>
 {/if}

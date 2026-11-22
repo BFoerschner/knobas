@@ -402,12 +402,21 @@ export function refName(ref: string): string {
   return file.slice(file.lastIndexOf("/") + 1) || ref;
 }
 
-/** Whether a schema has more than its one line: properties, items with their own, a composition, a ref to open. */
+/**
+ * Whether a schema has more than its one line: properties, items with their own, a composition, a ref to open. A
+ * caret stands only where the opened block would draw a row (Fable, 2026-11-22): `anyOf [string, ""]` draws none.
+ */
 export function hasInside(node: unknown): boolean {
   if (!isObj(node)) return false;
   if (typeof node.$ref === "string") return true;
   if (isObj(node.properties) && Object.keys(node.properties).length > 0) return true;
-  if (Array.isArray(node.oneOf) || Array.isArray(node.anyOf) || Array.isArray(node.allOf)) return true;
+  if (Array.isArray(node.allOf)) return true;
+  for (const key of ["oneOf", "anyOf"] as const) {
+    const list = node[key];
+    if (!Array.isArray(list)) continue;
+    const real = list.filter((m) => !nullish(m));
+    if (real.length > 1 || real.some(hasInside)) return true;
+  }
   if (isObj(node.additionalProperties)) return true;
   if (node.items !== undefined) return hasInside(node.items);
   return false;
@@ -520,6 +529,13 @@ export function schemeWords(s: { type: string; scheme: string; in: string; keyNa
 export function shortMethod(method: string): string {
   return method === "delete" ? "DEL" : method === "options" ? "OPT" : method.toUpperCase();
 }
+
+/**
+ * A name's parts, cut where it may wrap (Fable, 2026-11-22): after `_ - . / :` and before a capital that follows a
+ * small letter or a digit, so `payment_method_configuration_details` wraps at an underscore. No lookbehind: WebKit
+ * before 16.4 refuses to parse one.
+ */
+export const nameParts = (name: string): string[] => name.replace(/([_\-./:])(?=.)|([a-z0-9])(?=[A-Z])/g, "$1$2\u0000").split("\u0000");
 
 /** A path's parts, its `{parameters}` marked to draw dim. */
 export function pathParts(p: string): { text: string; param: boolean }[] {

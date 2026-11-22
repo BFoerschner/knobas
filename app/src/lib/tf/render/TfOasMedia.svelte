@@ -6,9 +6,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  import { refTarget, type Media } from "../../render/openapi";
+  import { refTarget, type Media, type Shape } from "../../render/openapi";
   import TfOasField from "./TfOasField.svelte";
-  import { exampleText, refName, summary } from "../../render/openapi-view";
+  import { exampleText, hasInside, refName, summary } from "../../render/openapi-view";
   import TfOasShape from "./TfOasShape.svelte";
   import type { OasState } from "./oas.svelte";
 
@@ -50,6 +50,16 @@
   });
   const exIndex = $derived(shown === undefined ? 0 : Math.min(Number(st.picked.get(`${sk}#ex`) ?? 0), Math.max(0, shown.examples.length - 1)));
   const given = $derived(shown?.examples[exIndex]);
+
+  /** Whether any row of a shape opens: only then is there an *Expand all*. */
+  const opens = (sh: Shape) => sh.props.some((p) => hasInside(p.node)) || sh.variants !== null || sh.items !== undefined || (sh.extra !== undefined && hasInside(sh.extra));
+  /** Whether anything below `key` is open. */
+  const anyOpen = (key: string) => [...st.expand].some((x) => x.startsWith(`${key}/`) || x.startsWith(`${key}|`));
+  /** *Expand all* or *Collapse all*, one button that flips, as Builds' does. */
+  function flipAll(key: string, sh: Shape) {
+    if (anyOpen(key)) st.closeAll(key);
+    else void st.expandShape(key, sh, trail);
+  }
   /** The top choice the shape's switch picked: the made example follows it. */
   const choice = $derived(shape?.variants == null ? 0 : Number(st.picked.get(`${sk}|`) ?? 0));
   const made = $derived(shown === undefined || given !== undefined ? undefined : choice === 0 ? st.samples.get(sk) : st.samples.get(`${sk}|${choice}`));
@@ -76,24 +86,25 @@
     </div>
   {/if}
   {#if away && shown.schema !== null && line !== null && line.ref !== null}
-    <TfOasField {st} name={refName(line.ref)} node={shown.schema} {base} k="{sk}/@" where={list.length === 1 ? shown.type : ""} {trail} {prose} {onfollow} />
-  {:else if line !== null}
-    <div class="tf-oas-f">
-      <span></span>
-      <div class="tf-oas-fl">
+    <div class="tf-oas-fs"><TfOasField {st} name={refName(line.ref)} node={shown.schema} {base} k="{sk}/@" where={list.length === 1 ? shown.type : ""} {trail} {prose} {onfollow} /></div>
+  {:else if line !== null || list.length === 1}
+    <!-- The schema's own line, the list's caption, with Expand all at its end where a row opens. -->
+    <div class="tf-oas-what">
+      {#if line !== null}
         <span class="tf-oas-ftype"
-          >{line.type}{#if line.ref !== null}{line.type !== "" ? " " : ""}{#if named !== null}<button type="button" class="tf-oas-ref" onclick={() => onfollow(named)}>{refName(line.ref)}</button>{:else}<span class="tf-oas-fname">{refName(line.ref)}</span>{/if}{/if}</span
+          >{line.type}{#if line.ref !== null}{line.type !== "" ? " " : ""}{#if named !== null}<button type="button" class="tf-oas-ref" onclick={() => onfollow(named)}>{refName(line.ref)}</button>{:else}<span class="tf-oas-code">{refName(line.ref)}</span>{/if}{/if}</span
         >
-        {#if list.length === 1}<span class="tf-oas-fwhere tf-oas-code">{shown.type}</span>{/if}
-      </div>
+      {/if}
+      {#if list.length === 1}<span class="tf-oas-fwhere tf-oas-code">{shown.type}</span>{/if}
+      {#if shape !== undefined && opens(shape)}
+        <span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => flipAll(sk, shape)}>{anyOpen(sk) ? "Collapse all" : "Expand all"}</button></span>
+      {/if}
     </div>
-  {:else if list.length === 1}
-    <div class="tf-oas-f"><span></span><div class="tf-oas-fl"><span class="tf-oas-fwhere tf-oas-code">{shown.type}</span></div></div>
   {/if}
   {#if shape !== undefined && !away}<TfOasShape {st} {shape} k={sk} {trail} {prose} {onfollow} />{/if}
   {#if example !== undefined}
     <div class="tf-oas-exbar">
-      <span>Example</span>
+      <b>Example</b>
       <span class="tf-oas-exfrom">{given !== undefined ? "From the spec" : "Made from the schema"}</span>
       {#if given !== undefined && shown.examples.length > 1}
         <select aria-label="Example" value={String(exIndex)} onchange={(e) => st.picked.set(`${sk}#ex`, (e.currentTarget as HTMLSelectElement).value)}>

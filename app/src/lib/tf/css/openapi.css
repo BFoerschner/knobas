@@ -103,18 +103,6 @@
 .tf-oas-fname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
 .tf-oas-ftype { color: var(--ink-2); }
 .tf-oas-fwhere { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
-.tf-oas-fd { grid-column: 2; margin: 2px 0 0; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; max-width: 76ch; }
-.tf-oas-fd code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); padding: 0 3px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); }
-.tf-oas-in { grid-column: 2; margin: 4px 0 0 2px; padding-left: 10px; border-left: 1px solid var(--rule); }
-.tf-oas-in > .tf-oas-f:last-child { border-bottom: 0; }
-.tf-oas-tog { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--ink-2); cursor: pointer; display: inline-grid; place-items: center; align-self: center; }
-.tf-oas-tog:hover { background: var(--rule-2); color: var(--ink); }
-.tf-oas-tog[aria-expanded="true"] svg { transform: rotate(90deg); }
-.tf-oas-ref { padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-oas-ref:hover { text-decoration-color: currentColor; }
-.tf-oas-variants { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
-.tf-oas-variants .tf-seg { flex-wrap: wrap; }
-.tf-oas-variants .tf-seg button { height: 22px; padding: 0 8px; font-size: calc(var(--t-xs) * var(--fs)); --fs: var(--size-code); font-family: var(--mono); }
 .tf-oas-ex { margin: 8px 0 0; padding: 8px 10px; max-height: 300px; overflow: auto; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre; }
 .tf-oas-exbar { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-oas-exbar select, .tf-oas-req select { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); padding: 0 6px; max-width: 100%; }
@@ -195,8 +183,6 @@
 .tf-oas-prose .tf-md { padding: 0; font-size: inherit; line-height: 1.5; color: inherit; }
 .tf-oas-prose .tf-md > :first-child { margin-top: 0; }
 .tf-oas-prose .tf-md > :last-child { margin-bottom: 0; }
-.tf-oas-fd .tf-oas-prose .tf-md :is(p, ul, ol, pre, blockquote) { margin: 0 0 4px; }
-.tf-oas-fd .tf-oas-prose .tf-md :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; margin: 6px 0 2px; border: 0; padding: 0; }
 .tf-oas-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
 .tf-oas-link:hover { text-decoration-color: currentColor; }
 .tf-oas-page:focus { outline: none; }
@@ -204,3 +190,88 @@
 /* Where an example comes from: the spec's own, or made from the schema. Quiet, as a fact is. */
 .tf-oas-exfrom { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-weight: var(--wt-ui, 400); }
 .tf-oas-lab .tf-oas-exfrom { margin-left: 4px; }
+
+/* ---- A list of fields (Fable's ruling, 2026-11-22: "make it a bit easier to read the schemas") ----
+   One grid a list, each row a subgrid of it: caret, name, type, notes, required, and 6 px so nothing touches the
+   row's end. Ink is the contract (name, type, literal values), second ink the commentary (words, fact labels, where
+   it goes). A nested list is its own grid one 20 px step in, under a guide that drops from its parent's caret. */
+.tf-oas-sec, .tf-oas-in { container: oasf / inline-size; }
+.tf-oas-fs {
+  --oas-name: calc(240px * var(--size-code));
+  display: grid; grid-template-columns: 20px fit-content(var(--oas-name)) minmax(0, 1fr) auto auto 6px; min-width: 0;
+}
+.tf-oas-fs > * { grid-column: 1 / -1; min-width: 0; }
+.tf-oas-sec > .tf-oas-fs { border-bottom: 1px solid var(--rule-2); }
+.tf-oas-lab + :is(.tf-oas-fs, .tf-oas-what, .tf-oas-pick) { margin-top: -6px; }
+.tf-oas-fs > .tf-oas-f { display: grid; grid-template-columns: subgrid; padding: 0; border: 0; column-gap: 0; }
+.tf-oas-fs > .tf-oas-f + * { border-top: 1px solid var(--rule-2); }
+
+/* The row: what toggles. Its head line's cells stand in the list's columns. */
+.tf-oas-fr { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; padding-block: 6px; min-width: 0; }
+.tf-oas-fr > :is(.tf-oas-tog, .tf-oas-fname, .tf-oas-ftype, .tf-oas-fnotes, .tf-oas-freq) { grid-row: 1; line-height: calc(20px * var(--fs)); }
+.tf-oas-fr > .tf-oas-tog { grid-column: 1; align-self: start; }
+.tf-oas-fr > .tf-oas-fname { grid-column: 2; padding-right: 16px; }
+.tf-oas-fr > .tf-oas-ftype { grid-column: 3; color: var(--ink); overflow-wrap: anywhere; }
+.tf-oas-fr > .tf-oas-fnotes { grid-column: 4; padding-left: 16px; display: flex; gap: 10px; white-space: nowrap; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-oas-fr > .tf-oas-freq { grid-column: 5; padding-left: 10px; white-space: nowrap; }
+.tf-oas-fr > .tf-oas-fd { grid-column: 2 / -2; }
+.tf-oas-fr > .tf-oas-fd:last-child { padding-bottom: 2px; }
+
+/* The caret: a glyph in its column. The row is the target. */
+.tf-oas-tog { width: 20px; height: calc(20px * var(--fs)); box-sizing: border-box; padding: 0 6px 0 4px; display: grid; place-items: center; border: 0; background: none; color: var(--ink-2); cursor: inherit; }
+.tf-oas-tog svg { width: 10px; height: 10px; }
+:is(.tf-oas-tog, .tf-oas-fr)[aria-expanded="true"] svg, .tf-oas-f[aria-expanded="true"] > .tf-oas-fr > .tf-oas-tog svg { transform: rotate(90deg); }
+
+/* A row that opens answers the pointer. The row the keys stand on wears the ring, inside. */
+.tf-oas-fr.tf-oas-can { cursor: pointer; }
+.tf-oas-fr.tf-oas-can:hover { background: var(--sheet-2); }
+.tf-oas-fr.tf-oas-can:hover .tf-oas-fd code { background: var(--rule-2); }
+.tf-oas-fr:is(.tf-oas-can:hover, :focus-visible, .tf-oas-cursor) > .tf-oas-tog { color: var(--ink); }
+.tf .tf-oas-fr:focus-visible { outline-offset: var(--focus-in); }
+:focus-visible .tf-oas-fr.tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) var(--focus); }
+
+/* What a row holds: one step in, under a guide that drops from its caret. */
+.tf-oas-in { grid-column: 1 / -1; margin: 0 0 6px 8px; padding-left: 11px; border-left: 1px solid var(--rule); }
+.tf-oas-in:has(> .tf-oas-fs > .tf-oas-f > .tf-oas-fr:is(:hover, :focus-visible, .tf-oas-cursor)) { border-left-color: var(--ink-2); }
+
+/* Words, then one smaller line of facts. */
+.tf-oas-fd { grid-column: 2; margin: 2px 0 0; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; max-width: 64ch; }
+.tf-oas-fd + .tf-oas-fd { margin-top: 4px; }
+.tf-oas-facts { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-facts > span { min-width: 0; }
+.tf-oas-fd code, .tf-oas-fd .tf-md code, .tf-oas-pick code {
+  --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures);
+  padding: 0 4px; border: 0; border-radius: 3px; background: var(--sheet-2); color: var(--ink);
+  overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.tf-oas-fd .tf-oas-prose .tf-md { padding: 0; font-size: inherit; line-height: inherit; color: inherit; }
+.tf-oas-fd .tf-oas-prose .tf-md > * { margin: 4px 0 0; }
+.tf-oas-fd .tf-oas-prose .tf-md > :first-child { margin-top: 0; }
+.tf-oas-fd .tf-oas-prose .tf-md :is(ul, ol) { padding-left: 18px; }
+.tf-oas-fd .tf-oas-prose .tf-md li + li { margin-top: 0; }
+
+/* A ref is the one thing in the type column that can be pressed. `.tf` outweighs `.tf button { font: inherit }`. */
+.tf .tf-oas-ref { padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+.tf .tf-oas-ref:hover { text-decoration-color: currentColor; }
+.tf-oas-more { text-decoration-color: var(--muted); }
+
+/* Lines in a list that are not fields: the choice, a note, the schema's own line. All on the names' axis. */
+.tf-oas-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 5px 6px 5px 20px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-oas-in > .tf-oas-fs + .tf-oas-pick { border-top: 1px solid var(--rule-2); }
+.tf-oas-pick .tf-seg { flex-wrap: wrap; }
+.tf-oas-pick .tf-seg button { height: 22px; padding: 0 8px; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-fnote { margin: 0; padding: 6px 6px 6px 20px; font-size: calc(var(--t-sm) * var(--fs)); line-height: calc(20px * var(--fs)); color: var(--ink-2); }
+.tf-oas-what { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-height: 32px; box-sizing: border-box; padding: 2px 0 2px 20px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oas-what .tf-oas-ftype { color: var(--ink); }
+:is(.tf-oas-what, .tf-oas-lab) .tf-btn.tf-sm { height: 22px; padding: 0 6px; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-exbar > b { font-weight: 600; }
+.tf-oas-fs + .tf-oas-exbar { margin-top: 14px; }
+
+@container oasf (max-width: 480px) {
+  .tf-oas-fs, .tf-oas-fs > .tf-oas-f { display: block; }
+  .tf-oas-fr { display: flex; flex-wrap: wrap; gap: 0 8px; position: relative; padding-inline: 20px 6px; }
+  .tf-oas-fr > .tf-oas-tog { position: absolute; left: 0; top: 6px; }
+  .tf-oas-fr > .tf-oas-fname { padding-right: 0; }
+  .tf-oas-fr > :is(.tf-oas-fnotes, .tf-oas-freq) { padding-left: 0; }
+  .tf-oas-fr > .tf-oas-fd { flex: 0 0 100%; }
+}

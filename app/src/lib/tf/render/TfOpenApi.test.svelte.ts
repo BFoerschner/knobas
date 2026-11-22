@@ -208,7 +208,7 @@ test("a ref's name follows to the schema's page, which pushes the place; Back re
   expect(text(page().querySelector(".tf-oas-back"))).toBe("Back to GET /pets/{petId}");
   // The schema's page: merged properties, an example made from it, and who uses it.
   expect(names().slice(0, 5)).toEqual(["id", "name", "status", "parent", "owner"]);
-  expect(text(page())).toContain("ExampleMade from the schema");
+  expect(text(page())).toContain("Example Made from the schema");
   expect(text(page())).toContain("Used by 3");
   expect(text(page())).toContain("Part of 1");
   // A followed name on the schema's page follows again, and Back steps back twice.
@@ -246,11 +246,12 @@ test("a caret opens a schema in place, once its shape is in; a schema that holds
   row("Pet").click();
   await settle();
   const owner = [...page().querySelectorAll<HTMLElement>(".tf-oas-f")].find((f) => text(f.querySelector(".tf-oas-fname")) === "owner")!;
-  owner.querySelector<HTMLButtonElement>(".tf-oas-tog")!.click();
+  // The whole row toggles, not just the caret.
+  owner.querySelector<HTMLElement>(".tf-oas-fname")!.click();
   await settle();
   expect(names(owner.querySelector(".tf-oas-in")!)).toEqual(["name", "pets"]);
   const parent = [...page().querySelectorAll<HTMLElement>(".tf-oas-f")].find((f) => text(f.querySelector(".tf-oas-fname")) === "parent")!;
-  expect(parent.querySelector(".tf-oas-tog")).toBeNull();
+  expect(parent.querySelector(".tf-oas-fr.tf-oas-can")).toBeNull();
   expect(text(parent)).toContain("It holds itself: follow Pet to read it.");
 });
 
@@ -273,14 +274,15 @@ test("allOf is drawn merged and a oneOf is a choice the reader picks among", asy
   // Stripe's `anyOf [X, ""]` reads as the schema, or empty.
   const description = [...page().querySelectorAll<HTMLElement>(".tf-oas-f")].find((f) => text(f.querySelector(".tf-oas-fname")) === "description")!;
   expect(text(description.querySelector(".tf-oas-ftype"))).toBe("string, or empty");
-  source.querySelector<HTMLButtonElement>(".tf-oas-tog")!.click();
+  source.querySelector<HTMLElement>(".tf-oas-fr")!.click();
   await settle();
-  expect(text(source.querySelector(".tf-oas-in .tf-oas-ftype"))).toBe("One of 2, told apart by object");
-  expect([...source.querySelectorAll(".tf-oas-variants button")].map((b) => text(b))).toEqual(["Card", "Bank"]);
-  expect(names(source.querySelector(".tf-oas-in .tf-oas-in")!)).toContain("last4");
+  // The choice heads the opened block in one line; the picked choice's rows follow in the same block.
+  expect(text(source.querySelector(".tf-oas-in > .tf-oas-pick"))).toBe("One of CardBank told apart by object");
+  expect([...source.querySelectorAll(".tf-oas-pick button")].map((b) => text(b))).toEqual(["Card", "Bank"]);
+  expect(names(source.querySelector(".tf-oas-in")!)).toContain("last4");
   button("Bank", source)!.click();
   await settle();
-  expect(names(source.querySelector(".tf-oas-in .tf-oas-in")!)).toContain("iban");
+  expect(names(source.querySelector(".tf-oas-in")!)).toContain("iban");
 });
 
 test("a body with two media types draws one and switches; a picked status survives a visit to another operation", async () => {
@@ -490,4 +492,46 @@ test("a line an address names (a search hit's) opens the operation that holds it
   await settle();
   expect(text(page().querySelector(".tf-oas-h"))).toBe("GET /pets");
   expect(places).toEqual(["replace get /pets"]);
+});
+
+test("a schema's rows: the keys open, shut and move; Alt-click opens everything below; Expand all flips to Collapse all", async () => {
+  draw("p.json", DEEP_30_JSON, { at: "schemas/Charge" });
+  await settle();
+  const rowOf = (name: string, within: ParentNode = page()) => [...within.querySelectorAll<HTMLElement>(".tf-oas-fr")].find((r) => text(r.querySelector(".tf-oas-fname")) === name)!;
+  const source = rowOf("source");
+  source.focus();
+  key(source, "ArrowRight");
+  await settle();
+  expect(source.getAttribute("aria-expanded")).toBe("true");
+  key(source, "ArrowRight");
+  await settle();
+  expect(text(document.activeElement?.querySelector(".tf-oas-fname"))).toBe("id");
+  key(document.activeElement!, "ArrowLeft");
+  expect(document.activeElement).toBe(source);
+  key(source, "ArrowLeft");
+  await settle();
+  expect(source.getAttribute("aria-expanded")).toBe("false");
+  key(source, "ArrowDown");
+  expect(text(document.activeElement?.querySelector(".tf-oas-fname"))).toBe("parent");
+  // Alt-click opens what the row holds and everything below it; again, shuts it all.
+  const customer = rowOf("customer");
+  customer.dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+  await settle();
+  expect(customer.getAttribute("aria-expanded")).toBe("true");
+  // With anything open the Properties label's button says Collapse all, and shuts it all; then Expand all opens every row that opens.
+  button("Collapse all", page())!.click();
+  await settle();
+  expect(page().querySelectorAll('.tf-oas-fr[aria-expanded="true"]').length).toBe(0);
+  button("Expand all", page())!.click();
+  await settle();
+  expect(rowOf("source").getAttribute("aria-expanded")).toBe("true");
+  expect(rowOf("customer").getAttribute("aria-expanded")).toBe("true");
+  expect(button("Collapse all", page())).toBeDefined();
+});
+
+test("a caret stands only where the opened block draws a row", async () => {
+  draw("p.json", DEEP_30_JSON, { at: "schemas/Charge" });
+  await settle();
+  const description = [...page().querySelectorAll<HTMLElement>(".tf-oas-fr")].find((r) => text(r.querySelector(".tf-oas-fname")) === "description")!;
+  expect(description.classList.contains("tf-oas-can")).toBe(false);
 });

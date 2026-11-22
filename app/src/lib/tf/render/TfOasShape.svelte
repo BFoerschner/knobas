@@ -61,42 +61,40 @@
   }
 </script>
 
-{#each drawn as p (p.name)}
-  <TfOasField {st} name={p.name} node={p.node} base={shape.base} k="{k}/{p.name}" required={p.required} words={p.words} {trail} {prose} {onfollow} />
-{/each}
-{#if shape.props.length > drawn.length}
-  <div class="tf-oas-f"><span></span><div class="tf-oas-fl"><button type="button" class="tf-oas-more" onclick={() => st.expand.add(`${k}#props`)}>Show the other {shape.props.length - drawn.length} properties</button></div></div>
+{#if drawn.length > 0 || shape.extra !== undefined}
+  <div class="tf-oas-fs">
+    {#each drawn as p (p.name)}
+      <TfOasField {st} name={p.name} node={p.node} base={shape.base} k="{k}/{p.name}" required={p.required} words={p.words} {trail} {prose} {onfollow} />
+    {/each}
+    {#if shape.props.length > drawn.length}
+      <div class="tf-oas-fnote"><button type="button" class="tf-oas-more" onclick={() => st.expand.add(`${k}#props`)}>Show the other {shape.props.length - drawn.length} properties</button></div>
+    {/if}
+    {#if shape.extra !== undefined}
+      <TfOasField {st} name="any other key" node={shape.extra} base={shape.base} k="{k}/{'{}'}" {trail} {prose} {onfollow} />
+    {/if}
+  </div>
 {/if}
 {#if shape.variants !== null}
   {@const v = shape.variants}
-  <div class="tf-oas-f">
-    <span></span>
-    <div class="tf-oas-fl">
-      <span class="tf-oas-ftype">{v.key === "oneOf" ? "One of" : "Any of"} {v.list.length}{#if v.discriminator !== ""}, told apart by <span class="tf-oas-fname">{v.discriminator}</span>{/if}</span>
-    </div>
-    <div class="tf-oas-variants">
-      <span class="tf-seg" role="group" aria-label="Which one">
-        {#each v.list.slice(0, CHOICES) as m, i (i)}
-          <button type="button" aria-pressed={i === pick} onclick={() => st.picked.set(`${k}|`, String(i))}>{choiceName(m, i)}</button>
-        {/each}
-      </span>
-      {#if v.list.length > CHOICES}<span>and {v.list.length - CHOICES} more</span>{/if}
-    </div>
-    <div class="tf-oas-in">
-      {#if choice !== undefined}
-        {#if choice.props.length > 0 || choice.variants !== null || choice.items !== undefined || choice.extra !== undefined}
-          <TfOasShape {st} shape={choice} k={choiceKey} {trail} {prose} {onfollow} />
-        {:else}
-          <div class="tf-oas-f"><span></span><div class="tf-oas-fl"><span class="tf-oas-ftype">{summary(v.list[pick]).type || "any"}</span></div></div>
-        {/if}
-      {/if}
-    </div>
+  <div class="tf-oas-pick">
+    <span>{v.key === "oneOf" ? "One of" : "Any of"}</span>
+    <span class="tf-seg" role="group" aria-label="Which one">
+      {#each v.list.slice(0, CHOICES) as m, i (i)}
+        <button type="button" aria-pressed={i === pick} onclick={() => st.picked.set(`${k}|`, String(i))}>{choiceName(m, i)}</button>
+      {/each}
+    </span>
+    {#if v.list.length > CHOICES}<span>and {v.list.length - CHOICES} more</span>{/if}
+    {#if v.discriminator !== ""}<span>told apart by <code>{v.discriminator}</code></span>{/if}
   </div>
+  {#if choice !== undefined}
+    {#if choice.props.length > 0 || choice.variants !== null || choice.items !== undefined || choice.extra !== undefined}
+      <TfOasShape {st} shape={choice} k={choiceKey} {trail} {prose} {onfollow} />
+    {:else}
+      <div class="tf-oas-fnote">{summary(v.list[pick]).type || "any"}</div>
+    {/if}
+  {/if}
 {/if}
 {#if itemsOnly && each !== undefined && (each.props.length > 0 || each.variants !== null || each.extra !== undefined)}
-  <div class="tf-oas-sub">Each item</div>
+  <div class="tf-oas-pick">Each item</div>
   <TfOasShape {st} shape={each} k={eachKey} {trail} {prose} {onfollow} />
-{/if}
-{#if shape.extra !== undefined}
-  <TfOasField {st} name="any other key" node={shape.extra} base={shape.base} k="{k}/{'{}'}" {trail} {prose} {onfollow} />
 {/if}

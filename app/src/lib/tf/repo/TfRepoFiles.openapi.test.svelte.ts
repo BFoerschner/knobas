@@ -155,7 +155,7 @@ test("a ref into another file is read at the spec's commit through the byte read
   expect(text(media)).toContain("Order");
   await settle();
   expect(reads).toEqual([]);
-  media.querySelector<HTMLButtonElement>(".tf-oas-tog")!.click();
+  media.querySelector<HTMLElement>(".tf-oas-fr.tf-oas-can")!.click();
   await vi.waitFor(() => {
     flushSync();
     expect(reads).toEqual([`${REPO} api/schemas/order.yaml c0mmit`]);
