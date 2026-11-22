@@ -202,13 +202,18 @@ jobs:
           python3 -I scripts/doc-lists.py
           scripts/conflict-markers.sh
 
+  # The front end's gate is two jobs: svelte-check and `vite build` in one,
+  # the whole vitest suite in three shards beside it. On one runner the
+  # suite alone took 454 s (front job 522 s, run 44975269002, 2026-11-22);
+  # split three ways each shard is about a third of that, and the runners
+  # cost nothing on a public repository. Every test still runs.
   front:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name != github.repository ||
       (github.head_ref != 'ux-polish' && github.head_ref != 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -224,16 +229,42 @@ jobs:
         working-directory: app
         run: npm ci
 
-      # The same commands as `just front-changed`, with the whole suite.
+      # The same commands as `just front-changed`.
       - name: svelte-check
         working-directory: app
         run: npx svelte-check --tsconfig ./tsconfig.json
 
-      # The standard runner has 4 cores; the suite's own cap is 4 workers.
-      - name: vitest (the whole suite)
-        working-directory: app
-        run: npx vitest run --maxWorkers 4
-
       - name: vite build
         working-directory: app
         run: npm run build
+
+  vitest:
+    name: vitest (${{ matrix.shard }}/3)
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      (github.head_ref != 'ux-polish' && github.head_ref != 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Every shard reports, so one red shard does not hide another's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: npm ci
+        working-directory: app
+        run: npm ci
+
+      # The standard runner has 4 cores; the suite's own cap is 4 workers.
+      - name: vitest, shard ${{ matrix.shard }} of 3
+        working-directory: app
+        run: npx vitest run --maxWorkers 4 --shard ${{ matrix.shard }}/3

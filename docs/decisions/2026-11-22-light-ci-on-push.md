@@ -10,7 +10,9 @@ requests, with cancel-in-progress per ref, on standard `ubuntu-latest` runners. 
   `migrations.sha384` matches every file (SHA-384 of its bytes, the same value `knobas-db`'s Rust test compares), names
   no missing file and keeps every released line; every `knobas:adapter@X` world the tag declares is byte-identical at
   HEAD, wherever it lives now; `cargo fmt --all --check`; `doc-lists.py` and the conflict-marker scan.
-- **front**: `npm ci`, svelte-check, the whole vitest suite, `vite build`.
+- **front**: `npm ci`, svelte-check and `vite build`; beside it **vitest** in three shards, the whole suite. On one
+  runner the suite took 454 s (front job 522 s, over the 6 minutes aimed for); three shards on free runners keep every
+  test and cut the wall time.
 
 **Why these.** Each has shipped as a slip from agents that ran only front-end gates. The worst was lessons-learned 12:
 a search and replace edited migration 0101's comment, which would have stopped every ux26 database from starting, and
