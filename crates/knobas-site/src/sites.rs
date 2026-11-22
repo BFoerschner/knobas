@@ -29,6 +29,11 @@ use crate::state::{
     idle, room, sleepers,
 };
 
+/// How often *Forget…* tries to remove a session the platform still holds.
+pub const FORGET_TRIES: u32 = 8;
+/// Between two tries.
+pub const FORGET_AGAIN: Duration = Duration::from_millis(500);
+
 /// How long quitting waits, at most, for the sites' sessions to be written.
 pub const QUIT_FLUSH: Duration = Duration::from_secs(3);
 
@@ -1037,7 +1042,7 @@ impl Sites {
             if let Some(site) = self.book().sites.get_mut(source) {
                 match mode {
                     FillMode::Fill => site.filler.refused(),
-                    FillMode::Look => site.filler.judged(FillAnswer::Odd),
+                    FillMode::Look => site.filler.judged(FillAnswer::Odd, false),
                 }
             }
             self.sync_later(source);
@@ -1057,12 +1062,20 @@ impl Sites {
         let now = self.now();
         let more = {
             let mut book = self.book();
+            let rule = book.sign_ins.get(source).cloned().unwrap_or_default();
+            let base = book.rules.get(source).map(|rules| rules.base.clone());
             let Some(site) = book.sites.get_mut(source) else {
                 return;
             };
             match mode {
                 FillMode::Fill => site.filler.answered(answer, now),
-                FillMode::Look => site.filler.judged(answer),
+                FillMode::Look => {
+                    let on_sign_in_page = match (&base, &site.url) {
+                        (Some(base), Some(url)) => is_sign_in_page(base, &rule, url),
+                        _ => false,
+                    };
+                    site.filler.judged(answer, on_sign_in_page);
+                }
             }
             site.filler.tick(now)
         };
@@ -1440,14 +1453,45 @@ impl Sites {
             let book = self.book();
             self.spec(source, "about:blank", Rect::default(), &book)?
         };
-        let profile_dir = self.inner.config.profile_dir.clone();
-        let source = source.to_owned();
-        self.shell().on_main(Box::new(move || {
-            let gone = host().is_some_and(|host| host.forget(&spec));
-            if !gone && let Err(error) = session::remember_to_forget(&profile_dir, &source) {
+        // The platform may hold the store for a moment after its last view
+        // closed (WebKit: "currently opened"; WebView2: its browser process
+        // still runs): try again for a few seconds before listing it.
+        let mut gone = false;
+        for attempt in 0..FORGET_TRIES {
+            if attempt > 0 {
+                tokio::time::sleep(FORGET_AGAIN).await;
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+            let spec = spec.clone();
+            self.shell().on_main(Box::new(move || match host() {
+                Some(host) => host.forget(
+                    &spec,
+                    Box::new(move |done| {
+                        let _ = tx.send(done);
+                    }),
+                ),
+                None => {
+                    let _ = tx.send(true);
+                }
+            }));
+            gone = matches!(
+                tokio::time::timeout(Duration::from_secs(5), rx).await,
+                Ok(Ok(true))
+            );
+            if gone {
+                break;
+            }
+        }
+        if !gone {
+            tracing::warn!(
+                source,
+                "a site's session is still held; removed at the next start"
+            );
+            if let Err(error) = session::remember_to_forget(&self.inner.config.profile_dir, source)
+            {
                 tracing::warn!(%error, "a site's session could not be listed to forget");
             }
-        }));
+        }
         Ok(SiteAsked::DONE)
     }
 

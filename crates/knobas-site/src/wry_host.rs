@@ -178,19 +178,14 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         let _ = (processes, deadline);
     }
 
-    fn forget(&self, spec: &ViewSpec) -> bool {
+    fn forget(&self, spec: &ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {
         #[cfg(target_os = "macos")]
-        {
-            crate::mac::forget(spec.data_store);
-            true
-        }
+        crate::mac::forget(spec.data_store, done);
         #[cfg(windows)]
-        {
-            match std::fs::remove_dir_all(&spec.data_dir) {
-                Ok(()) => true,
-                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-            }
-        }
+        done(match std::fs::remove_dir_all(&spec.data_dir) {
+            Ok(()) => true,
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        });
     }
 }
 

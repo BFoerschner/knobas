@@ -170,7 +170,10 @@ pub trait SiteHost {
     /// Remove `source`'s session, after its view was dropped. `true` when it
     /// is gone; `false` when it must wait for the next start (the folder is
     /// still held).
-    fn forget(&self, spec: &ViewSpec) -> bool;
+    /// `done` gets whether it is gone, at once or later on the main thread;
+    /// `false` while the store is still held (WebKit answers "currently
+    /// opened" for a moment after its last view closed, ux30).
+    fn forget(&self, spec: &ViewSpec, done: Box<dyn FnOnce(bool) + Send>);
     /// Quitting, after every view was dropped: wait, at most until
     /// `deadline`, for the sessions to be written (`processes` from
     /// [`SiteView::browser_process`]).

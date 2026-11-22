@@ -629,6 +629,26 @@ async fn a_forget_that_cannot_delete_yet_goes_on_the_list() {
     std::fs::remove_dir_all(&w._dir).unwrap();
 }
 
+/// WebKit holds a store for a moment after its last view closed: *Forget…*
+/// tries again until it is gone, and lists nothing (ux30, measured on the
+/// Mac: "data store is currently opened" right after the close).
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_forget_tries_again_while_the_store_is_held_for_a_moment() {
+    let w = world();
+    open_live(&w, "jira", "https://jira.example/").await;
+    *w.host.forget_held_for.borrow_mut() = 2;
+    w.sites.forget("jira", true).await.unwrap();
+    let tries = w
+        .host
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| *c == "forget jira")
+        .count();
+    assert_eq!(tries, 3, "held twice, gone the third time");
+    assert!(!w._dir.join("sites").join("forget.list").exists());
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn quitting_asks_only_the_pages_that_object() {
     let w = world();

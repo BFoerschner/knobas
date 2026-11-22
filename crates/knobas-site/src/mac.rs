@@ -88,11 +88,12 @@ pub fn builder<'a>(
 }
 
 /// Remove a site's data store. Its view is dropped already.
-pub fn forget(id: [u8; 16]) {
-    WebView::remove_data_store(&id, |result| {
-        if let Err(error) = result {
-            tracing::warn!(%error, "a site's data store could not be removed");
+pub fn forget(id: [u8; 16], done: Box<dyn FnOnce(bool) + Send>) {
+    WebView::remove_data_store(&id, move |result| {
+        if let Err(error) = &result {
+            tracing::debug!(%error, "a site's data store is not removed yet");
         }
+        done(result.is_ok());
     });
 }
 

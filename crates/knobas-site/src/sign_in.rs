@@ -97,7 +97,10 @@ pub fn is_sign_in_page(base: &Base, rule: &SignInRule, url: &str) -> bool {
     if rule.any_page {
         return true;
     }
-    let path = parsed.path();
+    // A servlet container's session in the path (`;jsessionid=…`, which
+    // XWiki, Jira and Confluence add on a first visit without a cookie) is
+    // not part of the page: measured on XWiki's login redirect, ux30.
+    let path = parsed.path().split(';').next().unwrap_or_default();
     let Some(rest) = path.strip_prefix(base.path.as_str()) else {
         return false;
     };
@@ -296,12 +299,16 @@ impl Filler {
         }
     }
 
-    /// A look after a fill answered.
-    pub fn judged(&mut self, answer: FillAnswer) {
+    /// A look after a fill answered. `on_sign_in_page`: the page it looked
+    /// at is the sign-in page by the adapter's declaration (always, for one
+    /// that declares `any_page`). A sign-in form somewhere on another page
+    /// (XWiki keeps one in a panel of every signed-in page, ux30) is not the
+    /// site refusing the sign-in; the sign-in page again is.
+    pub fn judged(&mut self, answer: FillAnswer, on_sign_in_page: bool) {
         self.submitted = false;
         self.check_at = None;
         match answer {
-            FillAnswer::Form | FillAnswer::Filled | FillAnswer::Ambiguous => {
+            FillAnswer::Form | FillAnswer::Filled | FillAnswer::Ambiguous if on_sign_in_page => {
                 self.armed = false;
                 self.said = Some(SiteSignIn::NotTaken);
             }
@@ -309,7 +316,11 @@ impl Filler {
                 self.armed = false;
                 self.said = Some(SiteSignIn::SecondFactor);
             }
-            FillAnswer::NoForm | FillAnswer::Odd => {
+            FillAnswer::NoForm
+            | FillAnswer::Odd
+            | FillAnswer::Form
+            | FillAnswer::Filled
+            | FillAnswer::Ambiguous => {
                 self.armed = true;
                 self.said = None;
             }
@@ -421,6 +432,19 @@ mod tests {
             &rule,
             "https://jira.example/login.jsp"
         ));
+        assert!(
+            is_sign_in_page(
+                &base,
+                &rule,
+                "https://jira.example/jira/login.jsp;jsessionid=D3BD7392?srid=hSw3&xredirect=%2F"
+            ),
+            "a session in the path is not part of the page"
+        );
+        assert!(!is_sign_in_page(
+            &base,
+            &rule,
+            "https://jira.example/jira/login.jspx;a=b"
+        ));
         assert!(!is_sign_in_page(
             &base,
             &rule,
@@ -474,10 +498,25 @@ mod tests {
         // The sign-in page again after the fill: judged, never filled again.
         assert_eq!(f.loaded(true, true, 500.0), None);
         assert_eq!(f.tick(500.0 + CHECK_SETTLE_MS), Some(FillAct::Look));
-        f.judged(FillAnswer::Form);
+        f.judged(FillAnswer::Form, true);
         assert_eq!(f.said, Some(SiteSignIn::NotTaken));
         assert_eq!(f.loaded(true, true, 2000.0), None, "until he presses");
         assert_eq!(f.press(3000.0), FillAct::Fill { auto: false });
+    }
+
+    #[test]
+    fn a_sign_in_form_on_another_page_is_no_refusal() {
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.answered(FillAnswer::Filled, 0.0);
+        f.judged(FillAnswer::Form, false);
+        assert_eq!(f.said, None);
+        assert!(f.armed);
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.answered(FillAnswer::Filled, 0.0);
+        f.judged(FillAnswer::Form, true);
+        assert_eq!(f.said, Some(SiteSignIn::NotTaken));
     }
 
     #[test]
@@ -487,7 +526,7 @@ mod tests {
         f.answered(FillAnswer::Filled, 0.0);
         assert_eq!(f.loaded(false, true, 400.0), None);
         assert_eq!(f.tick(800.0), Some(FillAct::Look));
-        f.judged(FillAnswer::NoForm);
+        f.judged(FillAnswer::NoForm, true);
         assert_eq!(f.said, None);
         assert_eq!(
             f.loaded(true, true, 9000.0),
@@ -546,7 +585,7 @@ mod tests {
         f.press(0.0);
         f.answered(FillAnswer::Filled, 0.0);
         assert_eq!(f.tick(CHECK_AFTER_MS), Some(FillAct::Look));
-        f.judged(FillAnswer::SecondFactor);
+        f.judged(FillAnswer::SecondFactor, true);
         assert_eq!(f.said, Some(SiteSignIn::SecondFactor));
     }
 
@@ -586,7 +625,7 @@ mod tests {
         let mut f = Filler::default();
         f.press(1000.0);
         f.answered(FillAnswer::Filled, 1000.0);
-        f.judged(FillAnswer::NoForm);
+        f.judged(FillAnswer::NoForm, true);
         assert!(!f.busy());
     }
 
@@ -648,7 +687,7 @@ mod tests {
         let mut f = Filler::default();
         f.press(0.0);
         f.answered(FillAnswer::Filled, 0.0);
-        f.judged(FillAnswer::Form);
+        f.judged(FillAnswer::Form, true);
         f.moved_on();
         assert_eq!(f.said, Some(SiteSignIn::NotTaken));
     }
@@ -659,7 +698,7 @@ mod tests {
         f.loaded(true, true, 0.0);
         f.answered(FillAnswer::Filled, 0.0);
         f.tick(CHECK_AFTER_MS);
-        f.judged(FillAnswer::Form);
+        f.judged(FillAnswer::Form, true);
         f.rearm();
         assert_eq!(f.said, None);
         assert_eq!(

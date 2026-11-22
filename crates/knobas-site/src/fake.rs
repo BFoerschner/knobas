@@ -144,6 +144,10 @@ pub struct FakeHost {
     pub fail: Rc<RefCell<Option<String>>>,
     /// `forget` answers this.
     pub forget_holds: Rc<RefCell<bool>>,
+    /// `forget` holds for this many tries first, as WebKit does for a
+    /// moment after a view closed.
+    pub forget_held_for: Rc<RefCell<u32>>,
+    forget_tries: Rc<RefCell<u32>>,
 }
 
 impl FakeHost {
@@ -235,11 +239,16 @@ impl SiteHost for FakeHost {
             .push(format!("flush {} ahead={ahead}", processes.len()));
     }
 
-    fn forget(&self, spec: &ViewSpec) -> bool {
+    fn forget(&self, spec: &ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {
         self.calls
             .borrow_mut()
             .push(format!("forget {}", spec.source));
-        !*self.forget_holds.borrow()
+        let holds = {
+            let mut tries = self.forget_tries.borrow_mut();
+            *tries += 1;
+            *self.forget_holds.borrow() || *tries <= *self.forget_held_for.borrow()
+        };
+        done(!holds);
     }
 }
 
