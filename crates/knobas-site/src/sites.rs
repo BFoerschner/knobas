@@ -301,6 +301,10 @@ struct Book {
     sign_ins: HashMap<String, SignInRule>,
 }
 
+/// How long a remade view waits for its old browser process to end
+/// ([`Sites::reconfine`]); past it, making it again fails and says so.
+pub const REMAKE_WAIT: Duration = Duration::from_secs(5);
+
 thread_local! {
     /// The views, on the main thread only: `wry::WebView` is not `Send`.
     static VIEWS: RefCell<HashMap<String, Rc<dyn SiteView>>> = RefCell::new(HashMap::new());
@@ -380,8 +384,8 @@ impl Sites {
     /// it is closed.
     ///
     /// A live site whose confinement changed (its allow-list, ux30) gets the
-    /// new one on the main thread; its view holds the loads knobas starts
-    /// until the platform's refusal follows.
+    /// new one on the main thread ([`Self::reconfine`]); its view holds the
+    /// loads knobas starts until the platform's refusal follows.
     pub fn set_rules(&self, rules: HashMap<String, SiteRules>) {
         let changed: Vec<(String, Option<crate::confine::Confine>)> = {
             let mut book = self.book();
@@ -400,13 +404,88 @@ impl Sites {
         if changed.is_empty() {
             return;
         }
+        let this = self.clone();
         self.shell().on_main(Box::new(move || {
             for (source, confine) in changed {
-                if let Some(view) = view(&source) {
-                    view.confine(confine);
-                }
+                this.reconfine(&source, confine, None);
             }
         }));
+    }
+
+    /// `source`'s live view takes what it may load now, then loads `then`
+    /// when given. On the main thread.
+    ///
+    /// On a platform that reads it only when a view is made
+    /// ([`SiteHost::remakes_to_confine`], Windows): the view is dropped, its
+    /// browser process waited for (at most [`REMAKE_WAIT`]: WebView2 refuses
+    /// other arguments on a session folder whose browser still runs), and
+    /// the view made again at `then`, else where it was, as a reload. One
+    /// that cannot be made again loads nothing and says so with *Retry*.
+    fn reconfine(
+        &self,
+        source: &str,
+        confine: Option<crate::confine::Confine>,
+        then: Option<String>,
+    ) {
+        let Some(view) = view(source) else {
+            return;
+        };
+        if !host().is_some_and(|host| host.remakes_to_confine()) {
+            view.confine(confine);
+            if let Some(url) = &then {
+                view.load(url);
+            }
+            return;
+        }
+        let here = then.or_else(|| view.url());
+        let url = {
+            let now = self.now();
+            let mut book = self.book();
+            let Some(site) = book.sites.get_mut(source) else {
+                return;
+            };
+            let url = here
+                .or_else(|| site.url.clone())
+                .unwrap_or_else(|| site.landing_url.clone());
+            site.land(&url, now);
+            url
+        };
+        let processes: Vec<u32> = view.browser_process().into_iter().collect();
+        VIEWS.with(|views| views.borrow_mut().remove(source));
+        drop(view);
+        tracing::info!(
+            source,
+            "a confined site's origins changed: its view is made again"
+        );
+        let this = self.clone();
+        let source = source.to_owned();
+        if processes.is_empty() {
+            self.shell()
+                .later(Box::new(move || this.remade(&source, &url)));
+        } else {
+            let shell = Arc::clone(self.shell());
+            std::thread::spawn(move || {
+                crate::host::wait_for_exit(&processes, std::time::Instant::now() + REMAKE_WAIT);
+                shell.on_main(Box::new(move || this.remade(&source, &url)));
+            });
+        }
+    }
+
+    /// The view [`Self::reconfine`] dropped, made again at `url`, unless the
+    /// site closed meanwhile. On the main thread.
+    fn remade(&self, source: &str, url: &str) {
+        if view(source).is_some() || !self.book().sites.contains_key(source) {
+            return;
+        }
+        self.make(source, url);
+        if view(source).is_none() {
+            if let Some(site) = self.book().sites.get_mut(source) {
+                site.fail(crate::state::SiteFailure::Other(
+                    crate::confine::NOT_CONFINED.to_owned(),
+                ));
+            }
+            self.sync(source);
+        }
     }
 
     /// Where each source's site asks for a sign-in and whether one is saved
@@ -1327,6 +1406,10 @@ impl Sites {
                         }
                     }
                 }
+            } else if act == SiteAct::Reload {
+                // A site with no view (its making failed, or a remake did,
+                // ux30): *Retry* makes it again.
+                this.make(&source, &landing);
             }
             this.sync(&source);
         }));
@@ -1391,12 +1474,12 @@ impl Sites {
             let this = self.clone();
             let source = source.to_owned();
             self.shell().on_main(Box::new(move || {
-                if let Some(view) = view(&source) {
-                    if let Some(confine) = confine {
-                        view.confine(confine);
-                    }
-                    if let Some(url) = &reload {
-                        view.load(url);
+                match confine {
+                    Some(confine) => this.reconfine(&source, confine, reload),
+                    None => {
+                        if let (Some(view), Some(url)) = (view(&source), &reload) {
+                            view.load(url);
+                        }
                     }
                 }
                 this.sync(&source);

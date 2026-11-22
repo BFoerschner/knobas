@@ -159,6 +159,9 @@ pub struct FakeHost {
     /// moment after a view closed.
     pub forget_held_for: Rc<RefCell<u32>>,
     forget_tries: Rc<RefCell<u32>>,
+    /// Views take a change of what they may load only when made, as on
+    /// Windows (ux30).
+    pub remakes: Rc<RefCell<bool>>,
 }
 
 impl FakeHost {
@@ -249,6 +252,10 @@ impl SiteHost for FakeHost {
         self.calls
             .borrow_mut()
             .push(format!("flush {} ahead={ahead}", processes.len()));
+    }
+
+    fn remakes_to_confine(&self) -> bool {
+        *self.remakes.borrow()
     }
 
     fn forget(&self, spec: &ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {

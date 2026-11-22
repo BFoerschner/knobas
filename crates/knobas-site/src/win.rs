@@ -12,7 +12,11 @@
 //!   whose status wry drops; the process ending from `ProcessFailed`.
 //! - A confined site (ux30, [`crate::confine`]): `WebResourceRequested` for
 //!   every request answers 403 to what the rule refuses, and
-//!   `FrameNavigationStarting` cancels such a frame.
+//!   `FrameNavigationStarting` cancels such a frame. On Windows the rule is
+//!   [`crate::confine::Confine::may_request`] whoever's page is on top: the
+//!   browser arguments send every connection but those to the site's
+//!   origins to a closed proxy, so an identity provider's page could load
+//!   nothing more anyway, and this way the log names what it asked for.
 
 use std::rc::Rc;
 
@@ -89,15 +93,16 @@ pub fn wait_for_exit(pids: &[u32], deadline: std::time::Instant) {
     }
 }
 
-/// wry's default arguments, which `with_additional_browser_args` replaces,
-/// and the cache's cap of 100 MB a site.
-const BROWSER_ARGS: &str =
-    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=104857600";
-
-/// The builder's Windows settings.
-pub fn builder(builder: WebViewBuilder<'_>) -> WebViewBuilder<'_> {
+/// The builder's Windows settings. The browser arguments come from what the
+/// site may load ([`crate::confine::webview2_args`]): WebView2 takes them
+/// when the site's browser process starts, which is why a confined view is
+/// made again when its allow-list changes.
+pub fn builder<'a>(
+    builder: WebViewBuilder<'a>,
+    confine: Option<&crate::confine::Confine>,
+) -> WebViewBuilder<'a> {
     builder
-        .with_additional_browser_args(BROWSER_ARGS)
+        .with_additional_browser_args(crate::confine::webview2_args(confine))
         // Ctrl+F, Ctrl+P and Alt+← stay WebView2's own (decisions §8).
         .with_browser_accelerator_keys(true)
 }
@@ -176,9 +181,11 @@ fn top_of(core: &ICoreWebView2) -> Option<String> {
 
 /// Refuse what a confined site's rule refuses (ux30): every request through
 /// `WebResourceRequested`, answered 403, and every frame through
-/// `FrameNavigationStarting`, cancelled. Both read `confined.rules` at the
-/// request, so a change applies at once; with no rule nothing is refused.
-/// One log line per refused origin and kind per page.
+/// `FrameNavigationStarting`, cancelled. Both ask `may_request` of
+/// `confined.rules` at the request, whatever page is on top (Fable's WebRTC
+/// ruling: the browser arguments' proxy refuses the rest anyway); with no
+/// rule nothing is refused. One log line per refused origin and kind per
+/// page.
 ///
 /// # Errors
 ///
@@ -218,7 +225,7 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
                 let refused = rules
                     .borrow()
                     .as_ref()
-                    .is_some_and(|rule| !rule.may_load(top.as_deref(), &uri));
+                    .is_some_and(|rule| !rule.may_request(&uri));
                 if !refused {
                     return Ok(());
                 }
@@ -246,18 +253,17 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
         )?;
         let rules = Rc::clone(&confined.rules);
         core.add_FrameNavigationStarting(
-            &NavigationStartingEventHandler::create(Box::new(move |webview, args| {
-                let (Some(webview), Some(args)) = (webview, args) else {
+            &NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
                     return Ok(());
                 };
                 let mut uri = PWSTR::null();
                 args.Uri(&mut uri)?;
                 let uri = webview2_com::take_pwstr(uri);
-                let top = top_of(&webview);
                 let refused = rules
                     .borrow()
                     .as_ref()
-                    .is_some_and(|rule| !rule.may_load(top.as_deref(), &uri));
+                    .is_some_and(|rule| !rule.may_request(&uri));
                 if refused {
                     args.SetCancel(true)?;
                 }

@@ -215,7 +215,7 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         }
         #[cfg(windows)]
         {
-            builder = crate::win::builder(builder);
+            builder = crate::win::builder(builder, spec.confine.as_ref());
         }
         let started = std::time::Instant::now();
         let view = builder
@@ -249,6 +249,10 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
 
     fn focus_shell(&self) {
         (self.focus_shell)();
+    }
+
+    fn remakes_to_confine(&self) -> bool {
+        cfg!(windows)
     }
 
     fn flush(&self, processes: &[u32], deadline: std::time::Instant) {

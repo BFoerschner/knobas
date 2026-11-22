@@ -513,6 +513,9 @@ impl<H: knobas_site::host::SiteHost> knobas_site::host::SiteHost for ProbeHost<H
     fn forget(&self, spec: &knobas_site::host::ViewSpec, done: Box<dyn FnOnce(bool) + Send>) {
         self.0.forget(spec, done);
     }
+    fn remakes_to_confine(&self) -> bool {
+        self.0.remakes_to_confine()
+    }
     fn flush(&self, processes: &[u32], deadline: Instant) {
         let started = Instant::now();
         self.0.flush(processes, deadline);

@@ -109,11 +109,9 @@ after, the VM's web client after, and the stand-in's folder page after.
 ## Not defended against, and owed
 
 - **The VM, owed when WSL is free again:** a folder's deep link against the real server (done on the stand-in).
-- **Windows (WebView2), owed:** the whole measurement above in knobas's WebView2 window (`S/owed-on-windows.md`),
-  above all **WebRTC**: `WebResourceRequested` sees no UDP and WebView2 has no switch to turn peer connections off, so a
-  page's STUN probably leaves there. Per Fable's ruling a page-chosen escape comes back before merge; the candidate is
-  Chromium's `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` in the confined site's browser arguments, which
-  stops UDP but may leave TURN over TCP. Also whether `WebResourceRequested` fires for a redirect hop and a WebSocket,
+- **Windows (WebView2), owed:** the whole measurement above in knobas's WebView2 window (`S/owed-on-windows.md`).
+  **WebRTC is settled** (`2026-11-22-webrtc-cannot-leave-a-password-managers-site-on-windows.md`: it did leave, STUN,
+  TURN over TCP and TLS and ICE-TCP alike; a confined site's browser arguments now stop every route). Also whether `WebResourceRequested` fires for a redirect hop and a WebSocket,
   service and shared workers, and a refused top-level navigation's first GET.
 - **macOS, not measured:** a service worker's fetch (Pleasant registers none; a dedicated worker's fetch was refused),
   CSP reports (Pleasant's policy names no report address, and only its own server can set one).

@@ -188,4 +188,20 @@ pub trait SiteHost {
     fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
         let _ = (processes, deadline);
     }
+    /// Whether a view takes a change of what it may load only when it is
+    /// made (Windows: WebView2 reads a confined site's browser arguments
+    /// when its browser process starts, ux30). The controller then drops
+    /// the view, waits for its browser process to end, and makes it again.
+    fn remakes_to_confine(&self) -> bool {
+        false
+    }
+}
+
+/// Wait, at most until `deadline`, for each of `processes` to end. Off the
+/// main thread: it blocks. Windows only; elsewhere nothing to wait for.
+pub fn wait_for_exit(processes: &[u32], deadline: std::time::Instant) {
+    #[cfg(windows)]
+    crate::win::wait_for_exit(processes, deadline);
+    #[cfg(not(windows))]
+    let _ = (processes, deadline);
 }

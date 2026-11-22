@@ -11,7 +11,7 @@ use knobas_site::policy::{Base, OtherSite, SiteRules};
 use knobas_site::sites::{
     SiteAct, SiteAsked, SiteAsks, SiteClosedWhy, SiteInsets, SiteRoutedTo, install_host,
 };
-use knobas_site::state::{IDLE_CLOSE_MS, SitePhase};
+use knobas_site::state::{IDLE_CLOSE_MS, SiteFailure, SitePhase};
 use knobas_site::{Config, SiteError, SiteEvent, Sites};
 
 struct World {
@@ -1246,6 +1246,144 @@ async fn a_changed_allow_list_reaches_the_live_confined_view_and_an_unchanged_on
     w.sites.set_rules(map);
     w.shell.drain();
     assert_eq!(calls("vault"), ["confine [https://vault.example:8443]"]);
+    assert_eq!(
+        confined_origins(&w, "vault"),
+        Some(vec!["https://vault.example:8443".to_owned()])
+    );
+}
+
+/// The `make` lines of the fake host, for `source`.
+fn makes(w: &World, source: &str) -> Vec<String> {
+    let prefix = format!("make {source} ");
+    w.host
+        .calls
+        .borrow()
+        .iter()
+        .filter(|call| call.starts_with(&prefix))
+        .cloned()
+        .collect()
+}
+
+/// `vault`'s rules with `allowed`, beside an unconfined Jira whose
+/// allow-list changes too.
+fn vault_rules(allowed: &[&str]) -> HashMap<String, SiteRules> {
+    let mut vault = rules("https://vault.example:8443");
+    vault.confined = true;
+    vault.allowed = allowed
+        .iter()
+        .map(|text| knobas_site::policy::Origin::parse(text).unwrap())
+        .collect();
+    let mut jira = rules("https://jira.example");
+    jira.allowed = vec![knobas_site::policy::Origin::parse("https://cdn.example").unwrap()];
+    HashMap::from([("vault".to_owned(), vault), ("jira".to_owned(), jira)])
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn where_a_view_takes_its_confinement_only_when_made_a_changed_allow_list_makes_it_again_where_it_was()
+ {
+    // Windows: WebView2 reads a confined site's proxy and WebRTC arguments
+    // when its browser starts (Fable's WebRTC ruling, 2026-11-22).
+    let w = vault_world();
+    *w.host.remakes.borrow_mut() = true;
+    open_live(
+        &w,
+        "vault",
+        "https://vault.example:8443/WebClient/Main?itemId=5f0c",
+    )
+    .await;
+    open_live(&w, "jira", "https://jira.example/").await;
+    let old = w.host.view("vault");
+    w.sites.set_rules(vault_rules(&[]));
+    w.shell.drain();
+    assert!(
+        !old.borrow()
+            .calls
+            .iter()
+            .any(|call| call.starts_with("confine")),
+        "the old view is not told: {:?}",
+        old.borrow().calls
+    );
+    assert_eq!(
+        old.borrow().calls.last().map(String::as_str),
+        Some("dropped")
+    );
+    assert_eq!(
+        makes(&w, "vault"),
+        [
+            "make vault https://vault.example:8443/",
+            "make vault https://vault.example:8443/WebClient/Main?itemId=5f0c"
+        ]
+    );
+    assert_eq!(
+        confined_origins(&w, "vault"),
+        Some(vec!["https://vault.example:8443".to_owned()])
+    );
+    // An unconfined site's allow-list makes nothing again.
+    assert_eq!(makes(&w, "jira").len(), 1);
+    // The same rules again: nothing.
+    w.sites.set_rules(vault_rules(&[]));
+    w.shell.drain();
+    assert_eq!(makes(&w, "vault").len(), 2);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn where_a_view_takes_its_confinement_only_when_made_allowing_while_landing_makes_it_again_at_the_landing()
+ {
+    let w = vault_world();
+    *w.host.remakes.borrow_mut() = true;
+    w.sites.open("vault", None, INSETS, false).await.unwrap();
+    w.sites.show("vault", INSETS, true, true);
+    assert!(!w.host.navigate("vault", "https://idp.example/sso"));
+    w.shell.drain();
+    assert_eq!(
+        w.sites.answer("vault", "https://idp.example", true),
+        Ok(None)
+    );
+    w.shell.drain();
+    assert_eq!(
+        makes(&w, "vault"),
+        [
+            "make vault https://vault.example:8443/",
+            "make vault https://vault.example:8443/"
+        ]
+    );
+    assert_eq!(
+        confined_origins(&w, "vault"),
+        Some(vec![
+            "https://vault.example:8443".to_owned(),
+            "https://sso.example".to_owned(),
+            "https://idp.example".to_owned()
+        ])
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_view_that_cannot_be_made_again_loads_nothing_says_so_and_retry_makes_it() {
+    let w = vault_world();
+    *w.host.remakes.borrow_mut() = true;
+    open_live(&w, "vault", "https://vault.example:8443/WebClient/Main").await;
+    *w.host.fail.borrow_mut() = Some("the session folder is still in use".into());
+    w.sites.set_rules(vault_rules(&[]));
+    w.shell.drain();
+    let status = w
+        .sites
+        .statuses()
+        .into_iter()
+        .find(|status| status.source == "vault")
+        .expect("the site stays");
+    assert_eq!(
+        status.failure,
+        Some(SiteFailure::Other(
+            knobas_site::confine::NOT_CONFINED.to_owned()
+        ))
+    );
+    *w.host.fail.borrow_mut() = None;
+    w.sites.act("vault", SiteAct::Reload, false).await.unwrap();
+    w.shell.drain();
+    assert_eq!(
+        makes(&w, "vault").last().map(String::as_str),
+        Some("make vault https://vault.example:8443/WebClient/Main")
+    );
     assert_eq!(
         confined_origins(&w, "vault"),
         Some(vec!["https://vault.example:8443".to_owned()])

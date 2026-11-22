@@ -136,6 +136,68 @@ impl Confine {
     }
 }
 
+/// Every site's WebView2 browser arguments (Windows): wry's defaults, which
+/// `with_additional_browser_args` replaces, and the cache's cap of 100 MB a
+/// site.
+pub const WEBVIEW2_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=104857600";
+
+/// Where a confined site's WebView2 sends every connection that is not to
+/// one of its origins: a loopback port nothing listens on, so the
+/// connection fails (Fable's WebRTC ruling, 2026-11-22). Never a listener of
+/// knobas's.
+pub const CLOSED_PROXY: &str = "127.0.0.1:9";
+
+/// A site's WebView2 browser arguments (Windows), given what it may load.
+/// An unconfined site gets [`WEBVIEW2_ARGS`] alone. A confined one (a
+/// password source's, ux30) also gets what keeps WebRTC from leaving for a
+/// host the page chose, which `WebResourceRequested` never sees:
+/// - the WebRTC IP handling policy `disable_non_proxied_udp`, under both
+///   spellings (Chrome 156 reads `--webrtc-ip-handling-policy` only; the
+///   `--force-` one is older): no UDP at all, so no STUN, no TURN over UDP
+///   and no UDP ICE check;
+/// - every connection through [`CLOSED_PROXY`] but those to the site's own
+///   and allowed origins (`--proxy-bypass-list`, exact scheme, host and
+///   port, `ws(s)` beside `http(s)`, `<-loopback>` first so a loopback
+///   address goes through the proxy too): TURN over TCP and TLS and a
+///   page-supplied ICE-TCP candidate go nowhere;
+/// - no name resolved but the origins' hosts (`--host-resolver-rules`):
+///   WebRTC looks a TURN or STUN server's name up itself, proxy or not, and
+///   the name carries what the page chose.
+#[must_use]
+pub fn webview2_args(confine: Option<&Confine>) -> String {
+    let Some(confine) = confine else {
+        return WEBVIEW2_ARGS.to_owned();
+    };
+    let mut bypass = vec!["<-loopback>".to_owned()];
+    let mut hosts: Vec<&str> = Vec::new();
+    for origin in confine.origins() {
+        let socket = if origin.scheme == "https" {
+            "wss"
+        } else {
+            "ws"
+        };
+        for scheme in [origin.scheme.as_str(), socket] {
+            bypass.push(format!("{scheme}://{}:{}", origin.host, origin.port));
+        }
+        let host = origin.host.trim_start_matches('[').trim_end_matches(']');
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    let mut resolve = "MAP * ~NOTFOUND".to_owned();
+    for host in hosts {
+        resolve.push_str(", EXCLUDE ");
+        resolve.push_str(host);
+    }
+    format!(
+        "{WEBVIEW2_ARGS} --webrtc-ip-handling-policy=disable_non_proxied_udp \
+         --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
+         --proxy-server={CLOSED_PROXY} --proxy-bypass-list={} \"--host-resolver-rules={resolve}\"",
+        bypass.join(";")
+    )
+}
+
 /// `url-filter` prefixes for `origin`'s addresses under `scheme`: the host
 /// and the port as WebKit writes them, and with a default port also the port
 /// written out.
@@ -668,5 +730,40 @@ mod tests {
         assert_eq!(gate.open(), None);
         assert!(!gate.is_open());
         assert_eq!(gate.load("https://vault.example/b"), None);
+    }
+
+    #[test]
+    fn an_unconfined_sites_webview2_keeps_webrtc_proxies_and_names_as_they_are() {
+        assert_eq!(webview2_args(None), WEBVIEW2_ARGS);
+    }
+
+    #[test]
+    fn a_confined_sites_webview2_sends_no_udp_and_reaches_its_own_origins_alone() {
+        let c = confine(OWN, &["http://sso.example", "https://idp.example"]);
+        assert_eq!(
+            webview2_args(Some(&c)),
+            format!(
+                "{WEBVIEW2_ARGS} --webrtc-ip-handling-policy=disable_non_proxied_udp \
+                 --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
+                 --proxy-server=127.0.0.1:9 \
+                 --proxy-bypass-list=<-loopback>;https://127.0.0.1:24801;wss://127.0.0.1:24801;\
+                 http://sso.example:80;ws://sso.example:80;https://idp.example:443;wss://idp.example:443 \
+                 \"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE sso.example, EXCLUDE idp.example\""
+            )
+        );
+    }
+
+    #[test]
+    fn a_host_on_two_origins_is_resolved_once_and_an_ipv6_one_without_brackets() {
+        let c = confine("https://[::1]:8443", &["http://[::1]:8080"]);
+        let args = webview2_args(Some(&c));
+        assert!(
+            args.contains("--proxy-bypass-list=<-loopback>;https://[::1]:8443;wss://[::1]:8443;http://[::1]:8080;ws://[::1]:8080 "),
+            "{args}"
+        );
+        assert!(
+            args.ends_with("\"--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ::1\""),
+            "{args}"
+        );
     }
 }
