@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use knobas_http::{Auth, HttpClient, HttpConfig, Method};
+use knobas_http::{HttpClient, HttpConfig, Method};
 use knobas_source::instance::SourceInstance;
 use knobas_source::passwords::{
     self, SecretAnswer, SecretAsk, SecretRef, SecretText, Write, WriteKind, Written,
@@ -75,7 +75,8 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         base_url: base_url.clone(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
-        auth: Auth::None,
+        // No auth of the client's own (the default): the bearer token rides
+        // on each request once signed in.
         body_message: Some(error_message),
         forbidden: Some(forbidden_refusal),
         ..HttpConfig::default()
@@ -704,8 +705,8 @@ impl Source for PleasantSource {
         let of = items.len() as u64;
         for (done, item) in items.into_iter().enumerate() {
             sink.item(item).await?;
-            if done % 200 == 199 {
-                sink.walked(done as u64 + 1, Some(of), "items").await;
+            if let Some(walked) = progress_after(done) {
+                sink.walked(walked, Some(of), "items").await;
             }
         }
         for pair in keys(walked) {
@@ -847,8 +848,27 @@ impl Source for PleasantSource {
     }
 }
 
+/// How many items a sync has handed over when it says so: every 200th, so a
+/// large vault shows its progress without a line per item.
+fn progress_after(done: usize) -> Option<u64> {
+    (done % 200 == 199).then(|| done as u64 + 1)
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// Every 200th item says how far the sync is, counting from one; and a
+    /// token the server gives no lifetime is kept 15 minutes (the final
+    /// suite's mutants: the cadence's arithmetic and the constant's).
+    #[test]
+    fn a_sync_says_its_progress_every_200_items_and_a_token_lasts_15_minutes() {
+        assert_eq!(progress_after(0), None);
+        assert_eq!(progress_after(198), None);
+        assert_eq!(progress_after(199), Some(200));
+        assert_eq!(progress_after(200), None);
+        assert_eq!(progress_after(399), Some(400));
+        assert_eq!(TOKEN_DEFAULT, Duration::from_secs(900));
+    }
     use super::*;
 
     #[test]

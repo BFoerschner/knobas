@@ -109,6 +109,44 @@ async fn the_adapter_passes_the_contract_battery() {
     .await;
 }
 
+/// The sign-in is a form, sent as one: the content type, the grant and the
+/// account in the body, and the adapter named in the User-Agent (the final
+/// suite's mutants: the client's kind and version, and knobas-http's form,
+/// went unseen).
+#[tokio::test]
+async fn the_sign_in_is_a_form_from_a_named_adapter() {
+    let server = server().await;
+    let s = source(&server.uri());
+    let mut sink = KeySink::default();
+    s.sync(None, &mut sink).await.unwrap();
+    let requests = server.received_requests().await.unwrap();
+    let token = requests
+        .iter()
+        .find(|r| r.url.path() == "/OAuth2/Token")
+        .expect("one sign-in");
+    let header = |name: &str| {
+        token
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert_eq!(header("content-type"), "application/x-www-form-urlencoded");
+    let agent = header("user-agent");
+    assert!(
+        agent.ends_with(&format!(
+            "({}/{})",
+            knobas_source_pleasant::ADAPTER_KIND,
+            knobas_source_pleasant::ADAPTER_VERSION
+        )),
+        "{agent}"
+    );
+    let body = String::from_utf8_lossy(&token.body);
+    assert!(body.contains("grant_type=password"), "{body}");
+    assert!(body.contains("username=mara.lindqvist"), "{body}");
+}
+
 #[tokio::test]
 async fn a_sync_is_one_sign_in_and_one_tree_and_nothing_else() {
     let server = server().await;
