@@ -20,15 +20,15 @@ One windowed list in the page's scroller: groups, operation rows, and each opene
 7. **Small, a spec is the inline form**: in a comparison the operations and schemas that differ, marked, on the stage's two sides; on a Docs page a code block's *API*, in a box of fixed height, the code first.
 8. **A request starts as the spec says** and is one model with three writers: what Rust sends, the curl text, and a Bruno request.
 9. **A server is the spec's or one a person saved** (one settings row). No environments, no variables but a server's own.
-10. **A secret is kept for one origin**: a saved server's in the keychain, never sent to the page; one typed for a spec's server in the app's memory until quit. Rust attaches it to its origin only. No source's credential is used.
+10. **A secret is kept for one origin, in memory only** (Björn: "I'd just type it into the openapi viewer page itself. not using stored credentials"): typed on the explorer's page, handed to the app once, held there until knobas quits; never in the keychain or a settings row. Rust attaches it to its origin only. No source's credential is used.
 11. **Rust sends once**: no retry, 10 s to connect, 60 s in all unless changed, 64 MiB of answer kept, `http` and `https` only.
 12. **Nothing is sent unasked.** A method other than `GET`, `HEAD` and `OPTIONS` to a host that is not this computer is asked about in place, once a host until quit, and Rust refuses it without that yes. Redirects are followed only for `GET` and `HEAD` on the same origin, five at most. Certificates are the platform's, plus a CA file a saved server names. No switch skips verification.
 13. **An answer's status takes a tone**, its body is drawn as Source draws a file, HTML is never rendered.
 14. **Answers and what was sent are kept in memory only**, 50 lines and 64 MiB, and are in no backup or share export.
 15. **An application may have an API spec command**, with `{file}`, `{collection}` and `{name}`. It runs on files knobas writes, so it needs no checkout.
 16. **The collection is written by knobas** as `.bru` files from each operation's starting request, with no secret in it, and Bruno's own parser reads it back in the tests.
-17. **The scratch folder** is in the profile, one a version of a spec, written once, opened as it is afterwards, removed after 30 days unopened.
-18. **Bruno ships as an entry.** On macOS it opens the collection. On Windows and Linux it cannot be pointed at a folder, and knobas says so with the path ready. Not found on the computer, the entry is drawn disabled and says so.
+17. **The scratch folder** is in the profile, one a spec file, written again when the spec's content changes (compared by hash, Björn), else opened as it is, removed after 30 days unopened.
+18. **Bruno ships as an entry.** On macOS it opens the collection. On Windows and Linux it cannot be pointed at a folder, and knobas says so with the path ready (*Open Collection*, Björn: yes). Not found on the computer, the entry is not drawn (Björn).
 19. **A program that exits with an error within 1.5 s of its start is a failed open**, for every application.
 
 ## Not in this pass
@@ -39,9 +39,22 @@ OAuth flows. Variables, scripts, tests and a saved history. Cookies between send
 
 On a prototype with the app's stylesheets in headless Chrome on the WSL box, GitHub's spec of 1,281 operations, median ms at 1x / 4x / 6x at 2560 x 1440: a filter key 16 / 67 / 85, an operation's page from the rail 14 / 56 / 82, a ref followed 15 / 57 / 95, a fold of 200 16 / 38 / 53; at 1440 x 868 each is lower. GitHub's 14.3 MB parses in 20 to 45 ms. The collection writer made GitHub's 1,330 files in 29 ms and Bruno's parser read every request back. Bruno 4.3.0 opened a handed folder on macOS only while running, and never on Linux. 
 
+## Björn's answers and asks (2026-11-22, after the design)
+
+1. **Credentials**: typed on the page, memory only; never stored, never a source's own. The design's keychain item for a saved server is dropped; a saved server holds a name, an address and a CA file.
+2. **History**: memory only, as designed.
+3. **Fill the window** becomes **Zen mode**, key `z` (free on the Code page; the one place it is bound is the file view), a file-view feature for every renderer where it applies (Markdown, PDF, JAR, images, the explorer): it hides the repository's header and tree. A visible button with its key in the tooltip, a row in Settings › Keyboard.
+4. **Bruno on Windows and Linux**: the *Open Collection* hint.
+5. **Bruno not installed**: the entry is hidden.
+6. **Scratch folders**: 30 days unopened, and rebuilt when the spec's content changed (by hash).
+7. **The question before a change**: once a host until knobas restarts.
+8. **Operations in the launcher**: no separate index. An Everything hit inside a spec opens the explorer at the operation or schema that holds the hit's line (`openapi-line.ts`, a scan of the text up to it).
+9. **Schemas** (Fable ruled the treatment): the whole row toggles; arrow keys; Alt-click for everything below; *Expand all* / *Collapse all*; names, types and *required* in columns a list shares; indent guides; the words under the name in the second ink; the facts one quiet line.
+10. **Examples**: the spec's own where present, else made from the schema everywhere (bodies, answers, parameters, a schema's page), deterministic, labelled *From the spec* or *Made from the schema*; realistic by `@faker-js/faker` (MIT, lazy, in the worker) and `randexp` (MIT) for patterns, chosen in the order example or default, enum or const, format, pattern, the property's name (any case style, German names too), the type with its limits.
+
 ## Built
 
-Step by step on the branch `ux31-openapi` (section 32 of the design). Steps 1 to 3: the sniff past its head, the worker's model, the explorer and its filter by the launcher's rules over a held list.
+Step by step on the branch `ux31-openapi` (section 32 of the design): the sniff past its head and the worker's model (1), the explorer (2), its filter by the launcher's rules over a held list (3), the timing (4), sending in Rust (5), the request and the answer (6), this note and ADR-0057 (7), then *Open in* and Bruno, a comparison, Docs and Zen mode.
 
 ## Reversing it
 
