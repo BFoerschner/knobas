@@ -25,10 +25,11 @@ The judgment calls went to Fable (xhigh) under Björn's standing instruction, an
 13. **`ticket_fields` says what a ticket lets a person change**, with the values the source holds now, in seven kinds of control the shell draws. **`field_options`** lists a field's choices; a project's people are read once a session and matched in memory.
 14. **`knobas:adapter@1.6.0`** adds the two reads as one optional interface. An adapter built against an earlier 1.x moves tickets if it declares `transition` and shows every other field as text.
 15. **A credential that may not write** shows every status and field as text, with the missing permission named.
+16. **The board edits what it lanes by**: *Assign to…* and *Priority ▸* in a card's menu, `a` on the selected card, and a drop in another assignee or priority lane queues the move, then the edit. Lanes by epic, issue type or label take no drop.
 
 ## Not in this pass
 
-Rank order on a Jira view. The description. Sprint, epic, parent, type, components, versions, links. A drag in the list or by touch. Several cards at once. A new ticket from a column.
+A source's own fields on the ticket page (the build's step 10, cut from the first pass on 2026-11-22: the write, the reads and the WIT carry them; the page does not draw them yet). Rank order on a Jira view. The description. Sprint, epic, parent, type, components, versions, links. A drag in the list or by touch. Several cards at once. A new ticket from a column.
 
 ## Measured
 
