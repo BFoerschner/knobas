@@ -294,6 +294,6 @@ test("a child's page sits under its parent's address, Fonts' old address still l
   expect(settingsParent("appearance")).toBeNull();
   // The tree's order: a parent, then its children.
   const keys = SETTINGS_SECTIONS.map(([key]) => key);
-  expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 3)).toEqual(["appearance", "code-colours", "fonts"]);
+  expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 4)).toEqual(["appearance", "theme", "code-colours", "fonts"]);
   expect(new Set(keys).size).toBe(keys.length);
 });

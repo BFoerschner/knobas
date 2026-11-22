@@ -401,6 +401,8 @@ const SITE_STATUS = {
 } as const;
 const siteResidueStore = createSiteStore();
 const TfAck = (await import("../tf/TfAck.svelte")).default;
+const TfThemeKeep = (await import("../tf/TfThemeKeep.svelte")).default;
+const { createThemes: createWindowThemes } = await import("../tf/themes.svelte");
 const { acknowledge } = await import("./ack.svelte");
 const { createZoom } = await import("../tf/zoom.svelte");
 /** A zoom of its own whose frames and layouts land at once: what is counted is the plate's, not the webview's. */
@@ -2751,6 +2753,29 @@ const CASES: Case[] = [
     target.querySelector<HTMLButtonElement>("button.tf-thm-sw")?.click();
     flushSync();
   }),
+  // Settings › Appearance › Theme (ADR-0055): a copy's rename is a panel on the layers until it ends.
+  sectionCase("TfAppThemeEditor", ["appearance", "theme"], (target) => {
+    ownThemeShown(target);
+    [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Rename…")?.click();
+    flushSync();
+  }),
+  // The preview's pick mode: a panel on the layers while it is on.
+  sectionCase("TfAppThemePreview", ["appearance", "theme"], (target) => {
+    flushSync();
+    [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Pick from the preview")?.click();
+    flushSync();
+  }),
+  {
+    /** The keep plate (ADR-0055): its countdown's interval and its layer go with it, a theme on trial. */
+    name: "TfThemeKeep",
+    source: "lib/tf/TfThemeKeep.svelte",
+    open: (target) => {
+      const data = new Map<string, string>([["knobas.themes", JSON.stringify([{ id: "own-residue1", name: "Faint", kind: "light", app: { sheet: "#FAFAFA", ink: "#AAAAAA" }, syntax: {} }])]]);
+      const themes = createWindowThemes(() => ({ getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) }), () => null);
+      themes.useAsIs("own-residue1");
+      return { app: mount(TfThemeKeep, { target, props: { themes } }) };
+    },
+  },
   {
     /** An opening's chip (ux21): the window's press listeners go with it; a chip shown and answered. */
     name: "TfAck",
