@@ -133,7 +133,11 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘Enter", "A composer or a dialog", "Send, or press its primary button"],
   ["J K ↑ ↓", "Tickets and the Inbox", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],
+  ["S", "Tickets and a ticket", "Move the ticket: carry its card on the board, or its status menu (ADR-0054)"],
+  ["⌘Z", "Tickets and a ticket", "Undo the last move while its toast stands"],
   ["L", "Job", "Connections"],
+  ["A", "A ticket's page, Tickets", "Assign it: the people picker (ADR-0054)"],
+  ["E", "A ticket's page", "Edit the summary (ADR-0054)"],
   ["J K", "A diff", "Next and previous file"],
   ["N P", "A diff", "Next and previous change"],
   ["V", "A diff", "Mark the file viewed"],
@@ -146,7 +150,6 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘R", "A site", "Reload it"],
   ["⌘[ ⌘]", "A site", "Back and forward in the site, then in knobas"],
   ["⌘L", "A site", "The keyboard to knobas's bar, and back"],
-  ["⌘⇧⌫", "Anywhere, a field too", "Put knobas's own themes back; yours are kept (ADR-0055)"],
   // The Passwords page (ADR-0056). `R` does nothing there: a sync is something a password manager logs, so it is a button.
   ["/", "Passwords", "Filter every folder"],
   ["J K ↑ ↓", "Passwords", "Move the selection; the entry follows"],
@@ -156,6 +159,8 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["U", "Passwords", "Copy the username"],
   ["O", "Passwords", "Copy the one-time code"],
   ["A", "Passwords", "Open or copy the address"],
+  ["E", "Passwords", "Edit the open entry, where its source lets you"],
+  ["N", "Passwords", "A new entry in the folder you are in"],
   ["Esc", "Passwords", "Clear the filter, else up one folder"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];

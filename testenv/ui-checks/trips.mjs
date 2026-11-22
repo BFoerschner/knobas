@@ -350,7 +350,7 @@ const APP_DUPLICATE_CHECK = String.raw`(b) => {
   const page = ${appPage};
   if (page.querySelector(".tf-thm-edh h2")?.textContent.trim() !== "knobas Light copy") return "the editor shows " + page.querySelector(".tf-thm-edh h2")?.textContent.trim();
   const swatches = page.querySelectorAll(".tf-apt-roles button.tf-thm-sw").length;
-  if (swatches !== 30) return swatches + " swatches are buttons, not the 30 of a theme one can change";
+  if (swatches !== 32) return swatches + " swatches are buttons, not the 32 of a theme one can change";
   return null;
 }`;
 /** A light theme of one's own in the window's light slot: knobas Light with a white panel. */
@@ -885,6 +885,12 @@ const PAGES = [
     { id: "reply-opener-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thr-reply", text: "Reply…" } },
     { id: "resolve-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thread button", text: "Resolve" } },
     { id: "unresolve-twice", kind: "enter-twice", strict: true, finding: "F-261", press: { sel: ".tf-thread button", text: "Unresolve" } },
+  ] },
+  // A ticket's fields as controls (ADR-0054, 2026-11-22): a double Enter on a picker's control opens it once and writes nothing (the
+  // priority's menu and the summary's field take a second Enter as their own pick and save, as every menu and inline editor does).
+  { page: "A ticket's fields", route: "ticket/mock%3APAY-231", trips: [
+    { id: "field-assignee-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: "button[aria-label='Assignee: change it']" } },
+    { id: "field-labels-open", kind: "enter-twice", strict: true, opens: true, finding: "ADR-0054", press: { sel: "button[aria-label='Labels: change it']" } },
   ] },
   { page: "A ticket's connections", route: "ticket/mock%3APAY-231", trips: [
     { id: "ticket-comment", kind: "enter-twice", strict: true, finding: "F-266", prep: [{ fill: ".tf-compose textarea", text: "Looks right to me." }, { wait: 150 }], press: { sel: ".tf-compose .tf-primary", text: "Comment" }, returns: "Comment on PAY-231" },

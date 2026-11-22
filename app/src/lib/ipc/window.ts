@@ -8,3 +8,13 @@ import { invoke } from "./invoke";
 export function windowLookSet(mode: "system" | "light" | "dark", light: string, dark: string): Promise<void> {
   return invoke<void>("window_look_set", { mode, light, dark });
 }
+
+/** The theme store as last kept in the database, which a backup carries (Björn, 2026-11-22). */
+export function themesKept(): Promise<string | null> {
+  return invoke<string | null>("themes_kept");
+}
+
+/** Keeps the theme store in the database; `null` removes it. */
+export function setThemesKept(snapshot: string | null): Promise<void> {
+  return invoke<void>("set_themes_kept", { snapshot });
+}

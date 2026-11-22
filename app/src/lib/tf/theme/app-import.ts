@@ -118,16 +118,33 @@ export function kindOfVsCode(json: Record<string, unknown>): ThemeKind {
   return /\blight\b/i.test(String(json.name ?? "")) ? "light" : "dark";
 }
 
-/** A VS Code theme's `colors` onto the window's colours. */
-export function appFromVsCode(json: Record<string, unknown>): { kind: ThemeKind; set: AppColours; from: Partial<Record<AppKey, string>> } {
+/**
+ * A selected row as the editor draws it, offered and never set (Björn, 2026-11-22): an import lands on knobas's ink
+ * plate, and the Theme page's *The theme's own* puts these in its place. Read where the theme sets them.
+ */
+export const VSCODE_ROW = { selRow: "list.activeSelectionBackground", onSelRow: "list.activeSelectionForeground" } as const;
+export const ZED_ROW = { selRow: "element.selected", onSelRow: "text" } as const;
+
+function offered(names: Record<"selRow" | "onSelRow", string>, colors: Record<string, unknown>, set: AppColours, kind: ThemeKind): AppColours {
+  const sheet = set.sheet ?? KNOBAS[kind].sheet;
+  const row = over(colors[names.selRow], sheet);
+  if (row === null) return {};
+  const words = over(colors[names.onSelRow], row);
+  return words === null ? { selRow: row } : { selRow: row, onSelRow: words };
+}
+
+/** A VS Code theme's `colors` onto the window's colours, and its selected row offered. */
+export function appFromVsCode(json: Record<string, unknown>): { kind: ThemeKind; set: AppColours; from: Partial<Record<AppKey, string>>; offers: AppColours } {
   const colors = (json.colors && typeof json.colors === "object" ? json.colors : {}) as Record<string, unknown>;
   const kind = kindOfVsCode(json);
-  return { kind, ...read(VSCODE, colors, kind) };
+  const read_ = read(VSCODE, colors, kind);
+  return { kind, ...read_, offers: offered(VSCODE_ROW, colors, read_.set, kind) };
 }
 
 /** A Zed theme's `style` onto the window's colours (its `syntax` is read by `fromZed` in `themes.ts`). */
-export function appFromZed(style: Record<string, unknown>, kind: ThemeKind): { set: AppColours; from: Partial<Record<AppKey, string>> } {
-  return read(ZED, style, kind);
+export function appFromZed(style: Record<string, unknown>, kind: ThemeKind): { set: AppColours; from: Partial<Record<AppKey, string>>; offers: AppColours } {
+  const read_ = read(ZED, style, kind);
+  return { ...read_, offers: offered(ZED_ROW, style, read_.set, kind) };
 }
 
 export const BASE16_KEYS = ["base00", "base01", "base02", "base03", "base04", "base05", "base06", "base07", "base08", "base09", "base0A", "base0B", "base0C", "base0D", "base0E", "base0F"] as const;

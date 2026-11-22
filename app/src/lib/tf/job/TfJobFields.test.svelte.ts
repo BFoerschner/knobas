@@ -297,3 +297,95 @@ test("the facts' boxes do not move when the fields land late", async () => {
   expect([after.left, after.top, after.width]).toEqual([before.left, before.top, before.width]);
   expect([...target.querySelectorAll("dl.tf-facts > dt")].map((dt) => dt.textContent).slice(0, rowsBefore.length)).toEqual(rowsBefore);
 });
+
+// ---- a source's own fields (ADR-0054, step 10) ----
+
+const OWN: TicketFields = {
+  fields: [
+    ...FIELDS.fields,
+    { id: "duedate", label: "Due date", kind: { type: "date" }, value: "2026-12-04", required: false },
+    { id: "customfield_10106", label: "Story Points", kind: { type: "number" }, value: 5, required: false },
+    { id: "customfield_10200", label: "Environment", kind: { type: "choice", options: ["Staging", "Production"].map((value) => ({ value, label: value })) }, value: "Staging", required: false },
+    { id: "customfield_10300", label: "Reviewer", kind: { type: "search", scope: "PAY", person: true }, value: null, required: false },
+    { id: "customfield_10400", label: "Release note", kind: { type: "flag" }, value: false, required: false },
+    { id: "customfield_10500", label: "Customer ref", kind: { type: "text" }, value: "ACME-7", required: false, readonly: "Not on this ticket's edit screen in Jira." },
+  ],
+};
+
+const more = () => target.querySelector<HTMLDetailsElement>("details.tf-tkmore");
+const ownFact = (name: string) => {
+  const term = [...(more()?.querySelectorAll("dl.tf-facts > dt") ?? [])].find((dt) => dt.textContent === name);
+  return term?.nextElementSibling as HTMLElement | undefined;
+};
+
+test("a source's own fields stand in a closed fold under the facts with their count; the four named fields are not in it", async () => {
+  open(ports(fieldPorts({ answer: OWN })));
+  await settle();
+  const fold = more()!;
+  expect(fold.open).toBe(false);
+  expect(fold.querySelector("summary")!.textContent).toBe("More fields 6");
+  const names = [...fold.querySelectorAll("dl.tf-facts > dt")].map((dt) => dt.textContent);
+  expect(names).toEqual(["Due date", "Story Points", "Environment", "Reviewer", "Release note", "Customer ref"]);
+  // Read only: text with the reason as its title.
+  const ref = ownFact("Customer ref")!.querySelector<HTMLElement>(".tf-fact-edit")!;
+  expect(ref.getAttribute("aria-disabled")).toBe("true");
+  expect(ref.title).toBe("Not on this ticket's edit screen in Jira.");
+  open(ports(fieldPorts()));
+});
+
+test("no own fields, no fold", async () => {
+  open(ports(fieldPorts()));
+  await settle();
+  expect(more()).toBeNull();
+});
+
+/** Mutant: an own field's edit that also sends a named field. */
+test("a date, a number, a choice, a person and a flag each queue EditTicket with that field alone, drawn at once", async () => {
+  open(ports(fieldPorts({ answer: OWN })));
+  await settle();
+  more()!.open = true;
+  flushSync();
+  const only = (fields: Record<string, unknown>) => ({ entity: ID, title: null, assignee: null, priority: null, labels: null, fields });
+
+  const date = ownFact("Due date")!.querySelector<HTMLInputElement>("input[type=date]")!;
+  date.value = "2026-12-24";
+  date.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(edited()).toEqual(only({ duedate: "2026-12-24" }));
+  expect(ownFact("Due date")!.querySelector(".tf-fwrite")?.textContent).toBe("Setting, queued");
+  writes.length = 0;
+
+  ownFact("Story Points")!.querySelector<HTMLElement>(".tf-fact-edit")!.click();
+  await settle();
+  const number = ownFact("Story Points")!.querySelector<HTMLInputElement>("input[type=number]")!;
+  number.value = "8";
+  number.dispatchEvent(new Event("input", { bubbles: true }));
+  number.form!.requestSubmit();
+  await settle();
+  expect(edited()).toEqual(only({ customfield_10106: 8 }));
+  expect(ownFact("Story Points")!.textContent).toContain("8");
+  writes.length = 0;
+
+  ownFact("Environment")!.querySelector<HTMLElement>(".tf-fact-edit")!.click();
+  await settle();
+  const items = [...document.querySelectorAll<HTMLElement>("[role=menuitemradio]")];
+  expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+  items[1]!.click();
+  await settle();
+  expect(edited()).toEqual(only({ customfield_10200: "Production" }));
+  writes.length = 0;
+
+  ownFact("Reviewer")!.querySelector<HTMLElement>(".tf-fact-edit")!.click();
+  await settle();
+  [...document.querySelectorAll<HTMLElement>(".tf-pick-opt")].find((row) => row.textContent?.includes("Mara Lindqvist"))!.click();
+  await settle();
+  expect(edited()).toEqual(only({ customfield_10300: "mara" }));
+  expect(ownFact("Reviewer")!.textContent).toContain("Mara Lindqvist");
+  writes.length = 0;
+
+  const flag = ownFact("Release note")!.querySelector<HTMLInputElement>("input[type=checkbox]")!;
+  flag.click();
+  await settle();
+  expect(edited()).toEqual(only({ customfield_10400: true }));
+  expect(ownFact("Release note")!.textContent).toContain("Yes");
+});

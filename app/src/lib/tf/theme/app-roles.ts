@@ -1,6 +1,6 @@
 /**
- * The window's part of a theme (ADR-0055): the 51 colours a theme may set for a side, each one of `tokens.css`'s
- * tokens, and how Settings › Appearance › Theme lists them: 22 rows under seven headings, a fold of 19 that knobas
+ * The window's part of a theme (ADR-0055): the 53 colours a theme may set for a side, each one of `tokens.css`'s
+ * tokens, and how Settings › Appearance › Theme lists them: 23 rows under seven headings, a fold of 19 that knobas
  * works out, and two never shown.
  */
 
@@ -19,6 +19,9 @@ export const APP_KEYS = [
   ["onPrimary", "--on-primary"],
   ["fill", "--fill"],
   ["onFill", "--on-fill"],
+  // A selected row of a list or a tree (Björn, 2026-11-22: its own colours, split from what is pressed).
+  ["selRow", "--sel-row"],
+  ["onSelRow", "--on-sel-row"],
   ["focus", "--focus"],
   ["link", "--link"],
   ["mark", "--mark"],
@@ -79,8 +82,10 @@ export const NAME: Record<AppKey, string> = {
   rule2: "Divider",
   primary: "Primary button",
   onPrimary: "Text on a primary button",
-  fill: "Selected, pressed",
-  onFill: "Text on what is selected",
+  fill: "Pressed",
+  onFill: "Text on what is pressed",
+  selRow: "Selected row",
+  onSelRow: "Text on a selected row",
   focus: "Focus ring",
   link: "Link",
   mark: "Highlight",
@@ -122,7 +127,7 @@ export const NAME: Record<AppKey, string> = {
 };
 
 /** What a row's example draws. Each kind is one small template in `TfAppThemeEditor.svelte`. */
-export type Example = "words" | "text" | "line" | "button" | "segment" | "ring" | "link" | "mark" | "selection" | "chip" | "unknown" | "card";
+export type Example = "words" | "text" | "line" | "button" | "segment" | "selrow" | "ring" | "link" | "mark" | "selection" | "chip" | "unknown" | "card";
 
 export interface Row {
   name: string;
@@ -140,7 +145,7 @@ export interface Heading {
   rows: readonly Row[];
 }
 
-/** The editor's rows: 30 keys in 22 rows under seven headings (the decisions' table; its text says 21). */
+/** The editor's rows: 32 keys in 23 rows under seven headings (the decisions' table, and *Selected row* since 2026-11-22). */
 export const HEADINGS: readonly Heading[] = [
   {
     name: "Surfaces",
@@ -174,7 +179,8 @@ export const HEADINGS: readonly Heading[] = [
     note: "",
     rows: [
       { name: "Primary button", keys: ["primary", "onPrimary"], example: "button", words: "Create ticket" },
-      { name: "Selected, pressed", keys: ["fill", "onFill"], example: "segment", words: "Board" },
+      { name: "Pressed", keys: ["fill", "onFill"], example: "segment", words: "Board" },
+      { name: "Selected row", keys: ["selRow", "onSelRow"], example: "selrow", words: "All tickets" },
       { name: "Focus ring", keys: ["focus"], example: "ring", words: "The keyboard's" },
       { name: "Link", keys: ["link"], example: "link", words: "release notes" },
     ],
@@ -237,5 +243,5 @@ export const HIDDEN: readonly AppKey[] = ["cardShade", "cardLift"];
 /** The row keys, in the order the editor lists them. */
 export const ROW_KEYS: readonly AppKey[] = HEADINGS.flatMap((h) => h.rows.flatMap((r) => r.keys));
 
-/** The eight chips a slot's card shows. */
-export const CHIPS: readonly AppKey[] = ["paper", "sheet", "ink", "primary", "ok", "warn", "err", "card"];
+/** The nine chips a slot's card shows. */
+export const CHIPS: readonly AppKey[] = ["paper", "sheet", "ink", "primary", "selRow", "ok", "warn", "err", "card"];

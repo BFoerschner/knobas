@@ -82,7 +82,11 @@ export type Act =
   /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
   | { do: "pipeline-read"; id: string }
   /** *Move to ▸ ⟨status⟩* on a ticket (ADR-0054): the page offering moves makes it. */
-  | { do: "move"; entityId: string; status: string };
+  | { do: "move"; entityId: string; status: string }
+  /** *Assign to…* on a ticket (ADR-0054, section 26): the page offering field edits opens its people picker at the card. */
+  | { do: "assign"; entityId: string }
+  /** *Priority ▸ ⟨name⟩* on a ticket: the page offering field edits queues it. */
+  | { do: "priority"; entityId: string; value: string; label: string };
 
 export interface Item {
   id: string;
@@ -134,6 +138,37 @@ export interface MenuContext {
    * Absent, or `null` for a ticket the page does not hold, the item is left out, so every other ticket menu is as it was.
    */
   moves?: (entityId: string) => MoveOffer | null;
+  /** A ticket's fields a card edits (section 26, `card-fields.svelte.ts`): *Assign to…* and *Priority ▸*; absent or `null`, left out. */
+  fields?: (entityId: string) => FieldOffer | null;
+}
+
+/** What a card's menu offers of its fields (`card-fields.svelte.ts`): each `null` where the source does not list it. */
+export interface FieldOffer {
+  /** *Assign to…*, disabled with the source's or the credential's reason. */
+  assign: { disabled: string | null } | null;
+  /** *Priority ▸*: the source's priorities, the ticket's own marked, or what is still asked. */
+  priority: { options: { value: string; label: string }[]; current: string | null; asking: string | null; disabled: string | null } | null;
+}
+
+/** *Assign to…* and *Priority ▸* on a ticket. */
+export function fieldItems(entityId: string, offer: FieldOffer | null): Item[] {
+  if (offer === null) return [];
+  const items: Item[] = [];
+  if (offer.assign !== null) items.push({ id: "assign", label: "Assign to…", act: { do: "assign", entityId }, disabled: offer.assign.disabled });
+  const priority = offer.priority;
+  if (priority !== null) {
+    if (priority.disabled !== null) items.push({ id: "priority", label: "Priority", disabled: priority.disabled });
+    else {
+      const sub: Entry[] = [];
+      if (priority.asking !== null) sub.push({ id: "priority-asking", label: priority.asking, disabled: priority.asking });
+      for (const one of priority.options) {
+        const own = one.value === priority.current;
+        sub.push({ id: `priority:${one.value}`, label: one.label, act: { do: "priority", entityId, value: one.value, label: one.label }, disabled: own ? `It is ${one.label} now.` : null });
+      }
+      items.push({ id: "priority", label: "Priority", sub });
+    }
+  }
+  return items;
 }
 
 /** What *Move to ▸* offers on a ticket (`moves.svelte.ts`). */
@@ -287,7 +322,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
     case "ticket": {
       const key = keyOf(thing.id);
       return grouped(
-        [...open(thing.hash, ctx), ...fromSheet("ticket", thing.id, title, ctx, moveItem(thing.id, ctx.moves?.(thing.id) ?? null))],
+        [...open(thing.hash, ctx), ...fromSheet("ticket", thing.id, title, ctx, [...moveItem(thing.id, ctx.moves?.(thing.id) ?? null), ...fieldItems(thing.id, ctx.fields?.(thing.id) ?? null)])],
         inSource(thing.id, ctx),
         [
           { id: "copy-key", label: "Copy key", hint: key, act: { do: "copy", text: key, said: `Copied ${key}` } },

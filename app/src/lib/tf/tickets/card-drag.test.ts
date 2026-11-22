@@ -37,7 +37,7 @@ let wrap: HTMLElement;
 let floats: HTMLElement;
 let drag: CardDrag;
 let stop: (() => void) | void;
-let dropped: { key: string; place: string; before: string | null; status: string }[];
+let dropped: { key: string; place: string; before: string | null; status: string; lane: string }[];
 let chosen: { statuses: string[]; answer: (status: string | null) => void } | null;
 let said: string[];
 
@@ -87,7 +87,7 @@ function host(over: Partial<CardDragHost> = {}): CardDragHost {
         node: wrap.querySelector<HTMLElement>(`[data-place="${column.place}"]`)!,
       })),
     facts: () => ({ source: "Tidewater Jira", moves: true, refused: null }),
-    drop: (one, to) => dropped.push({ key: one.key, ...to }),
+    drop: (one, to) => void dropped.push({ key: one.key, ...to }),
     choose: (_card, statuses) => new Promise((answer) => (chosen = { statuses, answer })),
     ask: () => Promise.resolve(null),
     scroller: () => wrap.querySelector<HTMLElement>(".tf-cols")!,
@@ -184,7 +184,7 @@ test("a release over a one-status column drops it between the two cards the poin
   pointer("pointermove", 630 + 100, 120);
   expect(floats.querySelector<HTMLElement>(".tf-tline")!.hidden).toBe(false);
   pointer("pointerup", 630 + 100, 120);
-  expect(dropped).toEqual([{ key: "PAY-1", place: "blocked", before: null, status: "Blocked" }]);
+  expect(dropped).toEqual([{ key: "PAY-1", place: "blocked", before: null, status: "Blocked", lane: "" }]);
   expect(floats.children).toHaveLength(0);
   const clicked = vi.fn();
   node("PAY-1").addEventListener("click", clicked);
@@ -203,7 +203,7 @@ test("a column of several statuses asks which; a pick drops with it, before the 
   expect(floats.querySelector(".tf-tghost")).not.toBeNull();
   chosen!.answer("In Review");
   await flush();
-  expect(dropped).toEqual([{ key: "PAY-1", place: "doing", before: "jira:PAY-4", status: "In Review" }]);
+  expect(dropped).toEqual([{ key: "PAY-1", place: "doing", before: "jira:PAY-4", status: "In Review", lane: "" }]);
   expect(floats.children).toHaveLength(0);
 });
 
@@ -246,7 +246,7 @@ test("m carries the card by key: the first step skips a column that will not tak
   key("ArrowRight");
   key("ArrowRight");
   key("Enter");
-  expect(dropped).toEqual([{ key: "PAY-1", place: "blocked", before: null, status: "Blocked" }]);
+  expect(dropped).toEqual([{ key: "PAY-1", place: "blocked", before: null, status: "Blocked", lane: "" }]);
 });
 
 test("while a card is carried every other key is swallowed, and Esc drops nothing", () => {
@@ -266,7 +266,7 @@ test("Enter on a carried card over a column with cards drops it above the first"
   await askReach(card("PAY-5", "Done"), "press", () => Promise.resolve(["To Do"]));
   drag.carry("jira:PAY-5");
   key("Enter");
-  expect(dropped).toEqual([{ key: "PAY-5", place: "todo", before: "jira:PAY-1", status: "To Do" }]);
+  expect(dropped).toEqual([{ key: "PAY-5", place: "todo", before: "jira:PAY-1", status: "To Do", lane: "" }]);
 });
 
 test("a card whose source answers later lights from what the window holds and follows the answer, boxes unchanged", async () => {

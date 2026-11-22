@@ -46,6 +46,10 @@ _Avoid_: colour scheme, palette, skin
 **Slot**:
 Which [theme](#theme) draws for a side: *While light* and *While dark* for the window, and the same two for code, four in all (ADR-0055). A theme only fills a slot of its side.
 
+**Colour-blind mode**:
+A switch in Settings › Appearance that names each pair of state colours of the drawn themes that read the same under protanopia, deuteranopia or tritanopia (Machado, 2009), with their roles: *Attention and Failed read the same under deuteranopia*. Off until turned on; it warns and changes no colour.
+_Avoid_: accessibility mode, high contrast
+
 **Follows**:
 A code [slot](#slot) that holds no theme of its own draws the window slot's theme of its side, or knobas's where that theme has no code colours. The start; *Set apart* keeps what it draws as its own.
 _Avoid_: linked, synced

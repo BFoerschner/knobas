@@ -568,7 +568,8 @@ test("Start work draws the stepper above the description", async () => {
 
 /** The card's facts list as label and value pairs, in order; a value of parts (an avatar and a name, chips) reads them space-separated. */
 function facts(card: HTMLElement): [string, string][] {
-  const terms = [...card.querySelectorAll("dl.tf-facts > dt")];
+  // The card's own facts, not a source's own fields under *More fields* (step 10).
+  const terms = [...card.querySelectorAll(".tf-tkstack > dl.tf-facts > dt")];
   const value = (dd: Element | null) => {
     if (dd === null) return "";
     // A value a person can change stands in one box (ADR-0054): its parts are the box's.

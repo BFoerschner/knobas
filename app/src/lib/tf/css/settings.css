@@ -7,7 +7,7 @@
 .tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .tf-stg-nav a:hover { background: var(--sheet-2); }
-.tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--on-fill); }
+.tf-stg-nav a[aria-current="page"] { background: var(--sel-row); color: var(--on-sel-row); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
 /* The nav's subtrees (2026-11-21, `TfSettingsNav.svelte`): a parent is a fold whose title is its page's link. Its chevron
    sits in the row's own left padding and the title where a leaf's stands, so no title moves; a child is indented. */
@@ -22,11 +22,11 @@
 .tf-stg-fold[open] > summary::before { transform: translateY(-75%) rotate(45deg); }
 .tf-stg-nav .tf-stg-fold > summary > a { flex: 1; min-width: 0; padding-left: 0; border-radius: 0 4px 4px 0; }
 .tf-stg-fold > summary:hover { background: var(--sheet-2); }
-.tf-stg-fold > summary:has(> a[aria-current="page"]) { background: var(--fill); }
+.tf-stg-fold > summary:has(> a[aria-current="page"]) { background: var(--sel-row); }
 .tf-stg-fold > summary:has(> a[aria-current="page"])::before { border-color: var(--sheet); }
 .tf-stg-nav a.tf-stg-child { padding-left: 24px; }
 /* A closed fold holding the open page: the open row's fill as an edge, as Docs' tree marks it. */
-.tf-stg-fold > summary.tf-holds { box-shadow: inset 2px 0 0 var(--fill); }
+.tf-stg-fold > summary.tf-holds { box-shadow: inset 2px 0 0 var(--sel-row); }
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
@@ -547,7 +547,7 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-apt-right { display: grid; gap: 10px; min-width: 0; align-content: start; }
 .tf-apt-rail { display: flex; gap: 2px; }
 .tf-apt-rail .tf-apt-nav { padding: 4px 9px; border-radius: 4px; color: var(--ink); font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-apt-rail .tf-apt-nav[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
+.tf-apt-rail .tf-apt-nav[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
 .tf-apt-rail .tf-apt-segr { margin-left: auto; }
 .tf-apt-stage .tf-tbl td { white-space: nowrap; }
 .tf-apt-stage .tf-tbl .tf-apt-hover td { background: var(--sheet-2); }
@@ -590,6 +590,15 @@ button.tf-thm-sw { cursor: pointer; }
    (`scopeValues`), so it reads whatever the window has become. */
 .tf-apt-keep { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--sheet); color: var(--ink); border: 2px solid var(--ink); box-shadow: 0 12px 40px -10px color-mix(in srgb, var(--scrim) 60%, transparent); font-size: calc(var(--t-md) * var(--fs)); }
 .tf-apt-keep b { font-variant-numeric: tabular-nums; }
+/* Settings › Appearance › Colour blindness (Björn, 2026-11-22): the switch, then each side's pairs that read alike. */
+.tf-stg-c.tf-cbm-c { flex-direction: column; align-items: flex-start; gap: 8px; }
+.tf-cbm-side { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink); display: grid; gap: 4px; justify-items: start; }
+.tf-cbm-side ul { margin: 0; padding-left: 18px; color: var(--warn); }
+/* On the Theme page, under the States: a pair that reads alike, while colour-blind mode is on. */
+.tf-apt-told.tf-apt-cb { background: var(--warn-bg); color: var(--warn); }
+/* The Selected row's quick picks (Björn, 2026-11-22): knobas's ink plate, the theme's accent, the theme's own. */
+.tf-apt-picks { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: var(--control-gap); padding-bottom: 6px; }
+.tf-apt-picks .tf-btn[aria-pressed="true"] { border-color: var(--ink); }
 
 /* *Syncs* (ADR-0056): sized to its longest choice, *Only when I press Sync now*; the note while by hand goes under the row. */
 .tf-stg-in.tf-stg-syncs { width: auto; min-width: 0; }

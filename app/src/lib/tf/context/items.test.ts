@@ -283,3 +283,25 @@ test("a ticket's Move to: the statuses it can reach as a submenu, after what it 
   expect(ids(menuFor(TICKET, null, ctx()))).not.toContain("move");
   expect(ids(menuFor(TICKET, null, ctx({ moves: () => null })))).not.toContain("move");
 });
+
+test("a ticket's Assign to… and Priority after Move to; the current priority not offered; disabled with the reason; absent without a page offering edits (ADR-0054, section 26)", () => {
+  const offer = {
+    assign: { disabled: null },
+    priority: { options: [{ value: "High", label: "High" }, { value: "Low", label: "Low" }], current: "Low", asking: null, disabled: null },
+  };
+  const moves = () => ({ statuses: ["Done"], asking: null, unsure: null, disabled: null });
+  const entries = menuFor(TICKET, null, ctx({ moves, fields: () => offer }));
+  expect(ids(entries).slice(0, 6)).toEqual(["open", "work", "timer", "move", "assign", "priority"]);
+  expect(item(entries, "assign")).toEqual({ id: "assign", label: "Assign to…", act: { do: "assign", entityId: TICKET.id }, disabled: null });
+  const priority = item(entries, "priority").sub as Item[];
+  expect(priority.map((one) => [one.label, one.disabled ?? null])).toEqual([["High", null], ["Low", "It is Low now."]]);
+  expect(priority[0]!.act).toEqual({ do: "priority", entityId: TICKET.id, value: "High", label: "High" });
+
+  const asking = item(menuFor(TICKET, null, ctx({ fields: () => ({ ...offer, priority: { ...offer.priority, options: [], asking: "Asking Jira…" } }) })), "priority");
+  expect(asking.sub).toEqual([{ id: "priority-asking", label: "Asking Jira…", disabled: "Asking Jira…" }]);
+  const readonly = menuFor(TICKET, null, ctx({ fields: () => ({ assign: { disabled: "Jira does not let you assign tickets." }, priority: null }) }));
+  expect(item(readonly, "assign").disabled).toBe("Jira does not let you assign tickets.");
+  expect(ids(readonly)).not.toContain("priority");
+  expect(ids(menuFor(TICKET, null, ctx()))).not.toContain("assign");
+  expect(ids(menuFor(TICKET, null, ctx({ fields: () => null })))).not.toContain("assign");
+});

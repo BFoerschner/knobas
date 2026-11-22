@@ -14,6 +14,7 @@ import { zoom } from "./lib/tf/zoom.svelte";
 import { theme as windowMode } from "./lib/tf/theme.svelte";
 import { themes as windowThemes } from "./lib/tf/themes.svelte";
 import { watchWindowLook } from "./lib/tf/window-look.svelte";
+import { mirrorThemes } from "./lib/tf/theme-backup.svelte";
 import "./unported.css";
 
 const target = document.getElementById("app");
@@ -26,5 +27,7 @@ await zoom.boot();
 
 // The bare window keeps the theme's page colour for the next start (ADR-0055).
 watchWindowLook(windowThemes, windowMode);
+// The themes go into backups (Björn, 2026-11-22): mirrored into the database a second after they change.
+mirrorThemes(windowThemes);
 
 export default mount(App, { target });

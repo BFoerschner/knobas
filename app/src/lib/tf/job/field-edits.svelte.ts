@@ -72,6 +72,8 @@ export interface FieldEdits {
   control(id: string): FactControl;
   /** The labels' echoes: each name added or removed and not yet shown. */
   labelEchoes(): Echo[];
+  /** The source's own fields (step 10): every field it answered but the four knobas names, in its order. */
+  own(): TicketField[];
   /** What the window holds of a searched field's list. */
   options(field: TicketField): HeldOptions | null;
   /** Ask a searched field's list (empty `typed`: the first of it). */
@@ -90,6 +92,9 @@ export interface FieldEditsInput {
   listen?: EchoListen | undefined;
   follower?: WriteFollower | undefined;
 }
+
+/** The four fields knobas names; every other id a source answers is its own. */
+const NAMED: readonly string[] = ["title", "assignee", "priority", "labels"];
 
 /** The detail's value of field `id`, as the read holds it, for settling an echo. */
 function readValue(detail: EntityDetail, id: string): string | null {
@@ -232,6 +237,9 @@ export function createFieldEdits(input: FieldEditsInput): FieldEdits {
         chip: echo === null || id === "labels" ? null : chipWords(id, echo.text, echo.state),
         note,
       };
+    },
+    own() {
+      return (answer()?.fields ?? []).filter((field) => !NAMED.includes(field.id));
     },
     labelEchoes() {
       const detail = input.detail();

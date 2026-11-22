@@ -3438,6 +3438,17 @@ mod tests {
         assert!(fields.is_empty());
     }
 
+    /// A label change is nothing only when it neither adds nor removes a name
+    /// (the adapters refuse an edit with nothing in it by this).
+    #[test]
+    fn a_label_change_is_empty_only_when_it_neither_adds_nor_removes() {
+        let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(LabelChange::default().is_empty());
+        for (add, remove) in [(names(&["sepa"]), vec![]), (vec![], names(&["triage"]))] {
+            assert!(!LabelChange { add, remove }.is_empty());
+        }
+    }
+
     /// An `EditTicket` (ADR-0054) carries only what is set: the assignee as
     /// `"nobody"` or `{"account": …}`, the labels as names added and removed,
     /// and an absent field reads as not written.

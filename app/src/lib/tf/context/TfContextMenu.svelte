@@ -37,6 +37,7 @@
   import { docsChoices } from "../docs/docs-choices.svelte";
   import { runsRead } from "../builds/runs-read.svelte";
   import { moveProvider } from "../tickets/moves.svelte";
+  import { fieldProvider } from "../tickets/card-fields.svelte";
   import { isEditable, selectionAt, thingAt, type Found } from "./thing";
 
   let {
@@ -115,6 +116,7 @@
             runs: { isRead: (id) => runsRead.read?.has(id) ?? false },
             checkout: clonedHere,
             moves: (id) => moveProvider()?.offer(id) ?? null,
+            fields: (id) => fieldProvider()?.offer(id) ?? null,
           },
           facts,
         ),
@@ -205,6 +207,8 @@
     }
     // A ticket's *Move to* asks where it can go as the menu opens (ADR-0054).
     if (thing.kind === "ticket") moveProvider()?.ask(thing.id);
+    // And what of its fields a card edits (section 26).
+    if (thing.kind === "ticket") fieldProvider()?.ask(thing.id);
     const headRead = entity !== null ? head(entity) : code !== null ? head(code) : none;
     const checkoutRead = code !== null ? checkout(code) : none;
     const forgeRead =
@@ -489,6 +493,10 @@
         return void runsRead.markAll({ runs: [], pipelines: [act.id] });
       case "move":
         return void moveProvider()?.move(act.entityId, act.status);
+      case "assign":
+        return void fieldProvider()?.assign(act.entityId);
+      case "priority":
+        return void fieldProvider()?.priority(act.entityId, act.value, act.label);
       case "clone": {
         const title = keyOf(act.repoId);
         return void ports.clone({ entityId: act.repoId, title }).then(() => push({ text: `Cloning ${title}` }), failed("Could not clone"));

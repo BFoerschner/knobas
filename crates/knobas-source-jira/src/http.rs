@@ -255,6 +255,18 @@ mod tests {
             error_envelope(r#"{"errorMessages":[],"errors":{"jql":"Unable to parse the query"}}"#),
             Some("jql: Unable to parse the query".to_owned())
         );
+        // A real Jira 10.3.24's refusal of a field off the edit screen
+        // (recorded 2026-11-22, `tests/golden/ticket-fields-off-screen-400.json`).
+        assert_eq!(
+            error_envelope(include_str!(
+                "../tests/golden/ticket-fields-off-screen-400.json"
+            )),
+            Some(
+                "resolution: Field 'resolution' cannot be set. It is not on the appropriate \
+                 screen, or unknown."
+                    .to_owned()
+            )
+        );
         // Both halves, in the order Jira documents them.
         assert_eq!(
             error_envelope(r#"{"errorMessages":["first"],"errors":{"jql":"second"}}"#),

@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
+  import { HOLD_MS } from "../still-press";
 
   import { fuzzyRank } from "../filter/fuzzy";
   import { inFloatHost, placeFloat } from "../floats";
@@ -46,6 +47,9 @@
   let at = $state(0);
   let box: HTMLElement | null = null;
   let field: HTMLInputElement | null = $state(null);
+  /** When it opened, and how long an `Enter` with nothing typed is taken as the opener's second press: a dialog's hold (`still-press.ts`). */
+  let openedAt = -Infinity;
+  const ARRIVAL_MS = HOLD_MS;
 
   /** Every name: those carried first in their order, then those on offer. Fixed while open, so a tick moves no row. */
   let names = $state<string[]>([]);
@@ -97,10 +101,13 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      openedAt = -Infinity;
       event.preventDefault();
       void move(event.key === "ArrowDown" ? 1 : -1);
     } else if (event.key === "Enter") {
       event.preventDefault();
+      // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
+      if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
       const hit = hits[at];
       if (hit !== undefined) toggle(hit.option);
       else if (adds) addFresh();
@@ -144,6 +151,7 @@
       open = false;
     };
     window.addEventListener("mousedown", away, true);
+    openedAt = performance.now();
     queueMicrotask(() => field?.focus({ preventScroll: true }));
     return () => {
       untrack(off);

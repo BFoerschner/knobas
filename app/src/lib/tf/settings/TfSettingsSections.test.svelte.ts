@@ -223,7 +223,7 @@ test("Appearance draws Zoom, then State colours, below Mode, one section per kin
   await open("appearance");
   // A row's label without its hint.
   const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.firstChild?.textContent?.trim());
-  expect(heads).toEqual(["Mode", "Zoom", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+  expect(heads).toEqual(["Mode", "Zoom", "Colour blindness", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
 });
 
 test("Fonts draws the four roles and code's ligatures before the database is up (2026-11-18)", async () => {
@@ -797,8 +797,8 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  // 31, and the Passwords page's nine (ADR-0056).
-  expect(rows).toHaveLength(40);
+  // 34, and the Passwords page's eleven (ADR-0056).
+  expect(rows).toHaveLength(45);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
@@ -806,6 +806,8 @@ test("Keyboard lists the fixed shortcuts", async () => {
   ]);
   const said = rows.map((row) => row.querySelector("td")?.textContent?.trim());
   for (const key of ["⌘D", "Tab", "⌘?", "⌘B", "⌘Enter", "J K", "N P", "V", "C", "S"]) expect(said, "F-062, F-633").toContain(key);
+  // A ticket's assign and summary keys (ADR-0054); labels have none, `L` being the drawer's (2026-11-22).
+  for (const key of ["A", "E", "L"]) expect(said, "ADR-0054").toContain(key);
   expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",

@@ -129,8 +129,8 @@ test("colours and names", () => {
   expect(uniqueName("Mine", ["One Dark"])).toBe("Mine");
 });
 
-test("seven themes come with knobas, the knobas pair first", () => {
-  expect(BUILTINS.map((t) => t.name)).toEqual(["knobas Light", "knobas Dark", "GitHub Light", "GitHub Dark", "One Dark", "Dracula", "Catppuccin Mocha"]);
+test("nine themes come with knobas, the knobas pair and its pair for colour blindness first", () => {
+  expect(BUILTINS.map((t) => t.name)).toEqual(["knobas Light", "knobas Dark", "knobas Light for colour blindness", "knobas Dark for colour blindness", "GitHub Light", "GitHub Dark", "One Dark", "Dracula", "Catppuccin Mocha"]);
 });
 
 // ---------- the window's part (ADR-0055, the decisions' 3.1 and 3.5) ----------

@@ -2453,6 +2453,28 @@ mod tests {
         );
     }
 
+    /// `after` is no change only on a target as it was: a move queued against a ticket that was gone, whose ticket
+    /// is back in a status an earlier move set, has changed (its liveness did), and so has one whose `op` differs.
+    #[test]
+    fn after_holds_nothing_when_the_target_came_or_went() {
+        let paths = ticket_paths();
+        let mut gone = moved(None);
+        gone["after"] = serde_json::json!(["In Progress"]);
+        assert!(!same_target(
+            &gone,
+            &moved(Some(&ticket("In Progress", ""))),
+            Some(&paths)
+        ));
+        let mut other = moved(Some(&ticket("To Do", "")));
+        other["op"] = serde_json::json!("comment");
+        other["after"] = serde_json::json!(["In Progress"]);
+        assert!(!same_target(
+            &other,
+            &moved(Some(&ticket("In Progress", ""))),
+            Some(&paths)
+        ));
+    }
+
     /// A kind whose status path resolves nothing compares the whole record
     /// (ADR-0007): a payload-only change holds, and liveness alone would not.
     #[test]

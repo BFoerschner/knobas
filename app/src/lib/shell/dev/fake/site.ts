@@ -288,6 +288,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     site_zoom: () => null,
     // The window's own look (ADR-0055): the browser has no bare window to colour.
     window_look_set: () => null,
+    // The theme store kept in the database for backups (Björn, 2026-11-22): the browser keeps none.
+    themes_kept: () => null,
+    set_themes_kept: () => null,
     site_reveal_download: () => null,
     sites_kept: () => kept,
     set_sites_kept: (args) => {

@@ -61,6 +61,11 @@ export interface HeldOptions {
 export const FIELDS_HELD = 500;
 
 const held = new SvelteMap<string, Held>();
+/**
+ * Each ticket's last answer, by its id alone: what is drawn while the ticket as it now stands is asked again, so a
+ * control that stands open does not close and no chevron blinks when a landed write moves the ticket's `updated_at`.
+ */
+const lastReady = new SvelteMap<string, Held>();
 const inFlight = new Map<string, Promise<TicketFields | null>>();
 const options = new SvelteMap<string, HeldOptions>();
 const optionsInFlight = new Map<string, Promise<HeldOptions>>();
@@ -88,7 +93,9 @@ function sourceOf(entityId: string): string {
 
 /** What the window holds of `ticket`'s fields now (reactive), `null` when never asked. */
 export function fieldsOf(ticket: FieldsKey): Held | null {
-  return held.get(keyOf(ticket)) ?? null;
+  const now = held.get(keyOf(ticket)) ?? null;
+  if (now !== null && now.state !== "asking") return now;
+  return lastReady.get(ticket.entity_id) ?? now;
 }
 
 /** The field `id` of what the window holds of `ticket`, or `null`. */
@@ -131,6 +138,7 @@ export function askFields(
     .then(
       (fields) => {
         remember(key, { state: "ready", fields });
+        lastReady.set(ticket.entity_id, { state: "ready", fields });
         if (fields !== null) readAhead(ticket.entity_id, fields, port);
         return fields;
       },
@@ -224,6 +232,7 @@ function merge(key: string, found: readonly FieldOption[], complete: boolean | n
 export function forgetFields(entityId?: string): void {
   if (entityId === undefined) {
     held.clear();
+    lastReady.clear();
     inFlight.clear();
     options.clear();
     optionsInFlight.clear();

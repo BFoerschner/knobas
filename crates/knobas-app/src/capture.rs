@@ -457,7 +457,10 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         Some(bundle) => builder.on_web_resource_request(bundle.answer_missing_with_404()),
         None => builder,
     };
-    // The bare window in the page colour the main window keeps (ADR-0055), so it does not flash the system's white.
+    // The bare window in the page colour the main window keeps (ADR-0055), so it does not flash the system's white;
+    // on macOS its web view draws no white of its own either.
+    #[cfg(target_os = "macos")]
+    let builder = crate::window_look::without_white(builder);
     let look = app
         .try_state::<crate::Profile>()
         .and_then(|profile| crate::window_look::read(&profile.dir));

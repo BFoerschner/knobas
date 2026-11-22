@@ -17,7 +17,8 @@ export function pairs(c: Colours): Pair[] {
   const grounds = { "the page": c.paper, "the panel": c.sheet, "the inset": c.sheet2, "the field": c.field };
   const three = { "the page": c.paper, "the panel": c.sheet, "the inset": c.sheet2 };
   const onCard = { "the card": c.card, "the card, pressed": c.card2 };
-  const sel = { "what is selected": c.fill };
+  const sel = { "what is pressed": c.fill };
+  const row = { "a selected row": c.selRow };
   const pagePanel = { "the page": c.paper, "the panel": c.sheet };
   return [
     [
@@ -44,14 +45,15 @@ export function pairs(c: Colours): Pair[] {
     ["err", { ...three, "its tint": c.errBg }, 4.5],
     ["info", { ...three, "its tint": c.infoBg }, 4.5],
     ["onFill", sel, 4.5],
+    ["onSelRow", row, 4.5],
     ["onPrimary", { "the primary button": c.primary, "the primary button under the pointer": mix(c.primary, c.sheet, 0.8) }, 4.5],
     ["cardInk", onCard, 4.5],
     ["cardInk2", onCard, 4.5],
-    ["onInkOk", sel, 4.5],
-    ["onInkWarn", sel, 4.5],
-    ["onInkErr", sel, 4.5],
-    ["onInkInfo", sel, 4.5],
-    ["onInkMuted", sel, 4.5],
+    ["onInkOk", row, 4.5],
+    ["onInkWarn", row, 4.5],
+    ["onInkErr", row, 4.5],
+    ["onInkInfo", row, 4.5],
+    ["onInkMuted", row, 4.5],
     ["cardOk", { "its tint on the card": c.cardOkBg }, 4.5],
     ["cardWarn", { "its tint on the card": c.cardWarnBg }, 4.5],
     ["cardErr", { "its tint on the card": c.cardErrBg }, 4.5],
@@ -97,7 +99,8 @@ export function unreadable(c: Colours): Failure[] {
     if (w.ratio < FLOOR) out.push({ key, ratio: w.ratio, on: w.on, want: FLOOR });
   };
   floor("ink", { "the page": c.paper, "the panel": c.sheet, "the field": c.field });
-  floor("onFill", { "what is selected": c.fill });
+  floor("onFill", { "what is pressed": c.fill });
+  floor("onSelRow", { "a selected row": c.selRow });
   floor("onPrimary", { "the primary button": c.primary });
   floor("cardInk", { "the card": c.card });
   return out;
@@ -120,7 +123,7 @@ export function lowSentence(f: Failure): string {
 }
 
 /** A filled pair's fix moves its ground: these words keep their colour, and the key named moves away from them. */
-const GROUND: Partial<Record<AppKey, AppKey>> = { onFill: "fill", onPrimary: "primary" };
+const GROUND: Partial<Record<AppKey, AppKey>> = { onFill: "fill", onPrimary: "primary", onSelRow: "selRow" };
 
 /** The fix's button: *Darken to 4.5:1*, *Lighten to 3:1*, or for a filled pair *Darken the button to 4.5:1*. */
 export function fixWords(kind: ThemeKind, c: Colours, f: Failure): string {
@@ -128,7 +131,7 @@ export function fixWords(kind: ThemeKind, c: Colours, f: Failure): string {
   const ground = GROUND[f.key];
   if (ground) {
     const darker = luminance(c[f.key]!) > luminance(c[ground]!);
-    return `${darker ? "Darken" : "Lighten"} the ${ground === "primary" ? "button" : "fill"} to ${mark}`;
+    return `${darker ? "Darken" : "Lighten"} the ${ground === "primary" ? "button" : ground === "selRow" ? "row" : "fill"} to ${mark}`;
   }
   const moved = fixOne(kind, {}, c, f)[f.key] ?? c[f.key]!;
   return `${luminance(moved) < luminance(c[f.key]!) ? "Darken" : "Lighten"} to ${mark}`;

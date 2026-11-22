@@ -963,11 +963,14 @@ test("no rule writes text in a surface colour on what is selected or on the prim
     for (const { selector, property, value } of declarations(source, sheet)) rules.set(selector, { ...rules.get(selector), [property]: value.trim() });
     for (const [selector, body] of rules) {
       const ground = body.background ?? body["background-color"] ?? "";
-      if (/var\(--(sheet|paper|field)\)/.test(body.color ?? "") && /var\(--(fill|primary)\)/.test(ground)) wrong.push(`${file} ${selector}`);
+      if (/var\(--(sheet|paper|field)\)/.test(body.color ?? "") && /var\(--(fill|primary|sel-row)\)/.test(ground)) wrong.push(`${file} ${selector}`);
+      // A selected row's words are its own pair's (Björn, 2026-11-22), never the pressed plate's.
+      if (/var\(--sel-row\)/.test(ground) && /var\(--on-fill\)/.test(body.color ?? "")) wrong.push(`${file} ${selector}`);
     }
   }
   expect(wrong).toEqual([]);
   expect(block(code, '.tf-seg button[aria-pressed="true"]')).toMatch(/color: var\(--on-fill\)/);
+  expect(block(code, '.tf-views a[aria-current="true"]')).toMatch(/background: var\(--sel-row\); color: var\(--on-sel-row\)/);
   expect(block(code, ".tf-btn.tf-primary")).toMatch(/background: var\(--primary\); color: var\(--on-primary\)/);
 });
 

@@ -152,3 +152,14 @@ test("a Base16 scheme of sixteen lines, as YAML, gives a theme with both parts a
   // Fifteen lines are not a scheme.
   expect(readBase16(BASE16.replace(/base0F.*\n/, ""))).toBeNull();
 });
+
+test("a theme's own selected row is offered, never set: VS Code's list selection, Zed's selected element", () => {
+  const { set, offers } = appFromVsCode({ type: "dark", colors: { "editor.background": "#1E1E1E", "editor.foreground": "#D4D4D4", "list.activeSelectionBackground": "#04395E", "list.activeSelectionForeground": "#FFFFFF" } });
+  expect(set.selRow).toBeUndefined();
+  expect(offers).toEqual({ selRow: "#04395E", onSelRow: "#FFFFFF" });
+  const [t] = themesOf(JSON.stringify({ name: "Sel", type: "dark", colors: { "editor.background": "#1E1E1E", "list.activeSelectionBackground": "#04395E" } }));
+  expect(t!.offers).toEqual({ selRow: "#04395E" });
+  expect(t!.app?.selRow).toBeUndefined();
+  const zed = JSON.parse(read("zed-one.json"));
+  expect(appFromZed(zed.themes[0].style, "dark").offers.selRow).toMatch(/^#[0-9A-F]{6}$/);
+});

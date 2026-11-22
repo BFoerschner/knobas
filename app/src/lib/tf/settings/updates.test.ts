@@ -70,7 +70,8 @@ test("the two ends: this computer's version and the channel's newest", () => {
   expect(box.there.label).toBe("Newest pre-release build");
   expect(box.there.version).toBe("3.2.9-ux28");
   expect(box.there.quiet).toBe(false);
-  expect(box.there.sub).toMatch(/^Published today \d\d:\d\d$/);
+  // Four hours before the pinned noon, whatever the wall clock says.
+  expect(box.there.sub).toBe("Published today 08:00");
   const package_ = updateBox(fakeUpdate("package"), NOW);
   expect(package_.here.sub).toBe("Release, from a .deb package");
   expect(package_.there.label).toBe("Newest release");

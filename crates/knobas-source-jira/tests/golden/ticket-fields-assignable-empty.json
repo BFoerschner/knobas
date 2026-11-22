@@ -1,0 +1,104 @@
+[
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "Jonas Becker",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10101",
+    "locale": "en_US",
+    "name": "jonas.becker",
+    "self": "https://jira.example/rest/api/2/user?username=jonas.becker",
+    "timeZone": "Etc/UTC"
+  },
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "knobas seed",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10000",
+    "locale": "en_US",
+    "name": "knobas",
+    "self": "https://jira.example/rest/api/2/user?username=knobas",
+    "timeZone": "Etc/UTC"
+  },
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "Lena Hoffmann",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10104",
+    "locale": "en_US",
+    "name": "lena.hoffmann",
+    "self": "https://jira.example/rest/api/2/user?username=lena.hoffmann",
+    "timeZone": "Etc/UTC"
+  },
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "Mara Lindqvist",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10100",
+    "locale": "en_US",
+    "name": "mara.lindqvist",
+    "self": "https://jira.example/rest/api/2/user?username=mara.lindqvist",
+    "timeZone": "Etc/UTC"
+  },
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "Priya Nair",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10102",
+    "locale": "en_US",
+    "name": "priya.nair",
+    "self": "https://jira.example/rest/api/2/user?username=priya.nair",
+    "timeZone": "Etc/UTC"
+  },
+  {
+    "active": true,
+    "avatarUrls": {
+      "16x16": "https://www.gravatar.com/avatar/masked?d=mm&s=16",
+      "24x24": "https://www.gravatar.com/avatar/masked?d=mm&s=24",
+      "32x32": "https://www.gravatar.com/avatar/masked?d=mm&s=32",
+      "48x48": "https://www.gravatar.com/avatar/masked?d=mm&s=48"
+    },
+    "deleted": false,
+    "displayName": "Tomasz Wójcik",
+    "emailAddress": "masked@example.invalid",
+    "key": "JIRAUSER10103",
+    "locale": "en_US",
+    "name": "tomasz.wojcik",
+    "self": "https://jira.example/rest/api/2/user?username=tomasz.wojcik",
+    "timeZone": "Etc/UTC"
+  }
+]
