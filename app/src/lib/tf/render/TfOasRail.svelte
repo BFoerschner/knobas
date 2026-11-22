@@ -4,7 +4,8 @@
 
   - A row is the method (the view's one loud thing, in a 34 px column) and the path in the code face, its
     `{parameters}` dim, from its group's shared start on; a path too long for the rail keeps its first and last whole
-    parts (`fitPath`), cut by a count of the code face's characters measured once. The row's `title` is the whole.
+    parts and the parts that tell it from the rows near it (`fitRows`), cut by a count of the code face's characters
+    measured once. The row's `title` is the whole.
   - The selected row is the rail's ink pill; the row the keys stand on has an inset `--focus` line.
   - With words typed the rail is one flat list, best first (`ranked`), and clearing them returns the folds and the
     scroll as they were.
@@ -18,7 +19,7 @@
   import { filterKeys } from "../filter-keys";
   import Marked from "../filter/Marked.svelte";
   import type { OpRow, PathRef } from "../../render/openapi";
-  import { counted, fitPath, pathParts, railRows, shortMethod, type RailInput, type RailMode, type RailRow } from "../../render/openapi-view";
+  import { counted, fitPath, fitRows, pathParts, railRows, shortMethod, type RailInput, type RailMode, type RailRow } from "../../render/openapi-view";
   import { OVERVIEW, pageOf, type OasState, type Place } from "./oas.svelte";
 
   let {
@@ -191,9 +192,11 @@
     if (list !== null) list.scrollTop = 0;
   }
 
+  /** Each row's path cut to the rail, told apart from the rows near it (`fitRows`): once a list or a width, not a row. */
+  const fits = $derived(fitRows(rows, charsAt));
   /** What a row's path says: from its group's shared start, fitted to the rail; the whole in its title. */
   function shownOf(row: RailRow & { kind: "op" }): string {
-    return fitPath(row.shown, charsAt(row.d));
+    return fits.get(row.k) ?? fitPath(row.shown, charsAt(row.d));
   }
   const titleOf = (op: OpRow) => `${op.method.toUpperCase()} ${op.path}${op.summary !== "" ? `\n${op.summary}` : ""}`;
 </script>

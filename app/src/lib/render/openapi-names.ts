@@ -51,7 +51,20 @@ export type Kind =
   | "latitude"
   | "longitude"
   | "jobTitle"
-  | "ip";
+  | "ip"
+  | "org"
+  | "repo"
+  | "branch"
+  | "tag"
+  | "timezone"
+  | "environment"
+  | "mediaType"
+  | "permission"
+  | "visibility"
+  | "level"
+  | "word"
+  | "action"
+  | "cursor";
 
 /** A name's words, lowercase: `phoneNumber`, `phone_number` and `phone-number` are all `["phone", "number"]`. */
 export function wordsOf(name: string): string[] {
@@ -73,8 +86,13 @@ const TABLE: readonly (readonly [Kind, readonly string[], readonly string[]])[] 
   ["email", ["email", "mail", "emailaddress", "mailaddress", "emailadresse", "e-mail"], ["email", "mail"]],
   ["firstName", ["firstname", "givenname", "forename", "vorname"], ["firstname", "givenname", "vorname"]],
   ["lastName", ["lastname", "surname", "familyname", "nachname", "familienname"], ["lastname", "surname", "familyname", "nachname"]],
-  ["username", ["username", "login", "user", "handle", "nickname", "benutzername", "benutzer", "loginname", "screenname"], ["username", "login", "handle"]],
-  ["fullName", ["name", "fullname", "displayname", "contactname", "customername", "personname", "realname", "author", "owner", "assignee"], ["fullname", "displayname", "contactname", "customername"]],
+  // An API's names (2026-11-22 polish): an account's login, an organisation's, a repository's, a branch, a tag.
+  ["username", ["username", "login", "user", "handle", "nickname", "benutzername", "benutzer", "loginname", "screenname", "assignee", "actor", "sender", "committer", "reviewer"], ["username", "login", "handle"]],
+  ["org", ["org", "organization", "organisation", "owner", "orgname", "organizationname", "orglogin", "enterprise", "workspace", "namespace", "tenant"], ["orgname", "organizationname"]],
+  ["repo", ["repo", "repository", "reponame", "repositoryname", "project", "projectname", "projekt"], ["reponame", "repositoryname"]],
+  ["branch", ["branch", "branchname", "defaultbranch", "headbranch", "basebranch", "masterbranch", "targetbranch", "sourcebranch", "ref", "headref", "baseref", "targetcommitish", "zweig"], ["branch", "branchname"]],
+  ["tag", ["tag", "tagname", "releasetag", "versiontag"], ["tagname"]],
+  ["fullName", ["name", "fullname", "displayname", "contactname", "customername", "personname", "realname", "author"], ["fullname", "displayname", "contactname", "customername"]],
   ["phone", ["phone", "phonenumber", "tel", "telephone", "mobile", "mobilephone", "mobilenumber", "cell", "fax", "telefon", "telefonnummer", "handy", "handynummer", "rufnummer"], ["phone", "phonenumber", "telefon", "telefonnummer", "mobile"]],
   ["street", ["street", "streetaddress", "address", "addressline", "addressline1", "line1", "strasse", "straße", "adresse", "anschrift"], ["street", "strasse", "straße", "streetaddress", "addressline1"]],
   ["city", ["city", "town", "locality", "ort", "stadt", "wohnort"], ["city", "town"]],
@@ -82,7 +100,7 @@ const TABLE: readonly (readonly [Kind, readonly string[], readonly string[]])[] 
   ["state", ["state", "region", "province", "bundesland"], ["province"]],
   ["countryCode", ["countrycode", "countryiso", "landcode", "laendercode"], ["countrycode"]],
   ["country", ["country", "land", "nation"], ["country"]],
-  ["company", ["company", "organization", "organisation", "org", "firma", "unternehmen", "companyname", "employer", "arbeitgeber"], ["company", "companyname", "organization", "organisation", "firma"]],
+  ["company", ["company", "firma", "unternehmen", "companyname", "employer", "arbeitgeber"], ["company", "companyname", "firma"]],
   ["iban", ["iban"], ["iban"]],
   ["bic", ["bic", "swift", "swiftcode", "bankcode"], ["bic"]],
   ["insuranceNumber", ["insurancenumber", "insuranceid", "policynumber", "versicherungsnummer", "sozialversicherungsnummer", "svnr", "ssn", "socialsecuritynumber", "krankenversicherungsnummer"], ["insurancenumber", "versicherungsnummer", "policynumber"]],
@@ -93,16 +111,25 @@ const TABLE: readonly (readonly [Kind, readonly string[], readonly string[]])[] 
   ["price", ["price", "amount", "cost", "total", "subtotal", "fee", "preis", "betrag", "kosten", "summe"], ["price", "amount", "cost", "preis", "betrag"]],
   ["currency", ["currency", "currencycode", "waehrung", "währung"], ["currency"]],
   ["uuid", ["uuid", "guid"], ["uuid", "guid"]],
-  ["sha", ["sha", "hash", "commit", "commitsha", "digest", "checksum"], ["sha", "hash", "digest"]],
+  ["sha", ["sha", "hash", "commit", "commitsha", "commitid", "commitoid", "oid", "treeid", "digest", "checksum", "revision"], ["sha", "hash", "digest", "commitid", "oid"]],
   ["jobTitle", ["jobtitle", "position", "role", "beruf", "berufsbezeichnung"], ["jobtitle"]],
   ["title", ["title", "summary", "subject", "headline", "label", "titel", "betreff", "caption"], ["title", "summary", "subject"]],
-  ["text", ["description", "body", "message", "comment", "text", "note", "notes", "content", "beschreibung", "nachricht", "kommentar", "bio"], ["description", "message", "comment", "beschreibung"]],
-  ["slug", ["slug", "key", "code", "ref"], ["slug"]],
+  ["text", ["description", "desc", "body", "message", "comment", "text", "note", "notes", "content", "beschreibung", "nachricht", "kommentar", "bio", "reason", "rationale", "explanation", "detail", "details", "error", "errors", "fehler", "remark", "remarks", "bodytext", "bodyhtml", "notiz", "begruendung"], ["description", "message", "comment", "beschreibung", "notes", "reason", "bodytext", "bodyhtml"]],
+  ["slug", ["slug", "key", "code", "context", "identifier"], ["slug", "key"]],
+  ["timezone", ["timezone", "tz", "tzid", "zoneid", "zeitzone", "iana"], ["timezone"]],
+  ["environment", ["environment", "env", "environmentname", "stage", "umgebung"], ["environment", "environmentname"]],
+  ["mediaType", ["contenttype", "mediatype", "mimetype", "mime", "accept"], ["contenttype", "mediatype", "mimetype"]],
+  ["permission", ["permission", "accesslevel", "access", "berechtigung"], ["permission", "accesslevel"]],
+  ["visibility", ["visibility", "privacy", "privacylevel", "sichtbarkeit"], ["visibility", "privacy"]],
+  ["level", ["severity", "priority", "level", "impact", "urgency", "prioritaet", "schweregrad"], ["severity", "priority"]],
+  ["word", ["topic", "topics", "keyword", "keywords", "hashtag", "q", "query", "search", "searchterm", "term", "suche", "stichwort"], ["topic", "keyword", "query"]],
+  ["action", ["action", "event", "eventtype", "eventname", "ereignis"], ["event"]],
+  ["cursor", ["cursor", "after", "before", "startingafter", "endingbefore", "nextcursor", "prevcursor", "pagecursor", "continuation"], ["cursor"]],
   ["path", ["path", "file", "filename", "filepath", "dateiname", "pfad"], ["path", "filename", "filepath"]],
   ["locale", ["locale", "language", "lang", "sprache"], ["locale", "language"]],
   ["colour", ["color", "colour", "farbe"], ["color", "colour"]],
   ["status", ["status", "state"], ["status"]],
-  ["kind", ["type", "kind", "category", "typ", "art", "kategorie"], []],
+  ["kind", ["type", "kind", "category", "typ", "art", "kategorie"], ["type", "kind"]],
   ["version", ["version", "semver"], ["version"]],
   ["ip", ["ip", "ipaddress", "ipaddr", "remoteaddr", "clientip"], ["ipaddress"]],
   ["latitude", ["lat", "latitude", "breitengrad"], ["latitude"]],
@@ -129,5 +156,84 @@ export function kindOf(name: string): Kind | null {
   if (words.length > 1 && (MOMENT.test(joined) || MOMENT_START.test(joined)) && !/(name|number|nummer)$/.test(joined)) return "dateTime";
   for (const [kind, , endings] of TABLE) for (const end of endings) if (joined.endsWith(end) && joined !== end) return kind;
   if (last === "number" || last === "nummer" || last === "nr") return "count";
+  // Any other name of a thing (`secret_name`, `runner_group_name`): an identifier, never a person's name.
+  if (words.length > 1 && last === "name") return "slug";
   return null;
+}
+
+/**
+ * The words a schema's or a property's name says it is, for a phrase: `nullable-simple-user` is `user`,
+ * `PullRequestResponse` is `pull request`. Words that only qualify go from its start and its end, never its last.
+ */
+const LEAD = new Set(["nullable", "simple", "full", "minimal", "basic", "base", "public", "new"]);
+const TAIL = new Set(["response", "dto", "model", "schema", "object", "item", "items", "data", "info", "payload", "body", "v1", "v2", "v3"]);
+export function nounOf(name: string): string {
+  const words = wordsOf(name).filter((w) => !/^\d+$/.test(w));
+  while (words.length > 1 && LEAD.has(words[0]!)) words.shift();
+  while (words.length > 1 && TAIL.has(words.at(-1)!)) words.pop();
+  return words.length === 1 && (LEAD.has(words[0]!) || TAIL.has(words[0]!)) ? "" : words.join(" ");
+}
+
+/**
+ * A short plain English phrase for a free-text field (2026-11-22 polish; Björn's shot: faker's Latin read as
+ * noise): from the field's name and the thing that holds it, `parent` (a schema's or a property's name), as
+ * `A short description of the repository`. Words in the name before its last say what it is about
+ * (`commit_message`: *A message about the commit*). Deterministic, and never Latin.
+ */
+export function phraseOf(name: string, parent: string): string {
+  const words = wordsOf(name);
+  const key = words.at(-1) ?? "";
+  const before = words.slice(0, -1).filter((w) => !["short", "long", "full", "raw", "plain", "html", "text", "body", "md", "markdown", "display"].includes(w));
+  const thing = before.length > 0 ? before.join(" ") : nounOf(parent);
+  const of = (lead: string, join: string) => (thing === "" ? lead : `${lead} ${join} the ${thing}`);
+  switch (key) {
+    case "description":
+    case "desc":
+    case "beschreibung":
+      return of("A short description", "of");
+    case "summary":
+      return of("A one-line summary", "of");
+    case "title":
+    case "headline":
+    case "titel":
+    case "caption":
+      return of("A title", "for");
+    case "subject":
+    case "betreff":
+      return of("The subject", "of");
+    case "label":
+      return of("A label", "for");
+    case "message":
+    case "nachricht":
+      return of("A message", "about");
+    case "comment":
+    case "kommentar":
+    case "remark":
+    case "remarks":
+      return of("A comment", "on");
+    case "note":
+    case "notes":
+    case "notiz":
+      return of("A few notes", "on");
+    case "bio":
+      return of("A few words", "about");
+    case "reason":
+    case "rationale":
+    case "explanation":
+    case "begruendung":
+      return of("The reason", "for");
+    case "body":
+    case "content":
+    case "text":
+    case "html":
+    case "detail":
+    case "details":
+      return of("The text", "of");
+    case "error":
+    case "errors":
+    case "fehler":
+      return of("What went wrong", "with");
+    default:
+      return thing === "" ? `Some ${words.join(" ")}` : `The ${words.join(" ")} of the ${thing}`;
+  }
 }

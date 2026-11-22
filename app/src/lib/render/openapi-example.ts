@@ -8,7 +8,13 @@
  *   then the `format` (date-time, date, uuid, email, uri, ipv4, …); then the `pattern` (randexp, seeded, where it is
  *   simple and bounded); then the property's name (`openapi-names.ts`: `firstName`, `phone_number`, `plz`,
  *   `versicherungsnummer`, made by Faker, `openapi-fakes.ts`); then the type with its limits. A format or a pattern
- *   beats the name. A password is always a placeholder.
+ *   beats the name. A password is always a placeholder. `example` is the last resort, for a string whose name the
+ *   table does not know.
+ * - **A name is read with the thing that holds it** (2026-11-22 polish): a parameter's own name (`org`, `repo`); a
+ *   property's object, named by its schema or the property that holds it. A free-text field (a description, a
+ *   summary, a title, a message, a comment, notes) is a plain English phrase from both, `A short description of
+ *   the repository`, never Faker's Latin; a bare `name` is a person's under a user or a contact, a repository's under
+ *   a repository, and an identifier elsewhere.
  * - A string is held to `minLength` and `maxLength`; a number to `minimum`, `maximum`, their exclusive forms and
  *   `multipleOf`.
  * - An object holds every required property and the first few others; `allOf` is merged; `oneOf` and `anyOf` take
@@ -18,7 +24,7 @@
  */
 import type { Shape } from "./openapi";
 import { fakeInt, fakePattern, fakeValue } from "./openapi-fakes";
-import { kindOf, type Kind } from "./openapi-names";
+import { kindOf, nounOf, phraseOf, wordsOf, type Kind } from "./openapi-names";
 
 /** Which way the example goes: into a request, or out of an answer. */
 export type Direction = "request" | "response" | "any";
@@ -40,6 +46,8 @@ export interface ExampleOptions {
    * example may not fit its schema (GitHub's `display_name`, typed a string, has the example `20.04`).
    */
   given?: boolean;
+  /** The name the value stands under where the schema is not a property's: a parameter's (`org`, `repo`). */
+  name?: string | undefined;
 }
 
 /** How deep an example goes before it stops. */
@@ -131,12 +139,33 @@ export function fromPattern(pattern: string): string | null {
   return new RegExp(pattern).test(out) ? out : null;
 }
 
+/** Who a bare `name` belongs to where its holder is one of these: a person's name. */
+const PERSON = new Set(["user", "person", "people", "contact", "customer", "member", "employee", "account", "profile", "author", "patient", "student", "guest", "attendee", "recipient", "applicant", "kunde", "mitarbeiter", "benutzer", "teilnehmer", "owner", "assignee", "reviewer", "committer", "actor", "sender"]);
+
+/** What `name` asks for under `parent`: a bare `name` reads its holder, the rest the table (`openapi-names.ts`). */
+function kindFor(name: string, parent: string): Kind | null {
+  const kind = kindOf(name);
+  if (kind !== "fullName" || wordsOf(name).join("") !== "name") return kind;
+  const holder = nounOf(parent).split(" ").at(-1) ?? "";
+  if (PERSON.has(holder)) return "fullName";
+  const of = kindOf(holder);
+  if (of === "fullName" || of === "username") return "fullName";
+  if (of === "org" || of === "repo" || of === "branch" || of === "tag" || of === "environment" || of === "company") return of;
+  return "slug";
+}
+
+/** The value kind `kind` gives for `name` under `parent` at `path`: a free-text field a phrase, the rest made. */
+function valueFor(kind: Kind, name: string, parent: string, path: string): string | number {
+  if (kind === "title" || kind === "text") return phraseOf(name, parent);
+  return fakeValue(kind, path);
+}
+
 /** A string example for schema `n` of property `name` at `path`: format, then pattern, then name, then type. */
-function stringFor(n: Obj, name: string, path: string): string {
+function stringFor(n: Obj, name: string, path: string, parent: string): string {
   const format = FORMATS[str(n.format)];
   const pattern = format === undefined && typeof n.pattern === "string" ? (fakePattern(n.pattern, path) ?? safePattern(n.pattern)) : null;
-  const kind = kindOf(name);
-  let s = format ?? pattern ?? (kind === null ? null : String(fakeValue(kind, path))) ?? "example";
+  const kind = kindFor(name, parent);
+  let s = format ?? pattern ?? (kind === null ? null : String(valueFor(kind, name, parent, path))) ?? "example";
   const min = typeof n.minLength === "number" ? n.minLength : 0;
   const max = typeof n.maxLength === "number" ? n.maxLength : Infinity;
   if (pattern === null) {
@@ -168,7 +197,7 @@ function numberFor(kind: Kind | null, path: string, integer: boolean): number | 
 function numberOf(n: Obj, name: string, integer: boolean, path: string): number {
   const lo = typeof n.minimum === "number" ? n.minimum : typeof n.exclusiveMinimum === "number" ? n.exclusiveMinimum + (integer ? 1 : 0.5) : null;
   const hi = typeof n.maximum === "number" ? n.maximum : typeof n.exclusiveMaximum === "number" ? n.exclusiveMaximum - (integer ? 1 : 0.5) : null;
-  let v = numberFor(kindOf(name), path, integer) ?? (integer ? 1 : 1.5);
+  let v = numberFor(kindFor(name, ""), path, integer) ?? (integer ? 1 : 1.5);
   if (lo !== null && v < lo) v = lo;
   if (hi !== null && v > hi) v = hi;
   const step = typeof n.multipleOf === "number" && n.multipleOf > 0 ? n.multipleOf : null;
@@ -199,16 +228,34 @@ function nullish(n: unknown): boolean {
 /** An example of schema `node` of file `base` (see the module's words). */
 export function makeExample(read: Reader, base: string, node: unknown, options: ExampleOptions): unknown {
   const ref = isObj(node) && typeof node.$ref === "string" ? node.$ref : "";
-  return walk(read, base, node, "", ref, 0, new Set(), options, true);
+  // A parameter's name seeds where it stands too, so `org` and `repo` beside each other differ.
+  const path = options.name === undefined || options.name === "" ? ref : `${ref}/${options.name}`;
+  return walk(read, base, node, options.name ?? "", path, 0, new Set(), options, true, "");
 }
 
-/** The example of `node`, named `name`, at schema path `path` (what seeds its values). */
-function walk(read: Reader, base: string, node: unknown, name: string, path: string, depth: number, seen: ReadonlySet<string>, options: ExampleOptions, top: boolean): unknown {
+/** A ref's last part, decoded: `#/components/schemas/full-repository` is `full-repository`. */
+function refName(ref: string): string {
+  const last = ref.slice(ref.lastIndexOf("/") + 1);
+  try {
+    return decodeURIComponent(last).replace(/~1/g, "/").replace(/~0/g, "~");
+  } catch {
+    return last;
+  }
+}
+
+/**
+ * The example of `node`, named `name`, at schema path `path` (what seeds its values). `parent` names the thing that
+ * holds it: its object's schema, or the property that holds the object.
+ */
+function walk(read: Reader, base: string, node: unknown, name: string, path: string, depth: number, seen: ReadonlySet<string>, options: ExampleOptions, top: boolean, parent: string): unknown {
   let n = node;
   let at = base;
   let trail = seen;
+  // What this value is, for what it holds: its schema's name where it is a ref, else its own name, else its holder's.
+  let noun = name !== "" ? name : parent;
   if (isObj(n) && typeof n.$ref === "string") {
     const ref = n.$ref;
+    noun = refName(ref) || noun;
     if (seen.has(`${at}#${ref}`) || depth > DEPTH) return null;
     trail = new Set(seen).add(`${at}#${ref}`);
     const r = read.resolve(at, ref);
@@ -240,29 +287,31 @@ function walk(read: Reader, base: string, node: unknown, name: string, path: str
     // Unasked, the first choice whose type the rest of the schema allows (an allOf part may narrow it).
     const fitting = typeof sh.facts.type === "string" ? sh.variants.list.findIndex((m) => choiceType(read, sh.base, m) === sh.facts.type) : -1;
     const pick = asked ? Math.min(options.choice!, sh.variants.list.length - 1) : Math.max(0, fitting);
-    const chosen = walk(read, sh.base, sh.variants.list[pick], name, `${path}|${pick}`, depth + 1, trail, options, false);
+    const chosen = walk(read, sh.base, sh.variants.list[pick], name, `${path}|${pick}`, depth + 1, trail, options, false, noun);
     // A choice beside properties of its own (a base with a oneOf): both, merged.
     if (sh.props.length === 0 || !isObj(chosen)) return chosen;
-    return { ...objectOf(read, sh, path, depth, trail, options), ...chosen };
+    return { ...objectOf(read, sh, path, depth, trail, options, noun), ...chosen };
   }
   for (const key of ["oneOf", "anyOf"] as const) {
     const list = n[key];
     if (Array.isArray(list) && sh.props.length === 0) {
       const real = list.find((m) => !nullish(isObj(m) && typeof m.$ref === "string" ? read.resolve(at, m.$ref)?.node : m));
-      if (real !== undefined) return walk(read, at, real, name, path, depth + 1, trail, options, false);
+      if (real !== undefined) return walk(read, at, real, name, path, depth + 1, trail, options, false, parent);
     }
   }
   const type = typeOf(n) ?? (typeof sh.facts.type === "string" ? sh.facts.type : undefined);
   if (sh.props.length > 0 || type === "object" || (type === undefined && Array.isArray(n.allOf))) {
-    const out = objectOf(read, sh, path, depth, trail, options);
+    const out = objectOf(read, sh, path, depth, trail, options, noun);
     if (Object.keys(out).length === 0 && sh.extra !== undefined && sh.extra !== false) {
-      return { key: walk(read, sh.base, sh.extra, "key", `${path}/{}`, depth + 1, trail, options, false) };
+      return { key: walk(read, sh.base, sh.extra, "key", `${path}/{}`, depth + 1, trail, options, false, noun) };
     }
     return out;
   }
   if (type === "array" || sh.items !== undefined) {
     if (depth >= DEPTH) return [];
-    const item = walk(read, sh.base, sh.items, name.replace(/s$/, ""), `${path}/[]`, depth + 1, trail, options, false);
+    // An item is named for its list (`labels`, a `label`); a list of `tags` holds labels, not a repository's tags.
+    const single = name.replace(/s$/, "");
+    const item = walk(read, sh.base, sh.items, kindOf(single) === "tag" && single === "tag" ? "keyword" : single, `${path}/[]`, depth + 1, trail, options, false, parent);
     const count = Math.min(3, Math.max(1, typeof n.minItems === "number" ? n.minItems : 1));
     return Array.from({ length: count }, () => item);
   }
@@ -271,14 +320,14 @@ function walk(read: Reader, base: string, node: unknown, name: string, path: str
   if (type === "integer") return numberOf(facts, name, true, path);
   if (type === "number") return numberOf(facts, name, false, path);
   if (type === "boolean") return true;
-  if (type === "string" || typeof facts.format === "string" || typeof facts.pattern === "string") return stringFor(facts, name, path);
+  if (type === "string" || typeof facts.format === "string" || typeof facts.pattern === "string") return stringFor(facts, name, path, parent);
   if (type === "null") return null;
-  const kind = kindOf(name);
-  return kind === null ? null : fakeValue(kind, path);
+  const kind = kindFor(name, parent);
+  return kind === null ? null : valueFor(kind, name, parent, path);
 }
 
 /** An object's example: its required properties and the first few others, as its direction allows. */
-function objectOf(read: Reader, sh: Shape, path: string, depth: number, seen: ReadonlySet<string>, options: ExampleOptions): Record<string, unknown> {
+function objectOf(read: Reader, sh: Shape, path: string, depth: number, seen: ReadonlySet<string>, options: ExampleOptions, noun: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   // Every required property, so the example is valid; then the first few others, fewer deeper down.
   const cap = depth === 0 ? TOP_PROPS : DEEP_PROPS;
@@ -292,7 +341,7 @@ function objectOf(read: Reader, sh: Shape, path: string, depth: number, seen: Re
     if (options.direction === "response" && flags.writeOnly === true) continue;
     if (flags.deprecated === true && !p.required) continue;
     if (!p.required && depth >= 2) continue;
-    out[p.name] = walk(read, sh.base, p.node, p.name, `${path}/${p.name}`, depth + 1, seen, options, false);
+    out[p.name] = walk(read, sh.base, p.node, p.name, `${path}/${p.name}`, depth + 1, seen, options, false, noun);
     if (!p.required) taken += 1;
   }
   return out;

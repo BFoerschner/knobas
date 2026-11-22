@@ -490,14 +490,15 @@ test("an example says where it comes from: the spec's own, or made from the sche
   const answers = [...page().querySelectorAll("section")].find((s) => text(s.querySelector("h3")).startsWith("Responses"))!;
   expect(text(answers.querySelector(".tf-oas-exfrom"))).toBe("Made from the schema");
   const made = JSON.parse(text(answers.querySelector(".tf-oas-ex"))) as Record<string, unknown>[];
-  // Realistic and in its schema's shape: an integer id, a person's name, the first of the enum, the cycle closed.
+  // Realistic and in its schema's shape: an integer id, a pet's name (an identifier: a person's only under a user or contact), the first of the enum, the cycle closed.
   expect(Object.keys(made[0]!)).toEqual(["id", "name", "status", "parent", "owner"]);
   expect(Number.isInteger(made[0]!.id)).toBe(true);
-  expect(made[0]!.name).toMatch(/^\S+ \S+/);
+  expect(made[0]!.name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)+$/);
   expect(made[0]!.status).toBe("available");
   expect(made[0]!.parent).toBeNull();
   const limit = [...page().querySelectorAll<HTMLElement>(".tf-oas-f")].find((f) => text(f.querySelector(".tf-oas-fname")) === "limit")!;
-  expect(text(limit)).toContain("Example 1 made from the schema");
+  // A parameter's example reads its name too: `limit` is a count.
+  expect(text(limit)).toMatch(/Example \d+ made from the schema/);
 });
 
 test("a line an address names (a search hit's) opens the operation that holds it, and the address says so", async () => {

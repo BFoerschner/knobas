@@ -483,8 +483,11 @@ export class SpecFiles {
   }
   #uses: { ops: Map<string, number[]>; schemas: Map<string, string[]> } | null = null;
 
-  /** An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic. */
-  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true): unknown {
+  /**
+   * An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic.
+   * `name` is the name it stands under where it is no property's: a parameter's.
+   */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true, name?: string): unknown {
     const reader = {
       resolve: (b: string, ref: string) => {
         const r = this.resolve(b, ref);
@@ -492,7 +495,7 @@ export class SpecFiles {
       },
       shape: (b: string, n: unknown) => this.shape(b, n),
     };
-    return makeExample(reader, base, node, { direction, choice, given });
+    return makeExample(reader, base, node, { direction, choice, given, name });
   }
 
   /**
@@ -555,7 +558,7 @@ export class SpecFiles {
     const out: Record<string, unknown> = {};
     for (const m of op.body?.content ?? []) if (m.examples.length === 0 && m.schema !== null) out[`b:${m.type}`] = this.sample(op.base, m.schema, "request");
     for (const r of op.responses) for (const m of r.content) if (m.examples.length === 0 && m.schema !== null) out[`r:${r.status}:${m.type}`] = this.sample(op.base, m.schema, "response");
-    for (const p of op.parameters) if (p.ref === null && p.example === undefined && p.schema !== null) out[`p:${p.in}:${p.name}`] = this.sample(op.base, p.schema, "request");
+    for (const p of op.parameters) if (p.ref === null && p.example === undefined && p.schema !== null) out[`p:${p.in}:${p.name}`] = this.sample(op.base, p.schema, "request", 0, true, p.name);
     return out;
   }
 

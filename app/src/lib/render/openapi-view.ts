@@ -135,20 +135,135 @@ export function pathTree(ops: readonly OpRow[]): Dir {
 /**
  * A path cut to `chars` characters of the code face (ux31): its first part and its last whole parts around an
  * ellipsis (`/organizations/…/retention-limit`), since the two ends tell endpoints apart. A path that fits, or of
- * two parts or fewer, is whole. A part is never cut inside.
+ * two parts or fewer, is whole. A part is never cut inside. The rail cuts each row against its neighbours instead
+ * ({@link fitRows}); this is the cut with no neighbour.
  */
 export function fitPath(path: string, chars: number): string {
+  return cutPath(path, chars, new Set());
+}
+
+/**
+ * `path` cut to `chars` characters, never dropping the parts at `keep` (indexes into its parts), its first or its
+ * last (2026-11-22 polish). The others go one by one until it fits, each run of dropped parts one `…`: the
+ * `{parameters}` first, left to right, since they say least, then the plain parts left to right, so the end stays
+ * longest, then the first part where `keep` does not hold it (`…/actions/secrets/…/repositories`). Where the kept
+ * parts alone are too long the answer is still longer than `chars`, and the row's own ellipsis ends it: a row then
+ * reads too long, never the same as its neighbour.
+ */
+function cutPath(path: string, chars: number, keep: ReadonlySet<number>): string {
   if (path.length <= chars) return path;
   const segs = partsOf(path);
-  if (segs.length < 3) return path;
-  const head = `/${segs[0]}/…`;
-  let tail = "";
-  for (let i = segs.length - 1; i >= 1; i--) {
-    const next = `/${segs[i]}${tail}`;
-    if (head.length + next.length > chars && tail !== "") break;
-    tail = next;
+  const n = segs.length;
+  if (n < 3) return path;
+  const dropped = Array.from({ length: n }, () => false);
+  const drawn = () => {
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      if (!dropped[i]) out += `/${segs[i]}`;
+      else if (i === 0) out += "…";
+      else if (!dropped[i - 1]) out += "/…";
+    }
+    return out;
+  };
+  const free: number[] = [];
+  for (let i = 1; i < n - 1; i++) if (!keep.has(i) && segs[i]!.startsWith("{")) free.push(i);
+  for (let i = 1; i < n - 1; i++) if (!keep.has(i) && !segs[i]!.startsWith("{")) free.push(i);
+  if (!keep.has(0)) free.push(0);
+  // The drawn length, kept as parts go: a part and its `/` out, a `/…` in unless a neighbour's run already has one.
+  let length = path.length;
+  for (const i of free) {
+    const runs = (i > 0 && dropped[i - 1] ? 1 : 0) + (i < n - 1 && dropped[i + 1] ? 1 : 0);
+    length -= segs[i]!.length + 1;
+    // Alone it adds a `/…` (a bare `…` at the start); joining one run adds nothing; joining two makes them one.
+    length += runs === 0 ? (i === 0 ? 1 : 2) : runs === 2 ? -2 : 0;
+    if (i === 0 && runs === 1) length -= 1;
+    dropped[i] = true;
+    if (length <= chars) return drawn();
   }
-  return `${head}${tail}`;
+  return drawn();
+}
+
+/**
+ * Where parts `a` and `b` first differ, read from the start and read from the end, as indexes into `a` (`-1` where
+ * `a` ends first). `loose` takes any two `{parameters}` as the same part: `{secret_name}` beside `{name}` tells a
+ * reader nothing.
+ */
+function differ(a: readonly string[], b: readonly string[], loose: boolean): [number, number] {
+  const same = (x: string, y: string) => x === y || (loose && x.startsWith("{") && y.startsWith("{"));
+  let f = 0;
+  while (f < a.length && f < b.length && same(a[f]!, b[f]!)) f++;
+  let e = 0;
+  while (e < a.length && e < b.length && same(a[a.length - 1 - e]!, b[b.length - 1 - e]!)) e++;
+  return [f < a.length ? f : -1, e < a.length ? a.length - 1 - e : -1];
+}
+
+/** The one part of `a` that best tells it from `b`: where they first differ if that is a plain part, else where they last do. */
+function tellFrom(a: readonly string[], b: readonly string[]): number {
+  const [f, e] = differ(a, b, true);
+  if (f >= 0 && !a[f]!.startsWith("{")) return f;
+  return e >= 0 ? e : f;
+}
+
+/** How many rows apart two rows of one run are still compared for reading the same: a rail's screen and more. */
+export const TELL_APART = 48;
+
+/**
+ * Each operation row's path as the rail draws it (2026-11-22 polish; Björn's shot: under *list repositories* twenty
+ * rows read `GET /orgs/…/repositories`). A path that fits is whole. One that does not is cut by {@link cutPath}
+ * keeping, **for each operation row next to it, the part that tells the two apart**: where they first differ if
+ * that is a plain part, else where they last do, any two `{parameters}` taken as the same
+ * (`…/codespaces/secrets/…/repositories` beside `…/dependabot/secrets/…/repositories`). Then no two rows of one run
+ * (the rows between two fold heads, or the whole filtered list), at most {@link TELL_APART} apart, may read the same,
+ * method and path: a pair that does keeps both the first and the last parts where the two differ, then the same
+ * with parameters told apart by name, and a pair that still reads the same is drawn whole. `charsAt(d)` is how many
+ * characters a row at depth `d` holds. Answers the shown text by row key, for the operation rows only.
+ */
+export function fitRows(rows: readonly RailRow[], charsAt: (d: number) => number): Map<string, string> {
+  const out = new Map<string, string>();
+  let run: (RailRow & { kind: "op" })[] = [];
+  const settle = () => {
+    const segs = run.map((r) => partsOf(r.shown));
+    const keep = run.map(() => new Set<number>());
+    const add = (i: number, at: number) => {
+      if (at >= 0) keep[i]!.add(at);
+    };
+    for (let i = 0; i + 1 < run.length; i++) {
+      add(i, tellFrom(segs[i]!, segs[i + 1]!));
+      add(i + 1, tellFrom(segs[i + 1]!, segs[i]!));
+    }
+    const cut = (i: number) => cutPath(run[i]!.shown, charsAt(run[i]!.d), keep[i]!);
+    const shown = run.map((_, i) => cut(i));
+    const whole = run.map(() => false);
+    // Two passes widen the pairs that read the same; what still does after them is drawn whole.
+    for (let pass = 0; pass < 3; pass++) {
+      let same = false;
+      for (let i = 0; i < run.length; i++) {
+        for (let j = i + 1; j < run.length && j <= i + TELL_APART; j++) {
+          const a = run[i]!;
+          const b = run[j]!;
+          if (a.op.method !== b.op.method || shown[i] !== shown[j] || a.shown === b.shown) continue;
+          same = true;
+          if (pass === 2) {
+            whole[i] = whole[j] = true;
+            continue;
+          }
+          for (const at of differ(segs[i]!, segs[j]!, pass === 0)) add(i, at);
+          for (const at of differ(segs[j]!, segs[i]!, pass === 0)) add(j, at);
+          shown[i] = cut(i);
+          shown[j] = cut(j);
+        }
+      }
+      if (!same) break;
+    }
+    run.forEach((r, i) => out.set(r.k, whole[i] ? r.shown : shown[i]!));
+    run = [];
+  };
+  for (const row of rows) {
+    if (row.kind === "op") run.push(row);
+    else if (run.length > 0) settle();
+  }
+  if (run.length > 0) settle();
+  return out;
 }
 
 /** The rail's three ways to list a spec. */

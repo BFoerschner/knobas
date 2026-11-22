@@ -58,7 +58,7 @@
 .tf-oas-row[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
 /* The method: the view's one loud thing, in a column of its own. */
 .tf-oas-m { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-stretch: 62%; font-variation-settings: "wdth" 62; letter-spacing: calc(.02em + var(--ls-head, 0em)); color: var(--ink); }
-/* A row says its path from the start its group shares; one still too long keeps its first and last whole parts (`fit`). */
+/* A row says its path from the start its group shares; one still too long keeps the parts that tell it from its neighbours (`fitRows`). */
 .tf-oas-rpath { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-oas-gpre { margin-left: 8px; color: var(--ink-2); font-weight: var(--wt-ui, 400); --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-row[aria-current="true"] .tf-oas-gpre { color: inherit; }

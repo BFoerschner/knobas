@@ -55,14 +55,14 @@ const FIXED: Readonly<Record<Kind, string | number>> = {
   sha: "0f3a9c1d2e4b5a6978869504a3b2c1d0e9f8a7b6",
   title: "A short title",
   text: "Some words about it.",
-  slug: "example-key",
+  slug: "steady-harbor",
   path: "docs/readme.md",
-  locale: "en",
+  locale: "en-US",
   colour: "#3366ff",
   status: "active",
   kind: "default",
   version: "1.0.0",
-  id: "a1b2c3",
+  id: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   port: 8080,
   year: 2026,
   age: 34,
@@ -71,7 +71,29 @@ const FIXED: Readonly<Record<Kind, string | number>> = {
   longitude: 13.405,
   jobTitle: "Engineer",
   ip: "192.0.2.10",
+  org: "tidewater",
+  repo: "payout-service",
+  branch: "main",
+  tag: "v1.4.2",
+  timezone: "Europe/Berlin",
+  environment: "production",
+  mediaType: "application/json",
+  permission: "read",
+  visibility: "private",
+  level: "high",
+  word: "harbor",
+  action: "created",
+  cursor: "Y3Vyc29yOnYyOpK0",
 };
+
+/** A name made of words for a URL: lower case, a hyphen between words, nothing else. */
+const slugOf = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 /** What the loaded libraries answer: a kind's value, and a pattern's string, each from a seed. */
 interface Loaded {
@@ -159,16 +181,18 @@ export function loadFakes(language: string | undefined): Promise<void> {
       dateTime: () => faker.date.recent({ days: 30, refDate: ref }).toISOString().replace(/\.\d{3}Z$/, "Z"),
       uuid: () => faker.string.uuid(),
       sha: () => faker.git.commitSha(),
-      title: () => faker.lorem.sentence({ min: 3, max: 6 }).replace(/\.$/, ""),
-      text: () => faker.lorem.sentence({ min: 6, max: 12 }),
-      slug: () => faker.lorem.slug(2),
+      // A free-text field is a phrase made from its name (`openapi-names.ts` `phraseOf`), never Faker's Latin.
+      title: () => FIXED.title,
+      text: () => FIXED.text,
+      slug: () => slugOf(`${faker.word.adjective()} ${faker.word.noun()}`),
       path: () => faker.system.filePath().replace(/^\//, ""),
-      locale: () => faker.location.countryCode().toLowerCase(),
+      locale: () => faker.helpers.arrayElement(["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "ja-JP", "pt-BR"]),
       colour: () => faker.color.rgb(),
       status: () => "active",
       kind: () => "default",
       version: () => faker.system.semver(),
-      id: () => faker.string.alphanumeric({ length: 8, casing: "lower" }),
+      // A string id is a UUID; a number id is made by the generator from the schema's type.
+      id: () => faker.string.uuid(),
       port: () => faker.internet.port(),
       year: () => faker.number.int({ min: 1990, max: 2026 }),
       age: () => faker.number.int({ min: 18, max: 80 }),
@@ -177,6 +201,20 @@ export function loadFakes(language: string | undefined): Promise<void> {
       longitude: () => faker.location.longitude({ precision: 4 }),
       jobTitle: () => faker.person.jobTitle(),
       ip: () => faker.internet.ipv4(),
+      org: () => slugOf(faker.company.name()).split("-").slice(0, 2).join("-"),
+      repo: () => slugOf(`${faker.hacker.noun()} ${faker.helpers.arrayElement(["service", "api", "app", "cli", "web", "tools", "sdk"])}`),
+      branch: () => `feature/${slugOf(`${faker.hacker.verb()} ${faker.hacker.noun()}`)}`,
+      tag: () => `v${faker.system.semver()}`,
+      timezone: () => faker.location.timeZone(),
+      environment: () => faker.helpers.arrayElement(["production", "staging", "development"]),
+      mediaType: () => faker.helpers.arrayElement(["application/json", "text/plain", "text/csv"]),
+      permission: () => faker.helpers.arrayElement(["read", "write", "admin"]),
+      visibility: () => faker.helpers.arrayElement(["public", "private", "internal"]),
+      level: () => faker.helpers.arrayElement(["low", "medium", "high", "critical"]),
+      word: () => faker.word.noun(),
+      action: () => faker.helpers.arrayElement(["created", "updated", "deleted", "opened", "closed"]),
+      // A page's cursor is opaque: letters and digits, as a server hands them out.
+      cursor: () => faker.string.alphanumeric({ length: 16 }),
     };
     loaded = {
       value(kind, seed) {

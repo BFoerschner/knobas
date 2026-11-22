@@ -184,5 +184,5 @@ test("a schema's example closes where the schema comes round again, and a choice
   const sessions = new Map([[1, files]]);
   const page = answerCall(sessions, 1, { kind: "page", place: "schemas/Charge" }) as { sample: Record<string, unknown> };
   expect(page.sample.parent).toBeNull();
-  expect(page.sample.description).toBe("Some words about it.");
+  expect(page.sample.description).toBe("A short description of the charge");
 });
