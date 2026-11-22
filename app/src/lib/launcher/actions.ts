@@ -60,6 +60,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   fonts: "Each face the app draws in, and its size",
   performance: "How many pages stay open in the background",
   renderers: "Your own commands that draw files and Markdown fences",
+  "api-servers": "Servers the API explorer can send to, besides a spec's own",
   keyboard: "The shortcuts",
   logs: "The sync log and the local database",
   updates: "Version, check for updates, pre-release builds",

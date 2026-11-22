@@ -53,3 +53,16 @@ test("a list drawn for the first time with words kept draws the filter as it was
   expect(order.marks("acme/auth-proxy")).toEqual([]);
   pending.length = 0;
 });
+
+test("an older text's answer that lands after a newer one's never replaces it", async () => {
+  const order = new FuzzyOrder<string>();
+  order.ask("proxy", rows, same);
+  order.ask("prox", rows, same);
+  pending[1]!.resolve([{ index: 1, loose: false, marks: [] }]);
+  await flush();
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [] }]);
+  await flush();
+  expect(order.settled("prox", rows)).toBe(true);
+  expect(order.rows("prox", rows, same)).toEqual(["acme/ADProxy"]);
+  pending.length = 0;
+});

@@ -89,6 +89,7 @@ pub mod classify;
 pub mod counted;
 mod credential;
 mod limiter;
+pub mod person;
 mod redirect;
 pub mod retry;
 mod walk;

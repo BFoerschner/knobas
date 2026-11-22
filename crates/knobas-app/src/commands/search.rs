@@ -23,9 +23,7 @@ use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 use tauri::State;
 
-#[cfg(test)]
-use crate::IpcErrorCode;
-use crate::{IpcError, Lifecycle};
+use crate::{IpcError, IpcErrorCode, Lifecycle};
 
 /// What an empty launcher box shows (interfaces §2.4).
 ///
@@ -932,6 +930,86 @@ pub fn fuzzy_rank(text: String, haystacks: Vec<String>) -> Vec<FuzzyRanked> {
             marks: ranked.marks,
         })
         .collect()
+}
+
+/// The lists pages hold for ranking ([`fuzzy_hold`]), at most four
+/// (`HeldLists::BOUND`), in the app process for as long as it runs.
+static HELD: std::sync::LazyLock<std::sync::Mutex<knobas_search::picker::HeldLists>> =
+    std::sync::LazyLock::new(std::sync::Mutex::default);
+
+/// Holds a page's list for ranking (ux31, the API explorer's filter): its
+/// texts are sent once, at open, and each key then sends only what was
+/// typed ([`fuzzy_rank_held`]). Nothing past [`MOST_RANKED`] texts is held.
+#[tauri::command]
+pub fn fuzzy_hold(id: String, haystacks: Vec<String>) -> Result<(), IpcError> {
+    if haystacks.len() > MOST_RANKED {
+        return Err(IpcError::new(
+            IpcErrorCode::Invalid,
+            format!(
+                "A list of {} texts is more than the {MOST_RANKED} knobas ranks.",
+                haystacks.len()
+            ),
+        ));
+    }
+    HELD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .hold(id, haystacks);
+    Ok(())
+}
+
+/// A held list ranked by `text`, as [`fuzzy_rank`] ranks the same texts.
+/// `not_found` where the list is not held (dropped past the bound): the page
+/// holds it again and asks again.
+#[tauri::command]
+pub fn fuzzy_rank_held(id: String, text: String) -> Result<Vec<FuzzyRanked>, IpcError> {
+    if text.chars().count() > 512 {
+        return Ok(Vec::new());
+    }
+    let ranked = knobas_search::picker::rank_held(&HELD, &id, &text)
+        .ok_or_else(|| IpcError::new(IpcErrorCode::NotFound, format!("No list {id} is held.")))?;
+    Ok(ranked
+        .into_iter()
+        .map(|ranked| FuzzyRanked {
+            index: ranked.index,
+            loose: ranked.loose,
+            marks: ranked.marks,
+        })
+        .collect())
+}
+
+/// Drops a held list, when its page closes.
+#[tauri::command]
+pub fn fuzzy_drop(id: String) {
+    HELD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .drop_list(&id);
+}
+
+#[cfg(test)]
+mod fuzzy_held_tests {
+    use super::{fuzzy_drop, fuzzy_hold, fuzzy_rank, fuzzy_rank_held};
+    use crate::IpcErrorCode;
+
+    #[test]
+    fn a_held_list_ranks_as_fuzzy_rank_does_and_a_dropped_one_is_not_found() {
+        let list = vec![
+            "get /pulls/comments".to_owned(),
+            "get /user".to_owned(),
+            "post /pulls".to_owned(),
+        ];
+        fuzzy_hold("held-test-1".into(), list.clone()).unwrap();
+        assert_eq!(
+            fuzzy_rank_held("held-test-1".into(), "pulls".into()).unwrap(),
+            fuzzy_rank("pulls".into(), list)
+        );
+        fuzzy_drop("held-test-1".into());
+        assert_eq!(
+            fuzzy_rank_held("held-test-1".into(), "pulls".into())
+                .unwrap_err()
+                .code,
+            IpcErrorCode::NotFound
+        );
+    }
 }
 
 #[cfg(test)]

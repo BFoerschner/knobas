@@ -7,7 +7,9 @@
  * only when a person opens it, one file at a time per ref, at most {@link FILE_CAP} bytes, at most
  * {@link IN_FLIGHT} reads at once, each file once per session. A ref to a URL is never read.
  */
-import type { Opened, Operation, PathRef, Resolved, SpecCall, SpecFiles } from "./openapi";
+import type { SpecChanges } from "./openapi-changes";
+import type { Opened, Operation, PageAnswer, PathRef, Resolved, Shape, SpecCall, SpecFiles, Uses } from "./openapi";
+import type { Direction } from "./openapi-example";
 
 export type { SpecCall };
 
@@ -61,7 +63,12 @@ function workerEngine(): SpecEngine | null {
 /** The spec kept on this thread: tests, and the fallback. js-yaml loads with the first call. */
 export function localEngine(): SpecEngine {
   const sessions = new Map<number, SpecFiles>();
-  return async (session, call) => (await import("./openapi")).answerCall(sessions, session, call);
+  return async (session, call) => {
+    const model = await import("./openapi");
+    // As the worker does: an example waits for Faker and randexp (`openapi-fakes.ts`).
+    if (call.kind === "page" || call.kind === "sample") await (await import("./openapi-fakes")).loadFakes(globalThis.navigator?.language).catch(() => {});
+    return model.answerCall(sessions, session, call);
+  };
 }
 
 /** The app's engine: the worker, else this thread. */
@@ -122,6 +129,41 @@ export class SpecSession {
 
   operation(i: number): Promise<Operation | null> {
     return this.#engine(this.#id, { kind: "operation", i }) as Promise<Operation | null>;
+  }
+
+  /** What a schema holds, merged and told (`Shape`); refs inside its own file followed, others left as refs. */
+  shape(base: string, node: unknown): Promise<Shape> {
+    return this.#engine(this.#id, { kind: "shape", base, node }) as Promise<Shape>;
+  }
+
+  /** Which operations and schemas name schema `name`. */
+  uses(name: string): Promise<Uses> {
+    return this.#engine(this.#id, { kind: "uses", name }) as Promise<Uses>;
+  }
+
+  /** An example the schema allows, made from it where it names none; `choice` picks the top `oneOf`'s. */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0): Promise<unknown> {
+    return this.#engine(this.#id, { kind: "sample", base, node, direction, choice });
+  }
+
+  /** The spec as a Bruno collection: its files, by path from its folder. */
+  collection(specFile: string): Promise<[string, string][]> {
+    return this.#engine(this.#id, { kind: "collection", specFile }) as Promise<[string, string][]>;
+  }
+
+  /** What changed in the API from the spec `before` (its text) to this one: a comparison's marks (section 13). */
+  changes(path: string, before: string): Promise<{ ok: true; changes: SpecChanges } | { ok: false; error: string }> {
+    return this.#engine(this.#id, { kind: "changes", path, before }) as Promise<{ ok: true; changes: SpecChanges } | { ok: false; error: string }>;
+  }
+
+  /** The place a line of the spec's text stands in, for a search hit at that line; `null` for none. */
+  placeAt(line: number): Promise<string | null> {
+    return this.#engine(this.#id, { kind: "placeAt", line }) as Promise<string | null>;
+  }
+
+  /** Everything a page's first screen draws, in one message (section 29). */
+  page(place: string): Promise<PageAnswer> {
+    return this.#engine(this.#id, { kind: "page", place }) as Promise<PageAnswer>;
   }
 
   /** A path item kept in another file: its operations, once that file is read. */

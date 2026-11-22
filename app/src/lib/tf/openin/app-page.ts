@@ -56,6 +56,8 @@ export interface AppDraft {
   commit: string;
   range: string;
   pr: string;
+  /** The API spec command (ux31). */
+  api: string;
 }
 
 /** The page's fields for `app`, or blank ones to add one. */
@@ -67,6 +69,7 @@ export function draftFrom(app: CheckoutApplication | null): AppDraft {
     commit: app?.commit_command ?? "",
     range: app?.range_command ?? "",
     pr: app?.pull_request_command ?? "",
+    api: app?.api_command ?? "",
   };
 }
 
@@ -85,6 +88,7 @@ export function entryOf(draft: AppDraft, id: string): CheckoutApplication {
     ...(draft.commit.trim() ? { commit_command: draft.commit.trim() } : {}),
     ...(draft.range.trim() ? { range_command: draft.range.trim() } : {}),
     ...(draft.pr.trim() ? { pull_request_command: draft.pr.trim() } : {}),
+    ...(draft.api.trim() ? { api_command: draft.api.trim() } : {}),
   };
 }
 
@@ -117,6 +121,8 @@ export function draftCommand(draft: AppDraft, kind: OpenObjectKind): string {
       return draft.range.trim();
     case "pull_request":
       return draft.pr.trim();
+    case "api_spec":
+      return draft.api.trim();
   }
 }
 
@@ -138,6 +144,9 @@ export function tryObject(
       const before = picks.commits[picks.commits.indexOf(picks.commit) + 1];
       return before === undefined ? null : { kind: "range", base: before, head: picks.commit };
     }
+    case "api_spec":
+      // A spec is opened at files knobas writes, never at a checkout: nothing of the repository to try it on.
+      return null;
     case "pull_request":
       return picks.pr === null ? null : { kind: "pull_request", number: picks.pr.number, base: picks.pr.base, head: picks.pr.head, branch: picks.pr.head, item: picks.pr.item };
   }

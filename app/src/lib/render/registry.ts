@@ -140,12 +140,13 @@ export const PDF: Renderer = {
  */
 export const OPENAPI: Renderer = {
   id: "openapi",
-  name: "OpenAPI",
+  name: "API",
   patterns: ["*"],
   fences: [],
   input: "text",
   output: "html",
-  // A comparison draws the two sides' views next to each other (2026-11-22), planned by `rendered.ts`' `specHint`.
+  // A comparison draws the explorer's marked inline form on each side (`TfOasDiff`), planned by `rendered.ts`' `specHint`
+  // and, for a drawn card it cannot tell, its side read at the checkout (2026-11-22, the JAR note's ruling 9 amended).
   diff: true,
   sniff: isOpenApi,
 };

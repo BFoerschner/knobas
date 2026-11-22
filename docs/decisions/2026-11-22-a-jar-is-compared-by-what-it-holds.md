@@ -51,6 +51,19 @@ records why it failed, the rulings and what was built.
    side is an OpenAPI or Swagger spec: Lines has the change.* Known gap: a modified spec with a plain name changed away
    from its first lines keeps *Lines* only, until the diff's backend marks specs as it lists files.
 
+   **Amended later that day (Fable, on merging `ux31-openapi`).** The stage is the API explorer's marked inline form
+   (`docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`, ruling 7; `TfOasDiff`):
+   each side held to the operations and schemas that differ, marked *Added*, *Removed*, *Changed* or *Changed through
+   Pet*, both opening the same rows, `n` and `p` stepping the marks, the foot *Change 1 of 3* or *The same API on both
+   sides*. The two full views go: cramped at the stage's height, and the reader hunts for the change. A spec on one side
+   only lists everything there, the foot *14 operations, all added* (or *removed*), with no compare. Planning stays
+   `specHint` first, which alone feeds the first frame, the band's *Rendered* and the room planner; then a read, only for
+   a drawn card of a modified, non-generated `.json`, `.yaml` or `.yml` that `specHint` said nothing about, where its
+   sides are read at the checkout (`DiffContext.local`: *Local changes*, a comparison ending at the working tree). It is
+   the read the stage reuses, it re-plans that card alone, and it can add the switch and nothing else: a sniffed card is
+   never turned by the band. Both sentences above stand word for word. The known gap shrinks to a plain-named modified
+   spec where the sides may be a forge's reads (two commits, a pull request).
+
 Rejected: two JAR views side by side (above); a side-by-side mode beside the list (a second surface for browsing
 unchanged entries); "changed" by size alone (misses same-size edits); the outline as the default (most changes are
 inside methods, so it would mostly say "the same"); OpenAPI offered on every JSON or YAML file (every config file would

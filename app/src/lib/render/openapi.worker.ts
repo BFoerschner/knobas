@@ -5,11 +5,17 @@
  * js-yaml loads here and nowhere else in the app.
  */
 import { answerCall, type SpecCall, type SpecFiles } from "./openapi";
+import { loadFakes } from "./openapi-fakes";
 
 const sessions = new Map<number, SpecFiles>();
 
-self.onmessage = (event: MessageEvent<{ id: number; session: number; call: SpecCall }>) => {
+// Faker and randexp, for examples made from a schema (`openapi-fakes.ts`): loaded with the worker, off the page's
+// thread, while the first spec parses; only a call that makes an example waits for them.
+const fakes = loadFakes(self.navigator?.language).catch(() => {});
+
+self.onmessage = async (event: MessageEvent<{ id: number; session: number; call: SpecCall }>) => {
   const { id, session, call } = event.data;
+  if (call.kind === "page" || call.kind === "sample") await fakes;
   let result: unknown;
   try {
     result = answerCall(sessions, session, call);

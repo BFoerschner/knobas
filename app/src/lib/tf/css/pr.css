@@ -27,6 +27,8 @@
 .tf-appmenu :is(button, a[role=menuitem]):focus-visible { background: var(--sheet-2); outline: none; }
 .tf-appmenu a[role=menuitem]:hover { background: var(--sheet-2); }
 .tf-appmenu b { font-weight: 600; }
+/* A section's label (ux31: *As requests, in an API client*): inset as the rows under it, in the second ink. */
+.tf-appmenu .tf-menulab { display: block; padding: 6px 12px 2px; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-appmenu .tf-plain { font-weight: var(--wt-ui, 400); }
 .tf-appmenu .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 /* The Diff tool's command holds the clone's path in its middle: it wraps, whole. */

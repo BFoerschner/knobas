@@ -906,11 +906,16 @@
     pipedPlans.set(piped, made);
     return made;
   }
-  /** A file's rendered mode: its pipeline output's where it is drawn piped, else its own. */
-  const planOf = (file: DrawnFile): Planned | null => {
+  /**
+   * A file's rendered mode as planned with no read: its pipeline output's where it is drawn piped, else its own (an API
+   * spec by `specHint`). It alone feeds the first frame, the band's *Rendered* and the room of a card not pressed.
+   */
+  const hintPlanOf = (file: DrawnFile): Planned | null => {
     const piped = pipedOf(file);
     return piped !== null ? pipedPlan(file, piped) : plans.get(keyOf(file));
   };
+  /** A file's rendered mode: as planned, else the one a drawn card's sniffed side found (an API spec, `sniffedPlanOf`). */
+  const planOf = (file: DrawnFile): Planned | null => hintPlanOf(file) ?? sniffedPlanOf(file);
   /** Each file's rendered mode, where one of its renderers draws both sides and they can be read (by `keyOf`). */
   const plans = $derived.by(() => {
     // Worked out per file as it is drawn, not for every file of a change of thousands as it opens.
@@ -971,7 +976,8 @@
    * A card's own press, else *Rendered* where the band's toggle is on or the file is binary (it has no lines) and a
    * renderer can draw both of its sides, else its lines.
    */
-  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary" || pipedOf(file)?.file.change === "binary") && planOf(file) ? "rendered" : "lines");
+  // A sniffed card's plan gives it the switch and nothing else: the band never turns it, so nothing moves once drawn.
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary" || pipedOf(file)?.file.change === "binary") && hintPlanOf(file) ? "rendered" : "lines");
   /** The band's *Rendered*, and `d`: every card's own press goes, so the toggle says how every file shows. */
   function toggleRendered() {
     rendering.set(!rendering.on);
@@ -979,6 +985,60 @@
     // A folder's *Real files* is an override as a card's press is; and a press groups again what came late (section 20).
     realFolders = new Set();
     lateGroups = false;
+  }
+  // ---- A spec the diff's text does not show (ux31; Fable's amendment of the JAR note's ruling 9, 2026-11-22) ----
+  /** A name a renderer may know by content (an API spec). */
+  const BY_CONTENT = /\.(ya?ml|json)$/i;
+  /** How much of a side the sniff reads. */
+  const SNIFF_BYTES = 1024 * 1024;
+  const headDecoder = new TextDecoder("utf-8", { fatal: false });
+  /** Each drawn card's sniffed head, by `keyOf`, `null` where its side could not be read or is no text. */
+  const sniffed = new SvelteMap<string, string | null>();
+  /**
+   * Whether a drawn card's side is read to know it for a spec: a modified, non-generated `.json`, `.yaml` or `.yml` that
+   * `specHint` said nothing about, where the sides are read at the checkout (never a forge's request for a sniff).
+   */
+  const sniffable = (file: DrawnFile) =>
+    context?.local === true && context.bytes !== undefined && file.change === "modified" && file.made === undefined && pipedOf(file) === null && BY_CONTENT.test(file.path) && specHint(lineOf(file)) === undefined;
+  /** Reads a drawn card's side once (the read the stage then takes) and keeps its head. */
+  function sniff(file: DrawnFile) {
+    const key = keyOf(file);
+    if (sniffed.has(key) || !sniffable(file)) return;
+    sniffed.set(key, null);
+    void (loadSide(file, "new") ?? Promise.resolve()).then(() => {
+      const read = got[`new\n${key}`];
+      const content = read?.kind === "drawn" ? read.content : null;
+      // `ArrayBuffer.isView`, not `instanceof`: bytes made in another realm are no `Uint8Array` here (`isListing`).
+      const head = typeof content === "string" ? content : content !== null && ArrayBuffer.isView(content) ? headDecoder.decode((content as Uint8Array).subarray(0, SNIFF_BYTES)) : null;
+      if (head !== null) sniffed.set(key, head);
+    });
+  }
+  /** Each sniffed card's plan, worked out again only when its own head, its pick or the defaults change. */
+  const sniffedPlans = new Map<string, { head: string; pick: string | undefined; list: unknown; planned: Planned | null }>();
+  /** The plan a drawn card's sniffed side gives it: the switch to *Rendered*, nothing more (`modeOf`). */
+  function sniffedPlanOf(file: DrawnFile): Planned | null {
+    const key = keyOf(file);
+    const head = sniffed.get(key);
+    if (head === undefined || head === null) return null;
+    const pick = picked[key];
+    const list = defaults.list;
+    const had = sniffedPlans.get(key);
+    if (had !== undefined && had.head === head && had.pick === pick && had.list === list) return had.planned;
+    const can = { whole: context !== null, bytes: true };
+    const shown = lineOf(file);
+    const opened = openWith({ path: file.path, binary: false, text: head }, allRenderers(), list);
+    const choices = renderedChoices(shown, opened, can);
+    const plan = renderedPlan(shown, choices.find((r) => r.id === pick) ?? choices[0] ?? null, can);
+    const planned = plan === null ? null : { plan, choices, opened };
+    sniffedPlans.set(key, { head, pick, list, planned });
+    return planned;
+  }
+  /** A drawn card's plan, asking its side's sniff where the diff's text did not tell (`fileCard` only). */
+  function cardPlanOf(file: DrawnFile): Planned | null {
+    const hinted = hintPlanOf(file);
+    if (hinted !== null) return hinted;
+    if (!sniffed.has(keyOf(file)) && sniffable(file)) untrack(() => queueMicrotask(() => sniff(file)));
+    return sniffedPlanOf(file);
   }
   /** Each side a rendered diff read, under `side\nkey`, and the reads made. */
   let got = $state.raw<Record<string, SideGot>>({});
@@ -995,10 +1055,12 @@
     return context.archive(file, side);
   }
 
-  function loadSide(file: DrawnFile, side: Side) {
+  /** Each side's read while it is out, so a second asker waits for the same one. */
+  const reading = new Map<string, Promise<void>>();
+  function loadSide(file: DrawnFile, side: Side): Promise<void> | undefined {
     const name = `${side}\n${keyOf(file)}`;
     const reader = context;
-    if (asked.has(name)) return;
+    if (asked.has(name)) return reading.get(name);
     asked.add(name);
     // A pipeline's outputs are in hand (ux26): drawn from the run, with no read.
     if (pipedOf(file) !== null) {
@@ -1031,12 +1093,17 @@
       const text = (await readWhole(file, reader))[side];
       return text === null ? { kind: "failed", why: `the file ${NAMES[side]} the change is not readable whole` } : { kind: "drawn", content: text };
     };
-    read()
+    const done = read()
       .catch((cause): SideGot => {
         asked.delete(name);
         return { kind: "failed", why: ipcErrorMessage(cause) };
       })
-      .then((side) => (got = { ...got, [name]: side }));
+      .then((side) => {
+        got = { ...got, [name]: side };
+        reading.delete(name);
+      });
+    reading.set(name, done);
+    return done;
   }
   const sideOf = (file: DrawnFile, side: Side): SideGot | undefined => {
     const piped = pipedOf(file);
@@ -1842,7 +1909,7 @@
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
       {@const got = lined[key]}
-      {@const planned = planOf(file)}
+      {@const planned = cardPlanOf(file)}
       <TfDiffCard
         bind:this={cards[key]}
         file={piped?.file ?? lineOf(file)}

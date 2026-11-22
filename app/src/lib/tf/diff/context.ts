@@ -96,6 +96,7 @@ export function rangeContext(read: Read, range: DiffRange, bytes?: ReadBytes, pi
     }
   }
   return {
+    ...(isWorkingTree(range.head) ? { local: true } : {}),
     ...(bytes ? { bytes: (file: DiffFile, side: "old" | "new") => atSide(file, side, (sha, path) => bytes(range.repository, path, sha)) } : {}),
     ...(piped
       ? { piped: (file: DiffFile, side: "old" | "new", steps: PipeStep[]) => atSide(file, side, (sha, path) => piped(range.repository, path, sha, steps)) }
@@ -140,6 +141,7 @@ export function localContext(bytes: ReadBytes, repoId: string, head: string | nu
   }
   const read = (file: DrawnFile, side: "old" | "new") => atSide(file, side, (path, end) => bytes(repoId, path, end));
   return {
+    local: true,
     bytes: read,
     archive: (file, side) => atSide(file, side, (path, end) => archive(repoId, path, end)),
     ...(piped ? { piped: (file: DiffFile, side: "old" | "new", steps: PipeStep[]) => atSide(file, side, (path, end) => piped(repoId, path, end, steps)) } : {}),

@@ -479,8 +479,8 @@ const source = (file: string) => readFileSync(join(process.cwd(), "src", file), 
 
 test("the lists of code's lines hear code's size, and the text measured in script takes its role's size", () => {
   // A run's log, a file's source and a diff's lines: rows that are line boxes, held at the new size (Fable's ruling 3).
-  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/repo/TfRepoFiles.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte"]) {
-    expect(source(file), file).toMatch(/const rowsOf = codeRows\((13, 1\.6|12, 1\.55)\);\s*const win = new Windowed<\w+>\(\{[^}]*estimate: rowsOf\.estimate[^}]*textSize: rowsOf\.textSize[^}]*\}\)/);
+  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/repo/TfRepoFiles.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte", "lib/tf/render/TfOasAnswer.svelte"]) {
+    expect(source(file), file).toMatch(/const rowsOf = codeRows\((13, 1\.6|12, 1\.55|12, 1\.6)\);\s*const win = new Windowed<\w+>\(\{[^}]*estimate: rowsOf\.estimate[^}]*textSize: rowsOf\.textSize[^}]*\}\)/);
   }
   // A run's step names and the day strip's labels are fitted by a canvas: at the role's size, again when it changes.
   expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const px = \(\(command \? 11 : 12\) \* fonts\.size\(role\)\) \/ 100;\s*void fonts\.family\(role\);/);

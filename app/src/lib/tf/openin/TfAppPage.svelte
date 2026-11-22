@@ -53,7 +53,7 @@
     type AppDraft,
     type AppPageAt,
   } from "./app-page";
-  import { insertAt, PLACEHOLDERS, runPreview, warnings, worktreeOf } from "./openin";
+  import { apiPreview, insertAt, PLACEHOLDERS, runPreview, warnings, worktreeOf } from "./openin";
   import { realTryReads, type TryCommit, type TryPr, type TryReads, type TryRepo } from "./try-reads";
   import { TryRepos } from "./try-repos.svelte";
   import TfTryMore from "./TfTryMore.svelte";
@@ -101,22 +101,30 @@
   });
 
   const changed = $derived(!sameDraft(draft, draftFrom(saved)));
-  const named = $derived(draft.name.trim() !== "" && draft.command.trim() !== "");
+  // An API client (Bruno) opens no checkout: an API spec command stands for the repository's.
+  const named = $derived(draft.name.trim() !== "" && (draft.command.trim() !== "" || draft.api.trim() !== ""));
   const ready = $derived(named && !busy);
   const why = $derived(
-    busy ? null : draft.name.trim() === "" ? (draft.command.trim() === "" ? "Name it, and give its command." : "Name it first.") : draft.command.trim() === "" ? "Give its command." : null,
+    busy ? null : draft.name.trim() === "" ? (draft.command.trim() === "" ? "Name it, and give its command." : "Name it first.") : draft.command.trim() === "" && draft.api.trim() === "" ? "Give its command." : null,
   );
   const warned = $derived(warnings(draft.command.trim()));
 
   // -- the fields and the placeholders ----------------------------------------
 
-  type Field = "command" | "file" | "commit" | "range" | "pr";
+  type Field = "command" | "file" | "commit" | "range" | "pr" | "api";
   const ROWS: readonly { field: Field; kind: OpenObjectKind; label: string; says: string; example: string }[] = [
     { field: "command", kind: "repository", label: "Command", says: "Opens the repository. Every Open in… on a repository or a branch offers it.", example: "MyGitViewer {path}" },
     { field: "file", kind: "file", label: "For a file", says: "Without one, a file opens with the command above.", example: "MyGitViewer --open {file}" },
     { field: "commit", kind: "commit", label: "For a commit", says: "Offered on a commit only when it has one.", example: "tig -C {path} show {sha}" },
     { field: "range", kind: "range", label: "For a range", says: "Two commits, as Compare and a diff's address name them.", example: "git -C {path} difftool -d {base} {head}" },
     { field: "pr", kind: "pull_request", label: "For a pull request", says: "Runs in the pull request's own worktree under the clones root.", example: "MyGitViewer --pr {pr} {path}" },
+    {
+      field: "api",
+      kind: "api_spec",
+      label: "API spec command",
+      says: "Offered on an OpenAPI or Swagger file. {file} is the spec as shown and {collection} a folder of Bruno requests, both written by knobas into a folder of its own; {name} is the API's title. It needs no clone.",
+      example: "open -R {file}",
+    },
   ];
   const fields: Partial<Record<Field, HTMLInputElement>> = {};
   /** The field a placeholder button inserts into: the one last focused. */
@@ -226,6 +234,7 @@
       commit: tryObject("commit", picks),
       range: tryObject("range", picks),
       pull_request: tryObject("pull_request", picks),
+      api_spec: null,
     };
   });
 
@@ -257,6 +266,10 @@
     // A file with no command of its own opens with the repository's, which its row says in words rather than twice.
     const command = kind === "file" ? draft.file.trim() : draftCommand(draft, kind);
     if (command === "") return { run: null, wait: kind === "repository" ? "Type the command, and this shows what it starts." : null };
+    if (kind === "api_spec") {
+      const run = apiPreview(command);
+      return run === null ? { run: null, wait: "A quote in the command is never closed." } : { run, wait: null };
+    }
     if (repo === null) return { run: null, wait: tryOn.list === null || tryOn.more ? "Reading the repositories on this disk…" : tryOn.none ? noneLine() : "Pick a repository below to see it filled in." };
     const object = objects[kind];
     if (object === null) {
@@ -266,6 +279,7 @@
         commit: commits === null ? "Reading its commits…" : "The repository has no commits to try it on.",
         range: commits === null ? "Reading its commits…" : "A range needs two commits; the repository has fewer.",
         pull_request: prs === null || (prItem !== null && prEnds === null) ? "Reading its pull requests…" : "The repository has no pull request to try it on.",
+        api_spec: "",
       };
       return { run: null, wait: waits[kind] };
     }
@@ -556,7 +570,7 @@
                 <button
                   type="button"
                   class="tf-btn tf-sm"
-                  disabled={!named || line.run === null}
+                  disabled={!named || line.run === null || row.kind === "api_spec"}
                   title={line.run === null ? undefined : named ? `Saves it, then runs this on ${repo?.title}` : (why ?? undefined)}
                   onclick={() => void tryIt(row.kind)}>Try it</button
                 >

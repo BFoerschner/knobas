@@ -3,11 +3,12 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
+import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers } from "../../ipc/api";
 import type { appStatus, commandSteps, completeFirstRun, diffPipelines, folderRender, folderRenderers, folderRenderPicks, folderRenderCompare, setFolderRenderPick, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, folderRenderTree, folderRenderFile, folderRenderFileBytes, folderRenderArchiveOpen, folderRenderOpen, folderRenderStore, setFolderRenderStore, clearFolderRenderStore, setFolderRenderers, setJavaPath, frontendReady, installedFonts, javaRuntime, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artifactBytes, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneAll, cloneAllPlan, cloneAllState, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsChoices, docsCreatePage, docsEditSection, setDocsHome, setDocsSpaceHidden, docsExportMarkdown, docsNodes, docsOutline, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCheckouts, entityCommitDiff, entityFileBytes, entityFilePiped, entityLocalDir, entityLocalFile, entityLocalPaths, entityLocalTree, entityRangeDiff, entitySourceRangeDiff, entityThread, entityHead, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, inboxShelves, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openFolder, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, publishStandupProtocolAgain, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, ticketFields, fieldOptions, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, readRuns, markRunsRead, markRunsUnread, unreadFailingBuilds, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity, repoPipelines, repoBranchPulls, commitRepositories, entityRangeFile, entityRangeFilePages, entityRangeFiles, entitySourceRangeFiles, entityRangeNames, cancelRead, archiveOpen, archiveNested, archiveEntry, archiveClass, archiveDecompile, archiveDownload } from "../../ipc/entity";
-import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, fuzzyRank, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, rereadFiles, search, searchFiles, searchSettings, setSearchEverything, setSearchFilesKept, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
+import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, rereadFiles, search, searchFiles, searchSettings, setSearchEverything, setSearchFilesKept, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteFill, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSignInOwn, siteSignInRemove, siteSignInSave, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
 import type { updateCancel, updateCheck, updateDownload, updateInstall, updateLater, updateNotes, updateSet, updateState } from "../../ipc/update";
@@ -74,6 +75,23 @@ export interface Answers {
   accept_suggestion: Answer<typeof acceptSuggestion>;
   ack_alert: Answer<typeof ackAlert>;
   fuzzy_rank: Answer<typeof fuzzyRank>;
+  fuzzy_hold: Answer<typeof fuzzyHold>;
+  fuzzy_rank_held: Answer<typeof fuzzyRankHeld>;
+  fuzzy_drop: Answer<typeof fuzzyDrop>;
+  api_send: Answer<typeof apiSend>;
+  api_cancel: Answer<typeof apiCancel>;
+  api_answer_body: Answer<typeof apiAnswerBody>;
+  api_sent: Answer<typeof apiSent>;
+  api_hold_secret: Answer<typeof apiHoldSecret>;
+  api_held: Answer<typeof apiHeld>;
+  api_forget_held: Answer<typeof apiForgetHeld>;
+  api_servers: Answer<typeof apiServers>;
+  api_set_servers: Answer<typeof apiSetServers>;
+  api_save_answer: Answer<typeof apiSaveAnswer>;
+  api_open_in: Answer<typeof apiOpenIn>;
+  api_clients_found: Answer<typeof apiClientsFound>;
+  api_scratch_size: Answer<typeof apiScratchSize>;
+  api_scratch_clear: Answer<typeof apiScratchClear>;
   unack_alert: Answer<typeof unackAlert>;
   set_monitor_hidden: Answer<typeof setMonitorHidden>;
   action_item_ticket: Answer<typeof actionItemTicket>;

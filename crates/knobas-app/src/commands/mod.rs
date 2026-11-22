@@ -29,6 +29,7 @@
 //! [`search::searcher`], not re-read in a body. (`docs_tree` still lists the
 //! sources twice, once for the paths and once in `sources::crud::fillers`.)
 
+pub mod api;
 pub mod app;
 pub mod assets;
 pub mod backup;

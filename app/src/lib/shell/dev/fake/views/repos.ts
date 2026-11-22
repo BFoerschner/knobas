@@ -22,7 +22,7 @@ import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
-import { ITEMS_YAML, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
+import { DEEP_30_JSON, ITEMS_YAML, MODEL_31_JSON, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
 import { fakePage } from "../folder-render";
 
 const RETRY_MAIN = `use std::time::Duration;
@@ -424,19 +424,32 @@ const BINARY: Record<string, () => Uint8Array> = {
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
 /**
- * `?fake-openapi` (ux18): a spec of the pet store, one with refs into other files, and one of 5,000 operations. Built
- * once, when first asked: constants, so nothing here goes back to a seed.
+ * `?fake-openapi` (ux18; ux31 added today's failures): a spec of the pet store, one with refs into other files, one
+ * of 5,000 operations, one whose every path starts `/v1` with no tags and with `allOf` and `oneOf` three deep (as
+ * Stripe's), one of servers, schemes, links and webhooks, and TeamCity's real 1.2 MB. Built once, when first asked:
+ * constants, so nothing here goes back to a seed.
  */
 const openapiFiles: () => Record<string, string> = (() => {
   let specs: Record<string, string> | null = null;
-  return () =>
-    (specs ??= {
+  // The repository's own TeamCity spec (1.2 MB, real), read only under `?fake-openapi` and only once: the fake's chunk
+  // ships with the app, and the spec stays a chunk of its own. It is the file's text, which no handler changes.
+  let teamcitySpec: string | null = null;
+  if (new URLSearchParams(globalThis.location?.search).has("fake-openapi")) {
+    void import("../../../../../../../testenv/specs/teamcity.json?raw").then((m: { default: string }) => (teamcitySpec = m.default));
+  }
+  return () => {
+    specs ??= {
       "api/openapi.yaml": PETS_30_YAML,
       "api/split.yaml": SPLIT_31_YAML,
       "api/schemas/order.yaml": ORDER_YAML,
       "api/paths/items.yaml": ITEMS_YAML,
       "api/big.yaml": bigSpec(5000),
-    });
+      "api/payments.json": DEEP_30_JSON,
+      "api/model.json": MODEL_31_JSON,
+    };
+    if (teamcitySpec !== null && specs["api/teamcity.json"] === undefined) specs["api/teamcity.json"] = teamcitySpec;
+    return specs;
+  };
 })();
 
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);

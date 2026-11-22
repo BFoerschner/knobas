@@ -17,8 +17,14 @@
  * Nodes are the document's own values: a schema is drawn from its JSON, and its `$ref`s stay refs until the view
  * opens one.
  */
+import { specChanges, type SpecChanges } from "./openapi-changes";
 import { JSON_SCHEMA, load } from "js-yaml";
 
+import { makeExample, type Direction } from "./openapi-example";
+import { pathAtLine, placeOfPath } from "./openapi-line";
+import { collection as bruCollection } from "./openapi-bru";
+import { firstSchemeOf, startDraft, type RequestDraft } from "./openapi-request";
+import { groupsOf } from "./openapi-view";
 import { fastYaml } from "./yaml-fast";
 
 export const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
@@ -35,6 +41,8 @@ export interface OpRow {
   deprecated: boolean;
   /** The operation's anchor (`get /pets/{petId}`): what a link to it names. */
   anchor: string;
+  /** A 3.1 webhook: `path` is its name, and it is never sent (ux31). */
+  webhook?: true;
 }
 
 /** A path whose item lives in another file (`$ref: ./paths/pets.yaml`): listed by its path, read when opened. */
@@ -43,9 +51,47 @@ export interface PathRef {
   ref: string;
 }
 
+export interface ServerVariable {
+  default: string;
+  enum: string[];
+  description: string;
+}
+
 export interface Server {
   url: string;
   description: string;
+  /** A `{variable}` of the address, its default and choices (ux31). */
+  variables: Record<string, ServerVariable>;
+}
+
+/** A security scheme (`components.securitySchemes`, 2.0's `securityDefinitions`), as the overview and a request read it. */
+export interface Scheme {
+  name: string;
+  /** `http`, `apiKey`, `oauth2`, `openIdConnect`, `mutualTLS`; 2.0's `basic` reads as `http` with scheme `basic`. */
+  type: string;
+  /** An `http` scheme's own: `bearer`, `basic`. */
+  scheme: string;
+  /** Where an API key goes: `header`, `query` or `cookie`. */
+  in: string;
+  /** An API key's own name (`X-API-Key`). */
+  keyName: string;
+  bearerFormat: string;
+  description: string;
+  /** An OAuth 2.0 scheme's flows by name (`authorizationCode`). */
+  flows: string[];
+}
+
+export interface Contact {
+  name: string;
+  email: string;
+  url: string;
+}
+
+export interface Info {
+  contact: Contact | null;
+  license: { name: string; url: string } | null;
+  terms: string;
+  externalDocs: { url: string; description: string } | null;
 }
 
 export interface Tag {
@@ -63,6 +109,12 @@ export interface SpecIndex {
   /** Markdown. */
   description: string;
   servers: Server[];
+  /** The security schemes, in the spec's order (ux31). */
+  security: Scheme[];
+  /** Contact, licence, terms and the external docs (ux31). */
+  info: Info;
+  /** 3.1's `webhooks`, one row each, numbered after `ops` (ux31). */
+  webhooks: OpRow[];
   /** The tags in the order the spec lists them, then those only operations name, in the order they first appear. */
   tags: Tag[];
   ops: OpRow[];
@@ -122,11 +174,20 @@ export interface Body {
   ref: string | null;
 }
 
+export interface Link {
+  name: string;
+  operationId: string;
+  operationRef: string;
+  description: string;
+}
+
 export interface Response {
   status: string;
   description: string;
   content: Media[];
   headers: Header[];
+  /** What may follow (`links`), each naming an operation (ux31). */
+  links: Link[];
   ref: string | null;
 }
 
@@ -141,8 +202,15 @@ export interface Operation {
   parameters: Param[];
   body: Body | null;
   responses: Response[];
-  /** The security schemes it asks for, by name, each requirement's names joined with `+`. */
-  security: string[];
+  /** The requirements it accepts, any one of them: each the scheme names it needs together; `[]` for *or nothing*. */
+  security: string[][];
+  /** Where it goes: its own servers, else its path item's, else the spec's (ux31). */
+  servers: Server[];
+  /** Its callbacks, by name. */
+  callbacks: string[];
+  externalDocs: { url: string; description: string } | null;
+  /** A 3.1 webhook: drawn with no request. */
+  webhook: boolean;
   /** The file the operation's refs are read from. */
   base: string;
 }
@@ -155,6 +223,55 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
 
+/** One property of a {@link Shape}: its schema as the spec writes it (a ref stays a ref), and its words. */
+export interface Prop {
+  name: string;
+  node: unknown;
+  required: boolean;
+  /** Its own description, else the description of the schema its ref names in the same file. */
+  words: string;
+}
+
+/** A choice among schemas (`oneOf`, `anyOf`), the reader picks one. */
+export interface Variants {
+  key: "oneOf" | "anyOf";
+  list: unknown[];
+  /** The property that tells them apart, where the spec names one. */
+  discriminator: string;
+}
+
+/**
+ * What a schema holds, as a reader wants it (ux31, section 8): `allOf` merged into one list of properties in the
+ * parts' order with their `required` lists joined and the first description kept; the first `oneOf` or `anyOf` of
+ * more than one schema a choice; a choice of one (or one and null) that one. Refs in the node's own file are
+ * followed to merge; refs inside the properties stay refs.
+ */
+export interface Shape {
+  props: Prop[];
+  variants: Variants | null;
+  /** What each item of an array is. */
+  items: unknown;
+  /** Any other key (`additionalProperties`). */
+  extra: unknown;
+  description: string;
+  /** The merged node's own facts (enum, default, bounds, pattern), for the page's line of facts. */
+  facts: Record<string, unknown>;
+  /** The file the shape's refs are read from. */
+  base: string;
+}
+
+/** Which operations name a schema, by `ops` index, and which named schemas hold it: direct uses only. */
+export interface Uses {
+  ops: number[];
+  schemas: string[];
+}
+
+/** A page's first screen in one answer (section 29): an operation and the shapes it shows, or a schema's page. */
+export type PageAnswer =
+  | { kind: "op"; op: Operation; shapes: Record<string, Shape>; samples: Record<string, unknown> }
+  | { kind: "schema"; name: string; node: unknown; base: string; shape: Shape; uses: Uses; sample: unknown; given: boolean }
+  | { kind: "missing" };
+
 /** One call of the view to where its spec is kept (`openapi-port.ts`). */
 export type SpecCall =
   | { kind: "open"; path: string; text: string }
@@ -162,7 +279,14 @@ export type SpecCall =
   | { kind: "operation"; i: number }
   | { kind: "pathItem"; ref: PathRef }
   | { kind: "resolve"; base: string; ref: string }
-  | { kind: "addFile"; path: string; text: string };
+  | { kind: "addFile"; path: string; text: string }
+  | { kind: "shape"; base: string; node: unknown }
+  | { kind: "uses"; name: string }
+  | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number }
+  | { kind: "page"; place: string }
+  | { kind: "placeAt"; line: number }
+  | { kind: "collection"; specFile: string }
+  | { kind: "changes"; path: string; before: string };
 
 /** Answers `call` for `session` among `sessions`: the spec worker's and this thread's one dispatch. */
 export function answerCall(sessions: Map<number, SpecFiles>, session: number, call: SpecCall): unknown {
@@ -180,6 +304,13 @@ export function answerCall(sessions: Map<number, SpecFiles>, session: number, ca
   if (call.kind === "operation") return files.operation(call.i);
   if (call.kind === "pathItem") return files.pathItem(call.ref);
   if (call.kind === "resolve") return files.resolve(call.base, call.ref);
+  if (call.kind === "shape") return files.shape(call.base, call.node);
+  if (call.kind === "uses") return files.uses(call.name);
+  if (call.kind === "sample") return files.sample(call.base, call.node, call.direction ?? "any", call.choice ?? 0);
+  if (call.kind === "page") return files.page(call.place);
+  if (call.kind === "placeAt") return files.placeAt(call.line);
+  if (call.kind === "collection") return files.collection(call.specFile);
+  if (call.kind === "changes") return files.changes(call.path, call.before);
   return files.addFile(call.path, call.text);
 }
 
@@ -190,6 +321,8 @@ export class SpecFiles {
   /** How many other files are kept, the least lately used dropped first (Fable's bound: 64). */
   readonly #keep: number;
   #index: SpecIndex | null = null;
+  /** The spec's text, for a line's place (`placeAt`). */
+  #text = "";
 
   constructor(root: string, keep = 64) {
     this.root = root;
@@ -200,6 +333,11 @@ export class SpecFiles {
     return this.#index;
   }
 
+  /** The spec's own parsed document. */
+  get doc(): unknown {
+    return this.#docs.get(this.root);
+  }
+
   /** Parses and checks the spec at `root`; a text read lately is not parsed again (`recent`). */
   open(text: string): Opened {
     const parsed = recentParse(text, this.root);
@@ -208,7 +346,18 @@ export class SpecFiles {
     if (!checked.ok) return checked;
     this.#docs.set(this.root, parsed.doc);
     this.#index = checked.index;
+    this.#text = text;
     return checked;
+  }
+
+  /**
+   * What changed in the API from the spec `before` (its text, at `path`) to this one (section 13): read once, the
+   * comparison's other side having parsed it lately (`recent`).
+   */
+  changes(path: string, before: string): { ok: true; changes: SpecChanges } | { ok: false; error: string } {
+    const parsed = recentParse(before, path);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    return { ok: true, changes: specChanges(parsed.doc, this.doc) };
   }
 
   /** Whether the file at `path` is held. */
@@ -250,18 +399,182 @@ export class SpecFiles {
     return { ok: true, node, base: target.file };
   }
 
-  /** Operation `i` as the view draws it. */
+  /** Operation `i` as the view draws it: an operation of `ops`, or a webhook numbered after them. */
   operation(i: number): Operation | null {
     const doc = this.#docs.get(this.root);
-    const row = this.#index?.ops[i];
-    if (!isObj(doc) || row === undefined) return null;
-    let item = (doc.paths as Obj)[row.path];
+    const index = this.#index;
+    if (!isObj(doc) || index === null) return null;
+    const row = i < index.ops.length ? index.ops[i] : index.webhooks[i - index.ops.length];
+    if (row === undefined) return null;
+    let item = row.webhook === true ? (isObj(doc.webhooks) ? doc.webhooks[row.path] : undefined) : (doc.paths as Obj)[row.path];
     if (isObj(item) && typeof item.$ref === "string") {
       const r = this.resolve(this.root, item.$ref);
       item = "ok" in r && r.ok ? r.node : {};
     }
     if (!isObj(item)) return null;
     return buildOperation(this, doc, item, row, this.root);
+  }
+
+  /** Follows refs inside `base` itself, a few deep: the node a same-file ref names, or the node as it is. */
+  #local(base: string, node: unknown): unknown {
+    return local(this, base, node).node;
+  }
+
+  /** What schema `node` of file `base` holds (section 8): `allOf` merged, a choice told, refs in its own file followed. */
+  shape(base: string, node: unknown): Shape {
+    const out: Shape = { props: [], variants: null, items: undefined, extra: undefined, description: "", facts: {}, base };
+    const required = new Set<string>();
+    const seen = new Set<string>();
+    const take = (raw: unknown, depth: number) => {
+      if (depth > 12) return;
+      let n = raw;
+      const ref = refOf(n);
+      if (ref !== null) {
+        if (seen.has(ref)) return;
+        seen.add(ref);
+        const r = this.resolve(base, ref);
+        // A ref into another file, or a broken one, stays what it is: the view reads it when opened.
+        if (!("ok" in r) || !r.ok || r.base !== base) return;
+        n = r.node;
+      }
+      if (!isObj(n)) return;
+      if (out.description === "" && typeof n.description === "string") out.description = n.description;
+      for (const k of FACT_KEYS) if (n[k] !== undefined && out.facts[k] === undefined) out.facts[k] = n[k];
+      if (Array.isArray(n.required)) for (const r of n.required) required.add(str(r));
+      if (isObj(n.properties)) {
+        for (const [name, schema] of Object.entries(n.properties)) {
+          const had = out.props.find((p) => p.name === name);
+          if (had === undefined) out.props.push({ name, node: schema, required: false, words: "" });
+          // A property two parts define is both: GitHub's forkee says `created_at` is `oneOf [integer, string]`, then `string`.
+          else had.node = { allOf: [had.node, schema] };
+        }
+      }
+      for (const key of ["oneOf", "anyOf"] as const) {
+        const list = n[key];
+        if (!Array.isArray(list)) continue;
+        // A choice of one schema and null, or of one, is that schema.
+        const real = list.filter((m) => !isNullSchema(this.#local(base, m)));
+        if (real.length === 1) take(real[0], depth + 1);
+        else if (real.length > 1 && out.variants === null) {
+          out.variants = { key, list: real, discriminator: isObj(n.discriminator) ? str(n.discriminator.propertyName) : "" };
+        }
+      }
+      if (n.items !== undefined && out.items === undefined) out.items = n.items;
+      if (n.additionalProperties !== undefined && typeof n.additionalProperties === "object" && out.extra === undefined) out.extra = n.additionalProperties;
+      if (Array.isArray(n.allOf)) for (const part of n.allOf) take(part, depth + 1);
+    };
+    take(node, 0);
+    for (const p of out.props) {
+      p.required = required.has(p.name);
+      const own = isObj(p.node) && typeof p.node.description === "string" ? p.node.description : "";
+      if (own !== "") p.words = own;
+      else {
+        const named = this.#local(base, p.node);
+        p.words = isObj(named) ? str(named.description) : "";
+      }
+    }
+    return out;
+  }
+
+  /** Which operations name schema `name`, and which schemas hold it: the index is built once, by one pass. */
+  uses(name: string): Uses {
+    this.#uses ??= buildUses(this);
+    return { ops: this.#uses.ops.get(name) ?? [], schemas: this.#uses.schemas.get(name) ?? [] };
+  }
+  #uses: { ops: Map<string, number[]>; schemas: Map<string, string[]> } | null = null;
+
+  /**
+   * An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic.
+   * `name` is the name it stands under where it is no property's: a parameter's.
+   */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true, name?: string): unknown {
+    const reader = {
+      resolve: (b: string, ref: string) => {
+        const r = this.resolve(b, ref);
+        return "ok" in r && r.ok ? { node: r.node, base: r.base } : null;
+      },
+      shape: (b: string, n: unknown) => this.shape(b, n),
+    };
+    return makeExample(reader, base, node, { direction, choice, given, name });
+  }
+
+  /**
+   * The spec as a Bruno collection (`openapi-bru.ts`): each operation's request as it starts in the explorer, its
+   * body the spec's example else one made from the schema (as a request). Its files, by path from its folder.
+   */
+  collection(specFile: string): [string, string][] {
+    const index = this.#index;
+    if (index === null) return [];
+    const made = new Map<number, { op: Operation; draft: RequestDraft } | null>();
+    const operation = (i: number) => {
+      if (!made.has(i)) {
+        const op = this.operation(i);
+        if (op === null) made.set(i, null);
+        else {
+          const bodies: Record<string, unknown> = {};
+          for (const m of op.body?.content ?? []) bodies[m.type] = m.examples[0]?.value ?? (m.schema === null ? undefined : this.sample(op.base, m.schema, "request"));
+          const resolve = (schema: unknown) => this.#local(op.base, schema);
+          made.set(i, { op, draft: startDraft(op, bodies, firstSchemeOf(op, index.security), resolve) });
+        }
+      }
+      return made.get(i)!;
+    };
+    return bruCollection({ index, groups: groupsOf(index), operation, specFile });
+  }
+
+  /** The place line `line` (1-based) of the spec's text stands in: an operation, a schema, or `null` (`openapi-line.ts`). */
+  placeAt(line: number): string | null {
+    const index = this.#index;
+    if (index === null || line < 1) return null;
+    return placeOfPath(pathAtLine(this.#text, line), (p) => index.ops.find((o) => o.path === p)?.anchor ?? null);
+  }
+
+  /** A page's first screen in one answer: `get /pets` an operation, `schemas/Pet` a schema. */
+  page(place: string): PageAnswer {
+    const index = this.#index;
+    if (index === null) return { kind: "missing" };
+    if (place.startsWith("schemas/")) {
+      const name = place.slice("schemas/".length);
+      if (!index.schemas.includes(name)) return { kind: "missing" };
+      const r = this.resolve(this.root, index.schemaBase + encodePointer(name));
+      if (!("ok" in r) || !r.ok) return { kind: "missing" };
+      // The sample starts from the ref, so a schema that holds itself closes where it comes round again.
+      const sample = this.sample(this.root, { $ref: index.schemaBase + encodePointer(name) });
+      const given = isObj(r.node) && (r.node.example !== undefined || (Array.isArray(r.node.examples) && r.node.examples.length > 0));
+      return { kind: "schema", name, node: r.node, base: r.base, shape: this.shape(r.base, r.node), uses: this.uses(name), sample, given };
+    }
+    const row = index.ops.find((o) => o.anchor === place) ?? index.webhooks.find((o) => o.anchor === place);
+    if (row === undefined) return { kind: "missing" };
+    const op = this.operation(row.i);
+    if (op === null) return { kind: "missing" };
+    return { kind: "op", op, shapes: this.pageShapes(op), samples: this.pageSamples(op) };
+  }
+
+  /**
+   * The examples an operation's page makes where the spec gives none (Björn, 2026-11-22): each body's media (as a
+   * request), each response's media (as an answer), each parameter (as a request), by the same keys as the shapes.
+   */
+  pageSamples(op: Operation): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const m of op.body?.content ?? []) if (m.examples.length === 0 && m.schema !== null) out[`b:${m.type}`] = this.sample(op.base, m.schema, "request");
+    for (const r of op.responses) for (const m of r.content) if (m.examples.length === 0 && m.schema !== null) out[`r:${r.status}:${m.type}`] = this.sample(op.base, m.schema, "response");
+    for (const p of op.parameters) if (p.ref === null && p.example === undefined && p.schema !== null) out[`p:${p.in}:${p.name}`] = this.sample(op.base, p.schema, "request", 0, true, p.name);
+    return out;
+  }
+
+  /** The shapes an operation's page draws unopened: each body's and each response's media, and its items or first choice. */
+  pageShapes(op: Operation): Record<string, Shape> {
+    const shapes: Record<string, Shape> = {};
+    const add = (key: string, node: unknown) => {
+      if (node === null || node === undefined) return;
+      const sh = this.shape(op.base, node);
+      shapes[key] = sh;
+      if (sh.props.length === 0 && sh.variants === null && sh.items !== undefined) shapes[`${key}/[]`] = this.shape(op.base, sh.items);
+      if (sh.variants !== null) shapes[`${key}|0`] = this.shape(op.base, sh.variants.list[0]);
+    };
+    for (const m of op.body?.content ?? []) add(`b:${m.type}`, m.schema);
+    for (const r of op.responses) for (const m of r.content) add(`r:${r.status}:${m.type}`, m.schema);
+    return shapes;
   }
 
   /** The operations of a path item that lives in another file, each whole, once the view has read that file. */
@@ -415,6 +728,28 @@ export function indexSpec(doc: unknown, written?: string): Opened {
       });
     }
   }
+  const webhooks: OpRow[] = [];
+  if (isObj(doc.webhooks)) {
+    for (const [name, raw] of Object.entries(doc.webhooks)) {
+      const item = isObj(raw) && typeof raw.$ref === "string" && raw.$ref.startsWith("#") ? pointer(doc, raw.$ref.slice(1)) : raw;
+      if (!isObj(item)) continue;
+      for (const method of METHODS) {
+        const op = item[method];
+        if (!isObj(op)) continue;
+        webhooks.push({
+          i: ops.length + webhooks.length,
+          method,
+          path: name,
+          summary: str(op.summary),
+          operationId: str(op.operationId) || null,
+          tags: [],
+          deprecated: op.deprecated === true,
+          anchor: `${method} ${name}`,
+          webhook: true,
+        });
+      }
+    }
+  }
   const schemaBase = key === "swagger" ? "#/definitions/" : "#/components/schemas/";
   const named = key === "swagger" ? doc.definitions : isObj(doc.components) ? doc.components.schemas : undefined;
   return {
@@ -425,7 +760,10 @@ export function indexSpec(doc: unknown, written?: string): Opened {
       title: str(info.title) || "Untitled API",
       apiVersion: str(info.version),
       description: str(info.description) || str(info.summary),
-      servers: serversOf(doc),
+      servers: serversOf(doc, doc),
+      security: schemesOf(doc),
+      info: infoOf(doc, info),
+      webhooks,
       tags,
       ops,
       pathRefs,
@@ -436,15 +774,68 @@ export function indexSpec(doc: unknown, written?: string): Opened {
   };
 }
 
-function serversOf(doc: Obj): Server[] {
-  if (Array.isArray(doc.servers)) {
-    return doc.servers.filter(isObj).map((s) => ({ url: str(s.url), description: str(s.description) })).filter((s) => s.url !== "");
+/**
+ * The servers `holder` names (the spec, a path item or an operation), each with its `{variables}`. A 2.0 spec's
+ * `host`, `basePath` and `schemes` are its servers; one with no `host` has a relative address, which needs a server
+ * of the person's own.
+ */
+export function serversOf(doc: Obj, holder: Obj): Server[] {
+  if (Array.isArray(holder.servers)) {
+    return holder.servers
+      .filter(isObj)
+      .map((s) => ({ url: str(s.url), description: str(s.description), variables: variablesOf(s.variables) }))
+      .filter((s) => s.url !== "");
   }
-  if (typeof doc.host === "string" || typeof doc.basePath === "string") {
+  if (holder === doc && (typeof doc.host === "string" || typeof doc.basePath === "string")) {
+    if (typeof doc.host !== "string" || doc.host === "") return [{ url: str(doc.basePath) || "/", description: "", variables: {} }];
     const schemes = Array.isArray(doc.schemes) && doc.schemes.length > 0 ? doc.schemes.map(str) : ["https"];
-    return schemes.map((scheme) => ({ url: `${scheme}://${str(doc.host)}${str(doc.basePath)}`, description: "" }));
+    return schemes.map((scheme) => ({ url: `${scheme}://${str(doc.host)}${str(doc.basePath)}`, description: "", variables: {} }));
   }
   return [];
+}
+
+function variablesOf(raw: unknown): Record<string, ServerVariable> {
+  const out: Record<string, ServerVariable> = {};
+  if (!isObj(raw)) return out;
+  for (const [name, v] of Object.entries(raw)) {
+    if (!isObj(v)) continue;
+    out[name] = { default: str(v.default), enum: Array.isArray(v.enum) ? v.enum.map(str) : [], description: str(v.description) };
+  }
+  return out;
+}
+
+/** The spec's security schemes, 3.x's `components.securitySchemes` or 2.0's `securityDefinitions`. */
+function schemesOf(doc: Obj): Scheme[] {
+  const raw = isObj(doc.components) && isObj(doc.components.securitySchemes) ? doc.components.securitySchemes : isObj(doc.securityDefinitions) ? doc.securityDefinitions : {};
+  const out: Scheme[] = [];
+  for (const [name, node] of Object.entries(raw)) {
+    const s = isObj(node) && typeof node.$ref === "string" && node.$ref.startsWith("#") ? pointer(doc, node.$ref.slice(1)) : node;
+    if (!isObj(s)) continue;
+    const basic = s.type === "basic";
+    out.push({
+      name,
+      type: basic ? "http" : str(s.type),
+      scheme: basic ? "basic" : str(s.scheme).toLowerCase(),
+      in: str(s.in),
+      keyName: str(s.name),
+      bearerFormat: str(s.bearerFormat),
+      description: str(s.description),
+      flows: isObj(s.flows) ? Object.keys(s.flows) : typeof s.flow === "string" ? [s.flow] : [],
+    });
+  }
+  return out;
+}
+
+function infoOf(doc: Obj, info: Obj): Info {
+  const c = info.contact;
+  const l = info.license;
+  const e = doc.externalDocs;
+  return {
+    contact: isObj(c) ? { name: str(c.name), email: str(c.email), url: str(c.url) } : null,
+    license: isObj(l) ? { name: str(l.name), url: str(l.url) } : null,
+    terms: str(info.termsOfService),
+    externalDocs: isObj(e) && str(e.url) !== "" ? { url: str(e.url), description: str(e.description) } : null,
+  };
 }
 
 /** The value at JSON pointer `ptr` (`/components/schemas/Pet`, `""` the whole) in `doc`, or `undefined`. */
@@ -484,6 +875,86 @@ export function refTarget(base: string, ref: string): { ok: true; file: string; 
     } else out.push(seg);
   }
   return { ok: true, file: out.join("/"), pointer: ptr };
+}
+
+/** The keys a field's line of facts reads (section 8). */
+export const FACT_KEYS = [
+  "type", "format", "enum", "const", "default", "example", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+  "minLength", "maxLength", "minItems", "maxItems", "uniqueItems", "pattern", "readOnly", "writeOnly", "deprecated", "nullable",
+] as const;
+
+/** Whether a schema says only "null" (3.1's `type: "null"`, or an `enum` of only `null` or the empty string). */
+function isNullSchema(node: unknown): boolean {
+  if (!isObj(node)) return false;
+  if (node.type === "null") return true;
+  return Array.isArray(node.enum) && node.enum.length === 1 && (node.enum[0] === null || node.enum[0] === "");
+}
+
+/** A name as one part of a JSON pointer. */
+export function encodePointer(name: string): string {
+  return name.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+/** The named schemas a value's refs name, each once: `#/components/schemas/Pet` and the like, read from its JSON. */
+function namedIn(value: unknown, schemaBase: string, out: Set<string>, follow?: (ref: string) => unknown, seen = new Set<string>()): void {
+  const walk = (v: unknown, depth: number) => {
+    if (depth > 64) return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+      return;
+    }
+    if (!isObj(v)) return;
+    const ref = v.$ref;
+    if (typeof ref === "string") {
+      if (ref.startsWith(schemaBase)) {
+        out.add(decodeURIComponent(ref.slice(schemaBase.length)).replace(/~1/g, "/").replace(/~0/g, "~"));
+      } else if (follow !== undefined && ref.startsWith("#/") && !seen.has(ref)) {
+        // A parameter, a response or a body kept in `components`: what it names, the operation names.
+        seen.add(ref);
+        walk(follow(ref), depth + 1);
+      }
+      return;
+    }
+    for (const x of Object.values(v)) walk(x, depth + 1);
+  };
+  walk(value, 0);
+}
+
+/** The *Used by* and *Part of* index of a spec: one pass over its operations and its named schemas. */
+function buildUses(files: SpecFiles): { ops: Map<string, number[]>; schemas: Map<string, string[]> } {
+  const ops = new Map<string, number[]>();
+  const schemas = new Map<string, string[]>();
+  const index = files.index;
+  const doc = files.doc;
+  if (index === null || !isObj(doc)) return { ops, schemas };
+  const follow = (ref: string) => pointer(doc, ref.slice(1));
+  const paths = isObj(doc.paths) ? doc.paths : {};
+  for (const row of index.ops) {
+    let item = paths[row.path];
+    if (isObj(item) && typeof item.$ref === "string" && item.$ref.startsWith("#")) item = follow(item.$ref);
+    if (!isObj(item)) continue;
+    const names = new Set<string>();
+    namedIn([item[row.method], item.parameters ?? null], index.schemaBase, names, follow);
+    for (const name of names) {
+      let list = ops.get(name);
+      if (list === undefined) ops.set(name, (list = []));
+      list.push(row.i);
+    }
+  }
+  const named = index.key === "swagger" ? doc.definitions : isObj(doc.components) ? doc.components.schemas : undefined;
+  if (isObj(named)) {
+    for (const holder of index.schemas) {
+      const names = new Set<string>();
+      namedIn(named[holder], index.schemaBase, names);
+      names.delete(holder);
+      for (const name of names) {
+        let list = schemas.get(name);
+        if (list === undefined) schemas.set(name, (list = []));
+        list.push(holder);
+      }
+    }
+  }
+  return { ops, schemas };
 }
 
 /** A node that is a `{ $ref }`: its ref, else `null`. */
@@ -549,6 +1020,7 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
   const swagger = typeof doc.swagger === "string";
   // The path's parameters, then the operation's, which replace one of the same name and place.
   const merged = new Map<string, Param>();
+  const form: Obj[] = [];
   let body: Body | null = null;
   const consumes = (Array.isArray(op.consumes) ? op.consumes : Array.isArray(doc.consumes) ? doc.consumes : ["application/json"]).map(str);
   for (const list of [item.parameters, op.parameters]) {
@@ -569,6 +1041,10 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
         };
         continue;
       }
+      if (swagger && node.in === "formData") {
+        form.push(node);
+        continue;
+      }
       const param: Param = {
         name: str(node.name),
         in: str(node.in),
@@ -581,6 +1057,18 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
       };
       merged.set(`${param.in}:${param.name}`, param);
     }
+  }
+  // 2.0's `formData` parameters are a form body, as its body parameter is the request body.
+  if (swagger && form.length > 0) {
+    const file = form.some((p) => p.type === "file");
+    const type = file ? "multipart/form-data" : (consumes.find((c) => c.includes("form")) ?? "application/x-www-form-urlencoded");
+    const properties: Obj = {};
+    for (const p of form) {
+      const schema = swaggerSchema(p);
+      properties[str(p.name)] = { ...(isObj(schema) ? schema : {}), ...(p.type === "file" ? { type: "string", format: "binary" } : {}), description: str(p.description) || undefined };
+    }
+    const required = form.filter((p) => p.required === true).map((p) => str(p.name));
+    body = { description: "", required: required.length > 0, content: [{ type, schema: { type: "object", required, properties }, examples: [] }], ref: null };
   }
   if (!swagger && op.requestBody !== undefined) {
     const { node, ref } = local(files, base, op.requestBody);
@@ -597,7 +1085,7 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
     for (const [status, raw] of Object.entries(op.responses)) {
       const { node, ref } = local(files, base, raw);
       if (ref !== null && refOf(node) !== null) {
-        responses.push({ status, description: "", content: [], headers: [], ref });
+        responses.push({ status, description: "", content: [], headers: [], links: [], ref });
         continue;
       }
       if (!isObj(node)) continue;
@@ -613,13 +1101,15 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
                 examples: examples[type] === undefined ? [] : [{ name: "", summary: "", value: examples[type], external: null }],
               }));
       } else content = contentOf(files, base, node.content);
-      responses.push({ status, description: str(node.description), content, headers: headersOf(files, base, node.headers, swagger), ref: null });
+      responses.push({ status, description: str(node.description), content, headers: headersOf(files, base, node.headers, swagger), links: linksOf(files, base, node.links), ref: null });
     }
   }
-  const security = (Array.isArray(op.security) ? op.security : Array.isArray(doc.security) ? doc.security : [])
-    .filter(isObj)
-    .map((req) => Object.keys(req).join(" + "))
-    .filter((s) => s !== "");
+  // Each requirement is the schemes it needs together; an empty one (`{}`) is *or nothing*.
+  const security = (Array.isArray(op.security) ? op.security : Array.isArray(doc.security) ? doc.security : []).filter(isObj).map((req) => Object.keys(req));
+  const ownServers = Array.isArray(op.servers) ? serversOf(doc, op) : [];
+  const itemServers = ownServers.length === 0 && Array.isArray(item.servers) ? serversOf(doc, item) : [];
+  const servers = ownServers.length > 0 ? ownServers : itemServers.length > 0 ? itemServers : serversOf(doc, doc);
+  const ext = op.externalDocs;
   return {
     i: row.i,
     method: row.method,
@@ -632,6 +1122,21 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
     body,
     responses,
     security,
+    servers,
+    callbacks: isObj(op.callbacks) ? Object.keys(op.callbacks) : [],
+    externalDocs: isObj(ext) && str(ext.url) !== "" ? { url: str(ext.url), description: str(ext.description) } : null,
+    webhook: row.webhook === true,
     base,
   };
+}
+
+function linksOf(files: SpecFiles, base: string, raw: unknown): Link[] {
+  if (!isObj(raw)) return [];
+  const out: Link[] = [];
+  for (const [name, l0] of Object.entries(raw)) {
+    const l = local(files, base, l0).node;
+    if (!isObj(l)) continue;
+    out.push({ name, operationId: str(l.operationId), operationRef: str(l.operationRef), description: str(l.description) });
+  }
+  return out;
 }

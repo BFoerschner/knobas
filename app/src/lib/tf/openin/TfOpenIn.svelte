@@ -29,7 +29,8 @@
   import { apps as sharedApps, fileFolder, type Apps } from "./apps.svelte";
   import { clones as sharedClones, type Clones } from "./clones.svelte";
   import { appPageHash } from "./app-page";
-  import { cloneTip, commandFor, fill, joinInside, menuOrder, repoName } from "./openin";
+  import { apiClients, BRUNO, cloneTip, commandFor, fill, joinInside, menuOrder, repoName } from "./openin";
+  import { clientsFound, type SpecOpener } from "../render/oas-open.svelte";
   import TfCloneRoot from "./TfCloneRoot.svelte";
 
   let {
@@ -47,6 +48,7 @@
     readPage = (id: string) => objectPage(id, { kind: "repository" }),
     browse = openExternal,
     layers = sharedLayers,
+    api = null,
   }: {
     /** The repo or branch the checkout was read for: what opens. */
     entityId: string;
@@ -68,6 +70,8 @@
     readPage?: (entityId: string) => Promise<string | null>;
     browse?: (url: string) => Promise<void>;
     layers?: Layers | undefined;
+    /** A spec the file view draws as an API: its *As requests, in an API client* entries (ux31). */
+    api?: SpecOpener | null;
   } = $props();
 
   let open = $state(false);
@@ -90,6 +94,20 @@
   /** A clone that just ended names its folder before the page reads the checkout again (`cloned`). */
   const path = $derived(checkout?.path ?? (mark?.kind === "cloned" ? mark.path : null));
   const entries = $derived(apps.settings === null ? [] : menuOrder(apps.settings));
+  const clients = $derived(api === null ? [] : apiClients(apps.settings, clientsFound.bruno));
+  let apiOpen = $state(false);
+  let apiFace = $state<HTMLButtonElement | null>(null);
+  function openApi(app: CheckoutApplication) {
+    open = false;
+    apiOpen = false;
+    void api?.open(app);
+  }
+  /** An API client's small line: what will be written, or the command it runs. */
+  function apiLine(app: CheckoutApplication): string {
+    if (api === null) return "";
+    if (app.id === BRUNO) return `${api.requests.toLocaleString("en")} requests in ${api.folders.toLocaleString("en")} folders, written to a folder of knobas's`;
+    return app.api_command ?? "";
+  }
   const fileAt = $derived(path !== null && file !== null ? joinInside(path, file) : null);
   /** A file's page is only the one the file view gives: the repository's would be the wrong page. */
   const browserUrl = $derived(page !== undefined ? page : file !== null ? null : (readUrl ?? null));
@@ -174,7 +192,14 @@
             {#if entries.length > 0}<hr />{/if}
             <button role="menuitem" onclick={() => toBrowser(browserUrl)}><b>Browser</b><span class="tf-mono" title={browserUrl}>{browserUrl}</span></button>
           {/if}
-          {#if entries.length > 0 || browserUrl !== null}<hr />{/if}
+          {#if clients.length > 0}
+            <hr />
+            <span class="tf-menulab">As requests, in an API client</span>
+            {#each clients as app (app.id)}
+              <button role="menuitem" onclick={() => openApi(app)}><b>{app.name}</b><span class="tf-dim">{apiLine(app)}</span></button>
+            {/each}
+          {/if}
+          {#if entries.length > 0 || browserUrl !== null || clients.length > 0}<hr />{/if}
           <a role="menuitem" href={addHash} onclick={() => (open = false)}>Add an application</a>
           <a role="menuitem" href="#/settings/checkouts" onclick={() => (open = false)}>Manage applications</a>
       </TfMenu>
@@ -185,6 +210,21 @@
       <button type="button" class="{cls} tf-ghost" aria-label="Stop cloning {name}" onclick={() => void clones.stop(repoId)}
         >Stop</button
       >
+    </span>
+  {:else if clients.length > 0 && mark?.kind !== "failed"}
+    <!-- Not cloned, and a spec: an API client needs no checkout, so the menu stands with the clients and Clone. -->
+    <span class="tf-openin">
+      <button bind:this={apiFace} type="button" class={cls} aria-haspopup="menu" aria-expanded={apiOpen} title="Open the spec in an API client, or clone" onclick={(event) => { event.stopPropagation(); apiOpen = !apiOpen; }}
+        >Open in…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
+      >
+      <TfMenu bind:open={apiOpen} opener={apiFace} label="Open in" className="tf-appmenu" {layers}>
+        <span class="tf-menulab">As requests, in an API client</span>
+        {#each clients as app (app.id)}
+          <button role="menuitem" onclick={() => openApi(app)}><b>{app.name}</b><span class="tf-dim">{apiLine(app)}</span></button>
+        {/each}
+        <hr />
+        <button role="menuitem" title={cloneTip(root, name)} onclick={() => { apiOpen = false; clone(); }}><b>Clone</b></button>
+      </TfMenu>
     </span>
   {:else}
     <span class="tf-openin">

@@ -81,7 +81,9 @@
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
-  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { goAcross, replaceAddress } from "../opener";
+  import type { SpecOpener } from "../render/oas-open.svelte";
+  import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
   import TfFolderPickMenu from "../render/TfFolderPickMenu.svelte";
@@ -149,6 +151,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
+  import { zen, zenApplies, isZenKey, ZEN_KEY_LABEL } from "../zen.svelte";
   import { layers } from "../layers.svelte";
   import {
     BAND,
@@ -1554,6 +1557,8 @@
     // its archive read from the generated folder (`folder_render_archive_open`); with no archive reads it stays binary.
     return openWith(drawn, allRenderers(), [...defaults.list, ...MADE_DEFAULTS]);
   });
+  /** What *Open in…* opens in an API client while the file is drawn by the API explorer (ux31). */
+  let specOpener = $state<SpecOpener | null>(null);
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();
   /** What draws the file now: the one picked, else the default. */
@@ -2155,11 +2160,40 @@
     };
   };
 
+  // ---- Zen mode (ux31, `../zen.svelte.ts`) ----
+  /** Whether the shown file is one Zen mode applies to: drawn by a renderer that wants the room, on the shown page. */
+  const zenHere = $derived(shownPage() && file !== null && fileMade === null && zenApplies(drawAs));
+  $effect(() => {
+    const here = zenHere;
+    zen.here = here;
+    return () => {
+      if (zen.here === here) zen.here = false;
+    };
+  });
+  // Leaving the file view (another tab, another page kept alive behind) ends it.
+  $effect(() => {
+    if (!shownPage()) zen.on = false;
+  });
+  // So does closing it, when it was the one shown; a kept page dropped behind the shown one leaves Zen mode alone.
+  onDestroy(() => {
+    if (untrack(() => zenHere)) zen.on = false;
+  });
+  // While it shows, `Esc` leaves it before it leaves the page: an inline panel's rung.
+  $effect(() => {
+    if (!zen.shown) return;
+    return untrack(() => layers.add({ kind: "panel", close: () => (zen.on = false) }));
+  });
+
   // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
   $effect(() => {
     const onkey = (event: KeyboardEvent) => {
       // A page or tab keep-alive holds hidden (#2247) takes no keys.
       if (!shownPage()) return;
+      if (isZenKey(event) && (zenHere || zen.on) && !inTextField(event.target) && !inTextField(document.activeElement) && !layers.open.some((layer) => layer.kind !== "panel")) {
+        event.preventDefault();
+        zen.toggle();
+        return;
+      }
       if (event.key !== "t" && event.key !== "T") return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
@@ -2262,7 +2296,7 @@
   </div>
 {/snippet}
 
-<div class="tf-repo" {@attach sideWidth("repo-tree")}>
+<div class="tf-repo" class:tf-zen={zen.shown} {@attach sideWidth("repo-tree")}>
   <TfSideEdge side="repo-tree" />
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
@@ -2492,8 +2526,17 @@
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
+          {#if zenHere}
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost tf-zenbtn"
+              aria-pressed={zen.on}
+              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
+              onclick={() => zen.toggle()}>Zen</button
+            >
+          {/if}
           {#if fileMade === null}
-            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
+            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} api={drawAs === "openapi" ? specOpener : null} />
             <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
           {/if}
         </span>
@@ -2604,9 +2647,18 @@
             path={spec.path}
             read={imageRead}
             at={path === spec.path ? place : null}
+            line={path === spec.path ? line : null}
+            repo={repoId}
+            bind:opener={specOpener}
             fileHref={placeLink}
             oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
             onsource={() => picks.set(spec.path, "source")}
+            onplace={(to, how, label) => {
+              const hash = to === "" ? hrefOf(spec.path) : placeHrefOf(spec.path, to);
+              if (how === "push") goAcross(hash, label);
+              else replaceAddress(hash);
+            }}
+            onback={() => history.back()}
             prose={oasProse}
           />
         {/await}

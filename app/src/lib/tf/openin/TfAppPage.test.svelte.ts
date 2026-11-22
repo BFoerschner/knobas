@@ -450,7 +450,7 @@ test("while later batches of checkouts come in, the picked repository and what i
   });
   // Before any checkout has answered, every row the page will have is drawn already: an answer fills them in and moves nothing.
   const before = drawn().rows;
-  expect(before).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr", "tf-app-command", "tf-app-file", "tf-app-commit", "tf-app-range", "tf-app-pr"]);
+  expect(before).toEqual(["tf-app-name", "tf-app-repo", "tf-app-tryfile", "tf-app-trycommit", "tf-app-trypr", "tf-app-command", "tf-app-file", "tf-app-commit", "tf-app-range", "tf-app-pr", "tf-app-api"]);
   batches.shift()!();
   await settle();
   const first = drawn();

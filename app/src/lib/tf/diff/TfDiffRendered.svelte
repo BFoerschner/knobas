@@ -40,6 +40,7 @@
   import TfDiagram from "../render/TfDiagram.svelte";
   import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import TfPdfDiff from "../render/TfPdfDiff.svelte";
+  import TfOasDiff from "../render/TfOasDiff.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import { imageMode as sharedImageMode, type ImageModeChoice } from "./image-mode.svelte";
   import { isListing, meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
@@ -158,6 +159,8 @@
    * is none that way. `entering`: from another file, so its first going down, its last going up.
    */
   export function nextChange(step: 1 | -1, entering = false): boolean {
+    // An API spec steps through its marked operations and schemas (ux31, section 13).
+    if (id === "openapi") return oasStage?.nextChange(step, entering) ?? false;
     readChanges();
     const to = entering ? (step === 1 ? 0 : changes.length - 1) : at + step;
     if (!marksOn || to < 0 || to >= changes.length || stage === null) return false;
@@ -192,8 +195,11 @@
     return got?.kind === "drawn" && !isListing(got.content) && !isOpenApi(textOf(got.content));
   };
   const neitherSpec = $derived(id === "openapi" && sides.length > 0 && sides.every(noSpec));
-  /** The columns the stage draws: one for a PDF (its own two), a JAR, a swipe or an onion, else one a side. */
-  const columns = $derived(id === "pdf" || id === "jar" || overlaid || neitherSpec ? 1 : sides.length);
+  /** The columns the stage draws: one for a PDF or an API spec (their own two), a JAR, a swipe or an onion, else one a side. */
+  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || overlaid || neitherSpec ? 1 : sides.length);
+  /** An API spec's stage (`TfOasDiff`), and what it says for the foot. */
+  let oasStage = $state<ReturnType<typeof TfOasDiff> | null>(null);
+  let oasSay = $state("");
 
   /** A JAR's side as listed: the listing, `null` for no file on that side, `undefined` while it is read or failed. */
   const listingOf = (side: Side): ArchiveIndex | null | undefined => {
@@ -280,6 +286,7 @@
     if (unread.length === 2) return "Reading both sides…";
     if (unread[0] === "old") return "Reading the side before…";
     if (unread[0] === "new") return ends?.new === "working tree" ? "Reading the working tree's side…" : "Reading the side after…";
+    if (id === "openapi") return oasSay;
     if (image) return sides.flatMap((side) => (sizes[side] ? [`${NAME[side]} ${sizes[side]}`] : [])).join(", ");
     if (jarCompare !== null) return compareWords(jarCompare, jarSides?.old === null ? "added" : jarSides?.new === null ? "removed" : null);
     if (marksOn && changes.length > 0) {
@@ -303,15 +310,6 @@
     <TfMarkdown text={textOf(content)} {render} lines={marksOn} />
   {:else if id === "html"}
     <TfHtmlPage html={textOf(content)} title="{path} {NAME[side]}, drawn as a page" {frame} room=".tf-rstage" extra="tf-rstage-frame" />
-  {:else if id === "openapi"}
-    {@const text = textOf(content)}
-    {#if isOpenApi(text)}
-      {#await import("../render/TfOpenApi.svelte") then { default: TfOpenApi }}
-        <TfOpenApi {text} {path} />
-      {/await}
-    {:else}
-      <p class="tf-jar-dnote tf-roas-no">Not an OpenAPI or Swagger spec on this side.</p>
-    {/if}
   {:else if isDiagramEngine(id)}
     <TfDiagram engine={id} code={textOf(content)} {render} />
   {:else}
@@ -384,6 +382,18 @@
     </div>
   {:else if neitherSpec}
     <div class="tf-rside tf-rside-doc"><p class="tf-jar-dnote tf-roas-no">Neither side is an OpenAPI or Swagger spec: Lines has the change.</p></div>
+  {:else if id === "openapi"}
+    {@const failed = sides.find((side) => failure(side) !== null)}
+    {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
+    <div class="tf-rside">
+      {#if failed !== undefined}
+        <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
+      {:else if old !== undefined && nu !== undefined}
+        <TfOasDiff bind:this={oasStage} before={old === null ? null : textOf(old)} after={nu === null ? null : textOf(nu)} {path} onsay={(words) => (oasSay = words)} />
+      {:else}
+        {@render waiting(sides[0] ?? "new")}
+      {/if}
+    </div>
   {:else if overlaid}
     {@const failed = sides.find((side) => failure(side) !== null)}
     <div class="tf-rside tf-rside-over">

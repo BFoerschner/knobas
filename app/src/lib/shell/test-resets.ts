@@ -19,6 +19,8 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // The hosts a change was confirmed for, until knobas quits (ux31, ADR-0057): each test asks afresh.
+  "tf/render/oas.svelte.ts#confirmedHosts": async () => (await import("../tf/render/oas.svelte")).confirmedHosts.clear(),
   // The Passwords page's one read, the folds opened and what the clipboard holds (ADR-0056): each test starts with none.
   "tf/passwords/held.svelte.ts#kept": async () => (await import("../tf/passwords/held.svelte")).forgetHeld(),
   "tf/passwords/held.svelte.ts#keptJson": async () => (await import("../tf/passwords/held.svelte")).forgetHeld(),

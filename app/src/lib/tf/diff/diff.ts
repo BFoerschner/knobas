@@ -51,6 +51,11 @@ export interface DiffContext {
    * not on that side. Absent: no JAR is compared rendered.
    */
   archive?(file: DiffFile, side: "old" | "new"): Promise<ArchiveIndex | null>;
+  /**
+   * The side after is read at the checkout, never through a forge's request (*Local changes*, a comparison ending at
+   * the working tree): a drawn YAML or JSON card's side may then be read to know it for an API spec (ux31).
+   */
+  local?: boolean;
 }
 
 /**

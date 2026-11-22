@@ -84,6 +84,7 @@ test("the rows are the sections in their order, Theme, Code colours and Fonts un
     "Fonts",
     "Performance",
     "Renderers",
+    "API servers",
     "Keyboard",
     "Logs and database",
     "Updates",

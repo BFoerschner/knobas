@@ -237,3 +237,22 @@ export function deleteTicketView(id: string): Promise<void> {
 export function fuzzyRank(text: string, haystacks: readonly string[]): Promise<FuzzyRanked[]> {
   return invoke<FuzzyRanked[]>("fuzzy_rank", { text, haystacks });
 }
+
+/**
+ * Holds a page's list for ranking (ux31, the API explorer's filter): its texts are sent once, and each key then
+ * sends only what was typed ({@link fuzzyRankHeld}). At most four lists are held in the app, the least lately used
+ * dropped first.
+ */
+export function fuzzyHold(id: string, haystacks: readonly string[]): Promise<void> {
+  return invoke<void>("fuzzy_hold", { id, haystacks });
+}
+
+/** A held list ranked as {@link fuzzyRank} ranks the same texts; `not_found` once the list was dropped. */
+export function fuzzyRankHeld(id: string, text: string): Promise<FuzzyRanked[]> {
+  return invoke<FuzzyRanked[]>("fuzzy_rank_held", { id, text });
+}
+
+/** Drops a held list, when its page closes. */
+export function fuzzyDrop(id: string): Promise<void> {
+  return invoke<void>("fuzzy_drop", { id });
+}

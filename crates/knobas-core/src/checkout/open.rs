@@ -42,8 +42,18 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// The placeholders a command may carry, in the order the dialog offers them.
-pub const PLACEHOLDERS: [&str; 10] = [
-    "path", "file", "line", "name", "sha", "base", "head", "pr", "branch", "url",
+pub const PLACEHOLDERS: [&str; 11] = [
+    "path",
+    "file",
+    "line",
+    "name",
+    "sha",
+    "base",
+    "head",
+    "pr",
+    "branch",
+    "url",
+    "collection",
 ];
 
 /// What an application is opened on (#2274).
@@ -99,16 +109,20 @@ pub enum ObjectKind {
     Commit,
     Range,
     PullRequest,
+    /// An API spec (ux31, ADR-0057): the file as shown and a collection of
+    /// requests, both written by knobas into a folder of its own.
+    ApiSpec,
 }
 
 impl ObjectKind {
     /// Every kind, in the order the dialog draws their commands.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Repository,
         Self::File,
         Self::Commit,
         Self::Range,
         Self::PullRequest,
+        Self::ApiSpec,
     ];
 
     /// The placeholders a command for this kind may carry. A repository and
@@ -120,6 +134,7 @@ impl ObjectKind {
             Self::Commit => &["path", "name", "sha", "url"],
             Self::Range => &["path", "name", "base", "head", "url"],
             Self::PullRequest => &["path", "name", "pr", "base", "head", "branch", "url"],
+            Self::ApiSpec => &["file", "collection", "name"],
         }
     }
 
@@ -132,6 +147,7 @@ impl ObjectKind {
             Self::Commit => "commit command",
             Self::Range => "range command",
             Self::PullRequest => "pull request command",
+            Self::ApiSpec => "API spec command",
         }
     }
 }
@@ -268,6 +284,13 @@ pub struct Application {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub pull_request_command: Option<String>,
+    /// The command that opens an API spec (ux31): `{file}` the spec as
+    /// shown and `{collection}` a folder of requests, both written by knobas,
+    /// and `{name}` the API's title. An application with one may have no
+    /// repository command (Bruno opens no checkout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub api_command: Option<String>,
 }
 
 impl Application {
@@ -276,11 +299,17 @@ impl Application {
     #[must_use]
     pub fn command_for(&self, kind: ObjectKind) -> Option<&str> {
         match kind {
-            ObjectKind::Repository => Some(&self.command),
-            ObjectKind::File => Some(self.file_command.as_deref().unwrap_or(&self.command)),
+            // An application with no repository command (an API client) opens no checkout or file.
+            ObjectKind::Repository => Some(self.command.as_str()).filter(|c| !c.is_empty()),
+            ObjectKind::File => self
+                .file_command
+                .as_deref()
+                .or(Some(self.command.as_str()))
+                .filter(|c| !c.is_empty()),
             ObjectKind::Commit => self.commit_command.as_deref(),
             ObjectKind::Range => self.range_command.as_deref(),
             ObjectKind::PullRequest => self.pull_request_command.as_deref(),
+            ObjectKind::ApiSpec => self.api_command.as_deref(),
         }
     }
 
@@ -289,6 +318,36 @@ impl Application {
     pub fn accepts(&self, kind: ObjectKind) -> bool {
         self.command_for(kind).is_some()
     }
+}
+
+/// The id of the shipped Bruno entry: the one application knobas knows by its
+/// id, for which it always writes the collection and looks whether it is
+/// installed (ux31).
+pub const BRUNO: &str = "bruno";
+
+/// The argument vector an API spec command becomes: `{file}`, `{collection}`
+/// and `{name}` filled from what knobas wrote, nothing else.
+///
+/// # Errors
+///
+/// [`TemplateError`]; a placeholder an API spec command does not take is
+/// [`TemplateError::NotForObject`].
+pub fn fill_api(
+    template: &str,
+    file: &Path,
+    collection: &Path,
+    name: &str,
+) -> Result<Vec<String>, TemplateError> {
+    check_for(template, ObjectKind::ApiSpec)?;
+    let words = split_words(template)?;
+    Ok(words
+        .iter()
+        .map(|word| {
+            word.replace("{file}", &file.to_string_lossy())
+                .replace("{collection}", &collection.to_string_lossy())
+                .replace("{name}", name)
+        })
+        .collect())
 }
 
 /// The id of the application the shipped list makes the default.
@@ -329,6 +388,14 @@ pub fn shipped_on(os: &str) -> Vec<Application> {
         pull_request_command: Some(command.to_owned()),
         ..Application::default()
     };
+    // Bruno (ux31, ADR-0057): an API client, offered on a spec only. On macOS it opens the collection; on Windows
+    // and Linux it cannot be pointed at a folder, so it comes to the front and knobas says where the folder is.
+    let bruno = |api: &str| Application {
+        id: BRUNO.to_owned(),
+        name: "Bruno".to_owned(),
+        api_command: Some(api.to_owned()),
+        ..Application::default()
+    };
     match os {
         "macos" => vec![
             app(
@@ -345,6 +412,7 @@ pub fn shipped_on(os: &str) -> Vec<Application> {
                 "open -a \"IntelliJ IDEA\" {path}",
                 Some("open -a \"IntelliJ IDEA\" {file}"),
             ),
+            bruno("open -a Bruno {collection}"),
         ],
         "linux" => vec![
             app(
@@ -360,6 +428,7 @@ pub fn shipped_on(os: &str) -> Vec<Application> {
                 None,
             ),
             app("files", "Files", "xdg-open {path}", None),
+            bruno("xdg-open bruno://app"),
         ],
         "windows" => vec![
             app(
@@ -370,6 +439,7 @@ pub fn shipped_on(os: &str) -> Vec<Application> {
             ),
             app("terminal", "Windows Terminal", "wt -d {path}", None),
             app("files", "File Explorer", "explorer {path}", None),
+            bruno("explorer bruno://app"),
         ],
         _ => Vec::new(),
     }
@@ -694,6 +764,10 @@ pub struct Draft {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub pull_request_command: Option<String>,
+    /// Blank is none: not offered for an API spec.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub api_command: Option<String>,
 }
 
 /// Why a list of applications cannot be saved, naming the entry.
@@ -745,11 +819,18 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
             return Err(ListError::NoName(index));
         }
         let command = draft.command.trim();
-        check_for(command, ObjectKind::Repository).map_err(|error| ListError::Command {
-            name: name.to_owned(),
-            object: ObjectKind::Repository,
-            error,
-        })?;
+        let has_api = draft
+            .api_command
+            .as_deref()
+            .is_some_and(|c| !c.trim().is_empty());
+        // An API client may open no checkout: its repository command may be blank.
+        if !(command.is_empty() && has_api) {
+            check_for(command, ObjectKind::Repository).map_err(|error| ListError::Command {
+                name: name.to_owned(),
+                object: ObjectKind::Repository,
+                error,
+            })?;
+        }
         let optional = |given: &Option<String>, object: ObjectKind| {
             let given = given
                 .as_deref()
@@ -770,6 +851,7 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
         let commit_command = optional(&draft.commit_command, ObjectKind::Commit)?;
         let range_command = optional(&draft.range_command, ObjectKind::Range)?;
         let pull_request_command = optional(&draft.pull_request_command, ObjectKind::PullRequest)?;
+        let api_command = optional(&draft.api_command, ObjectKind::ApiSpec)?;
         let given = draft.id.as_deref().map(str::trim).unwrap_or_default();
         let taken = |id: &str| out.iter().any(|app| app.id == id);
         let id = if !given.is_empty() && !taken(given) {
@@ -792,6 +874,7 @@ pub fn settle(drafts: &[Draft]) -> Result<Vec<Application>, ListError> {
             commit_command,
             range_command,
             pull_request_command,
+            api_command,
         });
     }
     Ok(out)
@@ -1108,12 +1191,12 @@ mod tests {
             |os: &str| -> Vec<String> { shipped_on(os).into_iter().map(|a| a.name).collect() };
         assert_eq!(
             names("macos"),
-            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]
+            ["VS Code", "Terminal", "Fork", "IntelliJ IDEA", "Bruno"]
         );
-        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files"]);
+        assert_eq!(names("linux"), ["VS Code", "Terminal", "Files", "Bruno"]);
         assert_eq!(
             names("windows"),
-            ["VS Code", "Windows Terminal", "File Explorer"]
+            ["VS Code", "Windows Terminal", "File Explorer", "Bruno"]
         );
         for os in ["freebsd", "MACOS", "Linux", ""] {
             assert!(shipped_on(os).is_empty(), "{os}");
@@ -1144,8 +1227,10 @@ mod tests {
             code: &code,
         };
         let file: &'static Path = Box::leak(Path::new(file).to_path_buf().into_boxed_path());
+        // Bruno takes a spec only (its repository command is blank): `bruno_takes_a_spec_on_each_platform` fills it.
         shipped_on(os)
             .iter()
+            .filter(|a| !a.command.trim().is_empty())
             .map(|a| {
                 [
                     Some(filled(&a.command, &at(None))),
@@ -1192,6 +1277,37 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    /// Bruno (ux31): on a spec only, its collection on macOS, brought to the front elsewhere; nothing else offered.
+    #[test]
+    fn bruno_takes_a_spec_on_each_platform() {
+        let file = Path::new("/scratch/payouts/openapi.yaml");
+        let collection = Path::new("/scratch/payouts/collection");
+        let argv = |os: &str| {
+            let bruno = shipped_on(os)
+                .into_iter()
+                .find(|a| a.id == BRUNO)
+                .unwrap_or_else(|| panic!("{os} ships Bruno"));
+            assert!(
+                bruno.command.is_empty()
+                    && bruno.file_command.is_none()
+                    && bruno.pull_request_command.is_none()
+            );
+            fill_api(
+                bruno.api_command.as_deref().unwrap_or_default(),
+                file,
+                collection,
+                "Payouts",
+            )
+            .unwrap_or_else(|error| panic!("{os}: {error}"))
+        };
+        assert_eq!(
+            argv("macos"),
+            ["open", "-a", "Bruno", "/scratch/payouts/collection"]
+        );
+        assert_eq!(argv("linux"), ["xdg-open", "bruno://app"]);
+        assert_eq!(argv("windows"), ["explorer", "bruno://app"]);
     }
 
     /// A path with a space stays one argument, and `{file}:{line}` is one.
