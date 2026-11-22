@@ -493,6 +493,19 @@ mod tests {
             }
         }
         assert!(replace(&Plain, "pw", &keys(1)).is_err());
+        // The trait's own defaults refuse, both ways, in their words.
+        let account = KeychainAccount::otp("pw", 0);
+        for refused in [
+            Plain.get_text(&account).map(|_| ()),
+            Plain.put_text(&account, "k1 w 0/1\n{}"),
+        ] {
+            match refused {
+                Err(SecretError::Backend(message)) => {
+                    assert_eq!(message, "this credential store keeps no text items");
+                }
+                other => panic!("refused, not {other:?}"),
+            }
+        }
     }
 }
 
@@ -535,6 +548,22 @@ mod more_tests {
         }
     }
 
+    /// A body that exactly fills a chunk's room is one piece, and one of
+    /// two-unit characters never runs past the room though its count
+    /// steps over it (the final suite's mutants: `>` against `>=` and `==`).
+    #[test]
+    fn a_cut_fills_its_room_exactly_and_never_passes_it() {
+        let room = CHUNK_CHARS - units(&format!("{TAG} w 99999/99999\n"));
+        assert_eq!(room % 2, 1, "an odd room, so two-unit steps pass over it");
+        assert_eq!(cut(&"a".repeat(room), "w"), vec!["a".repeat(room)]);
+        assert_eq!(cut(&"a".repeat(room + 1), "w").len(), 2);
+        let wide = cut(&"\u{1F511}".repeat(1_000), "w");
+        assert!(wide.len() >= 2);
+        for piece in &wide {
+            assert!(units(piece) <= room, "{} > {room}", units(piece));
+        }
+    }
+
     #[test]
     fn a_header_that_is_not_ours_is_refused() {
         for bad in [
@@ -564,7 +593,7 @@ mod more_tests {
         store
             .put_text(&KeychainAccount::otp("pw", 1), &cut[2])
             .unwrap();
-        assert!(read(&store, "pw").is_err());
+        assert_another_write(read(&store, "pw"));
         // Chunk 1 of the same write id but a different count.
         let other = chunks(
             &keys
@@ -578,7 +607,25 @@ mod more_tests {
         store
             .put_text(&KeychainAccount::otp("pw", 1), &other[1])
             .unwrap();
-        assert!(read(&store, "pw").is_err());
+        assert_another_write(read(&store, "pw"));
+        // Chunk 1 of another write with the same number and count.
+        let third = chunks(&keys, "else");
+        assert_eq!(third.len(), cut.len());
+        store
+            .put_text(&KeychainAccount::otp("pw", 1), &third[1])
+            .unwrap();
+        assert_another_write(read(&store, "pw"));
+    }
+
+    /// Refused by the header check itself, not later by the JSON that a
+    /// mixed join no longer decodes to.
+    fn assert_another_write(read: Result<OtpKeys, SecretError>) {
+        match read {
+            Err(SecretError::Backend(message)) => {
+                assert!(message.contains("belongs to another write"), "{message}");
+            }
+            other => panic!("refused as another write's chunk, not {other:?}"),
+        }
     }
 
     #[test]

@@ -210,6 +210,25 @@ mod tests {
         assert_eq!(got.account.expect("account kept").username, "admin");
     }
 
+    /// A text item (a code key chunk, ADR-0056) is kept as it is and read
+    /// back by a second store over the file; an absent one is `None`.
+    #[test]
+    fn a_text_item_is_kept_as_it_is_and_an_absent_one_is_none() {
+        let path = scratch("text");
+        let id = KeychainAccount::otp("pw", 0);
+        assert_eq!(FileStore::new(&path).get_text(&id).unwrap(), None);
+        FileStore::new(&path).put_text(&id, "k1 w 0/1\n{}").unwrap();
+        assert_eq!(
+            FileStore::new(&path).get_text(&id).unwrap().as_deref(),
+            Some("k1 w 0/1\n{}")
+        );
+        FileStore::new(&path).put_text(&id, "again").unwrap();
+        assert_eq!(
+            FileStore::new(&path).get_text(&id).unwrap().as_deref(),
+            Some("again")
+        );
+    }
+
     #[test]
     fn an_absent_account_is_none_and_deleting_it_succeeds() {
         let path = scratch("absent");

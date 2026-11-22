@@ -322,6 +322,25 @@ mod tests {
         )
     }
 
+    /// A text item is stored as it is and read back; an absent one is
+    /// `None`, not an error.
+    #[test]
+    fn a_text_item_is_kept_as_it_is_and_an_absent_one_is_none() {
+        let store = mock_backed();
+        let id = KeychainAccount::otp("pw", 0);
+        assert_eq!(store.get_text(&id).unwrap(), None);
+        store.put_text(&id, NEEDS_ESCAPING).unwrap();
+        assert_eq!(
+            store.get_text(&id).unwrap().as_deref(),
+            Some(NEEDS_ESCAPING)
+        );
+        assert_eq!(
+            store.entry(&id).unwrap().get_password().unwrap(),
+            NEEDS_ESCAPING,
+            "as it is: no envelope"
+        );
+    }
+
     /// `raw` placed in an item as the bytes a keychain holds, then read back
     /// through `get` -- for items no current `put` would write.
     fn read_stored(raw: &str) -> Secret {
