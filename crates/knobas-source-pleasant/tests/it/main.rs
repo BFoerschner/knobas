@@ -507,6 +507,8 @@ async fn the_writes_send_what_changed_once_and_read_the_entry_back_from_its_fold
     let item = written.item.expect("read back");
     assert_eq!(item.entity.to_string(), format!("pw:{WIKI}"));
     assert!(!item.payload.to_string().contains("GEZDGNBV"));
+    // A folder under the root is the entry's folder.
+    assert_eq!(item.payload["folder"], format!("pw:{folder}"));
     assert_eq!(written.otp_key.unwrap().secret.expose(), "GEZDGNBVGY3TQOJQ");
 
     let edit = s
@@ -569,4 +571,62 @@ async fn the_writes_send_what_changed_once_and_read_the_entry_back_from_its_fold
         refused,
         Err(knobas_source::SourceError::Protocol { status: None, .. })
     ));
+}
+
+/// An entry made in no folder goes to the root, whose id `folders/root`
+/// answers, and is read back as in no folder.
+#[tokio::test]
+async fn an_entry_made_in_no_folder_goes_to_the_root_and_reads_back_in_none() {
+    use knobas_source::passwords::{SecretText, Write};
+    let server = server().await;
+    let root = "6f9b1c3e-0000-4a10-9000-0000000000aa";
+    Mock::given(method("GET"))
+        .and(path("/api/v5/rest/folders/root"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(root))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/rest/entries"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(WIKI))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v5/rest/folders/{root}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Id": root, "Name": "Root", "ParentId": null, "Children": [],
+            "Credentials": [{"Id": WIKI, "Name": "loose", "GroupId": root, "HasViewEntryContentsAccess": true}]
+        })))
+        .mount(&server)
+        .await;
+    let s = source(&server.uri());
+    let written = s
+        .passwords_write(Write::CreateEntry {
+            source: "pw".into(),
+            folder: None,
+            title: "loose".into(),
+            username: None,
+            address: None,
+            notes: None,
+            expires: None,
+            password: SecretText::new("x"),
+            otp_key: None,
+            comment: None,
+        })
+        .await
+        .unwrap();
+    let item = written.item.expect("read back");
+    assert_eq!(item.payload["folder"], serde_json::Value::Null);
+    assert!(written.otp_key.is_none());
+    let posted: Vec<serde_json::Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path().ends_with("/entries"))
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(posted.len(), 1);
+    assert_eq!(posted[0]["GroupId"], root);
 }
