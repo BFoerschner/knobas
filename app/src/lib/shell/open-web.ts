@@ -86,9 +86,17 @@ export function webPlace(url: string, how: WebHow = {}, store: Pick<SiteStore, "
   if (how.elsewhere === true || baseOf(url) === null) return { to: "browser" };
   const named = how.source == null ? undefined : store.settings.get(how.source);
   if (named !== undefined && named.open_inside && named.offered && allows(named, url)) {
-    // The source the press was on, unless another source's base holds the address more closely.
+    // The source the press was on, unless another source's base holds the address more closely. Two sources on the
+    // same base (a vault and its test account on one server) tie, and the press's own wins: its site signs in with
+    // its own credential (ux30).
     const closer = owner(url, store);
-    return { to: "site", source: closer ?? named.source };
+    if (closer === null || closer === named.source) return { to: "site", source: named.source };
+    const closerBase = baseOf(store.settings.get(closer)?.base ?? "");
+    const namedBase = baseOf(named.base);
+    const at = baseOf(url);
+    const tie =
+      closerBase !== null && namedBase !== null && at !== null && holds(namedBase, at.origin, at.path) && namedBase.path.length >= closerBase.path.length;
+    return { to: "site", source: tie ? named.source : closer };
   }
   const found = owner(url, store);
   return found === null ? { to: "browser" } : { to: "site", source: found };
