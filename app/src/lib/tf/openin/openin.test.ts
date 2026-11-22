@@ -1,7 +1,7 @@
-import { expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 import type { CheckoutSettings } from "../../ipc/entity";
-import { argvText, cloneFailure, cloneTip, commandFor, fill, fillObject, folderName, insertAt, menuOrder, runPreview, splitWords, warnings } from "./openin";
+import { apiClients, apiPreview, argvText, cloneFailure, cloneTip, commandFor, fill, fillObject, folderName, insertAt, menuOrder, runPreview, splitWords, warnings } from "./openin";
 
 const AT = { path: "/Users/mara/code/payout-service", file: "/Users/mara/code/payout-service/src/lib.rs", line: 42 };
 
@@ -91,4 +91,31 @@ test("Clone's tooltip names the folder, and a failure says what to do", () => {
     "fatal: unable to access: Could not resolve host",
   );
   expect(cloneFailure("disk_full", "No space left on device", null)).toContain("The disk is full");
+});
+
+describe("API clients on a spec's Open in (ux31)", () => {
+  const settings = {
+    applications: [
+      { id: "vscode", name: "VS Code", command: "code {path}", file_command: null },
+      { id: "bruno", name: "Bruno", command: "", file_command: null, api_command: "open -a Bruno {collection}" },
+      { id: "insomnia", name: "Insomnia", command: "", file_command: null, api_command: "open -R {file}" },
+    ],
+    default_application: "vscode",
+  } as unknown as Parameters<typeof apiClients>[0];
+
+  it("lists every application with an API spec command, Bruno only where it is on this computer", () => {
+    expect(apiClients(settings, { bruno: true }).map((a) => a.id)).toEqual(["bruno", "insomnia"]);
+    expect(apiClients(settings, { bruno: false }).map((a) => a.id)).toEqual(["insomnia"]);
+    // Until the look answers, Bruno waits, so the menu never shrinks under the pointer.
+    expect(apiClients(settings, null).map((a) => a.id)).toEqual(["insomnia"]);
+  });
+
+  it("keeps an API client with no repository command off a repository's and a file's menu", () => {
+    expect(menuOrder(settings!).map((r) => r.app.id)).toEqual(["vscode"]);
+  });
+
+  it("previews an API spec command against a sample folder", () => {
+    expect(apiPreview("open -a Bruno {collection}")).toBe("open -a Bruno ~/knobas/api-clients/Pet-Store-1a2b3c4d");
+    expect(apiPreview('code "{file}"')).toBe("code ~/knobas/api-clients/Pet-Store-1a2b3c4d/openapi.yaml");
+  });
 });

@@ -151,3 +151,56 @@ pub async fn api_save_answer(id: u64, name: String) -> Result<String, IpcError> 
         .map_err(|error| IpcError::internal(format!("{}: {error}", path.display())))?;
     Ok(path.display().to_string())
 }
+
+/// Opens a spec in an application with an API spec command (ux31, section 23): knobas writes the spec and, where
+/// asked, the collection into a scratch folder of its own and runs the command on them.
+///
+/// # Errors
+/// As [`crate::api::open::open_in`].
+#[tauri::command]
+pub async fn api_open_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    application: String,
+    spec: crate::api::open::SpecToOpen,
+) -> Result<crate::api::open::OpenedSpec, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let profile = app.state::<crate::profile::Profile>().inner().clone();
+    crate::api::open::open_in(&pool, &profile.dir, &application, spec).await
+}
+
+/// Which shipped API clients are on this computer: `{ bruno }`. Read behind the menu's first frame.
+#[tauri::command]
+pub async fn api_clients_found() -> ClientsFound {
+    let home = dirs::home_dir();
+    let bruno =
+        tokio::task::spawn_blocking(move || crate::api::found::bruno(home.as_deref()).is_some())
+            .await
+            .unwrap_or(false);
+    ClientsFound { bruno }
+}
+
+/// Which shipped API clients are installed.
+#[derive(Debug, Clone, Copy, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "api.ts")]
+pub struct ClientsFound {
+    pub bruno: bool,
+}
+
+/// How many bytes the API clients' scratch folders hold, for Settings › Checkouts and Open in.
+#[tauri::command]
+pub async fn api_scratch_size<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> u64 {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    tokio::task::spawn_blocking(move || crate::api::open::scratch_size(&dir))
+        .await
+        .unwrap_or(0)
+}
+
+/// Removes every API client scratch folder (*Remove them now*).
+#[tauri::command]
+pub async fn api_scratch_clear<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::api::scratch::clear(&crate::api::open::scratch_root(&dir))
+    })
+    .await;
+}

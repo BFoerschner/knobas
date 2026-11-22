@@ -984,6 +984,10 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::api_servers,
         commands::api::api_set_servers,
         commands::api::api_save_answer,
+        commands::api::api_open_in,
+        commands::api::api_clients_found,
+        commands::api::api_scratch_size,
+        commands::api::api_scratch_clear,
         // A source's own website inside knobas (ADR-0050), appended at the
         // foot (§10.8).
         commands::site::site_settings,
@@ -1088,6 +1092,17 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let profile = handle.state::<Profile>().inner().clone();
+        // The API explorer's scratch folders a person has not opened for 30 days go, off the bring-up (ux31).
+        let scratch = api::scratch::root(&profile.dir);
+        tauri::async_runtime::spawn_blocking(move || {
+            let gone = api::scratch::sweep(
+                &scratch,
+                std::time::Duration::from_secs(api::scratch::KEEP_DAYS * 24 * 3600),
+            );
+            if gone > 0 {
+                tracing::info!(gone, "API client scratch folders swept");
+            }
+        });
         bring_up_app(
             &handle,
             &profile,

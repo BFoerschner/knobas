@@ -502,7 +502,14 @@ range_command?: string | null,
 /**
  * The command that opens a pull request.
  */
-pull_request_command?: string | null, };
+pull_request_command?: string | null, 
+/**
+ * The command that opens an API spec (ux31): `{file}` the spec as
+ * shown and `{collection}` a folder of requests, both written by knobas,
+ * and `{name}` the API's title. An application with one may have no
+ * repository command (Bruno opens no checkout).
+ */
+api_command?: string | null, };
 
 /**
  * An application as a person typed it in the dialog: a new one has no id
@@ -528,7 +535,11 @@ range_command?: string | null,
 /**
  * Blank is none: not offered for a pull request.
  */
-pull_request_command?: string | null, };
+pull_request_command?: string | null, 
+/**
+ * Blank is none: not offered for an API spec.
+ */
+api_command?: string | null, };
 
 /**
  * How a checkout was arrived at, or that it was not.
@@ -3638,7 +3649,7 @@ item?: string | null, };
  * Which kind of [`Object`]: what an application declares it accepts by
  * having a command for it.
  */
-export type OpenObjectKind = "repository" | "file" | "commit" | "range" | "pull_request";
+export type OpenObjectKind = "repository" | "file" | "commit" | "range" | "pull_request" | "api_spec";
 
 /**
  * Which panel a [`DocBlock::Panel`] is.

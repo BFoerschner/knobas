@@ -69,6 +69,9 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::api::send::ApiAnswer::export_all(cfg)?;
     crate::api::kept::SentLine::export_all(cfg)?;
     crate::api::servers::SavedServers::export_all(cfg)?;
+    crate::api::open::SpecToOpen::export_all(cfg)?;
+    crate::api::open::OpenedSpec::export_all(cfg)?;
+    crate::commands::api::ClientsFound::export_all(cfg)?;
     // passwords.ts (ADR-0056)
     knobas_source::passwords::Offers::export_all(cfg)?;
     knobas_source::passwords::EntryRecord::export_all(cfg)?;

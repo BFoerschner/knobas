@@ -145,6 +145,11 @@ export class SpecSession {
     return this.#engine(this.#id, { kind: "sample", base, node, direction, choice });
   }
 
+  /** The spec as a Bruno collection: its files, by path from its folder. */
+  collection(specFile: string): Promise<[string, string][]> {
+    return this.#engine(this.#id, { kind: "collection", specFile }) as Promise<[string, string][]>;
+  }
+
   /** The place a line of the spec's text stands in, for a search hit at that line; `null` for none. */
   placeAt(line: number): Promise<string | null> {
     return this.#engine(this.#id, { kind: "placeAt", line }) as Promise<string | null>;

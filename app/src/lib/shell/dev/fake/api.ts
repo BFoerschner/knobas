@@ -7,7 +7,7 @@
  * takes 2.6 s (so *Stop* can be pressed). A refusal the app makes before sending is made here too: a request that
  * changes something on a host that is not this computer, without the page's yes.
  */
-import type { ApiAnswer, ApiSend, SavedServers, SentLine } from "../../../ipc/api";
+import type { ApiAnswer, ApiSend, SavedServers, SentLine, SpecToOpen } from "../../../ipc/api";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 
@@ -91,5 +91,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return structuredClone(fakeServers);
     },
     api_save_answer: (args) => `~/Downloads/${String(args["name"])}`,
+    // Open in an API client (ux31, section 23): the argument vector, as `open_checkout` answers; nothing runs.
+    // `?fake-no-bruno` answers that Bruno is not on this computer.
+    api_open_in: (args) => {
+      const spec = args["spec"] as SpecToOpen;
+      const folder = `~/knobas/api-clients/${spec.name.replace(/[^A-Za-z0-9_-]+/g, "-")}-1a2b3c4d`;
+      return { argv: ["open", "-a", "Bruno", folder], folder, wrote: true, left_out: [] };
+    },
+    api_clients_found: () => ({ bruno: !params.has("fake-no-bruno") }),
+    api_scratch_size: () => 0,
+    api_scratch_clear: () => undefined,
   };
 }

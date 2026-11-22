@@ -41,6 +41,7 @@
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
   import { sniffSpec } from "../../render/openapi-sniff";
   import { columnsFor, paneHeight } from "./oas-layout";
+  import { clientsFound, specOpener, type SpecOpener } from "./oas-open.svelte";
 
   /** What the parse answers for a file with no version key at its top (`indexSpec`). */
   const NOT_AT_TOP = "The file has no openapi or swagger version at its top.";
@@ -52,6 +53,7 @@
     at = null,
     line = null,
     repo = "",
+    opener = $bindable(null),
     fileHref = () => null,
     oncopylink = null,
     onsource = null,
@@ -74,6 +76,8 @@
     line?: number | null;
     /** The repository the spec is read from: with its path, what *Sent since knobas started* is kept by. */
     repo?: string;
+    /** What the file view's *Open in…* opens in an API client, once the spec is read. */
+    opener?: SpecOpener | null;
     /** A file on the Code page, at a place in it. */
     fileHref?: (file: string, place: string | null) => string | null;
     oncopylink?: ((place: string, label: string) => void) | null;
@@ -296,6 +300,27 @@
       shownAt = place;
       void land(place ?? OVERVIEW, 0);
     });
+  });
+
+  // ---- Open in an API client (sections 23 to 27) ----
+  $effect(() => {
+    const state = st;
+    const idx = index;
+    if (state === null || idx === null) {
+      opener = null;
+      return;
+    }
+    clientsFound.look();
+    opener = specOpener({
+      title: idx.title,
+      text: untrack(() => text),
+      path,
+      key: `${repo}\n${path}`,
+      requests: idx.ops.length,
+      folders: state.groups.length,
+      collection: (specFile) => state.session.collection(specFile),
+    });
+    return () => (opener = null);
   });
 
   // ---- The request and the answer (sections 14 to 21) ----

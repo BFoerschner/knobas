@@ -21,6 +21,9 @@ import { JSON_SCHEMA, load } from "js-yaml";
 
 import { makeExample, type Direction } from "./openapi-example";
 import { pathAtLine, placeOfPath } from "./openapi-line";
+import { collection as bruCollection } from "./openapi-bru";
+import { firstSchemeOf, startDraft, type RequestDraft } from "./openapi-request";
+import { groupsOf } from "./openapi-view";
 import { fastYaml } from "./yaml-fast";
 
 export const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
@@ -280,7 +283,8 @@ export type SpecCall =
   | { kind: "uses"; name: string }
   | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number }
   | { kind: "page"; place: string }
-  | { kind: "placeAt"; line: number };
+  | { kind: "placeAt"; line: number }
+  | { kind: "collection"; specFile: string };
 
 /** Answers `call` for `session` among `sessions`: the spec worker's and this thread's one dispatch. */
 export function answerCall(sessions: Map<number, SpecFiles>, session: number, call: SpecCall): unknown {
@@ -303,6 +307,7 @@ export function answerCall(sessions: Map<number, SpecFiles>, session: number, ca
   if (call.kind === "sample") return files.sample(call.base, call.node, call.direction ?? "any", call.choice ?? 0);
   if (call.kind === "page") return files.page(call.place);
   if (call.kind === "placeAt") return files.placeAt(call.line);
+  if (call.kind === "collection") return files.collection(call.specFile);
   return files.addFile(call.path, call.text);
 }
 
@@ -475,6 +480,30 @@ export class SpecFiles {
       shape: (b: string, n: unknown) => this.shape(b, n),
     };
     return makeExample(reader, base, node, { direction, choice, given });
+  }
+
+  /**
+   * The spec as a Bruno collection (`openapi-bru.ts`): each operation's request as it starts in the explorer, its
+   * body the spec's example else one made from the schema (as a request). Its files, by path from its folder.
+   */
+  collection(specFile: string): [string, string][] {
+    const index = this.#index;
+    if (index === null) return [];
+    const made = new Map<number, { op: Operation; draft: RequestDraft } | null>();
+    const operation = (i: number) => {
+      if (!made.has(i)) {
+        const op = this.operation(i);
+        if (op === null) made.set(i, null);
+        else {
+          const bodies: Record<string, unknown> = {};
+          for (const m of op.body?.content ?? []) bodies[m.type] = m.examples[0]?.value ?? (m.schema === null ? undefined : this.sample(op.base, m.schema, "request"));
+          const resolve = (schema: unknown) => this.#local(op.base, schema);
+          made.set(i, { op, draft: startDraft(op, bodies, firstSchemeOf(op, index.security), resolve) });
+        }
+      }
+      return made.get(i)!;
+    };
+    return bruCollection({ index, groups: groupsOf(index), operation, specFile });
   }
 
   /** The place line `line` (1-based) of the spec's text stands in: an operation, a schema, or `null` (`openapi-line.ts`). */

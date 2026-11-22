@@ -88,7 +88,7 @@ impl Stored {
         self
     }
 
-    fn by_id(&self, id: &str) -> Option<&Application> {
+    pub(crate) fn by_id(&self, id: &str) -> Option<&Application> {
         self.applications.iter().find(|app| app.id == id)
     }
 }
@@ -134,7 +134,7 @@ async fn load_with(pool: &PgPool, shipped: Vec<Application>) -> Result<Stored, I
     .settle_default())
 }
 
-async fn load(pool: &PgPool) -> Result<Stored, IpcError> {
+pub(crate) async fn load(pool: &PgPool) -> Result<Stored, IpcError> {
     load_with(pool, rules::shipped()).await
 }
 
@@ -745,17 +745,63 @@ async fn inside_on_disk(
 /// fills a pipe nobody reads blocks for ever. A thread reaps it, because an
 /// editor outlives the click that started it and a dropped `Child` that is
 /// never waited on is a zombie for the life of the process.
-fn spawn(argv: &[String]) -> std::io::Result<()> {
-    let child = scrubbed_command(argv, std::env::vars_os())?
+pub(crate) fn spawn(argv: &[String]) -> std::io::Result<()> {
+    spawn_within(argv, FAILS_WITHIN)
+}
+
+/// How soon a program must fail for its open to count as failed (ux31, section 27). Found while reading the code:
+/// on macOS the shipped commands are `open -a <Application> …`, and where the application is missing `open` starts
+/// fine and exits 1, which knobas never read, so *Open in › Fork* without Fork did nothing and said nothing.
+pub const FAILS_WITHIN: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// [`spawn`], failing where the program exits with an error within `within`: the error then carries the first 4 KiB
+/// of what it wrote to stderr (`Unable to find application named 'Fork'`). stderr goes to a file in the temp
+/// folder, removed either way; a program still running after `within` is a success and is reaped by a thread.
+pub(crate) fn spawn_within(argv: &[String], within: std::time::Duration) -> std::io::Result<()> {
+    use std::io::Read as _;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let err_path = std::env::temp_dir().join(format!("knobas-open-{}-{n}.err", std::process::id()));
+    let err_file = std::fs::File::create(&err_path)?;
+    let spawned = scrubbed_command(argv, std::env::vars_os())?
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-    });
-    Ok(())
+        .stderr(err_file)
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_file(&err_path);
+            return Err(error);
+        }
+    };
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let mut words = String::new();
+            if let Ok(file) = std::fs::File::open(&err_path) {
+                let _ = file.take(4096).read_to_string(&mut words);
+            }
+            let _ = std::fs::remove_file(&err_path);
+            if status.success() {
+                return Ok(());
+            }
+            let words = words.trim();
+            return Err(std::io::Error::other(if words.is_empty() {
+                format!("it ended with {status}")
+            } else {
+                words.to_owned()
+            }));
+        }
+        if std::time::Instant::now() >= deadline {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&err_path);
+            });
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 }
 
 /// `argv[0]` with the rest as its arguments, in `parent`'s environment less
@@ -787,6 +833,7 @@ mod tests {
             commit_command: None,
             range_command: None,
             pull_request_command: None,
+            api_command: None,
         }
     }
 
@@ -936,5 +983,35 @@ mod tests {
         );
         assert!(!legacy.contains(&APPLICATIONS_KEY.to_owned()));
         assert_ne!(APPLICATIONS_KEY, super::super::CLONES_ROOT_KEY);
+    }
+}
+
+#[cfg(test)]
+mod fails_within_tests {
+    use super::spawn_within;
+    use std::time::{Duration, Instant};
+
+    fn sh(script: &str) -> Vec<String> {
+        vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_fails_at_once_is_a_failed_open_with_its_words() {
+        let error = spawn_within(
+            &sh("echo no such app >&2; exit 1"),
+            Duration::from_millis(1500),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "no such app");
+        assert!(spawn_within(&sh("exit 0"), Duration::from_millis(1500)).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_still_running_after_the_window_is_a_success() {
+        let t0 = Instant::now();
+        assert!(spawn_within(&sh("sleep 3; exit 1"), Duration::from_millis(300)).is_ok());
+        assert!(t0.elapsed() < Duration::from_secs(2));
     }
 }

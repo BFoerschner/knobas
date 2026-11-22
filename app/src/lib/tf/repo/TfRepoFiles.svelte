@@ -82,6 +82,7 @@
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
   import { goAcross, replaceAddress } from "../opener";
+  import type { SpecOpener } from "../render/oas-open.svelte";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -1557,6 +1558,8 @@
     const offered = made.offered.filter((r) => r.id !== "jar");
     return { ...made, offered, renderer: made.renderer?.id === "jar" ? (offered[0] ?? null) : made.renderer };
   });
+  /** What *Open in…* opens in an API client while the file is drawn by the API explorer (ux31). */
+  let specOpener = $state<SpecOpener | null>(null);
   /** The renderer picked in the switcher per file, for as long as the tab lives (#2263). */
   const picks = new SvelteMap<string, string>();
   /** What draws the file now: the one picked, else the default. */
@@ -2484,7 +2487,7 @@
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
           {#if fileMade === null}
-            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} />
+            <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} api={drawAs === "openapi" ? specOpener : null} />
             <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
           {/if}
         </span>
@@ -2596,6 +2599,8 @@
             read={imageRead}
             at={path === spec.path ? place : null}
             line={path === spec.path ? line : null}
+            repo={repoId}
+            bind:opener={specOpener}
             fileHref={placeLink}
             oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
             onsource={() => picks.set(spec.path, "source")}

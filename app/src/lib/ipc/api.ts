@@ -4,9 +4,9 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
-import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, Hop, SavedServer, SavedServers, SentLine } from "./generated/api";
+import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, Hop, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen } from "./generated/api";
 
-export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, Hop, SavedServer, SavedServers, SentLine };
+export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, Hop, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen };
 
 /** Sends one request, once. A refusal before anything was sent rejects; a failure is an answer. */
 export function apiSend(send: ApiSend): Promise<ApiAnswer> {
@@ -60,4 +60,24 @@ export function apiSetServers(servers: SavedServers): Promise<SavedServers> {
 /** Saves the body of send `id` to the Downloads folder under `name`; answers the path. */
 export function apiSaveAnswer(id: number, name: string): Promise<string> {
   return invoke<string>("api_save_answer", { id, name });
+}
+
+/** Opens a spec in an application with an API spec command; answers what ran and the folder. */
+export function apiOpenIn(application: string, spec: SpecToOpen): Promise<OpenedSpec> {
+  return invoke<OpenedSpec>("api_open_in", { application, spec });
+}
+
+/** Which shipped API clients are on this computer. */
+export function apiClientsFound(): Promise<ClientsFound> {
+  return invoke<ClientsFound>("api_clients_found", {});
+}
+
+/** How many bytes the API clients' scratch folders hold. */
+export function apiScratchSize(): Promise<number> {
+  return invoke<number>("api_scratch_size", {});
+}
+
+/** Removes every API client scratch folder. */
+export function apiScratchClear(): Promise<void> {
+  return invoke<void>("api_scratch_clear", {});
 }

@@ -11,7 +11,10 @@
 //! - [`kept`]: what was sent and answered, in memory only, bounded.
 //! - [`servers`]: servers a person saved, a name and an address, no secret.
 
+pub mod found;
 pub mod held;
 pub mod kept;
+pub mod open;
+pub mod scratch;
 pub mod send;
 pub mod servers;

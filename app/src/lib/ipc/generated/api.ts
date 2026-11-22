@@ -100,3 +100,38 @@ export type SentLine = { id: number, at_ms: number, send: ApiSend, answer: ApiAn
  * The body is still kept and can be drawn again.
  */
 kept: boolean, };
+
+/**
+ * Which shipped API clients are installed.
+ */
+export type ClientsFound = { bruno: boolean, };
+
+/**
+ * What an open did: the argument vector, the folder, and what was left out.
+ */
+export type OpenedSpec = { argv: Array<string>, folder: string, 
+/**
+ * Whether the folder was written now; `false` where it was opened as it was.
+ */
+wrote: boolean, left_out: Array<[string, string]>, };
+
+/**
+ * What the page hands over: the spec as shown and, where asked, its collection.
+ */
+export type SpecToOpen = { 
+/**
+ * The API's title.
+ */
+name: string, spec_text: string, 
+/**
+ * `yaml` or `json`.
+ */
+spec_ext: string, 
+/**
+ * The collection's files, by path from its folder; `None` where the command does not name `{collection}`.
+ */
+collection: Array<[string, string]> | null, 
+/**
+ * `repository\npath`: which folder is this spec's.
+ */
+key: string, };

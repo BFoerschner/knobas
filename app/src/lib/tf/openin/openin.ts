@@ -29,6 +29,7 @@ export const PLACEHOLDERS: readonly { name: string; says: string }[] = [
   { name: "{pr}", says: "the pull request’s number" },
   { name: "{branch}", says: "the pull request’s branch" },
   { name: "{url}", says: "its page at the source" },
+  { name: "{collection}", says: "for an API spec: a folder of Bruno requests knobas writes" },
 ];
 
 /** A checkout the dialog's preview fills from and *Try it* runs at. */
@@ -145,7 +146,8 @@ export function commandFor(app: CheckoutApplication, file: string | null): strin
 
 /** The menu's entries: the default first, then the rest in the list's order (R-8.22). */
 export function menuOrder(settings: CheckoutSettings): { app: CheckoutApplication; isDefault: boolean }[] {
-  const rows = settings.applications.map((app) => ({ app, isDefault: app.id === settings.default_application }));
+  // An API client with no repository command (Bruno) opens no checkout: it stands only on a spec's menu.
+  const rows = settings.applications.filter((app) => app.command.trim() !== "").map((app) => ({ app, isDefault: app.id === settings.default_application }));
   return [...rows.filter((row) => row.isDefault), ...rows.filter((row) => !row.isDefault)];
 }
 
@@ -224,6 +226,7 @@ export const OBJECT_PLACEHOLDERS: Readonly<Record<OpenObjectKind, readonly strin
   commit: ["{path}", "{name}", "{sha}", "{url}"],
   range: ["{path}", "{name}", "{base}", "{head}", "{url}"],
   pull_request: ["{path}", "{name}", "{pr}", "{base}", "{head}", "{branch}", "{url}"],
+  api_spec: ["{file}", "{collection}", "{name}"],
 };
 
 /** The command an application runs for an object of `kind`, or `null` when it does not accept one. */
@@ -239,7 +242,19 @@ export function objectCommand(app: CheckoutApplication, kind: OpenObjectKind): s
       return app.range_command ?? null;
     case "pull_request":
       return app.pull_request_command ?? null;
+    case "api_spec":
+      return app.api_command ?? null;
   }
+}
+
+/**
+ * An API spec command filled against a sample folder (ux31): what *It will run* says on the application page, since
+ * the real folder is written only when a spec is opened.
+ */
+export function apiPreview(command: string, scratch = "~/knobas/api-clients/Pet-Store-1a2b3c4d"): string | null {
+  const words = splitWords(command);
+  if (words === null) return null;
+  return argvText(words.map((w) => w.replaceAll("{file}", `${scratch}/openapi.yaml`).replaceAll("{collection}", scratch).replaceAll("{name}", "Pet Store")));
 }
 
 /** The menu for an object: the applications that accept it, the default first (R-8.22). */
@@ -300,4 +315,18 @@ export function worktreeOf(clonesRoot: string | null, repoEntityId: string | nul
 /** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */
 export function isDiffEnd(end: string, base: boolean): boolean {
   return isSha(base ? caretOf(end)[0] : end);
+}
+
+/** The id of the shipped Bruno entry, the one application knobas knows by its id (`knobas_core::checkout::open::BRUNO`). */
+export const BRUNO = "bruno";
+
+/**
+ * A spec's *As requests, in an API client* entries (ux31, section 23): every application with an API spec command,
+ * the shipped Bruno only where it is on this computer (Björn: hide it otherwise). `found` is `null` until the look
+ * answers, which the explorer asks for when it opens, long before a menu is: Bruno waits for it, so a menu never
+ * shrinks under the pointer.
+ */
+export function apiClients(settings: CheckoutSettings | null, found: { bruno: boolean } | null): CheckoutApplication[] {
+  if (settings === null) return [];
+  return settings.applications.filter((app) => (app.api_command ?? "").trim() !== "" && !(app.id === BRUNO && found?.bruno !== true));
 }
