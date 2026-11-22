@@ -121,7 +121,7 @@ test("an Enter on arrival, the opener's second press, picks nobody; one after th
   flushSync();
   key("Enter");
   expect(p.onpick).not.toHaveBeenCalled();
-  vi.advanceTimersByTime(600);
+  vi.advanceTimersByTime(800);
   key("Enter");
   expect(p.onpick).toHaveBeenCalledTimes(1);
 });

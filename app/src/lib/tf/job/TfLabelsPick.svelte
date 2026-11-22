@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
+  import { HOLD_MS } from "../still-press";
 
   import { fuzzyRank } from "../filter/fuzzy";
   import { inFloatHost, placeFloat } from "../floats";
@@ -46,9 +47,9 @@
   let at = $state(0);
   let box: HTMLElement | null = null;
   let field: HTMLInputElement | null = $state(null);
-  /** When it opened, and how long an `Enter` with nothing typed is taken as the opener's second press. */
+  /** When it opened, and how long an `Enter` with nothing typed is taken as the opener's second press: a dialog's hold (`still-press.ts`). */
   let openedAt = 0;
-  const ARRIVAL_MS = 500;
+  const ARRIVAL_MS = HOLD_MS;
 
   /** Every name: those carried first in their order, then those on offer. Fixed while open, so a tick moves no row. */
   let names = $state<string[]>([]);
