@@ -637,7 +637,13 @@ async fn a_forget_tries_again_while_the_store_is_held_for_a_moment() {
     let w = world();
     open_live(&w, "jira", "https://jira.example/").await;
     *w.host.forget_held_for.borrow_mut() = 2;
+    let started = tokio::time::Instant::now();
     w.sites.forget("jira", true).await.unwrap();
+    assert_eq!(
+        started.elapsed(),
+        knobas_site::sites::FORGET_AGAIN * 2,
+        "a pause before each try after the first, and none before it"
+    );
     let tries = w
         .host
         .calls
