@@ -494,8 +494,10 @@ test("a spec reordered and nothing else says it is the same API on both sides", 
 
 test("a YAML file that is no spec is read once and offers no rendered mode", async () => {
   const compose = file("deploy/compose.yaml");
-  const { context, asked } = localReader({ "deploy/compose.yaml": ["services: {}", "services:\n  web: {}"] });
-  draw({ files: [compose], context });
+  // A file of another kind is never read for the sniff.
+  const code = file("src/payout.rs");
+  const { context, asked } = localReader({ "deploy/compose.yaml": ["services: {}", "services:\n  web: {}"], "src/payout.rs": ["fn a() {}", "fn b() {}"] });
+  draw({ files: [compose, code], context });
   await vi.waitFor(() => expect(asked).toEqual(["bytes new:deploy/compose.yaml"]));
   await settle();
   expect(modes("deploy/compose.yaml")).toEqual([]);
