@@ -23,6 +23,9 @@ enum Next {
     FailAfterKeys,
     /// Only the second entry, with a new key: the first is gone.
     SecondOnly,
+    /// An incremental run that saw only the second entry and did not walk
+    /// the entries whole: its key joins the stored ones, nothing is dropped.
+    Partial,
 }
 
 struct Vault {
@@ -104,6 +107,7 @@ impl Source for Vault {
                 ("e2", "wiki admin", "BBBBBBBBBBBBBBBB"),
             ],
             Next::SecondOnly => &[("e2", "wiki admin", "CCCCCCCCCCCCCCCC")],
+            Next::Partial => &[("e2", "wiki admin", "DDDDDDDDDDDDDDDD")],
         };
         for (key_id, title, secret) in entries {
             let head = EntryHead {
@@ -121,6 +125,9 @@ impl Source for Vault {
         }
         if self.next == Next::FailAfterKeys {
             return Err(SourceError::Unreachable("simulated: gone mid-walk".into()));
+        }
+        if self.next == Next::Partial {
+            return Ok("tree".into());
         }
         sink.walked_whole(passwords::ENTRY_KIND).await;
         sink.walked_whole(passwords::FOLDER_KIND).await;
@@ -273,6 +280,18 @@ async fn a_runs_code_keys_reach_the_keychain_only_when_it_commits() {
     *registry.0.lock().unwrap() = Next::FailAfterKeys;
     assert_ne!(run(&deps, &id).await, SyncOutcome::Ok);
     assert_eq!(stored().len(), 2, "the failed run's keys were kept");
+
+    // An incremental run that did not walk the entries whole merges: e1's
+    // key stays, e2's is the new one.
+    *registry.0.lock().unwrap() = Next::Partial;
+    assert_eq!(run(&deps, &id).await, SyncOutcome::Ok);
+    assert_eq!(
+        stored(),
+        vec![
+            (format!("{id}:e1"), "AAAAAAAAAAAAAAAA".to_owned()),
+            (format!("{id}:e2"), "DDDDDDDDDDDDDDDD".to_owned()),
+        ]
+    );
 
     // A run that walked every entry replaces the set: e1 is gone.
     *registry.0.lock().unwrap() = Next::SecondOnly;

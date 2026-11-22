@@ -333,6 +333,23 @@ mod tests {
         (keeper, fake, told)
     }
 
+    /// A Mac that slept: the monotonic clock stood still while the wall
+    /// clock passed the deadline. The wall clock alone clears it.
+    #[tokio::test]
+    async fn a_copy_is_cleared_when_the_wall_clock_passes_its_deadline_alone() {
+        let (keeper, fake, _told) = keeper(Duration::from_secs(60));
+        keeper.copy("hunter2", "password", None).unwrap();
+        if let Some(held) = keeper.inner.held.lock().unwrap().as_mut() {
+            held.wall = SystemTime::now() - Duration::from_secs(1);
+        }
+        tokio::time::sleep(Duration::from_millis(1_300)).await;
+        assert_eq!(
+            fake.0.lock().unwrap().as_deref(),
+            None,
+            "the secret outlived its wall-clock deadline"
+        );
+    }
+
     #[test]
     fn a_copy_says_until_when_as_an_instant_the_hold_away() {
         let (keeper, _fake, told) = keeper(Duration::from_secs(30));

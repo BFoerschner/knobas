@@ -74,7 +74,7 @@ Why first-class: two already-decided features are views over exactly this data �
 | **Deployment flavor per source: `datacenter` (self-hosted) is the primary target** — Björn's real Jira/Confluence are self-hosted. Jira adapter speaks **DC REST v2** (`/rest/api/2/search`, `startAt` pagination — the Cloud `/search` removal never happened on DC); Confluence adapter speaks **DC REST v1** (`/rest/api/content` + CQL; the Cloud v2 API doesn't exist on DC). `cloud` is a config flavor to add later | Decided (Björn 08-24) | Contract sources vendored in `testenv/specs/` (official Jira DC WADL; **Atlassian publishes no machine-readable Confluence DC spec** — its contract is the official docs + validation against the real `atlassian/confluence` container, available with free dev licenses behind an opt-in compose profile). Pin WADL + container tags to the real instance versions once known. |
 | **Auth methods**: user + password, PAT (DC: Bearer, supported since Jira 8.14 / Confluence 7.9), API token, (OAuth later) | Decided | Stored in the OS keychain. |
 | **Add source** flow: type → URL → auth → *Test connection* → sync schedule → save | In mockup | |
-| **Sync schedule** per source (default every 5 min); *Sync now* | In mockup | |
+| **Sync schedule** per source (default every 5 min); *Sync now* | In mockup; **amended 2026-11-22 (ADR-0056)** | A source may sync **by hand**: only on *Sync now*, never due, no run after a write, *by hand* on its sources line. A password manager's adapter makes it the default, because a sync may write a line in the manager's audit log under the person's name. Settings › Sources › *Syncs*. |
 | **Credential health**: credential expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | **#1513 (2026-10-21):** the countdown draws the date a source reports for the credential in use (`secret_expires_at`). No built-in adapter can report one: Gitea tokens have no expiry, Kuma's key expiry is not on `/metrics`, and the Jira, Confluence and TeamCity token listings do not say which token authenticated the request. Today only an external adapter draws it (`docs/archive/2026-10-unattended-rulings.md`, #1513). |
 | **Offline / failed-source write queue**: edits made while a source is 401/offline queue as "pending writes", flush after re-auth; conflicts shown | In mockup | **Rec 08-24 (answers Q7):** the queue is inspectable (a list, not just a count — R3 only had the integer). Before flushing, the adapter re-reads the target; if it changed since the edit was queued, the write is held and shown as both-versions-side-by-side → you pick (apply anyway / discard / edit). No silent last-write-wins in v1; a per-source "just apply my version" toggle can come later. |
 | **Work adapters vs asset-import adapters** are listed separately in Sources (Jira/Gitea/… vs Proxmox/Docker host/Traefik); asset adapters show configured / "not configured — import creates editable assets" | In mockup (R3) | |
@@ -280,6 +280,28 @@ Links are what knobas adds that no source system has. They are **local**: create
 | Actions: *Run now*, *View log*, **Promote** scenario between environments with a review dialog (version diff, linked ticket, stage run status, compatibility) and optimistic result | Decided | |
 | Scenarios link to tickets/pages and to the container/VM they run on; steps and connectors are assets below them | Decided | |
 | Drift between environments surfaced (smart list, matrix view) | In mockup | |
+
+---
+
+## 12a. Passwords — **added 2026-11-22 (ADR-0056)**
+
+Björn, on PR #2479: the team's password manager as a page, Pleasant Password Server first (`mockups/passwords-2/`). **The
+hard rule: knobas does not fill the manager's audit log with the person's name.** Decisions: ADR-0056 and
+`docs/decisions/2026-11-22-passwords-are-a-role-and-a-secret-never-rests.md`; Pleasant's measured behaviour:
+`testenv/pleasant/README.md`.
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Passwords is a role**: a source emits `password_entry` and `password_folder` with the role's fixed records and answers one live read; it declares which of eight abilities it offers (codes, expiry, usage comments, audit log, history, attachments, access requests, writes), and the page draws only what the entry's source declares | Built (ux30) | Between Docs and Monitors in the bar. External (WASM) adapters may not fill it yet. |
+| **The page**: a folder tree, the list of a folder's own entries then a panel per folder below (five, then *Show all*), the entry; a filter over every folder; keys `/ J K ← → C S U O A E N Esc` | Built (ux30) | Windowed at 2,000 and 20,000 entries. `R` is unbound: a sync is a button. |
+| **A secret never rests**: a password, a protected field, an earlier password, an attachment's bytes are read live once per press, held 30 s in the app process, and written nowhere; *Show* draws it with a comb of thirty ticks; *Copy* puts it on the clipboard for 30 s and clears it only if it is still knobas's | Built (ux30) | Concealed from clipboard managers on each OS. |
+| **One-time codes** made on the machine from a key kept in the system's password store, never in the mirror: no read, no usage comment, offline too | Built (ux30) | Pleasant's own `TOTPSecret` and four KeePass plugin formats. |
+| **Usage comments** asked where the source says, pre-filled with the timed ticket, then the comment last sent | Built (ux30) | The source keeps the comment in its log. |
+| **Direct writes**: add an entry, edit one, change its password, with a generator (characters or words), sent on *Save* and answered before the dialog closes, never queued | Built (ux30) | Pleasant: create, edit, set password. |
+| **Attachments** listed by the sync, read live when opened or saved | Built (ux30) | Pleasant names them in its listings. |
+| **History, access requests** | Not offered by Pleasant | Its REST API has neither. The role carries both for a later manager. |
+| **The launcher** finds an entry by title, username, address, notes and openly sent fields; its preview shows title, folder, username and address; its actions copy the password, the username or the code | Built (ux30) | No link, set or timer for these kinds. |
+| **Notes and openly sent fields** rest in the mirror and are searched; they are in no backup and no share export (the mirror is not backed up, and an entry's title never reaches `knobas.entity`) | Built (ux30) | Pleasant marks no field protected, so every value it sends openly is mirrored (Fable for Björn, 2026-11-22); Settings says so. |
 
 ---
 
