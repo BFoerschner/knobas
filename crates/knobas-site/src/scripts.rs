@@ -157,7 +157,9 @@ mod tests {
             text.ends_with(r#"})("björn","a\"),alert(1),(\"\n","fill")"#),
             "{text}"
         );
-        assert!(!format!("{call:?}").contains("alert"));
+        let shown = format!("{call:?}");
+        assert!(!shown.contains("alert"), "{shown}");
+        assert!(shown.contains("Fill"), "the mode is what a log line is read for: {shown}");
         assert!(fill_sign_in(&SignInCall::look()).ends_with(r#"})("","","look")"#));
     }
 

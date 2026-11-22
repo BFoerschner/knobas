@@ -385,6 +385,12 @@ mod tests {
             );
         }
         assert_eq!(may_fill(&r, true, None, own), Err(FillRefusal::NotOwn));
+        // Neither address the source's own, and not the same one: not own,
+        // never "between addresses".
+        assert_eq!(
+            may_fill(&r, true, sso, Some("https://other.example/x")),
+            Err(FillRefusal::NotOwn)
+        );
         assert_eq!(may_fill(&r, true, own, None), Err(FillRefusal::NotOwn));
         assert_eq!(
             may_fill(&r, true, Some("about:blank"), Some("about:blank")),
