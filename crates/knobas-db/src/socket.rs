@@ -102,10 +102,21 @@ pub fn short_folder(data_dir: &Path) -> Option<PathBuf> {
     if let Some(root) = crate::embedded::seam::fallback_root(data_dir) {
         return Some(root.join(key(data_dir)));
     }
-    if !cfg!(windows) {
+    short_folder_under(cfg!(windows), std::env::var_os("LOCALAPPDATA"), data_dir)
+}
+
+/// [`short_folder`] off a test's root: Windows' `%LOCALAPPDATA%\knobas\<key>`
+/// where it is an absolute path, and nothing on any other platform, whatever
+/// the environment says.
+fn short_folder_under(
+    windows: bool,
+    local_app_data: Option<std::ffi::OsString>,
+    data_dir: &Path,
+) -> Option<PathBuf> {
+    if !windows {
         return None;
     }
-    let local = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+    let local = PathBuf::from(local_app_data?);
     local
         .is_absolute()
         .then(|| local.join("knobas").join(key(data_dir)))
@@ -261,6 +272,47 @@ fn connect(_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The short folder is Windows' alone, under an absolute
+    /// `%LOCALAPPDATA%`; elsewhere there is none even where the variable is
+    /// set (the final suite's mutants: the platform test turned around).
+    #[test]
+    fn the_short_folder_is_windows_alone_under_an_absolute_local_app_data() {
+        let data = Path::new("/deep/profile/data");
+        let local = || {
+            Some(std::ffi::OsString::from(if cfg!(windows) {
+                r"C:\Users\b\AppData\Local"
+            } else {
+                "/home/b/.local"
+            }))
+        };
+        assert_eq!(short_folder_under(false, local(), data), None);
+        let under = short_folder_under(true, local(), data).expect("an absolute folder");
+        assert!(
+            under.ends_with(Path::new("knobas").join(key(data))),
+            "{}",
+            under.display()
+        );
+        assert_eq!(
+            short_folder_under(true, Some("relative".into()), data),
+            None
+        );
+        assert_eq!(short_folder_under(true, None, data), None);
+    }
+
+    /// A test's own root stands in for the short folder until it is undone.
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_tests_fallback_root_lasts_until_it_is_undone() {
+        let data = Path::new("/tmp/knobas-seam-test/data");
+        let root = Path::new("/tmp/knobas-seam-test/root");
+        crate::embedded::seam::fall_back_to(data, root);
+        assert_eq!(short_folder(data), Some(root.join(key(data))));
+        crate::embedded::seam::no_fallback(data);
+        if !cfg!(windows) {
+            assert_eq!(short_folder(data), None, "undone");
+        }
+    }
     use super::*;
 
     /// A short folder takes a socket, and the probe leaves nothing behind.

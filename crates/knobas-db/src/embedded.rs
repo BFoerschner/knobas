@@ -3822,6 +3822,14 @@ mod tests {
 
         let said = server_said(b"FATAL: bad \xff byte\n", 0);
         assert_eq!(said, vec!["FATAL: bad \u{fffd} byte".to_owned()]);
+        // Lines that fill the 2,000 bytes exactly are all kept (the final
+        // suite's mutants: `>` against `>=` at the edge).
+        let full: String = (0..5)
+            .map(|_| format!("LOG: {}\n", "x".repeat(395)))
+            .collect();
+        let said = server_said(full.as_bytes(), 0);
+        assert_eq!(said.len(), 5, "{:?}", said.first());
+        assert!(said.iter().all(|line| line.len() == 400));
     }
 
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
