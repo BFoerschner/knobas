@@ -2,8 +2,9 @@
 //! against `knobas:adapter@1.6.0` answers `tickets.ticket-fields` and
 //! `tickets.field-options` and performs an `EditTicket`; one built against
 //! 1.5.0, 1.3.0 or 1.0.0 loads, offers no edits, and is never handed one;
-//! and a component that declares the write without the interface, or the
-//! reverse, is refused at load naming both.
+//! a component that declares the write without the interface is refused at
+//! load naming both, and one that exports the interface without the write
+//! (every SDK-built wiki) loads and offers no edits.
 
 use std::sync::atomic::Ordering;
 
@@ -216,10 +217,11 @@ async fn older_components_load_and_answer_no_fields() {
     }
 }
 
-/// The write without the interface, and the interface without the write,
-/// are each refused at load with a message naming both.
-#[test]
-fn edit_ticket_without_tickets_and_the_reverse_are_refused_at_load() {
+/// The write without the interface is refused at load with a message naming
+/// both; the interface without the write (what the SDK's `export!` gives a
+/// wiki) loads, offers no edits and answers no fields.
+#[tokio::test]
+async fn edit_ticket_without_tickets_is_refused_and_tickets_without_edit_ticket_offers_none() {
     let unexported = patched_fixture(
         "knobas:adapter/tickets@1.6.0",
         "knobas:adapter/tickits@1.6.0",
@@ -234,12 +236,16 @@ fn edit_ticket_without_tickets_and_the_reverse_are_refused_at_load() {
     );
 
     let undeclared = patched_fixture("edit_ticket", "edit_tickex");
-    let error = WasmAdapter::from_bytes(&undeclared).expect_err("the export without the write");
-    let LoadError::Link(message) = &error else {
-        panic!("{error:?}")
-    };
+    let adapter = WasmAdapter::from_bytes(&undeclared).expect("the export without the write loads");
     assert!(
-        message.contains("edit_ticket") && message.contains("knobas:adapter/tickets"),
-        "{message}"
+        !adapter.edits_tickets(),
+        "an export without the write offers no edits"
     );
+    let (source, accepted) = over_a_stand_in(adapter).await;
+    let fields = source
+        .ticket_fields("berths:BERTH-1")
+        .await
+        .map_err(|e| e.to_string());
+    assert!(matches!(fields, Ok(None)), "{fields:?}");
+    assert_eq!(accepted.load(Ordering::SeqCst), 0, "nothing crossed");
 }

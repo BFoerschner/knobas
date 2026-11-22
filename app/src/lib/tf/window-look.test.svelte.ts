@@ -4,7 +4,7 @@ import { expect, test, vi } from "vitest";
 
 import type { KeptStorage } from "./kept-value";
 import { createTheme } from "./theme.svelte";
-import { createThemes } from "./themes.svelte";
+import { createThemes, defaultTimers } from "./themes.svelte";
 import { TELL_AFTER, watchWindowLook } from "./window-look.svelte";
 
 const memory = (): KeptStorage => {
@@ -44,4 +44,33 @@ test("a run started with knobas's own themes tells the window nothing", () => {
   watchWindowLook(themes, createTheme(), tell);
   flushSync();
   expect(tell).not.toHaveBeenCalled();
+});
+
+test("the default timers are called as the window's own: a browser refuses setTimeout with another `this`", () => {
+  const real = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
+  // As Chrome and WebKit do: "Illegal invocation" unless `this` is the global or nothing.
+  const strict = <F extends (...args: never[]) => unknown>(f: F) =>
+    function (this: unknown, ...args: Parameters<F>) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return f(...args);
+    };
+  globalThis.setTimeout = strict(real.set) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = strict(real.clear) as unknown as typeof clearTimeout;
+  try {
+    // Captured at load, so the global swapped here cannot reach them: they must be wrappers, not the globals.
+    expect(defaultTimers.set).not.toBe(real.set);
+    expect(defaultTimers.clear).not.toBe(real.clear);
+    const themes = createThemes(memory, () => null);
+    const stop = watchWindowLook(themes, createTheme(), vi.fn(async () => {}));
+    flushSync();
+    themes.chooseApp("dracula");
+    flushSync();
+    stop();
+    const own = themes.add({ name: "Mine", kind: "dark", app: {}, syntax: {} })!;
+    themes.update(own.id, (t) => ({ ...t, app: { sheet: "#101010" } }));
+    themes.flush();
+  } finally {
+    globalThis.setTimeout = real.set;
+    globalThis.clearTimeout = real.clear;
+  }
 });

@@ -18,7 +18,7 @@
  *   the copy waits at the landing place; anywhere else the card is put back. The click the release makes is swallowed.
  * - **Put back**: `Esc`, a cancelled pointer, lost capture, the window losing focus, another address. Nothing was
  *   written and nothing moved.
- * - **The carry** (`m`): the same pickup by key. `←`/`→` (`h`/`l`) step through the columns of the card's lane that are
+ * - **The carry** (`MOVE_KEY`, `s`): the same pickup by key. `←`/`→` (`h`/`l`) step through the columns of the card's lane that are
  *   not `no`, its own included; `Enter` or `Space` drops at the column's top; `Esc` puts it back; every other key is
  *   swallowed. The live region says each step.
  *
@@ -95,7 +95,7 @@ interface Held {
 export interface CardDrag {
   /** On the board's wrap. */
   attach: Attachment<HTMLElement>;
-  /** `m` on a card: pick it up by key. Answers whether it was picked up. */
+  /** The move key on a card: pick it up by key. Answers whether it was picked up. */
   carry(entityId: string): boolean;
   /** Whether a card is held. */
   holding(): boolean;
@@ -464,10 +464,11 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     press = null;
     if (held === null || held.keys || held.choosing || event.pointerId !== held.pointer) return;
     place(event.clientX, event.clientY);
-    // The click the release makes is the drag's end, not a press on the card.
+    // The click the release makes is the drag's end, not a press on the card, nor a press outside the status menu the
+    // drop may open in this handler: no other listener of the window hears it (the menu's outside-click is one).
     const swallow = (click: MouseEvent) => {
       click.preventDefault();
-      click.stopPropagation();
+      click.stopImmediatePropagation();
     };
     window.addEventListener("click", swallow, { capture: true, once: true });
     setTimeout(() => window.removeEventListener("click", swallow, { capture: true }));
@@ -479,8 +480,15 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     if (held !== null && !held.keys && !held.choosing) putBackSaying(null);
   }
 
+  /**
+   * Capture lost while the button is still down is not the hand letting go: Chrome drops a capture on its own under a
+   * board that redraws (measured in headless Chrome, 2026-11-22), and the window's listeners follow the pointer anyway.
+   * Lost with no button down, the release went somewhere the board never heard of: put back.
+   */
   function onlost(event: PointerEvent) {
-    if (held !== null && !held.keys && !held.choosing && event.pointerId === held.pointer) putBackSaying(null);
+    if (held === null || held.keys || held.choosing || event.pointerId !== held.pointer) return;
+    if ((event.buttons & 1) === 1) return;
+    putBackSaying(null);
   }
 
   function onover(event: PointerEvent) {

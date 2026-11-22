@@ -15,7 +15,7 @@
  *   reached the source. One already sent can only be undone by another move: the source is asked where the ticket can
  *   go now, and the way back is queued where it is offered, or the toast says it is not.
  *
- * Which of Björn's open answers (section 34) this module carries, each in one place: `⌘Z` is the page's key handler's
+ * Björn's answers (section 34, 2026-11-22), each in one place: the key is {@link MOVE_KEY}; `⌘Z` is the page's key handler's
  * call of {@link undoLastMove}; a refused card going back by itself is {@link MoveHow.onstop}, which the board answers
  * with its held order's `restore`.
  */
@@ -32,6 +32,7 @@ import { echoOn, echoWrite, echoesOn, settleEchoes } from "../queued.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { keyOf } from "../job/job";
 import { sameStatus } from "./drop";
+import { columnName, shortKey } from "./tickets";
 import { askReach, forgetReach, type ReachKey, type ReachPort } from "./reach.svelte";
 
 export type MovedTicket = Pick<MiniBoardCard, "entity_id" | "source_id" | "key" | "status"> & Partial<Pick<MiniBoardCard, "issue_type" | "updated_at">>;
@@ -63,6 +64,14 @@ export interface MoveHow {
   onwithdrawn?: () => void;
 }
 
+/**
+ * The key that moves a ticket, on Tickets and on a ticket page (Björn, 2026-11-22: keys only where they match the common
+ * trackers; `s` is Linear's status key, `m` is Jira's comment key). On the board it picks the focused card up, on the
+ * list and on a ticket page it opens the status menu. Never in a field, a dialog or a hidden page. The one place it is
+ * spelled.
+ */
+export const MOVE_KEY = "s";
+
 /** The echo kind a move draws in. */
 export const STATUS = "status";
 
@@ -86,6 +95,9 @@ export async function moveTicket(ticket: MovedTicket, status: string, how: MoveH
   const ports = { ...REAL, ...how.ports };
   const entity = ticket.entity_id;
   const surface = how.surface ?? "tickets";
+  /** The ticket and the status as the board draws them: `ledger-api#140`, *Closed*. */
+  const key = shortKey(ticket.key);
+  const shown = columnName(status);
   const source = ticket.source_id;
   // In the caller's frame: the card stands in its new column before the queue answers.
   echoWrite(entity, STATUS, status, { base: ticket.status, surface, source });
@@ -94,7 +106,7 @@ export async function moveTicket(ticket: MovedTicket, status: string, how: MoveH
     write = await ports.submitWrite({ Transition: { entity, status } });
   } catch (cause) {
     settleEchoes(entity, (echo) => echo.kind === STATUS && echo.write === null);
-    push({ text: `Could not move ${ticket.key}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    push({ text: `Could not move ${key}: ${ipcErrorMessage(cause)}`, tone: "err" });
     return null;
   }
   // A newer move of the same ticket replaced this one's echo meanwhile: it is that one's to draw.
@@ -105,7 +117,8 @@ export async function moveTicket(ticket: MovedTicket, status: string, how: MoveH
     base: ticket.status,
     surface,
     source,
-    following: { name: "Move" },
+    // The toast a refusal or a hold raises names the ticket, then the source's own sentence (Björn, 2026-11-22).
+    following: { name: `Move of ${key} to ${shown}` },
     ...(ports.follower ? { follower: ports.follower } : {}),
     onsent: () => forgetReach(entity),
     onstop: () => how.onstop?.(),
@@ -113,11 +126,11 @@ export async function moveTicket(ticket: MovedTicket, status: string, how: MoveH
   onWithdrawn(write.id, () => how.onwithdrawn?.());
   const name = sourceRoles.nameOf(source);
   const record: Made = { ticket, from: ticket.status, to: status, write: write.id, toast: -1, ports, how };
-  record.toast = toastQueued(`${ticket.key} to ${status}`, { id: source, display_name: name }, {
+  record.toast = toastQueued(`${key} to ${shown}`, { id: source, display_name: name }, {
     write,
     // The way back is a toast of its own, so it takes no *Undo* from the move it undoes.
     subject: how.undo ? `move-back:${entity}` : `move:${entity}`,
-    words: moveWords(ticket.key, status, how.undo === true),
+    words: moveWords(key, shown, how.undo === true),
     ...(how.undo ? {} : { undo: () => void undoMove(record) }),
     ...(ports.follower ? { follower: ports.follower } : {}),
   });
@@ -146,6 +159,7 @@ async function undoMove(record: Made): Promise<void> {
   // Its *Undo* is spent: what follows says what happened in a toast of its own.
   dismiss(record.toast);
   const source = sourceRoles.nameOf(ticket.source_id);
+  const key = shortKey(ticket.key);
   const now: ReachKey = {
     entity_id: ticket.entity_id,
     source_id: ticket.source_id,
@@ -156,12 +170,12 @@ async function undoMove(record: Made): Promise<void> {
   };
   const reach = await askReach(now, "pickup", ports.reachableTransitions);
   if (reach === null || reach.standing !== "exact") {
-    push({ text: `${source} did not answer. ${ticket.key} stays in ${to}.`, tone: "err" });
+    push({ text: `${source} did not answer. ${key} stays in ${columnName(to)}.`, tone: "err" });
     return;
   }
   const back = reach.statuses.find((status) => sameStatus(status, from));
   if (back === undefined) {
-    push({ text: `${source} offers no move from ${to} back to ${from}. ${ticket.key} stays in ${to}.` });
+    push({ text: `${source} offers no move from ${columnName(to)} back to ${columnName(from)}. ${key} stays in ${columnName(to)}.` });
     return;
   }
   await moveTicket({ ...ticket, status: to }, back, { ...record.how, undo: true });
@@ -220,10 +234,10 @@ export function notesOf(rows: readonly QueuedWrite[]): Record<string, TicketNote
   for (const row of [...rows].sort((a, b) => a.id - b.id)) {
     const status = movedTo(row);
     if (status === null) continue;
-    const lead = `Not moved to ${status}.`;
+    const lead = `Not moved to ${columnName(status)}.`;
     if (row.state === "refused") out[row.entity_id] = { write: row.id, tone: "err", lead, words: row.detail ?? "" };
     else if (row.state === "held" && !mayHaveLanded(row)) {
-      out[row.entity_id] = { write: row.id, tone: "warn", lead, words: `${keyOf(row.entity_id)} changed in ${sourceRoles.nameOf(row.source_id)} since you moved it.` };
+      out[row.entity_id] = { write: row.id, tone: "warn", lead, words: `${shortKey(keyOf(row.entity_id))} changed in ${sourceRoles.nameOf(row.source_id)} since you moved it.` };
     }
   }
   return out;

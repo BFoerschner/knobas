@@ -533,7 +533,7 @@ Retired; the app no longer draws one. Its successors are the section rows on a [
 _Avoid_: card, widget, panel (as the name)
 
 **Ticket board**:
-A ticket view's tickets in columns, each column holding the statuses the view puts on it, optionally split into lanes. Inside the Tickets view its layout toggle says just *Board*, because the view qualifies it (ADR-0024).
+A ticket view's tickets in columns, each column holding the statuses the view puts on it, optionally split into lanes. Inside the Tickets view its layout toggle says just *Board*, because the view qualifies it (ADR-0024). A card is moved by dragging it to a column, which lights where it can go; a column of several statuses asks which.
 _Avoid_: kanban, board (alone, outside the Tickets view)
 
 **Mini board**:

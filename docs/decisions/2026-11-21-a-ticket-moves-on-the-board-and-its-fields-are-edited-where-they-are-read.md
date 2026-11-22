@@ -16,9 +16,9 @@ The judgment calls went to Fable (xhigh) under Björn's standing instruction, an
 4. **While a card is held** each column says whether it takes it: kept as it is with a hairline where it can go, emptied of its fill and faded where it cannot, with the reason under the card; the column under the pointer takes the selection's outline.
 5. **A column of several statuses asks which**, in a menu at the drop point; one status goes straight through.
 6. **The card lands where it was dropped** and stays there until the person sorts again. Nothing else moves during a drag. There is no rank and no reordering within a column.
-7. **The drag is pointer events** with a copy of the card in the float host; `m` carries a card by key, with the same picture and a live region; a card's menu and the list's Status cell move by name.
+7. **The drag is pointer events** with a copy of the card in the float host; `s` carries a card by key, with the same picture and a live region; a card's menu and the list's Status cell move by name.
 8. **The card stands in its new column at once, as an echo**: *Queued*, *Sent*, then nothing once a read shows it. A queued move is drawn again after a restart, from the queue.
-9. **A refused or held move puts the card back** with a note in the source's words, drawn from the queue's open row, gone when that row is discarded or sent.
+9. **A refused or held move puts the card back**, gliding into its old place, with a note in the source's words, drawn from the queue's open row, gone when that row is discarded or sent, and a toast naming the ticket and the reason.
 10. **Undo** discards a write that has not gone, and after that asks the source for the way back and says so when there is none.
 11. **On the ticket page the status is a menu** of the statuses the ticket can reach.
 12. **A field edit is one write, `EditTicket`**, carrying only what changed: summary, assignee, priority, labels as names added and removed, and a source's own fields by its id. It is held only on the named fields it overwrites.
@@ -32,7 +32,19 @@ Rank order on a Jira view. The description. Sprint, epic, parent, type, componen
 
 ## Measured
 
-The board's own part, on a prototype with the app's board CSS in headless Chrome on the WSL box: a pickup paints in 19 / 26 / 31 ms at 1x / 4x / 6x on a board as it opens and 24 / 48 / 64 ms with 250 cards drawn; a drop in 3 / 12 / 18 and 9 / 36 / 54 ms. With 1,250 cards and no column windowed both pass 100 ms at 4x, so a pickup un-windows nothing. A Gitea on the same box answers the read behind a pickup in 35 to 39 ms. ⟨The build adds: the same in the app, and on Björn's PC.⟩ Jira's reads were not measured: no Jira ran on the box.
+The board's own part, on a prototype with the app's board CSS in headless Chrome on the WSL box: a pickup paints in 19 / 26 / 31 ms at 1x / 4x / 6x on a board as it opens and 24 / 48 / 64 ms with 250 cards drawn; a drop in 3 / 12 / 18 and 9 / 36 / 54 ms. With 1,250 cards and no column windowed both pass 100 ms at 4x, so a pickup un-windows nothing. A Gitea on the same box answers the read behind a pickup in 35 to 39 ms. The build measured the same in the app (`testenv/perf/card-drag.mjs`, headless Chrome on the WSL box, the scale fixture, 87 cards in the DOM, medians of eight): a pickup 28 / 71 / 91 ms at 1x / 4x / 6x at 1440 x 868 and 26 / 69 / 87 at 2560 x 1440 @ 1.25; a drop on a one-status column 19 / 71 / 103 and 19 / 67 / 110; the carry's keys 13 / 61 / 83 and 13 / 55 / 90. Every median is inside 100 / 100 / 200. The worst frame while a card is held at 4x, from input to paint, was 47 and 76 ms, over the 34 ms line. Owed: Björn's PC (WebView2) and a real drag at 239 Hz. Jira's reads were not measured: no Jira ran on the box.
+
+## Björn's answers (2026-11-22)
+
+- **Keys:** few, and only where the common trackers have them; drag and drop is the main way. The status key is `s` (Linear's), not `m` (Jira's comment key); `⌘Z` / `Ctrl+Z` undoes. `s` is free on Tickets and a ticket page; the diff view's `s` is on another page.
+- **A refused move:** the card goes back by itself, and it must be obvious: it glides back, its note stays until dismissed or the write is discarded, and a toast names the ticket and the source's reason.
+- **Rank or ordering by hand:** never.
+
+## What the build changed from the decisions
+
+- `after` also lists the ticket's moves sent in the last ten minutes, whose refresh may not have reached the mirror yet: without it, a move queued between the previous one's send and its refresh was held.
+- A lost pointer capture puts a held card back only when no button is down: headless Chrome dropped the board's capture about 150 ms after a pickup with the button still held, and the window's listeners follow the pointer anyway.
+- A write chip stacks the words it can say, so it keeps the longer one's width (`Moving, queued` to `Moved, sent` moved by 22 px in `just moves`).
 
 ## Reversing it
 

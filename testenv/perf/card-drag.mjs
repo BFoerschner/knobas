@@ -10,12 +10,12 @@
 //   typed   the same after a word that each of the scale fixture's titles holds: fifty a column, the columns from 24
 //           cards windowed (`TicketStack`), so the DOM holds what is near the screen
 // Each round rests on the first To Do card, presses, travels past the tremble (the pickup), glides to In Progress and
-// releases there (the drop); then `m` on the next card, `→` and `Enter` (the carry, which moves it too). In the page, from each input's own
+// releases there (the drop); then `s` on the next card, `→` and `Enter` (the carry, which moves it too). In the page, from each input's own
 // event time:
 //   pickup  to the frame after the board says `data-held` (the columns' `data-drop` and the copy are set in the same
 //           handler), painted
 //   drop    from the release to the frame after the card stands in its new column with its write chip, painted
-//   key     from `m`, each `→` and `Enter` to the frame after it, painted
+//   key     from `s`, each `→` and `Enter` to the frame after it, painted
 //   move    each `pointermove` while held to its frame (no frame over 34 ms at 4x on a board as it opens)
 // The median of the rounds is the case's number; the lines are budget-keys.json's `drag`.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -39,7 +39,7 @@ const PAGE = `
   const times = (window.__drag = { pickup: [], drop: [], key: [], move: [] });
   let lastMove = null, lastUp = null, lastKey = null, held = false;
   const painted = (kind, since) => requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => times[kind].push(performance.now() - since); ch.port2.postMessage(0); });
-  addEventListener("pointermove", (e) => { lastMove = e.timeStamp; if (held) painted("move", e.timeStamp); }, true);
+  addEventListener("pointermove", (e) => { lastMove = e.timeStamp; if (document.querySelector(".tf-board-wrap[data-held]")) painted("move", e.timeStamp); }, true);
   addEventListener("pointerup", (e) => { lastUp = e.timeStamp; }, true);
   addEventListener("keydown", (e) => { lastKey = e.timeStamp; if (window.__dragKeys) painted("key", e.timeStamp); }, true);
   new MutationObserver(() => {
@@ -49,10 +49,10 @@ const PAGE = `
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-held"] });
   // The drop: the moved card standing in its column with its chip.
   window.__dragWatch = (id, column) => {
-    const since = lastUp;
+    const before = lastUp;
     const look = () => {
-      const card = document.querySelector('.tf-col[data-place$="' + column + '"] .tf-tcard[data-entity="' + id + '"] .tf-twrite');
-      if (card) painted("drop", since); else requestAnimationFrame(look);
+      const card = lastUp !== before && document.querySelector('.tf-col[data-place$="' + column + '"] .tf-tcard[data-entity="' + id + '"] .tf-twrite');
+      if (card) painted("drop", lastUp); else requestAnimationFrame(look);
     };
     look();
   };
@@ -77,6 +77,11 @@ const key = async (name, code, vk) => {
 
 async function open(kase) {
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  // From a blank page each time, with nothing kept from the case before (as keys.mjs opens one).
+  const blank = c.once("Page.loadEventFired");
+  await c.send("Page.navigate", { url: "about:blank" });
+  await blank;
+  await c.send("Storage.clearDataForOrigin", { origin: new URL(app).origin, storageTypes: "local_storage" });
   const loaded = c.once("Page.loadEventFired");
   await c.send("Page.navigate", { url: app });
   await loaded;
@@ -123,7 +128,7 @@ async function carry() {
   const ok = await js(`(() => { const n = ${column("To Do")}?.querySelector(".tf-tcard[data-entity]"); if (!n) return false; n.focus(); return true; })()`);
   if (!ok) return;
   await js(`window.__dragKeys = true`);
-  await key("m", "KeyM", 77);
+  await key("s", "KeyS", 83);
   await sleep(120);
   await key("ArrowRight", "ArrowRight", 39);
   await sleep(120);

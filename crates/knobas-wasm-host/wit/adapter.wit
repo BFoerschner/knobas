@@ -345,7 +345,9 @@ interface docs {
 /// is: a component built against an earlier 1.x, which does not export it,
 /// still links, and its tickets' fields are read only in knobas. A component
 /// that declares the `edit_ticket` write exports it; install refuses one that
-/// does not, and one that exports it without declaring the write.
+/// does not. One that exports it without declaring the write (the SDK's
+/// `export!` exports it for every component, a wiki's included) loads, and
+/// the host never calls it: it offers no edits.
 ///
 /// The write itself needs nothing here: `adapter.write` carries an
 /// `EditTicket` as JSON as it carries every op. Both reads run under the

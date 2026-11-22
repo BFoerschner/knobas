@@ -26,6 +26,7 @@ import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHa
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
+import { stateWord } from "../state-word";
 
 /** A value an item copies or opens: given, or read when the menu opened. */
 export type Text =
@@ -150,7 +151,8 @@ export function moveItem(entityId: string, offer: MoveOffer | null): Item[] {
   const sub: Entry[] = [];
   if (offer.asking !== null) sub.push({ id: "move-asking", label: offer.asking, disabled: offer.asking });
   if (offer.unsure !== null) sub.push({ id: "move-unsure", label: offer.unsure, disabled: offer.unsure });
-  for (const status of offer.statuses) sub.push({ id: `move:${status}`, label: status, act: { do: "move", entityId, status } });
+  // The status in the board's words (a forge's `closed` reads *Closed*, as its column does); the act carries the source's own.
+  for (const status of offer.statuses) sub.push({ id: `move:${status}`, label: stateWord(status), act: { do: "move", entityId, status } });
   return [{ id: "move", label: "Move to", sub }];
 }
 
