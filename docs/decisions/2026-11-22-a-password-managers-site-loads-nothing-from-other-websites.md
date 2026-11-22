@@ -80,14 +80,35 @@ the sink (an image and a fetch), and a WebRTC STUN packet to a UDP listener.
   filled it (`site sign-in answered mode=Fill answer=Filled`), `/SignIn/Success`, `/WebClient/Main` with "Hello, Mara
   Lindqvist", the tree and the credential list, all on the own origin; the sink still silent. The rule list compiled in
   1.8 to 3.3 ms.
-- **Not run:** a folder's deep link (`/SignIn/Direct?ReturnUrl=/WebClient/Main?itemId=…`, the same origin and path as
-  the front page's link that worked). The sync that lists the folders hit the WSL box hanging at 19:05.
+- **Not run against the VM:** a folder's deep link. The sync that lists the folders hit the WSL box hanging at 19:05,
+  and WSL was then blocked; the stand-in run below covers it.
 
-Captures (knobas's window only) are in the agent's report: the news frame with the sink's page before, empty after,
-and the web client after.
+## Measured again on the Mac alone (a local stand-in, 19:15 to 19:30)
+
+WSL blocked (Björn, ~19:15), so the same front served a stand-in of Pleasant's web client on
+`https://127.0.0.1:24801` (shaped like the VM's: `/SignIn/Direct` with `UserName`, `Password` and `RememberMe`, the
+signed-out `/Account/SignIn` landing with a "news" frame, `/WebClient/Main?itemId=`), with the API from
+`testenv/pleasant/standin.mjs` (20 entries). Every page framed and scripted from another origin and ran the probe, with
+no CSP, so the other origin's script was tried too; a second listener played an origin the person may allow.
+
+- **Before:** the news frame, the script and every probe kind reached the other origin, UDP included.
+- **After:** the landing, the sign-in page, the web client and a folder's page reached it with nothing; the page's
+  own image, script and fetch loaded (`ownScript`, `ownImage`, `fetch-own` true in the page's report). *Open web
+  interface* on the source: knobas filled the form 71 ms after it loaded, "remember me" ticked, and the web client
+  opened. A folder's *Open web interface* (after *Sync now*: 20 entries, 31 folders, 150 ms) took one 302 through
+  `/SignIn/Direct` to `/WebClient/Main?itemId=<the folder>`. **The allow-list, live:** allowing
+  `https://localhost:23475` while the site was open recompiled the list (2 origins, 1.6 ms); after a reload that origin
+  loaded and the other still got nothing. Settings › Site drew the sentence under the addresses.
+- **Found and fixed on the way:** with two password sources on one server address, *Open web interface* on the second
+  opened the first's site, which typed the first source's credential into the page (`open-web.ts`: a tie between
+  equal bases went by list order; it now goes to the press's own source).
+
+Captures (knobas's window only) are in the agent's report: the VM's news frame with the sink's page before and empty
+after, the VM's web client after, and the stand-in's folder page after.
 
 ## Not defended against, and owed
 
+- **The VM, owed when WSL is free again:** a folder's deep link against the real server (done on the stand-in).
 - **Windows (WebView2), owed:** the whole measurement above in knobas's WebView2 window (`S/owed-on-windows.md`),
   above all **WebRTC**: `WebResourceRequested` sees no UDP and WebView2 has no switch to turn peer connections off, so a
   page's STUN probably leaves there. Per Fable's ruling a page-chosen escape comes back before merge; the candidate is
