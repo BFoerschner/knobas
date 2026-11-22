@@ -127,7 +127,7 @@
       </div>
       <div class="tf-apt-right">
         <div class="tf-apt-rail">
-          <span class="tf-apt-nav" aria-current="true" data-keys="onFill fill onInkOk">All tickets</span><span class="tf-apt-nav" data-keys="ink paper">Mine</span><span class="tf-apt-nav" data-keys="ink paper">This sprint</span>
+          <span class="tf-apt-nav" aria-current="true" data-keys="onSelRow selRow onInkOk">All tickets</span><span class="tf-apt-nav" data-keys="ink paper">Mine</span><span class="tf-apt-nav" data-keys="ink paper">This sprint</span>
           <span class="tf-seg tf-apt-segr" data-keys="fill onFill rule"><button type="button" tabindex="-1" aria-pressed="true">Board</button><button type="button" tabindex="-1" aria-pressed="false">List</button></span>
         </div>
         <table class="tf-tbl" data-keys="sheet rule2">

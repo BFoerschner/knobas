@@ -148,7 +148,6 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘R", "A site", "Reload it"],
   ["⌘[ ⌘]", "A site", "Back and forward in the site, then in knobas"],
   ["⌘L", "A site", "The keyboard to knobas's bar, and back"],
-  ["⌘⇧⌫", "Anywhere, a field too", "Put knobas's own themes back; yours are kept (ADR-0055)"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];
 

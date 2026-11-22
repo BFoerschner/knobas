@@ -34,6 +34,8 @@ export interface Theme {
   from?: string;
   /** The window's colours it sets, `#RRGGBB` a key; absent where the theme has no window colours. */
   app?: Partial<Record<AppKey, string>>;
+  /** Colours its file had that knobas offers and does not set: a selected row as the editor draws it. */
+  offers?: Partial<Record<AppKey, string>>;
   /** `#RRGGBB` a role; a role left out draws in ink. Empty where the theme has no code colours. */
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
@@ -128,6 +130,8 @@ export function readTheme(value: unknown): Theme | null {
   if (typeof v.from === "string" && v.from !== "") theme.from = v.from.slice(0, LONGEST_NAME);
   const app = appOf(v.app);
   if (app) theme.app = app;
+  const offers = appOf(v.offers);
+  if (offers && Object.keys(offers).length > 0) theme.offers = offers;
   const diff = diffOf(v.diff);
   if (diff) theme.diff = diff;
   if (v.italicComments === false) theme.italicComments = false;
@@ -164,6 +168,8 @@ export interface ThemeFile {
   kind: ThemeKind;
   /** The window's colours, where the theme has them (ADR-0055). A build from before ignores the key. */
   app?: Partial<Record<AppKey, string>>;
+  /** What its source file offered and knobas did not set. */
+  offers?: Partial<Record<AppKey, string>>;
   syntax: Partial<Record<Role, string>>;
   diff?: DiffColours;
   italicComments: boolean;
@@ -171,7 +177,7 @@ export interface ThemeFile {
 
 /** `theme` as knobas's file: its name, `<name>.knobas-theme.json`, and its text. */
 export function exportTheme(theme: Theme): { fileName: string; text: string } {
-  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, ...(theme.app ? { app: { ...theme.app } } : {}), syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
+  const file: ThemeFile = { knobasTheme: 1, name: theme.name, kind: theme.kind, ...(theme.app ? { app: { ...theme.app } } : {}), ...(theme.offers ? { offers: { ...theme.offers } } : {}), syntax: { ...theme.syntax }, italicComments: theme.italicComments !== false };
   if (theme.diff) file.diff = { ...theme.diff };
   const safe = theme.name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "theme";
   return { fileName: `${safe}.knobas-theme.json`, text: `${JSON.stringify(file, null, 2)}\n` };
@@ -249,7 +255,11 @@ export function fromVsCode(json: Record<string, unknown>): ImportedTheme {
   const kind = kindOfVsCode(json);
   const theme: ImportedTheme = { name, kind, syntax, from: name };
   const colors = json.colors;
-  if (colors !== null && typeof colors === "object" && !Array.isArray(colors) && Object.keys(colors).length > 0) theme.app = appFromVsCode(json).set;
+  if (colors !== null && typeof colors === "object" && !Array.isArray(colors) && Object.keys(colors).length > 0) {
+    const read = appFromVsCode(json);
+    theme.app = read.set;
+    if (Object.keys(read.offers).length > 0) theme.offers = read.offers;
+  }
   const slant = ruleFor(rules, "comment", "fontStyle");
   if (slant !== null && !/italic/.test(slant)) theme.italicComments = false;
   return theme;
@@ -281,8 +291,9 @@ export function fromZed(json: Record<string, unknown>): ImportedTheme[] {
     const kind: ThemeKind = item.appearance === "light" ? "light" : "dark";
     const theme: ImportedTheme = { name, kind, syntax, from: name };
     if (style && typeof style === "object") {
-      const app = appFromZed(style, kind).set;
-      if (Object.keys(app).length > 0) theme.app = app;
+      const read = appFromZed(style, kind);
+      if (Object.keys(read.set).length > 0) theme.app = read.set;
+      if (Object.keys(read.offers).length > 0) theme.offers = read.offers;
     }
     if (italic === false) theme.italicComments = false;
     out.push(theme);
@@ -325,6 +336,8 @@ export function importThemes(text: string): ImportResult {
     const theme: ImportedTheme = { name, kind: v.kind, syntax: syntaxOf(v.syntax), from: name };
     const app = appOf(v.app);
     if (app) theme.app = app;
+    const offers = appOf(v.offers);
+    if (offers && Object.keys(offers).length > 0) theme.offers = offers;
     const diff = diffOf(v.diff);
     if (diff) theme.diff = diff;
     if (v.italicComments === false) theme.italicComments = false;

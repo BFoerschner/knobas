@@ -15,14 +15,14 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree a:hover { background: var(--sheet-2); }
-.tf-rd-tree a[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
+.tf-rd-tree a[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
 .tf-rd-tree details > summary {
   list-style: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: calc(var(--t-sm) * var(--fs));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree details > summary::-webkit-details-marker { display: none; }
 .tf-rd-tree details > summary:hover { background: var(--sheet-2); }
-.tf-rd-tree details > summary.tf-cur { background: var(--fill); color: var(--on-fill); }
+.tf-rd-tree details > summary.tf-cur { background: var(--sel-row); color: var(--on-sel-row); }
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
 .tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
 /* A page with nothing under it keeps the chevron's column, so a level's titles start on one edge: 14 px is the chevron's 6 + its margins. */
@@ -35,7 +35,7 @@
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
 /* A closed fold holding the open page (2026-11-19): the open row's fill as an edge, which takes no room, since a press in Docs opens no fold. */
-.tf-rd-tree details > summary.tf-holds { box-shadow: inset 2px 0 0 var(--fill); color: var(--ink); }
+.tf-rd-tree details > summary.tf-holds { box-shadow: inset 2px 0 0 var(--sel-row); color: var(--ink); }
 .tf-rd-sheet {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-docs-outline, 268px); column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;
@@ -196,7 +196,7 @@
   display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; white-space: normal; overflow: visible;
   border-bottom: 1px solid var(--rule-2); text-decoration: none;
 }
-.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
+.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
 .tf-rd-tree a.tf-dl-hit[aria-current="true"] :is(.tf-pth, .tf-n, .tf-sn b) { color: inherit; }
 /* A hit's title and snippet are the reading face, which keeps its own spacing; the label before a snippet is the interface's. */
 .tf-dl-hit :is(.tf-t, .tf-sn) { letter-spacing: var(--ls-read, normal); word-spacing: normal; }

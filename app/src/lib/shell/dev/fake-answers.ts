@@ -11,7 +11,7 @@ import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteS
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
 import type { updateCancel, updateCheck, updateDownload, updateInstall, updateLater, updateNotes, updateSet, updateState } from "../../ipc/update";
-import type { windowLookSet } from "../../ipc/window";
+import type { setThemesKept, themesKept, windowLookSet } from "../../ipc/window";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
@@ -45,6 +45,8 @@ export interface Answers {
   site_quit: Answer<typeof siteQuit>;
   site_zoom: Answer<typeof siteZoom>;
   window_look_set: Answer<typeof windowLookSet>;
+  themes_kept: Answer<typeof themesKept>;
+  set_themes_kept: Answer<typeof setThemesKept>;
   site_reveal_download: Answer<typeof siteRevealDownload>;
   sites_kept: Answer<typeof sitesKept>;
   set_sites_kept: Answer<typeof setSitesKept>;

@@ -31,6 +31,7 @@
     render,
     onduplicate,
     ondelete,
+    onfixcopy,
   }: {
     theme: Theme;
     themes: Themes;
@@ -38,6 +39,8 @@
     render: RenderPort;
     onduplicate: (theme: Theme) => void;
     ondelete: (theme: Theme) => void;
+    /** A built-in's fix: a copy of it with these colours, where it drew (Björn, 2026-11-22: built-ins keep their colours, and he lightens them). */
+    onfixcopy: (theme: Theme, syntax: Partial<Theme["syntax"]>) => void;
   } = $props();
 
   /** A short sample of each role, drawn in the role's own class. */
@@ -92,10 +95,26 @@
     });
   }
 
+  /** Every role under 4.5:1, fixed by lightness. */
+  const lowFixes = $derived(Object.fromEntries(ROLES.flatMap((role) => {
+    const next = fixedRole(surfaces, theme.kind, role, theme.syntax[role], tints);
+    return next === null ? [] : [[role, next]];
+  })) as Partial<Theme["syntax"]>);
+
+  function fixAllRoles(): void {
+    const fixes = lowFixes;
+    if (Object.keys(fixes).length === 0) return;
+    if (!own) return onfixcopy(theme, fixes);
+    const was = { ...theme.syntax };
+    themes.update(theme.id, (t) => ({ ...t, syntax: { ...t.syntax, ...fixes } }));
+    undoable(`${Object.keys(fixes).length === 1 ? "1 colour" : `${Object.keys(fixes).length} colours`} ${fixWord === "Darken" ? "darkened" : "lightened"} to 4.5:1.`, () => themes.update(theme.id, (t) => ({ ...t, syntax: was })), { subject: `theme-fix-${theme.id}` });
+  }
+
   function fixRole(role: Role): void {
     const was = theme.syntax[role];
     const next = fixedRole(surfaces, theme.kind, role, was, tints);
     if (next === null) return;
+    if (!own) return onfixcopy(theme, { [role]: next });
     setRole(role, next);
     undoable(`${ROLE_NAMES[role]} ${fixWord === "Darken" ? "darkened" : "lightened"} to 4.5:1.`, () => setRole(role, was), { subject: `theme-fix-${theme.id}-${role}` });
   }
@@ -166,6 +185,9 @@
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
+      {#if Object.keys(lowFixes).length > 0}
+        <button type="button" class="tf-btn tf-sm" onclick={fixAllRoles}>Fix all</button>
+      {/if}
       {#if own}
         <button type="button" class="tf-btn tf-sm" onclick={startRename}>Rename…</button>
         <button type="button" class="tf-btn tf-sm" onclick={() => onduplicate(theme)}>Duplicate</button>
@@ -219,7 +241,7 @@
         {#if c.low}
           <div class="tf-thm-why">
             {lowSentence(c.ratio, c.on)}
-            {#if own}<button type="button" class="tf-btn tf-sm" onclick={() => fixRole(role)}>{fixWord} to 4.5:1</button>{/if}
+            <button type="button" class="tf-btn tf-sm" onclick={() => fixRole(role)}>{fixWord} to 4.5:1</button>
           </div>
         {/if}
       </div>

@@ -14,6 +14,7 @@ import { createTheme } from "../theme.svelte";
 import { APP_SLOT_KEY, ASIS_KEY, createThemes, KEEP_SECONDS, SLOT_KEY, THEMES_KEY, type Themes, type ThemeRoot } from "../themes.svelte";
 import TfThemeKeep from "../TfThemeKeep.svelte";
 import TfThemeSection from "./TfThemeSection.svelte";
+import { colourBlind } from "../colour-blind.svelte";
 
 function memory(seed: Record<string, string> = {}): KeptStorage & { data: Map<string, string> } {
   const data = new Map(Object.entries(seed));
@@ -76,8 +77,8 @@ test("choosing in a slot keeps the id and writes the properties; a built-in has 
   const copy = themes.own[0]!;
   expect(copy.name).toBe("Dracula copy");
   expect(storage.data.get(APP_SLOT_KEY.dark)).toBe(copy.id);
-  // One swatch for each of the 30 row colours; the fold's 19 open on a press.
-  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(30);
+  // One swatch for each of the 32 row colours; the fold's 19 open on a press.
+  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(32);
 });
 
 test("a row's swatch sets its key; the preview and the figure follow; Auto takes it out again and says auto", () => {
@@ -262,4 +263,33 @@ test("pick mode: a press on the Attention chip lists its colours nearest first; 
   toggle.click();
   flushSync();
   expect(stage().classList.contains("tf-apt-picking")).toBe(false);
+});
+
+test("the Selected row's quick picks: the ink plate, the theme's accent, and the theme's own where its file had one", () => {
+  const OFFERED = { ...MINE, id: "own-offered1", app: { sheet: "#FFFFFF", ink: "#202020", primary: "#0B5FFF" }, offers: { selRow: "#DDEBFF", onSelRow: "#0B1B33" } };
+  draw({ [APP_SLOT_KEY.light]: OFFERED.id, [THEMES_KEY]: JSON.stringify([OFFERED]) });
+  const pick = (words: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-apt-picks button")].find((b) => b.textContent?.trim() === words)!;
+  expect(pick("knobas (ink)").getAttribute("aria-pressed")).toBe("true");
+  pick("The theme's accent").click();
+  flushSync();
+  expect(themes.find(OFFERED.id)!.app!.selRow).toBe("#0B5FFF");
+  expect(themes.find(OFFERED.id)!.app!.onSelRow).toBeUndefined();
+  pick("The theme's own").click();
+  flushSync();
+  expect(themes.find(OFFERED.id)!.app).toMatchObject({ selRow: "#DDEBFF", onSelRow: "#0B1B33" });
+  expect(html.props.get("--sel-row-light")).toBe("#DDEBFF");
+  pick("knobas (ink)").click();
+  flushSync();
+  expect(themes.find(OFFERED.id)!.app!.selRow).toBeUndefined();
+  expect(html.props.get("--sel-row-light")).toBe(html.props.get("--fill-light"));
+});
+
+test("colour-blind mode names the pairs that read alike under the States, and not while it is off", () => {
+  draw();
+  expect(target.querySelector(".tf-apt-cb")).toBeNull();
+  colourBlind.set(true);
+  flushSync();
+  const lines = [...target.querySelectorAll(".tf-apt-cb")].map((l) => l.textContent);
+  expect(lines).toContain("Attention and Failed read the same under deuteranopia.");
+  colourBlind.set(false);
 });

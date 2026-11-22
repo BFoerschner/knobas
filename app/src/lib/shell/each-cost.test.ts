@@ -75,6 +75,8 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfAppThemeEditor.svelte  heading.rows": "a set the code fixes: a heading's rows of the Theme page, at most five (app-roles.ts)",
   "tf/settings/TfAppThemeEditor.svelte  row.keys": "a set the code fixes: a row's colours, one or two (app-roles.ts)",
   "tf/settings/TfAppThemePreview.svelte  offered": "the colours of one part of the preview and what it stands on, at most a dozen",
+  "tf/settings/TfAppThemeEditor.svelte  confusions(colours)": "pairs of five states under three visions, at most thirty",
+  "tf/settings/TfAppearanceSection.svelte  pairs": "pairs of five states under three visions, at most thirty",
   "tf/site/TfSiteQuit.svelte  unsaved": "a handful by what it is: the live sites, at most Sites kept open (6) and the ones that held changes past it",
   "tf/site/TfSiteSection.svelte  setting.allowed": "a handful by what it is: the sign-in hosts one source's site was allowed to show",
   "tf/site/TfSiteSection.svelte  setting.suggested": "a handful by what it is: the hosts an Open in this source named this session",

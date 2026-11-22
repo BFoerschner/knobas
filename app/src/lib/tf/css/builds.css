@@ -179,17 +179,17 @@
 .tf-pl .tf-tr:hover::after { background: var(--sheet-2); }
 /* An inset ink pill, as every rail's selected row; the glyph's tones are re-declared for the ink. */
 .tf-pi[aria-current="true"] {
-  color: var(--on-fill);
+  color: var(--on-sel-row);
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted); --rule: var(--on-ink-muted);
 }
-.tf-pl .tf-pi[aria-current="true"]::after { background: var(--fill); }
+.tf-pl .tf-pi[aria-current="true"]::after { background: var(--sel-row); }
 /* The ring follows the pill, inside it. */
 .tf-pl .tf-tr:focus-visible { outline: none; }
 .tf-pl .tf-tr:focus-visible::after { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-in); }
 /* The glyph (`TfRunGlyph`): a quiet tick for a pass, a filled disc for a failure, so red is the loud thing on a scan.
    The marks cut into a filled shape are the row's ground (`--rg-x`), the fill on a selected row. */
 .tf-rg { flex: none; width: 12px; height: 12px; --rg-x: var(--sheet); }
-.tf-pi[aria-current="true"] .tf-rg { --rg-x: var(--fill); }
+.tf-pi[aria-current="true"] .tf-rg { --rg-x: var(--sel-row); }
 .tf-rg .tf-rg-line { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 /* Square ends, so the dashes keep their gaps at 12 px. */
 .tf-rg .tf-rg-dash { fill: none; stroke: currentColor; }

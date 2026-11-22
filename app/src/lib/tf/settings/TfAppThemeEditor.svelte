@@ -13,7 +13,8 @@
 
   import { undoable } from "../../shell/toasts.svelte";
   import { layers } from "../layers.svelte";
-  import { apartLine, closestStates, fixRow, fixWords, lowSentence, rowFigure, tellApart, APART } from "../theme/app-check";
+  import { apartLine, closestStates, failures, fixAll, fixRow, fixWords, lowSentence, rowFigure, tellApart, APART } from "../theme/app-check";
+  import { colourBlind, confusions } from "../colour-blind.svelte";
   import { derive } from "../theme/app-derive";
   import { FOLD, HEADINGS, NAME, type AppKey, type Row } from "../theme/app-roles";
   import { BUILTINS } from "../theme/builtins";
@@ -69,6 +70,24 @@
       const app = { ...t.app };
       if (next === undefined) delete app[key];
       else app[key] = next;
+      return { ...t, app };
+    });
+  }
+
+  /**
+   * A selected row's quick picks (Björn, 2026-11-22): knobas's ink plate (the pair left out, so derived), the theme's
+   * accent (its words then the more readable of panel and text), or the row its file drew, where it had one.
+   */
+  function pickRow(which: "ink" | "accent" | "own"): void {
+    themes.update(theme.id, (t) => {
+      const app = { ...t.app };
+      delete app.selRow;
+      delete app.onSelRow;
+      if (which === "accent") app.selRow = derive(t.kind, t.app ?? {}).colours.primary;
+      if (which === "own" && t.offers?.selRow) {
+        app.selRow = t.offers.selRow;
+        if (t.offers.onSelRow) app.onSelRow = t.offers.onSelRow;
+      }
       return { ...t, app };
     });
   }
@@ -136,6 +155,7 @@
         return { background: b!, color: a! };
       case "button":
       case "segment":
+      case "selrow":
       case "card":
         // A ground and the words on it.
         return { background: a!, color: b! };
@@ -177,6 +197,9 @@
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
+      {#if own && failures(colours).length > 0}
+        <button type="button" class="tf-btn tf-sm" onclick={() => setMany(fixAll(theme.kind, set), `${failures(colours).length === 1 ? "1 colour" : `${failures(colours).length} colours`} fixed by lightness.`)}>Fix all</button>
+      {/if}
       {#if own}
         <button type="button" class="tf-btn tf-sm" onclick={startRename}>Rename…</button>
         <button type="button" class="tf-btn tf-sm" onclick={() => onduplicate(theme)}>Duplicate</button>
@@ -222,6 +245,8 @@
               <span class="tf-apt-plate tf-apt-btn" {@attach cssVars(() => exampleOf(row))}>{row.words}</span>
             {:else if row.example === "segment"}
               <span class="tf-apt-plate tf-apt-btn" {@attach cssVars(() => exampleOf(row))}>{row.words}</span><span>List</span>
+            {:else if row.example === "selrow"}
+              <span class="tf-apt-plate tf-apt-btn" {@attach cssVars(() => exampleOf(row))}>{row.words}</span><span>Mine</span>
             {:else if row.example === "chip" || row.example === "unknown"}
               <span class="tf-chip" {@attach cssVars(() => exampleOf(row))}>{row.words}</span>
             {:else if row.example === "card"}
@@ -240,6 +265,15 @@
           </span>
           <span class="tf-thm-hex tf-apt-hex">{row.keys[0] === "selection" ? (set.selection ?? "") : colours[row.keys[0] as keyof typeof colours]}{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span>
           <span class="tf-thm-cr">{fig ? ratioText(fig.ratio) : ""}</span>
+          {#if own && row.example === "selrow"}
+            <div class="tf-apt-picks" role="group" aria-label="Selected row's colours">
+              <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow === undefined} onclick={() => pickRow("ink")}>knobas (ink)</button>
+              <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow !== undefined && set.selRow === colours.primary} onclick={() => pickRow("accent")}>The theme's accent</button>
+              {#if theme.offers?.selRow}
+                <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow === theme.offers.selRow} onclick={() => pickRow("own")}>The theme's own</button>
+              {/if}
+            </div>
+          {/if}
           {#if low && fig}
             <div class="tf-thm-why">
               {lowSentence(fig)}
@@ -249,6 +283,11 @@
         </div>
       {/each}
       {#if heading.name === "States"}
+        {#if colourBlind.on}
+          {#each confusions(colours) as pair (`${pair.a}-${pair.b}-${pair.vision}`)}
+            <div class="tf-apt-told tf-apt-cb" role="note">{pair.sentence}</div>
+          {/each}
+        {/if}
         <div class="tf-apt-told">
           <span>{apartLine(colours)}</span>
           {#if own && closestStates(colours).delta < APART}<button type="button" class="tf-btn tf-sm" onclick={apart}>Tell them apart</button>{/if}

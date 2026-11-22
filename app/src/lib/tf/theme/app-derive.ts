@@ -22,7 +22,7 @@ export type Colours = Record<Exclude<AppKey, "selection">, string> & { selection
 export const KNOBAS: Record<ThemeKind, Colours> = {
   light: {
     paper: "#E4E8EC", sheet: "#F7F8F9", sheet2: "#EEF1F4", field: "#FFFFFF", ink: "#17212B", ink2: "#4B5663", muted: "#5F6975",
-    rule: "#CBD2D9", rule2: "#DDE2E7", primary: "#17212B", onPrimary: "#F7F8F9", fill: "#17212B", onFill: "#F7F8F9", focus: "#2F55D4", link: "#2F55D4", mark: "#F6E08F",
+    rule: "#CBD2D9", rule2: "#DDE2E7", primary: "#17212B", onPrimary: "#F7F8F9", fill: "#17212B", onFill: "#F7F8F9", selRow: "#17212B", onSelRow: "#F7F8F9", focus: "#2F55D4", link: "#2F55D4", mark: "#F6E08F",
     ok: "#1F7444", warn: "#8A5600", err: "#B0262A", info: "#2F55D4",
     okBg: "#DDEFE4", warnBg: "#F6EBD3", errBg: "#F7DEDD", infoBg: "#DFE6FA", mutedBg: "#E6E9EC",
     card: "#F2D157", card2: "#E8C440", cardInk: "#2A230B", cardInk2: "#5A4D1E",
@@ -33,7 +33,7 @@ export const KNOBAS: Record<ThemeKind, Colours> = {
   },
   dark: {
     paper: "#12171C", sheet: "#1A2027", sheet2: "#212932", field: "#12171C", ink: "#E4E9EE", ink2: "#A0ABB7", muted: "#94A0AC",
-    rule: "#323C47", rule2: "#28313A", primary: "#A9B3BE", onPrimary: "#1A2027", fill: "#A9B3BE", onFill: "#1A2027", focus: "#8AA6FF", link: "#8AA6FF", mark: "#5C4E17",
+    rule: "#323C47", rule2: "#28313A", primary: "#A9B3BE", onPrimary: "#1A2027", fill: "#A9B3BE", onFill: "#1A2027", selRow: "#A9B3BE", onSelRow: "#1A2027", focus: "#8AA6FF", link: "#8AA6FF", mark: "#5C4E17",
     ok: "#6FCF97", warn: "#E5B04D", err: "#FF8A80", info: "#8AA6FF",
     okBg: "#1B3427", warnBg: "#3A2E14", errBg: "#3F1F1F", infoBg: "#1F2A4A", mutedBg: "#262E37",
     card: "#D9B941", card2: "#C9A930", cardInk: "#1D1806", cardInk2: "#3F3511",
@@ -132,11 +132,25 @@ export function derive(kind: ThemeKind, set: AppColours = {}): { colours: Colour
     for (const pick of ["#FFFFFF", c.sheet, c.ink, "#000000"]) if (contrast(pick, c.primary) >= 4.5) return pick;
     return contrast("#FFFFFF", c.primary) >= contrast("#000000", c.primary) ? "#FFFFFF" : "#000000";
   });
+  // A selected row is the pressed plate until a theme gives it a colour of its own; its words are then the more
+  // readable of the theme's panel and text on it.
+  k("selRow", ["fill"], () => c.fill);
+  k("onSelRow", ["selRow", "onFill", "sheet", "ink"], () => {
+    if (c.selRow === c.fill) return c.onFill;
+    return contrast(c.sheet, c.selRow) >= contrast(c.ink, c.selRow) ? c.sheet : c.ink;
+  });
   for (const t of TONES) k(t, ["paper", "sheet", "sheet2"], () => fix(K[t], { paper: c.paper, sheet: c.sheet, "sheet-2": c.sheet2 }));
   for (const t of TONES) k(`${t}Bg`, [t, "sheet", "ink"], () => tint(c[t], c.sheet, c.ink, dark));
   k("focus", ["info", "paper", "sheet"], () => fix(c.info, { paper: c.paper, sheet: c.sheet }, 3));
   k("link", ["info"], () => c.info);
-  k("card", [], () => K.card);
+  // The card is the theme's own (Björn, 2026-11-22: "themable"): where the theme sets none but sets its Attention,
+  // that hue at knobas's card's lightness and chroma, so Dracula's card is Dracula's yellow and One Dark's its orange.
+  // A theme that sets no Attention, or one with almost no hue, keeps knobas's own yellow.
+  k("card", ["warn"], () => {
+    const [, wc, wh] = toOklch(c.warn);
+    const [cl, cc] = toOklch(K.card);
+    return !has("warn") || wc < 0.03 ? K.card : fromOklch([cl, cc, wh]);
+  });
   k("card2", ["card"], () => shift(c.card, -0.04));
   const cardLight = luminance(c.card) > 0.3;
   const away = cardLight ? "darker" : "lighter";
@@ -155,13 +169,13 @@ export function derive(kind: ThemeKind, set: AppColours = {}): { colours: Colour
   });
   // Left out, selected text is the system's own highlight, so it is never derived.
   if (has("selection")) c.selection = set.selection!;
-  // The states on a fill (a rail's selected row): as light as knobas Dark's states on a dark fill, as dark as its
-  // on-ink ones on a light fill.
-  const fillDark = luminance(c.fill) < 0.3;
+  // The states on a selected row: as light as knobas Dark's states on a dark row, as dark as its on-ink ones on a
+  // light one.
+  const rowDark = luminance(c.selRow) < 0.3;
   for (const t of [...TONES, "muted"] as const)
-    k(`onInk${cap(t)}`, [t, "fill"], () => {
+    k(`onInk${cap(t)}`, [t, "selRow"], () => {
       const [, C0, H0] = toOklch(c[t]);
-      return fix(fromOklch([fillDark ? 0.78 : 0.33, C0, H0]), { fill: c.fill }, 4.5, fillDark ? "lighter" : "darker");
+      return fix(fromOklch([rowDark ? 0.78 : 0.33, C0, H0]), { row: c.selRow }, 4.5, rowDark ? "lighter" : "darker");
     });
   // The states on the card: the light theme's where the card is light, the dark theme's where it is dark.
   const C = KNOBAS[cardLight ? "light" : "dark"];

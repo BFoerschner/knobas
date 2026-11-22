@@ -13,14 +13,14 @@
   import { onMount, untrack } from "svelte";
 
   import { push, undoable } from "../../shell/toasts.svelte";
-  import { keyHint } from "../../shell/platform";
   import { layers } from "../layers.svelte";
   import { fixAll, unreadable } from "../theme/app-check";
+  import { colourBlind, confusions } from "../colour-blind.svelte";
   import { CHIPS } from "../theme/app-roles";
   import { cssVars } from "../theme/paint";
   import { hasApp, hasCode, type Theme, type ThemeKind } from "../theme/themes";
   import { importText } from "../theme-import";
-  import { RESET_HINT, putKnobasBack } from "../theme-reset";
+  import { putKnobasBack } from "../theme-reset";
   import { theme as windowTheme, type Theme as WindowTheme } from "../theme.svelte";
   import { themes as appThemes, type Themes } from "../themes.svelte";
   import TfAppThemeEditor from "./TfAppThemeEditor.svelte";
@@ -62,7 +62,7 @@
   const askText = $derived.by(() => {
     if (!asking) return "";
     const f = unreadable(themes.coloursOf(asking.theme))[0];
-    return f ? `Its ${f.key === "ink" ? "text" : f.key === "onPrimary" ? "text on a primary button" : f.key === "onFill" ? "text on what is selected" : "text on the card"} is ${(Math.floor(f.ratio * 10) / 10).toFixed(1)}:1 on ${f.on}. Under 3:1, words are hard to make out.` : "";
+    return f ? `Its ${f.key === "ink" ? "text" : f.key === "onPrimary" ? "text on a primary button" : f.key === "onFill" ? "text on what is pressed" : f.key === "onSelRow" ? "text on a selected row" : "text on the card"} is ${(Math.floor(f.ratio * 10) / 10).toFixed(1)}:1 on ${f.on}. Under 3:1, words are hard to make out.` : "";
   });
 
   /** Uses a theme for the window, asking first where it cannot be read; `then` is what else the press does. */
@@ -73,6 +73,14 @@
     }
     themes.chooseApp(t.id);
     then();
+    warnColourBlind(t);
+  }
+
+  /** In colour-blind mode, a theme put in a slot whose states read alike says so (Björn, 2026-11-22). */
+  function warnColourBlind(t: Theme): void {
+    if (!colourBlind.on) return;
+    const pairs = confusions(themes.coloursOf(t));
+    if (pairs.length > 0) push({ text: `${t.name}: ${pairs[0]!.sentence}${pairs.length > 1 ? ` And ${pairs.length - 1} more, in Settings › Appearance.` : ""}` });
   }
 
   function chooseSlot(select: HTMLSelectElement): void {
@@ -225,7 +233,7 @@
 </TfAppThemeEditor>
 <div class="tf-apt-foot">
   <button type="button" class="tf-btn tf-ghost" onclick={() => putKnobasBack(themes)}>Put knobas's themes back</button>
-  <span class="tf-dim">Or press {keyHint(RESET_HINT)} anywhere.</span>
+  <span class="tf-dim">Also in the search box: <i>put knobas's themes back</i>.</span>
 </div>
 {#if asking}
   <TfDialog title="{asking.theme.name} would be hard to read" {layers} onclose={() => (asking = null)}>
@@ -233,7 +241,7 @@
       <p>{askText}</p>
       <p class="tf-dlg-note">
         Fixing changes the colours under their mark and keeps their hues. Used as it is, knobas goes back to {themes.appDrawn(asking!.theme.kind).name} after 15 seconds unless you keep it.
-        {keyHint(RESET_HINT)} puts knobas's own themes back at any time.
+        <i>Put knobas's themes back</i>, on this page and in the search box, puts knobas's own themes back at any time.
       </p>
     {/snippet}
     {#snippet footer()}

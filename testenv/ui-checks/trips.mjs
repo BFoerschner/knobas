@@ -350,7 +350,7 @@ const APP_DUPLICATE_CHECK = String.raw`(b) => {
   const page = ${appPage};
   if (page.querySelector(".tf-thm-edh h2")?.textContent.trim() !== "knobas Light copy") return "the editor shows " + page.querySelector(".tf-thm-edh h2")?.textContent.trim();
   const swatches = page.querySelectorAll(".tf-apt-roles button.tf-thm-sw").length;
-  if (swatches !== 30) return swatches + " swatches are buttons, not the 30 of a theme one can change";
+  if (swatches !== 32) return swatches + " swatches are buttons, not the 32 of a theme one can change";
   return null;
 }`;
 /** A light theme of one's own in the window's light slot: knobas Light with a white panel. */

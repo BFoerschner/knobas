@@ -959,6 +959,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::site::site_quit,
         commands::site::site_zoom,
         commands::window::window_look_set,
+        commands::window::themes_kept,
+        commands::window::set_themes_kept,
         commands::site::site_reveal_download,
         commands::site::sites_kept,
         commands::site::set_sites_kept,

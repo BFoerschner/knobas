@@ -9,8 +9,8 @@
 .tf-views h2 { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
 .tf-views a { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; text-decoration: none; color: var(--ink); }
 .tf-views a:hover { background: var(--sheet-2); }
-.tf-views a[aria-current="true"] { background: var(--fill); color: var(--on-fill); }
-.tf-views a[aria-current="true"] .tf-count { background: color-mix(in srgb, var(--on-fill) 18%, transparent); color: inherit; }
+.tf-views a[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
+.tf-views a[aria-current="true"] .tf-count { background: color-mix(in srgb, var(--on-sel-row) 18%, transparent); color: inherit; }
 .tf-views a .tf-count { margin-left: auto; }
 .tf-board-wrap .tf-sbody { display: flex; flex-direction: column; }
 /* The board head is the canonical header (#2293): the title block left, `.tf-acts` right (the Board/List
