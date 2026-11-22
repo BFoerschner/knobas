@@ -189,7 +189,12 @@ toml = { version = "=0.9.12", features = ["preserve_order"] }
 # *Smooth scrolling on 120 Hz displays* (`frame_rate.rs`): the WebKit SPI that
 # lifts WKWebView's 60 fps cap. The copies already in the lockfile through wry.
 objc2 = "=0.6.4"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString"] }
+# `NSValue` and `NSKeyValueCoding` for *The window's own look* (`window_look.rs`): the web view told to draw no
+# white of its own before the page's first paint.
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSValue", "NSKeyValueCoding"] }
+# The configuration the main and capture windows' web views are built with (`window_look.rs`), which Tauri takes
+# as this type. The copy already in the lockfile through wry.
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "WKWebViewConfiguration"] }
 
 [target.'cfg(windows)'.dependencies]
 # *WebView2's own menu, trimmed* (`webview_menu.rs`): the main window's

@@ -3,8 +3,9 @@
 //! The page sets its theme before its first paint (`app/public/theme-boot.js`), but before the page exists the bare
 //! window is the system's default, white on Windows, and its title bar follows the system even when knobas is set
 //! dark. So the page tells this side its mode and each side's page colour (`window_look_set`), kept in
-//! `window-look.json` in the profile's folder; the main window is built hidden, given the title bar's side and that
-//! colour, and shown. Any failure on that path shows the window as before.
+//! `window-look.json` in the profile's folder; the main window is built with the title bar's side and that colour.
+//! Any failure on that path shows the window as before. On macOS the web view would still paint its own white over
+//! the window until the page's first paint, so it is built to draw none ([`without_white`]).
 //!
 //! `knobas --default-theme` (or `KNOBAS_DEFAULT_THEME=1`) starts one run on knobas's own themes: the window is given
 //! a script that says so before the page loads, and the page writes no theme and touches nothing kept.
@@ -166,6 +167,36 @@ pub fn write(profile_dir: &Path, look: &WindowLook) -> std::io::Result<()> {
         serde_json::to_vec(look).map_err(std::io::Error::other)?,
     )?;
     std::fs::rename(next, path)
+}
+
+/// The window's web view drawing no background of its own (macOS), so the window's colour shows until the page's
+/// first paint. WKWebView would paint its own there for about 300 ms, white on the light side and grey on the dark,
+/// whatever the theme (the design's risk 4). The page paints its whole background, so after that nothing changes.
+///
+/// wry does this itself only under Tauri's `macos-private-api`, which would also turn it on for the sites' web
+/// views (`knobas-site`, the same wry), and a site that sets no background would show the page under it. So only
+/// the windows built from here get it: a configuration made before the web view, with WebKit's `drawsBackground`
+/// off (private, as wry sets it; macOS 10.14 and later). wry keeps the default data store and adds its protocols to
+/// a configuration it is given, as to its own. Off the main thread the builder is left as it was.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn without_white<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    use objc2_foundation::{NSNumber, NSObjectNSKeyValueCoding, NSString};
+    let Some(main_thread) = objc2::MainThreadMarker::new() else {
+        return builder;
+    };
+    // SAFETY: on the main thread, as the marker proves; the key is the one wry sets on its own configuration.
+    let configuration = unsafe {
+        let configuration = objc2_web_kit::WKWebViewConfiguration::new(main_thread);
+        configuration.setValue_forKey(
+            Some(&NSNumber::new_bool(false)),
+            &NSString::from_str("drawsBackground"),
+        );
+        configuration
+    };
+    builder.with_webview_configuration(configuration)
 }
 
 #[cfg(test)]

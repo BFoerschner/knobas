@@ -104,3 +104,32 @@ Section 11, answered, and built:
    for an import that had one, *The theme's own* (VS Code's `list.activeSelectionBackground` and `-Foreground`, Zed's
    `element.selected`), which the import offers and does not set. The pair is checked at 4.5:1 and joins the 3:1
    floor; a selected row's states (`--on-ink-*`) are worked out against it.
+
+## The bare window on macOS (2026-11-22, the design's risk 4)
+
+The main window has been built visible since 7c9c6f1a, with the title bar's side and the page colour from
+`window-look.json`. On a Mac a restart still showed the wrong colour until the page's first paint, about 300 ms.
+The cause was not the window: tao gives the NSWindow the kept colour and the app its side before the window is
+ordered front. It was WKWebView, which paints a background of its own over the window until the page has painted.
+That background follows the side: white on the light side, a dark grey on the dark, whatever the theme. wry turns it
+off (WebKit's private `drawsBackground`) only under Tauri's `macos-private-api` feature. knobas does not use that
+feature, because it would also clear the background of the sites' web views (`knobas-site`, the same wry), and a site
+that sets no background of its own would show knobas's page through it.
+
+So the main and capture windows are given a `WKWebViewConfiguration` with `drawsBackground` off before their web view
+exists (`window_look::without_white`). The window's colour shows until the page paints, and the page then covers it in
+the same colour. The sites' web views are unchanged.
+
+Recorded on the Mac, knobas's window only (ScreenCaptureKit filtered to the app, about 120 frames a second, the app
+held at launch until the stream ran), a restart on a copy of the scale database, the Mac on its dark side. The
+capture shifts every colour a little, the window's and the page's alike, so the frames are compared with each other:
+
+| Theme | Before | After |
+| --- | --- | --- |
+| Dracula (dark) | 3 frames with the title bar and page WebKit's dark grey, then the page that grey under the theme's title bar until the first paint at 858 ms (about 330 ms) | every frame from the first is the theme's page colour, title bar included |
+| GitHub Light (light, on a dark Mac) | 3 frames all white, then a white page under the light title bar until 810 ms (about 320 ms) | every frame from the first is the theme's page colour, light title bar included |
+
+No unit test covers the configuration itself: WebKit's configuration is made on the main thread, which libtest
+never runs a test on, and a `harness = false` test binary is outside ADR-0017's layout. The side and colour a
+kept look gives are tested (`a_kept_look_gives_the_window_its_side_and_colour`). Why a window built hidden and shown
+later never loaded its page was not pursued, because the visible build now has no wrong frame.

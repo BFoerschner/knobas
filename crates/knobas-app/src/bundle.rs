@@ -146,7 +146,12 @@ pub fn open_main_window<R: Runtime>(
     }
     // The look the page last kept: the window is built with the title bar's side and the page colour, so the bare
     // window is the theme's before the page paints. Without one, as before. Not built hidden and shown after: on
-    // macOS a web view made hidden never loaded its page once shown (the real window, 2026-11-22).
+    // macOS a web view made hidden never loaded its page once shown (the real window, 2026-11-22). On macOS the web
+    // view draws no white of its own, so the window's colour is what shows until the page's first paint.
+    #[cfg(target_os = "macos")]
+    {
+        builder = crate::window_look::without_white(builder);
+    }
     let look =
         app.path().app_data_dir().ok().and_then(|data| {
             crate::window_look::read(&crate::profile::Profile::new(demo, &data).dir)
