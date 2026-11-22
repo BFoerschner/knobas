@@ -151,25 +151,22 @@ mod tests {
         assert_eq!(knobas_source::web_links::check(links, &kinds), Ok(()));
         let guid = "07c469c8-e880-4927-8c31-a8342cd66d98";
         assert_eq!(links.page(passwords::ENTRY_KIND), None);
-        for kind in [passwords::FOLDER_KIND] {
-            let url = knobas_source::web_links::page(
-                "https://pw.example:10001/",
-                links.page(kind).unwrap(),
-                guid,
-            )
-            .unwrap();
-            let parsed = url::Url::parse(&url).unwrap();
-            assert_eq!(parsed.path(), "/SignIn/Direct", "{kind}");
-            let back: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
-            assert_eq!(
-                back,
-                [(
-                    "ReturnUrl".to_owned(),
-                    format!("/WebClient/Main?itemId={guid}")
-                )],
-                "{kind}"
-            );
-        }
+        let url = knobas_source::web_links::page(
+            "https://pw.example:10001/",
+            links.page(passwords::FOLDER_KIND).unwrap(),
+            guid,
+        )
+        .unwrap();
+        let parsed = url::Url::parse(&url).unwrap();
+        assert_eq!(parsed.path(), "/SignIn/Direct");
+        let back: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(
+            back,
+            [(
+                "ReturnUrl".to_owned(),
+                format!("/WebClient/Main?itemId={guid}")
+            )]
+        );
         assert_eq!(
             knobas_source::web_links::home("https://pw.example:10001", Some(links)),
             "https://pw.example:10001/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain"

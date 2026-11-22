@@ -84,6 +84,13 @@ subjectAltName). The source: `mara.lindqvist`, the read-only account, added with
 7. *Forget…* removed the site's store (WebKit keeps it under the real `~/Library/WebKit/knobas-app/WebsiteDataStore`,
    whatever `HOME` says); the scratch profile was deleted.
 
+**Found: Pleasant's sign-in pages frame the vendor's news.** `/SignIn/Direct` and the `/Account/SignIn` landing hold
+an `<iframe>` of `https://pleasantpasswords.com/product-news?FeedID=…&Version=9.5.4.0.Unregistered,3&ref=<install id>`.
+ADR-0050's allow-list rules top-level navigations, not frames, so the site loads it as any browser does: in the run
+above, each signed-out load of the sign-in page sent that one GET from the Mac to pleasantpasswords.com (Björn:
+"never contact Pleasant", ruled about trial keys and sales). A remembered session skips the page. Whether a source's
+site should refuse frames from other origins is open for Björn; nothing here changes it.
+
 Not run: Windows (WebView2), owed; *Shift W* in the window, which would open the browser on Björn's Mac (the unit
 tests hold it); Linux has no in-app site.
 
