@@ -81,6 +81,7 @@
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
+  import { goAcross, replaceAddress } from "../opener";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -2597,6 +2598,12 @@
             fileHref={placeLink}
             oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
             onsource={() => picks.set(spec.path, "source")}
+            onplace={(to, how, label) => {
+              const hash = to === "" ? hrefOf(spec.path) : placeHrefOf(spec.path, to);
+              if (how === "push") goAcross(hash, label);
+              else replaceAddress(hash);
+            }}
+            onback={() => history.back()}
             prose={oasProse}
           />
         {/await}

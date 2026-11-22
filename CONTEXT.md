@@ -382,6 +382,10 @@ _Avoid_: output folder (the tool's own `{outdir}`, before it is kept), render ca
 A [folder renderer](#folder-renderer) run on one folder at each side of a [diff](#diff), each side in a lane of its own, and what the two runs made compared: for a [generated folder](#generated-folder), only the generated files that differ (added, deleted or changed, sizes first, bytes only where sizes match), the rest counted; for a single output, its two drawings (ux26, ADR-0049). It stands in the diff's file list in place of the folder's real files while the band's *Rendered* is on (a renderer with a glob takes the folder; one with none only by its glyph), and only *Run* runs it. A folder with no changed file under it is never one. Where a side is the [working tree](#working-tree-as-an-end), a file that differs only in line endings is counted apart. In code `FolderCompare`, `folder_render_compare`, `MadeCompare`.
 _Avoid_: folder diff (the real files' diff), rendered diff (a file's, a [rendered comparison](#rendered-comparison))
 
+**API explorer**:
+How an OpenAPI or Swagger file is drawn: a rail that lists its endpoints by tag, by path or by schema, a page for the one picked, and beside it a request a person can send. A spec is a file, so the explorer is its renderer, drawn wherever a file is (ux31, `docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`). In code `oas` (`TfOpenApi`, `TfOas…`); a **rail**, a **place** (`get /pets`, `schemas/Pet`, `tags/pets`).
+_Avoid_: Swagger view, Try it out, API client
+
 **Pipeline**:
 What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenkins job. The Builds view is drawn over pipelines and their [runs](#run); the source's own word appears once, in the view's header (ADR-0022).
 _Avoid_: build configuration (TeamCity's word), job (a [job](#job))

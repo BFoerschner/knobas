@@ -970,6 +970,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // The page filters' ranking (the fuzzy-search pass, 2026-11-19),
         // appended at the foot: the list is append-only (§10.8).
         commands::search::fuzzy_rank,
+        commands::search::fuzzy_hold,
+        commands::search::fuzzy_rank_held,
+        commands::search::fuzzy_drop,
         // A source's own website inside knobas (ADR-0050), appended at the
         // foot (§10.8).
         commands::site::site_settings,

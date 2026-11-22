@@ -1,9 +1,10 @@
-// The OpenAPI view's timing (ux18, `docs/decisions/2026-11-17-an-api-spec-is-drawn-as-its-endpoints.md`): the pages and
+// The API explorer's timing (ux18; ux31, `docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`): the pages and
 // presses it touches, in a headless Chrome over the built app under ?fake-ipc&fake-openapi, at each CPU throttle. Each
 // case is timed in the page, from the press (an address set, a click, a key's input) to the frame its first useful
 // thing is drawn in, five times, and the median is reported against the line: a page 100 / 200 / 300 ms and a press
 // 100 / 100 / 200 ms at 1x / 4x / 6x (on the Mac, half of each). The scroll of the 5,000-operation list reports its
-// frame rate, its worst frame gap and its longest task; an open reports whether a row it drew moved after it drew.
+// frame rate, its worst frame gap and its longest task; an arrow key held 30 rows its worst frame and longest task; an
+// open reports whether a row it drew moved after it drew.
 //
 //   testenv/ui-checks/with-built.sh <built> <port> node testenv/perf/openapi.mjs --port <port> [--size WxH@s] [--throttle 1,4,6] [--only a,b] [--machine pc]
 //
@@ -69,31 +70,37 @@ const go = (hash) => `() => { location.hash = ${JSON.stringify(hash)}; }`;
 const click = (sel, text = null) =>
   `() => [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)})).click()`;
 const typeIn = (value) =>
-  `() => { const box = document.querySelector('.tf-oas-band input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
+  `() => { const box = document.querySelector('.tf-oas-railhead input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
 const settle = () => sleep(700);
+/** Shuts every fold of the rail that is open, then opens `key`'s where given. */
+const folds = (open = null) =>
+  `() => { for (const b of document.querySelectorAll('.tf-oas-row.tf-oas-g[aria-expanded=true]')) b.click(); ${open === null ? "" : `document.querySelector(${JSON.stringify(`.tf-oas-row[data-k="${open}"]`)})?.click();`} }`;
 
 const SMALL = "api/openapi.yaml";
 const BIG = "api/big.yaml";
+const REAL = "api/teamcity.json";
+const DEEP = "api/payments.json";
 const CASES = [
   // A file opened from another file of the tree, as a press in it does; a README from a source file and back.
   { name: "readme", label: "a Markdown README opened from Cargo.toml (another file)", kind: "page", before: go(file("Cargo.toml")), act: go(file("README.md")), sel: ".tf-fileview .tf-md", watch: ".tf-fileview .tf-md > *" },
   { name: "source", label: "Cargo.toml opened from the README (another file)", kind: "page", before: go(file("README.md")), act: go(file("Cargo.toml")), sel: ".tf-fileview .tf-code .tf-l", watch: ".tf-fileview .tf-code .tf-l" },
-  { name: "small", label: "a small spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
-  { name: "big", label: "a 5,000-operation spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(BIG)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
-  { name: "landing", label: "a small spec opened from the Inbox (the page's first visit at it)", kind: "page", before: go("#/inbox"), act: go(file(SMALL)), sel: ".tf-oas-opbtn", watch: ".tf-oas-opbtn, .tf-oas-title" },
-  { name: "filter", label: "a filter key on 5,000 operations", kind: "press", before: `async () => { location.hash = ${JSON.stringify(file(BIG))}; }`, prep: typeIn(""), act: typeIn("delete resource12"), sel: ".tf-oas-count", text: "of 5000" },
-  { name: "open-op", label: "an operation opened", kind: "press", before: go(file(SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-opbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-opbtn", "/pets/{petId}"), sel: ".tf-oas-detail .tf-oas-resp" },
-  { name: "follow", label: "a $ref followed to its schema", kind: "press", before: go(place("get /pets/{petId}", SMALL)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-sbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-detail .tf-oas-top .tf-oas-ref"), sel: '[data-k="ds:Pet"] .tf-oas-pname' },
-  { name: "big-op", label: "an operation opened on 5,000", kind: "press", before: go(file(BIG)), prep: "() => { for (const b of document.querySelectorAll('.tf-oas-opbtn[aria-expanded=true]')) b.click(); }", act: click(".tf-oas-opbtn"), sel: ".tf-oas-detail .tf-oas-resp" },
+  // ux31's explorer (section 29): a spec opens on its overview with its rail beside it.
+  { name: "small", label: "a small spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(SMALL)), sel: ".tf-oas-list .tf-oas-row", watch: ".tf-oas-row, .tf-oas-title" },
+  { name: "big", label: "a 5,000-operation spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(BIG)), sel: ".tf-oas-list .tf-oas-row", watch: ".tf-oas-row, .tf-oas-title" },
+  { name: "real", label: "TeamCity's real 1.2 MB spec opened from the README", kind: "page", before: go(file("README.md")), act: go(file(REAL)), sel: ".tf-oas-list .tf-oas-row", watch: ".tf-oas-row, .tf-oas-title" },
+  { name: "landing", label: "a small spec opened from the Inbox (the page's first visit at it)", kind: "page", before: go("#/inbox"), act: go(file(SMALL)), sel: ".tf-oas-list .tf-oas-row", watch: ".tf-oas-row, .tf-oas-title" },
+  { name: "filter", label: "a filter key on 5,000 operations", kind: "press", before: go(file(BIG)), prep: typeIn(""), act: typeIn("delete resource12"), sel: ".tf-oas-count", text: "of 5,000" },
+  { name: "fold", label: "a fold of 200 opened on 5,000", kind: "press", before: go(file(BIG)), prep: folds(), act: click('.tf-oas-row[data-k="g:tag3"]'), sel: '.tf-oas-row[data-k="g:tag3"][aria-expanded=true]' },
+  { name: "op", label: "an operation's page from the rail, on 5,000", kind: "press", before: go(file(BIG)), prep: `() => { (${folds("g:tag3")})(); (${click(".tf-oas-row", "Overview")})(); }`, act: click('.tf-oas-row[data-k^="g:tag3\\n"]'), sel: ".tf-oas-page .tf-oas-h", text: "/resource3/{id}" },
+  { name: "deep-op", label: "an operation's page from the rail, allOf and oneOf three deep", kind: "press", before: go(file(DEEP)), prep: click(".tf-oas-row", "Overview"), act: click('.tf-oas-row[title^="POST /v1/charges"]'), sel: ".tf-oas-page .tf-oas-h", text: "POST" },
+  { name: "follow", label: "a ref followed to its schema's page, on TeamCity", kind: "press", before: go(place("get /app/rest/builds/{buildLocator}", REAL)), act: click(".tf-oas-page .tf-oas-ref"), sel: ".tf-oas-page .tf-oas-back" },
 ].filter((k) => only === null || only.includes(k.name));
 
-// The scroll of the 5,000-operation list: 40 px a frame for two seconds, its frames and its longest task.
+// The rail scrolled end to end: 5,000 rows flat under a filter, 40 px a frame for two seconds, its frames and its
+// longest task.
 const scroll = () =>
   c.js(`new Promise((resolve) => {
-    const list = document.querySelector('.tf-oas-list');
-    let box = list.parentElement;
-    while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
-    box = box ?? document.scrollingElement;
+    const box = document.querySelector('.tf-oas-list');
     let long = 0;
     const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) long = Math.max(long, e.duration); });
     po.observe({ type: 'longtask' });
@@ -107,9 +114,31 @@ const scroll = () =>
       last = now;
       box.scrollTop += 40;
       if (now - t0 < 2000) requestAnimationFrame(step);
-      else { po.disconnect(); resolve({ fps: frames / ((now - t0) / 1000), worst: Math.max(...gaps.slice(1)), long, rows: document.querySelectorAll('.tf-oas-opbtn').length }); }
+      else { po.disconnect(); resolve({ fps: frames / ((now - t0) / 1000), worst: Math.max(...gaps.slice(1)), long, rows: document.querySelectorAll('.tf-oas-list .tf-oas-row').length }); }
     };
     requestAnimationFrame(step);
+  })`);
+
+// An arrow key held in the rail, 30 rows: no task over 50 ms, and the worst key's frame.
+const arrows = () =>
+  c.js(`new Promise((resolve) => {
+    const list = document.querySelector('.tf-oas-list');
+    list.focus();
+    let long = 0;
+    const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) long = Math.max(long, e.duration); });
+    po.observe({ type: 'longtask' });
+    let n = 0;
+    let worst = 0;
+    const press = () => {
+      const t0 = performance.now();
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+      requestAnimationFrame(() => {
+        worst = Math.max(worst, performance.now() - t0);
+        if (++n < 30) setTimeout(press, 33);
+        else { po.disconnect(); resolve({ worst, long, at: document.querySelector('.tf-oas-cursor')?.textContent ?? '' }); }
+      });
+    };
+    press();
   })`);
 
 let over = 0;
@@ -145,11 +174,32 @@ for (const t of throttles) {
     out.push(row);
     console.log(row);
   }
+  if (only === null || only.includes("arrows")) {
+    const ran = await runCase(c, { name: "an arrow key held in the rail, 30 rows", throttle: t, prepare: home }, async () => {
+      await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+      await c.js(`(${go(file(BIG))})()`);
+      await sleep(2500);
+      await c.js(`(${folds("g:tag0")})()`);
+      await settle();
+      return arrows();
+    });
+    if (ran.failedToRun) { over++; const row = failedLine({ name: "arrow key held", throttle: t, failedToRun: ran.failedToRun }); out.push(row); console.log(row); }
+    else {
+      const a = ran.value;
+      const ok = a.long <= 50 && a.worst <= line("press", t);
+      if (!ok) over++;
+      const row = `${t}x ${size.name} an arrow key held in the rail, 30 rows: worst ${a.worst.toFixed(1)} ms (line ${line("press", t)}), longest task ${a.long.toFixed(0)} ms (line 50) ${ok ? "ok" : "OVER"}`;
+      out.push(row);
+      console.log(row);
+    }
+  }
   if (only === null || only.includes("scroll")) {
     const ran = await runCase(c, { name: "scroll of 5,000 operations", throttle: t, prepare: home }, async () => {
       await c.send("Emulation.setCPUThrottlingRate", { rate: t });
       await c.js(`(${go(file(BIG))})()`);
       await sleep(2500);
+      await c.js(`(${typeIn("resource")})()`);
+      await sleep(1500);
       return scroll();
     });
     if (ran.failedToRun) { over++; const row = failedLine({ name: "scroll of 5,000 operations", throttle: t, failedToRun: ran.failedToRun }); out.push(row); console.log(row); continue; }

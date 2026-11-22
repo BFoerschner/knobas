@@ -800,6 +800,70 @@ pub fn rank(text: &str, haystacks: &[String]) -> Vec<Ranked> {
         .collect()
 }
 
+/// Lists a page hands over once and ranks by what is typed afterwards (ux31,
+/// the API explorer's filter, section 6): a key then sends only its text,
+/// not the 400 kB of a 5,000-operation spec's texts that [`rank`] would be
+/// sent each time. At most [`HeldLists::BOUND`] are held, the least lately
+/// used dropped first; a dropped list answers `None` and the page holds it
+/// again.
+#[derive(Debug, Default)]
+pub struct HeldLists {
+    /// The lists, the least lately used first.
+    lists: Vec<(String, Arc<Vec<String>>)>,
+}
+
+impl HeldLists {
+    /// How many lists are held at once.
+    pub const BOUND: usize = 4;
+
+    /// Holds `haystacks` as list `id`, in place of any list of that id.
+    pub fn hold(&mut self, id: String, haystacks: Vec<String>) {
+        self.lists.retain(|(held, _)| *held != id);
+        self.lists.push((id, Arc::new(haystacks)));
+        while self.lists.len() > Self::BOUND {
+            self.lists.remove(0);
+        }
+    }
+
+    /// List `id`'s texts, now the most lately used; `None` where it is not
+    /// held (never, or dropped past the bound).
+    pub fn take(&mut self, id: &str) -> Option<Arc<Vec<String>>> {
+        let at = self.lists.iter().position(|(held, _)| held == id)?;
+        let entry = self.lists.remove(at);
+        let texts = Arc::clone(&entry.1);
+        self.lists.push(entry);
+        Some(texts)
+    }
+
+    /// Drops list `id`.
+    pub fn drop_list(&mut self, id: &str) {
+        self.lists.retain(|(held, _)| held != id);
+    }
+
+    /// How many lists are held.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.lists.len()
+    }
+
+    /// Whether no list is held.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.lists.is_empty()
+    }
+}
+
+/// [`rank`] over list `id` of `held`: what [`rank`] answers for the same
+/// texts, or `None` where the list is not held. The ranking runs outside any
+/// lock the caller holds on `held`, over the list's own texts.
+pub fn rank_held(held: &std::sync::Mutex<HeldLists>, id: &str, text: &str) -> Option<Vec<Ranked>> {
+    let texts = held
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take(id)?;
+    Some(rank(text, &texts))
+}
+
 /// The names held: parallel to `titles`, which frizbee reads, one record a
 /// row, newest first (`item_updated_at` descending, nulls last, then the
 /// id), so frizbee's order among equal scores is the newest first.
@@ -1210,6 +1274,59 @@ async fn load(pool: &sqlx::PgPool) -> Result<Held, sqlx::Error> {
         names.titles.push(title);
     }
     Ok(Held::new(names, words))
+}
+
+#[cfg(test)]
+mod held_tests {
+    use super::{HeldLists, rank, rank_held};
+    use std::sync::Mutex;
+
+    fn texts() -> Vec<String> {
+        [
+            "get /repos/{owner}/{repo}/pulls/comments",
+            "post /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+            "get /user",
+            "get /proxy ADProxy",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    }
+
+    #[test]
+    fn a_held_list_answers_what_rank_answers_for_the_same_texts() {
+        let held = Mutex::new(HeldLists::default());
+        held.lock().unwrap().hold("spec".into(), texts());
+        for text in ["pull review comment", "proxy", "user", "'get !pulls", "zzz"] {
+            assert_eq!(
+                rank_held(&held, "spec", text),
+                Some(rank(text, &texts())),
+                "{text}"
+            );
+        }
+        assert_eq!(rank_held(&held, "other", "user"), None);
+    }
+
+    #[test]
+    fn four_lists_are_held_and_the_least_lately_used_goes_first() {
+        let held = Mutex::new(HeldLists::default());
+        for id in ["a", "b", "c", "d"] {
+            held.lock().unwrap().hold(id.into(), texts());
+        }
+        // `a` used again is the newest, so `b` goes when a fifth comes.
+        assert!(rank_held(&held, "a", "user").is_some());
+        held.lock().unwrap().hold("e".into(), texts());
+        assert_eq!(held.lock().unwrap().len(), HeldLists::BOUND);
+        assert!(rank_held(&held, "b", "user").is_none());
+        assert!(rank_held(&held, "a", "user").is_some());
+        assert!(rank_held(&held, "c", "user").is_some());
+        held.lock().unwrap().drop_list("c");
+        assert!(rank_held(&held, "c", "user").is_none());
+        // Holding an id again replaces its list.
+        held.lock().unwrap().hold("a".into(), vec!["only".into()]);
+        assert_eq!(rank_held(&held, "a", "only").map(|r| r.len()), Some(1));
+        assert_eq!(held.lock().unwrap().len(), 3);
+    }
 }
 
 #[cfg(test)]

@@ -140,7 +140,7 @@ export const PDF: Renderer = {
  */
 export const OPENAPI: Renderer = {
   id: "openapi",
-  name: "OpenAPI",
+  name: "API",
   patterns: ["*"],
   fences: [],
   input: "text",

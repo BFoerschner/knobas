@@ -5,7 +5,7 @@
 import type { EverythingMatches, SearchResponse, SearchSettings } from "../../../ipc/search";
 import { SYNTAX } from "../../../launcher/syntax";
 import type { Handlers } from "../fake-tauri";
-import { onFakeReset } from "../fake-seed";
+import { keepSeed, onFakeReset } from "../fake-seed";
 import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
@@ -678,10 +678,30 @@ export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { ind
   });
 }
 
+/** The fake's held lists (`fuzzy_hold`), the least lately used first. */
+const fakeHeld = new Map<string, string[]>();
+keepSeed(fakeHeld);
+
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   longFiles = params.has("fake-long-paths");
   return {
     fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
+    // Held lists (ux31): the same ranking over texts sent once, four at most, the least lately used dropped.
+    fuzzy_hold: (args) => {
+      const id = String(args["id"] ?? "");
+      fakeHeld.delete(id);
+      fakeHeld.set(id, (args["haystacks"] as string[] | undefined) ?? []);
+      while (fakeHeld.size > 4) fakeHeld.delete(fakeHeld.keys().next().value!);
+    },
+    fuzzy_rank_held: (args) => {
+      const id = String(args["id"] ?? "");
+      const texts = fakeHeld.get(id);
+      if (texts === undefined) throw { code: "not_found", message: `No list ${id} is held.` };
+      fakeHeld.delete(id);
+      fakeHeld.set(id, texts);
+      return fakeFuzzyRank(String(args["text"] ?? ""), texts);
+    },
+    fuzzy_drop: (args) => void fakeHeld.delete(String(args["id"] ?? "")),
     // The launcher board (#504): the recent items alone since #2421 and
     // #2423. **Fixture-only**; the rules are witnessed at the IPC seam over a
     // real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.

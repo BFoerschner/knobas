@@ -160,9 +160,9 @@ export type RailRow =
   | { k: string; kind: "group"; d: 0; group: Group; open: boolean }
   | { k: string; kind: "dir"; d: number; dir: Dir; open: boolean }
   | { k: string; kind: "webhooks"; d: 0; n: number; open: boolean }
-  | { k: string; kind: "op"; d: number; op: OpRow; shown: string; marks: readonly (readonly [number, number])[] | null }
+  | { k: string; kind: "op"; d: number; op: OpRow; shown: string; marks: readonly number[] | null }
   | { k: string; kind: "pref"; d: number; ref: PathRef }
-  | { k: string; kind: "schema"; d: 0; name: string; marks: readonly (readonly [number, number])[] | null };
+  | { k: string; kind: "schema"; d: 0; name: string; marks: readonly number[] | null };
 
 /** What `railRows` reads besides the index. */
 export interface RailInput {
@@ -172,7 +172,7 @@ export interface RailInput {
   /** The folds open, by key. */
   open: ReadonlySet<string>;
   /** With words typed: the operations kept, best first, and the schemas kept, each with its marked spans. */
-  ranked: { ops: readonly { op: OpRow; marks: readonly (readonly [number, number])[] | null }[]; schemas: readonly { name: string; marks: readonly (readonly [number, number])[] | null }[] } | null;
+  ranked: { ops: readonly { op: OpRow; marks: readonly number[] | null }[]; schemas: readonly { name: string; marks: readonly number[] | null }[] } | null;
 }
 
 /** A path drawn after the start its group shares: `/builds` under *Build* `/app/rest`; the whole where none is left. */
@@ -431,4 +431,105 @@ export function namedSchema(ref: string, schemaBase: string, schemas: ReadonlySe
   if (!ref.startsWith(schemaBase)) return null;
   const name = decodeURIComponent(ref.slice(schemaBase.length)).replace(/~1/g, "/").replace(/~0/g, "~");
   return schemas.has(name) ? name : null;
+}
+
+// ---- What a page says in words (ux31) ----
+
+/**
+ * A description held to about `max` characters (section 7: an operation's 700, the overview's 900): cut at a
+ * paragraph's end where one falls between 60 % and 160 % of `max`, else at `max`. `cut` says *Show all* is owed.
+ */
+export function clampWords(text: string, max: number): { text: string; cut: boolean } {
+  const t = text.replace(/\r/g, "").trim();
+  if (max <= 0 || t.length <= max) return { text: t, cut: false };
+  const stop = t.indexOf("\n\n", Math.floor(max * 0.6));
+  return { text: t.slice(0, stop > 0 && stop < max * 1.6 ? stop : max).trimEnd(), cut: true };
+}
+
+/** Whether `text` holds anything Markdown would draw: plain text is drawn as text, which is cheaper by far. */
+export function needsMarkdown(text: string): boolean {
+  return /[`*_[\]#<>|!\\]|\n\s*\n|^\s*[-+]\s|^\s*\d+\.\s/m.test(text);
+}
+
+/** One run of a fact's line: words, or a value in the code face. */
+export interface Run {
+  text: string;
+  code: boolean;
+}
+
+const runOf = (v: unknown): Run => ({ text: typeof v === "string" ? v : JSON.stringify(v) ?? String(v), code: true });
+const words = (text: string): Run => ({ text, code: false });
+
+/** How many values of an `enum` a field's line draws before it counts the rest. */
+export const ENUM_SHOWN = 14;
+
+/**
+ * A field's line of facts (section 8): *One of* `a` `b`, *Default*, *Example*, its bounds in words, *matches* its
+ * pattern. Each fact is a list of runs; the view joins them with full stops.
+ */
+export function factsOf(node: unknown, example?: unknown): Run[][] {
+  if (!isObj(node)) return example === undefined ? [] : [[words("Example "), runOf(example)]];
+  const out: Run[][] = [];
+  if (Array.isArray(node.enum)) {
+    const shown = node.enum.slice(0, ENUM_SHOWN);
+    const fact: Run[] = [words("One of ")];
+    shown.forEach((v, i) => {
+      if (i > 0) fact.push(words(" "));
+      fact.push(runOf(v));
+    });
+    if (node.enum.length > ENUM_SHOWN) fact.push(words(` and ${node.enum.length - ENUM_SHOWN} more`));
+    out.push(fact);
+  } else if (node.const !== undefined) out.push([words("Always "), runOf(node.const)]);
+  if (node.default !== undefined) out.push([words("Default "), runOf(node.default)]);
+  const ex = example !== undefined ? example : node.example;
+  if (ex !== undefined && (example !== undefined || (!isObj(ex) && !Array.isArray(ex)))) out.push([words("Example "), runOf(ex)]);
+  const range: string[] = [];
+  const num = (v: unknown) => (typeof v === "number" ? v.toLocaleString("en") : String(v));
+  if (node.minimum !== undefined) range.push(`at least ${num(node.minimum)}`);
+  if (typeof node.exclusiveMinimum === "number") range.push(`more than ${num(node.exclusiveMinimum)}`);
+  if (node.maximum !== undefined) range.push(`at most ${num(node.maximum)}`);
+  if (typeof node.exclusiveMaximum === "number") range.push(`less than ${num(node.exclusiveMaximum)}`);
+  if (node.minLength !== undefined) range.push(`${num(node.minLength)} ${node.minLength === 1 ? "character" : "characters"} or more`);
+  if (node.maxLength !== undefined) range.push(`${num(node.maxLength)} characters at most`);
+  if (node.minItems !== undefined) range.push(`${num(node.minItems)} ${node.minItems === 1 ? "item" : "items"} or more`);
+  if (node.maxItems !== undefined) range.push(`${num(node.maxItems)} items at most`);
+  if (node.uniqueItems === true) range.push("no item twice");
+  if (range.length > 0) {
+    const line = range.join(", ");
+    out.push([words(line.charAt(0).toUpperCase() + line.slice(1))]);
+  }
+  if (typeof node.pattern === "string") out.push([words(range.length > 0 ? "Matches " : "Matches "), runOf(node.pattern)]);
+  return out;
+}
+
+/** What a security scheme asks for, in words (section 9). */
+export function schemeWords(s: { type: string; scheme: string; in: string; keyName: string; bearerFormat: string }): string {
+  if (s.type === "http") {
+    if (s.scheme === "basic") return "A user name and a password (Basic)";
+    if (s.scheme === "bearer") return `A bearer token${s.bearerFormat !== "" ? ` (${s.bearerFormat})` : ""}`;
+    return `HTTP ${s.scheme}`;
+  }
+  if (s.type === "apiKey") return `A key in the ${s.in === "query" ? "query" : s.in === "cookie" ? "cookie" : "header"} ${s.keyName}`;
+  if (s.type === "oauth2") return "OAuth 2.0: an access token, which you paste";
+  if (s.type === "openIdConnect") return "OpenID Connect: an access token, which you paste";
+  if (s.type === "mutualTLS") return "A client certificate (mutual TLS)";
+  return s.type;
+}
+
+/** The method as a row draws it: `DELETE` and `OPTIONS` cut to `DEL` and `OPT` for the rail's 34 px column. */
+export function shortMethod(method: string): string {
+  return method === "delete" ? "DEL" : method === "options" ? "OPT" : method.toUpperCase();
+}
+
+/** A path's parts, its `{parameters}` marked to draw dim. */
+export function pathParts(p: string): { text: string; param: boolean }[] {
+  return p
+    .split(/(\{[^}]*\})/)
+    .filter((s) => s !== "")
+    .map((s) => ({ text: s, param: s.startsWith("{") }));
+}
+
+/** A count in words: `1 endpoint`, `1,281 endpoints`. */
+export function counted(n: number, one: string, many: string): string {
+  return `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
 }

@@ -81,7 +81,7 @@ async function specDrawn() {
   await vi.waitFor(
     () => {
       flushSync();
-      expect(target.querySelector(".tf-oas-title, .tf-oas-bad")).not.toBeNull();
+      expect(target.querySelector(".tf-oas, .tf-oas-bad")).not.toBeNull();
     },
     { timeout: 10_000, interval: 20 },
   );
@@ -94,7 +94,7 @@ const face = () => text(target.querySelector(".tf-fileview .tf-rsw-face"));
 test("a spec opens in the OpenAPI view by default, at any name; Source is one pick away", async () => {
   draw("api/v1/petstore.oas.yml", PETS_30_YAML);
   await specDrawn();
-  expect(face()).toBe("Render as OpenAPI");
+  expect(face()).toBe("Render as API");
   expect(target.querySelector(".tf-fileview")!.classList.contains("tf-fv-oas")).toBe(true);
   expect(text(target.querySelector(".tf-oas-title"))).toBe("Pet Store");
   expect(target.querySelector(".tf-fileview .tf-code")).toBeNull();
@@ -102,7 +102,7 @@ test("a spec opens in the OpenAPI view by default, at any name; Source is one pi
   target.querySelector<HTMLButtonElement>(".tf-rsw-face")!.click();
   flushSync();
   const items = [...target.querySelectorAll<HTMLElement>(".tf-rsw .tf-menu [role^='menuitem']")];
-  expect(items.map((item) => text(item).replace(/^✓ ?/, "")).slice(0, 2).map((t) => t.split(" ")[0])).toEqual(["OpenAPI", "Source"]);
+  expect(items.map((item) => text(item).replace(/^✓ ?/, "")).slice(0, 2).map((t) => t.split(" ")[0])).toEqual(["API", "Source"]);
   items.find((item) => text(item).replace(/^✓ ?/, "").startsWith("Source"))!.click();
   await settle();
   expect(face()).toBe("Render as Source");
@@ -122,7 +122,7 @@ test("a spec whose version key is past the sniff's head opens as a spec (ux31)",
   for (let i = 0; i < 1300; i++) schemas[`S${i}`] = { type: "object", description: "x".repeat(220) };
   draw("api/sorted.json", JSON.stringify({ components: { schemas }, info: { title: "Sorted", version: "1" }, openapi: "3.0.3", paths: {} }));
   await specDrawn();
-  expect(face()).toBe("Render as OpenAPI");
+  expect(face()).toBe("Render as API");
   expect(text(target.querySelector(".tf-oas-title"))).toBe("Sorted");
 });
 
@@ -147,13 +147,21 @@ test("a ref into another file is read at the spec's commit through the byte read
     return new TextEncoder().encode(ORDER_YAML);
   });
   await specDrawn();
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-opbtn")].find((b) => text(b).startsWith("GET /orders"))!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-row")].find((b) => text(b) === "GET /orders")!.click();
   await settle();
   expect(reads).toEqual([]);
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Show it here")!.click();
+  // The response names the ref in a row of its own; its caret reads the other file, only when pressed.
+  const media = [...target.querySelectorAll<HTMLElement>(".tf-oas-page .tf-oas-sec")].find((s) => text(s.querySelector("h3")).startsWith("Responses"))!;
+  expect(text(media)).toContain("Order");
   await settle();
-  expect(reads).toEqual([`${REPO} api/schemas/order.yaml c0mmit`]);
-  expect(text(target.querySelector(".tf-oas-detail .tf-oas-pname"))).toBe("id");
+  expect(reads).toEqual([]);
+  media.querySelector<HTMLButtonElement>(".tf-oas-tog")!.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(reads).toEqual([`${REPO} api/schemas/order.yaml c0mmit`]);
+  });
+  await settle();
+  expect([...media.querySelectorAll(".tf-oas-fname")].map((el) => text(el))).toContain("id");
 });
 
 test("an address names a place inside a file: an operation opens there", async () => {
@@ -165,6 +173,7 @@ test("an address names a place inside a file: an operation opens there", async (
 
   draw("api/openapi.yaml", PETS_30_YAML, undefined, "get /pets/{petId}");
   await specDrawn();
-  const row = [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-opbtn")].find((b) => text(b).startsWith("GET /pets/{petId}"))!;
-  expect(row.getAttribute("aria-expanded")).toBe("true");
+  const row = [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-row")].find((b) => text(b) === "GET /pets/{petId}")!;
+  expect(row.getAttribute("aria-current")).toBe("true");
+  expect(text(target.querySelector(".tf-oas-page .tf-oas-h"))).toBe("GET /pets/{petId}");
 });

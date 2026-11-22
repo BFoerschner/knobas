@@ -101,6 +101,10 @@ export const QUIET: ReadonlySet<string> = new Set([
   "app_status",
   // A list a page holds, ranked (the fuzzy-search pass): reads nothing, changes nothing.
   "fuzzy_rank",
+  // The same over a list held once (ux31, the API explorer's filter).
+  "fuzzy_hold",
+  "fuzzy_rank_held",
+  "fuzzy_drop",
   "write_queue_counts",
   "pending_writes",
   "current_timer",

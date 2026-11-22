@@ -469,7 +469,9 @@ export class SpecFiles {
       if (!index.schemas.includes(name)) return { kind: "missing" };
       const r = this.resolve(this.root, index.schemaBase + encodePointer(name));
       if (!("ok" in r) || !r.ok) return { kind: "missing" };
-      return { kind: "schema", name, node: r.node, base: r.base, shape: this.shape(r.base, r.node), uses: this.uses(name), sample: this.sample(r.base, r.node) };
+      // The sample starts from the ref, so a schema that holds itself closes where it comes round again.
+      const sample = this.sample(this.root, { $ref: index.schemaBase + encodePointer(name) });
+      return { kind: "schema", name, node: r.node, base: r.base, shape: this.shape(r.base, r.node), uses: this.uses(name), sample };
     }
     const row = index.ops.find((o) => o.anchor === place) ?? index.webhooks.find((o) => o.anchor === place);
     if (row === undefined) return { kind: "missing" };
@@ -926,6 +928,13 @@ function sampleOf(files: SpecFiles, base: string, node: unknown, depth: number, 
     return out;
   }
   if (sh.variants !== null) return sampleOf(files, at, sh.variants.list[0], depth + 1, trail);
+  // A choice of one schema and null, or the empty string, is that schema.
+  for (const key of ["oneOf", "anyOf"] as const) {
+    const list = n[key];
+    if (!Array.isArray(list)) continue;
+    const real = list.find((m) => !isNullSchema(local(files, at, m).node));
+    if (real !== undefined) return sampleOf(files, at, real, depth + 1, trail);
+  }
   if (type === "array" || sh.items !== undefined) return depth > 4 ? [] : [sampleOf(files, at, sh.items, depth + 1, trail)];
   if (type === "integer" || type === "number") return typeof n.minimum === "number" ? n.minimum : 0;
   if (type === "boolean") return true;

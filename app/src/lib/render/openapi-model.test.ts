@@ -178,3 +178,11 @@ test("a page is one answer: an operation and the shapes it shows unopened, or a 
   expect(schema.uses.schemas).toEqual(["Card", "Bank", "Customer"]);
   expect(answerCall(sessions, 1, { kind: "page", place: "get /nowhere" })).toEqual({ kind: "missing" });
 });
+
+test("a schema's example closes where the schema comes round again, and a choice of a schema and empty is that schema", () => {
+  const { files } = opened(DEEP_30_JSON);
+  const sessions = new Map([[1, files]]);
+  const page = answerCall(sessions, 1, { kind: "page", place: "schemas/Charge" }) as { sample: Record<string, unknown> };
+  expect(page.sample.parent).toBeNull();
+  expect(page.sample.description).toBe("string");
+});

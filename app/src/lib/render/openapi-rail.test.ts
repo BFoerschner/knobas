@@ -116,7 +116,7 @@ test("a small spec opens with every fold open; the path tree's single top chain 
 test("with words typed the rail is flat: the operations kept, best first, then the schemas; Schemas lists only schemas", () => {
   const index = indexOf(MODEL_31_JSON);
   const op = index.ops[2]!;
-  const ranked = { ops: [{ op, marks: [[0, 3] as const] }], schemas: [{ name: "Thing", marks: null }] };
+  const ranked = { ops: [{ op, marks: [0, 3] }], schemas: [{ name: "Thing", marks: null }] };
   const groups = groupsOf(index);
   expect(railRows(index, { mode: "tags", groups, tree: null, open: new Set(), ranked }).map(label)).toEqual(["get /things/{id}", "s Thing"]);
   expect(railRows(index, { mode: "schemas", groups, tree: null, open: new Set(), ranked }).map(label)).toEqual(["s Thing"]);
