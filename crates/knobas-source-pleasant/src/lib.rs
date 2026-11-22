@@ -4,10 +4,14 @@
 //! one request a press; a one-time-code key goes to the sink's side channel
 //! and from there to the OS keychain. It never calls `GET entries/{id}`.
 
-mod api;
+/// The API's shapes and the mapping, open to the tests that replay the real
+/// server's recordings; nothing else names them.
+#[doc(hidden)]
+pub mod api;
 mod config;
 mod descriptor;
-mod map;
+#[doc(hidden)]
+pub mod map;
 mod otp;
 mod source;
 

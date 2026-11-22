@@ -46,6 +46,9 @@ pub fn descriptor_template() -> SourceDescriptor {
             history: None,
             attachments: false,
             access_requests: false,
+            // Confirmed on 9.5.4: a listing sends every custom field's value
+            // and marks none protected (`S/pleasant-server.md` §6.3).
+            marks_protected_fields: false,
             writes: vec![
                 WriteKind::CreateEntry,
                 WriteKind::EditEntry,

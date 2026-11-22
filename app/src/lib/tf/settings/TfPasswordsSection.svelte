@@ -64,8 +64,9 @@
     ["Access requests", offers.access_requests, "Asked for on the entry; knobas checks one only when you press Check now."],
   ]);
 
-  /** The four places a KeePass code plugin keeps its key, in the adapter's format ids. */
+  /** Where a code's key is kept: the server's own field, then the four places a KeePass plugin keeps it, in the adapter's format ids. */
   const FORMATS: [string, string, string, string][] = [
+    ["pleasant", "The server's own", "TOTPSecret", "The key in Base32, on the entry"],
     ["keepass", "KeePass 2.47+, built in", "TimeOtp-Secret-Base32", "The key in Base32"],
     ["tray_totp", "KeeTrayTOTP", "TOTP Seed, TOTP Settings", "Key and settings in two fields"],
     ["keeotp", "KeeOtp", "otp", "key=…&step=30&size=6"],
@@ -79,6 +80,13 @@
     What {name} offers the Passwords page. A control is drawn there only where its source offers it. Entries sync into the mirror; a password is read only when you show or copy
     it.{#if facts && synced}{" "}It lists {plural(facts.entries, "entry", "entries")} in {plural(facts.folders, "folder", "folders")}.{/if}
   </p>
+  {#if !offers.marks_protected_fields}
+    <!-- Fable's ruling while Björn was away (2026-11-22): every value is mirrored, and the page says so. -->
+    <p class="tf-stg-p tf-pw-fieldsnote">
+      Notes and custom fields sync with the entry and are searched. This server sends every custom field's value with its listing and marks none as protected, so knobas
+      cannot tell a PIN from a port number. Keep a value that must not rest on this machine in an entry's password.
+    </p>
+  {/if}
   {#each rows as [label, yes, detail] (label)}
     <div class="tf-stg-row">
       <div class="tf-stg-l">{label}</div>
@@ -97,8 +105,8 @@
   <section class="tf-stg-sec">
     <h2>Where the one-time code keys are</h2>
     <p class="tf-stg-p">
-      The server's codes come from a KeePass plugin that keeps each key in the entry's custom fields. The adapter reads every format below, moves the key to {keychainName}
-      and takes those fields out of the entry before it reaches the mirror.{#if !synced}{" "}It says which one it found after the first sync.{/if}
+      The server keeps a code's key on the entry itself, or a KeePass plugin keeps it in the entry's custom fields. The adapter reads every format below, the server's own
+      first, moves the key to {keychainName} and takes those fields out of the entry before it reaches the mirror.{#if !synced}{" "}It says which one it found after the first sync.{/if}
     </p>
     <div class="tf-pw-tblwrap">
       <table class="tf-tbl tf-pw-formats">

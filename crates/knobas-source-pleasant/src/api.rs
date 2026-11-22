@@ -1,8 +1,9 @@
 //! Pleasant Password Server's REST API v5, as far as knobas reads it.
 //!
-//! Every field is optional and unknown fields are ignored: the vendor's
-//! documentation is the source of these shapes, and a server that leaves one
-//! out must not fail a sync. `Password` is not declared at all, so whatever a
+//! Every field is optional and unknown fields are ignored: a server that
+//! leaves one out must not fail a sync. The shapes are the ones a real
+//! Pleasant 9.5.4 answered (`tests/fixtures/recorded`, `S/pleasant-server.md`
+//! §6). `Password` is not declared at all, so whatever a
 //! listing sends there is never even parsed.
 
 use std::collections::BTreeMap;
@@ -37,7 +38,37 @@ pub struct ApiEntry {
     pub custom_user_fields: BTreeMap<String, Option<serde_json::Value>>,
     pub has_modify_entries_access: Option<bool>,
     pub has_view_entry_contents_access: Option<bool>,
+    /// Whether the account may read the password (9.5.4).
+    pub has_view_entry_password_access: Option<bool>,
+    /// Whether the account may see the entry's code key (9.5.4).
+    #[serde(rename = "HasViewTOTPAccess")]
+    pub has_view_totp_access: Option<bool>,
+    /// The comment rules in force for the entry, its folders' included: an
+    /// entry carries them in every listing, where a folder object carries
+    /// its own only in the whole tree (§6.4).
     pub comment_prompts: Option<CommentPrompts>,
+    /// Pleasant's own code key: plain Base32, `null` when unset.
+    #[serde(rename = "TOTPSecret")]
+    pub totp_secret: Option<String>,
+    /// `0` when unset.
+    #[serde(rename = "TOTPDigits")]
+    pub totp_digits: Option<u32>,
+    /// `0` when unset.
+    #[serde(rename = "TOTPPeriod")]
+    pub totp_period: Option<u32>,
+    /// The entry's attachments, named with no bytes.
+    pub attachments: Vec<ApiAttachment>,
+}
+
+/// One attachment as a listing names it: never its bytes (`FileData` is not
+/// declared, so an answer that carries them is never parsed into memory
+/// here).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ApiAttachment {
+    pub attachment_id: String,
+    pub file_name: Option<String>,
+    pub file_size: Option<u64>,
 }
 
 /// One folder ("credential group") with what it holds.

@@ -133,6 +133,13 @@ export type Offers = { one_time_codes: boolean, expiry: boolean, usage_comments:
  */
 audit_log: boolean, history: HistoryKind | null, attachments: boolean, access_requests: boolean, 
 /**
+ * Whether the source marks which custom fields are protected. One that
+ * does keeps a protected value out of its records (read live, drawn
+ * covered); one that does not sends every value openly, and Settings
+ * says so (Fable's ruling while Björn was away, 2026-11-22).
+ */
+marks_protected_fields: boolean, 
+/**
  * The direct writes it performs.
  */
 writes: Array<WriteKind>, };

@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import type { Held, PwRow } from "../../ipc/passwords";
 import { CUT, chainOf, commentFolder, expiry, holding, marks, model, panels, pathOf, sourceNode, sourceWord, treeRows } from "./model";
 
-const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] };
+const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
 function source(id: string, name: string) {
   return { id, name, account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant" };

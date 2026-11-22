@@ -8,6 +8,11 @@
 //! | KeeOtp | `otp` = `key=…&step=…&size=…&otpHashMode=…` | `keeotp` |
 //! | KeePassXC | `otp` = `otpauth://totp/…?secret=…` | `otpauth` |
 //!
+//! Pleasant 9 keeps a code key of its own beside them (confirmed on 9.5.4,
+//! `S/pleasant-server.md` §6.3): `TOTPSecret` (plain Base32), `TOTPDigits`
+//! and `TOTPPeriod` on every entry, `null, 0, 0` when unset. [`own`] reads it,
+//! and an entry's own key is taken before the plugins' fields.
+//!
 //! [`take`] removes every one of those fields from the entry's fields,
 //! whatever it finds in them, so none can reach the mirror.
 
@@ -33,7 +38,12 @@ const OTP_FIELD: &str = "otp";
 /// Whether a field's name is one a code key lives in.
 #[must_use]
 pub fn is_key_field(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
     KEEPASS_FIELDS.iter().any(|f| f.eq_ignore_ascii_case(name))
+        // Every field of KeePass's built-in codes, `HmacOtp-` (counter codes,
+        // which knobas makes none of) included (Fable's ruling, 2026-11-22).
+        || lower.starts_with("timeotp-")
+        || lower.starts_with("hmacotp-")
         || name.eq_ignore_ascii_case(TRAY_SEED)
         || name.eq_ignore_ascii_case(TRAY_SETTINGS)
         || name.eq_ignore_ascii_case(OTP_FIELD)
@@ -239,6 +249,31 @@ fn keeotp(text: &str) -> Found {
     )
 }
 
+/// Pleasant's own code key (format `pleasant`): `None` when the entry has
+/// none. A digit count or period of 0 is the server's "unset", read as 6 and
+/// 30; the hash is SHA-1, the only one Pleasant's own codes use.
+#[must_use]
+pub fn own(secret: Option<&str>, digits: u32, period: u32) -> Option<Found> {
+    let secret = secret.map(str::trim).filter(|s| !s.is_empty())?;
+    let digits = if digits == 0 {
+        Some(6)
+    } else {
+        u8::try_from(digits).ok()
+    };
+    let period = if period == 0 {
+        Some(30)
+    } else {
+        u16::try_from(period).ok()
+    };
+    Some(found(
+        "pleasant",
+        from_base32(secret).as_deref().and_then(base32),
+        digits,
+        period,
+        Some(OtpAlgorithm::Sha1),
+    ))
+}
+
 /// Take the code key out of an entry's fields: every key field is removed
 /// from `fields`, and what they held is answered. `None` when the entry has
 /// no key field at all.
@@ -256,8 +291,21 @@ pub fn take(fields: &mut BTreeMap<String, String>) -> Option<Found> {
             }
         })
     });
-    let had_any = fields.keys().any(|k| is_key_field(k));
-    fields.retain(|name, _| !is_key_field(name));
+    // A value that is an otpauth:// link is a key wherever it sits.
+    let is_link = |value: &str| {
+        value
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("otpauth://")
+    };
+    let found = found.or_else(|| {
+        fields
+            .iter()
+            .find(|(name, value)| !is_key_field(name) && is_link(value))
+            .map(|(_, value)| otpauth(value))
+    });
+    let had_any = fields.iter().any(|(k, v)| is_key_field(k) || is_link(v));
+    fields.retain(|name, value| !is_key_field(name) && !is_link(value));
     found.or_else(|| had_any.then(unreadable))
 }
 
@@ -280,6 +328,46 @@ mod tests {
         all.insert("Port".into(), "5432".into());
         let found = take(&mut all).expect("a key field");
         (found, all)
+    }
+
+    #[test]
+    fn every_timeotp_and_hmacotp_field_and_any_otpauth_value_leave_the_fields() {
+        let mut all = fields(&[
+            ("TimeOtp-Something-New", "x"),
+            ("HmacOtp-Secret-Base32", RFC),
+            ("Second factor", &format!("otpauth://totp/x?secret={RFC}")),
+            ("Port", "5432"),
+        ]);
+        let found = take(&mut all).expect("a key");
+        assert_eq!(found.info.format, "otpauth");
+        assert_eq!(found.key.unwrap().secret.expose(), RFC);
+        assert_eq!(all.keys().collect::<Vec<_>>(), ["Port"]);
+        // A field named for a key with nothing readable still leaves.
+        let mut odd = fields(&[("hmacotp-counter", "7"), ("Port", "1")]);
+        assert_eq!(take(&mut odd).unwrap().info.format, OTP_UNREADABLE);
+        assert_eq!(odd.keys().collect::<Vec<_>>(), ["Port"]);
+    }
+
+    #[test]
+    fn pleasants_own_key_reads_with_its_unset_digits_and_period_as_6_and_30() {
+        let f = own(Some("gezd gnbv gy3t qojq gezd gnbv gy3t qojq"), 0, 0).unwrap();
+        assert_eq!(f.info.format, "pleasant");
+        assert_eq!((f.info.digits, f.info.period), (6, 30));
+        assert_eq!(f.key.unwrap().secret.expose(), RFC);
+        let eight = own(Some(RFC), 8, 60).unwrap();
+        assert_eq!((eight.info.digits, eight.info.period), (8, 60));
+        assert!(own(None, 0, 0).is_none());
+        assert!(own(Some("  "), 6, 30).is_none());
+        // Not Base32, or a digit count no code has: unreadable, never dropped.
+        assert_eq!(
+            own(Some("not base32!"), 6, 30).unwrap().info.format,
+            OTP_UNREADABLE
+        );
+        assert_eq!(own(Some(RFC), 12, 30).unwrap().info.format, OTP_UNREADABLE);
+        assert_eq!(
+            own(Some(RFC), 6, 100_000).unwrap().info.format,
+            OTP_UNREADABLE
+        );
     }
 
     #[test]

@@ -359,7 +359,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
       properties: { username: { type: "string", title: "Username", description: "The account knobas signs in as, with the password below. Test connection says whom it signed in as." } },
       required: ["username"],
     },
-    passwords: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] },
+    passwords: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
   }),
   // The fixture-only second ticket system (#2032): one saved-view kind, named Kestrel.
 

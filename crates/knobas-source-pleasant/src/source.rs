@@ -109,9 +109,10 @@ fn key_of<'a>(source: &str, entity: &'a str) -> Option<&'a str> {
         .filter(|k| !k.is_empty())
 }
 
-/// How a refused secret read says what it needs. *Unverified against a real
-/// server*: the vendor says the read "will throw" when a comment is needed;
-/// the recorded fixtures settle the status and the words.
+/// How a refused secret read says what it needs, read by its words: 9.5.4
+/// sends its errors as JSON in a `text/plain` body (`400 {"error_message":
+/// "Comment required."}`, `S/pleasant-server.md` §6.5), so the body decides,
+/// never the content type.
 fn refusal(error: &SourceError) -> Option<SecretAnswer> {
     let SourceError::Protocol {
         status: Some(status),
@@ -124,6 +125,11 @@ fn refusal(error: &SourceError) -> Option<SecretAnswer> {
         return None;
     }
     let lower = message.to_ascii_lowercase();
+    // 9.5.4 answers a missing entry `400 {"error_message":"Cannot find the
+    // requested entry."}` in a text/plain body (§6.5): gone, not a fault.
+    if lower.contains("cannot find the requested") {
+        return Some(SecretAnswer::NotOffered);
+    }
     if lower.contains("comment") {
         return Some(SecretAnswer::CommentRequired { scope: Vec::new() });
     }

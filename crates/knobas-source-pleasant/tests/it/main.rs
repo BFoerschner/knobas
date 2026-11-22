@@ -2,6 +2,8 @@
 //! battery with clause 16, the mapping, the four code-key formats, and **the
 //! request budget, which is the audit promise as a test**.
 
+mod recorded;
+
 use knobas_source::contract::{Fault, KeySink, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::passwords::{EntryRecord, OTP_UNREADABLE, SecretAnswer, SecretAsk, SecretRef};

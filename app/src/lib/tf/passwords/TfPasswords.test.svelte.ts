@@ -7,7 +7,7 @@ import { forgetHeld } from "./held.svelte";
 import { forgetComment, type PasswordPorts } from "./ports";
 import { resetClip } from "./clip.svelte";
 
-const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] };
+const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
 function row(id: string, folder: string, title: string, flags = 0): PwRow {
   return [id, 0, folder, title, `${title.split(" ")[0]}_user`, null, "2026-08-30T10:22:00Z", flags, null, []];

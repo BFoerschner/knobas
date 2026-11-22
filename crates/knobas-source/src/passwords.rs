@@ -479,6 +479,12 @@ pub struct Offers {
     pub history: Option<HistoryKind>,
     pub attachments: bool,
     pub access_requests: bool,
+    /// Whether the source marks which custom fields are protected. One that
+    /// does keeps a protected value out of its records (read live, drawn
+    /// covered); one that does not sends every value openly, and Settings
+    /// says so (Fable's ruling while Björn was away, 2026-11-22).
+    #[serde(default)]
+    pub marks_protected_fields: bool,
     /// The direct writes it performs.
     #[serde(default)]
     pub writes: Vec<WriteKind>,

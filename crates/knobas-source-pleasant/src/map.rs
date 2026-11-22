@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use knobas_source::SyncItem;
 use knobas_source::passwords::{
-    self, Approval, Attachments, CommentRules, EntryHead, EntryRecord, FieldRecord, FolderRecord,
-    OtpKey, PathStep,
+    self, Approval, AttachmentMeta, Attachments, CommentRules, EntryHead, EntryRecord, FieldRecord,
+    FolderRecord, OtpKey, PathStep,
 };
 
 use crate::api::{self, ApiEntry, ApiFolder, CommentPrompts};
@@ -69,10 +69,30 @@ pub fn entry(
             texts.insert(name.clone(), text);
         }
     }
-    let found = crate::otp::take(&mut texts);
+    // Pleasant's own key first, then the plugins' fields; every plugin key
+    // field leaves the fields either way. An account the server lets see no
+    // code key gets none.
+    let before: Vec<String> = texts.keys().cloned().collect();
+    let plugin = crate::otp::take(&mut texts);
+    // What `take` removed (a key field by name, or an otpauth:// value under
+    // any name) leaves the fields whole: never a covered row read live.
+    let taken: std::collections::BTreeSet<String> = before
+        .into_iter()
+        .filter(|name| !texts.contains_key(name))
+        .collect();
+    let found = if e.has_view_totp_access == Some(false) {
+        None
+    } else {
+        crate::otp::own(
+            e.totp_secret.as_deref(),
+            e.totp_digits.unwrap_or(0),
+            e.totp_period.unwrap_or(0),
+        )
+        .or(plugin)
+    };
     let fields: Vec<FieldRecord> = order
         .into_iter()
-        .filter(|name| !crate::otp::is_key_field(name))
+        .filter(|name| !crate::otp::is_key_field(name) && !taken.contains(name))
         .map(|name| FieldRecord {
             value: texts.get(&name).cloned(),
             name,
@@ -95,8 +115,25 @@ pub fn entry(
         changed_by: None,
         comment: rules(inherited, e.comment_prompts.as_ref()),
         approval: Approval::None,
-        attachments: Attachments::None,
-        can_read: e.has_view_entry_contents_access.unwrap_or(true),
+        attachments: if e.attachments.is_empty() {
+            Attachments::None
+        } else {
+            Attachments::Listed(
+                e.attachments
+                    .iter()
+                    .map(|a| AttachmentMeta {
+                        id: a.attachment_id.clone(),
+                        name: some_text(a.file_name.as_ref())
+                            .unwrap_or_else(|| "(unnamed)".to_owned()),
+                        size: a.file_size,
+                    })
+                    .collect(),
+            )
+        },
+        can_read: e
+            .has_view_entry_password_access
+            .or(e.has_view_entry_contents_access)
+            .unwrap_or(true),
         can_modify: e.has_modify_entries_access.unwrap_or(false),
     };
     let item = passwords::entry_item(

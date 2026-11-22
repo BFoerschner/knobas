@@ -100,7 +100,7 @@ function held(entries: Raw[], params: URLSearchParams): Held {
     sources: [{
       id: SOURCE, name: "Team passwords", account: "mara.lindqvist", by_hand: true,
       synced_at: unsynced ? null : SYNCED_AT, down_at: params.has("pw-offline") ? "2026-11-22T10:40:00Z" : null, never_synced: unsynced,
-      offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] },
+      offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
       skipped_root: `${SOURCE}:f/Tidewater`, adapter_name: "Pleasant Password Server",
     }],
     folders: unsynced ? [] : [...folders.values()],

@@ -567,7 +567,7 @@ const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svel
 
 /** The Passwords page's reads (ADR-0056), answering late: one source, one folder, one entry with a code. */
 function passwordPorts() {
-  const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] };
+  const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
   return {
     held: () =>
       deferred({
@@ -3529,7 +3529,7 @@ const CASES: Case[] = [
     name: "TfPwWrite",
     source: "lib/tf/passwords/TfPwWrite.svelte",
     open: (target) => {
-      const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: ["create_entry" as const] };
+      const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: ["create_entry" as const] };
       const source = { id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server" };
       const m = passwordModel({ sources: [source], folders: [{ id: "pw:f1", source: 0, parent: null, name: "Payments", comment_read: false, can_add: true }], entries: [], recent: [] });
       return {
@@ -3551,7 +3551,7 @@ const CASES: Case[] = [
           sourceId: "pw",
           name: "Team passwords",
           account: "mara",
-          offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] },
+          offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
           synced: true,
           facts: () => deferred({ entries: 1, folders: 1, formats: [["keepass", 1]] } as never),
         },
