@@ -9,6 +9,9 @@ mod locale;
 mod slow_answer;
 #[path = "embedded/start_reason.rs"]
 mod start_reason;
+#[cfg(unix)]
+#[path = "embedded/supervisor.rs"]
+mod supervisor;
 
 use knobas_db::{DbConfig, EmbeddedDb};
 
