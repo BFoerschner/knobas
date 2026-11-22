@@ -111,7 +111,7 @@ pub use knobas_source as spi;
 pub use knobas_source::docs::html;
 pub use knobas_source::docs::html::{Hook, Hooked, Reading};
 /// Where the source's own website shows its sign-in form: the descriptor's
-/// `web_sign_in`, read by the host from 1.6.0 on (ADR-0050). The host types a
+/// `web_sign_in`, read by the host from 1.7.0 on (ADR-0050). The host types a
 /// saved web sign-in into that form in its own web view; the adapter never
 /// sees one.
 pub use knobas_source::web_sign_in::WebSignInPages;
@@ -124,8 +124,15 @@ use knobas_source::{pipeline, run, view};
 
 /// The `knobas:adapter` version this SDK builds against: its WIT package's,
 /// and this crate's own version.
-#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
 pub const INTERFACE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The `knobas:adapter` version this SDK builds against: the frozen 1.6.0
+/// world, under the `v1_6` feature.
+#[cfg(all(
+    feature = "v1_6",
+    not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+))]
+pub const INTERFACE_VERSION: &str = "1.6.0";
 /// The `knobas:adapter` version this SDK builds against: the frozen 1.5.0
 /// world, under the `v1_5` feature.
 #[cfg(all(feature = "v1_5", not(any(feature = "v1_0", feature = "v1_3"))))]
@@ -143,10 +150,23 @@ pub const INTERFACE_VERSION: &str = "1.0.0";
 /// adapter's to name: the SDK's own types stand for every one.
 #[doc(hidden)]
 pub mod bindings {
-    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
     wit_bindgen::generate!({
         world: "adapter",
         path: "../knobas-wasm-host/wit",
+        pub_export_macro: true,
+        export_macro_name: "export_world",
+        default_bindings_module: "knobas_adapter_sdk::bindings",
+        runtime_path: "knobas_adapter_sdk::__private::wit_bindgen::rt",
+    });
+
+    #[cfg(all(
+        feature = "v1_6",
+        not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+    ))]
+    wit_bindgen::generate!({
+        world: "adapter",
+        path: "wit-1.6.0",
         pub_export_macro: true,
         export_macro_name: "export_world",
         default_bindings_module: "knobas_adapter_sdk::bindings",
@@ -583,8 +603,16 @@ mod tests {
     fn the_crate_version_is_the_interface_version_it_binds() {
         let wit = include_str!("../../knobas-wasm-host/wit/adapter.wit");
         assert_eq!(env!("CARGO_PKG_VERSION"), wit_version(wit));
-        #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
         assert_eq!(super::INTERFACE_VERSION, wit_version(wit));
+        #[cfg(all(
+            feature = "v1_6",
+            not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+        ))]
+        assert_eq!(
+            super::INTERFACE_VERSION,
+            wit_version(include_str!("../wit-1.6.0/adapter.wit"))
+        );
         #[cfg(all(feature = "v1_5", not(any(feature = "v1_0", feature = "v1_3"))))]
         assert_eq!(
             super::INTERFACE_VERSION,

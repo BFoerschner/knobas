@@ -47,12 +47,12 @@ pub(crate) fn patched(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
 }
 
 /// The manifest that names `artifact` truthfully: the fixture's kind and
-/// version, interface 1.6.0, its hash.
+/// version, interface 1.7.0, its hash.
 pub(crate) fn manifest_for(artifact: &[u8]) -> serde_json::Value {
     serde_json::json!({
         "adapter_kind": "wasm-fixture",
         "adapter_version": "0.1.0",
-        "interface_version": "1.6.0",
+        "interface_version": "1.7.0",
         "artifact": { "file": "fixture.wasm", "sha256": manifest::sha256(artifact) },
         "hosts": ["{base_url}"],
         "limits": { "deadline_secs": 30 },
@@ -218,7 +218,7 @@ async fn an_interface_version_this_knobas_cannot_host_is_refused() {
     says(
         &message,
         "the manifest asks for knobas:adapter@2.0.0, and this knobas hosts knobas:adapter@1.x \
-         up to 1.6.0",
+         up to 1.7.0",
     );
 }
 
@@ -256,7 +256,7 @@ async fn an_artifact_built_against_another_interface_than_the_manifest_says_is_r
     let message = refusal(&component, &manifest_for(&component).to_string()).await;
     says(
         &message,
-        "the artifact is built against knobas:adapter@2.0.0, and the manifest says 1.6.0",
+        "the artifact is built against knobas:adapter@2.0.0, and the manifest says 1.7.0",
     );
 }
 
@@ -486,7 +486,7 @@ async fn an_installed_fixture_is_offered_syncs_and_survives_a_restart() {
 
     let installed = install_fixture(&pool, &registry, store.path()).await;
     assert_eq!(installed.adapter_kind, "wasm-fixture");
-    assert_eq!(installed.interface_version, "1.6.0");
+    assert_eq!(installed.interface_version, "1.7.0");
     assert_eq!(installed.tag, None, "a local manifest is no release");
     assert_eq!(installed.hosts, ["{base_url}"]);
     assert!(
@@ -801,7 +801,7 @@ async fn a_preview_shows_name_version_roles_hosts_and_limits_and_writes_nothing(
     // The fixture names itself by its kind.
     assert_eq!(preview.name, "wasm-fixture");
     assert_eq!(preview.adapter_version, "0.1.0");
-    assert_eq!(preview.interface_version, "1.6.0");
+    assert_eq!(preview.interface_version, "1.7.0");
     assert_eq!(preview.tag, None);
     assert_eq!(preview.artifact_sha256, manifest::sha256(&artifact));
     assert_eq!(preview.hosts, ["{base_url}"]);
@@ -941,7 +941,7 @@ async fn a_preview_of_a_kind_already_installed_is_refused() {
 }
 
 /// An external source's site signs itself in as a built-in's does (ADR-0050,
-/// ux29): the 1.6.0 fixture declares its sign-in page, a web sign-in saved in
+/// ux30): the 1.7.0 fixture declares its sign-in page, a web sign-in saved in
 /// the source's keychain item is named in Settings, and a page loading there
 /// asks for the fill. The component never sees the sign-in.
 #[tokio::test(flavor = "multi_thread")]

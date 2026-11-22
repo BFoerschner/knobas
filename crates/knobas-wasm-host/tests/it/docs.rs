@@ -442,7 +442,7 @@ fn install(artifact: Vec<u8>) -> Result<manifest::Checked, manifest::Refusal> {
         &json!({
             "adapter_kind": "wasm-fixture",
             "adapter_version": "0.1.0",
-            "interface_version": "1.6.0",
+            "interface_version": "1.7.0",
             "artifact": { "file": "fixture.wasm", "sha256": manifest::sha256(&artifact) },
             "hosts": ["{base_url}"],
         })
@@ -460,7 +460,7 @@ fn a_wiki_claim_from_a_component_without_the_projection_is_refused_at_install() 
     let installed = install(fixture).expect("the fixture installs");
     assert!(installed.adapter.projects());
 
-    let unexported = patched_fixture("knobas:adapter/docs@1.6.0", "knobas:adapter/doxs@1.6.0");
+    let unexported = patched_fixture("knobas:adapter/docs@1.7.0", "knobas:adapter/doxs@1.7.0");
     let loaded = WasmAdapter::from_bytes(&unexported).expect("it still loads");
     assert!(!loaded.projects());
     assert_eq!(loaded.project("page", &payload("<p>words</p>")), None);
