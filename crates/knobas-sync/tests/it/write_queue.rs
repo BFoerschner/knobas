@@ -3197,6 +3197,65 @@ async fn move_to(h: &Harness, ticket: &EntityRef, status: &str) -> store::Queued
     .unwrap()
 }
 
+/// An edit that compares no field (labels alone: the ticket's liveness)
+/// carries no `after`, though an earlier edit of the ticket is open; one
+/// that compares its fields carries what the earlier one sets (ADR-0054; the
+/// final suite's mutants: the edit test widened to any op or any snapshot).
+#[tokio::test]
+async fn only_an_edit_that_compares_fields_carries_what_is_on_its_way() {
+    let h = harness().await;
+    let ticket = mirror_ticket(&h, "PAY-63", "To Do", "").await;
+    h.answer(Answer::Unreachable);
+    let edit =
+        |title: Option<&str>, labels: Option<knobas_source::LabelChange>| WriteOp::EditTicket {
+            entity: ticket.to_string(),
+            title: title.map(str::to_owned),
+            assignee: None,
+            priority: None,
+            labels,
+            fields: std::collections::BTreeMap::new(),
+        };
+    flusher::queue(&h.deps, &h.source, edit(Some("Retitled"), None))
+        .await
+        .unwrap();
+    let labels = flusher::queue(
+        &h.deps,
+        &h.source,
+        edit(
+            None,
+            Some(knobas_source::LabelChange {
+                add: vec!["sepa".to_owned()],
+                remove: vec![],
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        labels.target_snapshot.get("fields"),
+        None,
+        "{}",
+        labels.target_snapshot
+    );
+    assert_eq!(
+        labels.target_snapshot.get("after"),
+        None,
+        "{}",
+        labels.target_snapshot
+    );
+    let retitled = flusher::queue(&h.deps, &h.source, edit(Some("Again"), None))
+        .await
+        .unwrap();
+    if retitled.target_snapshot.get("fields").is_some() {
+        assert_eq!(
+            retitled.target_snapshot["after"]["title"],
+            serde_json::json!(["Retitled"]),
+            "{}",
+            retitled.target_snapshot
+        );
+    }
+}
+
 /// A colleague's comment synced between the queue and the flush does not
 /// hold a move: it compares the status alone (ADR-0054). Under the whole
 /// record (#43) it held.
