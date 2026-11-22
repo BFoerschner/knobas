@@ -107,7 +107,7 @@
   let box: HTMLElement | null = null;
   let field: HTMLInputElement | null = $state(null);
   /** When it opened, and how long an `Enter` with nothing typed is taken as the opener's second press: a dialog's hold (`still-press.ts`). */
-  let openedAt = 0;
+  let openedAt = -Infinity;
   const ARRIVAL_MS = HOLD_MS;
   let asked: ReturnType<typeof setTimeout> | undefined;
 
@@ -185,7 +185,7 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      openedAt = 0;
+      openedAt = -Infinity;
       event.preventDefault();
       void move(event.key === "ArrowDown" ? 1 : -1);
     } else if (event.key === "Enter") {
