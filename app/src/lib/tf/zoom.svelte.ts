@@ -111,6 +111,8 @@ export function createZoom({ storage, apply, frame = nextFrame, settled = heardA
   let level = $state(Number.isNaN(read) ? 1 : nearestLevel(read));
   let asked = $state(0);
   /** The level on the webview, and whether a frame is asked to put the newest there. */
+  // svelte-ignore state_referenced_locally
+  // A snapshot on purpose: what the webview has trails the level asked for.
   let applied = level;
   let waiting = false;
   /** A level is on its way to the webview: the next one waits for it to be laid out. */

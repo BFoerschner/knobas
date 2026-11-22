@@ -446,6 +446,8 @@ export function createFonts(
   let ligatures = $state(keptLigatures.read() === "on");
   let release = $state<Release>(keptRelease.read() === OLDER_RELEASE ? OLDER_RELEASE : CURRENT_RELEASE);
   /** The release and switch drawn now: they follow a press once its face has landed. */
+  // svelte-ignore state_referenced_locally
+  // A snapshot on purpose: what is drawn trails what is kept until the face lands.
   let drawn = { release, ligatures };
   const knobs = $state(
     Object.fromEntries(
