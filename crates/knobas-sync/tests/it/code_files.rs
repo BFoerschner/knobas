@@ -633,8 +633,20 @@ async fn an_archive_the_deadline_cuts_is_not_asked_again_and_holds_up_nothing() 
     assert_eq!(*world.forge.asked.lock().unwrap(), vec![huge.clone()]);
 
     // The next run reads the other repository first, and the cut one a file
-    // at a time: its archive is not asked again.
-    let second = pass_within(&world, bounds, u64::MAX).await;
+    // at a time: its archive is not asked again. Its budget is a deadline
+    // against a hang, not a measurement: 400 ms cut this run too on a loaded
+    // machine (the small-fixes list, 2026-11-22, at load 31). Still under the
+    // stand-in's 30 s archive, so an archive asked again would be cut and
+    // hold up the small repository, which the asserts below would see.
+    let second = pass_within(
+        &world,
+        Bounds {
+            budget: Duration::from_secs(20),
+            ..bounds
+        },
+        u64::MAX,
+    )
+    .await;
     assert_eq!(row(&world, &small).await, (Some("c1".to_owned()), 8, 8));
     assert_eq!(*world.forge.asked.lock().unwrap(), [huge.clone(), small]);
     assert_eq!((second.repositories, second.reads), (2, 8), "{second:?}");
