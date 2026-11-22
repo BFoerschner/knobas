@@ -162,7 +162,7 @@ fn own_fields(project: &str, values: &Value, meta: &Value) -> Vec<TicketField> {
             })
         })
         .collect();
-    fields.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    fields.sort_by_key(|f| f.label.to_lowercase());
     fields
 }
 
