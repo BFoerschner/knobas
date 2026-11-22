@@ -299,3 +299,85 @@ async fn the_site_settings_name_every_source_with_what_is_stored() {
         ]
     );
 }
+
+/// A password manager's site signs in with the source's own username and password where its adapter declares that
+/// (ux30): Pleasant's does. *Turn off* stops the fill until it is turned on again (the final suite's mutants: the
+/// write of *Turn off* and the source's sign-in method each survived the lib's tests).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_site_fills_its_sources_own_credential_until_that_is_turned_off() {
+    use knobas_secrets::{KeychainAccount, Secret};
+
+    let pool = knobas_db::test_util::scratch_database("site-own-credential")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('vault', 'pleasant', 'Team passwords', 'https://vault.example', 'user_password', $1)",
+    )
+    .bind(json!({ "username": "mara.lindqvist" }))
+    .execute(&pool)
+    .await
+    .expect("a Pleasant source");
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    secrets
+        .put(
+            &KeychainAccount::source("vault"),
+            &Secret::just(
+                knobas_source::AuthMethod::UserPassword,
+                "the reader's password",
+            ),
+        )
+        .unwrap();
+    let registry = knobas_app::sources::Registry::default();
+
+    let fill = knobas_app::site::sign_in_for_fill(&pool, &secrets, &registry, "vault")
+        .await
+        .expect("read");
+    let fill = fill.expect("the source's own credential");
+    assert_eq!(fill.username, "mara.lindqvist");
+    assert_eq!(fill.password, "the reader's password");
+    // Settings names it, on.
+    let own = |settings: Vec<knobas_app::site::SiteSetting>| {
+        settings
+            .into_iter()
+            .find(|s| s.source == "vault")
+            .and_then(|s| s.own_sign_in)
+            .map(|own| (own.user, own.on))
+    };
+    let reads = || knobas_app::site::SignInReads {
+        secrets: &secrets,
+        registry: &registry,
+    };
+    let settings = knobas_app::site::settings_and_rules(&pool, None, Some(reads()))
+        .await
+        .expect("settings");
+    assert_eq!(own(settings), Some(("mara.lindqvist".to_owned(), true)));
+
+    knobas_app::site::set_sign_in_off(&pool, "vault", true)
+        .await
+        .expect("turn off");
+    assert!(
+        knobas_app::site::sign_in_for_fill(&pool, &secrets, &registry, "vault")
+            .await
+            .expect("read")
+            .is_none(),
+        "turned off, nothing is filled"
+    );
+    let settings = knobas_app::site::settings_and_rules(&pool, None, Some(reads()))
+        .await
+        .expect("settings");
+    assert_eq!(own(settings), Some(("mara.lindqvist".to_owned(), false)));
+    knobas_app::site::set_sign_in_off(&pool, "vault", false)
+        .await
+        .expect("turn on");
+    assert!(
+        knobas_app::site::sign_in_for_fill(&pool, &secrets, &registry, "vault")
+            .await
+            .expect("read")
+            .is_some(),
+        "turned on again, the credential is filled"
+    );
+}

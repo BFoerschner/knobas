@@ -75,3 +75,65 @@ fn a_look_is_kept_in_the_profile_and_a_bad_one_refused() {
         knobas_app::window_look::WindowLook::new("dark", "#E4E8EC", "#1A2027").unwrap()
     );
 }
+
+/// The themes a person keeps, read back through the commands over the database: nothing before any is kept, then
+/// what was kept (the final suite's mutants: `themes_kept` answering a made-up snapshot survived the lib's tests).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_kept_themes_are_read_back_as_they_were_kept() {
+    let pool = knobas_db::test_util::scratch_database("themes-kept-ipc")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    let lifecycle = knobas_app::commands::app::Lifecycle::new();
+    lifecycle.install(knobas_app::AppState::over_pool(pool));
+    lifecycle.set(knobas_app::DbState::Ready);
+    let answers = tokio::task::spawn_blocking(move || {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                knobas_app::commands::window::themes_kept,
+                knobas_app::commands::window::set_themes_kept
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(lifecycle);
+        let webview = tauri::WebviewWindowBuilder::<MockRuntime, _>::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::default(),
+        )
+        .build()
+        .expect("mock webview");
+        let call = |cmd: &str, body: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.to_owned(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: LOCAL_ORIGIN.parse().expect("url"),
+                    body: body.into(),
+                    headers: HashMap::new().into_iter().collect(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .map_err(|error| format!("{error:?}"))
+            .and_then(|body| {
+                body.deserialize::<serde_json::Value>()
+                    .map_err(|e| e.to_string())
+            })
+        };
+        let before = call("themes_kept", json!({}));
+        call(
+            "set_themes_kept",
+            json!({ "snapshot": r#"{"v":1,"themes":[]}"# }),
+        )
+        .expect("kept");
+        let after = call("themes_kept", json!({}));
+        (before, after)
+    })
+    .await
+    .unwrap();
+    assert_eq!(answers.0.expect("read"), serde_json::Value::Null);
+    assert_eq!(answers.1.expect("read"), json!(r#"{"v":1,"themes":[]}"#));
+}
