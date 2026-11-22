@@ -1699,6 +1699,48 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 /// already cancelled by the time this is reached.
 const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How long the quit waits for an aborted run to be gone. An abort takes
+/// effect at the run's next await; a run stuck in a call that never returns
+/// to its executor takes none. On Windows a run reporting its end through an
+/// event to the page waited on the main thread, which was the quit waiting
+/// for the run: knobas never quit (the final suite, 2026-11-22). Past this the
+/// quit goes on without it; the next start's `reconcile_abandoned` closes its
+/// row.
+pub(crate) const ABORTED_GONE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The most a quit waits for [`Scheduler::shutdown`] by the wall clock
+/// ([`finish_within`]): its grace, the wait for aborted runs, the pool's
+/// close twice over (the cut writes' hold and the close itself), and a second.
+/// Past it the quit goes on to the database without the scheduler.
+pub const QUIT_BOUND: Duration = Duration::from_secs(
+    SHUTDOWN_GRACE.as_secs()
+        + ABORTED_GONE_TIMEOUT.as_secs()
+        + 2 * POOL_CLOSE_TIMEOUT.as_secs()
+        + 1,
+);
+
+/// Run `future` as a task on `runtime` and wait for its answer by the wall
+/// clock, at most `bound`: `None` past it, and the task is left to the
+/// process's end.
+///
+/// For a caller on a thread that is not one of the runtime's (the quit, on the
+/// main thread). Not a `block_on`: while a worker is stuck in a call that never
+/// returns to its executor, the runtime's timers can stop firing for a
+/// `block_on` thread (it never drives them), and every timeout inside the
+/// future with them (the final suite, 2026-11-22). A spawned task wakes a
+/// worker, which drives them; and a `recv_timeout` needs none of them.
+pub fn finish_within<T: Send + 'static>(
+    runtime: &tokio::runtime::Handle,
+    bound: Duration,
+    future: impl std::future::Future<Output = T> + Send + 'static,
+) -> Option<T> {
+    let (answer, answered) = std::sync::mpsc::channel();
+    runtime.spawn(async move {
+        let _ = answer.send(future.await);
+    });
+    answered.recv_timeout(bound).ok()
+}
+
 /// What `delete_source` asked to happen to a deleted source's mirror.
 ///
 /// Carried into the scheduler rather than staying in `delete_source`, because
@@ -2432,7 +2474,7 @@ impl Scheduler {
     /// are awaited together. One grace ([`SchedulerTiming::shutdown_grace`],
     /// [`SHUTDOWN_GRACE`] outside tests) from the cancel covers
     /// the door and both waits, and what is left at its end is aborted, and
-    /// awaited until it is gone. A write that was still at its source then
+    /// awaited until it is gone, for at most [`ABORTED_GONE_TIMEOUT`]. A write that was still at its source then
     /// is held as one the source may have (#1932, `write_queue::hold_cut`),
     /// so the next start does not send it again. Only then the pool.
     ///
@@ -2463,9 +2505,20 @@ impl Scheduler {
                 // Until each is gone: an aborted task's future is dropped on
                 // its own worker, and a send it cut is kept as it drops. A
                 // handle joined above is finished, and polling it again
-                // would panic.
-                for handle in handles.iter_mut().filter(|handle| !handle.is_finished()) {
-                    let _ = handle.await;
+                // would panic. Bounded: a run stuck in a blocking call is
+                // never gone ([`ABORTED_GONE_TIMEOUT`]).
+                let gone = async {
+                    for handle in handles.iter_mut().filter(|handle| !handle.is_finished()) {
+                        let _ = handle.await;
+                    }
+                };
+                if tokio::time::timeout(ABORTED_GONE_TIMEOUT, gone)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        "a sync run is stuck in a call that does not return: the quit goes on without it"
+                    );
                 }
             }
         };

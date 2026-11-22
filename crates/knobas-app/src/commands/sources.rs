@@ -620,7 +620,7 @@ pub async fn sync_now_with_progress<R: tauri::Runtime>(
     progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
 ) -> Result<i64, IpcError> {
     let state = crate::sources::state(&app)?;
-    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(progress))
+    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(&app, progress))
         as std::sync::Arc<dyn knobas_sync::ProgressSink>;
     state
         .scheduler
@@ -652,7 +652,7 @@ pub async fn watch_sync<R: tauri::Runtime>(
     progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
 ) -> Result<Option<i64>, IpcError> {
     let state = crate::sources::state(&app)?;
-    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(progress))
+    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(&app, progress))
         as std::sync::Arc<dyn knobas_sync::ProgressSink>;
     Ok(state.scheduler.watch(&source_id, sink).await)
 }

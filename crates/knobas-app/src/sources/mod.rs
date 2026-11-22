@@ -870,7 +870,21 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         return; // bring-up failed before the scheduler existed
     };
     tracing::info!("stopping the sync scheduler");
-    tauri::async_runtime::block_on(state.scheduler.shutdown());
+    // Spawned and waited for by the wall clock, never `block_on` here: see
+    // `knobas_sync::scheduler::finish_within`.
+    let scheduler = state.scheduler.clone();
+    let runtime = tauri::async_runtime::handle();
+    let stopped = knobas_sync::scheduler::finish_within(
+        runtime.inner(),
+        knobas_sync::scheduler::QUIT_BOUND,
+        async move { scheduler.shutdown().await },
+    );
+    if stopped.is_none() {
+        tracing::error!(
+            bound_s = knobas_sync::scheduler::QUIT_BOUND.as_secs(),
+            "the sync scheduler did not stop in time: quitting without it"
+        );
+    }
 }
 
 #[cfg(test)]
