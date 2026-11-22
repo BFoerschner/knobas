@@ -27,6 +27,7 @@ knobas-app/start_work_live  just start-work-live runs it with --test start_work_
 knobas-app/teamcity_seeded_live  just teamcity-live-seeded runs it with --test teamcity_seeded_live
 knobas-search/coverage  just search-perf runs it with --test coverage
 knobas-search/perf  just search-perf runs it with --test perf
+knobas-site/mac_forget  no harness: WebKit wants the main thread and its run loop, which libtest's threads are not
 knobas-source-confluence/live_confluence_seeded  just atlassian-live runs it with --test live_confluence_seeded
 knobas-source-gitea/live_gitea  just gitea-live runs it with --test live_gitea
 knobas-source-gitea/live_gitea_capped  just gitea-live-capped runs it with --test live_gitea_capped
