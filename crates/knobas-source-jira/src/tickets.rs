@@ -731,9 +731,12 @@ mod tests {
         };
         meta.insert("duedate".into(), json!({ "required": false, "name": "Due date", "operations": ["set"], "schema": { "type": "date", "system": "duedate" } }));
         meta.insert("description".into(), json!({ "required": false, "name": "Description", "operations": ["set"], "schema": { "type": "string", "system": "description" } }));
+        let mut reference = custom("Customer ref", "string", "textfield", 10100);
+        reference["required"] = json!(true);
+        meta.insert("customfield_10100".into(), reference);
         meta.insert(
-            "customfield_10100".into(),
-            custom("Customer ref", "string", "textfield", 10100),
+            "customfield_10500".into(),
+            custom("Go-live", "date", "datepicker", 10500),
         );
         meta.insert(
             "customfield_10106".into(),
@@ -754,6 +757,7 @@ mod tests {
         let values = answer["fields"].as_object_mut().unwrap();
         values.insert("duedate".into(), json!("2026-12-01"));
         values.insert("customfield_10100".into(), json!("ACME-7"));
+        values.insert("customfield_10500".into(), json!("2027-01-15"));
         values.insert("customfield_10106".into(), json!(3.0));
         values.insert(
             "customfield_10200".into(),
@@ -780,11 +784,21 @@ mod tests {
                 ("customfield_10100", "text"),
                 ("duedate", "date"),
                 ("customfield_10200", "choice"),
+                ("customfield_10500", "date"),
                 ("customfield_10300", "search"),
                 ("customfield_10106", "number"),
             ]
         );
         assert_eq!(fields.get("duedate").unwrap().value, json!("2026-12-01"));
+        assert_eq!(
+            fields.get("customfield_10500").unwrap().value,
+            json!("2027-01-15")
+        );
+        assert!(
+            fields.get("customfield_10100").unwrap().required,
+            "the screen says required"
+        );
+        assert!(!fields.get("duedate").unwrap().required);
         assert_eq!(fields.get("customfield_10106").unwrap().value, json!(3.0));
         let env = fields.get("customfield_10200").unwrap();
         assert_eq!(env.value, json!("Staging"));
