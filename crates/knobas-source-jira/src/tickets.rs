@@ -563,6 +563,24 @@ mod tests {
         assert!(none.fields.iter().all(|f| f.readonly.is_some()));
     }
 
+    /// A priority the ticket holds that the screen no longer offers is still
+    /// an option, first; one it offers is not listed twice.
+    #[test]
+    fn a_held_priority_the_screen_drops_leads_the_options_and_an_offered_one_is_not_doubled() {
+        let options = |answer: &Value| {
+            let fields = map("PAY-231", answer);
+            let TicketFieldKind::Choice { options } = fields.get("priority").unwrap().kind.clone()
+            else {
+                panic!("a choice")
+            };
+            options.into_iter().map(|o| o.value).collect::<Vec<_>>()
+        };
+        assert_eq!(options(&recorded()), ["Highest", "High", "Low"]);
+        let mut dropped = recorded();
+        dropped["fields"]["priority"] = json!({ "name": "Medium" });
+        assert_eq!(options(&dropped), ["Medium", "Highest", "High", "Low"]);
+    }
+
     #[test]
     fn assignable_people_read_by_name_with_their_account_and_complete_under_the_ceiling() {
         let found = people(&[

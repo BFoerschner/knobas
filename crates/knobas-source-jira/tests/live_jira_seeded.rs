@@ -5281,3 +5281,290 @@ async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
     println!("SEEDED attachment refusal: {MINTED} -> {refused:?}; the administrator reads it");
     drop(narrowed);
 }
+
+/// Where `KNOBAS_JIRA_RECORD` names a folder, each of Jira's raw answers this
+/// case reads is written there as a fixture: the base URL masked to
+/// `https://jira.example`, e-mail addresses to `masked@example.invalid`.
+async fn record(seeded: &Seeded, name: &str, value: &serde_json::Value) {
+    let Ok(dir) = std::env::var("KNOBAS_JIRA_RECORD") else {
+        return;
+    };
+    let text = serde_json::to_string_pretty(value)
+        .expect("JSON")
+        .replace(&seeded.url, "https://jira.example");
+    let masked = text
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("\"emailAddress\"") {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                let comma = if line.trim_end().ends_with(',') {
+                    ","
+                } else {
+                    ""
+                };
+                format!("{indent}\"emailAddress\": \"masked@example.invalid\"{comma}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::create_dir_all(&dir).expect("the record folder");
+    std::fs::write(format!("{dir}/{name}.json"), masked + "\n").expect("a fixture");
+}
+
+/// **A ticket's fields against a real Jira** (ADR-0054, the 2026-11-21
+/// ruling's section 21): on an issue this case files in PAY, the adapter's
+/// `ticket_fields` reads its screen (the four named fields and the due
+/// date, a source's own), the assignable search with nothing typed answers
+/// the seeded people, and one `EditTicket` after another assigns it,
+/// prioritises it, labels it, retitles it and dates it, each read back
+/// through Jira's REST API and through the fields again; then everything is
+/// put back and the issue deleted. A move there and back witnesses
+/// `transition` beside it. An edit of a field off the screen is refused with
+/// Jira's sentence. With `KNOBAS_JIRA_RECORD`, Jira's answers are kept as
+/// fixtures.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_tickets_fields_are_edited_and_read_back_on_a_real_jira() {
+    use knobas_source::{Assignee, LabelChange, WriteOp};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let project = seeded.owned_project_keys()[0].clone();
+    let (status, made) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/issue",
+            Some(serde_json::json!({ "fields": {
+                "project": { "key": project },
+                "issuetype": { "name": "Task" },
+                "summary": "knobas live suite: a ticket's fields",
+                "labels": [LITTER_LABEL],
+            } })),
+        )
+        .await;
+    assert_eq!(status, 201, "filing the case's issue: {made}");
+    let key = made["key"]
+        .as_str()
+        .expect("a created issue has a key")
+        .to_owned();
+    let id = format!("jira:{key}");
+    let source = seeded.source(serde_json::json!({}));
+    let edit = |change: &dyn Fn(&mut WriteOp)| {
+        let mut op = WriteOp::EditTicket {
+            entity: id.clone(),
+            title: None,
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: BTreeMap::new(),
+        };
+        change(&mut op);
+        op
+    };
+    let issue = |fields: &'static str| {
+        let (seeded, key) = (&seeded, key.clone());
+        async move {
+            let (status, body) = seeded
+                .get(&format!("rest/api/2/issue/{key}?fields={fields}"))
+                .await;
+            assert_eq!(status, 200, "{body}");
+            body["fields"].clone()
+        }
+    };
+
+    // 1. The screen, raw and as the adapter reads it.
+    let (status, raw) = seeded
+        .get(&format!(
+            "rest/api/2/issue/{key}?expand=editmeta&fields=*navigable"
+        ))
+        .await;
+    assert_eq!(status, 200, "{raw}");
+    record(&seeded, "ticket-fields-issue-editmeta", &raw).await;
+    let fields = source
+        .ticket_fields(&id)
+        .await
+        .expect("the fields read")
+        .expect("an issue edits");
+    assert_eq!(knobas_source::ticket::fault(&fields), None);
+    for named in ["title", "assignee", "priority", "labels"] {
+        let field = fields
+            .get(named)
+            .unwrap_or_else(|| panic!("{named} is listed"));
+        assert_eq!(
+            field.readonly, None,
+            "{named} is on the default edit screen: {raw}"
+        );
+    }
+    let own: Vec<&str> = fields.fields[4..].iter().map(|f| f.id.as_str()).collect();
+    println!("{key}'s own fields as the adapter reads them: {own:?}");
+
+    // 2. Who can be assigned, with nothing typed (section 21's open question).
+    let (status, people_raw) = seeded
+        .get(&format!(
+            "rest/api/2/user/assignable/search?issueKey={key}&username=&maxResults=1000"
+        ))
+        .await;
+    record(&seeded, "ticket-fields-assignable-empty", &people_raw).await;
+    println!(
+        "assignable search with an empty username: {status}, {} people",
+        people_raw.as_array().map_or(0, Vec::len)
+    );
+    let people = source
+        .field_options(&id, "assignee", "")
+        .await
+        .expect("the assignable search")
+        .expect("the assignee has a list");
+    let who = people
+        .options
+        .iter()
+        .find(|o| o.value != seeded.user)
+        .or(people.options.first())
+        .expect("somebody can be assigned")
+        .value
+        .clone();
+
+    // 3. Assigned, prioritised, labelled, retitled and dated in one edit.
+    let priority = match &fields.get("priority").unwrap().kind {
+        knobas_source::ticket::TicketFieldKind::Choice { options } => options
+            .iter()
+            .map(|o| o.value.clone())
+            .find(|v| Some(v.as_str()) != fields.get("priority").unwrap().value.as_str())
+            .expect("another priority"),
+        other => panic!("priority is {other:?}"),
+    };
+    let dated = own.contains(&"duedate");
+    source
+        .write(edit(&|op| {
+            if let WriteOp::EditTicket {
+                title,
+                assignee,
+                priority: p,
+                labels,
+                fields,
+                ..
+            } = op
+            {
+                *title = Some("knobas live suite: a ticket's fields (edited)".into());
+                *assignee = Some(Assignee::Account(who.clone()));
+                *p = Some(priority.clone());
+                *labels = Some(LabelChange {
+                    add: vec!["knobas-live-fields".into()],
+                    remove: vec![],
+                });
+                if dated {
+                    fields.insert("duedate".into(), serde_json::json!("2026-12-01"));
+                }
+            }
+        }))
+        .await
+        .expect("Jira takes the edit");
+    let after = issue("summary,assignee,priority,labels,duedate").await;
+    assert_eq!(
+        after["summary"],
+        "knobas live suite: a ticket's fields (edited)"
+    );
+    assert_eq!(after["assignee"]["name"], who.as_str(), "{after}");
+    assert_eq!(after["priority"]["name"], priority.as_str());
+    let labels: Vec<&str> = after["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|l| l.as_str())
+        .collect();
+    assert!(
+        labels.contains(&"knobas-live-fields") && labels.contains(&LITTER_LABEL),
+        "{labels:?}"
+    );
+    if dated {
+        assert_eq!(after["duedate"], "2026-12-01");
+    }
+    let read = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(read.get("assignee").unwrap().value, serde_json::json!(who));
+    assert_eq!(
+        read.get("priority").unwrap().value,
+        serde_json::json!(priority)
+    );
+
+    // 4. A field off the screen: refused with Jira's own sentence, raw too.
+    let (status, refusal) = seeded
+        .request(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{key}"),
+            Some(serde_json::json!({ "fields": { "resolution": { "name": "Done" } } })),
+        )
+        .await;
+    record(&seeded, "ticket-fields-off-screen-400", &refusal).await;
+    println!("an edit off the screen: {status} {refusal}");
+    assert_eq!(status, 400, "{refusal}");
+
+    // 5. Moved and back (`transition`, the moving build's witness).
+    let reach = source
+        .reachable_transitions(&id)
+        .await
+        .expect("the workflow read");
+    let was = issue("status").await["status"]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    if let Some(to) = reach.first().cloned() {
+        source
+            .write(WriteOp::Transition {
+                entity: id.clone(),
+                status: to.clone(),
+            })
+            .await
+            .expect("Jira takes the move");
+        assert_eq!(issue("status").await["status"]["name"], to.as_str());
+        let back = source.reachable_transitions(&id).await.unwrap();
+        if back.iter().any(|s| s == &was) {
+            source
+                .write(WriteOp::Transition {
+                    entity: id.clone(),
+                    status: was.clone(),
+                })
+                .await
+                .expect("Jira takes the move back");
+        }
+        println!("{key} moved {was} -> {to} and back where Jira lets it; reachable: {reach:?}");
+    }
+
+    // 6. Put back: unassigned, the label off, the date cleared, then gone.
+    source
+        .write(edit(&|op| {
+            if let WriteOp::EditTicket {
+                assignee,
+                labels,
+                fields,
+                ..
+            } = op
+            {
+                *assignee = Some(Assignee::Nobody);
+                *labels = Some(LabelChange {
+                    add: vec![],
+                    remove: vec!["knobas-live-fields".into()],
+                });
+                if dated {
+                    fields.insert("duedate".into(), serde_json::Value::Null);
+                }
+            }
+        }))
+        .await
+        .expect("Jira takes the edit back");
+    let back = issue("assignee,labels,duedate").await;
+    assert!(back["assignee"].is_null(), "{back}");
+    assert!(back["duedate"].is_null(), "{back}");
+    let (status, body) = seeded
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/issue/{key}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 204, "deleting {key}: {body}");
+    println!(
+        "{key} assigned to {who}, set to {priority}, labelled, retitled{} and deleted",
+        if dated { ", dated" } else { "" }
+    );
+}
