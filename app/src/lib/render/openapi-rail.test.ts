@@ -195,10 +195,10 @@ test("a cut row keeps the parts that tell it from its neighbours: no two rows re
     "put …/permissions/…/{repository_id}",
     "delete …/permissions/…/{repository_id}",
     "get /orgs/…/secrets/…/repositories",
-    "get …/actions/variables/…/repositories",
+    "get …/actions/variables/…",
     "get …/codespaces/…/repositories",
     "get …/dependabot/…/repositories",
-    "get …/private-registries/…/repositories",
+    "get …/private-registries/…",
     "get /orgs/…/settings/…/repositories",
     "get …/code-security/…/repositories",
     "get /orgs/{org}/repos",
@@ -210,6 +210,8 @@ test("a cut row keeps the parts that tell it from its neighbours: no two rows re
   ]);
   for (let i = 1; i < read.length; i++) expect(read[i]).not.toBe(read[i - 1]);
   expect(readingSame(rows, 32, rows.length)).toEqual([]);
+  // Each is cut at a part, within the width: the row's own ellipsis never cuts a word.
+  expect(read.filter((r) => r.slice(r.indexOf(" ") + 1).length > 32)).toEqual([]);
 });
 
 test("a row with no neighbour is cut as before: its first part and as many last parts as fit", () => {

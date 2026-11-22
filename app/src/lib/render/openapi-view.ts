@@ -146,9 +146,10 @@ export function fitPath(path: string, chars: number): string {
  * `path` cut to `chars` characters, never dropping the parts at `keep` (indexes into its parts), its first or its
  * last (2026-11-22 polish). The others go one by one until it fits, each run of dropped parts one `…`: the
  * `{parameters}` first, left to right, since they say least, then the plain parts left to right, so the end stays
- * longest, then the first part where `keep` does not hold it (`…/actions/secrets/…/repositories`). Where the kept
- * parts alone are too long the answer is still longer than `chars`, and the row's own ellipsis ends it: a row then
- * reads too long, never the same as its neighbour.
+ * longest, then the first part where `keep` does not hold it (`…/actions/secrets/…/repositories`), then the last
+ * (`…/runner-groups/…`): cut at a part, not mid-word by the row's own ellipsis. Where the kept parts alone are too
+ * long the answer is still longer than `chars`, and that ellipsis ends it: a row then reads too long, never the same
+ * as its neighbour.
  */
 function cutPath(path: string, chars: number, keep: ReadonlySet<number>): string {
   if (path.length <= chars) return path;
@@ -169,6 +170,7 @@ function cutPath(path: string, chars: number, keep: ReadonlySet<number>): string
   for (let i = 1; i < n - 1; i++) if (!keep.has(i) && segs[i]!.startsWith("{")) free.push(i);
   for (let i = 1; i < n - 1; i++) if (!keep.has(i) && !segs[i]!.startsWith("{")) free.push(i);
   if (!keep.has(0)) free.push(0);
+  if (!keep.has(n - 1)) free.push(n - 1);
   // The drawn length, kept as parts go: a part and its `/` out, a `/…` in unless a neighbour's run already has one.
   let length = path.length;
   for (const i of free) {
