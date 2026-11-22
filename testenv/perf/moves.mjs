@@ -161,7 +161,8 @@ const PLACES = [
     ["priority", `${shown} button[aria-label="Priority: change it"]`, "[role=menu] [role=menuitemradio]"],
     ["labels", `${shown} button[aria-label="Labels: change it"]`, ".tf-pick .tf-pick-opt"],
     ["title", `${shown} .tf-tktitlepen`, `${shown} .tf-tktitleedit input`],
-  ].map(([field, press, ready]) => ({ name: `ticket-edit-${field}`, fixture: true, start: TICKET, press, hash: null, ready, away: "Escape" })),
+    // The summary's field takes two Escs, the first leaving the field (`inlineEditor`): its `hash` asks `leave` for the second.
+  ].map(([field, press, ready]) => ({ name: `ticket-edit-${field}`, fixture: true, start: TICKET, press, hash: field === "title" ? TICKET : null, ready, away: "Escape" })),
   { name: "inbox", start: "#/time", nav: "inbox", hash: "#/inbox", away: "time", tabs: true },
   { name: "code", start: "#/time", nav: "code", hash: "#/code", away: "time", tabs: true },
   { name: "repo", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", away: "Escape", tabs: true },
