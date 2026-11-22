@@ -285,11 +285,17 @@ async fn the_site_settings_name_every_source_with_what_is_stored() {
             )
         })
         .collect();
+    // A site opens inside only where sites are offered (macOS and Windows):
+    // on Linux the stored `true` reads off.
     assert_eq!(
         rows,
         [
             ("jira".to_owned(), false, "http://x".to_owned()),
-            ("wiki".to_owned(), true, "http://x".to_owned()),
+            (
+                "wiki".to_owned(),
+                knobas_site::OFFERED,
+                "http://x".to_owned()
+            ),
         ]
     );
 }

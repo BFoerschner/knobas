@@ -137,6 +137,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         clone_from: Vec::new(),
         url_forms: Vec::new(),
         // A single-page app: its sign-in dialog stands on whatever page loads (ADR-0050).
+        web_links: None,
         web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::any_page()),
         code_pages: None,
         by_hand_by_default: false,

@@ -1,6 +1,19 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
 
 /**
+ * A site that signs in with its source's own credential (ux30).
+ */
+export type OwnSignIn = { 
+/**
+ * The credential's username: the source's `username` setting.
+ */
+user: string, 
+/**
+ * Not turned off. A saved sign-in still wins over it.
+ */
+on: boolean, };
+
+/**
  * What `site_do` does.
  */
 export type SiteAct = "back" | "forward" | "reload" | "stop" | "focus" | "focus-shell";
@@ -133,7 +146,13 @@ persists: boolean,
  * The username of the saved web sign-in (ux29), when one is saved. The
  * password never leaves the keychain item.
  */
-sign_in_user: string | null, };
+sign_in_user: string | null, 
+/**
+ * The site signs in with the source's own credential (ux30): its
+ * adapter says so, and the source signs in by username and password.
+ * `None` for every other site.
+ */
+own_sign_in: OwnSignIn | null, };
 
 /**
  * What the bar says about the sign-in (`SiteStatus::sign_in`).

@@ -15,6 +15,13 @@
 //!   then looks for a sign-in form on each page of the source's own origin
 //!   that loads, a few times while it renders.
 //!
+//! [`WebSignInPages::uses_credential`] says the site's sign-in is the source's
+//! own credential (ux30): a password manager's web interface signs in with the
+//! very account its API does, so knobas fills that form with the username and
+//! password the source already keeps, and nothing new is saved. Only with
+//! declared `paths`, never `any_page`, where a form in other people's text
+//! could collect it.
+//!
 //! An external adapter declares the same field in its descriptor's JSON; one
 //! that declares nothing gets the button alone. [`check`] holds a declaration
 //! to these rules (contract battery clause 16).
@@ -30,6 +37,12 @@ pub struct WebSignInPages {
     /// The form can stand on any page of the site's own origin.
     #[serde(default)]
     pub any_page: bool,
+    /// The site signs in with the source's own username and password, so
+    /// that credential is filled unless another sign-in is saved for the site
+    /// or the person turned the fill off (ux30).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub uses_credential: bool,
 }
 
 impl WebSignInPages {
@@ -39,6 +52,16 @@ impl WebSignInPages {
         Self {
             paths: paths.iter().map(|path| (*path).to_owned()).collect(),
             any_page: false,
+            uses_credential: false,
+        }
+    }
+
+    /// The same pages, signed in with the source's own credential.
+    #[must_use]
+    pub fn with_credential(self) -> Self {
+        Self {
+            uses_credential: true,
+            ..self
         }
     }
 
@@ -48,6 +71,7 @@ impl WebSignInPages {
         Self {
             paths: Vec::new(),
             any_page: true,
+            uses_credential: false,
         }
     }
 }
@@ -65,6 +89,8 @@ pub enum WebSignInError {
     Dots(String),
     #[error("path {0:?} is declared twice")]
     Twice(String),
+    #[error("`uses_credential` needs declared paths and not `any_page`")]
+    CredentialAnywhere,
 }
 
 /// A declaration's rules.
@@ -75,6 +101,9 @@ pub enum WebSignInError {
 pub fn check(pages: &WebSignInPages) -> Result<(), WebSignInError> {
     if pages.paths.is_empty() && !pages.any_page {
         return Err(WebSignInError::Empty);
+    }
+    if pages.uses_credential && (pages.any_page || pages.paths.is_empty()) {
+        return Err(WebSignInError::CredentialAnywhere);
     }
     for (index, path) in pages.paths.iter().enumerate() {
         if !path.starts_with('/') {
@@ -136,6 +165,34 @@ mod tests {
         assert_eq!(
             check(&WebSignInPages::at(&["/l", "/l"])),
             Err(WebSignInError::Twice("/l".into()))
+        );
+    }
+
+    /// The source's own credential is filled only on declared pages.
+    #[test]
+    fn the_credential_is_declared_with_paths_alone() {
+        assert_eq!(
+            check(&WebSignInPages::at(&["/SignIn/Direct"]).with_credential()),
+            Ok(())
+        );
+        assert_eq!(
+            check(&WebSignInPages::any_page().with_credential()),
+            Err(WebSignInError::CredentialAnywhere)
+        );
+        let both = WebSignInPages {
+            any_page: true,
+            ..WebSignInPages::at(&["/login"]).with_credential()
+        };
+        assert_eq!(check(&both), Err(WebSignInError::CredentialAnywhere));
+        let read: WebSignInPages =
+            serde_json::from_str(r#"{"paths":["/s"],"uses_credential":true}"#).unwrap();
+        assert!(read.uses_credential);
+        let read: WebSignInPages = serde_json::from_str(r#"{"paths":["/s"]}"#).unwrap();
+        assert!(!read.uses_credential);
+        assert_eq!(
+            serde_json::to_value(WebSignInPages::at(&["/s"])).unwrap(),
+            serde_json::json!({"paths": ["/s"], "any_page": false}),
+            "an older reader sees the bytes it knew"
         );
     }
 

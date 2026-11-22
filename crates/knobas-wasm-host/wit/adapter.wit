@@ -166,8 +166,14 @@ interface source {
         /// (`{"paths": ["/login"], "any_page": false}`): where the source's
         /// own website shows its sign-in form, paths after the base URL. A
         /// saved web sign-in is typed into that form by the host, inside its
-        /// own web view; the component never sees it. A component built
-        /// against 1.6.0 or earlier has the key dropped.
+        /// own web view; the component never sees it. With
+        /// `"uses_credential": true` (declared paths only) the host fills that
+        /// form with the source's own username and password. It also reads
+        /// the optional `web_links` (`{"home": "/vault", "pages":
+        /// {"<kind>": "/#/vault?itemId={key}"}}`): where the website shows an
+        /// item of a declared kind, `{key}` being the entity's key
+        /// percent-encoded once, and its front page, both after the base URL.
+        /// A component built against 1.6.0 or earlier has both keys dropped.
         descriptor: func() -> json;
 
         test-connection: func() -> result<connection-info, source-error>;

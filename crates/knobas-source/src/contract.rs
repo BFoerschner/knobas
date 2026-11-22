@@ -577,6 +577,14 @@ where
     //     only for one, and a write the source does not perform is refused
     //     before anything is sent.
     check_passwords(&*s, &d, &sink.0, &otp_keys).await;
+    // 18. The web links (ux30): each template after the base URL, one per
+    //     declared kind with `{key}` once -- see `web_links::check`.
+    if let Some(links) = &d.web_links {
+        let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
+        if let Err(error) = crate::web_links::check(links, &kinds) {
+            panic!("descriptor.web_links: {error}");
+        }
+    }
 }
 
 /// Clause 17 rule 2: the first code key handed over that appears in an
@@ -2719,6 +2727,7 @@ mod tests {
                 },
                 url_forms: Vec::new(),
                 web_sign_in: None,
+                web_links: None,
                 code_pages: None,
                 by_hand_by_default: false,
                 passwords: None,
@@ -4778,6 +4787,7 @@ mod password_tests {
                 url_forms: vec![],
                 code_pages: None,
                 web_sign_in: None,
+                web_links: None,
                 by_hand_by_default: true,
                 passwords: claimed.then(|| Offers {
                     one_time_codes: true,

@@ -44,6 +44,7 @@ pub mod tree;
 pub mod url_forms;
 pub mod view;
 pub mod watermark;
+pub mod web_links;
 pub mod web_sign_in;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
@@ -276,6 +277,18 @@ pub struct SourceDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub web_sign_in: Option<web_sign_in::WebSignInPages>,
+    /// Where the source's own website shows one item of a kind, and its
+    /// front page (ux30, [`web_links`]): the Passwords page's *Open web
+    /// interface* builds its address from the typed base URL and these,
+    /// never from a mirrored value. [`web_links::check`] holds it to its
+    /// rules (contract battery clause 18). Read on the Rust side.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// -- an external adapter's JSON among them -- decodes as a source whose
+    /// site opens at its base URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_links: Option<web_links::WebLinks>,
 }
 
 impl SourceDescriptor {
@@ -2917,6 +2930,7 @@ mod tests {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             web_sign_in: None,
+            web_links: None,
             code_pages: None,
             by_hand_by_default: false,
             passwords: None,
@@ -2978,6 +2992,7 @@ mod tests {
             clone_from: Vec::new(),
             url_forms: Vec::new(),
             web_sign_in: None,
+            web_links: None,
             code_pages: None,
             ..a_descriptor()
         };

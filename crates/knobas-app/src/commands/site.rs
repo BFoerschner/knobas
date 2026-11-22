@@ -393,6 +393,25 @@ pub async fn site_sign_in_remove<R: Runtime>(
     setting(&app, &pool, &id).await
 }
 
+/// *Turn off* (`on: false`) or *Turn on* the fill of `id`'s own credential
+/// into its site (ux30). A saved sign-in is not touched.
+///
+/// # Errors
+///
+/// `NotReady`; a write's.
+#[tauri::command]
+pub async fn site_sign_in_own<R: Runtime>(
+    app: AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    on: bool,
+) -> Result<SiteSetting, IpcError> {
+    let pool = lifecycle.pool()?;
+    site::set_sign_in_off(&pool, &id, !on).await?;
+    tracing::info!(source = %id, on, "a site's own sign-in set");
+    setting(&app, &pool, &id).await
+}
+
 /// *Fill sign-in*: the saved sign-in into the site's page now, if it is on
 /// the source's own origin.
 ///
@@ -431,6 +450,7 @@ mod tests {
             ("site_sign_in_save", &["id", "username", "password"]),
             ("site_sign_in_remove", &["id"]),
             ("site_fill", &["source"]),
+            ("site_sign_in_own", &["id", "on"]),
         ] {
             assert_eq!(keys(invocation(MIRROR, command)), args, "{command}");
         }

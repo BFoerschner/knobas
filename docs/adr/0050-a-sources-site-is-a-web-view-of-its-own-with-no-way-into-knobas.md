@@ -62,3 +62,15 @@ Björn asked for a site to stay signed in across restarts and to sign itself in.
 **External adapters too** (Björn: "how am i supposed to open xwiki as nicely as confluence"): `knobas:adapter@1.7.0` reads the same `web_sign_in` from a component's descriptor JSON, so an external source's site is filled by itself on its declared page as a built-in's is. The component only declares where the page is; the sign-in stays in the host's keychain item and is typed by the host into its own web view, so the sandbox is unchanged. A component built against 1.0 to 1.6 has the key dropped and keeps *Fill sign-in* (1.6.0 shipped frozen with ux29). The XWiki adapter (`knobas-adapter-xwiki`) declares `/bin/login/XWiki/XWikiLogin` after its base URL and its "Remember me" (`j_rememberme`) is ticked like the others.
 
 The exposure the original text names stands: a page on the source's own origin that imitates its form receives the password, as it would from a browser's password manager.
+
+## Amended 2026-11-22 (ux30): a site that signs in with its source's own credential
+
+Björn asked for Pleasant's web interface to open from the Passwords page and sign itself in. A password manager's web interface signs in with the very account its API does, so a second saved password would only be a copy. Decided by Fable while Björn was busy (`docs/decisions/2026-11-22-a-password-managers-web-interface.md`); this changes "No token, key or stored password of knobas's is sent to it" above, and the defence table's "Learn his knobas token or password" row, for such a source:
+
+- **The source's own credential is typed into the declared sign-in page**, under the same origin check as a saved sign-in (`may_fill`), when the adapter declares `web_sign_in.uses_credential` on declared paths (never `any_page`) and the source signs in by username and password: the source's `username` setting and the keychain item's password. Nothing new is stored; the envelope stays as it was.
+- **Unless it is turned off** (Settings › Site › *Turn off*, a `knobas.setting` row), or **another sign-in is saved**, which wins.
+- **A password source's site is remembered as any site's is**: the fill ticks "remember me" (Pleasant 9.5.4 keeps it 4 hours).
+- **A password source's site opens inside knobas by default**: *Open its pages inside knobas* reads on until it is set, so the Passwords page's *Open web interface* opens the site.
+- Only a press loads the site; knobas never loads it at start or in the background.
+
+The adapter also declares where its site shows an item (`web_links`, `knobas:adapter@1.7.0` for external adapters): templates after the typed base URL, so an address built from them can only name the source's own site.

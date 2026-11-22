@@ -209,6 +209,53 @@ pub async fn passwords_held<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Resu
     .map_err(IpcError::internal)
 }
 
+/// The address of a password source's own web interface on `item` (an
+/// entry's or a folder's entity id) or, with none, its front page (ux30).
+/// `None` for a source that is not a password source or whose base URL is no
+/// web address. Read at press time; the page opens it through `openWeb`.
+///
+/// # Errors
+/// As [`passwords_held`].
+#[tauri::command]
+pub async fn password_web_link<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source: String,
+    item: Option<String>,
+) -> Result<Option<crate::passwords::web::WebLink>, IpcError> {
+    use crate::passwords::web::{self, Target};
+    let sources = crate::sources::state(&app)?;
+    let Some(row) = knobas_sync::config::get(&sources.pool, &source).await? else {
+        return Ok(None);
+    };
+    let template = sources
+        .registry
+        .descriptors()
+        .into_iter()
+        .find(|t| t.adapter_kind == row.adapter_kind);
+    let Some(template) = template.filter(|t| t.passwords.is_some()) else {
+        return Ok(None);
+    };
+    let found = match &item {
+        Some(id) => reads::web_target(&sources.pool, &source, id)
+            .await
+            .map_err(IpcError::internal)?,
+        None => None,
+    };
+    let target = match &found {
+        Some(reads::WebTarget::Entry { key, folder }) => Target::Entry {
+            key,
+            folder: folder.as_deref(),
+        },
+        Some(reads::WebTarget::Folder { key }) => Target::Folder { key },
+        None => Target::Home,
+    };
+    Ok(web::web_link(
+        &row.base_url,
+        template.web_links.as_ref(),
+        target,
+    ))
+}
+
 /// The rest of one entry.
 ///
 /// # Errors

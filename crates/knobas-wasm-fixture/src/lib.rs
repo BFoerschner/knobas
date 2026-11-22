@@ -135,6 +135,14 @@ pub const ROLE: &str = "wasm-fixture:survey-desk";
 /// `source_actions` and offered on every survey's view.
 pub const BOOK_REPAIR: &str = "book_repair";
 
+/// Its website's front page, after the base URL (ux30, the descriptor's
+/// `web_links`).
+pub const WEB_HOME: &str = "/#/desk";
+
+/// Where its website shows a survey, after the base URL: a fragment route,
+/// as a single-page web vault's is (ux30).
+pub const WEB_SURVEY: &str = "/#/desk?survey={key}";
+
 /// `(key, title, body)` per survey. The kind is `survey`, not `note`: a note
 /// is knobas' own (quick capture), and the launcher hides those on a setting.
 pub const SURVEYS: [(&str, &str, &str); 3] = [
@@ -608,10 +616,20 @@ impl Adapter for Fixture {
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            // Where its site shows a survey, and its front page (ux30),
+            // declared by every build: the host reads them from a 1.7.0
+            // component and drops them from the older ones.
+            web_links: Some(knobas_adapter_sdk::WebLinks {
+                home: Some(WEB_HOME.into()),
+                pages: [("survey".to_owned(), WEB_SURVEY.to_owned())].into(),
+            }),
             // Its site's sign-in page (ADR-0050, ux29), declared by every
-            // build: the host reads it from a 1.6.0 component and drops it
-            // from the older ones, which keep *Fill sign-in* alone.
-            web_sign_in: Some(knobas_adapter_sdk::WebSignInPages::at(&["/login"])),
+            // build: the host reads it from a 1.7.0 component and drops it
+            // from the older ones, which keep *Fill sign-in* alone. It signs
+            // in with the source's own credential (ux30).
+            web_sign_in: Some(
+                knobas_adapter_sdk::WebSignInPages::at(&["/login"]).with_credential(),
+            ),
             code_pages: None,
             by_hand_by_default: false,
             passwords: None,

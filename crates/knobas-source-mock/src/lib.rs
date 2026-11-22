@@ -1339,6 +1339,7 @@ impl Source for MockSource {
             clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
             web_sign_in: None,
+            web_links: None,
             code_pages: None,
             by_hand_by_default: false,
             passwords: None,
