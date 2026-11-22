@@ -606,6 +606,17 @@ mod tests {
         assert_eq!(f.said, Some(SiteSignIn::NoForm), "the window ended");
     }
 
+    /// The next page after a fill settles before it is judged.
+    #[test]
+    fn the_page_after_a_fill_is_judged_once_it_has_settled() {
+        let mut f = Filler::default();
+        f.press(10_000.0);
+        f.answered(FillAnswer::Filled, 10_000.0);
+        assert_eq!(f.loaded(false, true, 12_000.0), None);
+        assert_eq!(f.tick(12_000.0 + CHECK_SETTLE_MS - 1.0), None, "not yet");
+        assert_eq!(f.tick(12_000.0 + CHECK_SETTLE_MS), Some(FillAct::Look));
+    }
+
     #[test]
     fn a_refused_fill_arms_again_only_when_knobas_started_it() {
         let mut f = Filler::default();
