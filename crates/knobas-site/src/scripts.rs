@@ -159,7 +159,10 @@ mod tests {
         );
         let shown = format!("{call:?}");
         assert!(!shown.contains("alert"), "{shown}");
-        assert!(shown.contains("Fill"), "the mode is what a log line is read for: {shown}");
+        assert!(
+            shown.contains("Fill"),
+            "the mode is what a log line is read for: {shown}"
+        );
         assert!(fill_sign_in(&SignInCall::look()).ends_with(r#"})("","","look")"#));
     }
 

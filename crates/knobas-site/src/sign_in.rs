@@ -551,6 +551,98 @@ mod tests {
     }
 
     #[test]
+    fn every_known_word_is_read() {
+        for (word, answer) in [
+            ("form", FillAnswer::Form),
+            ("ambiguous", FillAnswer::Ambiguous),
+            ("filled", FillAnswer::Filled),
+            ("no form", FillAnswer::NoForm),
+            ("second factor", FillAnswer::SecondFactor),
+        ] {
+            assert_eq!(
+                FillAnswer::from_answer(&format!("{word:?}")),
+                answer,
+                "{word}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fill_is_busy_while_asked_looking_or_judged_each_alone() {
+        assert!(!Filler::default().busy());
+        let asked = Filler {
+            asked: true,
+            ..Filler::default()
+        };
+        let looking = Filler {
+            next_try: Some(1.0),
+            ..Filler::default()
+        };
+        let submitted = Filler {
+            submitted: true,
+            ..Filler::default()
+        };
+        assert!(asked.busy() && looking.busy() && submitted.busy());
+        let mut f = Filler::default();
+        f.press(1000.0);
+        f.answered(FillAnswer::Filled, 1000.0);
+        f.judged(FillAnswer::NoForm);
+        assert!(!f.busy());
+    }
+
+    /// The clock is not at zero: the look window and the retry are counted
+    /// from the landing and the press.
+    #[test]
+    fn the_look_window_runs_from_the_moment_of_the_landing_or_the_press() {
+        let mut f = Filler::default();
+        f.loaded(true, true, 50_000.0);
+        f.answered(FillAnswer::NoForm, 50_010.0);
+        assert_eq!(f.tick(50_510.0), Some(FillAct::Fill { auto: true }));
+        let mut f = Filler::default();
+        f.press(80_000.0);
+        f.answered(FillAnswer::NoForm, 80_010.0);
+        assert_eq!(f.tick(80_510.0), Some(FillAct::Fill { auto: false }));
+        f.answered(FillAnswer::NoForm, 80_000.0 + LOOK_FOR_MS);
+        assert_eq!(f.said, Some(SiteSignIn::NoForm), "the window ended");
+    }
+
+    #[test]
+    fn a_refused_fill_arms_again_only_when_knobas_started_it() {
+        let mut f = Filler::default();
+        f.loaded(true, true, 0.0);
+        f.refused();
+        assert!(f.armed && !f.busy());
+        assert_eq!(f.said, None);
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.refused();
+        assert!(!f.armed && !f.busy());
+        assert_eq!(f.said, None, "the bar stops saying Filling");
+    }
+
+    #[test]
+    fn moving_on_clears_a_note_about_a_finished_fill_and_nothing_else() {
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.answered(FillAnswer::NoForm, LOOK_FOR_MS);
+        assert_eq!(f.said, Some(SiteSignIn::NoForm));
+        f.moved_on();
+        assert_eq!(f.said, None);
+        // While a fill is under way its note stays.
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.moved_on();
+        assert_eq!(f.said, Some(SiteSignIn::Filling));
+        // What the site did with it stays until the next fill.
+        let mut f = Filler::default();
+        f.press(0.0);
+        f.answered(FillAnswer::Filled, 0.0);
+        f.judged(FillAnswer::Form);
+        f.moved_on();
+        assert_eq!(f.said, Some(SiteSignIn::NotTaken));
+    }
+
+    #[test]
     fn a_new_sign_in_arms_again() {
         let mut f = Filler::default();
         f.loaded(true, true, 0.0);

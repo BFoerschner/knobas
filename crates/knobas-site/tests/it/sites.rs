@@ -1060,3 +1060,91 @@ async fn no_log_line_holds_the_password() {
         "a log line holds the password:\n{text}"
     );
 }
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn quitting_drops_every_view_then_waits_for_the_sessions_ahead() {
+    let w = world();
+    // Nothing alive: nothing to wait for.
+    w.sites.shutdown();
+    assert!(!w.host.calls.borrow().iter().any(|c| c.starts_with("flush")));
+    open_live(&w, "jira", "https://jira.example/").await;
+    let view = w.host.view("jira");
+    w.sites.shutdown();
+    assert!(view.borrow().calls.contains(&"dropped".to_owned()));
+    assert!(w.sites.statuses().is_empty());
+    assert_eq!(
+        w.host
+            .calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("flush"))
+            .collect::<Vec<_>>(),
+        ["flush 0 ahead=true"]
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_shell_with_no_saved_sign_in_turns_the_button_off() {
+    let w = world();
+    sign_ins(&w, true);
+    open_live(&w, "jira", "https://jira.example/secure/Dashboard.jspa").await;
+    assert!(last_status(&w, "jira").fill);
+    w.sites.press_fill("jira").unwrap();
+    w.shell.drain();
+    w.sites.fill_none("jira");
+    w.shell.drain();
+    let status = last_status(&w, "jira");
+    assert!(!status.fill, "nothing is saved after all");
+    assert_eq!(status.sign_in, None);
+    assert!(matches!(
+        w.sites.press_fill("jira"),
+        Err(SiteError::Invalid(_))
+    ));
+}
+
+/// A page on another origin, a provider's, judges nothing: the fill is
+/// judged when the site is back on its own page.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_provider_page_after_a_fill_judges_nothing() {
+    use knobas_site::sign_in::SiteSignIn;
+    let w = world();
+    sign_ins(&w, true);
+    let mut map = HashMap::new();
+    let mut jira = rules("https://jira.example");
+    jira.allowed = vec![knobas_site::policy::Origin::parse("https://sso.example").unwrap()];
+    map.insert("jira".to_owned(), jira);
+    w.sites.set_rules(map);
+    open_live(&w, "jira", "https://jira.example/login.jsp").await;
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://jira.example/login.jsp".into()),
+    );
+    w.shell.drain();
+    let view = w.host.view("jira");
+    view.borrow_mut()
+        .fill_answers
+        .push_back("\"filled\"".into());
+    hand_over(&w, "jira");
+    w.host.report(
+        "jira",
+        ViewEvent::Committed("https://sso.example/mfa".into()),
+    );
+    w.host.report(
+        "jira",
+        ViewEvent::Finished("https://sso.example/mfa".into()),
+    );
+    w.shell.drain();
+    w.shell.set_now(400);
+    w.sites.tick().await;
+    w.shell.drain();
+    assert_eq!(
+        view.borrow().sign_ins.len(),
+        1,
+        "no look on the provider's page"
+    );
+    assert_eq!(
+        last_status(&w, "jira").sign_in,
+        Some(SiteSignIn::Filling),
+        "still waiting to judge the fill on the source's own page"
+    );
+}

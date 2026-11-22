@@ -228,6 +228,13 @@ impl SiteHost for FakeHost {
         self.calls.borrow_mut().push("focus shell".into());
     }
 
+    fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
+        let ahead = deadline > std::time::Instant::now();
+        self.calls
+            .borrow_mut()
+            .push(format!("flush {} ahead={ahead}", processes.len()));
+    }
+
     fn forget(&self, spec: &ViewSpec) -> bool {
         self.calls
             .borrow_mut()
