@@ -161,8 +161,8 @@ test("the assignee is a button; a pick queues an EditTicket of the assignee alon
   expect(button.tagName).toBe("BUTTON");
   button.click();
   await settle();
-  expect(pick(".tf-pick")).not.toBeNull();
-  const mara = [...document.querySelectorAll<HTMLElement>(".tf-pick-opt")].find((row) => row.textContent?.includes("Mara Lindqvist"))!;
+  expect(pick(".tf-fpick")).not.toBeNull();
+  const mara = [...document.querySelectorAll<HTMLElement>(".tf-fpick-opt")].find((row) => row.textContent?.includes("Mara Lindqvist"))!;
   mara.click();
   await settle();
   expect(edited()).toEqual({ entity: ID, title: null, assignee: { account: "mara" }, priority: null, labels: null, fields: {} });
@@ -189,21 +189,21 @@ test("each label ticked is one write of the name added or removed, and the picke
   await settle();
   control("Labels")!.click();
   await settle();
-  const field = document.querySelector<HTMLInputElement>(".tf-pick input")!;
+  const field = document.querySelector<HTMLInputElement>(".tf-fpick input")!;
   field.value = "psp";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  const add = [...document.querySelectorAll<HTMLElement>(".tf-pick-opt")].find((row) => row.textContent?.includes("Add “psp”"))!;
+  const add = [...document.querySelectorAll<HTMLElement>(".tf-fpick-opt")].find((row) => row.textContent?.includes("Add “psp”"))!;
   add.click();
   await settle();
-  const sepa = [...document.querySelectorAll<HTMLElement>(".tf-pick-opt")].find((row) => row.textContent?.includes("sepa"))!;
+  const sepa = [...document.querySelectorAll<HTMLElement>(".tf-fpick-opt")].find((row) => row.textContent?.includes("sepa"))!;
   sepa.click();
   await settle();
   expect(writes.map((w) => (w as { EditTicket: { labels: unknown } }).EditTicket.labels)).toEqual([
     { add: ["psp"], remove: [] },
     { add: [], remove: ["sepa"] },
   ]);
-  expect(pick(".tf-pick"), "the picker stays open").not.toBeNull();
+  expect(pick(".tf-fpick"), "the picker stays open").not.toBeNull();
   expect([...fact("Labels")!.querySelectorAll(".tf-lab")].map((l) => l.textContent)).toEqual(["psp"]);
 });
 
@@ -267,9 +267,9 @@ test("`a` opens the assignee's picker and `e` turns the summary into a field tha
   await settle();
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
   await settle();
-  expect(pick(".tf-pick")?.getAttribute("aria-label")).toBe("Assignee");
+  expect(pick(".tf-fpick")?.getAttribute("aria-label")).toBe("Assignee");
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  document.querySelector<HTMLInputElement>(".tf-pick input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  document.querySelector<HTMLInputElement>(".tf-fpick input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await settle();
   (document.activeElement as HTMLElement | null)?.blur();
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
@@ -377,7 +377,7 @@ test("a date, a number, a choice, a person and a flag each queue EditTicket with
 
   ownFact("Reviewer")!.querySelector<HTMLElement>(".tf-fact-edit")!.click();
   await settle();
-  [...document.querySelectorAll<HTMLElement>(".tf-pick-opt")].find((row) => row.textContent?.includes("Mara Lindqvist"))!.click();
+  [...document.querySelectorAll<HTMLElement>(".tf-fpick-opt")].find((row) => row.textContent?.includes("Mara Lindqvist"))!.click();
   await settle();
   expect(edited()).toEqual(only({ customfield_10300: "mara" }));
   expect(ownFact("Reviewer")!.textContent).toContain("Mara Lindqvist");

@@ -157,9 +157,9 @@ const PLACES = [
     ["readonly", { fake: "fake-readonly", late: "refused_writes:300" }],
   ].map(([how, more]) => ({ name: `ticket-fields-${how}`, fixture: true, ...more, start: "#/tickets", go: TICKET, hash: TICKET, away: "#/tickets" })),
   ...[
-    ["assignee", `${shown} button[aria-label="Assignee: change it"]`, ".tf-pick .tf-pick-opt"],
+    ["assignee", `${shown} button[aria-label="Assignee: change it"]`, ".tf-fpick .tf-fpick-opt"],
     ["priority", `${shown} button[aria-label="Priority: change it"]`, "[role=menu] [role=menuitemradio]"],
-    ["labels", `${shown} button[aria-label="Labels: change it"]`, ".tf-pick .tf-pick-opt"],
+    ["labels", `${shown} button[aria-label="Labels: change it"]`, ".tf-fpick .tf-fpick-opt"],
     ["title", `${shown} .tf-tktitlepen`, `${shown} .tf-tktitleedit input`],
     // The summary's field takes two Escs, the first leaving the field (`inlineEditor`): its `hash` asks `leave` for the second.
   ].map(([field, press, ready]) => ({ name: `ticket-edit-${field}`, fixture: true, start: TICKET, press, hash: field === "title" ? TICKET : null, ready, away: "Escape" })),

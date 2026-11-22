@@ -991,3 +991,41 @@ test("no transition names a colour, but the site bar's key hint", () => {
     }
   expect(wrong).toEqual([]);
 });
+
+/**
+ * A class one stylesheet makes a float (`position: fixed`, placed by script) has its bare rule in that stylesheet
+ * alone (the final suite, 2026-11-22): the ticket fields' people picker took `.tf-pick`, which a pull request's
+ * commit picker already had in `code.css`, so every pull request drew its commit picker at the window's top left,
+ * over the top bar's Inbox entry, and a press there went nowhere (the `nav-place-pr` and `nav-reopen-pr` trips).
+ */
+test("a float's class is its own: no other stylesheet has a bare rule for it", () => {
+  const folder = join(APP, "src/lib/tf/css");
+  /** Bare class → the stylesheets with a rule for it, and those where that rule floats. */
+  const bare = new Map<string, Set<string>>();
+  const floats = new Map<string, Set<string>>();
+  for (const file of readdirSync(folder).filter((name) => name.endsWith(".css"))) {
+    const source = readFileSync(join(folder, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const [, selectors, body] of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      // Split at the commas outside parentheses, so `:is(.a, .b)` stays one selector.
+      let depth = 0;
+      let part = "";
+      const parts: string[] = [];
+      for (const ch of selectors!) {
+        if (ch === "(") depth += 1;
+        if (ch === ")") depth -= 1;
+        if (ch === "," && depth === 0) {
+          parts.push(part);
+          part = "";
+        } else part += ch;
+      }
+      parts.push(part);
+      for (const selector of parts.map((p) => p.trim()).filter((p) => /^\.[a-z][\w-]*$/.test(p))) {
+        bare.set(selector, (bare.get(selector) ?? new Set()).add(file));
+        if (/position:\s*fixed/.test(body!)) floats.set(selector, (floats.get(selector) ?? new Set()).add(file));
+      }
+    }
+  }
+  const shared = [...floats].filter(([selector]) => bare.get(selector)!.size > 1).map(([selector]) => `${selector} in ${[...bare.get(selector)!].sort().join(", ")}`);
+  expect(shared).toEqual([]);
+  expect(floats.size, "the scan finds the floats").toBeGreaterThan(5);
+});

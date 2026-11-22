@@ -254,7 +254,7 @@
 </script>
 
 {#if open}
-  <div class="tf-pick" role="dialog" aria-label={label} {@attach place}>
+  <div class="tf-fpick" role="dialog" aria-label={label} {@attach place}>
     <input
       bind:this={field}
       type="text"
@@ -271,28 +271,28 @@
       oninput={(event) => search(event.currentTarget.value)}
       {onkeydown}
     />
-    <div class="tf-pick-opts" id="{uid}-opts" role="listbox" aria-label={label}>
+    <div class="tf-fpick-opts" id="{uid}-opts" role="listbox" aria-label={label}>
       {#each drawn as { option: row, runs }, index (row.value ?? "")}
         <button
           type="button"
           role="option"
           tabindex="-1"
           id={optionId(index)}
-          class="tf-pick-opt"
+          class="tf-fpick-opt"
           class:tf-at={index === at}
           aria-selected={(row.value ?? null) === (current?.value ?? null)}
           onmousedown={(event) => event.preventDefault()}
           onclick={() => pick(row)}
         >
           {#if person}<span class="tf-av" aria-hidden="true">{row.value === null ? "–" : initials(row.label)}</span>{/if}
-          <span class="tf-pick-name">{#each cut(runs, row.label.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
+          <span class="tf-fpick-name">{#each cut(runs, row.label.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
           {#if row.hint !== null && row.hint !== row.label}<small>{row.hint}</small>{/if}
         </button>
       {/each}
       {#if drawn.length === 0}
-        <p class="tf-pick-none">No one matches {typed.trim()}.</p>
+        <p class="tf-fpick-none">No one matches {typed.trim()}.</p>
       {/if}
     </div>
-    <p class="tf-pick-foot" class:tf-err={failed !== null}>{foot}</p>
+    <p class="tf-fpick-foot" class:tf-err={failed !== null}>{foot}</p>
   </div>
 {/if}

@@ -378,20 +378,20 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-sheetcard .tf-tknoedits { color: var(--ink-2); }
 
 /* The people and labels pickers: a field over a list, in the float host under its fact (`TfPeoplePick`). */
-.tf-pick { position: fixed; left: 0; top: 0; z-index: 35; width: 280px; display: flex; flex-direction: column; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-pick input { border: 1px solid var(--rule); background: var(--field); color: var(--ink); border-radius: 4px; height: 28px; padding: 0 8px; width: 100%; font: inherit; }
-.tf-pick .tf-pick-opts { display: flex; flex-direction: column; max-height: 252px; overflow: auto; margin-top: 6px; background: var(--sheet); }
-.tf-pick .tf-pick-opt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; min-height: 30px; }
-.tf-pick .tf-pick-opt.tf-at, .tf-pick .tf-pick-opt:hover { background: var(--sheet-2); }
-.tf-pick .tf-pick-opt[aria-selected="true"] { font-weight: 600; }
-.tf-pick .tf-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-pick .tf-pick-opt small { margin-left: auto; padding-left: 8px; color: var(--ink-2); --fs: var(--size-code); font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: nowrap; }
-.tf-pick .tf-pick-tick { width: 14px; flex: none; text-align: center; }
-.tf-pick .tf-av { width: 22px; height: 22px; flex: none; }
-.tf-pick mark { background: var(--mark); color: inherit; }
-.tf-pick .tf-pick-none { padding: 6px; color: var(--ink-2); margin: 0; }
-.tf-pick .tf-pick-foot { padding: 6px 6px 2px; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); border-top: 1px solid var(--rule-2); }
-.tf-pick .tf-pick-foot.tf-err { color: var(--err); }
+.tf-fpick { position: fixed; left: 0; top: 0; z-index: 35; width: 280px; display: flex; flex-direction: column; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-fpick input { border: 1px solid var(--rule); background: var(--field); color: var(--ink); border-radius: 4px; height: 28px; padding: 0 8px; width: 100%; font: inherit; }
+.tf-fpick .tf-fpick-opts { display: flex; flex-direction: column; max-height: 252px; overflow: auto; margin-top: 6px; background: var(--sheet); }
+.tf-fpick .tf-fpick-opt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; min-height: 30px; }
+.tf-fpick .tf-fpick-opt.tf-at, .tf-fpick .tf-fpick-opt:hover { background: var(--sheet-2); }
+.tf-fpick .tf-fpick-opt[aria-selected="true"] { font-weight: 600; }
+.tf-fpick .tf-fpick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-fpick .tf-fpick-opt small { margin-left: auto; padding-left: 8px; color: var(--ink-2); --fs: var(--size-code); font: calc(var(--t-2xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: nowrap; }
+.tf-fpick .tf-fpick-tick { width: 14px; flex: none; text-align: center; }
+.tf-fpick .tf-av { width: 22px; height: 22px; flex: none; }
+.tf-fpick mark { background: var(--mark); color: inherit; }
+.tf-fpick .tf-fpick-none { padding: 6px; color: var(--ink-2); margin: 0; }
+.tf-fpick .tf-fpick-foot { padding: 6px 6px 2px; margin: 6px 0 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); border-top: 1px solid var(--rule-2); }
+.tf-fpick .tf-fpick-foot.tf-err { color: var(--err); }
 /* The summary's pencil and its one-line field (ADR-0054): the pencil's room is kept, unseen, where the summary does not open. */
 .tf-tkpagehead .tf-tktitlepen { flex: none; margin-top: 6px; }
 .tf-tkpagehead .tf-tktitlepen.tf-unseen { visibility: hidden; }

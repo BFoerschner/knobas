@@ -2697,9 +2697,9 @@ test("Assign to… on a card opens the people picker at it; a pick queues EditTi
   });
   fieldProvider()!.assign("jira:PAY-3");
   await settle();
-  const options = [...document.querySelectorAll<HTMLElement>(".tf-pick [role=option]")].map((one) => one.textContent!.trim());
+  const options = [...document.querySelectorAll<HTMLElement>(".tf-fpick [role=option]")].map((one) => one.textContent!.trim());
   expect(options.some((one) => one.includes("Mara Lindqvist"))).toBe(true);
-  const mara = [...document.querySelectorAll<HTMLElement>(".tf-pick [role=option]")].find((one) => one.textContent!.includes("Mara Lindqvist"))!;
+  const mara = [...document.querySelectorAll<HTMLElement>(".tf-fpick [role=option]")].find((one) => one.textContent!.includes("Mara Lindqvist"))!;
   mara.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
   mara.click();
   flushSync();
@@ -2731,7 +2731,7 @@ test("a on the selected card opens the people picker; a source whose adapter off
   flushSync();
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
   await settle();
-  expect(document.querySelector(".tf-pick")).not.toBeNull();
+  expect(document.querySelector(".tf-fpick")).not.toBeNull();
   press("Escape");
   press("Escape");
   await settle();
@@ -2739,7 +2739,7 @@ test("a on the selected card opens the people picker; a source whose adapter off
   flushSync();
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
   await settle();
-  expect(document.querySelector(".tf-pick")).toBeNull();
+  expect(document.querySelector(".tf-fpick")).toBeNull();
   const { fieldProvider } = await import("./card-fields.svelte");
   expect(fieldProvider()!.offer("jira:PAY-2")).toBeNull();
 });

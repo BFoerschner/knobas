@@ -164,7 +164,7 @@
 </script>
 
 {#if open}
-  <div class="tf-pick" role="dialog" aria-label={label} {@attach place}>
+  <div class="tf-fpick" role="dialog" aria-label={label} {@attach place}>
     <input
       bind:this={field}
       type="text"
@@ -181,21 +181,21 @@
       oninput={(event) => search(event.currentTarget.value)}
       {onkeydown}
     />
-    <div class="tf-pick-opts" id="{uid}-opts" role="listbox" aria-multiselectable="true" aria-label={label}>
+    <div class="tf-fpick-opts" id="{uid}-opts" role="listbox" aria-multiselectable="true" aria-label={label}>
       {#each drawn as { option: name, runs }, index (name)}
         <button
           type="button"
           role="option"
           tabindex="-1"
           id={optionId(index)}
-          class="tf-pick-opt"
+          class="tf-fpick-opt"
           class:tf-at={index === at}
           aria-selected={carried.includes(name)}
           onmousedown={(event) => event.preventDefault()}
           onclick={() => toggle(name)}
         >
-          <span class="tf-pick-tick" aria-hidden="true">{carried.includes(name) ? "✓" : ""}</span>
-          <span class="tf-pick-name">{#each cut(runs, name.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
+          <span class="tf-fpick-tick" aria-hidden="true">{carried.includes(name) ? "✓" : ""}</span>
+          <span class="tf-fpick-name">{#each cut(runs, name.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
         </button>
       {/each}
       {#if adds}
@@ -204,20 +204,20 @@
           role="option"
           tabindex="-1"
           id={optionId(hits.length)}
-          class="tf-pick-opt"
+          class="tf-fpick-opt"
           class:tf-at={at === hits.length}
           aria-selected="false"
           onmousedown={(event) => event.preventDefault()}
           onclick={addFresh}
         >
-          <span class="tf-pick-tick" aria-hidden="true">+</span>
-          <span class="tf-pick-name">Add “{fresh}”</span>
+          <span class="tf-fpick-tick" aria-hidden="true">+</span>
+          <span class="tf-fpick-name">Add “{fresh}”</span>
         </button>
       {/if}
       {#if count === 0}
-        <p class="tf-pick-none">{asking ? "Reading the labels…" : `No label matches ${fresh}.`}</p>
+        <p class="tf-fpick-none">{asking ? "Reading the labels…" : `No label matches ${fresh}.`}</p>
       {/if}
     </div>
-    {#if failed !== null}<p class="tf-pick-foot tf-err">The labels could not be read: {failed}</p>{/if}
+    {#if failed !== null}<p class="tf-fpick-foot tf-err">The labels could not be read: {failed}</p>{/if}
   </div>
 {/if}

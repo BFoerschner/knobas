@@ -56,8 +56,8 @@ function props(over: Record<string, unknown> = {}) {
   return state;
 }
 
-const names = () => [...document.querySelectorAll(".tf-pick-opt .tf-pick-name")].map((n) => n.textContent);
-const field = () => document.querySelector<HTMLInputElement>(".tf-pick input")!;
+const names = () => [...document.querySelectorAll(".tf-fpick-opt .tf-fpick-name")].map((n) => n.textContent);
+const field = () => document.querySelector<HTMLInputElement>(".tf-fpick input")!;
 function key(name: string) {
   field().dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
   flushSync();
@@ -74,7 +74,7 @@ test("it opens with three rows before the list lands, and keeps their places aft
   view = mount(TfPeoplePick, { target, props: p });
   flushSync();
   expect(names()).toEqual(["Me (mara)", "Unassigned", "Ben Okafor"]);
-  const before = [...document.querySelectorAll(".tf-pick-opt")].map((row) => row.textContent);
+  const before = [...document.querySelectorAll(".tf-fpick-opt")].map((row) => row.textContent);
   p.options = PEOPLE;
   p.complete = true;
   p.asking = false;
@@ -83,7 +83,7 @@ test("it opens with three rows before the list lands, and keeps their places aft
   expect(after.slice(0, 3)).toEqual(["Me (Mara Lindqvist)", "Unassigned", "Ben Okafor"]);
   expect(after.slice(3)).toEqual(["Lena Hoffmann", "Olu Adeyemi"]);
   expect(before).toHaveLength(3);
-  expect(document.querySelector(".tf-pick-foot")?.textContent).toBe("4 people who can be assigned in PAY");
+  expect(document.querySelector(".tf-fpick-foot")?.textContent).toBe("4 people who can be assigned in PAY");
 });
 
 test("a required field leads with no Unassigned", () => {
@@ -98,7 +98,7 @@ test("typing ranks by name and account, marks the letters, and Enter picks and c
   flushSync();
   type("le");
   expect(names()[0]).toBe("Lena Hoffmann");
-  expect(document.querySelector(".tf-pick-opt mark")?.textContent).toBe("Le");
+  expect(document.querySelector(".tf-fpick-opt mark")?.textContent).toBe("Le");
   key("Enter");
   expect(p.onpick).toHaveBeenCalledWith("lena", "Lena Hoffmann");
   expect(p.open).toBe(false);
@@ -167,7 +167,7 @@ test("a failed read leaves Me, Unassigned and the current assignee, with a line 
   view = mount(TfPeoplePick, { target, props: props({ asking: false, failed: "Jira did not answer" }) });
   flushSync();
   expect(names()).toEqual(["Me (mara)", "Unassigned", "Ben Okafor"]);
-  expect(document.querySelector(".tf-pick-foot")?.textContent).toBe("Jira's list could not be read: Jira did not answer");
+  expect(document.querySelector(".tf-fpick-foot")?.textContent).toBe("Jira's list could not be read: Jira did not answer");
 });
 
 test("initials are a name's first and last letters", () => {
