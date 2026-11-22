@@ -70,6 +70,9 @@ struct Remote {
     /// source holds them, and a position moved past the one handed in), or
     /// nothing, as on a source unchanged since the run.
     walk_finds: Mutex<bool>,
+    /// The keys a walk under REPO-1 answers as deleted: an item under the
+    /// parent the source dropped, or the parent itself.
+    walk_deleted: Mutex<Vec<&'static str>>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -183,8 +186,17 @@ impl Source for Fake {
         }
         let mut repo = ticket("REPO-1", "payout-service");
         repo.kind = "repo".to_owned();
+        let deleted = self.0.walk_deleted.lock().unwrap().clone();
+        repo.deleted = deleted.contains(&"REPO-1");
+        let mut items = vec![repo, ticket("PAY-1", &self.0.title.lock().unwrap())];
+        for key in deleted.into_iter().filter(|key| *key != "REPO-1") {
+            items.push(SyncItem {
+                deleted: true,
+                ..ticket(key, "dropped")
+            });
+        }
         Ok(knobas_source::UnderAnswer::Walked {
-            items: vec![repo, ticket("PAY-1", &self.0.title.lock().unwrap())],
+            items,
             cursor: Some(format!("{} walked", cursor.unwrap_or("none"))),
         })
     }
@@ -345,6 +357,7 @@ async fn fixture(name: &str) -> Fixture {
         syncs_entered: AtomicUsize::new(0),
         walks: Mutex::new(Vec::new()),
         walk_finds: Mutex::new(true),
+        walk_deleted: Mutex::new(Vec::new()),
     });
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(Arc::clone(&remote)));
     let heard = Heard::default();
@@ -1203,6 +1216,28 @@ async fn a_refresh_under_a_parent_writes_what_it_walked_and_moves_the_position_w
             write_id: None,
             ended: RefreshEnd::Refreshed,
         }]
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// A walk says the parent is gone only when it answers the parent itself
+/// deleted: an item under it the source dropped is written as gone, and the
+/// parent still refreshed (the final suite's mutants: the test turned around,
+/// or widened to any deleted item, went unseen).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_is_gone_only_when_it_answers_the_parent_deleted() {
+    let f = fixture("refresh_under_gone").await;
+    *f.remote.walk_deleted.lock().unwrap() = vec!["PAY-2"];
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "a dropped child is not the parent gone: {answer:?}"
+    );
+    *f.remote.walk_deleted.lock().unwrap() = vec!["REPO-1"];
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Gone)),
+        "the parent answered deleted: {answer:?}"
     );
     f.state.scheduler.shutdown().await;
 }
