@@ -366,6 +366,56 @@ pub async fn entry(pool: &PgPool, entity_id: &str) -> Result<Option<PwEntry>, sq
     }))
 }
 
+/// What a password source's Settings page counts (ADR-0056): its entries
+/// and folders, and how many entries keep a code key in each format the
+/// sync found (`payload->'otp'->>'format'`), `unreadable` included.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export_to = "passwords.ts")]
+pub struct SourceFacts {
+    #[ts(type = "number")]
+    pub entries: i64,
+    #[ts(type = "number")]
+    pub folders: i64,
+    /// Format id and how many entries have it, most first.
+    #[ts(type = "Array<[string, number]>")]
+    pub formats: Vec<(String, i64)>,
+}
+
+/// [`SourceFacts`] for `source_id`.
+///
+/// # Errors
+/// The database's.
+pub async fn source_facts(pool: &PgPool, source_id: &str) -> Result<SourceFacts, sqlx::Error> {
+    let (entries, folders): (i64, i64) = sqlx::query_as(
+        "select count(*) filter (where i.kind = $2), count(*) filter (where i.kind = $3)
+           from sync.item i
+           join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
+          where i.source_id = $1",
+    )
+    .bind(source_id)
+    .bind(passwords::ENTRY_KIND)
+    .bind(passwords::FOLDER_KIND)
+    .fetch_one(pool)
+    .await?;
+    let formats: Vec<(String, i64)> = sqlx::query_as(
+        "select i.payload->'otp'->>'format' as format, count(*)
+           from sync.item i
+           join knobas.entity e on e.id = i.entity_id and e.deleted_at is null
+          where i.source_id = $1 and i.kind = $2 and i.payload->'otp' is not null
+            and jsonb_typeof(i.payload->'otp') = 'object'
+          group by 1 order by 2 desc, 1",
+    )
+    .bind(source_id)
+    .bind(passwords::ENTRY_KIND)
+    .fetch_all(pool)
+    .await?;
+    Ok(SourceFacts {
+        entries,
+        folders,
+        formats,
+    })
+}
+
 /// The recent entries, newest first.
 ///
 /// # Errors

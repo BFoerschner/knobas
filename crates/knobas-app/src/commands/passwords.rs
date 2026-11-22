@@ -12,7 +12,7 @@ use knobas_source::passwords::{self, SecretAnswer, SecretAsk, SecretRef, SecretT
 use tauri::Manager;
 
 use crate::IpcError;
-use crate::passwords::reads::{self, Held, PwEntry};
+use crate::passwords::reads::{self, Held, PwEntry, SourceFacts};
 use crate::passwords::{PasswordsState, clipboard::ClipState};
 
 /// What a show or a copy answered.
@@ -445,4 +445,20 @@ pub fn clipboard_forget<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(
 #[tauri::command]
 pub fn clipboard_state<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<ClipState, IpcError> {
     Ok(state(&app)?.clipboard.state())
+}
+
+/// What a password source's Settings page counts: entries, folders and the
+/// code-key formats the sync found.
+///
+/// # Errors
+/// As [`passwords_held`].
+#[tauri::command]
+pub async fn password_source_facts<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source_id: String,
+) -> Result<SourceFacts, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    reads::source_facts(&sources.pool, &source_id)
+        .await
+        .map_err(IpcError::internal)
 }

@@ -100,6 +100,7 @@
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
   import TfSiteSection from "../site/TfSiteSection.svelte";
+  import TfPasswordsSection from "./TfPasswordsSection.svelte";
   import TfSecretPrompt from "./TfSecretPrompt.svelte";
 
   let {
@@ -642,7 +643,8 @@
         {#if expiry !== null}
           <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">{expiry.text}</span>
         {/if}
-        <button class="tf-btn tf-sm" onclick={openReenter}>{noneStored ? "Enter…" : "Re-enter…"}</button>
+        <!-- A password manager's credential is its master password: knobas is told a new one, it does not change it (ADR-0056). -->
+        <button class="tf-btn tf-sm" onclick={openReenter}>{noneStored ? "Enter…" : isPasswordSource ? "Change…" : "Re-enter…"}</button>
       </div>
     </div>
   {/if}
@@ -727,6 +729,16 @@
     </div>
   </div>
 </section>
+
+{#if isPasswordSource && adapter?.passwords}
+  <TfPasswordsSection
+    sourceId={source.id}
+    {name}
+    account={userOf(source.config) || null}
+    offers={adapter.passwords}
+    synced={source.last_run !== null}
+  />
+{/if}
 
 {#if config.error !== null || config.fields.length > 0}
 <section class="tf-stg-sec">
@@ -830,7 +842,7 @@
     </div>
   </div>
   <div class="tf-stg-row">
-    <div class="tf-stg-l">Remove this source<small>Asks whether to keep what it synced.</small></div>
+    <div class="tf-stg-l">Remove this source<small>Asks whether to keep what it synced.{isPasswordSource ? " Its credential and its one-time code keys leave the keychain." : ""}</small></div>
     <div class="tf-stg-c">
       <button
         class="tf-btn tf-sm tf-danger"
@@ -843,7 +855,8 @@
 </section>
 
 {#if reentering}
-  <TfSecretPrompt {source} {health} {acceptsAccount} {stored} {ports} {layers} {onhealth} onclose={closeReenter} {onstarted} {onstopped} />
+  <TfSecretPrompt {source} {health} {acceptsAccount} {stored} {ports} {layers} {onhealth} onclose={closeReenter} {onstarted} {onstopped} passwords={isPasswordSource} />
+
 {/if}
 
 {#if removing}
@@ -859,6 +872,9 @@
           <span>Delete what it synced<small>Links to those items go too. Your links between other items stay.</small></span>
         </label>
       </div>
+      {#if isPasswordSource}
+        <p class="tf-dlg-note">Either way its credential and its one-time code keys are deleted from the keychain, so kept entries can no longer show a password or a code.</p>
+      {/if}
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (removing = false)}>Cancel</button>

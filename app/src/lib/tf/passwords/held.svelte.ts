@@ -3,7 +3,12 @@
  * (`docs/tree-store.ts`): a return to the page draws from it in the first frame and reads again behind. Read again when
  * a run of a filler source ends and when a direct write lands. A read that changed nothing replaces nothing.
  */
+import { SvelteSet } from "svelte/reactivity";
+
 import { passwordsHeld, type Held } from "../../ipc/passwords";
+
+/** The folds the reader opened in the tree, kept for the session. */
+export const folds = new SvelteSet<string>();
 
 let kept: Held | null = null;
 let keptJson = "";
@@ -27,4 +32,5 @@ export async function readHeld(read: () => Promise<Held> = passwordsHeld): Promi
 export function forgetHeld(): void {
   kept = null;
   keptJson = "";
+  folds.clear();
 }

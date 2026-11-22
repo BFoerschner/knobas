@@ -7,7 +7,7 @@
  */
 import { invoke } from "./invoke";
 
-import type { ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef } from "./generated/passwords";
+import type { ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts } from "./generated/passwords";
 
 export type {
   Approval,
@@ -33,6 +33,7 @@ export type {
   ReadAnswer,
   SecretRef,
   SecretText,
+  SourceFacts,
   Write,
   WriteKind,
 } from "./generated/passwords";
@@ -90,4 +91,9 @@ export function clipboardForget(): Promise<void> {
 /** What the clipboard holds for knobas now. */
 export function clipboardState(): Promise<ClipState> {
   return invoke<ClipState>("clipboard_state");
+}
+
+/** What a password source's Settings page counts: entries, folders and the code-key formats the sync found. */
+export function passwordSourceFacts(sourceId: string): Promise<SourceFacts> {
+  return invoke<SourceFacts>("password_source_facts", { sourceId });
 }

@@ -238,6 +238,17 @@ export type SecretRef = { "kind": "password" } | { "kind": "field", name: string
 export type SecretText = string;
 
 /**
+ * What a password source's Settings page counts (ADR-0056): its entries
+ * and folders, and how many entries keep a code key in each format the
+ * sync found (`payload->'otp'->>'format'`), `unreadable` included.
+ */
+export type SourceFacts = { entries: number, folders: number, 
+/**
+ * Format id and how many entries have it, most first.
+ */
+formats: Array<[string, number]>, };
+
+/**
  * A change to a password source, sent the moment it is made and never
  * stored (ADR-0056). Not a [`WriteOp`](crate::WriteOp): the write queue's
  * column is one, so it cannot hold this.

@@ -22,7 +22,6 @@
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
   import { untrack } from "svelte";
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -30,7 +29,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
   import TfPwEntry from "./TfPwEntry.svelte";
-  import { heldNow, readHeld } from "./held.svelte";
+  import { folds, heldNow, readHeld } from "./held.svelte";
   import {
     CUT,
     CUT_OVER,
@@ -125,7 +124,7 @@
 
   // ---- the tree ----
   /** Folds the reader opened, kept for the session. */
-  const opened = keptFolds();
+  const opened = folds;
   const treeOpen = $derived.by(() => {
     const all = new Set(opened);
     if (node) for (let at: Node | null = node.parent; at !== null; at = at.parent) all.add(at.id);
@@ -391,14 +390,6 @@
   function copied(what: string): void {
 
     push({ text: `Copied the ${what}.` });
-  }
-</script>
-
-<script lang="ts" module>
-  /** The folds the reader opened, kept for the session. */
-  const folds = new SvelteSet<string>();
-  function keptFolds(): SvelteSet<string> {
-    return folds;
   }
 </script>
 

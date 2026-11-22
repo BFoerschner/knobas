@@ -185,5 +185,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return undefined;
     },
     clipboard_state: () => clip,
+    password_source_facts: () => {
+      const codes = entries.filter((e) => e.totp).length;
+      return { entries: view.entries.length, folders: view.folders.length, formats: codes > 0 ? [["keepass", codes] as [string, number]] : [] };
+    },
   };
 }

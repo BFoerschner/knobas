@@ -16,12 +16,16 @@
   let until = $state(0);
   let failed = $state<string | null>(null);
   let turn: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped when the row is let go or its entry changes: an answer for an older ask schedules nothing. */
+  let generation = 0;
 
   async function ask(): Promise<void> {
     if (turn !== null) clearTimeout(turn);
     turn = null;
+    const mine = generation;
     try {
       const next = await ports.code(entry.id);
+      if (mine !== generation) return;
       answer = next;
       failed = null;
       if (next.kind === "code") {
@@ -38,9 +42,11 @@
     if (!visible) return;
     void ask();
     return () => {
+      generation++;
       if (turn !== null) clearTimeout(turn);
       turn = null;
     };
+
   });
 
   const copied = $derived(clip().entity_id === entry.id && clip().what === "one-time code" && clip().until !== null);

@@ -76,7 +76,7 @@
 </script>
 
 <article class="tf-panel tf-pw-entry" aria-label={entry.title}>
-  <header class="tf-pw-ehead">
+  <div class="tf-pw-ehead">
     <div class="tf-pw-etitle">
       <div class="tf-pw-epath">
         {#if chain.length === 0}Not in a folder{/if}
@@ -84,7 +84,7 @@
       </div>
       <h2>{entry.title}</h2>
     </div>
-  </header>
+  </div>
   {#if down}
     <div class="tf-stale tf-pw-enote" role="status">
       <span>{Word} did not answer at {when(source.down_at)}. This entry is as listed {source.synced_at ? `at ${when(source.synced_at)}` : "before"}, and its password can't be read until it answers.</span>

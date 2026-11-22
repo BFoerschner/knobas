@@ -558,6 +558,37 @@ const LinkAssetDialog = (await import("../assets/LinkAssetDialog.svelte")).defau
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
+const TfPasswords = (await import("../tf/passwords/TfPasswords.svelte")).default;
+const TfPwCode = (await import("../tf/passwords/TfPwCode.svelte")).default;
+const TfPwComb = (await import("../tf/passwords/TfPwComb.svelte")).default;
+const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svelte")).default;
+
+/** The Passwords page's reads (ADR-0056), answering late: one source, one folder, one entry with a code. */
+function passwordPorts() {
+  const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] };
+  return {
+    held: () =>
+      deferred({
+        sources: [{ id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: "2026-11-22T10:22:00Z", down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server" }],
+        folders: [{ id: "pw:f1", source: 0, parent: null, name: "Payments", comment_read: false, can_add: true }],
+        entries: [["pw:e1", 0, "pw:f1", "payout db", "payout_svc", null, null, 1, null, []]],
+        recent: [],
+      } as never),
+    entry: () =>
+      deferred({
+        id: "pw:e1", source: "pw", title: "payout db", username: "payout_svc", address: null, folder: "pw:f1", notes: null, fields: [],
+        otp: { format: "keepass", digits: 6, period: 30, algorithm: "SHA1" }, expires: null, changed: null, changed_by: null,
+        comment: { read: false, modify: false }, approval: { state: "none" }, attachments: { state: "none" }, can_read: true, can_modify: true,
+      } as never),
+    show: () => deferred({ kind: "not_offered" } as never),
+    copy: () => deferred({ kind: "not_offered" } as never),
+    hide: () => deferred(undefined),
+    code: () => deferred({ kind: "code", code: "123456", digits: 6, period: 30, left_ms: 20_000 } as never),
+    copyCode: () => deferred({ kind: "not_offered" } as never),
+    copyPlain: () => deferred(undefined),
+    openExternal: () => deferred(undefined),
+  };
+}
 const { createInbox } = await import("../inbox/inbox.svelte");
 
 /** The estate's browse, answering with nothing: this file tests teardowns. */
@@ -3461,6 +3492,51 @@ const CASES: Case[] = [
     name: "FirstRun",
     source: "lib/sources/FirstRun.svelte",
     open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
+  },
+  {
+    /** Passwords (ADR-0056): its one read and the open entry's record, answering late. */
+    name: "TfPasswords",
+    source: "lib/tf/passwords/TfPasswords.svelte",
+    open: (target) => ({ app: mount(TfPasswords, { target, props: { ready: true, rest: [], ports: passwordPorts() } }) }),
+  },
+  {
+    /** An entry's one-time code (ADR-0056): asked at open and again at the period's turn, a timer it must not leave behind. */
+    name: "TfPwCode",
+    source: "lib/tf/passwords/TfPwCode.svelte",
+    open: (target) => ({
+      app: mount(TfPwCode, {
+        target,
+        props: {
+          entry: { id: "pw:e1", comment: { read: false, modify: false } } as never,
+          word: "the password manager",
+          ports: passwordPorts() as never,
+        },
+      }),
+    }),
+  },
+  {
+    /** The comb (ADR-0056): registered with the page's one ticker while drawn, and let go when unmounted. */
+    name: "TfPwComb",
+    source: "lib/tf/passwords/TfPwComb.svelte",
+    open: (target) => ({ app: mount(TfPwComb, { target, props: { until: Date.now() + 30_000 } }) }),
+  },
+  {
+    /** A password source's Settings section (ADR-0056): its counts, answering late. */
+    name: "TfPasswordsSection",
+    source: "lib/tf/settings/TfPasswordsSection.svelte",
+    open: (target) => ({
+      app: mount(TfPasswordsSection, {
+        target,
+        props: {
+          sourceId: "pw",
+          name: "Team passwords",
+          account: "mara",
+          offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] },
+          synced: true,
+          facts: () => deferred({ entries: 1, folders: 1, formats: [["keepass", 1]] } as never),
+        },
+      }),
+    }),
   },
 ];
 

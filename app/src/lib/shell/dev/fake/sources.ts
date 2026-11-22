@@ -114,6 +114,15 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
     ...fixtureSource("kestrel", "kestrel", "Tidewater Kestrel", "https://kestrel.tidewater.example", "ok", 1, 97, "Pat"),
     roles: [{ role: "ticket-system", reads: [] }],
   },
+  // The Passwords page's one source (ADR-0056): a Pleasant Password Server set to sync only by hand, so Settings ›
+  // Sources shows *Only when I press Sync now* and the source's *Passwords* section.
+  {
+    ...fixtureSource("team", "pleasant", "Team passwords", "https://passwords.tidewater.example:10001", "ok", 32, 98, "UserPassword"),
+    sync_by_hand: true,
+    next_run_at: null,
+    config: { username: "mara.lindqvist" } as Record<string, unknown>,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+  },
 ];
 
 // A ticket system the fixture draws moves and comments on its tickets (ADR-0054), as Jira's and Gitea's adapters
@@ -329,7 +338,31 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     ],
     config_schema: TEAMCITY_SCHEMA,
   }),
+  // Pleasant Password Server (ADR-0056): what the Passwords role's first adapter declares.
+  descriptor({
+    id: "pleasant",
+    adapter_kind: "pleasant",
+    name: "Pleasant Password Server",
+    capabilities: [],
+    adapter_version: "3.2.8",
+    auth_methods: ["UserPassword"],
+    min_sync_interval_secs: 60,
+    by_hand_by_default: true,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+    write_ops: [],
+    entity_kinds: [
+      { id: "password_entry", label: "Password entry", plural: "Password entries", monogram: "PW", full_sync_exhaustive: true },
+      { id: "password_folder", label: "Password folder", plural: "Password folders", monogram: "PF", full_sync_exhaustive: true },
+    ],
+    config_schema: {
+      type: "object",
+      properties: { username: { type: "string", title: "Username", description: "The account knobas signs in as, with the password below. Test connection says whom it signed in as." } },
+      required: ["username"],
+    },
+    passwords: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: [] },
+  }),
   // The fixture-only second ticket system (#2032): one saved-view kind, named Kestrel.
+
   descriptor({
     id: "kestrel",
     adapter_kind: "kestrel",
