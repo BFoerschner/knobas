@@ -1,7 +1,8 @@
 //! A ticket's reads asked ahead of a press go in the background lane (ADR-0054): `reachable_transitions` and
 //! `ticket_fields` with `behind: true` are the board's reads while the pointer rests on a card, and stand aside for a
 //! person's own reads of the same server; without it they are a person's. Through Tauri's own IPC pipeline, over a
-//! source that records the lane each read was sent on (`knobas_http::current_lane`), and that answers fields, so the
+//! source that records the lane each read was sent on (`knobas_http::current_lane`), and that answers fields and a
+//! field's choices (`field_options`, a person's read as they type), so the
 //! command's answer is the adapter's (the final suite's mutants: the `behind` branches and the fields' answer each
 //! survived the lib's tests).
 
@@ -106,8 +107,27 @@ impl Source for Fake {
             .expect("one text field"),
         ))
     }
+    async fn field_options(
+        &self,
+        _entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        self.lanes
+            .lock()
+            .unwrap()
+            .push(("options", knobas_http::current_lane()));
+        Ok(Some(
+            serde_json::from_value(json!({
+                "options": [{ "value": format!("{field}:{typed}"), "label": "Ines Harbourmaster" }],
+                "complete": true
+            }))
+            .expect("one option"),
+        ))
+    }
 }
 
+// What a person typing into a field's picker is offered: the adapter's own list.
 struct Connections(knobas_db::embedded::Connector);
 
 #[async_trait]
@@ -177,7 +197,8 @@ fn invoke(
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
             knobas_app::commands::entity::reachable_transitions,
-            knobas_app::commands::entity::ticket_fields
+            knobas_app::commands::entity::ticket_fields,
+            knobas_app::commands::entity::field_options
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -233,6 +254,10 @@ async fn a_read_ahead_of_a_press_goes_behind_and_a_persons_goes_first() {
                     "ticket_fields",
                     json!({ "entityId": entity, "behind": false }),
                 ),
+                (
+                    "field_options",
+                    json!({ "entityId": entity, "field": "assignee", "typed": "ines" }),
+                ),
             ],
         )
     })
@@ -242,6 +267,11 @@ async fn a_read_ahead_of_a_press_goes_behind_and_a_persons_goes_first() {
     assert_eq!(answers[1], json!(["In Progress"]));
     assert_eq!(answers[2]["fields"][0]["id"], "title", "{}", answers[2]);
     assert_eq!(answers[3]["fields"][0]["value"], "Fender panels cracked");
+    assert_eq!(
+        answers[4],
+        json!({ "options": [{ "value": "assignee:ines", "label": "Ines Harbourmaster" }], "complete": true }),
+        "the picker's choices are the adapter's, for the field and the words typed"
+    );
     use knobas_http::Lane::{Background, Interactive};
     assert_eq!(
         *lanes.lock().unwrap(),
@@ -250,6 +280,7 @@ async fn a_read_ahead_of_a_press_goes_behind_and_a_persons_goes_first() {
             ("transitions", Interactive),
             ("fields", Background),
             ("fields", Interactive),
+            ("options", Interactive),
         ]
     );
 }
