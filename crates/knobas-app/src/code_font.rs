@@ -268,6 +268,34 @@ fn families<'a>(faces: impl Iterator<Item = (&'a str, bool, Traits)>) -> Vec<Ins
 mod tests {
     use super::*;
 
+    /// The machine's own fonts are read, with their traits: some monospace,
+    /// some with an x-height, and most versions read from the `name` table's
+    /// version record, which begins with a number (the final suite's mutants:
+    /// the scan emptied, the traits defaulted, the version read from another
+    /// record, such as the copyright, went unseen). Every machine the tests
+    /// run on has system fonts (macOS's Menlo, Linux's fontconfig set).
+    #[test]
+    fn the_machines_fonts_are_read_with_their_traits() {
+        let fonts = scan();
+        assert!(!fonts.is_empty(), "no system font found");
+        assert!(fonts.iter().any(|f| f.monospace), "no monospace family");
+        assert!(
+            fonts.iter().any(|f| f.x_height.is_some()),
+            "no x-height read"
+        );
+        let versions: Vec<&str> = fonts.iter().filter_map(|f| f.version.as_deref()).collect();
+        let numbered = versions
+            .iter()
+            .filter(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+            .count();
+        assert!(
+            !versions.is_empty() && numbered * 2 > versions.len(),
+            "{numbered} of {} versions begin with a number: {:?}",
+            versions.len(),
+            versions.iter().take(5).collect::<Vec<_>>()
+        );
+    }
+
     fn font(family: &str, monospace: bool) -> InstalledFont {
         InstalledFont {
             family: family.to_owned(),
