@@ -3,7 +3,9 @@
 //
 // Usage:
 //   testenv/ui-checks/build-app.sh . <folder>
-//   testenv/ui-checks/with-built.sh <folder> <port> node testenv/ui-checks/long-paths.mjs <out dir> --port <port> [--only a,b] [--shots]
+//   testenv/ui-checks/with-built.sh <folder> <port> node testenv/ui-checks/long-paths.mjs <out dir> --port <port> [--only a,b] [--part k/m] [--shots]
+// `--part k/m`: every m-th screen from the k-th, so m runs share the screens (a run too long for one turn on a machine's
+// queue, the final suite, 2026-11-22).
 // `--shots` also writes each screen with the long paths as <out dir>/<screen>-<size>.png, and with the fixture's own short ones
 // as <screen>-<size>-short.png, to look at or to hold to `pixel-same.py` against another head.
 //
@@ -39,8 +41,9 @@ const out = args[0];
 const port = Number(args[args.indexOf("--port") + 1]);
 const only = args.includes("--only") ? args[args.indexOf("--only") + 1].split(",") : null;
 const shots = args.includes("--shots");
-if (!out || !port) {
-  console.error("usage: long-paths.mjs <out dir> --port <port> [--only a,b]");
+const [partK, partM] = args.includes("--part") ? args[args.indexOf("--part") + 1].split("/").map(Number) : [1, 1];
+if (!out || !port || !(partK >= 1 && partK <= partM)) {
+  console.error("usage: long-paths.mjs <out dir> --port <port> [--only a,b] [--part k/m]");
   process.exit(2);
 }
 
@@ -324,7 +327,8 @@ await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
 const results = [];
 let failed = 0;
-for (const screen of SCREENS) {
+for (const [at, screen] of SCREENS.entries()) {
+  if (at % partM !== partK - 1) continue;
   if (only && !only.some((word) => screen.id.includes(word))) continue;
   for (const [width, height, scale] of screen.sizes ?? SIZES) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
