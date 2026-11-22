@@ -133,6 +133,8 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘Enter", "A composer or a dialog", "Send, or press its primary button"],
   ["J K ↑ ↓", "Tickets and the Inbox", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],
+  ["S", "Tickets and a ticket", "Move the ticket: carry its card on the board, or its status menu (ADR-0054)"],
+  ["⌘Z", "Tickets and a ticket", "Undo the last move while its toast stands"],
   ["L", "Job", "Connections"],
   ["J K", "A diff", "Next and previous file"],
   ["N P", "A diff", "Next and previous change"],

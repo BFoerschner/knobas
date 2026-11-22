@@ -796,7 +796,7 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(31);
+  expect(rows).toHaveLength(33);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
