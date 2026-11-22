@@ -339,7 +339,8 @@ function missingLine(file: string, markup: string, add: (v: Violation) => void):
   const blocks = [...markup.matchAll(/<TfDialog\b[\s\S]*?<\/TfDialog>/g)].map((m) => m[0]);
   for (const block of blocks) {
     if (/\btf-dwhy\b/.test(block)) add({ rule: "m", file, key: "tf-dwhy in a dialog", detail: "draws the missing line by hand; it is `TfDialog`'s `why`" });
-    const passes = /\bwhy=/.test(block.slice(0, tagEnd(block, 0)));
+    // `why={…}` or the shorthand `{why}`.
+    const passes = /\bwhy=|\{why\}/.test(block.slice(0, tagEnd(block, 0)));
     for (const expr of disabledPrimaries(block)) {
       const inFlight = expr.split("||").every((part) => IN_FLIGHT.test(part.trim()));
       if (!inFlight && !passes) add({ rule: "n", file, key: expr, detail: `a primary is disabled={${expr}} and its dialog passes no \`why\`` });
@@ -577,6 +578,7 @@ test("(n) a dialog's primary disabled for more than a send needs `why`; a send i
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "!ready"))).toEqual(["n"]);
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", 'writing || name === ""'))).toEqual(["n"]);
   expect(rulesFor("lib/x/Y.svelte", dialog('<TfDialog why={ready ? null : "Name it."}>', "!ready"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog title={heading} {why}>", "!ready"))).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "writing"))).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "sending || queue.busy"))).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", '<TfDialog>{#snippet footer()}<button class="tf-btn tf-primary">Add</button>{/snippet}</TfDialog>')).toEqual([]);

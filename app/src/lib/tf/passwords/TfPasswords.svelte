@@ -26,6 +26,7 @@
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
   import { inTextField } from "../../shell/keys";
+  import { filterKeys } from "../filter-keys";
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
   import TfPwEntry from "./TfPwEntry.svelte";
@@ -593,12 +594,9 @@
                   spellcheck="false"
                   bind:value={query}
                   bind:this={filter}
+                  {@attach filterKeys()}
                   onkeydown={(event) => {
-                    if (event.key === "Escape" && query !== "") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      query = "";
-                    } else if (event.key === "ArrowDown") {
+                    if (event.key === "ArrowDown") {
                       event.preventDefault();
                       move(1);
                     } else if (event.key === "ArrowUp") {
