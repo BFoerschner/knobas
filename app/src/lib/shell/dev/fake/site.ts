@@ -132,7 +132,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         offered: true,
         persists: true,
         // Confluence has a saved web sign-in, so the bar's *Fill sign-in* and Settings' row are drawn (ux29).
-        sign_in_user: source === "confluence" ? "knobas" : null,
+        // `?fake-long-paths`: a long username, for the row in `long-paths.mjs`.
+        sign_in_user:
+          source === "confluence" ? (params.has("fake-long-paths") ? "tidewater.confluence-service-account-with-a-long-name@payments.platform.tidewater.example" : "knobas") : null,
       },
     ]),
   );
