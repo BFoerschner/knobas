@@ -402,18 +402,62 @@ async fn an_attachment_is_read_live_in_one_request_and_an_id_that_leaves_the_pat
         read.unwrap(),
         Some(knobas_source::view::FileBytes::Read(b"AAAA".to_vec()))
     );
-    // Over the cap: too large, with its size.
+    // At the cap it is read; over it, too large, with its size.
+    assert_eq!(
+        s.attachment_bytes(&entity, &aid, 4).await.unwrap(),
+        Some(knobas_source::view::FileBytes::Read(b"AAAA".to_vec()))
+    );
     assert_eq!(
         s.attachment_bytes(&entity, &aid, 2).await.unwrap(),
         Some(knobas_source::view::FileBytes::TooLarge { size: 4 })
     );
-    for bad in ["../password", "x/y", "a?b", ""] {
-        assert!(
-            s.attachment_bytes(&entity, bad, 1 << 20).await.is_err(),
-            "{bad}"
-        );
+    // An id or an entry key that could leave the path is refused before
+    // anything is sent.
+    for bad in ["../password", "x/y", "a?b", "a#b", "a\\b", "a..b", ""] {
+        let (refused, sent) =
+            knobas_http::counted::counted(s.attachment_bytes(&entity, bad, 1 << 20)).await;
+        assert!(refused.is_err(), "{bad}");
+        assert_eq!(sent, 0, "{bad} was sent");
     }
-    assert!(s.attachment_bytes("other:e1", &aid, 1 << 20).await.is_err());
+    for bad_entry in ["pw:a/b", "pw:a..b", "pw:", "other:e1"] {
+        let (refused, sent) =
+            knobas_http::counted::counted(s.attachment_bytes(bad_entry, &aid, 1 << 20)).await;
+        assert!(refused.is_err(), "{bad_entry}");
+        assert_eq!(sent, 0, "{bad_entry} was sent");
+    }
+
+    // Saved: the file's bytes, under the name the list gave, into the sink.
+    #[derive(Default)]
+    struct Kept {
+        name: Option<String>,
+        bytes: Vec<u8>,
+    }
+    #[async_trait::async_trait]
+    impl knobas_source::run::DownloadSink for Kept {
+        async fn start(&mut self, file_name: &str) -> Result<(), knobas_source::SourceError> {
+            self.name = Some(file_name.to_owned());
+            Ok(())
+        }
+        async fn write(&mut self, bytes: &[u8]) -> Result<(), knobas_source::SourceError> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+    let mut kept = Kept::default();
+    assert!(
+        s.download_attachment(&entity, &aid, "ledger-signing.pem", &mut kept)
+            .await
+            .unwrap()
+    );
+    assert_eq!(kept.name.as_deref(), Some("ledger-signing.pem"));
+    assert_eq!(kept.bytes, b"AAAA");
+    let mut none = Kept::default();
+    assert!(
+        s.download_attachment(&entity, "../x", "x", &mut none)
+            .await
+            .is_err()
+    );
+    assert!(none.name.is_none());
 }
 
 #[tokio::test]
