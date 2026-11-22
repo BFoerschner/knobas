@@ -322,6 +322,10 @@ impl Shell for ProbeShell {
     fn landed(&self, source: &str) {
         log("landed", json!({ "source": source }));
     }
+    /// The probe keeps no saved sign-in: the ask is logged and nothing is typed.
+    fn sign_in(&self, source: &str) {
+        log("sign-in-asked", json!({ "source": source }));
+    }
 }
 
 const INSETS: SiteInsets = SiteInsets {

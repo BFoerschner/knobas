@@ -25,6 +25,7 @@ use objc2::runtime::{AnyClass, AnyObject, Bool, NSObject, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags};
 use objc2_foundation::{NSObjectProtocol, NSString};
+use objc2_web_kit::WKWebsiteDataStore;
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtDarwin, WebViewExtDarwin, WebViewExtMacOS};
 
 use crate::host::{Hooks, KeyHook, LeaveFreely, ViewEvent, ViewSpec};
@@ -40,6 +41,12 @@ fn os_major() -> u32 {
         msg_send![&*info, operatingSystemVersion]
     };
     u32::try_from(version.majorVersion).unwrap_or(0)
+}
+
+/// Whether macOS `major` keeps a data store per identifier, so [`forget`]
+/// has data to clear first.
+fn has_data_stores(major: u32) -> bool {
+    major >= DATA_STORES_FROM
 }
 
 /// Whether a site's session outlives knobas on this macOS: data stores by
@@ -87,8 +94,62 @@ pub fn builder<'a>(
     }
 }
 
-/// Remove a site's data store. Its view is dropped already.
+thread_local! {
+    /// The stores whose data [`forget`] has cleared and whose removal is the
+    /// next try's.
+    static CLEARED: RefCell<std::collections::HashSet<[u8; 16]>> = RefCell::default();
+}
+
+/// Remove a site's data store. Its view is dropped already. `Sites::forget`
+/// calls it again every half second until it answers `true`.
+///
+/// The first call clears the store's data through the store and answers
+/// `false`; the next removes the store. Removing alone deletes the store's
+/// files but, while another view (knobas's own page) keeps WebKit's network
+/// process alive, leaves the session it holds for the store: in the real
+/// window (2026-11-22) Confluence's cookies came back to the next view with
+/// that identifier, which was signed in at once and wrote them back at the
+/// quit (`tests/mac_forget.rs`). Clearing through the store reaches that
+/// session. The removal waits for the next call because WebKit refuses to
+/// remove a store while the clear's own handle on it is open.
 pub fn forget(id: [u8; 16], done: Box<dyn FnOnce(bool) + Send>) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        done(false);
+        return;
+    };
+    if !has_data_stores(os_major()) || CLEARED.with(|cleared| cleared.borrow_mut().remove(&id)) {
+        remove_store(id, done);
+        return;
+    }
+    let store = objc2::rc::autoreleasepool(|_| {
+        // SAFETY: a WebKit read on the main thread (`mtm`).
+        unsafe {
+            WKWebsiteDataStore::dataStoreForIdentifier(
+                &objc2_foundation::NSUUID::from_bytes(id),
+                mtm,
+            )
+        }
+    });
+    let held = RefCell::new(Some(done));
+    let cleared = RcBlock::new(move || {
+        if let Some(done) = held.take() {
+            CLEARED.with(|cleared| cleared.borrow_mut().insert(id));
+            tracing::debug!("a site's data store is cleared; its removal is the next try");
+            done(false);
+        }
+    });
+    // SAFETY: a WebKit call on the main thread (`mtm`), with the types its
+    // selector takes; WebKit keeps the block until it has called it.
+    unsafe {
+        store.removeDataOfTypes_modifiedSince_completionHandler(
+            &WKWebsiteDataStore::allWebsiteDataTypes(mtm),
+            &objc2_foundation::NSDate::distantPast(),
+            &cleared,
+        );
+    }
+}
+
+fn remove_store(id: [u8; 16], done: Box<dyn FnOnce(bool) + Send>) {
     WebView::remove_data_store(&id, move |result| {
         if let Err(error) = &result {
             tracing::debug!(%error, "a site's data store is not removed yet");
@@ -594,6 +655,13 @@ pub fn wrap(view: &WebView, source: &str, hooks: &Hooks, leaving: &LeaveFreely) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_stores_by_identifier_came_with_macos_14() {
+        assert!(!has_data_stores(13));
+        assert!(has_data_stores(14));
+        assert!(has_data_stores(27));
+    }
 
     #[test]
     fn the_user_agent_names_the_safari_of_its_macos() {

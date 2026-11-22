@@ -52,9 +52,12 @@ dpi = "0.1"
 # The key monitor, the delegate wrappers, back and forward (`mac.rs`). The
 # copies already in the lockfile through wry.
 objc2 = "=0.6.4"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSError", "NSURL", "NSProcessInfo", "objc2-core-foundation", "block2"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSError", "NSURL", "NSProcessInfo", "NSUUID", "NSDate", "NSSet", "objc2-core-foundation", "block2"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSEvent", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSAlert", "NSGraphicsContext", "NSButton", "NSControl", "NSTextField", "NSGraphics", "NSRunningApplication", "block2", "objc2-core-foundation"] }
 block2 = "=0.6.2"
+# A site's data store by identifier and its cookies (`mac::forget`). The copy wry
+# already resolves, with two of the features wry already builds.
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "block2", "WKWebsiteDataStore", "WKHTTPCookieStore"] }
 
 [target.'cfg(windows)'.dependencies]
 # The controller's settings and events wry does not expose (`windows.rs`).
@@ -76,3 +79,14 @@ wry = { version = "=0.55.1", default-features = false, features = ["os-webview",
 [target.'cfg(windows)'.dev-dependencies]
 # The probe's posted keys (`examples/site_probe.rs`). The copy in the lockfile.
 windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# `tests/mac_forget.rs`: a page's cookie into a store, and what is left after a forget. Copies in the lockfile.
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDate", "NSArray", "NSHTTPCookie", "NSRunLoop", "NSUUID", "NSObjCRuntime", "NSEnumerator", "NSGeometry", "NSURL", "NSURLRequest", "objc2-core-foundation"] }
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "block2", "WKWebsiteDataStore", "WKHTTPCookieStore", "WKWebViewConfiguration"] }
+
+# WebKit wants the main thread and its run loop: no harness (the file says why).
+[[test]]
+name = "mac_forget"
+path = "tests/mac_forget.rs"
+harness = false

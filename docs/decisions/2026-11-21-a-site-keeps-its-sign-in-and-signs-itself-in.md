@@ -113,3 +113,16 @@ looked for while it draws), and a log capture through a whole fill with no line 
 any allowed origin, fill twice per landing; each fails its test. Front end: the fill script against each built-in
 kind's recorded sign-in page (`crates/knobas-site/tests/sign-in-pages/`) and the tricky ones, the Settings row and
 dialog, the bar's button and notes.
+
+## Found in the final suite (2026-11-22)
+
+- ***Forget…* on the Mac left the session alive** when the site had been open in the same run. The Mac's real window,
+  Confluence: *Forget…* removed the store's folder, yet the next open was signed in at once, a reload too, and the
+  quit wrote `Cookies.binarycookies` back, so the start after it was signed in as well. While another view lives
+  (knobas's own page), WebKit's network process keeps the store's session in memory after its files are removed and
+  hands it to the next view with that identifier. `mac::forget` now clears every kind of data through the store
+  first (`removeDataOfTypes:modifiedSince:`, which reaches that session) and removes the store on the next try, half
+  a second later, since WebKit refuses to remove a store while the clear's own handle on it is open.
+  `crates/knobas-site/tests/mac_forget.rs` loads a page that sets a lasting and a session cookie into a store, beside
+  a second view on the default store, forgets the store, and asks it for cookies: both were still there before, none
+  after. In the window after the fix: cleared, removed 0.5 s later, and the next open went to `/login.action`.
