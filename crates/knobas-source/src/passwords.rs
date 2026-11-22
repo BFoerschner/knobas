@@ -79,12 +79,6 @@ impl SecretText {
     pub fn expose(&self) -> &str {
         &self.0
     }
-
-    /// Whether it holds nothing.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
 impl std::fmt::Debug for SecretText {
@@ -524,6 +518,11 @@ pub struct SecretAsk {
     pub which: SecretRef,
     /// The usage comment, where one was asked for and given.
     pub comment: Option<String>,
+    /// The entry's folder as the mirror holds it, an entity id: where a
+    /// source that reads a field by listing the entry's folder (Pleasant)
+    /// looks. `None` directly under the source's root, or when unknown.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 /// What a secret read answered.
@@ -827,5 +826,70 @@ mod tests {
             serde_json::to_value(OtpAlgorithm::Sha256).unwrap(),
             serde_json::json!("SHA256")
         );
+    }
+
+    #[test]
+    fn an_algorithm_reads_back_its_own_spelling() {
+        for algorithm in [
+            OtpAlgorithm::Sha1,
+            OtpAlgorithm::Sha256,
+            OtpAlgorithm::Sha512,
+        ] {
+            assert_eq!(OtpAlgorithm::parse(algorithm.as_str()), Some(algorithm));
+            assert_eq!(
+                serde_json::to_value(algorithm).unwrap(),
+                serde_json::json!(algorithm.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_kinds_are_the_roles_and_name_their_folders_at_path() {
+        assert!(is_password_kind(ENTRY_KIND) && is_password_kind(FOLDER_KIND));
+        assert!(!is_password_kind("ticket") && !is_password_kind(""));
+        let paths = payload_paths();
+        assert_eq!(
+            paths.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>(),
+            [ENTRY_KIND, FOLDER_KIND]
+        );
+        for p in &paths {
+            assert_eq!(p.parent.len(), 1);
+            assert_eq!(p.parent[0].kind, FOLDER_KIND);
+            assert_eq!(p.parent[0].at, PayloadPath::of(["path"]));
+            assert_eq!(p.parent[0].names, vec![PayloadPath::of(["name"])]);
+        }
+    }
+
+    #[test]
+    fn a_write_names_its_comment_its_target_and_its_kind() {
+        let set = Write::SetPassword {
+            entity: "pw:e1".into(),
+            password: SecretText::new("x"),
+            comment: Some("PAY-231".into()),
+        };
+        assert_eq!(set.comment(), Some("PAY-231"));
+        assert_eq!(set.target(), "pw:e1");
+        assert_eq!(set.kind(), WriteKind::SetPassword);
+        let ask = Write::RequestAccess {
+            entity: "pw:e2".into(),
+            comment: "deploy".into(),
+        };
+        assert_eq!(ask.comment(), Some("deploy"));
+        assert_eq!(ask.kind(), WriteKind::RequestAccess);
+        let create = Write::CreateEntry {
+            source: "pw".into(),
+            folder: None,
+            title: "t".into(),
+            username: None,
+            address: None,
+            notes: None,
+            expires: None,
+            password: SecretText::new("x"),
+            otp_key: None,
+            comment: None,
+        };
+        assert_eq!(create.comment(), None);
+        assert_eq!(create.target(), "pw");
+        assert_eq!(create.kind(), WriteKind::CreateEntry);
     }
 }

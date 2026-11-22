@@ -592,6 +592,7 @@ pub async fn check_passwords(
                     entity: first.entity.to_string(),
                     which: SecretRef::Password,
                     comment: None,
+                    folder: None,
                 })
                 .await;
             assert!(
@@ -714,6 +715,7 @@ pub async fn check_passwords(
                 entity: item.entity.to_string(),
                 which: SecretRef::Password,
                 comment: None,
+                folder: None,
             })
             .await;
         assert!(
@@ -740,6 +742,7 @@ pub async fn check_passwords(
             entity: not_an_entry.clone(),
             which: SecretRef::Password,
             comment: None,
+            folder: None,
         })
         .await;
     assert!(

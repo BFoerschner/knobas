@@ -1127,6 +1127,26 @@ impl Request {
     /// retries a transient failure, and a retried emit is a second emit. A
     /// packet that must not arrive twice -- Kuma's `add` is one -- says so
     /// with [`Request::no_retry`] (issue #1122).
+    /// A form body, `application/x-www-form-urlencoded`: an OAuth2 password
+    /// grant's (Pleasant Password Server's `/OAuth2/Token`, ADR-0056). The
+    /// pairs are percent-encoded here; a value never reaches a log line.
+    #[must_use]
+    pub fn form(self, pairs: &[(&str, &str)]) -> Self {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs)
+            .finish();
+        Self {
+            inner: self
+                .inner
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(body),
+            ..self
+        }
+    }
+
     #[must_use]
     pub fn text(self, body: String) -> Self {
         Self {

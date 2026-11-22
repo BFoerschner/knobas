@@ -365,14 +365,17 @@ mod tests {
             let wrote = replace(&store, "pw", &keys(n)).unwrap();
             assert_eq!(read(&store, "pw").unwrap(), keys(n), "{n} keys");
             assert_eq!(count_items(&store, "pw"), wrote, "{n} keys");
-            for chunk in chunks(&keys(n), &write_id()) {
-                assert!(
-                    units(&chunk) <= CHUNK_CHARS,
-                    "{} > {CHUNK_CHARS}",
-                    units(&chunk)
-                );
+            let cut = chunks(&keys(n), &write_id());
+            for (i, chunk) in cut.iter().enumerate() {
+                let len = chunk.encode_utf16().count();
+                assert!(len <= CHUNK_CHARS, "{len} > {CHUNK_CHARS}");
+                assert_eq!(units(chunk), len);
                 // Windows' own limit, in its own unit: 2,560 bytes of UTF-16.
-                assert!(chunk.encode_utf16().count() * 2 <= 2_560);
+                assert!(len * 2 <= 2_560);
+                // A chunk is cut full: every one but the last nearly fills.
+                if i + 1 < cut.len() {
+                    assert!(len > 1_150, "chunk {i} of {} holds only {len}", cut.len());
+                }
             }
         }
         // About fifteen keys a chunk at Pleasant's id length: 400 is many.
@@ -490,5 +493,151 @@ mod tests {
             }
         }
         assert!(replace(&Plain, "pw", &keys(1)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+    use crate::MemoryStore;
+
+    fn one(secret: &str) -> OtpKey {
+        OtpKey {
+            secret: SecretText::new(secret),
+            digits: 6,
+            period: 30,
+            algorithm: OtpAlgorithm::Sha1,
+        }
+    }
+
+    /// Entity ids outside the BMP take two UTF-16 units a character: the cut
+    /// counts them so, and every chunk still fits and nearly fills.
+    #[test]
+    fn wide_characters_are_counted_in_utf16_units() {
+        let keys: OtpKeys = (0..300)
+            .map(|i| {
+                (
+                    format!("pw:\u{1F511}\u{1F511}{i:05}"),
+                    one("JBSWY3DPEHPK3PXP"),
+                )
+            })
+            .collect();
+        let store = MemoryStore::new();
+        replace(&store, "pw", &keys).unwrap();
+        assert_eq!(read(&store, "pw").unwrap(), keys);
+        let cut = chunks(&keys, "w");
+        for (i, chunk) in cut.iter().enumerate() {
+            let len = chunk.encode_utf16().count();
+            assert!(len <= CHUNK_CHARS, "{len}");
+            if i + 1 < cut.len() {
+                assert!(len > 1_150, "chunk {i} holds only {len}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_header_that_is_not_ours_is_refused() {
+        for bad in [
+            "k1 w 3/2\n{}",
+            "k1 w 0/1 x\n{}",
+            "k2 w 0/1\n{}",
+            "k1 w 0-1\n{}",
+            "nonewline",
+        ] {
+            assert!(header(bad).is_err(), "{bad:?}");
+        }
+        assert!(header("k1 w 0/1\n{}").is_ok());
+    }
+
+    #[test]
+    fn a_later_chunk_numbered_or_counted_otherwise_is_refused() {
+        let keys: OtpKeys = (0..100)
+            .map(|i| (format!("pw:{i:060}"), one("JBSWY3DPEHPK3PXP")))
+            .collect();
+        let cut = chunks(&keys, "same");
+        assert!(cut.len() >= 3);
+        // Chunk 1 replaced by one of the same write but another number.
+        let store = MemoryStore::new();
+        for (n, c) in cut.iter().enumerate() {
+            store.put_text(&KeychainAccount::otp("pw", n), c).unwrap();
+        }
+        store
+            .put_text(&KeychainAccount::otp("pw", 1), &cut[2])
+            .unwrap();
+        assert!(read(&store, "pw").is_err());
+        // Chunk 1 of the same write id but a different count.
+        let other = chunks(
+            &keys
+                .iter()
+                .take(90)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            "same",
+        );
+        assert_ne!(other.len(), cut.len());
+        store
+            .put_text(&KeychainAccount::otp("pw", 1), &other[1])
+            .unwrap();
+        assert!(read(&store, "pw").is_err());
+    }
+
+    #[test]
+    fn two_writes_never_share_an_id() {
+        let (a, b) = (write_id(), write_id());
+        assert_ne!(a, b);
+        assert!(!a.is_empty() && !a.contains(' ') && !a.contains('\n'));
+    }
+
+    /// A chunk 0 that does not read leaves the count unknown: a replace clears
+    /// every chunk it finds after the ones it wrote.
+    #[test]
+    fn a_replace_over_an_unreadable_chunk_0_clears_the_whole_tail() {
+        let store = MemoryStore::new();
+        for n in 0..5 {
+            store
+                .put_text(&KeychainAccount::otp("pw", n), "garbage")
+                .unwrap();
+        }
+        replace(
+            &store,
+            "pw",
+            &[("pw:e1".to_owned(), one("JBSWY3DPEHPK3PXP"))]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        for n in 1..5 {
+            assert!(
+                store
+                    .get_text(&KeychainAccount::otp("pw", n))
+                    .unwrap()
+                    .is_none(),
+                "chunk {n} left"
+            );
+        }
+        assert_eq!(read(&store, "pw").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_async_wrappers_reach_the_store() {
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+        let keys: OtpKeys = [("pw:e1".to_owned(), one("JBSWY3DPEHPK3PXP"))]
+            .into_iter()
+            .collect();
+        assert_eq!(spawn::replace(&store, "pw", keys.clone()).await.unwrap(), 1);
+        assert_eq!(spawn::read(&store, "pw").await.unwrap(), keys);
+        let more: OtpKeys = [("pw:e2".to_owned(), one("KRSXG5CTMVRXEZLU"))]
+            .into_iter()
+            .collect();
+        assert_eq!(spawn::merge(&store, "pw", more).await.unwrap(), 1);
+        assert_eq!(spawn::read(&store, "pw").await.unwrap().len(), 2);
+        spawn::delete(&store, "pw").await.unwrap();
+        assert!(spawn::read(&store, "pw").await.unwrap().is_empty());
+        assert!(
+            store
+                .get_text(&KeychainAccount::otp("pw", 0))
+                .unwrap()
+                .is_none()
+        );
     }
 }

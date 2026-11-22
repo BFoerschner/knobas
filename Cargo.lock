@@ -4182,6 +4182,7 @@ dependencies = [
  "knobas-source-jira",
  "knobas-source-kuma",
  "knobas-source-mock",
+ "knobas-source-pleasant",
  "knobas-source-teamcity",
  "knobas-sync",
  "knobas-update",
@@ -4514,6 +4515,23 @@ dependencies = [
  "serde_json",
  "sha1",
  "tokio",
+]
+
+[[package]]
+name = "knobas-source-pleasant"
+version = "3.2.8"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "data-encoding",
+ "knobas-http",
+ "knobas-source",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
