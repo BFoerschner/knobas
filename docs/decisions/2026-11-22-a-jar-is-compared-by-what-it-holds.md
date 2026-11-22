@@ -78,3 +78,16 @@ gain a switch that leads to "not a spec").
 - 29 hand mutants on the decision logic (the JAR's plan against `can.archive`, the registry's `diff`, the listing
   guard, the generated folder's JAR, the CRC and size compare, families, library pairing, the words, `specHint`, the
   per-name plan cache): all killed.
+
+## In the real app (Mac, 2026-11-22)
+
+A debug build on a scratch profile, a scratch Gitea over http for the sync and the repository's checkout set by hand to
+a local clone (the https front was on the WSL box, blocked that day). A folder renderer (`javac` and `jar` over a
+folder holding `*.lcproj`) on two commits: the diff address between them with *Rendered* on and *Run* pressed listed
+`greeter.jar` as *Bytes | Rendered*, its head line, `Added.class` added, `Greeter.class and 1 nested class` changed
+and `notes.txt` changed at the same size (by its CRC), the foot "2 changed, 1 added; 2 the same". The class opened to
+its outline diff with no decompiler in the build (*Source* disabled, the reason as its title), and to its decompiled
+source diff once Vineflower was staged. The generated folder's file view opened the JAR in the JAR view with *Render
+as JAR*. Against the working tree, an uncommitted change came out as `Added.class` changed, its source diffed. Two
+faults found and fixed there: the JAR diff drew unstyled (it did not import `jar.css`), and its hunks broke under
+*Split* (the split card's line grid; a PDF's text hunks had the same fault).

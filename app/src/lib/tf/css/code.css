@@ -521,7 +521,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-was { margin: 2px 0 6px; }
 .tf-was-at { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-was-hunk, .tf-pdfd-hunk { border: 1px solid var(--rule-2); border-radius: 4px; overflow-x: auto; background: var(--under); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: calc(40px * var(--size-code)) calc(40px * var(--size-code)) 1fr; white-space: pre; overflow: visible; }
+.tf-was-hunk .tf-ln, .tf-diff.tf-split .tf-was-hunk .tf-ln, .tf-pdfd-hunk .tf-ln, .tf-diff.tf-split .tf-pdfd-hunk .tf-ln { display: grid; grid-template-columns: calc(40px * var(--size-code)) calc(40px * var(--size-code)) 1fr; white-space: pre; overflow: visible; }
 .tf-was-hunk .tf-no, .tf-pdfd-hunk .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
 .tf-was-hunk .tf-add, .tf-pdfd-hunk .tf-add { background: var(--diff-add); }
 .tf-was-hunk .tf-del, .tf-pdfd-hunk .tf-del { background: var(--diff-del); }

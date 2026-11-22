@@ -30,6 +30,8 @@
 </script>
 
 <script lang="ts">
+  import "../css/jar.css";
+
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
