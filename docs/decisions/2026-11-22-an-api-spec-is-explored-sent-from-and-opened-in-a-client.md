@@ -17,7 +17,7 @@ One windowed list in the page's scroller: groups, operation rows, and each opene
 4. **An operation's page** shows one response and one media type at a time, picked in a segmented control. **A schema** is drawn merged (`allOf`), chosen among (`oneOf`, `anyOf`) and followed (a ref's name goes to the schema's page, which lists the operations that use it).
 5. **The overview** draws the servers with their variables and the security schemes in words.
 6. **A followed link pushes the window's history; a pick in the rail replaces the place.** The address is the file's with a place, as before, plus `tags/<name>`.
-7. **Small, a spec is the inline form**: in a comparison the operations and schemas that differ, marked, on the stage's two sides; on a Docs page a code block's *API*, in a box of fixed height, the code first.
+7. **Small, a spec is the inline form**: in a comparison the operations and schemas that differ, marked, on the stage's two sides; on a Docs page a code block's *API*, in a box of fixed height, the code first. Its filter is every word typed, not the launcher's ranking: a page may hold several forms, and each would hold a list in the picker. A Docs block whose version key lies past the sniff's head is not offered *API*.
 8. **A request starts as the spec says** and is one model with three writers: what Rust sends, the curl text, and a Bruno request.
 9. **A server is the spec's or one a person saved** (one settings row). No environments, no variables but a server's own.
 10. **A secret is kept for one origin, in memory only** (Björn: "I'd just type it into the openapi viewer page itself. not using stored credentials"): typed on the explorer's page, handed to the app once, held there until knobas quits; never in the keychain or a settings row. Rust attaches it to its origin only. No source's credential is used.
@@ -30,6 +30,8 @@ One windowed list in the page's scroller: groups, operation rows, and each opene
 17. **The scratch folder** is in the profile, one a spec file, written again when the spec's content changes (compared by hash, Björn), else opened as it is, removed after 30 days unopened.
 18. **Bruno ships as an entry.** On macOS it opens the collection. On Windows and Linux it cannot be pointed at a folder, and knobas says so with the path ready (*Open Collection*, Björn: yes). Not found on the computer, the entry is not drawn (Björn).
 19. **A program that exits with an error within 1.5 s of its start is a failed open**, for every application.
+20. **A comparison reads a YAML or JSON file's side to know it for a spec** (as built): a renderer that knows its files by content cannot be picked by a name alone, so the side the stage would read is read once as the card is planned, its first MiB sniffed. *Lines* stays the default. The marks come from the worker, by JSON with keys sorted and refs left as refs; a schema that changed marks the operations that reach it as *Changed through* the nearest changed schema.
+21. **Zen mode** (Björn's ask 3, as built): *Zen* in the file header and `Z` outside a field, on a file drawn as Markdown, PDF, JAR, an image, an API spec, a diagram (Mermaid, D2, Graphviz) or a page. It hides the repository's crumbs, header, tabs and tree; the file's own header stays. `Esc` leaves it, leaving the file view ends it, it holds while the reader moves between files, and it is never kept. Its key and renderers live in `tf/zen.svelte.ts`, which the tooltip and Settings › Keyboard read.
 
 ## Not in this pass
 
@@ -54,8 +56,8 @@ On a prototype with the app's stylesheets in headless Chrome on the WSL box, Git
 
 ## Built
 
-Step by step on the branch `ux31-openapi` (section 32 of the design): the sniff past its head and the worker's model (1), the explorer (2), its filter by the launcher's rules over a held list (3), the timing (4), sending in Rust (5), the request and the answer (6), this note and ADR-0057 (7), then *Open in* and Bruno, a comparison, Docs and Zen mode.
+Step by step on the branch `ux31-openapi` (section 32 of the design): the sniff past its head and the worker's model (1), the explorer (2), its filter by the launcher's rules over a held list (3), the timing (4), sending in Rust (5), the request and the answer (6), this note and ADR-0057 (7), *Open in* and Bruno (8), a spec in a comparison (10), a spec on a Docs page (11) and Zen mode (12). Step 9 (Bruno on Linux and Windows) waits for the PC.
 
 ## Reversing it
 
-Each part stands alone. The explorer: `TfOpenApi` as it was at `87b4e568`, with `openapi.css`. Sending: the request column is drawn only where `api_send` is registered, so taking the command out takes the column out. *Open in*: remove `api_command` from the shipped Bruno entry and no menu offers a client. The settings row, the keychain items and the scratch folder can stay; nothing reads them.
+Each part stands alone. The explorer: `TfOpenApi` as it was at `87b4e568`, with `openapi.css`. Sending: the request column is drawn only where `api_send` is registered, so taking the command out takes the column out. *Open in*: remove `api_command` from the shipped Bruno entry and no menu offers a client. Zen mode: drop the button and the key in `TfRepoFiles` and the two classes; `tf/zen.svelte.ts` holds nothing else. A spec in a comparison: `OPENAPI.diff = false`, and the diff's sniff reads (`BY_CONTENT` in `TfDiffView`) stop with it. The settings row and the scratch folder can stay; nothing reads them.

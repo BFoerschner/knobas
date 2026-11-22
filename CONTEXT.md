@@ -383,8 +383,12 @@ A [folder renderer](#folder-renderer) run on one folder at each side of a [diff]
 _Avoid_: folder diff (the real files' diff), rendered diff (a file's, a [rendered comparison](#rendered-comparison))
 
 **API explorer**:
-How an OpenAPI or Swagger file is drawn: a rail that lists its endpoints by tag, by path or by schema, a page for the one picked, and beside it a request a person can send. A spec is a file, so the explorer is its renderer, drawn wherever a file is (ux31, `docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`). In code `oas` (`TfOpenApi`, `TfOas…`); a **rail**, a **place** (`get /pets`, `schemas/Pet`, `tags/pets`).
+How an OpenAPI or Swagger file is drawn: a rail that lists its endpoints by tag, by path or by schema, a page for the one picked, and beside it a request a person can send. A spec is a file, so the explorer is its renderer, drawn wherever a file is (ux31, `docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`). In code `oas` (`TfOpenApi`, `TfOas…`); a **rail**, a **place** (`get /pets`, `schemas/Pet`, `tags/pets`). Drawn small it is the **inline form** (`TfOasInline`): a Docs code block's *API*, a comparison's two sides.
 _Avoid_: Swagger view, Try it out, API client
+
+**Zen mode**:
+A file on the Code page shown alone, the repository's crumbs, header, tabs and tree hidden, for a renderer that wants the room (Markdown, PDF, JAR, an image, an API spec, a diagram, a page). `Z` or the file header's *Zen*; `Esc` leaves it. A way of reading, never a setting (ux31, `app/src/lib/tf/zen.svelte.ts`).
+_Avoid_: full screen, focus mode, fill the window
 
 **Pipeline**:
 What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenkins job. The Builds view is drawn over pipelines and their [runs](#run); the source's own word appears once, in the view's header (ADR-0022).
