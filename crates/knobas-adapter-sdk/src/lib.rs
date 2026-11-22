@@ -425,7 +425,9 @@ pub trait Adapter: Sized + 'static {
     /// `Some` for every ticket it emits (battery clause 15), and its `write`
     /// refuses by name, at write time, a field it cannot set. Built against
     /// 1.5.0 or earlier, which has no `tickets`, it is never called, and its
-    /// tickets' fields are read only in knobas.
+    /// tickets' fields are read only in knobas. `export!` exports `tickets`
+    /// for every adapter; the host calls it only for one that declares
+    /// `edit_ticket`.
     #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
     fn ticket_fields(
         &self,

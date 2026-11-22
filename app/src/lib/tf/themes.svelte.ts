@@ -206,9 +206,11 @@ export interface ThemeTimers {
   frame: (run: () => void) => unknown;
 }
 
-const defaultTimers: ThemeTimers = {
-  set: setTimeout,
-  clear: clearTimeout,
+export const defaultTimers: ThemeTimers = {
+  // Called as the window's own: `timers.set(...)` would call `setTimeout` on this object, which a browser refuses
+  // ("Illegal invocation"); Node does not, so only the window shows it.
+  set: ((run: () => void, ms?: number) => setTimeout(run, ms)) as typeof setTimeout,
+  clear: ((id?: ReturnType<typeof setTimeout>) => clearTimeout(id)) as typeof clearTimeout,
   frame: (run) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => run()) : setTimeout(run, 16)),
 };
 

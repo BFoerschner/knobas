@@ -140,20 +140,20 @@ pub(crate) fn optional_export(
 
 /// The `tickets` export and the `edit_ticket` write are two signals for one
 /// fact (ADR-0054): a component that declares the write exports the
-/// interface its fields are read through, and one that exports it declares
-/// the write. Either alone is refused, naming both.
-fn check_tickets(template: &SourceDescriptor, exports: bool) -> Result<(), String> {
+/// interface its fields are read through, or it is refused, naming both.
+/// The reverse is not a fault: the SDK's `export!` exports the interface for
+/// every component built against 1.6.0, a wiki's included, so an export
+/// without the write answers `Ok(false)` and the host never calls it (the
+/// component offers no edits), as it drops an unanswered `refresh`.
+/// `Ok(true)`: the interface is kept.
+fn check_tickets(template: &SourceDescriptor, exports: bool) -> Result<bool, String> {
     let declares = template.write_ops.iter().any(|op| op == EDIT_TICKET);
     match (declares, exports) {
         (true, false) => Err(format!(
             "it declares the {EDIT_TICKET:?} write and exports no {TICKETS_EXPORT}, which a \
              ticket's fields are read through"
         )),
-        (false, true) => Err(format!(
-            "it exports {TICKETS_EXPORT} and does not declare the {EDIT_TICKET:?} write it \
-             goes with"
-        )),
-        _ => Ok(()),
+        (declares, exports) => Ok(declares && exports),
     }
 }
 
@@ -349,11 +349,17 @@ impl WasmAdapter {
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
-        check_tickets(
+        let keeps = check_tickets(
             &adapter.inner.template,
             adapter.inner.ticket_fields.is_some(),
         )
         .map_err(LoadError::Link)?;
+        if !keeps {
+            let inner =
+                Arc::get_mut(&mut adapter.inner).expect("nothing else holds the adapter yet");
+            inner.ticket_fields = None;
+            inner.field_options = None;
+        }
         if adapter.inner.download.is_some() {
             block_on(source::check_download(&adapter)).map_err(LoadError::Link)?;
         }

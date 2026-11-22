@@ -2802,7 +2802,10 @@ const CASES: Case[] = [
     source: "lib/tf/TfThemeKeep.svelte",
     open: (target) => {
       const data = new Map<string, string>([["knobas.themes", JSON.stringify([{ id: "own-residue1", name: "Faint", kind: "light", app: { sheet: "#FAFAFA", ink: "#AAAAAA" }, syntax: {} }])]]);
-      const themes = createWindowThemes(() => ({ getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) }), () => null);
+      // The store's own 15 s timer is the store's, not the plate's: it runs on timers of its own here, so what is
+      // counted is what the plate itself leaves.
+      const storeTimers = { set: (() => 0) as unknown as typeof setTimeout, clear: (() => {}) as typeof clearTimeout, frame: () => 0 };
+      const themes = createWindowThemes(() => ({ getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) }), () => null, storeTimers);
       themes.useAsIs("own-residue1");
       return { app: mount(TfThemeKeep, { target, props: { themes } }) };
     },

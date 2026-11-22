@@ -7,11 +7,12 @@
  */
 import { windowLookSet } from "../ipc/window";
 import type { Theme as Mode } from "./theme.svelte";
-import type { Themes } from "./themes.svelte";
+import { defaultTimers, type Themes } from "./themes.svelte";
 
 export const TELL_AFTER = 300;
 
-export function watchWindowLook(themes: Themes, mode: Mode, tell: typeof windowLookSet = windowLookSet, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }): () => void {
+
+export function watchWindowLook(themes: Themes, mode: Mode, tell: typeof windowLookSet = windowLookSet, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = defaultTimers): () => void {
   if (themes.startedDefault) return () => {};
   let told = "";
   let waiting: ReturnType<typeof setTimeout> | null = null;
