@@ -158,10 +158,10 @@
     {/if}
   </div>
   <div class="tf-pw-fa">
-    <button type="button" class="tf-btn{main ? '' : ' tf-sm'}" disabled={shown === null && disabled} title={why || undefined} onclick={() => void toggle()}
+    <button type="button" class="tf-btn{main ? '' : ' tf-sm'}" aria-label={shown ? "Hide" : "Show"} aria-keyshortcuts={main ? "S" : undefined} disabled={shown === null && disabled} title={why || undefined} onclick={() => void toggle()}
       >{shown ? "Hide" : "Show"}{#if main}<kbd>S</kbd>{/if}</button
     >
-    <button type="button" class="tf-btn{main ? ' tf-primary' : ' tf-sm'}" disabled={disabled && shown === null} title={why || undefined} onclick={() => void press("copy")}
+    <button type="button" class="tf-btn{main ? ' tf-primary' : ' tf-sm'}" aria-label="Copy" aria-keyshortcuts={main ? "C" : undefined} disabled={disabled && shown === null} title={why || undefined} onclick={() => void press("copy")}
       >Copy{#if main}<kbd>C</kbd>{/if}</button
     >
   </div>

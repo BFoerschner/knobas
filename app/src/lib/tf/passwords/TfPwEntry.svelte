@@ -103,7 +103,7 @@
     <div class="tf-pw-f">
       <div class="tf-pw-fl">Username</div>
       <div class="tf-pw-fv tf-mono">{entry.username}</div>
-      <div class="tf-pw-fa"><button type="button" class="tf-btn tf-sm" onclick={() => void copyUsername()}>Copy<kbd>U</kbd></button></div>
+      <div class="tf-pw-fa"><button type="button" class="tf-btn tf-sm" aria-label="Copy the username" aria-keyshortcuts="U" onclick={() => void copyUsername()}>Copy<kbd>U</kbd></button></div>
     </div>
   {/if}
   <TfPwSecret bind:this={password} {entry} which={PASSWORD} label="Password" main {source} {word} {scope} {timedTicket} {blocked} {ports} />
@@ -115,7 +115,7 @@
       <div class="tf-pw-fl">Address</div>
       <div class="tf-pw-fv tf-mono">{entry.address}</div>
       <div class="tf-pw-fa">
-        <button type="button" class="tf-btn tf-sm" title={isWeb(entry.address) ? "Opens in your browser" : undefined} onclick={() => void address()}
+        <button type="button" class="tf-btn tf-sm" aria-label={isWeb(entry.address) ? "Open the address" : "Copy the address"} aria-keyshortcuts="A" title={isWeb(entry.address) ? "Opens in your browser" : undefined} onclick={() => void address()}
           >{isWeb(entry.address) ? "Open" : "Copy"}<kbd>A</kbd></button
         >
       </div>

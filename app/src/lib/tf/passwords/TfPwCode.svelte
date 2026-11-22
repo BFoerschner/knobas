@@ -72,7 +72,7 @@
     {/if}
   </div>
   <div class="tf-pw-fa">
-    <button type="button" class="tf-btn" disabled={answer?.kind !== "code"} onclick={() => void copy()}>Copy<kbd>O</kbd></button>
+    <button type="button" class="tf-btn" aria-label="Copy the code" aria-keyshortcuts="O" disabled={answer?.kind !== "code"} onclick={() => void copy()}>Copy<kbd>O</kbd></button>
   </div>
   <div class="tf-pw-fh">
     {#if failed}<span class="tf-stg-errt">{failed}</span>
