@@ -399,7 +399,7 @@ const APP_BAND_CHECK = (how) => String.raw`(b) => {
 const APP_PICK_CHECK = String.raw`(b) => {
   const page = ${appPage};
   if (page.querySelector(".tf-apt-stage.tf-apt-picking")) return "the pick mode is still on";
-  if (!page.querySelector(".tf-thm-pop[aria-label="Attention's tint"]")) return "Attention's tint's panel is not open";
+  if (!page.querySelector(".tf-thm-pop[aria-label=\"Attention's tint\"]")) return "Attention's tint's panel is not open";
   return null;
 }`;
 /** Dracula while dark, GitHub Light while light, One Dark's code while dark. */
@@ -445,8 +445,8 @@ const MOVES = [
 // The right-click menu's cases (2026-11-16): one per kind of thing a person right-clicks daily, a field, and nothing.
 const RIGHT_CLICK = [
   { page: "Right-click, Tickets", route: "tickets", trips: [
-    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "link", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
-    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "link", "web", "copy-key", "copy-key-title", "copy-link"] },
+    { id: "rc-ticket-card", kind: "right-click", finding: "right-click", on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "assign", "priority", "link", "web", "copy-key", "copy-key-title", "copy-link"], pick: "copy-key", toast: "Copied " },
+    { id: "rc-ticket-key", kind: "right-click", finding: "right-click", key: true, on: { sel: ".tf-tcard" }, items: ["open", "work", "timer", "move", "assign", "priority", "link", "web", "copy-key", "copy-key-title", "copy-link"] },
     { id: "rc-field", kind: "right-click", finding: "right-click", platform: true, on: { sel: ".tf-main input" } },
   ] },
   { page: "Right-click, Code", route: "code", trips: [
@@ -760,7 +760,7 @@ const PAGES = [
     ...[["The app and code", "follows"], ["The app only", "apart"], ["Code only", "code"]].map(([text, how]) => ({ id: `app-import-${how}`, kind: "press-result", finding: "themes", before: APP_BEFORE, steps: [{ press: { sel: ".tf-thm-top button", text: "Import…" }, file: "themes/vscode-app-fixture.json" }, { press: { sel: ".tf-apt-use button", text } }], check: APP_BAND_CHECK(how) })),
     { id: "app-pick", kind: "press-result", finding: "themes", store: APP_OWN_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-pvh button", text: "Pick from the preview" } }, { press: { sel: ".tf-apt-stage .tf-chip.tf-warn[data-keys^='warn ']" } }, { press: { sel: "[role=menuitem]", starts: "Attention's tint" } }], check: APP_PICK_CHECK },
     { id: "app-reset", kind: "press-result", finding: "themes", store: APP_KEPT_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-foot button", text: "Put knobas's themes back" } }], check: APP_RESET_CHECK(false) },
-    { id: "app-reset-undo", kind: "press-result", finding: "themes", store: APP_KEPT_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-foot button", text: "Put knobas's themes back" } }, { press: { sel: ".tf-toast button", text: "Undo" } }], check: APP_RESET_CHECK(true) },
+    { id: "app-reset-undo", kind: "press-result", finding: "themes", store: APP_KEPT_STORE, before: APP_BEFORE, steps: [{ press: { sel: ".tf-apt-foot button", text: "Put knobas's themes back" } }, { press: { sel: ".tf-toasts .tf-toast button", text: "Undo" } }], check: APP_RESET_CHECK(true) },
   ] },
   { page: "Settings, Appearance", route: "settings/appearance", trips: [
     { id: "rail-top", kind: "rail-top", strict: true, finding: "F-650", scroller: ".tf-stg-scroll", press: { sel: ".tf-stg-nav a", text: "Keyboard" }, size: [1440, 620] },
@@ -789,7 +789,7 @@ const PAGES = [
   // A site's saved sign-in (ux29): *Fill sign-in* pressed twice by key fills once (the fake's Confluence has one saved),
   // and Settings' *Save one…* pressed twice opens its dialog once and saves nothing.
   { page: "A site, Confluence", route: "site/confluence", trips: [
-    { id: "site-fill-twice", kind: "enter-twice", strict: true, finding: "site-signin", prep: [{ wait: 400 }, { click: ".tf-site button", starts: "Open " }, { wait: 900 }], press: { sel: ".tf-sitebar button", text: "Fill sign-in" } },
+    { id: "site-fill-twice", kind: "enter-twice", strict: true, finding: "site-signin", prep: [{ wait: 400 }, { click: ".tf-site button.tf-primary", starts: "Open " }, { wait: 900 }], press: { sel: ".tf-sitebar button", text: "Fill sign-in" } },
   ] },
   { page: "A source's site sign-in", route: "settings/source/jira", trips: [
     { id: "site-signin-save-opens", kind: "enter-twice", strict: true, finding: "site-signin", press: { sel: ".tf-stg-row button", text: "Save one…" }, opens: true },
