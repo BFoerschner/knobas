@@ -341,21 +341,41 @@ async fn the_real_servers_refused_sign_in_and_expired_token_are_the_credential()
 #[tokio::test]
 async fn the_folder_walk_takes_the_comment_rule_from_the_entry_where_folders_say_false() {
     // Under `GET folders/{id}` every folder object says false (§6.4); the
-    // entries inside still say true, and the rule is taken from them.
+    // entries inside still say true, and the rule is taken from them. PSP
+    // blocks access inheritance, which blocks the inherited rule too (§6.7):
+    // its two entries say false, and so must the walk.
     let r = load("folder-comment-rule");
     let folder: knobas_source_pleasant::api::ApiFolder = serde_json::from_str(&r.body).unwrap();
     let walked = knobas_source_pleasant::map::walk("pw", &folder);
-    let asks: Vec<bool> = walked
+    let asks: Vec<(String, bool)> = walked
         .items
         .iter()
         .filter(|i| i.kind == knobas_source::passwords::ENTRY_KIND)
         .map(|i| {
-            serde_json::from_value::<EntryRecord>(i.payload.clone())
+            let read = serde_json::from_value::<EntryRecord>(i.payload.clone())
                 .unwrap()
                 .comment
-                .read
+                .read;
+            (i.title.clone(), read)
         })
         .collect();
-    assert!(!asks.is_empty());
-    assert!(asks.iter().all(|a| *a), "{asks:?}");
+    let in_psp = |t: &str| ["PSP live secret key", "PSP dashboard, finance sign-in"].contains(&t);
+    assert_eq!(
+        asks.iter().filter(|(t, _)| !in_psp(t)).count(),
+        5,
+        "{asks:?}"
+    );
+    assert!(
+        asks.iter().filter(|(t, _)| !in_psp(t)).all(|(_, a)| *a),
+        "{asks:?}"
+    );
+    assert_eq!(
+        asks.iter().filter(|(t, _)| in_psp(t)).count(),
+        2,
+        "{asks:?}"
+    );
+    assert!(
+        asks.iter().filter(|(t, _)| in_psp(t)).all(|(_, a)| !*a),
+        "{asks:?}"
+    );
 }
