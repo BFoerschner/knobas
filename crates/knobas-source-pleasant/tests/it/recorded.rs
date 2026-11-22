@@ -415,3 +415,28 @@ async fn an_attachment_is_read_live_in_one_request_and_an_id_that_leaves_the_pat
     }
     assert!(s.attachment_bytes("other:e1", &aid, 1 << 20).await.is_err());
 }
+
+#[tokio::test]
+async fn a_refusal_is_said_in_the_servers_words_not_its_json() {
+    let server = serve(&["folder-missing"]).await;
+    let s = source(&server.uri());
+    let r = load("folder-missing");
+    let folder = r
+        .path
+        .trim_start_matches("/api/v5/rest/folders/")
+        .to_owned();
+    let answer = s
+        .read_secret(&SecretAsk {
+            entity: "pw:e1".into(),
+            which: SecretRef::Field { name: "PIN".into() },
+            comment: None,
+            folder: Some(format!("pw:{folder}")),
+        })
+        .await;
+    let said = format!("{answer:?}");
+    assert!(said.contains("Cannot find the requested folder."), "{said}");
+    assert!(
+        !said.contains("error_message"),
+        "the JSON reached the words: {said}"
+    );
+}

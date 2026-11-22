@@ -165,6 +165,20 @@ mod tests {
     }
 
     #[test]
+    fn an_attachments_bytes_never_print() {
+        let file: ApiFile = serde_json::from_value(serde_json::json!({
+            "FileName": "ledger-signing.pem", "FileData": "U0VDUkVU"
+        }))
+        .unwrap();
+        let printed = format!("{file:?}");
+        assert!(
+            printed.contains("ledger-signing.pem") && printed.contains("redacted"),
+            "{printed}"
+        );
+        assert!(!printed.contains("U0VDUkVU"), "{printed}");
+    }
+
+    #[test]
     fn a_listing_is_read_and_its_password_never_parsed() {
         let entry: ApiEntry = serde_json::from_value(serde_json::json!({
             "Id": "e1", "Name": "db", "Password": "hunter2", "Unknown": 1,

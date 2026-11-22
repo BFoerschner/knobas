@@ -243,6 +243,24 @@ mod tests {
     }
 
     #[test]
+    fn an_otpauth_link_under_any_field_name_leaves_the_fields_and_becomes_the_key() {
+        let e: ApiEntry = serde_json::from_value(serde_json::json!({
+            "Id": "e9", "Name": "vpn",
+            "CustomUserFields": {
+                "Second factor": "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+                "Port": "51820"
+            }
+        }))
+        .unwrap();
+        let (item, key) = entry("pw", &e, None, &[], CommentRules::default());
+        let record: EntryRecord = serde_json::from_value(item.payload).unwrap();
+        let names: Vec<&str> = record.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["Port"], "the key's field stayed in the record");
+        assert!(key.is_some());
+        assert_eq!(record.otp.unwrap().format, "otpauth");
+    }
+
+    #[test]
     fn the_root_is_left_out_and_paths_chain_the_folders() {
         let walked = walk("pleasant", &tree());
         assert_eq!((walked.folders, walked.entries), (3, 2));
