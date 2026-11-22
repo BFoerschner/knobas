@@ -28,6 +28,7 @@ const SETTING: SiteSetting = {
   persists: true,
   sign_in_user: null,
   own_sign_in: null,
+  confined: false,
 };
 
 function status(over: Partial<SiteStatus> = {}): SiteStatus {

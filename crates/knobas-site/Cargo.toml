@@ -55,9 +55,10 @@ objc2 = "=0.6.4"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSError", "NSURL", "NSProcessInfo", "NSUUID", "NSDate", "NSSet", "objc2-core-foundation", "block2"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSEvent", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSAlert", "NSGraphicsContext", "NSButton", "NSControl", "NSTextField", "NSGraphics", "NSRunningApplication", "block2", "objc2-core-foundation"] }
 block2 = "=0.6.2"
-# A site's data store by identifier and its cookies (`mac::forget`). The copy wry
-# already resolves, with two of the features wry already builds.
-objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "block2", "WKWebsiteDataStore", "WKHTTPCookieStore"] }
+# A site's data store by identifier and its cookies (`mac::forget`), and a
+# confined site's content rule list (`mac::confine`, ux30). The copy wry
+# already resolves, with features wry already builds but the rule list's two.
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "block2", "WKWebsiteDataStore", "WKHTTPCookieStore", "WKUserContentController", "WKContentRuleList", "WKContentRuleListStore"] }
 
 [target.'cfg(windows)'.dependencies]
 # The controller's settings and events wry does not expose (`windows.rs`).

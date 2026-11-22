@@ -1,6 +1,7 @@
 //! A source's own website, shown inside knobas (ADR-0050).
 //!
 //! - [`policy`]: which addresses a site may show, and what crosses from it.
+//! - [`confine`]: a confined site's requests stay on its own origins.
 //! - [`keys`]: the keys knobas takes from a site, and Esc twice.
 //! - [`state`]: one site's state, and how long sites live.
 //! - [`session`]: where a site keeps its session.
@@ -14,6 +15,7 @@
 //! Tauri: Tauri hands every web view it builds its IPC bootstrap, its plugins'
 //! scripts and its schemes (decisions §3). `tests/scan.rs` holds that line.
 
+pub mod confine;
 pub mod failures;
 pub mod glue;
 pub mod host;

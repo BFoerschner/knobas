@@ -138,6 +138,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         sign_in_user:
           source === "confluence" ? (params.has("fake-long-paths") ? "tidewater.confluence-service-account-with-a-long-name@payments.platform.tidewater.example" : "knobas") : null,
         own_sign_in: source === "team" ? { user: "mara.lindqvist", on: true } : null,
+        // The password manager's site loads nothing from other websites (ux30).
+        confined: source === "team",
       },
     ]),
   );

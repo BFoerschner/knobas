@@ -37,6 +37,9 @@ pub struct ViewSpec {
     pub zoom: f64,
     /// Developer tools: a debug build only.
     pub devtools: bool,
+    /// A confined site's origins: the platform refuses every request
+    /// elsewhere, and loads nothing until that refusal is in place (ux30).
+    pub confine: Option<crate::confine::Confine>,
 }
 
 /// What a view reports, on the main thread, as it happens.
@@ -125,6 +128,11 @@ pub trait SiteView {
     fn poll(&self) -> Option<ViewEvent>;
     /// The main window moved (Windows: a page's drop-down follows it).
     fn window_moved(&self) {}
+    /// What the site may load changed (the allow-list, ux30): the platform's
+    /// refusal follows before the next load knobas starts goes through.
+    fn confine(&self, confine: Option<crate::confine::Confine>) {
+        let _ = confine;
+    }
     /// The process that writes the site's session to disk, which quitting
     /// waits for once the view is dropped (Windows; ux29).
     fn browser_process(&self) -> Option<u32> {

@@ -152,7 +152,12 @@ sign_in_user: string | null,
  * adapter says so, and the source signs in by username and password.
  * `None` for every other site.
  */
-own_sign_in: OwnSignIn | null, };
+own_sign_in: OwnSignIn | null, 
+/**
+ * The site loads nothing from other websites but the allowed ones: a
+ * password manager's (ux30). Settings says so beside the addresses.
+ */
+confined: boolean, };
 
 /**
  * What the bar says about the sign-in (`SiteStatus::sign_in`).

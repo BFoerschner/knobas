@@ -21,6 +21,7 @@ function setting(source: string, base: string, on = true, extra: Partial<SiteSet
     persists: true,
     sign_in_user: null,
     own_sign_in: null,
+    confined: false,
     ...extra,
   };
 }
@@ -66,6 +67,16 @@ describe("webPlace", () => {
     expect(owner("https://tools.example/jira/browse/A-1", s)).toBe("jira");
     expect(owner("https://tools.example/jiraX", s)).toBeNull();
     expect(webPlace("https://tools.example/jira2/browse/B-1", { source: "jira" }, s)).toEqual({ to: "site", source: "jira2" });
+  });
+
+  test("two sources on the same base: the press's own source wins the tie, a closer base still wins", () => {
+    const s = store(setting("vault", "https://vault.example"), setting("vault-test", "https://vault.example"), setting("deep", "https://vault.example/deep"));
+    const url = "https://vault.example/SignIn/Direct?ReturnUrl=%2FWebClient%2FMain";
+    expect(webPlace(url, { source: "vault" }, s)).toEqual({ to: "site", source: "vault" });
+    expect(webPlace(url, { source: "vault-test" }, s)).toEqual({ to: "site", source: "vault-test" });
+    expect(webPlace("https://vault.example/deep/x", { source: "vault-test" }, s)).toEqual({ to: "site", source: "deep" });
+    // With no source named, the first on the base, as before.
+    expect(webPlace(url, {}, s)).toEqual({ to: "site", source: "vault" });
   });
 
   test("by host alone is not enough: the port and the scheme are the origin's", () => {

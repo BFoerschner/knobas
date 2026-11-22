@@ -74,3 +74,16 @@ Björn asked for Pleasant's web interface to open from the Passwords page and si
 - Only a press loads the site; knobas never loads it at start or in the background.
 
 The adapter also declares where its site shows an item (`web_links`, `knobas:adapter@1.7.0` for external adapters): templates after the typed base URL, so an address built from them can only name the source's own site.
+
+## Amended 2026-11-22 (ux30): a password manager's site loads nothing from other websites
+
+Pleasant 9.5.4's sign-in page frames the vendor's news with the server's version and install id in its address, and the allow-list above rules top-level navigations only, so the frame loaded. Björn: "never contact Pleasant", and yes to blocking content from other websites inside password-manager pages. Decided by Fable while Björn was busy (`docs/decisions/2026-11-22-a-password-managers-site-loads-nothing-from-other-websites.md`); this adds to "An allow-list of origins decides what a site shows" above, for a source with the Passwords role only:
+
+- **Every load is ruled, not only the top-level navigation.** While the page on top is anything but a page on an allowed origin, frames, scripts, styles, images, fonts, fetches, XHR and WebSockets go only to the source's own origin and the origins the person allowed for it (`ws(s)` as `http(s)` on the same host and port; `data:`, `blob:` of those origins and `about:` contact nobody). A page on an allowed origin, an identity provider the person let in, loads as in a browser. Origins are compared exactly. One pure function holds the rule (`knobas_site::confine`); the top-level rule is unchanged.
+- **The platform refuses, not a script.** macOS: a `WKContentRuleList` made from the same inputs, on the view before it loads anything, and the navigation delegate for frames. Windows: `WebResourceRequested` answers 403 and `FrameNavigationStarting` cancels.
+- **It fails closed.** A list that does not compile, or a handler that does not register, loads nothing and says so, with *Retry*. A changed allow-list reaches a live site before the next load knobas starts.
+- **Settings says so** under the site's addresses. Nothing in the bar.
+
+- **WebRTC is off on a confined site's view on macOS** (measured: a page's STUN packet is outside any content rule list).
+
+Measured in the Mac window against Pleasant 9.5.4 with every load aimed at a local listener on another origin: before, the vendor's news frame and every kind of load reached it; after, nothing did, and the sign-in fill and the web client worked. Not defended against, for now: WebRTC on Windows, where WebView2 has no switch for it (owed, with the rest of the Windows measurement); a service worker's fetch and CSP reports (not measured); a removed allowed origin for the milliseconds a live Mac site's new list compiles; and a script sending the top-level address elsewhere after landing, which opens the browser as line 5 says.

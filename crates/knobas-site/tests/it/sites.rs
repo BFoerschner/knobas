@@ -26,6 +26,7 @@ fn rules(base: &str) -> SiteRules {
         base: Base::parse(base).unwrap(),
         allowed: vec![],
         others: vec![],
+        confined: false,
     }
 }
 
@@ -1172,5 +1173,126 @@ async fn a_provider_page_after_a_fill_judges_nothing() {
         last_status(&w, "jira").sign_in,
         Some(SiteSignIn::Filling),
         "still waiting to judge the fill on the source's own page"
+    );
+}
+
+// ---- a confined site (ux30): a password manager's loads nothing from other websites
+
+fn vault_world() -> World {
+    let w = world();
+    let mut map = HashMap::new();
+    let mut vault = rules("https://vault.example:8443");
+    vault.confined = true;
+    vault.allowed = vec![knobas_site::policy::Origin::parse("https://sso.example").unwrap()];
+    map.insert("vault".to_owned(), vault);
+    map.insert("jira".to_owned(), rules("https://jira.example"));
+    w.sites.set_rules(map);
+    w
+}
+
+fn confined_origins(w: &World, source: &str) -> Option<Vec<String>> {
+    w.host
+        .view(source)
+        .borrow()
+        .confine
+        .as_ref()
+        .map(|confine| confine.origins().map(ToString::to_string).collect())
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_confined_sources_view_is_made_with_its_own_and_allowed_origins_and_others_without() {
+    let w = vault_world();
+    w.sites.open("vault", None, INSETS, false).await.unwrap();
+    w.sites.open("jira", None, INSETS, false).await.unwrap();
+    assert_eq!(
+        confined_origins(&w, "vault"),
+        Some(vec![
+            "https://vault.example:8443".to_owned(),
+            "https://sso.example".to_owned()
+        ])
+    );
+    assert_eq!(confined_origins(&w, "jira"), None);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_changed_allow_list_reaches_the_live_confined_view_and_an_unchanged_one_sends_nothing() {
+    let w = vault_world();
+    open_live(&w, "vault", "https://vault.example:8443/").await;
+    open_live(&w, "jira", "https://jira.example/").await;
+    let mut map = HashMap::new();
+    let mut vault = rules("https://vault.example:8443");
+    vault.confined = true;
+    vault.allowed = vec![knobas_site::policy::Origin::parse("https://sso.example").unwrap()];
+    map.insert("vault".to_owned(), vault.clone());
+    let mut jira = rules("https://jira.example");
+    jira.allowed = vec![knobas_site::policy::Origin::parse("https://cdn.example").unwrap()];
+    map.insert("jira".to_owned(), jira);
+    w.sites.set_rules(map.clone());
+    w.shell.drain();
+    let calls = |source: &str| -> Vec<String> {
+        w.host
+            .view(source)
+            .borrow()
+            .calls
+            .iter()
+            .filter(|call| call.starts_with("confine"))
+            .cloned()
+            .collect()
+    };
+    assert!(calls("vault").is_empty(), "the same rules again");
+    assert!(calls("jira").is_empty(), "an unconfined site's allow-list");
+    vault.allowed.clear();
+    map.insert("vault".to_owned(), vault);
+    w.sites.set_rules(map);
+    w.shell.drain();
+    assert_eq!(calls("vault"), ["confine [https://vault.example:8443]"]);
+    assert_eq!(
+        confined_origins(&w, "vault"),
+        Some(vec!["https://vault.example:8443".to_owned()])
+    );
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn allowing_an_origin_on_a_confined_site_confines_it_anew_before_the_landing_loads_again() {
+    let w = vault_world();
+    w.sites.open("vault", None, INSETS, false).await.unwrap();
+    w.sites.show("vault", INSETS, true, true);
+    assert!(!w.host.navigate("vault", "https://idp.example/sso"));
+    w.shell.drain();
+    assert_eq!(
+        w.sites.answer("vault", "https://idp.example", true),
+        Ok(None)
+    );
+    w.shell.drain();
+    let calls = w.host.view("vault").borrow().calls.clone();
+    let confine = calls
+        .iter()
+        .position(|call| {
+            call == "confine [https://vault.example:8443 https://sso.example https://idp.example]"
+        })
+        .expect("confined anew");
+    let load = calls
+        .iter()
+        .position(|call| call == "load https://vault.example:8443/")
+        .expect("the landing again");
+    assert!(confine < load, "{calls:?}");
+    // An unconfined site's answer confines nothing.
+    let w = world();
+    w.sites.open("jira", None, INSETS, false).await.unwrap();
+    w.sites.show("jira", INSETS, true, true);
+    assert!(!w.host.navigate("jira", "https://idp.example/sso"));
+    w.shell.drain();
+    assert_eq!(
+        w.sites.answer("jira", "https://idp.example", true),
+        Ok(None)
+    );
+    w.shell.drain();
+    assert!(
+        !w.host
+            .view("jira")
+            .borrow()
+            .calls
+            .iter()
+            .any(|call| call.starts_with("confine"))
     );
 }

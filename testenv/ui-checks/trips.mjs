@@ -7,6 +7,8 @@
 // Options:
 //   --only a,b      only trips whose id, kind, finding, page or route contains one of these
 //   --workers n     parallel Chromes (default 2)
+//   --part k/m      every m-th trip from the k-th of those picked, so m runs share them (a run too long for one turn on a
+//                   machine's queue, the final suite, 2026-11-22)
 //   --gap n         ms between the two presses of a trip with `leaves` or `returns`, to prove one fails once its hold has let go
 //   --trip-limit s  the most one trip may take (default 180; the longest real ones took 77 s on the loaded Mac). A trip past it
 //                   fails by name, its Chrome is stopped and a fresh one takes the rest (`trip-runner.mjs`).
@@ -1482,6 +1484,11 @@ if (!outDir || outDir.startsWith("--")) {
 const port = Number(flag("port", 5317));
 const workers = Number(flag("workers", 2));
 const only = flag("only", "").split(",").filter(Boolean);
+const [partK, partM] = flag("part", "1/1").split("/").map(Number);
+if (!(partK >= 1 && partK <= partM)) {
+  console.error("--part is k/m with 1 <= k <= m");
+  process.exit(2);
+}
 const gapFlag = flag("gap", null);
 const strict = argv.includes("--strict");
 const tripLimit = Number(flag("trip-limit", 180));
@@ -4287,7 +4294,7 @@ async function startBrowser() {
   return { run: (t) => KINDS[t.kind](t), stop };
 }
 
-const queue = every.filter(wanted);
+const queue = every.filter(wanted).filter((_, at) => at % partM === partK - 1);
 if (!queue.length) {
   console.error(`no trip matches --only ${only.join(",")}${table.some((t) => t.strict && wanted(t)) ? ". Some strict ones do: add --strict" : ""}`);
   process.exit(2);
