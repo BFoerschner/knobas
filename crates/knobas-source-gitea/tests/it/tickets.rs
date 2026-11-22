@@ -548,6 +548,42 @@ async fn a_retitle_and_an_assignee_are_one_patch_that_replaces_the_assignee() {
     assert_eq!(writes(&server).await[0].2, json!({ "assignees": [] }));
 }
 
+/// The due date (a source's own field, ADR-0054 step 10) rides the issue's
+/// one `PATCH`: a day at its start in UTC, or cleared by `unset_due_date`.
+#[tokio::test]
+async fn a_due_date_is_set_at_the_days_start_and_cleared_in_the_issues_patch() {
+    let server = editable(json!([{ "login": "tom" }])).await;
+    source(server.uri(), json!({}))
+        .write(with(|op| {
+            if let WriteOp::EditTicket { fields, .. } = op {
+                fields.insert("due_date".into(), json!("2026-12-01"));
+            }
+        }))
+        .await
+        .expect("Gitea takes the due date");
+    assert_eq!(
+        writes(&server).await,
+        [(
+            "PATCH".to_owned(),
+            format!("/api/v1/repos/{FULL}/issues/7"),
+            json!({ "due_date": "2026-12-01T00:00:00Z" })
+        )]
+    );
+    let server = editable(json!([{ "login": "tom" }])).await;
+    source(server.uri(), json!({}))
+        .write(with(|op| {
+            if let WriteOp::EditTicket { fields, .. } = op {
+                fields.insert("due_date".into(), Value::Null);
+            }
+        }))
+        .await
+        .expect("Gitea clears the due date");
+    assert_eq!(
+        writes(&server).await[0].2,
+        json!({ "unset_due_date": true })
+    );
+}
+
 /// A label is added by its id, never its name, and removed by the id the
 /// issue carries it under; a name added that it carries, or removed that it
 /// does not, sends nothing.

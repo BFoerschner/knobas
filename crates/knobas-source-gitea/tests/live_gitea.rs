@@ -6222,6 +6222,32 @@ async fn a_tickets_fields_are_edited_and_read_back() {
         serde_json::json!(who)
     );
 
+    // 2b. A source's own field (step 10): the due date set, read back as its
+    // day through the fields, then cleared.
+    let due = |value: serde_json::Value| {
+        edit(Box::new(move |op| {
+            if let WriteOp::EditTicket { fields, .. } = op {
+                fields.insert("due_date".into(), value);
+            }
+        }))
+    };
+    source
+        .write(due(serde_json::json!("2026-12-01")))
+        .await
+        .expect("Gitea takes the due date");
+    let fields = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(
+        fields.get("due_date").unwrap().value,
+        serde_json::json!("2026-12-01"),
+        "{}",
+        read().await["due_date"]
+    );
+    source
+        .write(due(serde_json::Value::Null))
+        .await
+        .expect("Gitea clears the due date");
+    assert!(read().await["due_date"].is_null());
+
     // 3. Back as it was: unassigned, the label off, the title restored.
     source
         .write(edit(Box::new({
@@ -6264,7 +6290,7 @@ async fn a_tickets_fields_are_edited_and_read_back() {
         .await
         .expect("delete the run's label");
     assert!(gone.status().is_success(), "{}", gone.status());
-    println!("{id} assigned to {who}, labelled, retitled and put back");
+    println!("{id} assigned to {who}, labelled, retitled, due and put back");
 }
 
 /// The item a refresh answers for `id`, or a panic naming what it answered.

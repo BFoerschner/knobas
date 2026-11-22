@@ -453,9 +453,10 @@ impl Source for JiraSource {
     /// `mypermissions` and never probed: see [`crate::grants`]. A ticket's
     /// asks are answered in its project, a create's in the project it names;
     /// an entity of another source, or one that is neither, is not answered.
-    /// The issue's summary, assignee, priority and labels, from one read
-    /// of its values and its edit screen (ADR-0054); `None` for an id that
-    /// is not an issue of this source.
+    /// The issue's summary, assignee, priority and labels, and the fields of
+    /// its own this adapter edits, from one read of its values and its edit
+    /// screen (ADR-0054); `None` for an id that is not an issue of this
+    /// source.
     async fn ticket_fields(
         &self,
         entity: &str,
@@ -466,8 +467,9 @@ impl Source for JiraSource {
         crate::tickets::fields(&self.http, &key).await.map(Some)
     }
 
-    /// Who the issue can be assigned to (ADR-0054). Every other field has
-    /// its options in the fields' answer.
+    /// Who the issue can be assigned to (ADR-0054), which a custom user
+    /// picker (a source's own field, step 10) offers too. Every other field
+    /// has its options in the fields' answer.
     async fn field_options(
         &self,
         entity: &str,
@@ -477,7 +479,7 @@ impl Source for JiraSource {
         let Ok(key) = self.issue_key(entity) else {
             return Ok(None);
         };
-        if field != knobas_source::ticket::ASSIGNEE {
+        if field != knobas_source::ticket::ASSIGNEE && !field.starts_with("customfield_") {
             return Ok(None);
         }
         crate::tickets::assignable(&self.http, &key, typed)

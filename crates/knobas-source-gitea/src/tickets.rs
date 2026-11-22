@@ -7,6 +7,9 @@
 //!   organisation's, which a person cannot make here.
 //! - **No priority**: knobas reads a Gitea priority out of a scoped label,
 //!   and a person changes it by changing the label.
+//! - **The due date** is the issue's own field ([`DUE`], a `date`): set by
+//!   `due_date` at the day's start in UTC, cleared by `unset_due_date`, and
+//!   read back as the day the answer names.
 //! - A pull request is not a ticket: [`fields`] is asked of issues only.
 
 use knobas_source::ticket::{
@@ -18,9 +21,14 @@ use serde_json::{Value, json};
 use crate::GiteaSource;
 use crate::client::issues_path;
 
+/// A Gitea issue's due date: a source's own field (ADR-0054, step 10).
+pub(crate) const DUE: &str = "due_date";
+
 /// One issue as the fields read it.
 struct Issue {
     title: String,
+    /// `YYYY-MM-DD`, the day of its `due_date`, or `None`.
+    due: Option<String>,
     /// `(login, full name)`, in Gitea's order.
     assignees: Vec<(String, Option<String>)>,
     /// `(id, name)`.
@@ -53,6 +61,10 @@ fn issue_of(value: &Value) -> Issue {
         .unwrap_or_default();
     Issue {
         title: text(&value["title"]).unwrap_or_default(),
+        due: value["due_date"]
+            .as_str()
+            .and_then(|d| d.get(..10))
+            .map(str::to_owned),
         assignees,
         labels,
     }
@@ -130,7 +142,28 @@ fn answer(issue: &Issue, owner: &str, repo: &str, source: &str) -> TicketFields 
                 required: false,
                 readonly: None,
             },
+            TicketField {
+                id: DUE.into(),
+                label: "Due date".into(),
+                kind: TicketFieldKind::Date,
+                value: issue.due.as_ref().map_or(Value::Null, |d| json!(d)),
+                shown: None,
+                required: false,
+                readonly: None,
+            },
         ],
+    }
+}
+
+/// The `PATCH` keys a due date of `value` sets: a day at its start in UTC,
+/// or `null` to clear it. `None` for anything else, which is refused by name.
+fn due_patch(value: &Value) -> Option<(&'static str, Value)> {
+    match value {
+        Value::Null => Some(("unset_due_date", json!(true))),
+        Value::String(day) if TicketFieldKind::Date.fits(value) => {
+            Some(("due_date", json!(format!("{day}T00:00:00Z"))))
+        }
+        _ => None,
     }
 }
 
@@ -231,8 +264,9 @@ pub(crate) struct Edit<'a> {
 }
 
 impl Edit<'_> {
-    /// Refuse an edit with nothing in it, a priority, or a field Gitea's
-    /// issue does not have, before anything is sent.
+    /// Refuse an edit with nothing in it, a priority, a field Gitea's issue
+    /// does not have, or a due date that is not a day, before anything is
+    /// sent.
     fn check(&self, key: &str) -> Result<(), SourceError> {
         if self.title.is_none()
             && self.assignee.is_none()
@@ -250,9 +284,16 @@ impl Edit<'_> {
                  so change the label"
             )));
         }
-        if let Some(id) = self.fields.keys().next() {
+        if let Some(id) = self.fields.keys().find(|id| *id != DUE) {
             return Err(SourceError::protocol(format!(
                 "gitea: {id:?} is not a field of a Gitea issue"
+            )));
+        }
+        if let Some(due) = self.fields.get(DUE)
+            && due_patch(due).is_none()
+        {
+            return Err(SourceError::protocol(format!(
+                "gitea: {key}'s due date must be a day (YYYY-MM-DD) or nothing, not {due}"
             )));
         }
         Ok(())
@@ -309,6 +350,9 @@ pub(crate) async fn edit(
             json!(assignee.account().into_iter().collect::<Vec<_>>()),
         );
     }
+    if let Some((key, value)) = edit.fields.get(DUE).and_then(due_patch) {
+        patch.insert(key.into(), value);
+    }
     if !patch.is_empty() {
         source.client.patch(&path, &Value::Object(patch)).await?;
     }
@@ -359,6 +403,7 @@ mod tests {
     fn issue(assignees: &[(&str, Option<&str>)]) -> Issue {
         Issue {
             title: "Retry SEPA".into(),
+            due: Some("2026-12-01".into()),
             assignees: assignees
                 .iter()
                 .map(|(l, n)| ((*l).to_owned(), n.map(str::to_owned)))
@@ -377,7 +422,12 @@ mod tests {
         );
         assert_eq!(ticket::fault(&fields), None);
         let ids: Vec<&str> = fields.fields.iter().map(|f| f.id.as_str()).collect();
-        assert_eq!(ids, ["title", "assignee", "labels"]);
+        assert_eq!(ids, ["title", "assignee", "labels", "due_date"]);
+        let due = fields.get(DUE).unwrap();
+        assert_eq!(
+            (&due.kind, &due.value, due.required),
+            (&TicketFieldKind::Date, &json!("2026-12-01"), false)
+        );
         let who = fields.get("assignee").unwrap();
         assert_eq!(who.value, json!("mara"));
         assert_eq!(who.shown.as_deref(), Some("Mara Lindqvist"));
@@ -392,6 +442,34 @@ mod tests {
         assert_eq!(fields.get("labels").unwrap().value, json!(["payments"]));
         let none = answer(&issue(&[]), "o", "r", "Gitea");
         assert_eq!(none.get("assignee").unwrap().value, Value::Null);
+        let undated = Issue {
+            due: None,
+            ..issue(&[])
+        };
+        assert_eq!(
+            answer(&undated, "o", "r", "Gitea").get(DUE).unwrap().value,
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn a_due_date_is_read_as_its_day_and_sent_at_the_days_start_or_cleared() {
+        let read = issue_of(&json!({ "title": "t", "due_date": "2026-12-01T23:59:59+01:00" }));
+        assert_eq!(read.due.as_deref(), Some("2026-12-01"));
+        assert_eq!(
+            issue_of(&json!({ "title": "t", "due_date": null })).due,
+            None
+        );
+        assert_eq!(
+            due_patch(&json!("2026-12-01")),
+            Some(("due_date", json!("2026-12-01T00:00:00Z")))
+        );
+        assert_eq!(
+            due_patch(&Value::Null),
+            Some(("unset_due_date", json!(true)))
+        );
+        assert_eq!(due_patch(&json!("2026-13-01")), None);
+        assert_eq!(due_patch(&json!(20261201)), None);
     }
 
     #[test]
@@ -471,6 +549,28 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("\"due\"")
+        );
+        let bad_day: std::collections::BTreeMap<String, Value> =
+            [(DUE.to_owned(), json!("tomorrow"))].into();
+        assert!(
+            Edit {
+                fields: &bad_day,
+                ..base
+            }
+            .check("o/r#1")
+            .unwrap_err()
+            .to_string()
+            .contains("must be a day")
+        );
+        let good_day: std::collections::BTreeMap<String, Value> =
+            [(DUE.to_owned(), json!("2026-12-01"))].into();
+        assert!(
+            Edit {
+                fields: &good_day,
+                ..base
+            }
+            .check("o/r#1")
+            .is_ok()
         );
         let empty_labels = LabelChange::default();
         let labels = Edit {
