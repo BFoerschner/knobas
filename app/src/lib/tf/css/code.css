@@ -808,3 +808,5 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-rstage-open .tf-oasd { height: 85vh; }
 .tf-oasd > .tf-oasd-no { padding: 10px 12px; }
 .tf-oasd > .tf-oasd-no + .tf-oas-inline, .tf-oasd > .tf-oas-inline + .tf-oasd-no { border-left: 1px solid var(--rule); }
+/* *Zen* says it is on: the ghost button keeps its hover's fill and edge while pressed. */
+.tf-btn.tf-ghost.tf-zenbtn[aria-pressed="true"] { background: var(--rule-2); border-color: var(--rule); }

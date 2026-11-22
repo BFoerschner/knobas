@@ -248,7 +248,7 @@ test("the applications are macOS's four, a saved list replaces them, and opening
   const h = demoHandlers() as Calls;
   type Settings = { default_application: string | null; applications: { id: string; name: string }[] };
   const first = h["checkout_settings"]!({}) as Settings;
-  expect(first.applications.map((app) => app.name)).toEqual(["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
+  expect(first.applications.map((app) => app.name)).toEqual(["VS Code", "Terminal", "Fork", "IntelliJ IDEA", "Bruno"]);
   expect(first.default_application).toBe("vscode");
 
   const argv = h["open_checkout"]!({ entityId: "mock:tidewater/payout-service", application: null, file: "src/lib.rs", line: 3 });

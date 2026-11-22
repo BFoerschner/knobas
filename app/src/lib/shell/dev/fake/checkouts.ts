@@ -354,6 +354,7 @@ interface FakeApp {
   commit_command?: string;
   range_command?: string;
   pull_request_command?: string;
+  api_command?: string | null;
 }
 
 const SHIPPED: FakeApp[] = [
@@ -373,6 +374,8 @@ const SHIPPED: FakeApp[] = [
     file_command: 'open -a "IntelliJ IDEA" {file}',
     pull_request_command: 'open -a "IntelliJ IDEA" {path}',
   },
+  // An API client (ux31, ADR-0057): a spec's command only, as the macOS list ships it.
+  { id: "bruno", name: "Bruno", command: "", file_command: null, api_command: "open -a Bruno {collection}" },
 ];
 
 let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
@@ -435,7 +438,9 @@ function fakeSetApps(drafts: unknown, defaultId: unknown) {
     const name = String(draft.name ?? "").trim();
     if (name === "") throw { code: "invalid", message: `application ${index + 1} has no name`, source_id: null };
     const command = String(draft.command ?? "").trim();
-    refuse(command, `${name}'s command`);
+    // An API client (ux31) may have a spec's command only: its repository command stays blank, as Rust's `settle` allows.
+    const api = String(draft.api_command ?? "").trim() || null;
+    if (!(api !== null && command === "")) refuse(command, `${name}'s command`);
     const file = String(draft.file_command ?? "").trim() || null;
     if (file !== null) refuse(file, `${name}'s file command`);
     const given = String(draft.id ?? "").trim();
@@ -453,6 +458,7 @@ function fakeSetApps(drafts: unknown, defaultId: unknown) {
       ...optional("commit_command"),
       ...optional("range_command"),
       ...optional("pull_request_command"),
+      ...(api !== null ? { api_command: api } : {}),
     });
   });
   fakeApps = out;
