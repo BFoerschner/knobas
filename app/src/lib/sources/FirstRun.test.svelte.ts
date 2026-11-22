@@ -866,7 +866,7 @@ test("the wizard says nothing of rooms or spec sections, and names the roles it 
   button("Next")!.click();
   flushSync();
   seen.push(text());
-  expect(text()).toContain("A ticket system, code host, CI, wiki or monitoring");
+  expect(text()).toContain("A ticket system, code host, CI, wiki, monitoring or password manager");
   for (const page of seen) {
     expect(page).not.toMatch(/room/i);
     expect(page).not.toContain("§");

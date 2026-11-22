@@ -501,7 +501,7 @@
                   a list of adapters: it stays true when an external adapter
                   is installed, and needs no read (#1401).
                 -->
-                <small>A ticket system, code host, CI, wiki or monitoring</small>
+                <small>A ticket system, code host, CI, wiki, monitoring or password manager</small>
               </button>
             </div>
             {#if failure}
@@ -529,8 +529,13 @@
           {/if}
         {:else if stepIndex === 2}
           <p class="tf-fr-lead">
-            knobas will read everything <b>{source?.display_name}</b> will give it. The first run is
-            the slow one; after this it only asks for what changed.
+            {#if source?.sync_by_hand}
+              knobas will list everything <b>{source.display_name}</b> lets this account see. After this it
+              syncs only when you press Sync now.
+            {:else}
+              knobas will read everything <b>{source?.display_name}</b> will give it. The first run is
+              the slow one; after this it only asks for what changed.
+            {/if}
           </p>
 
           {#if phase === null}
