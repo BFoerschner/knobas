@@ -12,7 +12,7 @@
     `Enter` or `Space` opens the row. In the filter: `↓` goes to the first row, `Enter` opens it, `Esc` clears.
 -->
 <script lang="ts">
-  import { flushSync, tick } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
 
   import { Windowed } from "../../shell/windowed.svelte";
   import { filterKeys } from "../filter-keys";
@@ -112,6 +112,15 @@
       else if (top + 28 > list.scrollTop + list.clientHeight) list.scrollTop = top + 28 - list.clientHeight;
     }
   }
+
+  // A place the rail did not pick (an address, a followed link): its row is brought into view and the keys stand on it.
+  $effect(() => {
+    const at = st.current;
+    untrack(() => {
+      const i = rows.findIndex((r) => r.kind === "op" && r.op.anchor === at);
+      if (i >= 0 && rows[i]!.k !== st.cursor) void moveTo(i);
+    });
+  });
 
   const isFold = (row: RailRow) => row.kind === "group" || row.kind === "dir" || row.kind === "webhooks";
   const foldKey = (row: RailRow) => (row.kind === "group" ? row.group.key : row.kind === "webhooks" ? "w" : row.k);

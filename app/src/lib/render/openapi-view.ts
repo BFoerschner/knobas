@@ -552,7 +552,9 @@ export function counted(n: number, one: string, many: string): string {
 
 /** Whether `text` holds Markdown that is more than a line's: a list, a heading, a fence, a table, a quote. */
 export function needsBlocks(text: string): boolean {
-  return /^\s*([-*+]|\d+\.)\s|^\s*#{1,6}\s|```|^\s*\||^\s*>/m.test(text);
+  // HTML written into a description (Stripe's `<p>…<a href>…</p>`) is drawn by the Markdown renderer, which sanitizes
+  // it; the inline path would print its tags as text. `<br>` alone the inline path draws.
+  return /^\s*([-*+]|\d+\.)\s|^\s*#{1,6}\s|```|^\s*\||^\s*>|<\/?(p|a|ul|ol|li|code|pre|strong|em|b|i|table|tr|td|th|h[1-6]|div|span|blockquote)\b[^>]*>/im.test(text);
 }
 
 /** One run of inline Markdown: text, `code`, *em*, **strong**, or a link's words with its address. */

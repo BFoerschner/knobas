@@ -192,6 +192,12 @@ export class OasState {
       }
     }
     const page = pageOf(place);
+    // An operation named by an address or a followed link: the fold that holds it opens, so the rail's pill shows.
+    const row = this.opAt(page);
+    if (row !== null && this.mode === "tags") {
+      const g = this.groups.find((x) => x.ops.some((o) => o.anchor === row.anchor));
+      if (g !== undefined && !this.folds.has(g.key)) this.fold(g.key, true);
+    }
     if (page === OVERVIEW) {
       this.shown = { place, answer: null };
       this.reading = false;

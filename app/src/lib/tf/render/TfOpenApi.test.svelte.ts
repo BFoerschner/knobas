@@ -125,6 +125,14 @@ test("a large spec opens with every fold shut: its first screen is the table of 
   expect(rail().length).toBeLessThan(200);
 });
 
+test("an address naming an operation in a large spec opens the fold that holds it, the pill on its row", async () => {
+  draw("big.yaml", bigSpec(5000), { at: "get /resource3/{id}" });
+  await settle();
+  await vi.waitFor(() => expect(target.querySelector('.tf-oas-row[aria-current="true"]')?.getAttribute("title")).toMatch(/^GET \/resource3\/\{id\}/));
+  expect(row("tag3").getAttribute("aria-expanded")).toBe("true");
+  expect(row("tag0").getAttribute("aria-expanded")).toBe("false");
+});
+
 test("a pick in the rail shows the operation, replaces the place, and its parameters stand in the order path, query, header", async () => {
   const places: string[] = [];
   const spec = {
