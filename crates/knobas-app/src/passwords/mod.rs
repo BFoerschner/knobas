@@ -30,8 +30,11 @@ pub struct PasswordsState {
     down: Mutex<HashMap<String, chrono::DateTime<chrono::Utc>>>,
     /// Each source's code keys as read from the keychain, and the run they
     /// were read after: read once a session and again after each run.
-    keys: Mutex<HashMap<String, (Arc<OtpKeys>, Option<chrono::DateTime<chrono::Utc>>)>>,
+    keys: Mutex<HashMap<String, KeysRead>>,
 }
+
+/// A source's code keys and the run they were read after.
+type KeysRead = (Arc<OtpKeys>, Option<chrono::DateTime<chrono::Utc>>);
 
 impl PasswordsState {
     /// The state over `clipboard`, telling `tell` what it holds.

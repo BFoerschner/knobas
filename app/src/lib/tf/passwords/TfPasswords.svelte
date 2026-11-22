@@ -29,6 +29,8 @@
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
   import TfPwEntry from "./TfPwEntry.svelte";
+  import TfPwWrite from "./TfPwWrite.svelte";
+  import type { Layers } from "../layers.svelte";
   import { folds, heldNow, readHeld } from "./held.svelte";
   import {
     CUT,
@@ -58,6 +60,7 @@
     rest,
     visible = true,
     timedTicket = null,
+    layers,
     sync,
     syncRevision = 0,
     ports = realPasswordPorts,
@@ -66,7 +69,7 @@
     rest: string[];
     visible?: boolean;
     timedTicket?: string | null;
-    layers?: unknown;
+    layers?: Layers;
     sync?: Snippet;
     syncRevision?: number;
     ports?: PasswordPorts;
@@ -339,6 +342,12 @@
       u: () => void entryPane?.copyUsername(),
       o: () => entryPane?.copyCode(),
       a: () => void entryPane?.address(),
+      e: () => {
+        if (record && source && record.can_modify && source.offers.writes.includes("edit_entry") && source.down_at === null) writing = "edit";
+      },
+      n: () => {
+        if (newSource) writing = "new";
+      },
     };
     // ↑ ↓ in the tree are the tree's.
     if ((key === "ArrowDown" || key === "ArrowUp") && (event.target as HTMLElement | null)?.closest?.(".tf-pw-tree")) return;
@@ -387,6 +396,28 @@
     };
   }
 
+  // ---- writes (ADR-0056) ----
+  let writing = $state<"change" | "new" | "edit" | null>(null);
+  /** The source a new entry goes to: the folder's, else the first that performs creates. */
+  const newSource = $derived.by((): PwSource | null => {
+    if (!held) return null;
+    const at = node && node.src >= 0 ? held.sources[node.src] : null;
+    const performs = (s: PwSource) => s.offers.writes.includes("create_entry") && s.down_at === null && !s.never_synced;
+    if (at) return performs(at) ? at : null;
+    return held.sources.find(performs) ?? null;
+  });
+
+  async function written(entityId: string, words: string): Promise<void> {
+    records.clear();
+    push({ text: `${words}.` });
+    await read();
+    if (where.entry === null) picked = entityId;
+    else location.hash = `#/passwords/entry/${encodeURIComponent(entityId)}`;
+    records.delete(entityId);
+    const fresh = await fetchEntry(entityId).catch(() => null);
+    if (fresh && openId === entityId) record = fresh;
+  }
+
   function copied(what: string): void {
 
     push({ text: `Copied the ${what}.` });
@@ -394,6 +425,25 @@
 </script>
 
 <svelte:window onkeydown={onkey} />
+
+{#if writing !== null && m}
+  {@const writeSource = writing === "new" ? newSource : source}
+  {#if writeSource}
+    <TfPwWrite
+      kind={writing}
+      source={writeSource}
+      entry={writing === "new" ? null : record}
+      folder={node}
+      {m}
+      {timedTicket}
+      {layers}
+      send={ports.write}
+      copySecret={ports.copySecret}
+      onclose={() => (writing = null)}
+      ondone={(id, words) => void written(id, words)}
+    />
+  {/if}
+{/if}
 
 {#snippet mark()}
   <svg class="tf-pw-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" role="img" aria-label="Usage comment required"
@@ -466,7 +516,7 @@
               {@attach depth(Math.max(0, r.node.depth))}
               aria-level={Math.max(0, r.node.depth) + 1}
               aria-expanded={r.node.kids.length > 0 && r.node.id !== "" ? r.open : undefined}
-              aria-current={here ? "true" : undefined}
+              aria-selected={here}
               tabindex={here ? 0 : -1}
               data-id={r.node.id || "~"}
               onclick={(event) => pressNode(event, r.node)}
@@ -491,7 +541,10 @@
               <h1>{node.id === "" ? "Passwords" : node.name}</h1>
               <p class="tf-sub">{headLine}</p>
             </div>
-            <div class="tf-acts">{@render sync?.()}</div>
+            <div class="tf-acts">
+              {#if newSource}<button type="button" class="tf-btn" aria-label="New entry" aria-keyshortcuts="N" onclick={() => (writing = "new")}>New entry<kbd>N</kbd></button>{/if}
+              {@render sync?.()}
+            </div>
           </header>
           <div class="tf-pw-cols">
             <div class="tf-pw-listcol">
@@ -551,7 +604,7 @@
             <div class="tf-pw-entrycol">
               {#if record && source && openEntry}
                 {#key record.id}
-                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} />
+                  <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} />
                 {/key}
               {:else}
                 <div class="tf-panel"><div class="tf-empty tf-pw-blank"><p>{query ? "No entry matches the filter." : "No entry is open."}</p></div></div>

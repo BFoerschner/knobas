@@ -561,6 +561,8 @@ const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const TfPasswords = (await import("../tf/passwords/TfPasswords.svelte")).default;
 const TfPwCode = (await import("../tf/passwords/TfPwCode.svelte")).default;
 const TfPwComb = (await import("../tf/passwords/TfPwComb.svelte")).default;
+const TfPwWrite = (await import("../tf/passwords/TfPwWrite.svelte")).default;
+const { model: passwordModel } = await import("../tf/passwords/model");
 const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svelte")).default;
 
 /** The Passwords page's reads (ADR-0056), answering late: one source, one folder, one entry with a code. */
@@ -581,6 +583,8 @@ function passwordPorts() {
         comment: { read: false, modify: false }, approval: { state: "none" }, attachments: { state: "none" }, can_read: true, can_modify: true,
       } as never),
     show: () => deferred({ kind: "not_offered" } as never),
+    write: () => deferred({ kind: "unreachable", message: "" } as never),
+    copySecret: async () => {},
     copy: () => deferred({ kind: "not_offered" } as never),
     hide: () => deferred(undefined),
     code: () => deferred({ kind: "code", code: "123456", digits: 6, period: 30, left_ms: 20_000 } as never),
@@ -3519,6 +3523,22 @@ const CASES: Case[] = [
     name: "TfPwComb",
     source: "lib/tf/passwords/TfPwComb.svelte",
     open: (target) => ({ app: mount(TfPwComb, { target, props: { until: Date.now() + 30_000 } }) }),
+  },
+  {
+    /** A write dialog (ADR-0056): its generator's first value, and a write answering late. */
+    name: "TfPwWrite",
+    source: "lib/tf/passwords/TfPwWrite.svelte",
+    open: (target) => {
+      const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, writes: ["create_entry" as const] };
+      const source = { id: "pw", name: "Team passwords", account: "mara", by_hand: true, synced_at: null, down_at: null, never_synced: false, offers, skipped_root: null, adapter_name: "Pleasant Password Server" };
+      const m = passwordModel({ sources: [source], folders: [{ id: "pw:f1", source: 0, parent: null, name: "Payments", comment_read: false, can_add: true }], entries: [], recent: [] });
+      return {
+        app: mount(TfPwWrite, {
+          target,
+          props: { kind: "new", source, m, timedTicket: null, send: () => deferred({ kind: "unreachable", message: "" } as never), copySecret: async () => {}, onclose: () => {}, ondone: () => {} },
+        }),
+      };
+    },
   },
   {
     /** A password source's Settings section (ADR-0056): its counts, answering late. */

@@ -462,3 +462,134 @@ pub async fn password_source_facts<R: tauri::Runtime>(
         .await
         .map_err(IpcError::internal)
 }
+
+/// What a direct write answered.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "passwords.ts")]
+pub enum WriteAnswer {
+    /// The source took it; the entry is `entity_id`.
+    Written { entity_id: String },
+    /// The source did not answer: nothing was saved.
+    Unreachable { message: String },
+    /// It was sent and no answer came: Sync now shows whether it arrived.
+    Unconfirmed { message: String },
+}
+
+/// The words an activity line says a write did: fixed, never a title.
+fn did(write: &passwords::Write) -> &'static str {
+    match write.kind() {
+        passwords::WriteKind::CreateEntry => "Added an entry",
+        passwords::WriteKind::EditEntry => "Edited an entry",
+        passwords::WriteKind::SetPassword => "Changed a password",
+        passwords::WriteKind::RequestAccess => "Requested access",
+    }
+}
+
+/// Send a **direct write** to a password source (ADR-0056): at once, never
+/// queued, answered when the source has. The entry the source answers goes
+/// into the mirror under the source's run lock, as a refresh's does; a code
+/// key it set goes to the keychain. Nothing of it is kept if the source does
+/// not answer.
+///
+/// # Errors
+/// [`IpcError`] for the source's refusal, or when the engine is not up.
+#[tauri::command]
+pub async fn passwords_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    write: passwords::Write,
+) -> Result<WriteAnswer, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    let pw = state(&app)?;
+    let source_id = match &write {
+        passwords::Write::CreateEntry { source, .. } => source.clone(),
+        other => other
+            .target()
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_owned(),
+    };
+    let lent = sources
+        .live
+        .source(
+            &sources.pool,
+            &sources.secrets,
+            &sources.registry,
+            &format!("{source_id}:write"),
+        )
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&source_id)))?;
+    let verb = did(&write);
+    let target = write.target().to_owned();
+    let written = match lent.source.passwords_write(write).await {
+        Ok(written) => written,
+        Err(SourceError::Unreachable(message)) => {
+            pw.mark_down(&source_id);
+            return Ok(WriteAnswer::Unreachable { message });
+        }
+        Err(SourceError::Unconfirmed { message, .. }) => {
+            return Ok(WriteAnswer::Unconfirmed { message });
+        }
+        Err(error) => return Err(IpcError::from_source_error(&error, Some(&source_id))),
+    };
+    pw.mark_up(&source_id);
+    let entity_id = written
+        .item
+        .as_ref()
+        .map_or(target, |item| item.entity.to_string());
+    if let Some(mut item) = written.item {
+        // One listing does not hold the entry's ancestors: keep the path the
+        // mirror has while the entry stays in its folder.
+        if let Ok(Some(old)) = reads::entry(&sources.pool, &entity_id).await {
+            let mut record: passwords::EntryRecord =
+                serde_json::from_value(item.payload.clone()).unwrap_or_default();
+            if record.path.is_empty() && record.folder == old.folder {
+                let path: Option<Vec<passwords::PathStep>> =
+                    sqlx::query_scalar::<_, serde_json::Value>(
+                        "select payload->'path' from sync.item where entity_id = $1",
+                    )
+                    .bind(&entity_id)
+                    .fetch_optional(&sources.pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|v| serde_json::from_value(v).ok());
+                record.path = path.unwrap_or_default();
+                item.payload = serde_json::to_value(&record).unwrap_or(item.payload);
+            }
+        }
+        let deps = sources.scheduler.deps();
+        let mut conn = deps.connections.open().await.map_err(IpcError::internal)?;
+        let wrote = knobas_sync::refresh::write_direct(&mut conn, lent.source.as_ref(), item).await;
+        let _ = sqlx::Connection::close(conn).await;
+        wrote.map_err(|e| {
+            IpcError::internal(format!(
+                "the source took the change; the mirror did not: {e}"
+            ))
+        })?;
+    }
+    if let Some(key) = written.otp_key {
+        let keys: knobas_secrets::otp::OtpKeys = [(entity_id.clone(), key)].into_iter().collect();
+        if let Err(error) =
+            knobas_secrets::otp::spawn::merge(&sources.secrets, &source_id, keys).await
+        {
+            tracing::warn!(source = %source_id, %error, "the written entry's code key could not be kept");
+        }
+        pw.forget_source(&source_id);
+    }
+    // The activity line names the entry by id and says what was done in fixed words: no title, no value.
+    let entity = knobas_core::entity::EntityRef::parse(&entity_id).ok();
+    if let Err(error) = knobas_core::activity::record(
+        &sources.pool,
+        "user",
+        verb,
+        entity.as_ref(),
+        serde_json::json!({}),
+    )
+    .await
+    {
+        tracing::warn!(entity = %entity_id, %error, "the write's activity line was not kept");
+    }
+    Ok(WriteAnswer::Written { entity_id })
+}

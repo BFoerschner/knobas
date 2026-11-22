@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use knobas_http::{Auth, HttpClient, HttpConfig, Method};
 use knobas_source::instance::SourceInstance;
-use knobas_source::passwords::{self, SecretAnswer, SecretAsk, SecretRef, SecretText};
+use knobas_source::passwords::{
+    self, SecretAnswer, SecretAsk, SecretRef, SecretText, Write, WriteKind, Written,
+};
 use knobas_source::{
     ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
 };
@@ -316,6 +318,205 @@ impl PleasantSource {
     }
 }
 
+impl PleasantSource {
+    /// The root folder's id: where an entry with no folder goes.
+    async fn root_id(&self) -> Result<String, SourceError> {
+        self.call(Method::GET, "folders/root", |r| r)
+            .await?
+            .json::<String>()
+            .await
+            .map_err(|e| SourceError::protocol(format!("the root's id did not decode: {e}")))
+    }
+
+    /// An entry as a sync would emit it, read back by listing its folder once
+    /// (never `GET entries/{id}`), with its code key.
+    async fn read_back(&self, key: &str, folder: &str) -> Result<Written, SourceError> {
+        let listing = self.folder(folder).await?;
+        let Some(entry) = listing
+            .credentials
+            .iter()
+            .find(|e| e.id.eq_ignore_ascii_case(key))
+        else {
+            return Ok(Written::default());
+        };
+        // The entry's path is the mirror's to keep: one listing does not hold
+        // its ancestors, so the item carries none and the next sync draws it.
+        let at = (!listing.parent_id.is_none()).then_some(listing.id.as_str());
+        let (item, otp_key) =
+            crate::map::entry(&self.id, entry, at, &[], passwords::CommentRules::default());
+        Ok(Written {
+            item: Some(item),
+            otp_key,
+        })
+    }
+
+    /// The fields a write sets, as Pleasant spells them; `None` leaves one.
+    fn fields(
+        title: Option<&str>,
+        username: Option<Option<&str>>,
+        address: Option<Option<&str>>,
+        notes: Option<Option<&str>>,
+        expires: Option<Option<chrono::NaiveDate>>,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut body = serde_json::Map::new();
+        if let Some(t) = title {
+            body.insert("Name".into(), t.into());
+        }
+        let text = |v: Option<&str>| v.map_or(serde_json::Value::String(String::new()), Into::into);
+        if let Some(v) = username {
+            body.insert("Username".into(), text(v));
+        }
+        if let Some(v) = address {
+            body.insert("Url".into(), text(v));
+        }
+        if let Some(v) = notes {
+            body.insert("Notes".into(), text(v));
+        }
+        if let Some(v) = expires {
+            body.insert(
+                "Expires".into(),
+                v.map_or(serde_json::Value::Null, |d| format!("{d}T00:00:00").into()),
+            );
+        }
+        body
+    }
+
+    /// The direct writes (ADR-0056): each request sent once, the entry read
+    /// back by listing its folder. *Unverified against a real server*: how a
+    /// `PATCH` carries a usage comment; the live suite settles it.
+    async fn write_direct(&self, write: Write) -> Result<Written, SourceError> {
+        let unsent = |what: &str| SourceError::protocol(format!("{what}, so nothing was sent"));
+        match write {
+            Write::CreateEntry {
+                folder,
+                title,
+                username,
+                address,
+                notes,
+                expires,
+                password,
+                otp_key,
+                comment,
+                ..
+            } => {
+                let group = match folder.as_deref().and_then(|f| key_of(&self.id, f)) {
+                    Some(g) => g.to_owned(),
+                    None => self.root_id().await?,
+                };
+                let mut body = Self::fields(
+                    Some(&title),
+                    Some(username.as_deref()),
+                    Some(address.as_deref()),
+                    Some(notes.as_deref()),
+                    Some(expires),
+                );
+                body.insert("Password".into(), password.expose().into());
+                body.insert("GroupId".into(), group.clone().into());
+                body.insert("Tags".into(), serde_json::json!([]));
+                body.insert("CustomApplicationFields".into(), serde_json::json!({}));
+                let mut custom = serde_json::Map::new();
+                if let Some(key) = &otp_key {
+                    custom.insert("TimeOtp-Secret-Base32".into(), key.expose().into());
+                }
+                body.insert("CustomUserFields".into(), custom.into());
+                if let Some(c) = comment {
+                    body.insert("Comment".into(), c.into());
+                }
+                let id: String = self
+                    .call(Method::POST, "entries", |r| {
+                        r.json(&serde_json::Value::Object(body.clone())).no_retry()
+                    })
+                    .await?
+                    .json()
+                    .await
+                    .map_err(|e| SourceError::Unconfirmed {
+                        status: None,
+                        message: format!("the new entry's id did not decode: {e}"),
+                    })?;
+                self.read_back(&id, &group).await
+            }
+            Write::EditEntry {
+                entity,
+                title,
+                username,
+                address,
+                notes,
+                expires,
+                folder,
+                otp_key,
+                comment,
+                listed_in,
+            } => {
+                let key = key_of(&self.id, &entity)
+                    .ok_or_else(|| unsent(&format!("{entity} is not this source's")))?
+                    .to_owned();
+                if otp_key.is_some() {
+                    return Err(unsent("a code key is not changed by Edit in this pass"));
+                }
+                let mut body = Self::fields(
+                    title.as_deref(),
+                    username.as_ref().map(|v| v.as_deref()),
+                    address.as_ref().map(|v| v.as_deref()),
+                    notes.as_ref().map(|v| v.as_deref()),
+                    expires,
+                );
+                let mut now_in = listed_in
+                    .as_deref()
+                    .and_then(|f| key_of(&self.id, f))
+                    .map(str::to_owned);
+                if let Some(to) = folder {
+                    let group = match to.as_deref().and_then(|f| key_of(&self.id, f)) {
+                        Some(g) => g.to_owned(),
+                        None => self.root_id().await?,
+                    };
+                    body.insert("GroupId".into(), group.clone().into());
+                    now_in = Some(group);
+                }
+                if body.is_empty() {
+                    return Err(unsent("the edit changes nothing"));
+                }
+                if let Some(c) = comment {
+                    body.insert("Comment".into(), c.into());
+                }
+                self.call(Method::PATCH, &format!("entries/{key}"), |r| {
+                    r.json(&serde_json::Value::Object(body.clone())).no_retry()
+                })
+                .await?;
+                match now_in {
+                    Some(group) => self.read_back(&key, &group).await,
+                    None => Ok(Written::default()),
+                }
+            }
+            Write::SetPassword {
+                entity,
+                password,
+                comment,
+                listed_in,
+            } => {
+                let key = key_of(&self.id, &entity)
+                    .ok_or_else(|| unsent(&format!("{entity} is not this source's")))?
+                    .to_owned();
+                let mut body = serde_json::Map::new();
+                body.insert("Password".into(), password.expose().into());
+                if let Some(c) = comment {
+                    body.insert("Comment".into(), c.into());
+                }
+                self.call(Method::PATCH, &format!("entries/{key}"), |r| {
+                    r.json(&serde_json::Value::Object(body.clone())).no_retry()
+                })
+                .await?;
+                match listed_in.as_deref().and_then(|f| key_of(&self.id, f)) {
+                    Some(group) => self.read_back(&key, group).await,
+                    None => Ok(Written::default()),
+                }
+            }
+            Write::RequestAccess { .. } => {
+                Err(passwords::undeclared(&self.id, WriteKind::RequestAccess))
+            }
+        }
+    }
+}
+
 /// Run reads side by side on this task, so the request counter sees them.
 async fn futures_join<F: std::future::Future>(reads: Vec<F>) -> Vec<F::Output> {
     let mut pinned: Vec<std::pin::Pin<Box<F>>> = reads.into_iter().map(Box::pin).collect();
@@ -425,6 +626,18 @@ impl Source for PleasantSource {
             "a Pleasant source takes no queued writes ({:?} was not sent): its changes are direct",
             op.identifier()
         )))
+    }
+
+    /// A change to an entry, sent at once (ADR-0056). A kind the descriptor
+    /// does not list is refused before anything is sent.
+    async fn passwords_write(&self, write: Write) -> Result<Written, SourceError> {
+        let offers = crate::descriptor::descriptor_template()
+            .passwords
+            .unwrap_or_default();
+        if !offers.writes(write.kind()) {
+            return Err(passwords::undeclared(&self.id, write.kind()));
+        }
+        self.write_direct(write).await
     }
 
     async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {

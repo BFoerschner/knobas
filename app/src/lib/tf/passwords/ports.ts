@@ -4,6 +4,7 @@
  * side its deadline is moot.
  */
 import {
+  clipboardCopySecret,
   clipboardForget,
   otpCode,
   otpCopy,
@@ -12,11 +13,14 @@ import {
   passwordShow,
   passwordsEntry,
   passwordsHeld,
+  passwordsWrite,
   type CodeAnswer,
   type Held,
   type PwEntry,
   type ReadAnswer,
   type SecretRef,
+  type Write,
+  type WriteAnswer,
 } from "../../ipc/passwords";
 import { openWebPort } from "../../shell/open-web";
 
@@ -31,6 +35,10 @@ export interface PasswordPorts {
   /** Copy text that is no secret (a username, an address). */
   copyPlain: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  /** A direct write (ADR-0056). */
+  write: (write: Write) => Promise<WriteAnswer>;
+  /** Copy a value typed or generated in a dialog, as a secret. */
+  copySecret: (text: string, what: string) => Promise<unknown>;
 }
 
 export const realPasswordPorts: PasswordPorts = {
@@ -46,6 +54,8 @@ export const realPasswordPorts: PasswordPorts = {
     await clipboardForget().catch(() => {});
   },
   openExternal: (url) => openWebPort()(url),
+  write: (write) => passwordsWrite(write),
+  copySecret: (text, what) => clipboardCopySecret(text, what),
 };
 
 /** The password, as a secret ref. */

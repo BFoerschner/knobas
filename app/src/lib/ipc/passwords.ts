@@ -7,7 +7,7 @@
  */
 import { invoke } from "./invoke";
 
-import type { ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts } from "./generated/passwords";
+import type { ClipState, CodeAnswer, Copied, Held, PwEntry, ReadAnswer, SecretRef, SourceFacts, Write, WriteAnswer } from "./generated/passwords";
 
 export type {
   Approval,
@@ -35,6 +35,7 @@ export type {
   SecretText,
   SourceFacts,
   Write,
+  WriteAnswer,
   WriteKind,
 } from "./generated/passwords";
 
@@ -96,4 +97,9 @@ export function clipboardState(): Promise<ClipState> {
 /** What a password source's Settings page counts: entries, folders and the code-key formats the sync found. */
 export function passwordSourceFacts(sourceId: string): Promise<SourceFacts> {
   return invoke<SourceFacts>("password_source_facts", { sourceId });
+}
+
+/** A direct write (ADR-0056): sent at once, answered when the source has; nothing is kept if it does not answer. */
+export function passwordsWrite(write: Write): Promise<WriteAnswer> {
+  return invoke<WriteAnswer>("passwords_write", { write });
 }

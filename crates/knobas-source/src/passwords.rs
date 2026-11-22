@@ -559,6 +559,21 @@ pub struct OtpKey {
 ///
 /// No derived `Debug`: the hand-written one prints the variant and the
 /// entity, never a value.
+///
+/// It cannot be queued: the write queue holds [`WriteOp`](crate::WriteOp)s,
+/// and nothing turns one of these into one.
+///
+/// ```compile_fail
+/// use knobas_source::passwords::{SecretText, Write};
+/// let write = Write::SetPassword {
+///     entity: "pw:e1".into(),
+///     password: SecretText::new("hunter2"),
+///     comment: None,
+///     listed_in: None,
+/// };
+/// let queued: knobas_source::WriteOp = write.into();
+/// ```
+
 #[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "write", rename_all = "snake_case")]
 #[ts(export_to = "passwords.ts")]
@@ -601,11 +616,18 @@ pub enum Write {
         #[ts(optional)]
         otp_key: Option<SecretText>,
         comment: Option<String>,
+        /// The folder the mirror lists it in, an entity id: where a source
+        /// that reads an entry back by listing its folder looks.
+        #[serde(default)]
+        listed_in: Option<String>,
     },
     SetPassword {
         entity: String,
         password: SecretText,
         comment: Option<String>,
+        /// As [`Write::EditEntry`]'s.
+        #[serde(default)]
+        listed_in: Option<String>,
     },
     RequestAccess {
         entity: String,
@@ -745,6 +767,7 @@ mod tests {
             entity: "pleasant:e1".into(),
             password: SecretText::new("s3cr3t-pass"),
             comment: Some("PAY-231".into()),
+            listed_in: None,
         };
         let printed = format!("{write:?}");
         assert_eq!(printed, "SetPassword(pleasant:e1)");
@@ -866,6 +889,7 @@ mod tests {
             entity: "pw:e1".into(),
             password: SecretText::new("x"),
             comment: Some("PAY-231".into()),
+            listed_in: None,
         };
         assert_eq!(set.comment(), Some("PAY-231"));
         assert_eq!(set.target(), "pw:e1");

@@ -303,6 +303,81 @@ async fn refresh_locked(
     Ok(outcome)
 }
 
+/// Write the item a **direct write** answered (ADR-0056) into the mirror, as
+/// a refresh writes the item it read: under the source's run lock, through
+/// the run's item write and its checks (the role's record, the title kept in
+/// the mirror), then the per-item work. No run follows: a source by hand is
+/// asked nothing more.
+///
+/// # Errors
+/// [`SyncError`] for an item of another source, or the database's.
+pub async fn write_direct(
+    conn: &mut PgConnection,
+    source: &dyn Source,
+    item: knobas_source::SyncItem,
+) -> Result<(), SyncError> {
+    let descriptor = source.descriptor();
+    check_source_id(&descriptor.id)?;
+    let (source_id, declared) = Declared::of(descriptor);
+    let entity = item.entity.to_string();
+    if item.entity.namespace != source_id {
+        return Err(SyncError::Source(SourceError::protocol(format!(
+            "{entity:?} is not an item of source {source_id:?}"
+        ))));
+    }
+    let Declared {
+        kinds,
+        exhaustive: _,
+        monitor_paths,
+        saved_views,
+        role_check,
+        payload_paths,
+        private_titles,
+        passwords: _,
+    } = declared;
+    let mut tx = conn.begin().await?;
+    let written = async {
+        sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+            .bind(&source_id)
+            .execute(&mut *tx)
+            .await?;
+        write_items(
+            &mut tx,
+            &source_id,
+            kinds,
+            &private_titles,
+            role_check,
+            vec![item],
+        )
+        .await?;
+        per_item_work(
+            &mut tx,
+            &source_id,
+            &PerItem {
+                monitor_paths,
+                saved_views,
+                payload_paths,
+            },
+            Some(&entity),
+        )
+        .await?;
+        Ok::<(), SyncError>(())
+    }
+    .await;
+    match written {
+        Ok(()) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(error) => {
+            if let Err(rollback) = tx.rollback().await {
+                tracing::warn!(source_id, %rollback, "rolling the direct write's item back failed");
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Write what a refresh read through the run's item write, judged as a run
 /// judges: the same role rule an incremental run's handful of records is
 /// held to.

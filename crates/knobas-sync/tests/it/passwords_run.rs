@@ -296,3 +296,82 @@ async fn a_runs_code_keys_reach_the_keychain_only_when_it_commits() {
         );
     }
 }
+
+/// A **direct write**'s answer (ADR-0056) reaches the mirror without a run:
+/// the item is written under the run's checks, its title stays out of
+/// `knobas.entity`, no run is logged, and an item of another source is refused.
+#[tokio::test]
+async fn a_direct_writes_item_reaches_the_mirror_without_a_run() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    let id = format!("pw-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    config::insert(
+        &pool,
+        &InsertConfig {
+            id: id.clone(),
+            adapter_kind: "vault".into(),
+            display_name: "Team passwords".into(),
+            base_url: String::new(),
+            auth_kind: AuthKind::Method(AuthMethod::UserPassword),
+            config: serde_json::json!({}),
+            sync_interval_secs: 300,
+            enabled: true,
+            sync_by_hand: true,
+        },
+    )
+    .await
+    .unwrap();
+    let vault = Vault {
+        id: id.clone(),
+        next: Next::Both,
+    };
+    let record = EntryRecord {
+        username: Some("grafana_admin".into()),
+        can_read: true,
+        can_modify: true,
+        ..EntryRecord::default()
+    };
+    let head = |source: &str| EntryHead {
+        source: source.to_owned(),
+        key: "e9".into(),
+        title: "grafana".into(),
+        updated_at: None,
+    };
+    let mut conn = knobas_db::test_util::test_connector()
+        .await
+        .connect()
+        .await
+        .unwrap();
+    knobas_sync::refresh::write_direct(
+        &mut conn,
+        &vault,
+        passwords::entry_item(head(&id), &record),
+    )
+    .await
+    .unwrap();
+    let row: (String, String, serde_json::Value) = sqlx::query_as(
+        "select e.title, i.title, i.payload from knobas.entity e join sync.item i on i.entity_id = e.id
+          where i.source_id = $1",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "", "the title reached knobas.entity");
+    assert_eq!(row.1, "grafana");
+    assert_eq!(row.2["username"], "grafana_admin");
+    let runs: (i64,) = sqlx::query_as("select count(*) from knobas.sync_run where source_id = $1")
+        .bind(&id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(runs.0, 0, "a direct write started a run");
+
+    let other = knobas_sync::refresh::write_direct(
+        &mut conn,
+        &vault,
+        passwords::entry_item(head("someone-else"), &record),
+    )
+    .await;
+    assert!(other.is_err(), "an item of another source was written");
+}

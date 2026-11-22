@@ -255,8 +255,36 @@ formats: Array<[string, number]>, };
  *
  * No derived `Debug`: the hand-written one prints the variant and the
  * entity, never a value.
+ *
+ * It cannot be queued: the write queue holds [`WriteOp`](crate::WriteOp)s,
+ * and nothing turns one of these into one.
+ *
+ * ```compile_fail
+ * use knobas_source::passwords::{SecretText, Write};
+ * let write = Write::SetPassword {
+ *     entity: "pw:e1".into(),
+ *     password: SecretText::new("hunter2"),
+ *     comment: None,
+ *     listed_in: None,
+ * };
+ * let queued: knobas_source::WriteOp = write.into();
+ * ```
  */
-export type Write = { "write": "create_entry", source: string, folder: string | null, title: string, username: string | null, address: string | null, notes: string | null, expires: string | null, password: SecretText, otp_key: SecretText | null, comment: string | null, } | { "write": "edit_entry", entity: string, title?: string, username?: string | null, address?: string | null, notes?: string | null, expires?: string | null, folder?: string | null, otp_key?: SecretText, comment: string | null, } | { "write": "set_password", entity: string, password: SecretText, comment: string | null, } | { "write": "request_access", entity: string, comment: string, };
+export type Write = { "write": "create_entry", source: string, folder: string | null, title: string, username: string | null, address: string | null, notes: string | null, expires: string | null, password: SecretText, otp_key: SecretText | null, comment: string | null, } | { "write": "edit_entry", entity: string, title?: string, username?: string | null, address?: string | null, notes?: string | null, expires?: string | null, folder?: string | null, otp_key?: SecretText, comment: string | null, 
+/**
+ * The folder the mirror lists it in, an entity id: where a source
+ * that reads an entry back by listing its folder looks.
+ */
+listed_in: string | null, } | { "write": "set_password", entity: string, password: SecretText, comment: string | null, 
+/**
+ * As [`Write::EditEntry`]'s.
+ */
+listed_in: string | null, } | { "write": "request_access", entity: string, comment: string, };
+
+/**
+ * What a direct write answered.
+ */
+export type WriteAnswer = { "kind": "written", entity_id: string, } | { "kind": "unreachable", message: string, } | { "kind": "unconfirmed", message: string, };
 
 /**
  * A direct write a source performs.

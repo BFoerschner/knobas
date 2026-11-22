@@ -138,6 +138,7 @@ const SMALL: Record<string, string> = {
   "tf/passwords/TfPasswords.svelte  marks(e.title, query)": "the runs of one line's or one name's words: an entry's title, the filter's letters marked",
   "tf/passwords/TfPasswords.svelte  marks(e.user, query)": "the runs of one line's or one name's words: an entry's username, the filter's letters marked",
   "tf/passwords/TfPasswords.svelte  marks(bare(e.address), query)": "the runs of one line's or one name's words: an entry's address, the filter's letters marked",
+  "tf/passwords/TfPwWrite.svelte  folders": "one source's folders, in a select drawn only while a write dialog is open: tens to a few hundred",
   "tf/passwords/TfPwEntry.svelte  chain": "a handful by what it is: the folders an entry sits under",
   "tf/passwords/TfPwEntry.svelte  entry.fields": "a handful by what it is: one entry's custom fields",
   "tf/settings/TfPasswordsSection.svelte  rows": "a set the code fixes: the eight abilities the Passwords role allows",

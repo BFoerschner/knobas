@@ -185,6 +185,11 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return undefined;
     },
     clipboard_state: () => clip,
+    passwords_write: (args) => {
+      if (offline) return { kind: "unreachable", message: "unreachable: the server did not answer" };
+      const write = args["write"] as { write: string; entity?: string; source?: string };
+      return { kind: "written", entity_id: write.entity ?? `${SOURCE}:pl-payout-db` };
+    },
     password_source_facts: () => {
       const codes = entries.filter((e) => e.totp).length;
       return { entries: view.entries.length, folders: view.folders.length, formats: codes > 0 ? [["keepass", codes] as [string, number]] : [] };

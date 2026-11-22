@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { Held, PwEntry, PwRow, ReadAnswer, SecretRef } from "../../ipc/passwords";
+import type { Held, PwEntry, PwRow, ReadAnswer, SecretRef, WriteAnswer } from "../../ipc/passwords";
 import TfPasswords from "./TfPasswords.svelte";
 import { forgetHeld } from "./held.svelte";
 import { forgetComment, type PasswordPorts } from "./ports";
@@ -60,6 +60,8 @@ function ports(over: Partial<PasswordPorts> = {}, view: Held = held()): Password
     copyCode: vi.fn(async () => ({ kind: "code" as const, code: "482913", digits: 6, period: 30, left_ms: 12_000 })),
     copyPlain: vi.fn(async () => {}),
     openExternal: vi.fn(async () => {}),
+    write: vi.fn(async (): Promise<WriteAnswer> => ({ kind: "written", entity_id: "pw:graf" })),
+    copySecret: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -205,4 +207,82 @@ test("no password source says how to add one; one never synced offers its sync",
   await open(ports({}, unsynced));
   expect(target.querySelector("h1")?.textContent).toBe("Team passwords is not synced yet");
   expect(target.textContent).toContain("It syncs only when you press Sync now. A sync lists its entries and their folders. It reads no passwords.");
+});
+
+/** A source that performs the three writes, and an entry the account may change. */
+function writable(down: string | null = null): Held {
+  const view = held(down);
+  view.sources[0] = { ...view.sources[0]!, offers: { ...offers, writes: ["create_entry", "edit_entry", "set_password"] } };
+  return view;
+}
+
+test("Change password… sends the new value once, with a comment where the entry asks one, and opens the entry again", async () => {
+  const p = ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true, comment: { read: true, modify: true } })) }, writable());
+  await open(p, ["entry", "pw:graf"], "PLAT-7");
+  button("Change password…").click();
+  await settle();
+  const dialog = target.ownerDocument.querySelector<HTMLElement>(".tf-pw-form")!;
+  const value = dialog.querySelector<HTMLInputElement>("#tf-pw-new")!;
+  // It starts with a generated password.
+  expect(value.value.length).toBeGreaterThanOrEqual(16);
+  expect(dialog.querySelector<HTMLInputElement>("#tf-pw-comment")!.value).toBe("PLAT-7");
+  expect(target.ownerDocument.body.textContent).toContain("It does not change it at pay.example");
+  value.value = "n3w-Secret";
+  value.dispatchEvent(new Event("input", { bubbles: true }));
+  dialog.requestSubmit();
+  await settle();
+  expect(p.write).toHaveBeenCalledTimes(1);
+  expect(p.write).toHaveBeenCalledWith({ write: "set_password", entity: "pw:graf", password: "n3w-Secret", comment: "PLAT-7", listed_in: "pw:plat" });
+  expect(target.ownerDocument.querySelector(".tf-pw-form")).toBeNull();
+});
+
+test("Edit sends only what changed, and no password", async () => {
+  const p = ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true })) }, writable());
+  await open(p, ["entry", "pw:graf"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+  await settle();
+  const dialog = target.ownerDocument.querySelector<HTMLFormElement>(".tf-pw-form")!;
+  expect(dialog.querySelector("#tf-pw-new")).toBeNull();
+  const user = dialog.querySelector<HTMLInputElement>("#tf-pw-user")!;
+  user.value = "grafana_admin";
+  user.dispatchEvent(new Event("input", { bubbles: true }));
+  dialog.requestSubmit();
+  await settle();
+  expect(p.write).toHaveBeenCalledWith({ write: "edit_entry", entity: "pw:graf", comment: null, listed_in: "pw:plat", username: "grafana_admin" });
+});
+
+test("a write the source does not answer keeps the dialog and what was typed, and says nothing was saved", async () => {
+  const p = ports({ write: vi.fn(async (): Promise<WriteAnswer> => ({ kind: "unreachable", message: "unreachable" })) }, writable());
+  await open(p, ["in", "pw:plat"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
+  await settle();
+  const dialog = target.ownerDocument.querySelector<HTMLFormElement>(".tf-pw-form")!;
+  expect(dialog.querySelector<HTMLSelectElement>("#tf-pw-folder")!.value).toBe("pw:plat");
+  const title = dialog.querySelector<HTMLInputElement>("#tf-pw-title")!;
+  title.value = "loki";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  dialog.requestSubmit();
+  await settle();
+  expect(p.write).toHaveBeenCalledTimes(1);
+  expect(target.ownerDocument.querySelector(".tf-pw-form #tf-pw-title")).not.toBeNull();
+  expect(target.ownerDocument.querySelector<HTMLInputElement>("#tf-pw-title")!.value).toBe("loki");
+  expect(target.ownerDocument.body.textContent).toContain("Team passwords does not answer, so nothing was saved.");
+});
+
+test("no write is offered where the source performs none, the account may not change the entry, or the source is down", async () => {
+  await open(ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true })) }), ["entry", "pw:graf"]);
+  expect(button("Change password…")).toBeUndefined();
+  expect(button("New entry")).toBeUndefined();
+  unmount(app!);
+  app = null;
+  forgetHeld();
+  await open(ports({}, writable()), ["entry", "pw:graf"]);
+  expect(button("Change password…")).toBeUndefined();
+  expect(button("New entry")).toBeTruthy();
+  unmount(app!);
+  app = null;
+  forgetHeld();
+  await open(ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true })) }, writable("2026-11-22T10:40:00Z")), ["entry", "pw:graf"]);
+  expect(button("Change password…").disabled).toBe(true);
+  expect(button("New entry")).toBeUndefined();
 });

@@ -779,11 +779,13 @@ pub async fn check_passwords(
             folder: None,
             otp_key: None,
             comment: None,
+            listed_in: None,
         },
         Write::SetPassword {
             entity: entity.clone(),
             password: SecretText::new("contract-battery-probe"),
             comment: None,
+            listed_in: None,
         },
         Write::RequestAccess {
             entity,

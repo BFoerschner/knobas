@@ -23,6 +23,8 @@
     onretry,
     retrying = false,
     copied,
+    onchange,
+    onedit,
   }: {
     entry: PwEntry;
     source: PwSource;
@@ -35,7 +37,12 @@
     retrying?: boolean;
     /** A plain copy landed (a username, an address): the page's toast. */
     copied: (what: string) => void;
+    /** *Change password…* and *Edit*, drawn where the source performs them and the account may change the entry. */
+    onchange?: () => void;
+    onedit?: () => void;
   } = $props();
+  const canChange = $derived(entry.can_modify && source.offers.writes.includes("set_password"));
+  const canEdit = $derived(entry.can_modify && source.offers.writes.includes("edit_entry"));
 
   let password = $state<TfPwSecret | null>(null);
   let code = $state<TfPwCode | null>(null);
@@ -84,6 +91,12 @@
       </div>
       <h2>{entry.title}</h2>
     </div>
+    {#if canChange || canEdit}
+      <div class="tf-acts">
+        {#if canChange}<button type="button" class="tf-btn" disabled={down || blocked} title={down ? `${source.name} does not answer` : undefined} onclick={onchange}>Change password…</button>{/if}
+        {#if canEdit}<button type="button" class="tf-btn" aria-label="Edit" aria-keyshortcuts="E" disabled={down} title={down ? `${source.name} does not answer` : undefined} onclick={onedit}>Edit<kbd>E</kbd></button>{/if}
+      </div>
+    {/if}
   </div>
   {#if down}
     <div class="tf-stale tf-pw-enote" role="status">

@@ -457,3 +457,116 @@ async fn a_field_the_listing_did_not_send_is_read_from_its_folder() {
         SecretAnswer::NotOffered
     );
 }
+
+/// The three entry writes (ADR-0056): each one request sent once, an edit
+/// carrying only what changed, then the entry read back by listing its folder
+/// (never `GET entries/{id}`). The bodies are what the stand-in received.
+#[tokio::test]
+async fn the_writes_send_what_changed_once_and_read_the_entry_back_from_its_folder() {
+    use knobas_source::passwords::{SecretText, Write};
+    let server = server().await;
+    let folder = "6f9b1c3e-0004-4a10-9000-000000000004";
+    Mock::given(method("POST"))
+        .and(path("/api/v5/rest/entries"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(WIKI))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/api/v5/rest/entries/{WIKI}")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v5/rest/folders/{folder}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Id": folder, "Name": "Platform", "ParentId": "x", "Children": [],
+            "Credentials": [{"Id": WIKI, "Name": "wiki admin", "Username": "root", "GroupId": folder,
+                             "HasViewEntryContentsAccess": true,
+                             "CustomUserFields": {"TimeOtp-Secret-Base32": "GEZDGNBVGY3TQOJQ"}}]
+        })))
+        .mount(&server)
+        .await;
+    let s = source(&server.uri());
+    let (written, sent) = knobas_http::counted::counted(s.passwords_write(Write::CreateEntry {
+        source: "pw".into(),
+        folder: Some(format!("pw:{folder}")),
+        title: "wiki admin".into(),
+        username: Some("root".into()),
+        address: None,
+        notes: None,
+        expires: None,
+        password: SecretText::new("N3w!pass"),
+        otp_key: Some(SecretText::new("GEZDGNBVGY3TQOJQ")),
+        comment: None,
+    }))
+    .await;
+    let written = written.unwrap();
+    assert_eq!(sent, 3, "a sign-in, the create and the folder");
+    let item = written.item.expect("read back");
+    assert_eq!(item.entity.to_string(), format!("pw:{WIKI}"));
+    assert!(!item.payload.to_string().contains("GEZDGNBV"));
+    assert_eq!(written.otp_key.unwrap().secret.expose(), "GEZDGNBVGY3TQOJQ");
+
+    let edit = s
+        .passwords_write(Write::EditEntry {
+            entity: format!("pw:{WIKI}"),
+            title: None,
+            username: Some(Some("admin2".into())),
+            address: None,
+            notes: None,
+            expires: None,
+            folder: None,
+            otp_key: None,
+            comment: None,
+            listed_in: Some(format!("pw:{folder}")),
+        })
+        .await
+        .unwrap();
+    assert!(edit.item.is_some());
+    s.passwords_write(Write::SetPassword {
+        entity: format!("pw:{WIKI}"),
+        password: SecretText::new("Ch4nged!"),
+        comment: Some("OPS-77".into()),
+        listed_in: None,
+    })
+    .await
+    .unwrap();
+    let bodies: Vec<serde_json::Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() != "GET" && r.url.path().contains("/entries"))
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect();
+    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies[0]["Name"], "wiki admin");
+    assert_eq!(bodies[0]["Password"], "N3w!pass");
+    assert_eq!(bodies[0]["GroupId"], folder);
+    assert_eq!(
+        bodies[0]["CustomUserFields"]["TimeOtp-Secret-Base32"],
+        "GEZDGNBVGY3TQOJQ"
+    );
+    assert_eq!(
+        bodies[1],
+        serde_json::json!({"Username": "admin2"}),
+        "an edit sends only what changed"
+    );
+    assert_eq!(
+        bodies[2],
+        serde_json::json!({"Password": "Ch4nged!", "Comment": "OPS-77"})
+    );
+    // Access requests are not offered: refused before anything is sent.
+    let refused = s
+        .passwords_write(Write::RequestAccess {
+            entity: format!("pw:{WIKI}"),
+            comment: "x".into(),
+        })
+        .await;
+    assert!(matches!(
+        refused,
+        Err(knobas_source::SourceError::Protocol { status: None, .. })
+    ));
+}

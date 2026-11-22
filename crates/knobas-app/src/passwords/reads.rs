@@ -280,8 +280,7 @@ fn assemble(sources: &[SourceRow], items: &[ItemRow], ask: &Ask<'_>, recent: Vec
             record
                 .also_in
                 .into_iter()
-                .map(|f| lift(Some(f)))
-                .flatten()
+                .filter_map(|f| lift(Some(f)))
                 .collect(),
         ));
     }

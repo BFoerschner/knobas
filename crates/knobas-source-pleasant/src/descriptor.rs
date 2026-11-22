@@ -1,6 +1,6 @@
 //! What a Pleasant source is, said once.
 
-use knobas_source::passwords::{self, Offers};
+use knobas_source::passwords::{self, Offers, WriteKind};
 use knobas_source::role::RoleClaim;
 use knobas_source::{AuthMethod, SourceDescriptor};
 
@@ -46,7 +46,11 @@ pub fn descriptor_template() -> SourceDescriptor {
             history: None,
             attachments: false,
             access_requests: false,
-            writes: Vec::new(),
+            writes: vec![
+                WriteKind::CreateEntry,
+                WriteKind::EditEntry,
+                WriteKind::SetPassword,
+            ],
         }),
     }
 }
