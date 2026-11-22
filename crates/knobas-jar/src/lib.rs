@@ -56,6 +56,9 @@ pub struct ArchiveIndex {
     pub names: String,
     pub sizes: Vec<u64>,
     pub packed_sizes: Vec<u64>,
+    /// Each entry's CRC-32 as its directory declares it, aligned with `sizes`: what a comparison of two archives tells a
+    /// changed entry by, with no entry read.
+    pub crcs: Vec<u32>,
     /// [`flag`]s per entry.
     pub flags: Vec<u8>,
     /// The manifest's main section, in its order.
@@ -111,6 +114,7 @@ pub fn index<R: Read + Seek + ?Sized>(r: &mut R, dir: &Directory, file_name: &st
         String::with_capacity(order.iter().map(|&i| dir.entries[i].name.len() + 1).sum());
     let mut sizes = Vec::with_capacity(order.len());
     let mut packed_sizes = Vec::with_capacity(order.len());
+    let mut crcs = Vec::with_capacity(order.len());
     let mut flags = Vec::with_capacity(order.len());
     let mut seen: HashSet<&str> = HashSet::with_capacity(order.len());
     let (mut total, mut packed) = (0u64, 0u64);
@@ -132,6 +136,7 @@ pub fn index<R: Read + Seek + ?Sized>(r: &mut R, dir: &Directory, file_name: &st
         }));
         sizes.push(e.size);
         packed_sizes.push(e.csize);
+        crcs.push(e.crc);
         total = total.saturating_add(e.size);
         packed = packed.saturating_add(e.csize);
         let mut f = 0u8;
@@ -277,6 +282,7 @@ pub fn index<R: Read + Seek + ?Sized>(r: &mut R, dir: &Directory, file_name: &st
         names,
         sizes,
         packed_sizes,
+        crcs,
         flags,
         manifest,
         maven,

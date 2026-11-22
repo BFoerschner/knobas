@@ -350,23 +350,24 @@ pub async fn open(
             mebibytes(ARCHIVE_CAP)
         ))
     };
-    // The working tree's archive (ux29, the Files tab on *Working tree*): read from the checkout as it is on disk, never
-    // the source, and kept by no key, so a rebuilt JAR is read again.
-    if commit == Some(crate::checkout::working::END) {
+    // The working tree's archive (ux29, the Files tab on *Working tree*) or the index's (Local changes' staged half, a
+    // comparison's side): read from the checkout, never the source, and kept by no key, so a rebuilt JAR is read again.
+    if let Some(end) = commit
+        .filter(|c| *c == crate::checkout::working::END || *c == crate::checkout::working::INDEX)
+    {
         use crate::checkout::working::Bytes;
-        return match crate::checkout::working_file_bytes(
-            pool,
-            entity_id,
-            crate::checkout::working::END,
-            path,
-            ARCHIVE_CAP,
-        )
-        .await?
+        return match crate::checkout::working_file_bytes(pool, entity_id, end, path, ARCHIVE_CAP)
+            .await?
         {
             Bytes::Read(bytes) => take_in(bytes, name, None).await.map(|i| (*i).clone()),
             Bytes::TooLarge(size) => Err(too_large(size)),
             Bytes::NotThere => Err(IpcError::not_found(format!(
-                "git lists no file {path} in the working tree"
+                "git lists no file {path} in {}",
+                if end == crate::checkout::working::INDEX {
+                    "the index"
+                } else {
+                    "the working tree"
+                }
             ))),
         };
     }
@@ -708,6 +709,8 @@ pub(crate) mod tests {
         let ix = open_bytes(jar, "app.jar").await.unwrap();
         assert_eq!(ix.names, "BOOT-INF/lib/lib-1.0.jar\na.txt");
         assert_eq!(ix.kind, "boot-jar");
+        // Each entry's CRC as declared, aligned with its name: what a comparison tells a changed entry by.
+        assert_eq!(ix.crcs, vec![crc32(&lib), crc32(b"hello")]);
         assert_eq!(entry_bytes(&ix.handle, "a.txt").await.unwrap(), b"hello");
         let inner = nested(&ix.handle, "BOOT-INF/lib/lib-1.0.jar")
             .await

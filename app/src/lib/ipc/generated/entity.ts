@@ -133,6 +133,11 @@ total: number, packed: number,
  */
 names: string, sizes: Array<number>, packed_sizes: Array<number>, 
 /**
+ * Each entry's CRC-32 as its directory declares it, aligned with `sizes`: what a comparison of two archives tells a
+ * changed entry by, with no entry read.
+ */
+crcs: Array<number>, 
+/**
  * [`flag`]s per entry.
  */
 flags: Array<number>, 

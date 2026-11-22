@@ -37,7 +37,14 @@ function libs(n: number): Lib[] {
   return out;
 }
 
-function columns(entries: [string, number][]): Pick<ArchiveIndex, "names" | "sizes" | "packed_sizes" | "flags" | "total" | "packed"> {
+/** A stand-in CRC-32 of an entry named `name` of `size` bytes, for the fixture's archives. */
+export function crcOf(name: string, size: number): number {
+  let h = size >>> 0;
+  for (let i = 0; i < name.length; i += 1) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function columns(entries: [string, number][]): Pick<ArchiveIndex, "names" | "sizes" | "packed_sizes" | "crcs" | "flags" | "total" | "packed"> {
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const sizes = entries.map(([, s]) => s);
   const packed = entries.map(([n, s]) => (n.endsWith(".jar") ? s : Math.round(s * 0.45)));
@@ -45,6 +52,8 @@ function columns(entries: [string, number][]): Pick<ArchiveIndex, "names" | "siz
     names: entries.map(([n]) => n).join("\n"),
     sizes,
     packed_sizes: packed,
+    // A made-up CRC from the name and the size: the same entry is the same in both archives.
+    crcs: entries.map(([n, s]) => crcOf(n, s)),
     flags: entries.map(([n]) => (n.endsWith(".jar") ? 8 : 0)),
     total: sizes.reduce((a, b) => a + b, 0),
     packed: packed.reduce((a, b) => a + b, 0),
@@ -223,6 +232,8 @@ function runtime(asked: string | null): JavaRuntime {
 /** The archive reads, answered from this fixture, by command name as the bridge takes them. */
 export interface JarAnswers {
   archive_open: (args: Record<string, unknown>) => ArchiveIndex;
+  /** A generated archive (a folder renderer's JAR): the library, or the fat JAR where its name says payout-service. */
+  folder_render_archive_open: (args: Record<string, unknown>) => ArchiveIndex;
   archive_nested: (args: Record<string, unknown>) => ArchiveIndex;
   archive_entry: (args: Record<string, unknown>) => Uint8Array;
   archive_class: (args: Record<string, unknown>) => ClassOutline;
@@ -240,6 +251,13 @@ export function jarAnswers(java: string | null = null): JarAnswers {
     archive_open: (args) => {
       const path = String(args["path"]);
       if (JAR_FILES[path] === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
+      next += 1;
+      const handle = `a${next}`;
+      opened.set(handle, path);
+      return path.includes("payout-service") ? fat(handle) : plain(handle);
+    },
+    folder_render_archive_open: (args) => {
+      const path = String(args["path"]);
       next += 1;
       const handle = `a${next}`;
       opened.set(handle, path);

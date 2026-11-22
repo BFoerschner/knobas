@@ -1754,7 +1754,7 @@ const CASES: Case[] = [
           ports: {
             open: () =>
               deferred({
-                handle: "a1", kind: "jar", size: 10, total: 5, packed: 5, names: "a.txt", sizes: [5], packed_sizes: [5], flags: [0],
+                handle: "a1", kind: "jar", size: 10, total: 5, packed: 5, names: "a.txt", sizes: [5], packed_sizes: [5], crcs: [0], flags: [0],
                 manifest: [], maven: [], release: null, releases: [], libs: [], prefix: 0, warnings: [],
               }),
             nested: () => deferred(null as never),
