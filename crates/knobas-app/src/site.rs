@@ -99,6 +99,9 @@ pub struct SiteSetting {
     /// adapter says so, and the source signs in by username and password.
     /// `None` for every other site.
     pub own_sign_in: Option<OwnSignIn>,
+    /// The site loads nothing from other websites but the allowed ones: a
+    /// password manager's (ux30). Settings says so beside the addresses.
+    pub confined: bool,
 }
 
 /// A site that signs in with its source's own credential (ux30).
@@ -380,7 +383,10 @@ pub async fn settings_and_rules(
     reads: Option<SignInReads<'_>>,
 ) -> Result<Vec<SiteSetting>, IpcError> {
     let mut out = Vec::new();
-    let mut bases: Vec<(String, Base, Vec<Origin>)> = Vec::new();
+    // Each source whose pages open inside knobas: its base, the origins the
+    // person allowed, and whether it is a password manager, whose site is
+    // confined to its own origin (ux30).
+    let mut bases: Vec<(String, Base, Vec<Origin>, bool)> = Vec::new();
     let listed = sources(pool).await?;
     // Each source's saved sign-in, read at once: one keychain read a source.
     let users: Vec<Option<String>> = match reads {
@@ -428,6 +434,9 @@ pub async fn settings_and_rules(
         }
         let passwords = template.as_ref().is_some_and(|t| t.passwords.is_some());
         let open_inside = read_open_inside(pool, &source, passwords).await?;
+        // Without the adapters' descriptors the role is unknown: the site is
+        // confined until a read that knows it.
+        let confined = passwords || reads.is_none();
         let allowed = read_allowed(pool, &source).await?;
         let kept_since = crate::settings::read_value(pool, &kept_since_key(&source))
             .await?
@@ -457,18 +466,19 @@ pub async fn settings_and_rules(
             persists: knobas_site::sessions_persist(),
             sign_in_user: user,
             own_sign_in,
+            confined,
         });
         if open_inside && let Some(base) = base {
-            bases.push((source, base, allowed));
+            bases.push((source, base, allowed, confined));
         }
     }
     if let Some(sites) = sites {
         let mut rules = HashMap::new();
-        for (source, base, allowed) in &bases {
+        for (source, base, allowed, passwords) in &bases {
             let others = bases
                 .iter()
-                .filter(|(other, _, _)| other != source)
-                .map(|(other, base, _)| OtherSite {
+                .filter(|(other, _, _, _)| other != source)
+                .map(|(other, base, _, _)| OtherSite {
                     source: other.clone(),
                     base: base.clone(),
                 })
@@ -479,6 +489,7 @@ pub async fn settings_and_rules(
                     base: base.clone(),
                     allowed: allowed.clone(),
                     others,
+                    confined: *passwords,
                 },
             );
         }

@@ -202,6 +202,9 @@
             </li>
           {/each}
         </ul>
+        {#if setting.confined}
+          <span class="tf-stg-hint">Content from other websites is blocked on this site. Allowed addresses still load.</span>
+        {/if}
       </div>
     </div>
     <div class="tf-stg-row">

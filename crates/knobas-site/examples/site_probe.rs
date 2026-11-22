@@ -993,6 +993,7 @@ fn main() {
                 base: shell_base.clone(),
             })
             .collect(),
+        confined: false,
     };
     sites.set_rules(HashMap::from([
         ("a".to_owned(), rules("a")),

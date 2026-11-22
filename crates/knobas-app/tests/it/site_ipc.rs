@@ -39,6 +39,7 @@ fn sites() -> Sites {
             base: Base::parse("https://jira.example").unwrap(),
             allowed: vec![],
             others: vec![],
+            confined: false,
         },
     )]));
     sites

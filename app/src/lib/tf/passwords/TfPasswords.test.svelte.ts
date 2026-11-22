@@ -12,7 +12,7 @@ import type { SiteSetting } from "../../ipc/site";
 /** The password source's site, as Settings holds it (ux30): it opens inside and signs in with the source's credential. */
 const SITE: SiteSetting = {
   source: "pw", open_inside: true, base: "https://pw.example:10001", own: "https://pw.example:10001", allowed: [], suggested: [],
-  kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: { user: "mara.lindqvist", on: true },
+  kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: { user: "mara.lindqvist", on: true }, confined: true,
 };
 
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };

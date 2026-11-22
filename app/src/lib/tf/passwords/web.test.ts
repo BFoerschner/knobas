@@ -6,7 +6,7 @@ import { fillsAs, opensInside, webOpens, webWords } from "./web";
 
 const SITE: SiteSetting = {
   source: "pw", open_inside: true, base: "https://pw.example", own: "https://pw.example", allowed: [], suggested: [],
-  kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: null,
+  kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: null, confined: true,
 };
 
 function source(over: Partial<PwSource> = {}): PwSource {

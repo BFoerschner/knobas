@@ -146,6 +146,9 @@ pub struct SiteRules {
     pub allowed: Vec<Origin>,
     /// The other sources with *Open its pages inside knobas* on.
     pub others: Vec<OtherSite>,
+    /// Every request the site makes, frames and subresources included, stays
+    /// on its own origin: a password manager's site (ux30, [`crate::confine`]).
+    pub confined: bool,
 }
 
 impl SiteRules {
@@ -153,6 +156,14 @@ impl SiteRules {
     #[must_use]
     pub fn own(&self) -> &Origin {
         &self.base.origin
+    }
+
+    /// What a confined site may load: its own origin and the allowed ones;
+    /// `None` when it is not confined.
+    #[must_use]
+    pub fn confine(&self) -> Option<crate::confine::Confine> {
+        self.confined
+            .then(|| crate::confine::Confine::new(self.own().clone(), self.allowed.clone()))
     }
 
     /// Whether `origin` is `own(S)` or one the person allowed.
@@ -363,6 +374,7 @@ mod tests {
             base: Base::parse(base).expect("a base"),
             allowed: vec![],
             others: vec![],
+            confined: false,
         }
     }
 

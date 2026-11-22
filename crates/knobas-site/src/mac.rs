@@ -14,6 +14,9 @@
 //!    [`crate::keys::Keyboard`] counts it once.
 //! 5. The user agent names a Safari, so sites do not answer "unsupported
 //!    browser".
+//! 6. A confined site (ux30, [`crate::confine`]): a `WKContentRuleList`
+//!    refuses every load the rule refuses, frames included, and the
+//!    navigation delegate cancels such a frame before it starts.
 
 use std::cell::RefCell;
 use std::ptr::NonNull;
@@ -25,9 +28,11 @@ use objc2::runtime::{AnyClass, AnyObject, Bool, NSObject, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags};
 use objc2_foundation::{NSObjectProtocol, NSString};
-use objc2_web_kit::WKWebsiteDataStore;
+use objc2_foundation::NSError;
+use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore, WKWebsiteDataStore};
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtDarwin, WebViewExtDarwin, WebViewExtMacOS};
 
+use crate::confine::Confine;
 use crate::host::{Hooks, KeyHook, LeaveFreely, ViewEvent, ViewSpec};
 use crate::keys::{Key, Press};
 
@@ -241,6 +246,8 @@ pub fn poll(view: &WebView) -> ViewEvent {
 pub struct NavIvars {
     inner: Retained<AnyObject>,
     event: Rc<dyn Fn(ViewEvent)>,
+    /// A confined site's rule; `None` when it is not confined.
+    confine: Rc<RefCell<Option<Confine>>>,
 }
 
 define_class!(
@@ -278,8 +285,20 @@ define_class!(
                 }
             };
             if !main {
-                // A frame follows the site's own rules, as in a browser.
-                handler.call((1,));
+                // A frame follows the site's own rules, as in a browser, but
+                // a confined site's frame stays on its origins (ux30).
+                let refused = self.ivars().confine.borrow().as_ref().is_some_and(|confine| {
+                    let top = url_string(unsafe { msg_send![webview, URL] });
+                    let target = url_string(unsafe {
+                        let request: Option<Retained<AnyObject>> = msg_send![action, request];
+                        request.and_then(|request| msg_send![&*request, URL])
+                    });
+                    !confine.may_load(top.as_deref(), target.as_deref().unwrap_or_default())
+                });
+                if refused {
+                    tracing::debug!("a confined site's frame on another origin is cancelled");
+                }
+                handler.call((if refused { 0 } else { 1 },));
                 return;
             }
             // SAFETY: wry's delegate answers this selector.
@@ -464,6 +483,106 @@ define_class!(
     }
 );
 
+// ------------------------------------------------------------------ confine
+
+/// Put `rules`' rule list on `view` in place of any before, holding loads at
+/// the gate until it is (ux30). The list compiles in WebKit's own time, a few
+/// milliseconds; its answer comes on the main thread. `None` takes every
+/// list off and lets loads through.
+pub fn confine(view: &WebView, confined: &crate::wry_host::Confined, rules: Option<&Confine>) {
+    let generation = confined.generation.get() + 1;
+    confined.generation.set(generation);
+    let manager = view.manager();
+    let Some(rules) = rules else {
+        // SAFETY: WKUserContentController's own method, on the main thread.
+        unsafe { manager.removeAllContentRuleLists() };
+        if let Some(url) = confined.gate.open() {
+            load(&view.webview(), &url);
+        }
+        return;
+    };
+    confined.gate.hold();
+    let Some(mtm) = MainThreadMarker::new() else {
+        confined.refused("not on the main thread");
+        return;
+    };
+    // SAFETY: WebKit's shared store, on the main thread.
+    let Some(store) = (unsafe { WKContentRuleListStore::defaultStore(mtm) }) else {
+        confined.refused("no content rule list store");
+        return;
+    };
+    let web = objc2::rc::Weak::from_retained(&view.webview());
+    let gate = Rc::downgrade(&confined.gate);
+    let current = Rc::clone(&confined.generation);
+    let after = confined.clone();
+    let origins = rules.origins().count();
+    let started = std::time::Instant::now();
+    let done = RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
+        // A newer list is on its way, or the view is gone.
+        if current.get() != generation {
+            return;
+        }
+        let (Some(web), Some(gate)) = (web.load(), gate.upgrade()) else {
+            return;
+        };
+        // SAFETY: WebKit hands a live list, or nil and an error.
+        match unsafe { list.as_ref() } {
+            Some(list) => {
+                // SAFETY: WKUserContentController's own methods, on the main
+                // thread; both reach the page before the next load does.
+                unsafe {
+                    manager.removeAllContentRuleLists();
+                    manager.addContentRuleList(list);
+                }
+                tracing::info!(
+                    source = %after.source,
+                    origins,
+                    ms = started.elapsed().as_secs_f64() * 1000.0,
+                    "site confined: content from other websites is blocked"
+                );
+                if let Some(url) = gate.open() {
+                    load(&web, &url);
+                }
+            }
+            None => {
+                // SAFETY: an NSError or nil.
+                let why = unsafe { error.as_ref() }
+                    .map(|error| error.localizedDescription().to_string())
+                    .unwrap_or_default();
+                after.refused(&why);
+            }
+        }
+    });
+    let id = NSString::from_str(&format!("knobas-site-{}", confined.source));
+    let encoded = NSString::from_str(&rules.content_rules());
+    // SAFETY: a WebKit call on the main thread; WebKit keeps the block until
+    // it has called it.
+    unsafe {
+        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
+            Some(&id),
+            Some(&encoded),
+            Some(&done),
+        );
+    }
+}
+
+/// Load `url` in the web view itself (the gate opened after the view's wry
+/// handle was out of reach).
+fn load(web: &AnyObject, url: &str) {
+    // SAFETY: Foundation's constructors and WKWebView's `loadRequest:`, on
+    // the main thread.
+    unsafe {
+        let url: Option<Retained<AnyObject>> =
+            msg_send![objc2::class!(NSURL), URLWithString: &*NSString::from_str(url)];
+        let Some(url) = url else {
+            return;
+        };
+        let request: Retained<AnyObject> =
+            msg_send![objc2::class!(NSURLRequest), requestWithURL: &*url];
+        let _: Option<Retained<AnyObject>> = msg_send![web, loadRequest: &*request];
+    }
+}
+
 // ---------------------------------------------------------------------- keys
 
 struct Route {
@@ -589,8 +708,15 @@ impl Drop for Wrapped {
     }
 }
 
-/// Wrap `view`'s two delegates and route its keys.
-pub fn wrap(view: &WebView, source: &str, hooks: &Hooks, leaving: &LeaveFreely) -> Wrapped {
+/// Wrap `view`'s two delegates and route its keys. `confine` is the site's
+/// rule, read for each frame.
+pub fn wrap(
+    view: &WebView,
+    source: &str,
+    hooks: &Hooks,
+    leaving: &LeaveFreely,
+    confine: &Rc<RefCell<Option<Confine>>>,
+) -> Wrapped {
     let wk = view.webview();
     // SAFETY: a WryWebView is an NSView.
     let as_view: Retained<AnyObject> = unsafe { Retained::cast_unchecked(wk.clone()) };
@@ -624,6 +750,7 @@ pub fn wrap(view: &WebView, source: &str, hooks: &Hooks, leaving: &LeaveFreely) 
             let proxy = mtm.alloc::<KnobasSiteNavigation>().set_ivars(NavIvars {
                 inner,
                 event: Rc::clone(&hooks.event),
+                confine: Rc::clone(confine),
             });
             let proxy: Retained<KnobasSiteNavigation> = msg_send![super(proxy), init];
             let () = msg_send![&*wk, setNavigationDelegate: &*proxy];

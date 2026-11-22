@@ -413,6 +413,7 @@ mod tests {
             base: Base::parse("https://jira.example").unwrap(),
             allowed: vec![Origin::parse("https://sso.example").unwrap()],
             others: vec![],
+            confined: false,
         }
     }
 

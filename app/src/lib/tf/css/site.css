@@ -71,6 +71,7 @@
 .tf-site-quit-title { color: var(--ink-2); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Settings › Sources › ⟨source⟩ › Site: the addresses it may show, one a line, its own marked. */
+.tf-stg-c.tf-site-origins { flex-direction: column; align-items: flex-start; justify-content: center; gap: 6px; }
 .tf-site-origins ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tf-site-origins li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tf-site-origins .tf-mono { overflow-wrap: anywhere; }

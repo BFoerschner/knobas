@@ -378,8 +378,35 @@ impl Sites {
     /// The rules of every source whose pages open inside knobas. A source
     /// missing from `rules` opens no site; one already open stays open until
     /// it is closed.
+    ///
+    /// A live site whose confinement changed (its allow-list, ux30) gets the
+    /// new one on the main thread; its view holds the loads knobas starts
+    /// until the platform's refusal follows.
     pub fn set_rules(&self, rules: HashMap<String, SiteRules>) {
-        self.book().rules = rules;
+        let changed: Vec<(String, Option<crate::confine::Confine>)> = {
+            let mut book = self.book();
+            let changed = book
+                .sites
+                .keys()
+                .filter_map(|source| {
+                    let old = book.rules.get(source).and_then(SiteRules::confine);
+                    let new = rules.get(source).and_then(SiteRules::confine);
+                    (old != new).then(|| (source.clone(), new))
+                })
+                .collect();
+            book.rules = rules;
+            changed
+        };
+        if changed.is_empty() {
+            return;
+        }
+        self.shell().on_main(Box::new(move || {
+            for (source, confine) in changed {
+                if let Some(view) = view(&source) {
+                    view.confine(confine);
+                }
+            }
+        }));
     }
 
     /// Where each source's site asks for a sign-in and whether one is saved
@@ -492,6 +519,7 @@ impl Sites {
             background: book.background,
             zoom: book.zoom,
             devtools: config.devtools,
+            confine: book.rules.get(source).and_then(SiteRules::confine),
         })
     }
 
@@ -1322,7 +1350,7 @@ impl Sites {
     ) -> Result<Option<String>, SiteError> {
         let origin = Origin::parse(origin).map_err(|e| SiteError::Invalid(e.to_string()))?;
         let now = self.now();
-        let (reload, browser, close) = {
+        let (reload, browser, close, confine) = {
             let mut book = self.book();
             let asked = book
                 .sites
@@ -1333,19 +1361,23 @@ impl Sites {
                 .filter(|(asked, _)| *asked == origin)
                 .ok_or_else(|| SiteError::Invalid("the site asks about another address".into()))?;
             if allow {
+                // A confined site's refusal takes the new origin in before
+                // the landing loads again (ux30).
+                let mut confine = None;
                 if let Some(rules) = book.rules.get_mut(source)
                     && !rules.allowed.contains(&origin)
                 {
                     rules.allowed.push(origin.clone());
+                    confine = rules.confine().map(Some);
                 }
                 let site = book.sites.get_mut(source).ok_or(SiteError::NotOpen)?;
                 let landing = site.landing_url.clone();
                 site.land(&landing, now);
-                (Some(landing), None, false)
+                (Some(landing), None, false, confine)
             } else {
                 let site = book.sites.get_mut(source).ok_or(SiteError::NotOpen)?;
                 let close = site.declined();
-                (None, Some(asked.1), close)
+                (None, Some(asked.1), close, None)
             }
         };
         tracing::info!(source, host = %origin.host, allow, "site question answered");
@@ -1359,8 +1391,13 @@ impl Sites {
             let this = self.clone();
             let source = source.to_owned();
             self.shell().on_main(Box::new(move || {
-                if let (Some(url), Some(view)) = (&reload, view(&source)) {
-                    view.load(url);
+                if let Some(view) = view(&source) {
+                    if let Some(confine) = confine {
+                        view.confine(confine);
+                    }
+                    if let Some(url) = &reload {
+                        view.load(url);
+                    }
                 }
                 this.sync(&source);
             }));

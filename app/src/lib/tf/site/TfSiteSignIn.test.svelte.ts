@@ -28,6 +28,7 @@ const SETTING: SiteSetting = {
   persists: true,
   sign_in_user: null,
   own_sign_in: null,
+  confined: false,
 };
 
 function status(over: Partial<SiteStatus> = {}): SiteStatus {
@@ -230,4 +231,20 @@ test("Use another… saves a sign-in that wins, and Remove goes back to the sour
   await tick();
   flushSync();
   expect(target.textContent).toContain("Same as Wiki's credential, mara");
+});
+
+test("a password manager's site says beside its addresses that other websites' content is blocked; others say nothing", () => {
+  const sentence = "Content from other websites is blocked on this site. Allowed addresses still load.";
+  const row = () => [...target.querySelectorAll(".tf-stg-row")].find((el) => el.textContent?.includes("Addresses it may show"))!;
+  section();
+  expect(row().textContent).not.toContain(sentence);
+  unmount(view!);
+  view = undefined;
+  store.holdOne({ ...SETTING, confined: true, allowed: ["https://sso.example"] });
+  section();
+  const hint = row().querySelector(".tf-site-origins > .tf-stg-hint");
+  expect(hint?.textContent).toBe(sentence);
+  // Under the list, in the same cell: the allowed address is still listed above it.
+  expect(hint?.previousElementSibling?.tagName).toBe("UL");
+  expect(row().textContent).toContain("https://sso.example");
 });

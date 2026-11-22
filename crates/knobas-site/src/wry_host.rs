@@ -4,7 +4,7 @@
 //! (`tests/scan.rs` refuses the five names), so the page in it reaches nothing
 //! of knobas.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -12,7 +12,9 @@ use std::rc::Rc;
 use raw_window_handle::HasWindowHandle;
 use wry::{NewWindowResponse, PageLoadEvent, WebContext, WebView, WebViewBuilder};
 
+use crate::confine::{Confine, Gate, NOT_CONFINED};
 use crate::host::{Hooks, HostError, LeaveFreely, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
+use crate::state::SiteFailure;
 use crate::scripts::{DIRTY_PROBE, Dirty, SignInCall, fill_sign_in};
 
 /// knobas's main window, and how to give its own web view the keyboard.
@@ -57,9 +59,67 @@ fn wry_rect(bounds: Rect) -> wry::Rect {
     }
 }
 
+/// A view's confinement (ux30): what it may load now, shared with the
+/// platform's handlers so a change applies at once, and the gate its loads
+/// wait at while the refusal is not in place.
+#[derive(Clone)]
+pub struct Confined {
+    pub rules: Rc<RefCell<Option<Confine>>>,
+    pub gate: Rc<Gate>,
+    pub source: String,
+    pub event: Rc<dyn Fn(ViewEvent)>,
+    /// The rule list being compiled (macOS): an older one that lands late is
+    /// dropped.
+    pub generation: Rc<Cell<u64>>,
+    /// Whether the request handler is registered (Windows).
+    pub registered: Rc<Cell<bool>>,
+}
+
+impl Confined {
+    /// Put the current rules in place on `view`, holding loads until they
+    /// are. With no rules, nothing is refused and loads go through.
+    fn apply(&self, view: &WebView) {
+        let rules = self.rules.borrow().clone();
+        #[cfg(target_os = "macos")]
+        crate::mac::confine(view, self, rules.as_ref());
+        #[cfg(windows)]
+        {
+            if rules.is_some() && !self.registered.get() {
+                match crate::win::confine(view, self) {
+                    Ok(()) => self.registered.set(true),
+                    Err(error) => {
+                        self.refused(&error.to_string());
+                        return;
+                    }
+                }
+            }
+            if let Some(url) = self.gate.open() {
+                load_now(view, &url);
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let _ = (view, rules);
+    }
+
+    /// The refusal could not be put in place: nothing loads, and the site
+    /// says so with *Retry* (fail closed).
+    pub fn refused(&self, why: &str) {
+        tracing::warn!(source = %self.source, error = why, "a site's refusal of other websites is not in place: it loads nothing");
+        self.gate.shut();
+        (self.event)(ViewEvent::Failed(SiteFailure::Other(NOT_CONFINED.to_owned())));
+    }
+}
+
+fn load_now(view: &WebView, url: &str) {
+    if let Err(error) = view.load_url(url) {
+        tracing::warn!(%error, "a site could not load an address");
+    }
+}
+
 /// One site's view, and what must live as long as it.
 pub struct WryView {
     view: WebView,
+    confined: Confined,
     /// The person said "leave anyway": the page's own leave dialog is answered.
     leaving: LeaveFreely,
     /// The session folder's context (Windows), kept beside its view.
@@ -86,10 +146,27 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         let title_hook = Rc::clone(&hooks.event);
         let load_hook = Rc::clone(&hooks.event);
         let (r, g, b, a) = spec.background;
+        let confined = Confined {
+            rules: Rc::new(RefCell::new(spec.confine.clone())),
+            // A confined view loads nothing until its refusal is in place.
+            gate: Rc::new(if spec.confine.is_some() {
+                Gate::waiting(&spec.url)
+            } else {
+                Gate::opened()
+            }),
+            source: spec.source.clone(),
+            event: Rc::clone(&hooks.event),
+            generation: Rc::default(),
+            registered: Rc::default(),
+        };
+        let builder = WebViewBuilder::new_with_web_context(&mut context);
         #[allow(unused_mut)]
-        let mut builder = WebViewBuilder::new_with_web_context(&mut context)
-            .with_url(spec.url.as_str())
-            .with_bounds(wry_rect(spec.bounds))
+        let mut builder = if spec.confine.is_some() {
+            builder
+        } else {
+            builder.with_url(spec.url.as_str())
+        }
+        .with_bounds(wry_rect(spec.bounds))
             .with_visible(false)
             .with_focused(false)
             .with_devtools(spec.devtools)
@@ -150,11 +227,15 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         let _ = view.set_bounds(placed(&view, spec.bounds));
         let leaving = LeaveFreely::default();
         #[cfg(target_os = "macos")]
-        let mac = crate::mac::wrap(&view, &spec.source, &hooks, &leaving);
+        let mac = crate::mac::wrap(&view, &spec.source, &hooks, &leaving, &confined.rules);
         #[cfg(windows)]
         let windows = crate::win::harden(&view, &hooks, &leaving);
+        if spec.confine.is_some() {
+            confined.apply(&view);
+        }
         Ok(Box::new(WryView {
             view,
+            confined,
             leaving,
             _context: context,
             #[cfg(target_os = "macos")]
@@ -188,9 +269,26 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
 
 impl SiteView for WryView {
     fn load(&self, url: &str) {
-        if let Err(error) = self.view.load_url(url) {
-            tracing::warn!(%error, "a site could not load an address");
+        let gate = &self.confined.gate;
+        if gate.is_shut() {
+            // *Retry* after the refusal failed: try to put it in place again.
+            gate.hold();
+            let _ = gate.load(url);
+            self.confined.apply(&self.view);
+            return;
         }
+        match gate.load(url) {
+            Some(url) => load_now(&self.view, &url),
+            None => tracing::debug!("a site's load waits for its refusal of other websites"),
+        }
+    }
+
+    fn confine(&self, confine: Option<Confine>) {
+        if *self.confined.rules.borrow() == confine {
+            return;
+        }
+        *self.confined.rules.borrow_mut() = confine;
+        self.confined.apply(&self.view);
     }
 
     fn set_bounds(&self, bounds: Rect) {
@@ -223,7 +321,9 @@ impl SiteView for WryView {
     }
 
     fn reload(&self) {
-        let _ = self.view.reload();
+        if self.confined.gate.is_open() {
+            let _ = self.view.reload();
+        }
     }
 
     fn stop(&self) {

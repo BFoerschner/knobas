@@ -189,7 +189,7 @@
   }
 
   function fallbackSetting() {
-    return { source, open_inside: true, base: "", own: "", allowed: [], suggested: [], kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: null };
+    return { source, open_inside: true, base: "", own: "", allowed: [], suggested: [], kept_since: null, offered: true, persists: true, sign_in_user: null, own_sign_in: null, confined: false };
   }
 
   const backOf = $derived(back as EscTargetOf | null);

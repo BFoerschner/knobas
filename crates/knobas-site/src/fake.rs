@@ -42,6 +42,8 @@ pub struct FakeViewState {
     pub fill_answers: VecDeque<String>,
     /// Every fill script run, in order.
     pub sign_ins: Vec<SignInCall>,
+    /// What the view may load: made with, then each change (ux30).
+    pub confine: Option<crate::confine::Confine>,
 }
 
 /// A view that records every call.
@@ -124,6 +126,15 @@ impl SiteView for FakeView {
     }
     fn leave_freely(&self) {
         self.state.borrow_mut().calls.push("leave freely".into());
+    }
+    fn confine(&self, confine: Option<crate::confine::Confine>) {
+        let mut state = self.state.borrow_mut();
+        let origins: Vec<String> = confine
+            .iter()
+            .flat_map(|confine| confine.origins().map(ToString::to_string))
+            .collect();
+        state.calls.push(format!("confine [{}]", origins.join(" ")));
+        state.confine = confine;
     }
 }
 
@@ -220,6 +231,7 @@ impl SiteHost for FakeHost {
             probe: self.probe.borrow().get(&spec.source).copied(),
             hooks: Some(hooks),
             bounds: spec.bounds,
+            confine: spec.confine.clone(),
             ..FakeViewState::default()
         }));
         self.views
