@@ -387,4 +387,32 @@ mod tests {
         assert_eq!(f.len(), 2);
         assert!(is_key_field("OTP") && is_key_field("totp seed") && !is_key_field("Port"));
     }
+
+    #[test]
+    fn a_shape_outside_six_to_eight_digits_or_one_to_300_seconds_is_unreadable() {
+        for (digits, period) in [("5", "30"), ("9", "30"), ("6", "0"), ("6", "301")] {
+            let (found, _) = key_of(&[
+                ("TimeOtp-Secret-Base32", RFC),
+                ("TimeOtp-Length", digits),
+                ("TimeOtp-Period", period),
+            ]);
+            assert_eq!(
+                found.info.format, OTP_UNREADABLE,
+                "{digits} digits, {period} s"
+            );
+        }
+        let (found, _) = key_of(&[
+            ("TimeOtp-Secret-Base32", RFC),
+            ("TimeOtp-Length", "8"),
+            ("TimeOtp-Period", "300"),
+        ]);
+        assert_eq!(found.info.format, "keepass");
+    }
+
+    #[test]
+    fn a_tray_seed_without_settings_uses_thirty_seconds_and_six_digits() {
+        let (found, _) = key_of(&[("TOTP Seed", RFC)]);
+        assert_eq!(found.info.format, "tray_totp");
+        assert_eq!((found.info.digits, found.info.period), (6, 30));
+    }
 }

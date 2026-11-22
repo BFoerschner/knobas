@@ -266,3 +266,194 @@ async fn an_expired_token_signs_in_once_more_and_repeats_once() {
     result.unwrap();
     assert_eq!(sent, 4, "token, refused tree, token, tree");
 }
+
+async fn token_refusal(body: serde_json::Value) -> knobas_source::SourceError {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(path("/OAuth2/Token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(body))
+        .mount(&server)
+        .await;
+    match source(&server.uri()).test_connection().await {
+        Err(error) => error,
+        Ok(info) => panic!("signed in: {info:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_refused_sign_in_is_the_credential_and_a_second_factor_is_said_in_words() {
+    assert!(matches!(
+        token_refusal(serde_json::json!({"error": "invalid_grant"})).await,
+        knobas_source::SourceError::Unauthorized { .. }
+    ));
+    assert!(matches!(
+        token_refusal(
+            serde_json::json!({"error": "unsupported", "error_description": "Bad password."})
+        )
+        .await,
+        knobas_source::SourceError::Unauthorized { .. }
+    ));
+    let otp = token_refusal(
+        serde_json::json!({"error": "otp", "error_description": "two-factor code required"}),
+    )
+    .await;
+    assert!(otp.to_string().contains("second factor"), "{otp}");
+    let other = token_refusal(serde_json::json!({"error": "unsupported_grant_type"})).await;
+    assert!(
+        matches!(other, knobas_source::SourceError::Protocol { .. })
+            && !other.to_string().contains("second factor"),
+        "{other}"
+    );
+}
+
+#[tokio::test]
+async fn a_token_refused_twice_is_unauthorized_and_not_a_loop() {
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(path("/OAuth2/Token"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"access_token": "tok"})),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/rest/folders"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let refused = source(&server.uri())
+        .sync(None, &mut KeySink::default())
+        .await;
+    assert!(matches!(
+        refused,
+        Err(knobas_source::SourceError::Unauthorized { .. })
+    ));
+}
+
+#[tokio::test]
+async fn a_server_older_than_7_9_7_is_refused_by_name() {
+    for (version, ok) in [
+        ("7.9.6", false),
+        ("6.0.0", false),
+        ("7.9.7", true),
+        ("unknown", true),
+    ] {
+        let server = MockServer::builder().start().await;
+        Mock::given(method("POST"))
+            .and(path("/OAuth2/Token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"access_token": "tok"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v5/rest/GetServerInfo"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"Version": version})),
+            )
+            .mount(&server)
+            .await;
+        let answer = source(&server.uri()).test_connection().await;
+        assert_eq!(answer.is_ok(), ok, "{version}: {answer:?}");
+        if let Err(error) = answer {
+            assert!(error.to_string().contains("older than 7.9.7"), "{error}");
+        }
+    }
+}
+
+/// `walk = folders`: the root's id, then each folder one level down, eight
+/// at a time, put back together into the tree a single request answers.
+#[tokio::test]
+async fn the_folder_walk_reads_the_same_tree_a_folder_at_a_time() {
+    let tree: serde_json::Value = serde_json::from_str(TREE).unwrap();
+    let server = server().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/rest/folders/root"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tree["Id"].clone()))
+        .mount(&server)
+        .await;
+    // Each folder answers with its entries and its children, the children's
+    // own contents left out (`recurseLevel=1`).
+    fn mount_all(folder: &serde_json::Value, out: &mut Vec<(String, serde_json::Value)>) {
+        let mut shallow = folder.clone();
+        if let Some(children) = shallow["Children"].as_array_mut() {
+            for child in children.iter_mut() {
+                child["Children"] = serde_json::json!([]);
+                child["Credentials"] = serde_json::json!([]);
+            }
+        }
+        out.push((folder["Id"].as_str().unwrap().to_owned(), shallow));
+        for child in folder["Children"].as_array().unwrap() {
+            mount_all(child, out);
+        }
+    }
+    let mut folders = Vec::new();
+    mount_all(&tree, &mut folders);
+    for (id, body) in folders {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v5/rest/folders/{id}")))
+            .and(wiremock::matchers::query_param("recurseLevel", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    let mut by_tree = KeySink::default();
+    source(&server.uri())
+        .sync(None, &mut by_tree)
+        .await
+        .unwrap();
+    let mut config = instance(&server.uri(), "right");
+    config.config = serde_json::json!({"username": "mara.lindqvist", "walk": "folders"});
+    let mut by_folders = KeySink::default();
+    knobas_source_pleasant::build(config)
+        .unwrap()
+        .sync(None, &mut by_folders)
+        .await
+        .unwrap();
+    let ids = |s: &KeySink| {
+        s.items
+            .iter()
+            .map(|i| (i.entity.to_string(), i.payload.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&by_folders), ids(&by_tree));
+    assert_eq!(by_folders.keys.len(), by_tree.keys.len());
+}
+
+#[tokio::test]
+async fn a_field_the_listing_did_not_send_is_read_from_its_folder() {
+    let server = server().await;
+    let folder = "6f9b1c3e-0003-4a10-9000-000000000003";
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v5/rest/folders/{folder}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Id": folder, "Name": "Databases", "Children": [],
+            "Credentials": [{"Id": DB, "CustomUserFields": {"Recovery PIN": "4711", "Empty": ""}}]
+        })))
+        .mount(&server)
+        .await;
+    let s = source(&server.uri());
+    let ask = |name: &str| SecretAsk {
+        entity: format!("pw:{DB}"),
+        which: SecretRef::Field { name: name.into() },
+        comment: None,
+        folder: Some(format!("pw:{folder}")),
+    };
+    let (answer, sent) = knobas_http::counted::counted(s.read_secret(&ask("Recovery PIN"))).await;
+    match answer.unwrap() {
+        SecretAnswer::Value(v) => assert_eq!(v.expose(), "4711"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(sent, 2, "a sign-in and the folder");
+    assert_eq!(
+        s.read_secret(&ask("Empty")).await.unwrap(),
+        SecretAnswer::NotOffered
+    );
+    assert_eq!(
+        s.read_secret(&ask("Missing")).await.unwrap(),
+        SecretAnswer::NotOffered
+    );
+}

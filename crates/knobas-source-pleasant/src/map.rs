@@ -272,4 +272,16 @@ mod tests {
         assert_eq!(folder.parent, None);
         assert!(folder.can_add);
     }
+
+    #[test]
+    fn a_fields_value_is_text_a_number_or_a_flag_and_nothing_else() {
+        use serde_json::json;
+        assert_eq!(field_value(Some(&json!("5432"))), Some("5432".into()));
+        assert_eq!(field_value(Some(&json!(5432))), Some("5432".into()));
+        assert_eq!(field_value(Some(&json!(true))), Some("true".into()));
+        assert_eq!(field_value(Some(&json!(""))), None);
+        assert_eq!(field_value(Some(&json!(null))), None);
+        assert_eq!(field_value(Some(&json!({"a": 1}))), None);
+        assert_eq!(field_value(None), None);
+    }
 }

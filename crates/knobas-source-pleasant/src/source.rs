@@ -535,6 +535,18 @@ mod tests {
             )),
             Some(SecretAnswer::ApprovalRequired { approver: None })
         );
+        assert_eq!(
+            refusal(&refused(403, "Each use waits for an approver")),
+            Some(SecretAnswer::ApprovalRequired { approver: None })
+        );
+        assert_eq!(
+            refusal(&refused(403, "You must request access first")),
+            Some(SecretAnswer::ApprovalRequired { approver: None })
+        );
+        assert_eq!(
+            refusal(&refused(409, "An access request is pending")),
+            Some(SecretAnswer::ApprovalRequired { approver: None })
+        );
         assert_eq!(refusal(&refused(500, "comment")), None);
         assert_eq!(refusal(&refused(400, "bad input")), None);
         assert_eq!(key_of("pw", "pw:abc"), Some("abc"));
