@@ -196,6 +196,44 @@ test("a generated folder's index lists a folder, folders first and by name, and 
   expect(index.has("docs")).toBe(false);
 });
 
+/**
+ * Björn, 2026-11-23: a run that wrote Java sources showed no `src` folder in the tree, though *Go to file* found the
+ * file. The manifest is sorted by path (`folder_render::keep`), so a folder's first file is often in a folder under it.
+ */
+test("a generated folder with folders alone above it is named in every folder on its way, whatever the files' order", () => {
+  const made = (paths: string[]): MadeTree => ({ ...MADE, files: paths.map((path) => ({ path, size: 1 })) });
+  const names = (index: ReturnType<typeof madeIndex>, at: string) => index.listingOf(at)?.map((e) => `${e.kind}:${e.name}`);
+
+  const java = madeIndex(made(["README.md", "src/main/java/demo/Greeter.java"]), "t2", sectionOf);
+  expect(names(java, "")).toEqual(["dir:src", "file:README.md"]);
+  expect(names(java, "src")).toEqual(["dir:main"]);
+  expect(names(java, "src/main")).toEqual(["dir:java"]);
+  expect(names(java, "src/main/java")).toEqual(["dir:demo"]);
+  expect(names(java, "src/main/java/demo")).toEqual(["file:Greeter.java"]);
+  expect([...java.dirs].sort()).toEqual(["", "src", "src/main", "src/main/java", "src/main/java/demo"]);
+  expect(java.listingOf("")![0]).toEqual({ name: "src", kind: "dir", size: null, section: "made:dir:src" });
+
+  // A folder under it first, as the sorted manifest has it: the folder between still stands at the top, once.
+  const sorted = madeIndex(made(["docs/deep/a.md", "docs/deep/b.md", "docs/steps.md", "docs/zeta/y/z.md"]), "t3", sectionOf);
+  expect(names(sorted, "")).toEqual(["dir:docs"]);
+  expect(names(sorted, "docs")).toEqual(["dir:deep", "dir:zeta", "file:steps.md"]);
+  expect(names(sorted, "docs/zeta")).toEqual(["dir:y"]);
+
+  // And drawn: every folder on the way is a row once it is open, the file under them.
+  const listed = graftedListings({ "": [dirEntry("app")], app: [fileEntry("real.txt")] }, [{ folder: "app", dirs: java.dirs, listingOf: (d) => java.listingOf(d) }]);
+  const open = new Set(["app", "app/src", "app/src/main", "app/src/main/java", "app/src/main/java/demo"]);
+  expect(treeRows(listed, open, new Set(["app"])).map((r) => r.path)).toEqual([
+    "app",
+    `app${BAND}`,
+    "app/src",
+    "app/src/main",
+    "app/src/main/java",
+    "app/src/main/java/demo",
+    "app/src/main/java/demo/Greeter.java",
+    "app/README.md",
+  ]);
+});
+
 test("a graft hides the real rows at and under its folder and no others, and draws the generated ones there", () => {
   const real: Record<string, TreeEntry[]> = {
     "": [dirEntry("apps"), fileEntry("README.md")],

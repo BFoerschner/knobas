@@ -167,14 +167,22 @@ export function madeIndex(
     const list = filesIn.get(dir);
     if (list === undefined) filesIn.set(dir, [file]);
     else list.push(file);
-    // Each folder on the way, in its parent's names.
+    // Each folder on the way is made and named in its parent's names, up to the first one held before this file. Its
+    // own parent names that one already. `held` is read before a folder is made, never after. The walk used to make a
+    // parent so it could name the child in it, then found that parent held and stopped there. A folder two levels under
+    // the last one held (`src/main/java/demo`, with folders alone above it) was named nowhere, so the tree drew neither
+    // it nor its files, though *Go to file* found them (ux31).
     let at = dir;
-    while (at !== "" && !subdirs.has(at)) {
-      subdirs.set(at, new Set());
-      const up = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "";
-      if (!subdirs.has(up)) subdirs.set(up, new Set());
-      subdirs.get(up)!.add(at.slice(at.lastIndexOf("/") + 1));
-      at = up;
+    let child: string | null = null;
+    for (;;) {
+      const held = subdirs.get(at);
+      const names = held ?? new Set<string>();
+      if (held === undefined) subdirs.set(at, names);
+      if (child !== null) names.add(child);
+      if (held !== undefined) break;
+      const cut = at.lastIndexOf("/");
+      child = at.slice(cut + 1);
+      at = cut === -1 ? "" : at.slice(0, cut);
     }
   }
   const sorted = new Map<string, readonly TreeEntry[]>();

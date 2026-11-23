@@ -414,6 +414,66 @@ test("a re-run with the same files keeps every row's node, and swaps in the new 
   expect(target.querySelector(".tf-rendered h1")?.textContent).toBe("Orders, generated again");
 });
 
+/**
+ * Björn, 2026-11-23: "re-rendering with a new tool, i can't see a java-folder and its files inside the renderings but I
+ * can select the .java file with the T search, but the folder stays invisible". The new run's files lie under folders
+ * that hold folders alone (`src/main/java/demo`), which the tab's index named nowhere.
+ */
+test("a re-run that adds a folder under folders alone draws it, and Go to file opens the folders down to its file", async () => {
+  MADE["D"] = { "README.md": "# Orders\n" };
+  MADE["E"] = { "README.md": "# Orders\n", "src/main/java/demo/Greeter.java": "class Greeter {}\n" };
+  try {
+    token = "D";
+    const { place } = draw({ rendered: RENDERED });
+    await settle();
+    expect(rowPaths().filter((p) => p!.startsWith("flows/orders/"))).toEqual(["flows/orders/README.md"]);
+
+    // *Run again*, the tool now writing Java sources too.
+    token = "E";
+    target.querySelector<HTMLButtonElement>(".tf-madebar-run")!.click();
+    await settle();
+    expect(target.querySelector(".tf-madebar [role='status']")?.textContent).toContain("Made by Low-code site");
+    const src = target.querySelector<HTMLButtonElement>('.tf-fdir[data-path="flows/orders/src"]');
+    expect(src, "the new folder has its row under the band").not.toBeNull();
+    expect(src!.getAttribute("aria-expanded")).toBe("false");
+    expect(src!.hasAttribute("data-made")).toBe(true);
+
+    // Go to file finds it, and choosing it opens every folder above it, its row the current one.
+    const field = target.querySelector<HTMLInputElement>('input[aria-label="Go to file"]')!;
+    field.value = "greeter";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    const found = target.querySelector<HTMLAnchorElement>("a.tf-gotof")!;
+    expect(found.getAttribute("href")).toBe(`${HASH}/rendered/site/flows%2Forders/files/src/main/java/demo/Greeter.java`);
+    // The address it names, as the router hands it down.
+    found.click();
+    place.path = "src/main/java/demo/Greeter.java";
+    await settle();
+    const rows = rowPaths();
+    const at = rows.indexOf("flows/orders");
+    expect(rows.slice(at, at + 8)).toEqual([
+      "flows/orders",
+      "flows/orders\u0000band",
+      "flows/orders/src",
+      "flows/orders/src/main",
+      "flows/orders/src/main/java",
+      "flows/orders/src/main/java/demo",
+      "flows/orders/src/main/java/demo/Greeter.java",
+      "flows/orders/README.md",
+    ]);
+    expect(target.querySelector('.tf-ftree a[data-path="flows/orders/src/main/java/demo/Greeter.java"]')?.getAttribute("aria-current")).toBe("true");
+
+    // Folding and unfolding a folder on the way is the reader's, as for any row.
+    target.querySelector<HTMLButtonElement>('.tf-fdir[data-path="flows/orders/src/main"]')!.click();
+    flushSync();
+    expect(rowPaths()).not.toContain("flows/orders/src/main/java");
+    expect(rowPaths()).toContain("flows/orders/src/main");
+  } finally {
+    delete MADE["D"];
+    delete MADE["E"];
+  }
+});
+
 test("a render/ address of a folder of files renderer is drawn as its generated folder, with no redirect", async () => {
   draw({ folderRender: RENDERED });
   await settle();
