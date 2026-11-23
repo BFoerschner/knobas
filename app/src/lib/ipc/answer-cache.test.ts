@@ -110,6 +110,23 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(1);
   });
 
+  it("drops nothing on the estate's reads, and keeps them over a visit", async () => {
+    // The ux30 Windows pass (2026-11-23): Assets' columns and types, unknown here, dropped every kept answer, so Builds,
+    // Monitors and Tickets opened after Assets read the backend again (Builds late 257 ms drawn at 4x on the PC).
+    await ask("docs_outline");
+    await ask("asset_types");
+    await ask("asset_tree", { parentId: null });
+    await ask("asset_tree", { parentId: "asset:site" });
+    await ask("depends_on_this", { assetId: "asset:vm" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(1);
+    await ask("visit_entity", { entityId: "asset:vm" });
+    await ask("asset_tree", { parentId: null });
+    await ask("depends_on_this", { assetId: "asset:vm" });
+    expect(asked("asset_tree")).toBe(2);
+    expect(asked("depends_on_this")).toBe(1);
+  });
+
   it("drops nothing on a clone's reads or a pipeline's older runs, and shares a read they came between", async () => {
     // The ux18 Windows pass (2026-11-18): Files reading a clone's folder as a repository opened dropped every kept answer
     // and the press's reads on their way, so the page asked its row and the rest a second time.

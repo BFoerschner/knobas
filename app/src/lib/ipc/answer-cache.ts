@@ -62,6 +62,10 @@ export const READS: ReadonlySet<string> = new Set([
   "card_reads",
   // A reached asset, for a ticket's Assets row: its row, what holds it, its history (no visits) and its monitors.
   "get_asset",
+  // The estate's columns and what depends on an asset (the ux30 Windows pass, 2026-11-23): unknown here, Assets' first
+  // column dropped every kept answer, so each page opened after it read the backend again.
+  "asset_tree",
+  "depends_on_this",
   "pipelines",
   "pipeline_runs",
   "repo_pipelines",
@@ -184,6 +188,8 @@ export const QUIET: ReadonlySet<string> = new Set([
   "docs_search",
   "search",
   "launcher_home",
+  // The asset types: a table compiled into the app (ux30 Windows pass), never the mirror.
+  "asset_types",
 ]);
 
 /** The reads a visit (`visit_entity`) cannot move: none of them reads the activity log. */
@@ -193,6 +199,9 @@ export const VISIT_BLIND: ReadonlySet<string> = new Set([
   // page visits on every open, which dropped its own ticket, reach, sections and assets before a return could draw them.
   "get_entity",
   "get_asset",
+  // An estate column and what depends on an asset carry no visit (the ux30 Windows pass).
+  "asset_tree",
+  "depends_on_this",
   "job_reach",
   "card_reads",
   "docs_nodes",
