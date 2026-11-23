@@ -1384,6 +1384,35 @@ mod tests {
         }
     }
 
+    /// An API client may leave its repository command blank; an entry whose
+    /// API command is blank too is not an API client, and its blank
+    /// repository command is refused (the ux30 end gate's mutants).
+    #[test]
+    fn only_an_api_client_may_leave_its_repository_command_blank() {
+        let saved = settle(&[Draft {
+            api_command: Some(" open -a Bruno {collection} ".into()),
+            ..draft(None, "Bruno", "  ", None)
+        }])
+        .unwrap();
+        assert_eq!(saved[0].command, "");
+        assert_eq!(
+            saved[0].api_command.as_deref(),
+            Some("open -a Bruno {collection}")
+        );
+        assert_eq!(
+            settle(&[Draft {
+                api_command: Some("   ".into()),
+                ..draft(None, "Bruno", "  ", None)
+            }])
+            .unwrap_err(),
+            ListError::Command {
+                name: "Bruno".to_owned(),
+                object: ObjectKind::Repository,
+                error: TemplateError::Empty,
+            }
+        );
+    }
+
     fn draft(id: Option<&str>, name: &str, command: &str, file: Option<&str>) -> Draft {
         Draft {
             id: id.map(str::to_owned),

@@ -77,6 +77,13 @@ tickets read only in knobas; these now fail.
 `api::scratch::keep()`, and the sweep test now keeps a folder 29 days old and sweeps one 31 days old with it. The
 mutant made the limit 72 minutes, which would have removed every API-explorer folder a person had not opened that hour.
 
+### knobas-core (run 45248101534: 62 caught, 1 missed)
+
+`checkout/open.rs:825` (`settle`, `delete !` in "the API command is not blank"): an API client may leave its
+repository command blank, and only an API client. `only_an_api_client_may_leave_its_repository_command_blank` saves
+Bruno with a blank repository command and refuses an entry whose API command is blank as well; with the mutation applied
+by hand it fails, and passes on the real code.
+
 ### knobas-db (Windows baseline)
 
 Not a survivor: the Windows baseline failed on `embedded.rs` `a_watch_sees_a_killed_postmaster_whose_lock_file_stayed`
@@ -113,6 +120,11 @@ test bug, not a product bug; both tests are now `#[cfg(unix)]`, as the code they
 - knobas-source-pleasant `source.rs:210` (`PleasantSource::token`, `>` → `>=`): a kept token is used while its expiry
   `until` is after now. The two differ only at the one instant `until == Instant::now()`, which a test cannot stop the
   monotonic clock on; on either side of it both read the same.
+
+- knobas-db `test_util.rs:393` (`supervise` → `Some(Default::default())`, run 45227865249): the `cfg(not(unix))` stub
+  of the test harness's supervisor. Linux does not compile it, so the mutant changes nothing there; on Windows it would
+  not build (`ChildStdin` has no `Default`). The unix supervisor has its own four tests (`tests/embedded/supervisor.rs`),
+  all caught. Its six timeouts in the same run are servers that never start once their start is replaced: caught.
 
 ## Needs a real web view: the plain calls into WebView2, WKWebView and the OS
 
