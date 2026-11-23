@@ -180,6 +180,8 @@
   import { fbarHeight } from "./fbar-height";
   import TicketCard from "./TicketCard.svelte";
   import TicketStack, { STACK_WINDOW_FROM } from "./TicketStack.svelte";
+  import { readTicketAhead } from "../job/press-reads";
+  import type { Attachment } from "svelte/attachments";
   import Signals from "./Signals.svelte";
   import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, keepColumnArrays, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
@@ -1236,6 +1238,24 @@
     reader.chooseLayout(next);
   }
 
+  /**
+   * A press on a card or a row asks the reads the ticket's page waits on (`job/press-reads.ts`, the ux30 end gate,
+   * Windows): at the pointer's going down, or the `Enter` that opens it, before the page is built.
+   */
+  const pressAhead: Attachment<HTMLElement> = (root) => {
+    const pressed = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof PointerEvent ? event.button !== 0 : event.key !== "Enter") return;
+      const id = (event.target as Element | null)?.closest?.<HTMLElement>("[data-entity]")?.dataset.entity;
+      if (id) readTicketAhead(id);
+    };
+    root.addEventListener("pointerdown", pressed);
+    root.addEventListener("keydown", pressed);
+    return () => {
+      root.removeEventListener("pointerdown", pressed);
+      root.removeEventListener("keydown", pressed);
+    };
+  };
+
   /** A click, a double click or `Enter`: the ticket page (spec #2227), the card selected for the way back. There is no preview to fill. */
   function openTicket(card: MiniBoardCard) {
     session.selected = card.entity_id;
@@ -1342,7 +1362,7 @@
   let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")}>
+<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")} {@attach pressAhead}>
   <TfSideEdge side="tickets-views" />
   <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
   {#if subtasksOf === null}

@@ -57,6 +57,12 @@ export async function readSection(listEntities: ReachPorts["listEntities"], id: 
 }
 
 /** A read of `kinds`, scoped to what `id` reaches (or unscoped with `null`) and to `role` when named. */
+/** The card's four sections over the reach of ticket `id`, in the one read the card makes (`card_reads`, ux19). */
+export function cardFilters(id: string): EntityFilter[] {
+  const order = [SECTION_READS.code, SECTION_READS.builds, SECTION_READS.pages, SECTION_READS.monitors];
+  return order.map((read) => reachFilter(id, read.kinds, read.order, read.role));
+}
+
 export function reachFilter(id: string | null, kinds: readonly string[], order: EntityOrder, role: string | null = null): EntityFilter {
   return {
     sources: [],

@@ -208,6 +208,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
   "tf/repo/drawn-files.ts#kept": async () => (await import("../tf/repo/drawn-files")).forgetAllDrawnFiles(),
   "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
+  // The checkouts and a ticket page's reads asked at a press (the ux30 end gate, Windows).
+  "ipc/entity.ts#checkoutsAhead": async () => (await import("../ipc/entity")).forgetCheckoutsAhead(),
+  "tf/job/press-reads.ts#asked": async () => (await import("../tf/job/press-reads")).forgetTicketReads(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
   "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
@@ -239,7 +242,7 @@ export const UNSCANNED: readonly string[] = [
   // Made by a generic factory and held in a plain `.ts`: the scan reads neither.
   "tf/drafts.svelte.ts#typed",
   "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens",
-  "tf/repo/drawn-files.ts#kept", "ipc/entity.ts#readsAhead"];
+  "tf/repo/drawn-files.ts#kept", "ipc/entity.ts#readsAhead", "ipc/entity.ts#checkoutsAhead", "tf/job/press-reads.ts#asked"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

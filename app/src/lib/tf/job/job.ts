@@ -74,6 +74,17 @@ export interface ResolvedJob {
 }
 
 /**
+ * The ids a job address could name, in the order {@link resolveJob} asks them: every listed source's ticket under the
+ * address's key, and the id itself first where the address names one no source's key gives.
+ */
+export function jobCandidates(segment: string, sources: readonly { id: string }[]): string[] {
+  const key = segmentKey(segment);
+  const candidates = sources.map((source) => `${source.id}:${key}`);
+  if (isEntityId(segment) && !candidates.includes(segment)) candidates.unshift(segment);
+  return candidates;
+}
+
+/**
  * The ticket a job address names, as {@link resolveTicket} reads it, with
  * every other listed source's ticket under the same key (#1476), so a key two
  * sources hold is never opened silently: a bare key opens the first listed,
@@ -87,9 +98,7 @@ export async function resolveJob(
   briefs?: Briefs,
 ): Promise<ResolvedJob | null> {
   const named = isEntityId(segment);
-  const key = segmentKey(segment);
-  const candidates = sources.map((source) => `${source.id}:${key}`);
-  if (named && !candidates.includes(segment)) candidates.unshift(segment);
+  const candidates = jobCandidates(segment, sources);
   const tickets = await ticketsOf(candidates, read, briefs);
   const ticket = named ? tickets.find((each) => each.row.entity_id === segment) : tickets[0];
   if (ticket === undefined) return null;
