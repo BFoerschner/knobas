@@ -37,7 +37,9 @@ concurrency:
 jobs:
   linux:
     name: linux ${{ matrix.crate }} ${{ matrix.shard }}
-    runs-on: ubuntu-latest
+    # 24.04, not ubuntu-latest: since 2026-11 that is 26.04, which has no libxml2.so.2, and the embedded PostgreSQL
+    # 18.6 binaries link it, so every test that starts a database failed the baseline there (run 45221186058).
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     strategy:
       fail-fast: false
@@ -79,7 +81,7 @@ jobs:
       - name: Install Tauri's Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev libxml2
       - id: toolchain
         name: Read the pinned toolchain
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
