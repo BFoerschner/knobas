@@ -17,8 +17,6 @@ export interface Entry {
   flags: number;
   expires: string | null;
   also: string[];
-  /** Lower-cased title, username, address and path: what the filter reads. */
-  hay: string;
 }
 
 /** Row flags, as `passwords::reads` sets them. */
@@ -34,8 +32,11 @@ export interface Node {
   name: string;
   parent: Node | null;
   kids: Node[];
-  /** The entries directly in it, by title. */
-  own: Entry[];
+  /**
+   * The entries directly in it, as indices into the read's rows (`Entries.at`). {@link ordered} makes them entries
+   * sorted by title, once, when they are drawn.
+   */
+  own: number[];
   /** Every entry under it, itself included. */
   total: number;
   depth: number;
@@ -52,9 +53,103 @@ export interface Model {
   held: Held;
   root: Node;
   nodes: Map<string, Node>;
-  entries: Map<string, Entry>;
-  /** Every entry, by title. */
+  entries: Entries;
+}
+
+/**
+ * The read's entries, each made out of its row when it is first asked for. The first open draws a dozen rows of
+ * 20,000: making an object and a map slot for every row before its first frame was most of what was left of its cost
+ * (the ux30 end gate, 2026-11-23: 38 ms at 4x in the page's profile).
+ */
+export class Entries {
+  readonly #rows: readonly PwRow[];
+  readonly #made: (Entry | undefined)[];
+  /** The entries made so far, by id. */
+  readonly #madeById = new Map<string, Entry>();
+  /** Every row's index by id, once `index` has run. */
+  #byId: Map<string, number> | null = null;
+
+  constructor(rows: readonly PwRow[]) {
+    this.#rows = rows;
+    this.#made = new Array<Entry | undefined>(rows.length);
+  }
+
+  /** How many rows the read holds. */
+  get size(): number {
+    return this.#rows.length;
+  }
+
+  /** How many entries have been made out of their rows. */
+  get made(): number {
+    return this.#madeById.size;
+  }
+
+  /** The entry of row `i`. */
+  at(i: number): Entry {
+    let e = this.#made[i];
+    if (e === undefined) {
+      const [id, src, folder, title, user, address, changed, flags, expires, also] = this.#rows[i]!;
+      e = { id, src, folder, title, user, address, changed, flags, expires, also };
+      this.#made[i] = e;
+      if (!this.#madeById.has(id)) this.#madeById.set(id, e);
+    }
+    return e;
+  }
+
+  /**
+   * The entry `id`, or `undefined`. One already made, or any once {@link index} has run, is a map's lookup; before
+   * that, the rows are walked (the recent entries at the first open, an entry named in the address).
+   */
+  get(id: string): Entry | undefined {
+    const made = this.#madeById.get(id);
+    if (made !== undefined) return made;
+    if (this.#byId !== null) {
+      const i = this.#byId.get(id);
+      return i === undefined ? undefined : this.at(i);
+    }
+    for (let i = 0; i < this.#rows.length; i++) if (this.#rows[i]![0] === id) return this.at(i);
+    return undefined;
+  }
+
+  /** The rows indexed by id so far, while `index` runs. */
+  #indexing = new Map<string, number>();
+  #indexedTo = 0;
+
+  /**
+   * Every row's index by id, so a lookup no longer walks the rows; built once the page has drawn, in slices: it stops
+   * when `more` says so, after at least one block of rows, and answers whether it is done.
+   */
+  index(more: () => boolean = () => true): boolean {
+    if (this.#byId !== null) return true;
+    const rows = this.#rows;
+    do {
+      const end = Math.min(rows.length, this.#indexedTo + 1000);
+      for (let i = this.#indexedTo; i < end; i++) {
+        const id = rows[i]![0];
+        if (!this.#indexing.has(id)) this.#indexing.set(id, i);
+      }
+      this.#indexedTo = end;
+    } while (this.#indexedTo < rows.length && more());
+    if (this.#indexedTo < rows.length) return false;
+    this.#byId = this.#indexing;
+    return true;
+  }
+
+  /** Every entry, in the read's order, each made. */
+  *values(): IterableIterator<Entry> {
+    for (let i = 0; i < this.#rows.length; i++) yield this.at(i);
+  }
+}
+
+/**
+ * What the filter reads: every entry by title, and each one's lower-cased title, username, address and path, in the
+ * same order. Built on the filter's first use or once the page has drawn (`searchIndex`), never with the model: at
+ * 20,000 entries the sort and the strings were most of the model's cost, on the first open's path (the ux30 end gate,
+ * 2026-11-23: 418 ms at 6x against the line's 300).
+ */
+export interface SearchIndex {
   all: Entry[];
+  hay: string[];
 }
 
 /** The id of a source's top node. */
@@ -88,24 +183,18 @@ export function model(held: Held): Model {
     node.parent = parent;
     parent.kids.push(node);
   }
-  const entries = new Map<string, Entry>();
-  const all: Entry[] = [];
-  for (const row of held.entries as PwRow[]) {
-    const [id, src, folder, title, user, address, changed, flags, expires, also] = row;
-    const e: Entry = { id, src, folder, title, user, address, changed, flags, expires, also, hay: "" };
-    entries.set(id, e);
-    all.push(e);
-    const homes = [folder, ...e.also];
-    for (const home of homes) {
-      const node = (home !== null ? nodes.get(home) : undefined) ?? tops[src] ?? root;
-      node.own.push(e);
-    }
+  const rows = held.entries as PwRow[];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const folder = row[2];
+    ((folder !== null ? nodes.get(folder) : undefined) ?? tops[row[1]] ?? root).own.push(i);
+    const also = row[9];
+    for (let k = 0; k < also.length; k++) ((also[k] !== null ? nodes.get(also[k]!) : undefined) ?? tops[row[1]] ?? root).own.push(i);
   }
   // Depth, order and counts, top down.
   const visit = (node: Node, depth: number): number => {
     node.depth = depth;
     node.kids.sort((a, b) => collate(a.name, b.name));
-    node.own.sort(byTitle);
     let total = node.own.length;
     for (const kid of node.kids) total += visit(kid, depth + 1);
     node.total = total;
@@ -113,21 +202,182 @@ export function model(held: Held): Model {
   };
   visit(root, -1);
   // An entry in several folders counts once in All entries.
-  root.total = all.length;
-  all.sort(byTitle);
-  const m: Model = { held, root, nodes, entries, all };
-  // Each folder's path as the filter reads it, once per folder rather than once per entry.
-  const paths = new Map<string | null, string>();
-  const pathText = (folder: string | null): string => {
-    let text = paths.get(folder);
+  root.total = rows.length;
+  return { held, root, nodes, entries: new Entries(rows) };
+}
+
+const sorted = new WeakMap<Node, Entry[]>();
+
+/**
+ * `node`'s own entries by title, made and sorted on the first call. Not with the model: the top of the page lists a
+ * panel per folder, and sorting every folder's entries before the first frame cost about 8 ms at 1x at 20,000 entries,
+ * while the frame draws a dozen rows (the ux30 end gate, 2026-11-23).
+ */
+export function ordered(m: Model, node: Node): Entry[] {
+  let out = sorted.get(node);
+  if (out === undefined) {
+    out = node.own.map((i) => m.entries.at(i)).sort(byTitle);
+    sorted.set(node, out);
+  }
+  return out;
+}
+
+/** How many entries a run of the index's merge sort sorts at once. */
+const RUN = 512;
+/** How many rows or merged entries a slice of the index's build does between looks at `more`. */
+const BLOCK = 500;
+
+/**
+ * The filter's index over one model, built in slices (`step`) while the page is idle, or at once (`finish`) when the
+ * filter is used first. Built at once it was one task of about 140 ms at 4x at 20,000 entries, which delayed the frame
+ * after the first open and would hold a press that came then (the ux30 end gate, 2026-11-23). So the sort is a merge
+ * sort that can stop between any two steps: runs of {@link RUN} sorted, then merged pair by pair.
+ */
+export class IndexBuild {
+  readonly #m: Model;
+  #stage: "index" | "make" | "runs" | "merge" | "hay" | "done" = "index";
+  #at = 0;
+  #src: Entry[] = [];
+  #dst: Entry[] = [];
+  #width = RUN;
+  #lo = 0;
+  #a = 0;
+  #b = 0;
+  #k = 0;
+  #mid = 0;
+  #hi = 0;
+  #inPair = false;
+  #hay: string[] = [];
+  readonly #paths = new Map<string | null, string>();
+  #index: SearchIndex | null = null;
+
+  constructor(m: Model) {
+    this.#m = m;
+  }
+
+  /** The index, once built. */
+  get index(): SearchIndex | null {
+    return this.#index;
+  }
+
+  /** Builds on until `more` answers false, one block at least; answers whether the index is built. */
+  step(more: () => boolean): boolean {
+    do this.#block();
+    while (this.#stage !== "done" && more());
+    return this.#stage === "done";
+  }
+
+  /** The index, built now if it is not yet. */
+  finish(): SearchIndex {
+    while (this.#stage !== "done") this.#block();
+    return this.#index!;
+  }
+
+  #block(): void {
+    const m = this.#m;
+    const n = m.entries.size;
+    switch (this.#stage) {
+      case "index":
+        if (m.entries.index(() => false)) this.#stage = "make";
+        return;
+      case "make": {
+        const end = Math.min(n, this.#at + BLOCK);
+        for (let i = this.#at; i < end; i++) this.#src.push(m.entries.at(i));
+        this.#at = end;
+        if (end === n) {
+          this.#stage = "runs";
+          this.#at = 0;
+        }
+        return;
+      }
+      case "runs": {
+        const end = Math.min(n, this.#at + RUN);
+        const run = this.#src.slice(this.#at, end).sort(byTitle);
+        for (let i = 0; i < run.length; i++) this.#src[this.#at + i] = run[i]!;
+        this.#at = end;
+        if (end === n) {
+          this.#stage = this.#width >= n ? "hay" : "merge";
+          this.#dst = new Array<Entry>(n);
+          this.#at = 0;
+        }
+        return;
+      }
+      case "merge": {
+        const src = this.#src;
+        const dst = this.#dst;
+        for (let budget = BLOCK; budget > 0; budget--) {
+          if (!this.#inPair) {
+            if (this.#lo >= n) {
+              this.#src = dst;
+              this.#dst = src;
+              this.#width *= 2;
+              this.#lo = 0;
+              if (this.#width >= n) this.#stage = "hay";
+              return;
+            }
+            this.#mid = Math.min(this.#lo + this.#width, n);
+            this.#hi = Math.min(this.#lo + 2 * this.#width, n);
+            this.#a = this.#lo;
+            this.#b = this.#mid;
+            this.#k = this.#lo;
+            this.#inPair = true;
+          }
+          if (this.#k < this.#hi) {
+            dst[this.#k++] = this.#b >= this.#hi || (this.#a < this.#mid && byTitle(src[this.#a]!, src[this.#b]!) <= 0) ? src[this.#a++]! : src[this.#b++]!;
+          } else {
+            this.#inPair = false;
+            this.#lo = this.#hi;
+          }
+        }
+        return;
+      }
+      case "hay": {
+        const all = this.#src;
+        const end = Math.min(n, this.#at + BLOCK);
+        for (let i = this.#at; i < end; i++) {
+          const e = all[i]!;
+          // One lower-casing of the whole: a flat string, where a join of four is flattened by the first keystroke's
+          // `includes`, 20,000 of them in its task.
+          this.#hay.push(`${e.title}\n${e.user ?? ""}\n${e.address ?? ""}\n${this.#pathText(e.folder)}`.toLowerCase());
+        }
+        this.#at = end;
+        if (end === n) {
+          this.#index = { all, hay: this.#hay };
+          this.#stage = "done";
+        }
+        return;
+      }
+      case "done":
+        return;
+    }
+  }
+
+  /** A folder's path as the filter reads it, once per folder rather than once per entry. */
+  #pathText(folder: string | null): string {
+    let text = this.#paths.get(folder);
     if (text === undefined) {
-      text = chainOf(m, folder !== null ? nodes.get(folder) ?? null : null).map((n) => n.name).join(" ").toLowerCase();
-      paths.set(folder, text);
+      text = chainOf(this.#m, folder !== null ? (this.#m.nodes.get(folder) ?? null) : null).map((n) => n.name).join(" ").toLowerCase();
+      this.#paths.set(folder, text);
     }
     return text;
-  };
-  for (const e of all) e.hay = `${e.title.toLowerCase()}\n${(e.user ?? "").toLowerCase()}\n${(e.address ?? "").toLowerCase()}\n${pathText(e.folder)}`;
-  return m;
+  }
+}
+
+const builds = new WeakMap<Model, IndexBuild>();
+
+/** The build of the filter's index over `m`: one per model, so the idle slices and the filter share it. */
+export function indexBuild(m: Model): IndexBuild {
+  let build = builds.get(m);
+  if (build === undefined) {
+    build = new IndexBuild(m);
+    builds.set(m, build);
+  }
+  return build;
+}
+
+/** The filter's index over `m`, finished now if the slices have not finished it, and kept with the model. */
+export function searchIndex(m: Model): SearchIndex {
+  return indexBuild(m).finish();
 }
 
 /** The chain of folders an entry sits in, names, outermost first (a source's top included, with several sources). */
@@ -159,7 +409,10 @@ export interface Panel {
   kind: "recent" | "folder" | "hits";
   /** The folder whose own entries it lists (folder panels). */
   node: Node | null;
-  rows: Entry[];
+  /** How many rows it holds. */
+  count: number;
+  /** Its rows, by title: a folder panel's are sorted when first read (`ordered`). */
+  readonly rows: Entry[];
 }
 
 /** How many rows a panel further down shows before *Show all*. */
@@ -174,19 +427,42 @@ export const CUT_OVER = 6;
 export function panels(m: Model, node: Node, query: string): Panel[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length > 0) {
-    return [{ kind: "hits", node: null, rows: m.all.filter((e) => words.every((w) => e.hay.includes(w))) }];
+    const { all, hay } = searchIndex(m);
+    // A plain loop, not a closure per entry and word: a keystroke reads all 20,000.
+    const rows: Entry[] = [];
+    outer: for (let i = 0; i < all.length; i++) {
+      const text = hay[i]!;
+      for (let w = 0; w < words.length; w++) if (!text.includes(words[w]!)) continue outer;
+      rows.push(all[i]!);
+    }
+    return [{ kind: "hits", node: null, count: rows.length, rows }];
   }
   const out: Panel[] = [];
   if (node === m.root) {
     const recent = m.held.recent.map((id) => m.entries.get(id)).filter((e): e is Entry => e !== undefined);
-    if (recent.length > 0) out.push({ kind: "recent", node: null, rows: recent });
+    if (recent.length > 0) out.push({ kind: "recent", node: null, count: recent.length, rows: recent });
   }
   const walk = (at: Node): void => {
-    if (at.own.length > 0) out.push({ kind: "folder", node: at, rows: at.own });
+    if (at.own.length > 0) {
+      out.push({
+        kind: "folder",
+        node: at,
+        count: at.own.length,
+        get rows() {
+          return ordered(m, at);
+        },
+      });
+    }
     for (const kid of at.kids) walk(kid);
   };
   walk(node);
   return out;
+}
+
+/** The nodes whose own entries hold `e`, as `model` places it: its folder and the folders it is also in. */
+export function homesOf(m: Model, e: Entry): Node[] {
+  const top = m.held.sources.length > 1 ? (m.nodes.get(sourceNode(m.held.sources[e.src]?.id ?? "")) ?? m.root) : m.root;
+  return [e.folder, ...e.also].map((home) => (home !== null ? m.nodes.get(home) : undefined) ?? top);
 }
 
 /** The ids of every folder at or above an entry's folders: the folds that hold it. */

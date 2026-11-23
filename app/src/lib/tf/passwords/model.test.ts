@@ -1,7 +1,7 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import type { Held, PwRow } from "../../ipc/passwords";
-import { CUT, chainOf, commentFolder, expiry, holding, marks, model, panels, pathOf, sourceNode, sourceWord, treeRows } from "./model";
+import { CUT, chainOf, commentFolder, expiry, holding, homesOf, indexBuild, marks, model, ordered, panels, pathOf, searchIndex, sourceNode, sourceWord, treeRows } from "./model";
 
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
@@ -41,7 +41,7 @@ test("the tree nests folders under their parents, sorted, with totals that count
   expect(m.root.total).toBe(11);
   expect(m.nodes.get("pw:db")!.depth).toBe(2);
   // Entries sort by title in a folder, case-insensitively.
-  expect(m.nodes.get("pw:db")!.own.map((e) => e.title).slice(0, 2)).toEqual(["db user 1", "db user 2"]);
+  expect(ordered(m, m.nodes.get("pw:db")!).map((e) => e.title).slice(0, 2)).toEqual(["db user 1", "db user 2"]);
   expect(pathOf(m, m.entries.get("pw:d0")!)).toEqual(["Payments", "Prod", "Databases"]);
   expect(chainOf(m, m.root)).toEqual([]);
 });
@@ -107,4 +107,82 @@ test("an expiry turns warn within two weeks and err within three days", () => {
   expect(expiry("2027-03-01", now)).toMatchObject({ tone: "" });
   expect(expiry("2026-11-21", now)).toMatchObject({ text: "Expired" });
   expect(expiry(null, now)).toBeNull();
+});
+
+test("the model sorts no entries and lower-cases nothing: a folder sorts when its rows are read, the filter on its first use", () => {
+  // 600 entries in four folders of 150. At 20,000 entries the sorts of every folder and of all entries, and the
+  // filter's text, were most of the first open, which draws a dozen rows (the ux30 end gate, 2026-11-23).
+  const big = held();
+  big.entries = Array.from({ length: 600 }, (_, i) => row(`pw:x${i}`, ["pw:pay", "pw:prod", "pw:db", "pw:plat"][i % 4]!, `Title ${(i * 7919) % 600}`, `User${i}`));
+  const sorted: number[] = [];
+  const sort = Array.prototype.sort;
+  const sortSpy = vi.spyOn(Array.prototype, "sort").mockImplementation(function (this: unknown[], compare) {
+    sorted.push(this.length);
+    return sort.call(this, compare);
+  });
+  const lower = vi.spyOn(String.prototype, "toLowerCase");
+  try {
+    const m = model(big);
+    expect(lower).not.toHaveBeenCalled();
+    expect(m.entries.made).toBe(0);
+    expect(m.root.total).toBe(600);
+    const top = panels(m, m.root, "");
+    // The tree's folders sort; no list of entries does.
+    expect(Math.max(...sorted)).toBeLessThanOrEqual(2);
+    expect(top.map((p) => p.count)).toEqual([150, 150, 150, 150]);
+    // A panel's rows, read, sort that folder alone, by title.
+    const db = top.find((p) => p.node?.id === "pw:db")!;
+    const titles = db.rows.map((e) => e.title);
+    expect(sorted.filter((n) => n > 2)).toEqual([150]);
+    expect(m.entries.made).toBe(150);
+    expect(m.entries.get("pw:x7")?.title).toBe(`Title ${(7 * 7919) % 600}`);
+    expect(m.entries.get("pw:nothing")).toBeUndefined();
+    // The filter builds what it reads on its first keystroke.
+    const hits = panels(m, m.root, "user1")[0]!.rows.map((e) => e.title);
+    // In runs of 512 (`IndexBuild`'s merge sort), all 600 of them.
+    expect(sorted.filter((n) => n > 2)).toEqual([150, 512, 88]);
+    sortSpy.mockRestore();
+    const byTitle = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+    expect(titles).toEqual([...titles].sort(byTitle));
+    expect(hits).toHaveLength(111);
+    expect(hits).toEqual([...hits].sort(byTitle));
+  } finally {
+    sortSpy.mockRestore();
+    lower.mockRestore();
+  }
+});
+
+test("an entry's homes are the nodes the model put it in: its folder, the ones it is also in, else the top", () => {
+  const two = held();
+  two.sources.push(source("org", "Tidewater org"));
+  two.entries.push(row("org:loose", null, "loose org thing", null, 1));
+  two.entries.push(["pw:both", 0, "pw:db", "in two", null, null, null, 0, null, ["pw:plat"]]);
+  const m = model(two);
+  expect(homesOf(m, m.entries.get("pw:both")!).map((n) => n.id)).toEqual(["pw:db", "pw:plat"]);
+  expect(homesOf(m, m.entries.get("org:loose")!).map((n) => n.id)).toEqual([sourceNode("org")]);
+  for (const e of m.entries.values()) for (const home of homesOf(m, e)) expect(ordered(m, home)).toContain(e);
+});
+
+test("the filter's index builds in slices that each stop when told, and comes out as one build at once", () => {
+  // 3,001 entries in titles out of order, some the same but for case: the merge sort's runs of 512 and its last
+  // uneven pair. Built at once it was one task of 140 ms at 4x at 20,000 entries (the ux30 end gate, 2026-11-23).
+  const big = held();
+  big.entries = Array.from({ length: 3001 }, (_, i) => row(`pw:y${i}`, i % 3 ? "pw:db" : null, `${i % 2 ? "Key" : "key"} ${(i * 7919) % 1500}`, `u${i}`));
+  const byTitle = (a: { title: string; id: string }, b: { title: string; id: string }) =>
+    new Intl.Collator(undefined, { sensitivity: "base" }).compare(a.title, b.title) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const sliced = indexBuild(model(big));
+  let steps = 0;
+  while (!sliced.step(() => false)) steps++;
+  expect(steps).toBeGreaterThan(20);
+  const whole = searchIndex(model(big));
+  expect(sliced.index!.all.map((e) => e.id)).toEqual(whole.all.map((e) => e.id));
+  expect(sliced.index!.hay).toEqual(whole.hay);
+  expect(whole.all.map((e) => e.id)).toEqual([...whole.all].sort(byTitle).map((e) => e.id));
+  expect(whole.hay[0]).toContain("\nu");
+  // A keystroke before the slices are done finishes the build where it stands.
+  const half = model(big);
+  for (let i = 0; i < 10; i++) indexBuild(half).step(() => false);
+  expect(indexBuild(half).index).toBeNull();
+  expect(searchIndex(half).all.map((e) => e.id)).toEqual(whole.all.map((e) => e.id));
+  expect(panels(half, half.root, "key 7")[0]!.count).toBe(whole.hay.filter((h) => h.includes("key") && h.includes("7")).length);
 });

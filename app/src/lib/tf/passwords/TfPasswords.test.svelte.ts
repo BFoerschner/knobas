@@ -409,3 +409,34 @@ test("a source whose base URL is no web address, or with its site off, draws no 
   const web = [...target.querySelectorAll<HTMLButtonElement>(".tf-pw-entry .tf-acts button")].find((b) => b.textContent?.startsWith("Open web interface"))!;
   expect(web.title).toBe("Opens this entry in the password manager's web interface, in your browser.");
 });
+
+test("the first open sorts the folders whose rows it draws, not every folder; ↓ walks on into the folders below", async () => {
+  // 400 folders of six: the top lists a panel for each. At 20,000 entries sorting them all before the first frame was
+  // most of the first open (the ux30 end gate, 2026-11-23); the window draws a few dozen lines.
+  const many: Held = {
+    ...held(),
+    folders: Array.from({ length: 400 }, (_, f) => ({ id: `pw:f${f}`, source: 0, parent: null, name: `folder ${String(f).padStart(3, "0")}`, comment_read: false, can_add: true })),
+    entries: Array.from({ length: 2400 }, (_, i) => row(`pw:e${i}`, `pw:f${i % 400}`, `entry ${String((i * 7919) % 2400).padStart(4, "0")}`)),
+  };
+  const sorted: number[] = [];
+  const sort = Array.prototype.sort;
+  const spy = vi.spyOn(Array.prototype, "sort").mockImplementation(function (this: unknown[], compare) {
+    if (Array.isArray(this[0]) || (this[0] as { title?: unknown } | undefined)?.title !== undefined) sorted.push(this.length);
+    return sort.call(this, compare);
+  });
+  try {
+    await open(ports({}, many));
+    const drawn = target.querySelectorAll(".tf-pw-lhead").length;
+    expect(drawn).toBeGreaterThan(2);
+    expect(sorted.length).toBeLessThanOrEqual(drawn + 1);
+    expect(sorted.length).toBeLessThan(50);
+    // The first entry opens; ↓ goes through the first folder's rows and on into the next.
+    const first = target.querySelector(".tf-pw-row[aria-current=true] .tf-pw-t")?.textContent;
+    expect(first).toBe(text(".tf-pw-row .tf-pw-t")[0]);
+    for (let i = 0; i < 6; i++) window.dispatchEvent(new KeyboardEvent("keydown", { key: "j" }));
+    await settle();
+    expect(target.querySelector(".tf-pw-row[aria-current=true] .tf-pw-t")?.textContent).toBe(text(".tf-pw-row .tf-pw-t")[6]);
+  } finally {
+    spy.mockRestore();
+  }
+});

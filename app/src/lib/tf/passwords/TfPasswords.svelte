@@ -46,15 +46,19 @@
     commentFolder,
     expiry,
     holding,
+    homesOf,
     marks,
     model,
+    ordered,
     panels,
     plural,
+    indexBuild,
     sourceNode,
     sourceWord,
     treeRows,
     type Entry,
     type Node,
+    type Panel,
   } from "./model";
   import { realPasswordPorts, type PasswordPorts } from "./ports";
 
@@ -93,6 +97,38 @@
       failed = String((cause as { message?: string })?.message ?? cause);
     }
   }
+
+  // The filter's index (`indexBuild`), built once the page has drawn, in slices of at most 8 ms while the window is
+  // idle: not on the first open's path, never one long task a press would wait behind, and built before a first
+  // keystroke needs it (one that comes sooner finishes it, `searchIndex`).
+  $effect(() => {
+    const at = m;
+    if (!at || !visible) return;
+    const build = indexBuild(at);
+    if (build.index) return;
+    let live = true;
+    let cancel = () => {};
+    const slice = (deadline?: IdleDeadline) => {
+      if (!live) return;
+      const end = performance.now() + Math.min(8, deadline?.timeRemaining() ?? 8);
+      if (!build.step(() => performance.now() < end)) next();
+    };
+    const next = () => {
+      if (typeof requestIdleCallback === "function") {
+        const id = requestIdleCallback(slice, { timeout: 1000 });
+        cancel = () => cancelIdleCallback(id);
+      } else {
+        const id = setTimeout(slice, 16);
+        cancel = () => clearTimeout(id);
+      }
+    };
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => live && next()));
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      cancel();
+    };
+  });
 
   // Read when the database answers, again when the role's runs end (`syncRevision`), and when shown again.
   $effect(() => {
@@ -202,9 +238,17 @@
   }
 
   // ---- the list: one flat list of lines ----
+  /**
+   * A row is its panel's `n`th, read from `rows` when it is drawn or a key reaches it: a folder's rows are sorted only
+   * then (`ordered`), so the top of the page, a panel for every folder, sorts the dozen folders it draws and not all
+   * of them (the ux30 end gate, 2026-11-23). A folder's row is keyed by its place, which needs no sort. A hit is keyed
+   * by its place as a number: a keystroke that every entry matches lists 20,000, and a text key for each, made and
+   * hashed again by the window's heights, was a third of that keystroke's script; a row of the same place shows the
+   * next keystroke's hit in place.
+   */
   type Line =
     | { kind: "head"; key: string; panel: number; title: string; pre: string; href: string | null; count: number; comment: boolean; first: boolean }
-    | { kind: "row"; key: string; e: Entry; path: boolean; last: boolean }
+    | { kind: "row"; key: string | number; p: Panel; n: number; path: boolean; last: boolean }
     | { kind: "more"; key: string; node: Node; count: number }
     | { kind: "none"; key: string; text: string };
 
@@ -219,7 +263,7 @@
     const out: string[] = [];
     for (const home of [e.folder, ...e.also]) {
       const at = home !== null ? m.nodes.get(home) : undefined;
-      if (at && at.own.length > CUT_OVER && at.own.indexOf(e) >= CUT) out.push(at.id);
+      if (at && at.own.length > CUT_OVER && ordered(m, at).indexOf(e) >= CUT) out.push(at.id);
     }
     return out.join("\n");
   });
@@ -230,27 +274,27 @@
     const out: Line[] = [];
     shownPanels.forEach((p, i) => {
       if (p.kind === "hits") {
-        if (p.rows.length === 0) {
+        if (p.count === 0) {
           out.push({ kind: "none", key: "none", text: `Nothing matches "${query}". The filter looks at titles, usernames, addresses and folder names.` });
           return;
         }
-        out.push({ kind: "head", key: "h:hits", panel: i, title: `${plural(p.rows.length, "entry", "entries")} in every folder`, pre: "", href: null, count: p.rows.length, comment: false, first: true });
-        p.rows.forEach((e, n) => out.push({ kind: "row", key: `r:hits:${e.id}`, e, path: true, last: n === p.rows.length - 1 }));
+        out.push({ kind: "head", key: "h:hits", panel: i, title: `${plural(p.count, "entry", "entries")} in every folder`, pre: "", href: null, count: p.count, comment: false, first: true });
+        for (let n = 0; n < p.count; n++) out.push({ kind: "row", key: n, p, n, path: true, last: n === p.count - 1 });
         return;
       }
       if (p.kind === "recent") {
-        out.push({ kind: "head", key: "h:recent", panel: i, title: "Used recently", pre: "", href: null, count: p.rows.length, comment: false, first: i === 0 });
-        p.rows.forEach((e, n) => out.push({ kind: "row", key: `r:recent:${e.id}`, e, path: true, last: n === p.rows.length - 1 }));
+        out.push({ kind: "head", key: "h:recent", panel: i, title: "Used recently", pre: "", href: null, count: p.count, comment: false, first: i === 0 });
+        p.rows.forEach((e, n) => out.push({ kind: "row", key: `r:recent:${e.id}`, p, n, path: true, last: n === p.count - 1 }));
         return;
       }
       const at = p.node!;
       const rel = chainOf(m, at).slice(chainOf(m, node).length);
       const title = rel.length > 0 ? rel[rel.length - 1]!.name : node.kids.length > 0 ? `Directly in ${node.name}` : node.name;
       const pre = rel.length > 1 ? `${rel.slice(0, -1).map((r) => r.name).join(" / ")} / ` : "";
-      const cut = rel.length > 0 && p.rows.length > CUT_OVER && !liftedIds.has(at.id) ? CUT : p.rows.length;
-      out.push({ kind: "head", key: `h:${at.id}`, panel: i, title, pre, href: rel.length > 0 ? hashOf(at) : null, count: p.rows.length, comment: commentFolder(at) !== null, first: i === 0 });
-      p.rows.slice(0, cut).forEach((e, n) => out.push({ kind: "row", key: `r:${at.id}:${e.id}`, e, path: false, last: n === cut - 1 && cut === p.rows.length }));
-      if (cut < p.rows.length) out.push({ kind: "more", key: `m:${at.id}`, node: at, count: p.rows.length });
+      const cut = rel.length > 0 && p.count > CUT_OVER && !liftedIds.has(at.id) ? CUT : p.count;
+      out.push({ kind: "head", key: `h:${at.id}`, panel: i, title, pre, href: rel.length > 0 ? hashOf(at) : null, count: p.count, comment: commentFolder(at) !== null, first: i === 0 });
+      for (let n = 0; n < cut; n++) out.push({ kind: "row", key: `r:${at.id}:${n}`, p, n, path: false, last: n === cut - 1 && cut === p.count });
+      if (cut < p.count) out.push({ kind: "more", key: `m:${at.id}`, node: at, count: p.count });
     });
     if (out.length === 0) out.push({ kind: "none", key: "none", text: `Nothing in ${node.name} yet.` });
     return out;
@@ -259,10 +303,34 @@
     count: () => lines.length,
     key: (i) => lines[i]!.key,
     estimate: 52,
-    estimateOf: (key) => (key.startsWith("h:") ? 50 : key.startsWith("m:") ? 36 : 52),
+    estimateOf: (key) => (typeof key === "number" ? 52 : key.startsWith("h:") ? 50 : key.startsWith("m:") ? 36 : 52),
     from: 60,
   });
-  const listRows = $derived(lines.flatMap((l) => (l.kind === "row" ? [l.e] : [])));
+
+  /** A row line's entry. */
+  const entryOf = (line: Extract<Line, { kind: "row" }>): Entry => line.p.rows[line.n]!;
+
+  /**
+   * Where the entry `id` is listed, as an index into `lines`, or -1. A folder panel is read only when it is one of the
+   * entry's folders, so the search sorts none of the others.
+   */
+  function lineOf(id: string | null): number {
+    const e = id !== null && m ? m.entries.get(id) : undefined;
+    if (!e || !m) return -1;
+    const homes = homesOf(m, e);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (line.kind !== "row" || (line.p.node !== null && !homes.includes(line.p.node))) continue;
+      if (entryOf(line) === e) return i;
+    }
+    return -1;
+  }
+
+  /** The first row at or after `from` going by `step`, as an index into `lines`, or -1. */
+  function rowFrom(from: number, step: number): number {
+    for (let i = from; i >= 0 && i < lines.length; i += step) if (lines[i]!.kind === "row") return i;
+    return -1;
+  }
 
   // ---- the entry ----
   const records = new Map<string, PwEntry>();
@@ -311,9 +379,11 @@
   // The first entry listed opens when the address names none.
   $effect(() => {
     if (where.entry !== null || !m) return;
-    const listed = listRows;
-    if (picked !== null && listed.some((e) => e.id === picked)) return;
-    picked = listed[0]?.id ?? null;
+    void lines;
+    if (picked !== null && lineOf(picked) >= 0) return;
+    const first = rowFrom(0, 1);
+    const line = first >= 0 ? lines[first] : undefined;
+    picked = line?.kind === "row" ? entryOf(line).id : null;
   });
 
   function pick(e: Entry): void {
@@ -322,12 +392,14 @@
   }
 
   function move(step: number): void {
-    const at = listRows.findIndex((e) => e.id === openId);
-    const next = listRows[Math.max(0, Math.min(listRows.length - 1, at + step))];
-    if (!next) return;
-    pick(next);
-    const index = lines.findIndex((l) => l.kind === "row" && l.e.id === next.id);
-    if (index >= 0) listWin.reveal(index);
+    const at = lineOf(openId);
+    // From the open row one row on, the last row staying put; with none open, the first row.
+    const next = at < 0 ? rowFrom(0, 1) : rowFrom(at + step, step);
+    const index = next < 0 ? at : next;
+    const line = index >= 0 ? lines[index] : undefined;
+    if (line?.kind !== "row") return;
+    pick(entryOf(line));
+    listWin.reveal(index);
   }
 
   const source = $derived.by((): PwSource | null => {
@@ -423,7 +495,7 @@
     });
     const folders = countFolders(node);
     const count = query
-      ? `${plural(shownPanels[0]?.rows.length ?? 0, "entry matches", "entries match")} "${query}".`
+      ? `${plural(shownPanels[0]?.count ?? 0, "entry matches", "entries match")} "${query}".`
       : `${plural(node.total, "entry", "entries")}${folders ? ` in ${plural(folders, "folder")}` : ""}.`;
     const rule = node.id !== "" && commentFolder(node) ? " A usage comment is required for every read here." : "";
     return `${count} ${lines.join(" ")}${rule}`;
@@ -639,7 +711,7 @@
                       <span class="tf-count">{line.count}</span>
                     </header>
                   {:else if line.kind === "row"}
-                    <div class="tf-pw-lrow" class:tf-pw-last={line.last} {@attach listWin.row(line.key)}>{@render row(line.e, line.path, line.last)}</div>
+                    <div class="tf-pw-lrow" class:tf-pw-last={line.last} {@attach listWin.row(line.key)}>{@render row(entryOf(line), line.path, line.last)}</div>
                   {:else if line.kind === "more"}
                     <div class="tf-pw-lrow tf-pw-last" {@attach listWin.row(line.key)}>
                       <button type="button" class="tf-pw-more" onclick={() => go(line.node)}>Show all {line.count} in {line.node.name}</button>

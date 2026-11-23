@@ -3,12 +3,18 @@
 // rows, and every fold of the tree opened and scrolled. Real input over the DevTools protocol, at each CPU throttle.
 //
 //   node testenv/perf/passwords.mjs --app <url> [--scale 2000] [--throttle 1,4,6] [--size WxH@s] [--out <file.json>]
+//                                   [--attach <port>]
 //
 // --app    a built app serving `?fake-ipc` (vite preview of `app/dist`); `&pw-scale=<n>` is added
 // --scale  about how many entries (`?pw-scale`, the fake's: eight levels, folders of 610, 530 and 515)
+// --attach drive a page that is already open on that DevTools port (knobas's own WebView2 window on Windows, its front
+//          end served into it), keeping that window's size unless `--size` is given; `--app` is where it finds the app
 //
 // An interaction is timed from its input event to the end of the frame that first shows its result (the rAF after
-// the one that found it). A held key and a scroll are timed by their frames: the longest frame and long tasks.
+// the one that found it); one that never shows within 10 s is recorded as not shown, over its line. A held key and a
+// scroll are timed by their frames: the longest frame and long tasks. A folder is pressed by its id, read when it is
+// picked: a press opens that folder's fold, which moves every row below it (the ux30 end gate, 2026-11-23, pressed a
+// row by its old index and timed a heading that never came).
 // Lines: open 100 / 200 / 300 ms at 1x / 4x / 6x; a press and a key 100 / 100 / 200; frames under 50 ms.
 import { writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, sleep, viewport } from "./cdp.mjs";
@@ -38,7 +44,7 @@ const PAGE = `(() => {
     const gave = performance.now() + 10000;
     const look = () => {
       if (test()) requestAnimationFrame(() => requestAnimationFrame((t) => resolve(t - (pw.input ?? t))));
-      else if (performance.now() > gave) resolve(Infinity);
+      else if (performance.now() > gave) resolve(-1);
       else requestAnimationFrame(look);
     };
     look();
@@ -46,15 +52,17 @@ const PAGE = `(() => {
   pw.reset = () => { pw.input = null; pw.frames = []; pw.long = []; };
 })()`;
 
-const browser = await launch({ size });
+const attached = opt("--attach");
+const browser = attached ? { port: Number(attached), stop: () => {} } : await launch({ size });
 const c = await attach(browser.port);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
-await viewport(c, size);
+if (!attached || args.includes("--size")) await viewport(c, size);
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: PAGE });
 
 const results = [];
 const js = (e) => c.js(e);
+const byId = (id) => `.tf-pw-node[data-id="${id.replace(/["\\]/g, "\\$&")}"]`;
 const rect = async (sel, i = 0) => js(`(() => { const e = document.querySelectorAll(${JSON.stringify(sel)})[${i}]; if (!e) return null; e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
 async function click(xy) {
   const [x, y] = xy;
@@ -69,6 +77,11 @@ async function key(k, text = null) {
   await c.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, windowsVirtualKeyCode: code });
 }
 const record = (throttle, name, ms, line, extra = {}) => {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+    results.push({ throttle, name, ms: null, line, ok: false, note: "not shown within 10 s", ...extra });
+    console.log(`${throttle}x ${name.padEnd(36)}     - ms  line ${line}  OVER  not shown within 10 s`);
+    return;
+  }
   const ok = ms <= line;
   results.push({ throttle, name, ms: Math.round(ms * 10) / 10, line, ok, ...extra });
   console.log(`${throttle}x ${name.padEnd(36)} ${String(Math.round(ms)).padStart(5)} ms  line ${line}  ${ok ? "ok" : "OVER"}${extra.note ? `  ${extra.note}` : ""}`);
@@ -103,23 +116,22 @@ for (const throttle of throttles) {
   await sleep(600);
 
   // Folder presses: the biggest folders the tree shows, by their totals.
-  const big = await js(`[...document.querySelectorAll(".tf-pw-node")].map((n, i) => [i, Number(n.querySelector(".tf-pw-n")?.textContent.replace(/\\D/g, "") || 0), n.querySelector(".tf-pw-nm")?.textContent.trim()]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(1, 4)`);
-  for (const [i, n, name] of big) {
+  const big = await js(`[...document.querySelectorAll(".tf-pw-node")].map((n) => [n.dataset.id, Number(n.querySelector(".tf-pw-n")?.textContent.replace(/\\D/g, "") || 0), n.querySelector(".tf-pw-nm")?.textContent.trim()]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(1, 4)`);
+  for (const [id, n, name] of big) {
     await js("__pw.reset()");
-    const at = await rect(".tf-pw-node", i);
+    const at = await rect(byId(id));
     const shown = js(`__pw.until(() => [...document.querySelectorAll("h1")].some((h) => h.textContent.trim() === ${JSON.stringify(name)}))`);
     await click(at);
     record(throttle, `folder ${name} (${n})`, await shown, LINES.act[throttle]);
     await sleep(400);
   }
   // The 610-entry folder, found by its total wherever it nests: open its parents by key, then press it.
-  const deep = await js(`(() => { const n = [...document.querySelectorAll(".tf-pw-node")].find((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); return n ? n.querySelector(".tf-pw-nm").textContent.trim() : null; })()`);
+  const deep = await js(`(() => { const n = [...document.querySelectorAll(".tf-pw-node")].find((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); return n ? { id: n.dataset.id, name: n.querySelector(".tf-pw-nm").textContent.trim() } : null; })()`);
   if (deep) {
     await js("__pw.reset()");
-    const i = await js(`[...document.querySelectorAll(".tf-pw-node")].findIndex((e) => e.querySelector(".tf-pw-nm")?.textContent.trim() === ${JSON.stringify(deep)})`);
-    const shown = js(`__pw.until(() => [...document.querySelectorAll("h1")].some((h) => h.textContent.trim() === ${JSON.stringify(deep)}))`);
-    await click(await rect(".tf-pw-node", i));
-    record(throttle, `folder ${deep} (6xx)`, await shown, LINES.act[throttle]);
+    const shown = js(`__pw.until(() => [...document.querySelectorAll("h1")].some((h) => h.textContent.trim() === ${JSON.stringify(deep.name)}))`);
+    await click(await rect(byId(deep.id)));
+    record(throttle, `folder ${deep.name} (6xx)`, await shown, LINES.act[throttle]);
     await sleep(400);
   } else {
     results.push({ throttle, name: "folder 6xx", note: "not on screen in the tree's first rows" });
