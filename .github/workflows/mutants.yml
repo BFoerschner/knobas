@@ -15,6 +15,11 @@
 name: mutants
 
 on:
+  # A dispatch needs the file on the default branch, which the gate does not touch; so a push to this one branch, which
+  # exists only to start this run (the gate pushes the head it wants mutated there), starts it too. Never ux-polish or
+  # main, never a pull request: light CI stays light.
+  push:
+    branches: [ux30-gate-mutants]
   workflow_dispatch:
     inputs:
       base:
@@ -91,7 +96,7 @@ jobs:
       - name: Mutants
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          BASE: ${{ inputs.base }}
+          BASE: ${{ inputs.base || 'v3.2.9-ux28' }}
           CRATES: ${{ matrix.crate }}
           SHARD: ${{ matrix.shard }}
         run: |
@@ -136,7 +141,7 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          BASE: ${{ inputs.base }}
+          BASE: ${{ inputs.base || 'v3.2.9-ux28' }}
         run: |
           git diff "$BASE"..HEAD -- crates > "$RUNNER_TEMP/changed.diff"
           if [ "$RUNNER_OS" = macOS ]; then site="-f crates/knobas-site/src/mac.rs"; else site="-f crates/knobas-site/src/win.rs"; fi
