@@ -98,13 +98,17 @@ That was the pass after the move in the drop's task. Run over the old echoes, it
 a laned drop laid the board over four times in its own task (instrumented build, 1x); a carry that dropped a focused
 card did the same in the page's tests.
 
-The teardown now reads the keys and span the window last worked out, kept as plain values beside its deriveds: the same
-answer (a row the list no longer holds is gone; one outside the span is held), and nothing reactive runs while effects
-are destroyed. One pass a drop, held by a test that fails on the old teardown (4 passes) and passes on the new (1).
+The teardown now first asks the keys the window last worked out, kept as a plain value beside its derived: a row whose
+key they no longer hold has left the list (a card dropped in another column, a filter), and nothing is held for it, as
+before, with nothing reactive read. Only a row still in the list goes on to the old question of the window's span. A
+first version answered that question from plain copies of the span too, and the Files tree's focus changed with it: in
+a batch the destroyed effects saw the span before the scroll, so a row scrolled away never had the list take its focus
+and the tree took it itself; the copies held the span after it, and the list took focus first (light CI, 697f447f).
+One pass a drop, held by a test that fails on the old teardown (4 passes) and passes on the new (1).
 
 Measured on the Mac's headless Chrome (load 3 to 4), the parent (044c4708) and the fix alternated, two rounds each, the
-`lanes` case at 1440 x 868: drop median 69.0 and 68.5 ms at 4x before, 46.4 and 46.9 after; at 6x 107.2 and 107.3
-before, 73.8 and 76.5 after; the first drop at 4x 94.8 and 92.8 before, 65.0 and 65.3 after. The forced style and
+`lanes` case at 1440 x 868: drop median 74.2 and 76.3 ms at 4x before, 50.0 and 51.2 after; at 6x 110.4 and 116.6
+before, 87.2 and 84.8 after; the first drop at 4x 96.3 and 113.2 before (over the line once), 64.8 and 72.0 after. The forced style and
 layout inside the first pass is Chromium's own focus fix-up as the focused card's old row is removed; the focus the
 drop gives the moved card needs the same update, so it stays. Owed: the window's numbers on Björn's PC (WSL and the PC
 were taken back before the fix could be measured there).
