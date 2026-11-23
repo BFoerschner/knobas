@@ -91,7 +91,7 @@
 }
 .tf-vw-stub .tf-mono { display: block; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .tf-vw-stub-more { background: none; border-style: dashed; color: var(--ink-2); text-align: center; }
-.tf-vw-mlist { width: 100%; border-collapse: collapse; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-vw-mlist { width: 100%; border-collapse: separate; border-spacing: 0; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-vw-mlist th { text-align: left; color: var(--ink-2); font-weight: 600; padding: 3px 6px; border-bottom: 1px solid var(--rule); }
 .tf-vw-mlist td { padding: 4px 6px; border-bottom: 1px solid var(--rule-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
 .tf-vw-mlist .tf-mono { font-size: calc(var(--t-2xs) * var(--fs)); }

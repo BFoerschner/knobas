@@ -187,6 +187,29 @@ test("a window slot holding knobas's writes no window property, and going back f
   expect(html.attrs.has("data-sel")).toBe(false);
 });
 
+test("an engine whose highlights do not inherit gets data-sel-each once a theme's selection is drawn, and keeps it; asked once", () => {
+  const html = root();
+  let asked = 0;
+  const themes = createThemes(() => memory(), () => html, undefined, { selectionInherits: () => (asked += 1, false) });
+  expect(asked).toBe(0);
+  expect(html.attrs.has("data-sel-each")).toBe(false);
+  themes.chooseApp("dracula");
+  expect(html.attrs.get("data-sel")).toBe("dark");
+  expect(html.attrs.has("data-sel-each")).toBe(true);
+  themes.chooseApp("knobas-dark");
+  themes.chooseApp("dracula");
+  expect(html.attrs.has("data-sel-each")).toBe(true);
+  expect(asked).toBe(1);
+});
+
+test("an engine whose highlights inherit never gets data-sel-each", () => {
+  const html = root();
+  const themes = createThemes(() => memory(), () => html, undefined, { selectionInherits: () => true });
+  themes.chooseApp("dracula");
+  expect(html.attrs.get("data-sel")).toBe("dark");
+  expect(html.attrs.has("data-sel-each")).toBe(false);
+});
+
 test("ten edits in one frame apply once, with the last value, and data-paint moves only on the save", () => {
   vi.useFakeTimers();
   try {

@@ -438,7 +438,7 @@ test("a parser's error that lands late stays inside the room; with nothing drawn
   expect(b.body.querySelector(".tf-stepfail pre")?.textContent).toBe("The diagram worker stopped.");
 });
 
-test("a theme switch draws again in the room the drawing has: a fitted one stays fitted, one at its own size keeps its frame", async () => {
+test("a theme switch draws again in the room the drawing has: a fitted one keeps its frame and its button, as one at its own size does", async () => {
   const html = document.documentElement;
   const dark = async () => {
     html.style.setProperty("--sheet", "#1A2027");
@@ -462,12 +462,19 @@ test("a theme switch draws again in the room the drawing has: a fitted one stays
     draw(b.body, own.port, { actions: b.header });
     await own.land(200, 226);
     const frame = b.frame()!;
+    // A fitted drawing in new colours swaps its picture: its holder, frame and *Show at full size* are the ones
+    // standing, so the page lays nothing out (2026-11-23, `testenv/perf/theme-switch.mjs`).
+    const fittedFrame = a.frame()!;
+    const fittedButton = a.header.querySelector(".tf-dfull");
     await dark();
     expect([fitted.asked.map((request) => request.palette.dark), own.asked.map((request) => request.palette.dark)]).toEqual([[false, true], [false, true]]);
     await fitted.land(200, 226);
     await own.land(200, 226);
     expect([a.frame()!.width, a.frame()!.height, a.body.style.height]).toEqual(["100", "113", "125px"]);
     expect(a.header.querySelectorAll(".tf-dfull")).toHaveLength(1);
+    expect(a.frame()).toBe(fittedFrame);
+    expect(a.header.querySelector(".tf-dfull")).toBe(fittedButton);
+    expect(fittedFrame.srcdoc).toContain('content="dark"');
     expect(b.frame()).toBe(frame);
     expect(frame.srcdoc).toContain('content="dark"');
     // The size it drew at in the light theme is its room in the dark one: an engine is handed the theme as colours.

@@ -171,15 +171,24 @@ a { color: var(--link); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 2px; }
 /* Selected text, where the theme of the side drawn sets a colour for it (`data-sel` on <html> names those sides,
-   `tf/themes.svelte.ts`); elsewhere the system's own highlight draws. One rule for each way a side is drawn. */
+   `tf/themes.svelte.ts`); elsewhere the system's own highlight draws. One rule for each way a side is drawn.
+   The rules name `<html>`'s own `::selection`: where highlights inherit (Chromium, so WebView2), every element's
+   selection takes it from its parent's. A rule naming every element's (`:root[…] ::selection`) made Chromium resolve a
+   selection style for each element on every restyle while it matched, so with a theme's selection on, a slot change
+   or the light and dark toggle cost about 1.8 times what it does without (2026-11-23, `testenv/perf/theme-switch.mjs`).
+   An engine whose highlights do not inherit (WebKit) gets `data-sel-each` as well, and the rules for every element. */
 @media not (prefers-color-scheme: dark) {
-  :root[data-sel~="light"]:not([data-theme="dark"]) ::selection { background: var(--selection); color: var(--ink); }
+  :root[data-sel~="light"]:not([data-theme="dark"])::selection { background: var(--selection); color: var(--ink); }
+  :root[data-sel-each][data-sel~="light"]:not([data-theme="dark"]) ::selection { background: var(--selection); color: var(--ink); }
 }
-:root[data-theme="light"][data-sel~="light"] ::selection { background: var(--selection); color: var(--ink); }
+:root[data-theme="light"][data-sel~="light"]::selection { background: var(--selection); color: var(--ink); }
+:root[data-sel-each][data-theme="light"][data-sel~="light"] ::selection { background: var(--selection); color: var(--ink); }
 @media (prefers-color-scheme: dark) {
-  :root[data-sel~="dark"]:not([data-theme="light"]) ::selection { background: var(--selection); color: var(--ink); }
+  :root[data-sel~="dark"]:not([data-theme="light"])::selection { background: var(--selection); color: var(--ink); }
+  :root[data-sel-each][data-sel~="dark"]:not([data-theme="light"]) ::selection { background: var(--selection); color: var(--ink); }
 }
-:root[data-theme="dark"][data-sel~="dark"] ::selection { background: var(--selection); color: var(--ink); }
+:root[data-theme="dark"][data-sel~="dark"]::selection { background: var(--selection); color: var(--ink); }
+:root[data-sel-each][data-theme="dark"][data-sel~="dark"] ::selection { background: var(--selection); color: var(--ink); }
 /* Where a board's two scrollbars meet: the page's own colour, not a white square. */
 ::-webkit-scrollbar-corner { background: transparent; }
 

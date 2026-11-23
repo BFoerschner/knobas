@@ -23,8 +23,12 @@
 .tf-md .tf-box.tf-on, .tf-doc .tf-box.tf-on { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
 .tf-md .tf-box.tf-on::after, .tf-doc .tf-box.tf-on::after { content: "✓"; }
 .tf-md del { color: var(--ink-2); }
-.tf-md table { border-collapse: collapse; font-size: calc(var(--t-md) * var(--fs)); display: block; overflow-x: auto; background: var(--under); }
-.tf-md th, .tf-md td { border: 1px solid var(--rule); padding: 5px 12px; text-align: left; }
+/* A table's lines are each cell's outline in the 1px between cells, not collapsed borders: Chromium lays a collapsed
+   table out again whenever a border's colour changes, so a theme switch on a page with a table cost layout. The outline
+   is drawn where the collapsed border was, pixel for pixel at 1x and 1.25x, merged and missing cells included, and a
+   colour change only repaints it (2026-11-23, `testenv/perf/theme-switch.mjs`). */
+.tf-md table { border-collapse: separate; border-spacing: 1px; font-size: calc(var(--t-md) * var(--fs)); display: block; overflow-x: auto; background: var(--under); }
+.tf-md th, .tf-md td { outline: 1px solid var(--rule); padding: 5px 12px; text-align: left; }
 .tf-md th { background: var(--sheet-2); font-weight: 600; }
 .tf-md blockquote { border-left: 3px solid var(--rule); padding-left: 12px; color: var(--ink-2); }
 .tf-md hr { border: 0; border-top: 1px solid var(--rule); }

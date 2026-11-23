@@ -149,3 +149,57 @@ The ux29 Windows boot check found the page area wrong until the page's first pai
 | A kept dark look (Dracula's `#21222c`) | `#21222c` from the first frame | the same |
 
 The light side was not tested on Windows: that would have meant changing Björn's system theme. Linux under Xvfb (light, since there is no portal there): a fresh profile was GTK's `#f6f5f4` from 1,233 to 1,781 ms before the fix. After it, `#e4e8ec` showed from the first frame. The mode-follows-system test was the same before and after.
+
+## The switch measured (2026-11-23, the ux30 end gate)
+
+`testenv/perf/theme-switch.mjs` had never given a number. It stopped at "the app wrote no paint cache for Dracula"
+because it moved between pages by changing only the address after `#`, which is a same-document navigation: no
+module ran again, so the slot written to `localStorage` was never read. Its three pages were all the Tickets board, and
+the cold loads were handed a cache encoded twice. The app wrote its cache all along. The probe now loads every page
+afresh through `about:blank`, waits for the page to go idle, counts layout in both directions and holds it to the
+line, and takes `--attach <port>` to drive knobas's own window.
+
+Run to the end, the first paint met its line, and the switch did not:
+
+- **A theme's selected text made every restyle dearer.** The rules `:root[data-sel~=…] ::selection` named every
+  element's selection, so while one matched, Chromium resolved a selection style for each element on every restyle. A
+  slot change to Dracula, and the light and dark toggle with Dracula on, cost about 1.8 times what they cost without
+  it (Tickets at 4x: 40 ms against 23). The rules now name `<html>`'s own `::selection`, which Chromium's highlights
+  inherit, and cost nothing measurable. An engine whose highlights do not inherit (WebKit) is found by one style read
+  the first time a theme's selection is drawn (`theme/selection.ts`) and gets `data-sel-each`, which keeps the rules
+  for every element there.
+- **Tables were laid out again.** Chromium lays a `border-collapse: collapse` table out whenever a border's colour
+  changes. The Markdown and Docs tables and the view editor's list now draw the same lines with separate borders
+  (Docs, the list) or each cell's outline (Markdown, whose table is a block that scrolls), pixel for pixel at 1x and
+  1.25x in both sides, merged cells included.
+- **A fitted diagram was built again.** A diagram fitted into a kept room was given a new holder, frame and *Show at
+  full size* when its drawing came back in the new colours; a drawing of the same size now swaps its picture.
+
+**What the line counts (Fable's ruling, Björn away, 2026-11-23).** A slot change, like the toggle, also draws each
+diagram again: its colours are baked into the drawing, so the sandboxed frame it stands in (the ruling of 2026-10-30 on
+#2255) loads a new document, and that lays the frame's place in the page out (about 20 objects). The line is held in
+two parts. The colours, the properties and `data-sel`, lay nothing out to the end of their frame, counted by CDP's
+`LayoutCount`. The redraw that `data-paint` sets off, followed to its frames' loads, lays nothing out on a page with no
+diagram, and on one with diagrams moves no frame or fence and shifts nothing. Its cost is reported beside the toggle's.
+The time line stays the whole slot change against the toggle plus 10 %. A literal zero with diagrams would need them
+drawn as an `<img>` in the page rather than in the frame, and even then a palette not drawn before lays Mermaid's
+measuring box out in the window's document. That is open for Björn: it reverses the 2026-10-30 ruling for diagrams.
+
+**Measured on the Mac** (headless Chrome 156, load 3 to 4, the parent `6a31a1af` build and the fixed one alternated,
+seven runs a rate, medians; slot change against toggle in ms, then the colours' layouts in 14 switches):
+
+| Page | Size | 1x before | 1x after | 4x before | 4x after | 6x before | 6x after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Tickets | 1440 x 868 | 14 / 12, 0 | 10 / 10, 0 | 43 / 25, 0 | 24 / 24, 0 | 67 / 39, 0 | 38 / 41, 0 |
+| Repository | 1440 x 868 | 6 / 5, 14 | 3 / 4, 0 | 18 / 14, 14 | 14 / 13, 0 | 26 / 20, 14 | 19 / 20, 0 |
+| PR files | 1440 x 868 | 17 / 13, 0 | 13 / 16, 0 | 38 / 26, 0 | 27 / 28, 0 | 58 / 39, 0 | 41 / 42, 0 |
+| Tickets | 2560 x 1440 @ 1.25 | 15 / 13, 0 | 6 / 6, 0 | 52 / 23, 0 | 24 / 24, 0 | 77 / 34, 0 | 36 / 36, 0 |
+| Repository | 2560 x 1440 @ 1.25 | 13 / 8, 14 | 5 / 6, 0 | 28 / 22, 14 | 14 / 13, 0 | 42 / 32, 14 | 18 / 19, 0 |
+| PR files | 2560 x 1440 @ 1.25 | 19 / 18, 0 | 18 / 19, 0 | 48 / 30, 0 | 27 / 28, 0 | 71 / 45, 0 | 41 / 42, 0 |
+
+On the repository page, a redraw after the fix loads its two diagram frames, lays out about once (0.2 to 0.5 ms), moves
+no box and shifts nothing; the toggle's costs the same. The first draw in Dracula is 31 to 32 layouts (about 1.1 ms at
+1x), mostly Mermaid measuring its text. On the other two pages a redraw lays nothing out. The first frame of a cold
+load had Dracula's page colour in 15 of 15 loads at each size, before and after. In WebKit (a windowless `WKWebView` on
+this Mac) the check answers that highlights do not inherit, and with `data-sel-each` a deep element's selection is
+Dracula's; with `<html>`'s rule alone it would be the system's.

@@ -211,8 +211,11 @@ export function drawDiagram(engine: DiagramEngine, code: string, into: HTMLEleme
   let live = true;
   let drawn = "";
   let ask = 0;
-  /** The frame standing in `into`: a drawing, or the empty stand-in of a kept size. `fitted`: inside a kept room. */
-  let box: { iframe: HTMLIFrameElement; w: number; h: number; fitted: boolean } | null = null;
+  /**
+   * The frame standing in `into`: a drawing, or the empty stand-in of a kept size. `fitted`: inside a kept room, the
+   * drawing of `of` (its own size) drawn at `w` by `h`.
+   */
+  let box: { iframe: HTMLIFrameElement; w: number; h: number; fitted: boolean; of?: { w: number; h: number } } | null = null;
   /**
    * The height `into` is kept at, once a drawing or an error landed late. A text drawn again hands its fences the
    * rooms they were kept at (`keepFenceRooms`), so a fitted drawing comes back fitted and nothing under it moves.
@@ -319,7 +322,7 @@ export function drawDiagram(engine: DiagramEngine, code: string, into: HTMLEleme
     const [holder, iframe] = shell(w, h);
     iframe.srcdoc = scale < 1 ? frame.at(w, h) : frame.srcdoc;
     into.replaceChildren(holder);
-    box = { iframe, w, h, fitted: true };
+    box = { iframe, w, h, fitted: true, of: { w: frame.width, h: frame.height } };
     if (scale >= 1 && !cut) return unoffer();
     holder.classList.add(cut ? "tf-dcut" : "tf-dfit");
     holder.addEventListener("click", grow);
@@ -334,10 +337,16 @@ export function drawDiagram(engine: DiagramEngine, code: string, into: HTMLEleme
     full.textContent = cut ? "Show all" : "Show at full size";
   };
 
-  /** A drawing that is in: into the frame of its size already standing, else its own room where that moves nothing, else fitted. */
+  /**
+   * A drawing that is in: into the frame of its size already standing (a fitted one too, where it fitted a drawing of
+   * this size: the same drawing in a theme's new colours swaps its picture and lays nothing out), else its own room
+   * where that moves nothing, else fitted.
+   */
   const place = (frame: SvgFrame) => {
     latest = frame;
     if (box !== null && !box.fitted && box.w === frame.width && box.h === frame.height) box.iframe.srcdoc = frame.srcdoc;
+    else if (box?.of !== undefined && box.of.w === frame.width && box.of.h === frame.height)
+      box.iframe.srcdoc = box.w < frame.width || box.h < frame.height ? frame.at(box.w, box.h) : frame.srcdoc;
     // In the call's own task nothing of the text is drawn yet, so the block takes its own size, unless its room came kept.
     else if (first ? lockedAt === null : free()) own(frame);
     else fit(frame);

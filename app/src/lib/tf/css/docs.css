@@ -125,8 +125,12 @@
 .tf-doc pre code { font: inherit; font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; border-radius: 0; }
 /* A table scrolls sideways inside its frame, so a wide one never widens the page (#2436). */
 .tf-doc-tbl { overflow-x: auto; background: var(--paper); margin: 0 0 18px; }
-.tf-doc table { border-collapse: collapse; width: 100%; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-md) * var(--fs)); line-height: 1.45; }
-.tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
+/* Separate borders, each cell's left and top and the table's right and bottom, not collapsed ones: Chromium lays a
+   collapsed table out again whenever a border's colour changes, so a theme switch cost layout. Every column keeps the
+   collapsed one's extra pixel, so a full-width table shares its width out as before, pixel for pixel at 1x and 1.25x;
+   a row with fewer cells than the table's is closed by the table's own edge (2026-11-23, `testenv/perf/theme-switch.mjs`). */
+.tf-doc table { border-collapse: separate; border-spacing: 0; border: solid var(--rule); border-width: 0 1px 1px 0; width: 100%; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-md) * var(--fs)); line-height: 1.45; }
+.tf-doc th, .tf-doc td { border: solid var(--rule); border-width: 1px 0 0 1px; padding: 7px 10px; text-align: left; vertical-align: top; }
 .tf-doc th { background: var(--sheet-2); font-weight: 600; }
 /* A cell holds blocks (#2436): they keep their gaps between them, none after the last. */
 .tf-doc :is(th, td) > :last-child { margin-bottom: 0; }

@@ -7,7 +7,8 @@
  * for a window theme that is not knobas's own, every colour as `--<token>-<side>` (`tf/css/tokens.css` reads them,
  * `-light` in `:root` and `-dark` in the dark blocks, knobas's own values behind them); for a code theme, its roles
  * as `--hl-<role>-<side>`, the diff's colours it sets and whether comments slant. A window that is all knobas's writes
- * nothing. `data-sel` names the sides whose theme sets selected text, `data-paint` counts the changes a diagram draws
+ * nothing. `data-sel` names the sides whose theme sets selected text (and `data-sel-each` marks an engine whose
+ * highlights do not inherit, `theme/selection.ts`), `data-paint` counts the changes a diagram draws
  * again for, and `knobas.paint` keeps what was written for the head's script (`public/theme-boot.js`), so the first
  * paint has the theme.
  *
@@ -22,6 +23,7 @@ import { type Colours, derive } from "./theme/app-derive";
 import { unreadable } from "./theme/app-check";
 import { APP_KEYS } from "./theme/app-roles";
 import { BUILTINS, DEFAULT_THEME } from "./theme/builtins";
+import { selectionInherits } from "./theme/selection";
 import { hasApp, hasCode, MOST_THEMES, ownId, readThemes, uniqueName, type DiffKey, type ImportedTheme, type Theme, type ThemeKind } from "./theme/themes";
 
 export const SLOT_KEY: Record<ThemeKind, string> = { light: "knobas.theme.light", dark: "knobas.theme.dark" };
@@ -233,6 +235,11 @@ export interface ThemeOptions {
   defaultTheme?: boolean;
   /** What is told once at start: a slot whose theme cannot be read and was not kept draws knobas's. */
   onUnreadable?: (theme: Theme, kind: ThemeKind) => void;
+  /**
+   * Whether the engine's highlights inherit (`theme/selection.ts`), asked the first time a theme's selection is drawn;
+   * where they do not, `<html>` gets `data-sel-each` for good. Unset: they inherit.
+   */
+  selectionInherits?: () => boolean;
 }
 
 export function createThemes(storage: () => KeptStorage | null, root: () => ThemeRoot | null, timers: ThemeTimers = defaultTimers, options: ThemeOptions = {}): Themes {
@@ -273,6 +280,8 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   let trialTimer: ReturnType<typeof setTimeout> | null = null;
   let framed = false;
   let paint = 0;
+  /** Whether the engine's highlights inherit, once asked. */
+  let inherits: boolean | null = null;
 
   const find = (id: string) => BUILTINS.find((t) => t.id === id) ?? own.find((t) => t.id === id);
   const knobas = (kind: ThemeKind) => find(DEFAULT_THEME[kind])!;
@@ -335,7 +344,13 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
           else html.style.setProperty(property, value);
         }
       if (sel.length === 0) html.removeAttribute("data-sel");
-      else html.setAttribute("data-sel", sel.join(" "));
+      else {
+        if (inherits === null) {
+          inherits = options.selectionInherits?.() ?? true;
+          if (!inherits) html.setAttribute("data-sel-each", "");
+        }
+        html.setAttribute("data-sel", sel.join(" "));
+      }
     }
     // The run started with knobas's own themes keeps the cache as it was, for the next start.
     if (defaultTheme) return;
@@ -625,4 +640,5 @@ export const unreadableAtStart: { theme: Theme; kind: ThemeKind }[] = [];
 export const themes: Themes = createThemes(windowStorage, () => (typeof document === "undefined" ? null : document.documentElement), defaultTimers, {
   defaultTheme: startedDefault,
   onUnreadable: (theme, kind) => unreadableAtStart.push({ theme, kind }),
+  selectionInherits: () => selectionInherits(),
 });
