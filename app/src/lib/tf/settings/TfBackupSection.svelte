@@ -332,7 +332,9 @@
         <label class="tf-ck"><input type="checkbox" bind:checked={parts[tick.part]} /> {tick.label}</label>
       {/each}
     </div>
-    <div class="tf-stg-acts">
+    <!-- Held with the ticks: on a profile with every tick they wrap to a second row once drawn, which pushed these down
+         26 px after they drew (the ux30 end gate's just moves --real). -->
+    <div class="tf-stg-acts" class:tf-hidden={ticksRead < 4}>
       <button class="tf-btn tf-sm tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => choose("share")}>Import…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>

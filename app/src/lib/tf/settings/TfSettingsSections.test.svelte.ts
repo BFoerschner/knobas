@@ -499,6 +499,19 @@ test("the ticks draw once all four of their reads have answered, so a late one's
   expect([...checks.querySelectorAll("label")].map((el) => el.textContent?.trim())).toContain("Ticket views");
 });
 
+test("the share buttons wait with the ticks, so ticks that wrap to a second row can't push them down (ux30 end gate)", async () => {
+  // On the scale copy every tick is there, they wrap to a second row once drawn, and the buttons under them dropped
+  // 26 px after they drew (just moves --real, settings-backup, first open and return).
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  await open("backup", sectionPorts({ ticketViews: vi.fn(async () => (await late, [{ id: "my-work" }])) }));
+  const acts = target.querySelector(".tf-stg-sec .tf-stg-acts")!;
+  expect(acts.classList.contains("tf-hidden"), "held while the ticks' reads are out").toBe(true);
+  answer();
+  await settle();
+  expect(acts.classList.contains("tf-hidden")).toBe(false);
+});
+
 test("a ticket view draws its tick, on by default (#812)", async () => {
   const p = await open("backup", sectionPorts({ ticketViews: vi.fn(() => Promise.resolve([{ id: "my-work" }])) }));
   expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Ticket views");
