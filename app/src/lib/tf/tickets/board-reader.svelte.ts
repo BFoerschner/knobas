@@ -197,8 +197,13 @@ export interface BoardReader {
   resort(): void;
   chooseLayout(layout: "board" | "list"): void;
   chooseLanes(lanes: LaneField): void;
-  /** Reads now, with no pause: a sync's re-read, which keeps the drawn cards where they are (`asked` stays). */
-  refresh(): void;
+  /**
+   * Reads now, with no pause: a sync's re-read, which keeps the drawn cards where they are (`asked` stays). `sorts`: the
+   * runs the person's own *Sync now* started have ended, so the answer that lands sorts the cards again as their own read
+   * does, and what the runs brought draws where it sorts, not behind *Show N new* (the ux30 end gate). It holds until an
+   * answer of this scope lands, so a later sync's read that overtakes it still sorts.
+   */
+  refresh(sorts?: boolean): void;
   /** Stops the pause and drops every answer still out. */
   close(): void;
 }
@@ -314,6 +319,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
   let pausing: ReturnType<typeof setTimeout> | undefined;
   /** Board reads sent and not yet answered. */
   let out = 0;
+  /** A *Sync now*'s end: the next board answer, or the list's next first page where it pages, sorts as the person's read does. */
+  let sortBoard = false;
+  let sortRows = false;
   /** The read words typed while a read was out wait to make: made once it answers, with the words as they are then. */
   let queued: (() => void) | null = null;
   /** The list's whole read after its quick one, once the keys have paused ({@link LIST_SETTLE_MS}). */
@@ -468,7 +476,8 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         if (mine !== rowsReading) return;
         rows = inOrder(answer);
         state.drawn = sent;
-        if (byPerson) state.asked += 1;
+        if (byPerson || sortRows) state.asked += 1;
+        sortRows = false;
       })
       .catch((error: unknown) => {
         if (mine === rowsReading) state.failed = messageOf(error);
@@ -521,8 +530,10 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
         // A quick answer that holds every card of every column is the whole read already: none follows it.
         if (quick && drawn.columns.every((column) => column.cards.length >= column.total)) clearTimeout(settling);
         state.failed = null;
-        // A read the person caused (a filter, *Show more*, lanes) sorts the cards again; a sync's does not (`held-order`).
-        if (byPerson) state.asked += 1;
+        // A read the person caused (a filter, *Show more*, lanes, their *Sync now*) sorts the cards again; a sync's does not
+        // (`held-order`). Where the list pages, its own first page sorts it (`sortRows`), never the counts' read before it.
+        if (byPerson || sortBoard) state.asked += 1;
+        sortBoard = false;
         if (query === base) state.total = sum(drawn);
         then?.();
       })
@@ -612,6 +623,9 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       state.drawn = state.filter;
       rows = null;
       rowsReading += 1;
+      // Another scope is the person's own read: nothing a sync asked for carries over.
+      sortBoard = false;
+      sortRows = false;
       paging.clear();
       readThrough.clear();
       if (scope.base === null) return;
@@ -763,7 +777,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
       readThrough.clear();
       read();
     },
-    refresh: () => {
+    refresh: (sorts = false) => {
+      if (sorts) {
+        if (paged()) sortRows = true;
+        else sortBoard = true;
+      }
       read(false, false);
       readRows(false);
     },

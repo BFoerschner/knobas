@@ -100,6 +100,12 @@ export interface TfPageContext {
 export interface RoleFrameProps {
   sync?: Snippet;
   syncRevision?: number;
+  /**
+   * Moves only when the runs the person's own *Sync now* started have all ended (`syncRevision` moves then too): a
+   * view that holds its rows still (`held-order`) sorts again on it, since the press was the person's act (the ux30
+   * end gate). Held while the page is hidden, as `syncRevision` is.
+   */
+  syncAsked?: number;
 }
 
 /** One registered page, its types erased once {@link definePage} checked them. */
