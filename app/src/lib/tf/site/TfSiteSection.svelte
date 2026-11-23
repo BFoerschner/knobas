@@ -211,11 +211,12 @@
       <div class="tf-stg-l">Saved sign-in<small>Typed into {name}'s own sign-in page</small></div>
       <div class="tf-stg-c">
         {#if setting.sign_in_user}
-          <span>Saved for <span class="tf-mono">{setting.sign_in_user}</span>, never shown</span>
+          <!-- A service account's long name breaks inside the row (the ux30 end gate's long-paths). -->
+          <span class="tf-wrapall">Saved for <span class="tf-mono">{setting.sign_in_user}</span>, never shown</span>
           <button class="tf-btn tf-sm" disabled={saving} onclick={openSignIn}>Change…</button>
           <button class="tf-btn tf-sm tf-ghost" disabled={saving} onclick={removeSignIn}>Remove</button>
         {:else if setting.own_sign_in?.on}
-          <span>Same as {name}'s credential, <span class="tf-mono">{setting.own_sign_in.user}</span></span>
+          <span class="tf-wrapall">Same as {name}'s credential, <span class="tf-mono">{setting.own_sign_in.user}</span></span>
           <button class="tf-btn tf-sm" disabled={saving || !setting.offered} onclick={openSignIn}>Use another…</button>
           <button class="tf-btn tf-sm tf-ghost" disabled={saving} onclick={() => ownSignIn(false)}>Turn off</button>
         {:else if setting.own_sign_in}

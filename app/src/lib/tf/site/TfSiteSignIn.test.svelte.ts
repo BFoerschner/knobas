@@ -172,6 +172,14 @@ test("Settings saves a sign-in from the dialog, then names it and never shows th
   expect(document.body.innerHTML).not.toContain("s3cr3t");
 });
 
+test("a long account name breaks inside its box instead of running past it (the ux30 end gate's long-paths)", () => {
+  // `long-paths.mjs` settings-site-signin: a service account's 85-character name ran 293 px past the row at every size.
+  store.holdOne({ ...SETTING, sign_in_user: "tidewater.confluence-service-account-with-a-long-name@payments.platform.tidewater.example" });
+  section();
+  const name = [...target.querySelectorAll(".tf-stg-row .tf-mono")].find((el) => el.textContent?.includes("service-account"))!;
+  expect(name.closest(".tf-wrapall"), "the saved name's run may break anywhere").not.toBeNull();
+});
+
 test("Change opens the dialog with the name and an empty password; Remove removes", async () => {
   store.holdOne({ ...SETTING, sign_in_user: "knobas" });
   section();
