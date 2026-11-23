@@ -67,8 +67,97 @@ pub async fn install_from(archive: &Path) -> Result<bool, DbError> {
     unpack(archive, &version_dir()).await
 }
 
+/// Make every unpack of a theseus archive keep the archive's hard links,
+/// whether it is [`install_from`]'s or the download `EmbeddedDb::start` falls
+/// back to. Called before either can run; registering twice is harmless, and
+/// this registers once.
+///
+/// `postgresql_archive` 0.21's extractor writes files, directories and
+/// symlinks, and skips hard links. theseus's 18.6.1 Linux build, which knobas
+/// runs there (`PG_VERSION_REQ`), stores 257 of its time zones as hard links,
+/// `UTC` among them, so without this the server refuses knobas's
+/// `TimeZone=UTC` ("invalid value for parameter"). 0.22 keeps them, and also
+/// rewrites the command builders knobas's start depends on (the `-F` before
+/// `-c fsync=on`, see `Cargo.toml`), so it waits for its own change.
+pub(crate) fn keep_hard_links() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Newer registrations are tried first, so this one wins for theseus's
+        // URL. The registry's lock is only poisoned by a panic inside it.
+        let registered = postgresql_archive::extractor::registry::register(
+            |url| Ok(url.starts_with(postgresql_archive::configuration::theseus::URL)),
+            extract_keeping_hard_links,
+        );
+        if let Err(error) = registered {
+            tracing::warn!(%error, "could not register the extractor that keeps hard links");
+        }
+    });
+}
+
+/// The crate's own theseus extractor, then the archive's hard links laid next
+/// to it.
+/// It has the registry's `ExtractFn` shape, `&Vec<u8>` and all.
+fn extract_keeping_hard_links(
+    bytes: &Vec<u8>,
+    directories: &postgresql_archive::extractor::ExtractDirectories,
+) -> postgresql_archive::Result<Vec<PathBuf>> {
+    let mut files = postgresql_archive::configuration::theseus::extract(bytes, directories)?;
+    // The directory the theseus extractor renamed the unpack to.
+    let into = directories.get_path(".")?;
+    files.extend(link_hard_links(bytes, &into)?);
+    Ok(files)
+}
+
+/// Lay each hard link in the `.tar.gz` `bytes` into `into`, which holds the
+/// archive already unpacked without them: a link to the file it names, or a
+/// copy where the filesystem has no hard links. The top-level directory is
+/// stripped as the extractor strips it. A link that is there already, whose
+/// file is not, or whose path leaves `into` is passed over.
+fn link_hard_links(bytes: &[u8], into: &Path) -> std::io::Result<Vec<PathBuf>> {
+    /// `top/a/b` as `a/b`, or `None` for anything that is not plain names.
+    fn inside(path: &Path) -> Option<PathBuf> {
+        let mut parts = path.components();
+        parts.next()?;
+        let rest: PathBuf = parts
+            .map(|part| match part {
+                std::path::Component::Normal(name) => Some(name),
+                _ => None,
+            })
+            .collect::<Option<_>>()?;
+        (!rest.as_os_str().is_empty()).then_some(rest)
+    }
+
+    let mut made = Vec::new();
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    for entry in archive.entries()? {
+        let entry = entry?;
+        if entry.header().entry_type() != tar::EntryType::Link {
+            continue;
+        }
+        let Some(link) = inside(&entry.path()?) else {
+            continue;
+        };
+        let Some(original) = entry.link_name()?.and_then(|name| inside(&name)) else {
+            continue;
+        };
+        let (link, original) = (into.join(link), into.join(original));
+        if link.symlink_metadata().is_ok() || !original.is_file() {
+            continue;
+        }
+        if let Some(parent) = link.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if std::fs::hard_link(&original, &link).is_err() {
+            std::fs::copy(&original, &link)?;
+        }
+        made.push(link);
+    }
+    Ok(made)
+}
+
 /// [`install_from`], into `version_dir`.
 async fn unpack(archive: &Path, version_dir: &Path) -> Result<bool, DbError> {
+    keep_hard_links();
     let started = std::time::Instant::now();
     let (from, into) = (archive.to_path_buf(), version_dir.to_path_buf());
     // The extractor is synchronous under its `async fn`: it inflates and
@@ -164,9 +253,66 @@ mod tests {
 
     #[test]
     fn the_archive_is_named_after_the_pinned_version() {
-        assert_eq!(pinned_version(), "18.6.0");
-        assert_eq!(archive_name(), "postgresql-18.6.0.tar.gz");
-        assert!(version_dir().ends_with("postgresql/18.6.0"));
+        // theseus's 18.6.1 carries its libraries on Linux; macOS and Windows
+        // are still on 18.6.0 (`PG_VERSION_REQ`).
+        let want = if cfg!(target_os = "linux") {
+            "18.6.1"
+        } else {
+            "18.6.0"
+        };
+        assert_eq!(pinned_version(), want);
+        assert_eq!(archive_name(), format!("postgresql-{want}.tar.gz"));
+        assert!(version_dir().ends_with(format!("postgresql/{want}")));
+    }
+
+    /// A hard link in the archive is in the install too. theseus's 18.6.1
+    /// keeps `share/timezone/UTC` as one, and `postgresql_archive` 0.21 alone
+    /// drops it: the server then refuses `TimeZone=UTC` and knobas never
+    /// starts. A link whose path would leave the install is not followed.
+    #[tokio::test]
+    async fn a_hard_link_in_the_archive_is_unpacked_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = archive_of(dir.path(), |tar| {
+            for directory in ["top/", "top/share/", "top/share/timezone/"] {
+                let mut header = tar::Header::new_gnu();
+                header.set_entry_type(tar::EntryType::Directory);
+                header.set_size(0);
+                header.set_mode(0o755);
+                header.set_cksum();
+                tar.append_data(&mut header, directory, std::io::empty())
+                    .unwrap();
+            }
+            let body = b"TZif2 UTC";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, "top/share/timezone/UCT", &body[..])
+                .unwrap();
+            for (link, to) in [
+                ("top/share/timezone/UTC", "top/share/timezone/UCT"),
+                ("top/share/timezone/Etc/UTC", "top/share/timezone/UCT"),
+                ("top/share/timezone/away", "top/../../outside"),
+            ] {
+                let mut header = tar::Header::new_gnu();
+                header.set_entry_type(tar::EntryType::Link);
+                header.set_size(0);
+                header.set_mode(0o644);
+                tar.append_link(&mut header, link, to).unwrap();
+            }
+        });
+        let into = dir.path().join("install").join(pinned_version());
+
+        assert!(unpack(&archive, &into).await.unwrap());
+
+        let zones = into.join("share").join("timezone");
+        assert_eq!(std::fs::read(zones.join("UTC")).unwrap(), b"TZif2 UTC");
+        assert_eq!(
+            std::fs::read(zones.join("Etc").join("UTC")).unwrap(),
+            b"TZif2 UTC"
+        );
+        assert!(!zones.join("away").exists());
+        assert!(!dir.path().join("outside").exists());
     }
 
     /// The archive's own top-level directory is not part of the install, and
@@ -326,7 +472,7 @@ mod tests {
         }
         let said = error.to_string();
         assert!(
-            said.contains("PostgreSQL 18.6.0 is not installed"),
+            said.contains(&format!("PostgreSQL {} is not installed", pinned_version())),
             "{said}"
         );
         assert!(

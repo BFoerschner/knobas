@@ -129,22 +129,40 @@ mod tests {
         );
     }
 
-    /// The pin file names one archive per release target, all of the version
-    /// `knobas-db` runs: a pin moved in one place alone would stage an
-    /// archive the app never looks for.
+    /// The pin file names one archive per release target, each of the version
+    /// `knobas-db` runs on that platform: a pin moved in one place alone would
+    /// stage an archive the app never looks for. This build's own target is
+    /// checked against its pin; the others are held to the same PostgreSQL
+    /// (18.6), since only theseus's build number may differ between them.
     #[test]
     fn the_pinned_archives_are_of_the_version_knobas_runs() {
         let pins = include_str!("../postgresql/archives.sha256");
         let version = knobas_db::install::pinned_version();
+        let release = version.rsplit_once('.').expect("a three-part version").0;
+        let this_os = if cfg!(target_os = "linux") {
+            "-linux-"
+        } else if cfg!(target_os = "macos") {
+            "-apple-darwin"
+        } else {
+            "-windows-"
+        };
         let mut targets = Vec::new();
         for line in pins.lines().filter(|line| !line.starts_with('#')) {
             let (hash, name) = line.split_once("  ").expect("`<sha256>  <file>` per line");
             assert_eq!(hash.len(), 64, "{line}");
             assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()), "{line}");
-            let target = name
-                .strip_prefix(&format!("postgresql-{version}-"))
+            let (build, target) = name
+                .strip_prefix(&format!("postgresql-{release}."))
                 .and_then(|rest| rest.strip_suffix(".tar.gz"))
-                .unwrap_or_else(|| panic!("{name} is not an archive of PostgreSQL {version}"));
+                .and_then(|rest| rest.split_once('-'))
+                .unwrap_or_else(|| panic!("{name} is not an archive of PostgreSQL {release}"));
+            if target.contains(this_os) {
+                assert_eq!(
+                    format!("{release}.{build}"),
+                    version,
+                    "{name} is this platform's archive, and knobas runs {version} here"
+                );
+            }
             targets.push(target);
         }
         targets.sort_unstable();
