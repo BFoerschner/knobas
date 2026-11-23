@@ -3,7 +3,7 @@
 //
 //   node testenv/perf/card-drag.mjs --app <url> --out <file.json> [--throttle 1,4,6] [--repeat 8] [--size WxH@s]
 //                                   [--cases small,forty,open,typed,full,lanes] [--check budget-keys.json]
-//                                   [--attach <port>] [--trace <prefix>]
+//                                   [--attach <port>] [--trace <prefix>] [--hz <n>]
 //
 // <url> is the built app on the fixture, `?fake-ipc&fake-scale#/tickets`. The cases, with the cards each draws at
 // 1440 x 868 and at 2560 x 1440 @1.25 (measured 2026-11-23):
@@ -25,6 +25,8 @@
 //   drop    from the release to the frame after the card stands in its new column with its write chip, painted
 //   key     from `s`, each `→` and `Enter` to the frame after it, painted
 //   move    each `pointermove` while held to its frame (no frame over 34 ms at 4x on a board as it opens)
+// The glide is eight moves 16 ms apart; `--hz <n>` glides at a display's rate instead, a move every 1000/n ms over the
+// same 128 ms (the ux30 end gate measured knobas's window on Björn's PC idling at about 170 Hz, 2026-11-23).
 // The median of the rounds is the case's number, and the first drop after the page opened is held to the drop's line
 // too; the lines are budget-keys.json's `drag`.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -44,6 +46,8 @@ const check = opt("--check");
 // CPU profile) to `<prefix>-<case>-<rate>x.json`, for what a pickup, a move and a drop cost. `CARD_DRAG_INVALIDATIONS=1`
 // adds what invalidated style and layout; `CARD_DRAG_CATEGORIES=a,b` adds categories of its own (`fonts` found the ✕).
 const trace = opt("--trace");
+const hz = opt("--hz") === null ? null : Number(opt("--hz"));
+const glide = hz === null ? { steps: 8, every: 16 } : { steps: Math.max(8, Math.round(0.128 * hz)), every: 1000 / hz };
 
 // The page half, on every document before the app's own scripts: the input's times, and a frame clock that reports
 // the frame after a change painted (a task queued from inside the frame's callback runs after it painted).
@@ -82,7 +86,9 @@ await c.send("Page.enable");
 await c.send("Runtime.enable");
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: PAGE });
-await viewport(c, size);
+// Attached, the window keeps its own size unless `--size` is given (a full-screen run measured 1440 x 868 before).
+if (!opt("--attach") || args.includes("--size")) await viewport(c, size);
+else size.name = await c.js("`${innerWidth}x${innerHeight}@${devicePixelRatio}`");
 const js = c.js;
 const tracing = tracer(c);
 const mouse = (type, x, y, down = false) => c.send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", buttons: down ? 1 : 0, clickCount: type === "mouseMoved" ? 0 : 1, pointerType: "mouse" });
@@ -178,9 +184,9 @@ async function round() {
     await mouse("mouseReleased", at.x + 9, at.y + 3);
     throw new Error(`${at.id}: no column of its lane takes it with one status (${seen})`);
   }
-  for (let i = 1; i <= 8; i++) {
-    await mouse("mouseMoved", at.x + ((to.tx - at.x) * i) / 8, at.y + ((to.ty - at.y) * i) / 8, true);
-    await sleep(16);
+  for (let i = 1, t0 = Date.now(); i <= glide.steps; i++) {
+    await mouse("mouseMoved", at.x + ((to.tx - at.x) * i) / glide.steps, at.y + ((to.ty - at.y) * i) / glide.steps, true);
+    await sleep(Math.max(0, t0 + i * glide.every - Date.now()));
   }
   await sleep(80);
   await js(`window.__dragWatch(${JSON.stringify(at.id)}, ${JSON.stringify(to.status)}), true`);
@@ -233,7 +239,7 @@ for (const kase of cases) {
   }
 }
 await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-writeFileSync(out, JSON.stringify({ size: size.name, results }, null, 1));
+writeFileSync(out, JSON.stringify({ size: size.name, hz, results }, null, 1));
 browser.stop();
 
 let failed = 0;

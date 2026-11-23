@@ -82,8 +82,7 @@ export type Handlers = { [K in keyof Answers]?: (args: Record<string, unknown>) 
  */
 interface Listener {
   event: string;
-  callback: (payload: unknown) => void;
-  /** The callback's id (`transformCallback`), dropped with the listener. */
+  /** The callback's id (`transformCallback`), run on an emit and dropped with the listener. */
   handler: number;
 }
 
@@ -93,16 +92,74 @@ export interface FakeBridge {
   emit(event: string, payload: unknown): void;
 }
 
+/** The part of a real Tauri window's internals the fake answers through (`scripts/core.js` of tauri 2). */
+interface TauriInternals {
+  runCallback(id: number, data: unknown): void;
+  unregisterCallback(id: number): void;
+}
+
 let nextCallbackId = 0;
 let nextEventId = 0;
 
 /**
+ * A real Tauri window's internals, or `null` in a plain browser.
+ *
+ * Tauri's first script defines `window.__TAURI_INTERNALS__` with `Object.defineProperty` and a value only, so in its
+ * own window the property can be neither replaced nor deleted, and `invoke`, `transformCallback` and `ipc` on it are
+ * read-only too. Redefining it there throws, and before the ux30 end gate (2026-11-23) that throw ended `App.svelte`'s
+ * start before `lifecycle.start()`: the KNOBAS_PERF build served into knobas's own WebView2 window under `?fake-ipc`
+ * stayed on *Starting the local database* for good.
+ */
+function lockedTauri(): TauriInternals | null {
+  const held = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__");
+  return held !== undefined && !held.configurable ? (held.value as TauriInternals) : null;
+}
+
+/**
+ * The URL a real window's `invoke` posts each command to: `http://ipc.localhost/<cmd>` on Windows (or `https://` with
+ * Tauri's https scheme), `ipc://localhost/<cmd>` on macOS and Linux (`convertFileSrc(cmd, "ipc")`).
+ */
+const IPC_URL = /^(?:https?:\/\/ipc\.localhost|ipc:\/\/localhost)\/([^?#]*)/;
+
+/**
+ * Answer a real Tauri window's commands from the fixture (`?fake-ipc` served into knobas's own window, the ux30 end
+ * gate): Tauri's `invoke` is read-only there, but it reaches its backend through the page's own `fetch`, a POST to
+ * {@link IPC_URL} carrying the ids of its two callbacks. That `fetch` is answered here: the fixture's answer goes to the
+ * callback the way Tauri's own response handler hands it on (`runCallback`), as the object itself rather than a JSON
+ * round trip, so a page does the same work in the window as in Chrome over the same fixture. The `fetch` itself never
+ * settles, so Tauri never reads a response and never falls back to `window.ipc.postMessage`: no command reaches the
+ * real backend. Every other request goes out as before.
+ */
+function answerTauriIpc(internals: TauriInternals, route: (cmd: string, args: Record<string, unknown>) => Promise<unknown>) {
+  const network = window.fetch.bind(window);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const command = IPC_URL.exec(url);
+    if (command === null) return network(input, init);
+    const headers = new Headers(init?.headers);
+    const ok = Number(headers.get("Tauri-Callback"));
+    const failed = Number(headers.get("Tauri-Error"));
+    const body = init?.body;
+    const args = typeof body === "string" && body !== "" ? (JSON.parse(body) as Record<string, unknown>) : {};
+    route(decodeURIComponent(command[1]!), args).then(
+      (answer) => internals.runCallback(ok, answer),
+      (error: unknown) => internals.runCallback(failed, error),
+    );
+    return new Promise<Response>(() => {});
+  };
+}
+
+/**
  * Define `window.__TAURI_INTERNALS__` so `invoke` and `listen` resolve against
- * `handlers` instead of against a backend that is not there.
+ * `handlers` instead of against a backend that is not there. In a real Tauri
+ * window, where that property is locked, answer Tauri's own IPC requests
+ * instead ({@link answerTauriIpc}).
  */
 export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge {
+  const tauri = lockedTauri();
   const callbacks = new Map<number, (payload: unknown) => void>();
   const listeners = new Map<number, Listener>();
+  const run = (handler: number, payload: unknown) => (tauri ? tauri.runCallback(handler, payload) : callbacks.get(handler)?.(payload));
 
   // A listener dropped lets its callback go too, as Tauri's own `unregisterListener` does
   // (`unregisterCallback(listeners[id].handlerId)`). Kept, every `listen()` a page ever made held its handler, and
@@ -112,16 +169,16 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
     const listener = listeners.get(eventId);
     if (listener === undefined) return;
     listeners.delete(eventId);
-    callbacks.delete(listener.handler);
+    if (tauri) tauri.unregisterCallback(listener.handler);
+    else callbacks.delete(listener.handler);
   };
 
   const invoke = async (cmd: string, args: Record<string, unknown> = {}) => {
     if (cmd === "plugin:event|listen") {
       const id = ++nextEventId;
       const handler = args["handler"] as number;
-      const callback = callbacks.get(handler);
-      if (callback) {
-        listeners.set(id, { event: String(args["event"]), callback, handler });
+      if (tauri || callbacks.has(handler)) {
+        listeners.set(id, { event: String(args["event"]), handler });
       }
       return id;
     }
@@ -137,6 +194,23 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
     }
     return handler(args);
   };
+
+  const bridge: FakeBridge = {
+    emit(event, payload) {
+      for (const [id, listener] of listeners) {
+        if (listener.event === event) {
+          run(listener.handler, { event, id, payload });
+        }
+      }
+    },
+  };
+
+  if (tauri) {
+    // Tauri's own `unregisterListener` reads listeners its backend registered, and finds none of these: `unlisten()`
+    // goes on to `plugin:event|unlisten`, answered above.
+    answerTauriIpc(tauri, invoke);
+    return bridge;
+  }
 
   const internals = {
     transformCallback(callback: (payload: unknown) => void) {
@@ -178,15 +252,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
     writable: true,
   });
 
-  return {
-    emit(event, payload) {
-      for (const [id, listener] of listeners) {
-        if (listener.event === event) {
-          listener.callback({ event, id, payload });
-        }
-      }
-    },
-  };
+  return bridge;
 }
 
 /** What one `fake/<feature>.ts` module exports. */
