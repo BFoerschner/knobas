@@ -338,3 +338,26 @@ async fn a_send_is_kept_with_its_answer_and_no_secret() {
     );
     held().forget(&server.uri());
 }
+
+/// A CA file the person named is read and must hold a certificate: one that
+/// holds none fails the send before anything goes out (the ux30 end gate's
+/// mutants: a client built without the file's roots went unseen).
+#[tokio::test]
+async fn a_ca_file_without_a_certificate_fails_the_send_before_it_goes() {
+    let server = MockServer::builder().start().await;
+    let dir = tempfile::tempdir().expect("a folder");
+    let ca = dir.path().join("not-a-ca.pem");
+    std::fs::write(&ca, "no certificate here\n").expect("the file");
+    let answer = send::send(
+        request(900, "GET", format!("{}/x", server.uri())),
+        Some(ca.to_string_lossy().into_owned()),
+    )
+    .await;
+    let failed = match answer {
+        Ok(ApiAnswer::Failed { words, .. }) => words,
+        Err(error) => format!("{error:?}"),
+        Ok(other) => panic!("the send went out: {other:?}"),
+    };
+    assert!(failed.contains("CA file"), "{failed}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

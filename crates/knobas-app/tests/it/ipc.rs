@@ -1892,3 +1892,19 @@ async fn a_tone_override_is_announced_on_the_activity_event() {
     assert_eq!(failure(&answer)["origin"], "adapter", "{answer}");
     assert!(lines.is_empty(), "a read announces nothing");
 }
+
+/// The boot screen's count of sources is the table's (the ux30 end gate's mutants: a count fixed at one went
+/// unseen, since the status test runs before any database).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_source_count_is_how_many_sources_are_configured() {
+    let pool = knobas_db::test_util::scratch_database("source-count")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    assert_eq!(knobas_app::settings::source_count(&pool).await.unwrap(), 0);
+    crate::support::source_config(&pool, "jira", "jira", "Jira", &serde_json::json!({})).await;
+    crate::support::source_config(&pool, "wiki", "confluence", "Wiki", &serde_json::json!({}))
+        .await;
+    assert_eq!(knobas_app::settings::source_count(&pool).await.unwrap(), 2);
+}

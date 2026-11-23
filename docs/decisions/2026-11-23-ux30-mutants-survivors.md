@@ -73,6 +73,23 @@ tickets read only in knobas; these now fail.
 
 ### knobas-app
 
+Run 45227865249 ran 9 of knobas-app's 16 shards (the other 7 failed their baselines on the two tests below) and the
+macOS leg (run 45236096794) 27 of the 128 mutants in the app's macOS files before it was cancelled. New tests for
+what survived there:
+
+- `api/kept.rs:19` (`BODY_BYTES`, `64 * 1024 * 1024`, either `*` → `+`): `answers_up_to_64_mib_in_all_are_kept` keeps
+  two 20 MiB answers and drops the oldest at 70 MiB. The test that was there scales with the constant, so it could not
+  see a bound of about 1 MiB.
+- `api/send.rs:309` (the client built without the CA file's roots): `a_ca_file_without_a_certificate_fails_the_send_before_it_goes`.
+- `settings.rs:163` (`source_count` → `Ok(1)`): `the_source_count_is_how_many_sources_are_configured` (0, then 2).
+- `site.rs:439` (`passwords || reads.is_none()` → `&&`, a site whose role is unknown left unconfined) and `site.rs:480`
+  (`other != source` → `==`, a site's rules listing itself instead of the others):
+  `a_site_is_confined_until_its_role_is_read_and_its_rules_name_the_others`.
+- `site.rs:424` (`delete !`: the source's own sign-in counted as saved while turned off): the existing own-credential
+  test now reads the site's sign-in rule back through `Sites::sign_in_rule`, a read-only getter beside `Sites::rules`.
+- `sources/progress.rs:74` (`ChannelSink`'s drop → `()`): `a_sink_that_never_reported_lets_its_channel_go_on_the_main_thread`.
+  The test that was there reported first, and the reports' copies of the channel let it go on the main thread anyway.
+
 `lib.rs:1103` (`spawn_bring_up`, `*` → `+` in `KEEP_DAYS * 24 * 3600`): the scratch folders' age limit is
 `api::scratch::keep()`, and the sweep test now keeps a folder 29 days old and sweeps one 31 days old with it. The
 mutant made the limit 72 minutes, which would have removed every API-explorer folder a person had not opened that hour.
@@ -106,7 +123,24 @@ test bug, not a product bug; both tests are now `#[cfg(unix)]`, as the code they
 - knobas-core (run 45221186058, Ubuntu 26.04): embedded PostgreSQL 18.6.0 needs `libxml2.so.2`; rerun on 24.04 by the
   gate.
 
+### knobas-sync (run 45227865249: 42 caught, 2 missed, 1 timeout)
+
+- `refresh.rs:241` (`==` → `!=`, a walk read as the parent gone when any other item under it was deleted): killed by
+  knobas-app's `tests/it/refresh.rs` `a_walk_is_gone_only_when_it_answers_the_parent_deleted`, which drives the refresh
+  through the scheduler; knobas-sync's own suite has no source that walks. Checked by hand: the app test fails with the
+  mutation in knobas-sync and passes without it.
+- `write_queue.rs:901` (`attempt` → `Ok(true)`): a timeout, so caught.
+
 ## Equivalent: no behaviour changes
+
+- knobas-sync `scheduler.rs:1718` (`2 * POOL_CLOSE_TIMEOUT.as_secs()` → `2 + ...`): `POOL_CLOSE_TIMEOUT` is 2 s, and
+  2 × 2 = 2 + 2, so `QUIT_BOUND` is the same.
+- knobas-app `passwords/otp.rs:77`, `:78`, `:79` (`|` → `^` in RFC 4226's truncation): the four bytes are shifted into
+  bit ranges that do not overlap (24 to 30, 16 to 23, 8 to 15, 0 to 7), so or and xor give the same number. The RFC's
+  test vectors stay green either way.
+- knobas-app `lib.rs:1105` (`gone > 0` → `<`, `>=`): only whether the sweep writes its log line.
+- knobas-app `commands/entity/fields.rs:32` (`behind == Some(true)` → `!=`): only marks the command's span as a read
+  behind, which changes the level a slow command is logged at, nothing it answers.
 
 - knobas-source `lib.rs:2362` (`Source::ticket_fields` → `Ok(None)`) and `:2375` (`Source::field_options` →
   `Ok(None)`): the default bodies already answer `Ok(None)`.
@@ -167,6 +201,16 @@ run them yet.
 - `make` → `Ok(Box::new(Default::default()))` (wry_host.rs) and `wrap` → `Default::default()` (mac.rs): unviable, they
   do not build.
 
+### knobas-app
+
+- `api/send.rs:310` (the client built without `direct`): `direct` only turns the system proxy and `HTTPS_PROXY` off for
+  a request to this computer; with no proxy set, as in every test process, both clients are the same. A test would have
+  to set a proxy in the process's environment, which every other test in the binary reads. Path: the explorer sending to
+  `localhost` with `HTTPS_PROXY` set to a dead proxy; it still answers.
+- `site.rs:678` (`TauriShell::sign_in` → `()`): the Tauri side of the saved sign-in's fill. Path: sign in with a saved
+  sign-in (settled on Windows and the Mac, 2026-11-22).
+- `capture.rs:448` (`open_window` → `()`, macOS leg): builds the capture window. Path: the capture shortcut opens it.
+
 ### win.rs (Windows)
 
 - `browser_process` → `None`, `Some(0)`, `Some(1)` and `wait_for_exit` → `()`, `==` → `!=` (line 85): as
@@ -181,5 +225,8 @@ run them yet.
 - knobas-app's Windows-only files: its test targets do not compile on Windows. Eighteen of its test files are written
   for unix (`std::os::unix` permissions and symlinks, `sh` scripts standing in for git), so making them build there is
   not a small change. The Windows code in knobas-app is driven by the Windows passes' real-app paths.
-- macOS-gated files outside knobas-site (knobas-secrets `keyring_store.rs`, knobas-db `socket.rs`, knobas-app's
-  macOS files): run 2's macOS leg was cancelled before its artifact; the gate reran it as run 45236096794.
+- The macOS leg's rerun (run 45236096794, cancelled at 21:32 after 3 h 14 min): knobas-db `socket.rs` 23 of 23
+  caught, knobas-secrets `keyring_store.rs` 4 of 4 caught, knobas-site complete (its survivors are the ones above), and
+  knobas-app 27 of its 128 macOS mutants (20 caught, 6 unviable, `capture.rs:448` above). The other 101 are not run.
+- knobas-app's 7 shards whose baselines failed on the two tests fixed above (run 45227865249), and knobas-search, whose
+  baseline failed on `coverage_plans` (its own fix): not run until the gate's rerun.

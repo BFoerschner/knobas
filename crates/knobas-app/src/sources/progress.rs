@@ -111,6 +111,38 @@ mod tests {
         }
     }
 
+    /// A sink dropped before it reported anything still lets its channel go
+    /// on the main thread: no report holds a copy of it (the ux30 end gate's
+    /// mutants: the drop handed to nobody passed the test below, whose reports
+    /// keep the channel alive until the main thread runs them).
+    #[test]
+    fn a_sink_that_never_reported_lets_its_channel_go_on_the_main_thread() {
+        let dropped: Arc<Mutex<Option<ThreadId>>> = Arc::default();
+        let guard = Guard(Arc::clone(&dropped));
+        let channel = Channel::<SyncProgress>::new(move |_body| {
+            let _ = &guard;
+            Ok(())
+        });
+        let queue: Queue = Arc::default();
+        let into = Arc::clone(&queue);
+        let sink = ChannelSink::over(
+            Box::new(move |task| into.lock().unwrap().push(task)),
+            channel,
+        );
+        thread::spawn(move || drop(sink)).join().unwrap();
+        assert!(
+            dropped.lock().unwrap().is_none(),
+            "the worker let the channel go itself: {:?}",
+            dropped.lock().unwrap()
+        );
+        let tasks = std::mem::take(&mut *queue.lock().unwrap());
+        assert_eq!(tasks.len(), 1, "the drop is handed to the main thread");
+        for task in tasks {
+            task();
+        }
+        assert_eq!(*dropped.lock().unwrap(), Some(thread::current().id()));
+    }
+
     /// A sync reports from its worker; the channel hears it on the main thread
     /// only, and is let go there too (its last drop is the page's `end`).
     #[test]
