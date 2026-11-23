@@ -78,6 +78,9 @@ export function draftOf(app: CheckoutApplication): CheckoutApplicationDraft {
     commit_command: app.commit_command ?? null,
     range_command: app.range_command ?? null,
     pull_request_command: app.pull_request_command ?? null,
+    // Kept on every save (ux30 end gate): the shipped Bruno has no repository command, so without this the backend
+    // refuses the whole list, and a command typed on an application's page would be dropped by the next save.
+    api_command: app.api_command ?? null,
   };
 }
 
