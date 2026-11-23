@@ -241,6 +241,7 @@
     back = null,
     sync,
     syncRevision = 0,
+    syncAsked = 0,
     health = sharedHealth,
     demo = lifecycle.status?.demo ?? false,
   }: {
@@ -790,6 +791,8 @@
   // The refresh after a move, or a run of its source's end, reads the board again, so its echo settles. Not under a held
   // card: the read waits for its drop (`afterDrag`), so the columns under the copy are the ones it was picked up from.
   const refreshBoard = () => reader.refresh();
+  /** The board read again after the person's *Sync now*: its answer sorts the cards again (`refresh(true)`). */
+  const sortBoard = () => reader.refresh(true);
   $effect(() => untrack(() => watchEchoes("tickets", () => drag.afterDrag(refreshBoard), { listen: ports.listen })));
   // The notes of refused and held moves, from the queue; and a move the queue still holds, drawn after a restart.
   $effect(() => untrack(() => watchTicketNotes(ports.moves ?? {})));
@@ -1115,13 +1118,19 @@
   });
   $effect(() => () => reader.close());
 
-  // *Sync now*'s runs ended (#2106): the board is read again.
+  // *Sync now*'s runs ended (#2106), or a run that changed something: the board is read again. The person's own *Sync
+  // now* sorts it again too (`syncAsked`, the ux30 end gate): a ticket it brought that sorts above the drawn cards draws
+  // there, where a run nobody here pressed leaves it behind *Show N new*.
   let boardAt = untrack(() => syncRevision);
+  let askedAt = untrack(() => syncAsked);
   $effect(() => {
     const at = syncRevision;
-    if (!ready || at === boardAt) return;
+    const asked = syncAsked;
+    if (!ready || (at === boardAt && asked === askedAt)) return;
+    const sorts = asked !== askedAt;
     boardAt = at;
-    untrack(() => drag.afterDrag(refreshBoard));
+    askedAt = asked;
+    untrack(() => drag.afterDrag(sorts ? sortBoard : refreshBoard));
   });
 
   /**

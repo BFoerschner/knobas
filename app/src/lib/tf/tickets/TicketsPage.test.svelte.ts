@@ -1723,6 +1723,61 @@ test("a drawn card keeps whether it names its source until the person's next rea
   }
 });
 
+test("the person's own Sync now draws what its runs brought where it sorts; another source's run still waits behind Show N new (the ux30 end gate)", async () => {
+  // The gate's real app: a filter typed, a new Forgejo issue, *Sync now*. The run brought it, the board read it, and the
+  // hold kept it behind a *Show 1 new* the person never saw, until a reload.
+  const corpus = [...CORPUS];
+  const frame = $state({ revision: 0, asked: 0 });
+  const h = harness([], [], corpus);
+  page = mount(TicketsPage, {
+    target,
+    props: {
+      ready: true,
+      ports: h.ports,
+      viewId: null,
+      typingPause: 0,
+      get syncRevision() {
+        return frame.revision;
+      },
+      get syncAsked() {
+        return frame.asked;
+      },
+    },
+  });
+  await settle();
+  for (const char of "ticket") type(field(), char);
+  await settle();
+  const todo = () => [...target.querySelectorAll<HTMLElement>(".tf-col")][0]!;
+  const inTodo = () => [...todo().querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  const held = () => target.querySelector(".tf-fheld")?.textContent ?? null;
+  const inProgress = () => [...[...target.querySelectorAll<HTMLElement>(".tf-col")][1]!.querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  expect(inTodo()[0]).toBe("jira:PAY-2");
+
+  // A run nobody here pressed (a scheduled sync) brings a ticket that sorts on top, and moves PAY-3 to In Progress: the
+  // new one waits, and says so; PAY-3 stays where it drew.
+  corpus.unshift({ status: "To Do", card: card("PAY-98", "Ticket made elsewhere", { source_id: "forgejo", entity_id: "forgejo:PAY-98" }) });
+  const moved = corpus.findIndex((entry) => entry.card.key === "PAY-3");
+  corpus[moved] = { ...corpus[moved]!, status: "In Progress" };
+  frame.revision += 1;
+  flushSync();
+  await settle();
+  expect(inTodo()).not.toContain("forgejo:PAY-98");
+  expect(inTodo()).toContain("jira:PAY-3");
+  expect(held()).toBe("Show 1 new");
+
+  // The person presses *Sync now*; its runs end with another new ticket. Their press sorts the board again: both draw on top.
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "Ticket synced on the press", { source_id: "forgejo", entity_id: "forgejo:PAY-99" }) });
+  frame.revision += 1;
+  frame.asked += 1;
+  flushSync();
+  await settle();
+  expect(inTodo().slice(0, 3)).toEqual(["forgejo:PAY-99", "forgejo:PAY-98", "jira:PAY-2"]);
+  expect(inTodo(), "a ticket the sync moved leaves its old column").not.toContain("jira:PAY-3");
+  expect(inProgress()).toContain("jira:PAY-3");
+  expect(held(), "nothing left waiting").toBeNull();
+  expect(field().value, "the filter stays").toBe("ticket");
+});
+
 test("a key changes nothing drawn until its answer lands: no card a sync held back, no mark, no column grown (the ux19 overs pass)", async () => {
   const corpus = [...CORPUS];
   const revision = $state({ n: 0 });
@@ -2461,6 +2516,55 @@ test("a view stored with Show every ticket draws its list in the server's order 
   const keys = [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
   expect(keys.slice(0, 3)).toEqual(["PAY-54", "PAY-53", "PAY-52"]);
   expect(target.querySelector(".tf-list-more")).toBeNull();
+});
+
+test("a list that shows every ticket sorts again on the person's own Sync now, at the depth it read; another run's ticket waits (the ux30 end gate)", async () => {
+  const corpus = [...CORPUS];
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true, layout: "list" })], corpus);
+  const board = h.ports.board;
+  const pages: (BoardPage | null | undefined)[] = [];
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) => {
+    pages.push(page);
+    return board(perColumn, query, savedView, lanes, role).then((answer) => {
+      if (!page?.sort) return answer;
+      // The server's order: by key, highest first.
+      const keyed = answer.columns.flatMap((column) => column.cards).sort((a, b) => Number(b.key.split("-")[1]) - Number(a.key.split("-")[1]));
+      return { ...answer, order: keyed.map((card) => card.entity_id) };
+    });
+  };
+  const frame = $state({ revision: 0, asked: 0 });
+  page = mount(TicketsPage, {
+    target,
+    props: {
+      ready: true,
+      ports: h.ports,
+      viewId: "v",
+      typingPause: 0,
+      get syncRevision() {
+        return frame.revision;
+      },
+      get syncAsked() {
+        return frame.asked;
+      },
+    },
+  });
+  await settle();
+  const keys = () => [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
+  expect(keys()[0]).toBe("PAY-54");
+  corpus.unshift({ status: "To Do", card: card("PAY-98", "Ticket made elsewhere") });
+  frame.revision += 1;
+  flushSync();
+  await settle();
+  expect(keys(), "a run nobody here pressed: it waits").not.toContain("PAY-98");
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "Ticket synced on the press") });
+  pages.length = 0;
+  frame.revision += 1;
+  frame.asked += 1;
+  flushSync();
+  await settle();
+  expect(keys().slice(0, 3)).toEqual(["PAY-99", "PAY-98", "PAY-54"]);
+  expect(keys(), "every row it drew").toHaveLength(20);
+  expect(pages.filter((one) => one?.sort).map((one) => one!.after), "the list's own first page, read again").toEqual([0]);
 });
 
 test("a Jira view's settings carry Show every ticket too, and it then opens on fifty a column", async () => {

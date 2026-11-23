@@ -94,6 +94,17 @@
     return atHide;
   });
   /**
+   * The person's own *Sync now* alone (`syncAsked`, the ux30 end gate), held while hidden the same way: a page shown
+   * again after one ended meanwhile sorts again on its return.
+   */
+  const askedNow = () => (roleSync === null ? 0 : roleSync.revision);
+  let askedAtHide = untrack(askedNow);
+  const asked = $derived.by(() => {
+    const now = askedNow();
+    if (visible) askedAtHide = now;
+    return askedAtHide;
+  });
+  /**
    * What the frame hands a role view beside its own props: nothing for any other page. One object whose getters read
    * {@link revision}, never one rebuilt per change: a spread of a new object tells every prop it holds, and `ctx` is new
    * at every address, so a hidden Code page read its 4,400 pull requests and ran `git status` in 132 checkouts again
@@ -108,6 +119,9 @@
           },
           get syncRevision() {
             return revision;
+          },
+          get syncAsked() {
+            return asked;
           },
         };
   const Page = page.component;

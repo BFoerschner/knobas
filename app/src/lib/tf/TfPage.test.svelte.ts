@@ -215,6 +215,23 @@ test("a shown role view reads again when a run of its role's sources ends with s
   expect(count(log.reads, "builds"), "its return reads once").toBe(3);
 });
 
+test("syncAsked moves when the person's own Sync now ends, not on another run's end, and a hidden view holds it until its return (the ux30 end gate)", () => {
+  log.asks = [];
+  go("#/builds");
+  roleRan.n += 1;
+  flushSync();
+  expect(log.asks, "a run nobody here pressed").toEqual([]);
+  roleRevision.n += 1;
+  flushSync();
+  expect(log.asks).toEqual(["builds"]);
+  go("#/inbox");
+  roleRevision.n += 1;
+  flushSync();
+  expect(log.asks, "hidden").toEqual(["builds"]);
+  go("#/builds");
+  expect(log.asks, "its return").toEqual(["builds", "builds"]);
+});
+
 test("an address with no page hides every kept page", () => {
   go("#/builds");
   go("#/nowhere");
