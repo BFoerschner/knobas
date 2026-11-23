@@ -20,7 +20,8 @@
 //! milliseconds a keystroke with no answer wrong: a Gitea under its own commits, which
 //! went to the grouped read (#2503), and one with a long run of withdrawn child rows at
 //! the head of its range, which read them all (#2504). The run at the far end of a
-//! third source is what the look that reads the far end first costs when it is wrong.
+//! third source is what the look that reads the far end first costs when it is wrong,
+//! and a fourth has a run at each end.
 
 use knobas_search::Searcher;
 use knobas_search::testing::{
@@ -40,6 +41,14 @@ const SWEPT_COMMITS: i64 = 500;
 /// The other way round: its live child rows are at the head of the range, and the
 /// far end, where the probe looks first, is the withdrawn run.
 const SWEPT_LAST: &str = "gitea-swept-last";
+/// [`SWEPT_LAST`] with the head of its range withdrawn too: the entities of the first
+/// [`HEAD_RUN`] child rows in the index's order, whatever order the table holds them in.
+const SWEPT_BOTH_ENDS: &str = "gitea-swept-both-ends";
+/// How many child rows [`SWEPT_BOTH_ENDS`] withdraws at the head of its range: three
+/// branches, at two child rows each.
+const HEAD_RUN: i32 = 6;
+/// How many child rows `UNDER_COVERAGE_SQL`'s look at the far end of a range reads.
+const FAR_LOOK: f64 = 256.0;
 
 /// The benchmark's parents, in proportion: a Gitea source's commits and pull
 /// requests name a repository, and the other sources name nothing.
@@ -130,6 +139,40 @@ async fn corpus_with_parents() -> sqlx::PgPool {
         true,
     )
     .await;
+    a_gitea(&pool, SWEPT_BOTH_ENDS).await;
+    rows_of(
+        &pool,
+        SWEPT_BOTH_ENDS,
+        "branch",
+        "live",
+        20,
+        "1 year",
+        false,
+    )
+    .await;
+    rows_of(
+        &pool,
+        SWEPT_BOTH_ENDS,
+        "commit",
+        "gone",
+        SWEPT_COMMITS,
+        "3 years",
+        true,
+    )
+    .await;
+    // Chosen by place in the index and not by what was written first, so the head is
+    // withdrawn however the table laid the rows out.
+    sqlx::query(
+        "update knobas.entity set deleted_at = now()
+          where id in (select entity_id from sync.item_parent
+                        where arm = 'child' and source_id = $1
+                        order by ctid limit $2)",
+    )
+    .bind(SWEPT_BOTH_ENDS)
+    .bind(HEAD_RUN)
+    .execute(&pool)
+    .await
+    .unwrap();
     testing::prepare(&pool).await.unwrap();
     let (child_rows,): (i64,) = sqlx::query_as(
         "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
@@ -247,6 +290,34 @@ fn rows_read_from(index: &str, plan: &str) -> f64 {
         .sum()
 }
 
+/// How many withdrawn child rows of `source` come ahead of its first live one in
+/// `item_parent_child_idx`, which is what the look from the head reads past.
+///
+/// The index holds equal keys in the order of the rows' places in the table, and the
+/// fixture cannot choose those. A row goes where the backend writing it last wrote,
+/// if that page has room, and the pool hands each statement any of its connections,
+/// so a later statement can fill an earlier page. So a withdrawn row written after
+/// [`SWEPT_LAST`]'s live ones can come ahead of them, as one did on GitHub's runner
+/// (the ux30 gate's mutants baseline: 258 rows), and a vacuum between the writes
+/// did the same for 49 rows (the ux28 gate). So this reads the run the fixture got
+/// instead of assuming it.
+async fn head_run(pool: &sqlx::PgPool, source: &str) -> f64 {
+    let (run,): (i64,) = sqlx::query_as(
+        "select count(*) from sync.item_parent ip
+          where ip.arm = 'child' and ip.source_id = $1
+            and ip.ctid < (select min(r.ctid) from sync.item_parent r
+                             join sync.live_item i on i.entity_id = r.entity_id
+                            where r.arm = 'child' and r.source_id = $1)",
+    )
+    .bind(source)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    #[allow(clippy::cast_precision_loss)]
+    let run = run as f64;
+    run
+}
+
 /// One test and not two, because each step changes what the next one plans over.
 ///
 /// A quiet source proves it names no parent from an empty range of the index,
@@ -290,16 +361,32 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                 .unwrap();
         }
         // #2504. A run of withdrawn child rows costs a bounded look at whichever end
-        // of the range it sits: 256 rows, and one more from the head when the far end
-        // saw nothing live.
-        for source in [SWEPT, SWEPT_LAST] {
+        // of the range it sits. Where the far end holds a live row the look stops at
+        // it. Where it holds none, the look reads its 256 rows and the read from the
+        // head goes on past the head's withdrawn run to its first live row.
+        // `SWEPT`'s live rows end its range, so its look stops at one of them, and the
+        // one more is for a layout that put them all at the head instead.
+        let both_ends = head_run(&pool, SWEPT_BOTH_ENDS).await;
+        assert!(
+            both_ends >= f64::from(HEAD_RUN),
+            "{state}: {both_ends} withdrawn rows head {SWEPT_BOTH_ENDS}: the fixture moved"
+        );
+        for (source, line) in [
+            (SWEPT, FAR_LOOK + 1.0),
+            (
+                SWEPT_LAST,
+                FAR_LOOK + head_run(&pool, SWEPT_LAST).await + 1.0,
+            ),
+            (SWEPT_BOTH_ENDS, FAR_LOOK + both_ends + 1.0),
+        ] {
             let ids = [source.to_owned()];
             for cache in [PlanCache::Custom, PlanCache::Generic] {
                 let plan = under_coverage_plan(&pool, &ids, cache).await.unwrap();
                 let read = rows_read_from("item_parent_child_idx", &plan);
                 assert!(
-                    read <= 257.0,
-                    "under:, {state}, {cache:?}: read {read} child rows of {source}:\n{plan}"
+                    read <= line,
+                    "under:, {state}, {cache:?}: read {read} child rows of {source} \
+                     against {line}:\n{plan}"
                 );
             }
         }
