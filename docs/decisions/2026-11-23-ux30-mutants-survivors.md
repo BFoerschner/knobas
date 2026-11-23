@@ -225,8 +225,10 @@ run them yet.
 - knobas-app's Windows-only files: its test targets do not compile on Windows. Eighteen of its test files are written
   for unix (`std::os::unix` permissions and symlinks, `sh` scripts standing in for git), so making them build there is
   not a small change. The Windows code in knobas-app is driven by the Windows passes' real-app paths.
-- The macOS leg's rerun (run 45236096794, cancelled at 21:32 after 3 h 14 min): knobas-db `socket.rs` 23 of 23
+- The macOS leg's rerun (run 45236096794, stopped by Björn at 21:32 after 3 h 14 min): knobas-db `socket.rs` 23 of 23
   caught, knobas-secrets `keyring_store.rs` 4 of 4 caught, knobas-site complete (its survivors are the ones above), and
-  knobas-app 27 of its 128 macOS mutants (20 caught, 6 unviable, `capture.rs:448` above). The other 101 are not run.
+  knobas-app 27 of its 128 macOS mutants (20 caught, 6 unviable, `capture.rs:448` above). The other 101: not run,
+  stopped by Björn.
 - knobas-app's 7 shards whose baselines failed on the two tests fixed above (run 45227865249), and knobas-search, whose
-  baseline failed on `coverage_plans` (its own fix): not run until the gate's rerun.
+  baseline failed on `coverage_plans` (its own fix): not run, stopped by Björn (run 45227865249 cancelled). Björn
+  ruled that these do not block the gate's green, and that heavy work no longer runs on GitHub Actions: no rerun.
