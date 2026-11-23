@@ -24,7 +24,12 @@
     | { kind: "pdf"; read: () => Promise<Uint8Array>; size: number }
     | { kind: "text"; text: string; truncated: boolean }
     | { kind: "none" }
-    | { kind: "missing"; why: string; retry: (() => void) | null };
+    | { kind: "missing"; why: string; retry: (() => void) | null }
+    /**
+     * An image at an address, offered (the XML view's design, 2026-11-23, section 14): nothing has been fetched.
+     * `load` asks the address once; with `always`, the host is kept and its images load when their dialog opens.
+     */
+    | { kind: "offer"; url: string; host: string; load: (always: boolean) => void; browser: () => void; loading: boolean; why: string | null };
 </script>
 
 <script lang="ts">
@@ -86,6 +91,17 @@
         <div class="tf-vempty">
           <span class="tf-tkkind" aria-hidden="true">{kind}</span>
           <p>No preview for this kind of file. Download it to open it.</p>
+        </div>
+      {:else if content.kind === "offer"}
+        <div class="tf-vempty tf-xv-offerbox">
+          <p>This image is at <code class="tf-xv-code">{content.url}</code>. knobas loads nothing from the web by itself.</p>
+          <div class="tf-xv-offer">
+            <button type="button" class="tf-btn tf-sm tf-primary" disabled={content.loading} onclick={() => content.load(false)}>{content.loading ? "Loading…" : "Load it"}</button>
+            <button type="button" class="tf-btn tf-sm" disabled={content.loading} onclick={() => content.load(true)}>Always load images from {content.host}</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={content.browser}>Open in the browser</button>
+          </div>
+          <p class="tf-dim">Loading asks {content.host} once, with no cookie and no sign-in of yours.</p>
+          {#if content.why !== null}<p class="tf-xv-warn" role="alert">{content.why}</p>{/if}
         </div>
       {:else if content.kind === "missing"}
         <div class="tf-vempty">

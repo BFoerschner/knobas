@@ -15,6 +15,7 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
+import { keepSeed } from "../../fake-seed";
 import { JAR_FILES, jarSize } from "../jar";
 import { ASCII_AFTER, asciiArt } from "../../fake-ascii";
 import type { BranchPull, DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
@@ -452,6 +453,51 @@ const openapiFiles: () => Record<string, string> = (() => {
   };
 })();
 
+/**
+ * `?fake-xml` (the XML view, 2026-11-23): the two openTRANS orders, the POM, the image and the contract the orders name,
+ * from `fixtures/doc/` (made by the clickdummy's data script, `fixtures/doc/SOURCE.md`).
+ */
+const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/*.xml", { query: "?raw", import: "default", eager: true });
+const XML_BYTES = import.meta.glob<string>("../../../../../../../fixtures/doc/*.{png,pdf}", { query: "?url", import: "default", eager: true });
+const XML_AT: Record<string, string> = { "order-4710.xml": "orders/order-4710.xml", "order-4711.xml": "orders/order-4711.xml", "pom.xml": "build/pom.xml" };
+const xmlOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xml");
+/**
+ * What `?fake-xml` holds once read: the fixture's binary files, by path, and `?fake-xml-big`'s order, the first item
+ * repeated to about 50 MB (the design's section 3), made once. Kept as a seed is, so a test starts with neither.
+ */
+const xmlHeld: { binary: Map<string, Uint8Array>; big: string | null } = { binary: new Map(), big: null };
+keepSeed(xmlHeld);
+function madeBig(order: string): string {
+  if (xmlHeld.big !== null) return xmlHeld.big;
+  const from = order.indexOf("<ORDER_ITEM>");
+  const to = order.indexOf("</ORDER_ITEM>", from) + "</ORDER_ITEM>".length;
+  const item = order.slice(from, to);
+  const times = Math.max(1, Math.floor((50 * 1024 * 1024 - order.length) / (item.length + 5)));
+  xmlHeld.big = order.slice(0, to) + `\n    ${item}`.repeat(times) + order.slice(to);
+  return xmlHeld.big;
+}
+function xmlFiles(): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (new URLSearchParams(globalThis.location?.search).has("fake-xml-big")) {
+    const order = Object.entries(XML_TEXT).find(([f]) => f.endsWith("order-4710.xml"))?.[1];
+    if (order !== undefined) out["orders/order-big.xml"] = madeBig(order);
+  }
+  for (const [file, text] of Object.entries(XML_TEXT)) {
+    const name = file.slice(file.lastIndexOf("/") + 1);
+    if (XML_AT[name] !== undefined) out[XML_AT[name]] = text;
+  }
+  out["media/kugellager-6204-2rs.png"] = "";
+  out["contracts/rahmenvertrag-2026.pdf"] = "";
+  return out;
+}
+if (xmlOn()) {
+  for (const [file, url] of Object.entries(XML_BYTES)) {
+    const name = file.slice(file.lastIndexOf("/") + 1);
+    const at = name.endsWith(".png") ? `media/${name}` : `contracts/${name}`;
+    void fetch(url).then((r) => r.arrayBuffer()).then((b) => xmlHeld.binary.set(at, new Uint8Array(b)), () => {});
+  }
+}
+
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
@@ -470,6 +516,7 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
       ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      ...(query.has("fake-xml") ? xmlFiles() : {}),
       // `?fake-ascii` (2026-11-21): ASCII art, box drawing and arrows, for the code face (`../../fake-ascii.ts`).
       ...(asciiArt() ? { "docs/states.txt": ASCII_AFTER } : {}),
       // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
@@ -764,6 +811,8 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   if (files === null) return undefined;
   // A wrapped fixture's bytes start as gzip's do, so the viewer offers its unwrap (#2265).
   if (WRAPPED[path] !== undefined) return Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0x03);
+  const held = repoId === PAYOUT ? xmlHeld.binary.get(path) : undefined;
+  if (held !== undefined) return held;
   const image = repoId === PAYOUT ? (binaryOf(path) ?? PAYOUT_IMAGES[path]) : undefined;
   const text = files[path];
   if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
@@ -958,6 +1007,8 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));
   if (files === null) return undefined;
+  // A value pipeline (ADR-0059): its value taken out of the file, then the steps a value is wrapped in.
+  if (steps[0]?.step === "take" && files[path] !== undefined) return fakeValuePiped(files[path], steps);
   let gz = WRAPPED[path];
   const read = gz === undefined ? files[path] : "";
   if (read === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
@@ -994,4 +1045,46 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
   }
   if (gz !== undefined) return { outcome: "done", name, output: { kind: "bytes", base64: "H4sIAAAAAAAAAw==", size: gz.size } };
   return { outcome: "done", name, output: { kind: "text", text } };
+}
+
+/** A value pipeline in the dev fake: `take` and the steps that need no decompressor, on the file's text. */
+function fakeValuePiped(text: string, steps: PipeStep[]): PipeRun {
+  let bytes = new TextEncoder().encode(text.replace(/^\uFEFF/, ""));
+  const decode = (b: Uint8Array) => new TextDecoder().decode(b);
+  const named: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+  const refs = (s: string) =>
+    s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (whole, n: string) => named[n] ?? (n.startsWith("#x") || n.startsWith("#X") ? String.fromCodePoint(parseInt(n.slice(2), 16)) : n.startsWith("#") ? String.fromCodePoint(Number(n.slice(1))) : whole));
+  for (const [index, step] of steps.entries()) {
+    const fail = (error: string): PipeRun => ({ outcome: "failed", failure: { index, name: step.step, why: "error", error, input: { size: bytes.length, head: decode(bytes.subarray(0, 256)), binary: false } } });
+    try {
+      if (step.step === "take") {
+        if (step.to > bytes.length || step.from > step.to) return fail(`the value's place, bytes ${step.from} to ${step.to}, is not in the file`);
+        const cut = decode(bytes.subarray(step.from, step.to));
+        bytes = new TextEncoder().encode(step.read === "xml_text" ? refs(cut.replace(/<!\[CDATA\[|\]\]>/g, "")) : step.read === "xml_attribute" ? refs(cut) : cut);
+      } else if (step.step === "base64_decode") {
+        const raw = atob(decode(bytes).replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/"));
+        bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+      } else if (step.step === "url_decode") {
+        bytes = new TextEncoder().encode(decodeURIComponent(decode(bytes)));
+      } else if (step.step === "unescape") {
+        bytes = new TextEncoder().encode(refs(decode(bytes)));
+      } else if (step.step === "json_string") {
+        const t = decode(bytes).trim();
+        bytes = new TextEncoder().encode(JSON.parse(t.startsWith('"') ? t : `"${t}"`) as string);
+      } else if (step.step === "jwt") {
+        const [h, p] = decode(bytes).trim().split(".");
+        const part = (x: string | undefined) => JSON.parse(atob((x ?? "").replace(/-/g, "+").replace(/_/g, "/"))) as unknown;
+        bytes = new TextEncoder().encode(`${JSON.stringify({ header: part(h), payload: part(p), signature: "not checked: knobas has no key to check it with" }, null, 2)}\n`);
+      } else return fail(`the dev fake does not run ${step.step} on a value`);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+  try {
+    return { outcome: "done", name: "value", output: { kind: "text", text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) } };
+  } catch {
+    let raw = "";
+    for (const b of bytes) raw += String.fromCharCode(b);
+    return { outcome: "done", name: "value", output: { kind: "bytes", base64: btoa(raw), size: bytes.length } };
+  }
 }

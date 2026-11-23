@@ -871,6 +871,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_file_bytes,
         // #2264's pipeline over a file's bytes, appended at the foot (§10.8).
         commands::entity::entity_file_piped,
+        commands::entity::entity_file_piped_save,
         // #2265's command steps and named pipelines, appended at the foot
         // (§10.8).
         commands::app::command_steps,
@@ -983,6 +984,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::api_servers,
         commands::api::api_set_servers,
         commands::api::api_save_answer,
+        commands::api::image_fetch,
+        commands::api::image_hosts,
+        commands::api::set_image_hosts,
         commands::api::api_open_in,
         commands::api::api_clients_found,
         commands::api::api_scratch_size,

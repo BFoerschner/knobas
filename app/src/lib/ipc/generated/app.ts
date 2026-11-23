@@ -348,6 +348,26 @@ reason: string | null,
 set_path: string | null, };
 
 /**
+ * A field a named pipeline is kept for: how its names end, in which files,
+ * and the renderer its output is drawn by.
+ */
+export type KeptField = { 
+/**
+ * A file pattern, as a default per pattern has it: `*.xml`.
+ */
+files: string, 
+/**
+ * How the value's names end, `/` between them and `@` for an attribute
+ * (`MIME_EMBEDDED/MIME_DATA`), or for JSON `.` and `[]`
+ * (`attachments[].content`). Positions are never part of it.
+ */
+field: string, 
+/**
+ * The renderer the output is drawn by: `image`, `pdf`, `xml`, `text`, `hex`.
+ */
+end: string, };
+
+/**
  * One generated file that differs.
  */
 export type MadeChange = { path: string, change: MadeChangeKind, before_size: number | null, after_size: number | null, 
@@ -441,12 +461,16 @@ export type NamedPipeline = {
 /**
  * Made from the name when first saved, kept through a rename.
  */
-id: string, name: string, steps: Array<PipeStep>, };
+id: string, name: string, steps: Array<PipeStep>, 
+/**
+ * The fields it is kept for; none for a pipeline only a file pattern names.
+ */
+fields?: Array<KeptField>, };
 
 /**
  * A named pipeline as the viewer or Settings sends it: a new one has no id.
  */
-export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, };
+export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, fields?: Array<KeptField>, };
 
 /**
  * Where the copy was written from.

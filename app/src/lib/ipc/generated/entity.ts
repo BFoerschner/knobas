@@ -472,6 +472,11 @@ name: string, };
 export type ChainStepRow = { pipeline_id: string, name: string, run: RunRow | null, };
 
 /**
+ * A character set the *read as* step reads bytes in.
+ */
+export type Charset = "windows1252" | "iso_8859_15" | "utf16le" | "utf16be";
+
+/**
  * One application on the *Open in…* menu.
  *
  * Issue #844, R-8.21, #2274. It accepts the objects it has a command for:
@@ -3751,7 +3756,7 @@ export type PipeRun = { "outcome": "done", name: string, output: PipeOutput, } |
 /**
  * One step of a pipeline.
  */
-export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" } | { "step": "command", id: string, };
+export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" } | { "step": "gunzip" } | { "step": "unzstd" } | { "step": "bunzip2" } | { "step": "unxz" } | { "step": "jq", filter: string, } | { "step": "pretty", format: PipeFormat, } | { "step": "convert", from: PipeFormat, to: PipeFormat, } | { "step": "hex_dump" } | { "step": "command", id: string, } | { "step": "take", from: number, to: number, read: TakeAs, } | { "step": "hex_decode" } | { "step": "inflate" } | { "step": "url_decode" } | { "step": "unescape" } | { "step": "json_string" } | { "step": "jwt" } | { "step": "charset", charset: Charset, };
 
 /**
  * Why a step stopped.
@@ -4867,6 +4872,11 @@ more: Array<SuggestionMore>, };
  * row, and a header cell opening a body row heads that row (a header column).
  */
 export type TableCell = { header: boolean, blocks: Array<DocBlock>, colspan: number, rowspan: number, };
+
+/**
+ * How [`PipeStep::Take`] reads the bytes it cuts out of the file.
+ */
+export type TakeAs = "bytes" | "xml_text" | "xml_attribute" | "json_string";
 
 /**
  * How one test came out in one run: its history, newest first (#855).

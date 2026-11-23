@@ -24,6 +24,7 @@
   import TfCommand from "../TfCommand.svelte";
   import TfWords from "../TfWords.svelte";
   import { needsWords, secondsWhy } from "./form-words";
+  import { imageHosts, setImageHosts } from "../../ipc/api";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
 
@@ -44,6 +45,30 @@
   async function removePipe(at: number) {
     const gone = pipelines.list[at]!;
     if (await storePipes(pipelines.list.filter((_, i) => i !== at).map(pipeDraft))) pipeRemoved({ name: gone.name, at, item: pipeDraft(gone) });
+  }
+
+  // Kept for fields (the XML view, section 18): each field a pipeline is kept for, and forgetting one.
+  const kept = $derived(pipelines.list.flatMap((pipeline) => (pipeline.fields ?? []).map((field) => ({ pipeline, field }))));
+  async function forgetField(id: string, field: string, files: string) {
+    const list = pipelines.list.map((p) => {
+      const draft = pipeDraft(p);
+      return p.id !== id ? draft : { ...draft, fields: (p.fields ?? []).filter((f) => !(f.field === field && f.files === files)) };
+    });
+    // A chain that was kept for its fields alone, with no step, goes with its last field.
+    await storePipes(list.filter((d) => d.steps.length > 0 || (d.fields?.length ?? 0) > 0));
+  }
+
+  // Images load from (the XML view, section 14): the hosts kept, read once.
+  let hosts = $state<string[]>([]);
+  $effect(() => {
+    void imageHosts().then((h) => (hosts = h.hosts), () => {});
+  });
+  async function forgetHost(host: string) {
+    try {
+      hosts = (await setImageHosts({ hosts: hosts.filter((h) => h !== host) })).hosts;
+    } catch (cause) {
+      push({ text: `Could not forget ${host}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
   }
 
   // Command steps.
@@ -105,7 +130,8 @@
   let savingPipe = $state(false);
   const pipeWhy = $derived(needsWords([...(pipeForm.name.trim() === "" ? ["a name"] : []), ...(pipeForm.steps.length === 0 ? ["a step"] : [])]));
 
-  const pipeDraft = (p: NamedPipeline): NamedPipelineDraft => ({ id: p.id, name: p.name, steps: p.steps });
+  // A pipeline's kept fields go with it (the XML view, section 18): a save here must not lose them.
+  const pipeDraft = (p: NamedPipeline): NamedPipelineDraft => ({ id: p.id, name: p.name, steps: p.steps, ...(p.fields === undefined ? {} : { fields: p.fields }) });
   /** The patterns whose default names pipeline `id`. */
   const usedBy = (id: string) => defaults.list.filter((d) => d.pipeline === id).map((d) => d.pattern);
 
@@ -216,6 +242,53 @@
   {/if}
   <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editPipe("new")}>Add a pipeline…</button></div>
   {#if pipeRefusal !== null && editingPipe === null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
+</div>
+
+<div class="tf-stg-sec">
+  <h2>Kept for fields</h2>
+  <p class="tf-stg-p">
+    Chains kept from the value viewer: every value whose names end as the field says, in the files the pattern takes, opens on the chain when you
+    press its chip. Nothing is decoded by itself.
+  </p>
+  {#if kept.length === 0}
+    <p class="tf-dim">None yet: look at a value in an XML file and press <i>Keep for this field…</i>.</p>
+  {:else}
+    <table class="tf-tbl tf-rnd-tbl">
+      <thead><tr><th>Name</th><th>Field</th><th>In</th><th>Steps</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+      <tbody>
+        {#each kept as k (`${k.pipeline.id}\n${k.field.field}\n${k.field.files}`)}
+          {@const steps = k.pipeline.steps.map((s) => stepName(s, stepCommands.list)).join(" → ") || "no step"}
+          <tr>
+            <td><b class="tf-cut" title={k.pipeline.name}>{k.pipeline.name}</b></td>
+            <td class="tf-small"><code class="tf-mono">{k.field.field}</code></td>
+            <td class="tf-small"><code class="tf-mono">{k.field.files}</code></td>
+            <td class="tf-small"><span class="tf-cut" title={steps}>{steps}</span></td>
+            <td class="tf-right"><button class="tf-btn tf-sm tf-ghost" aria-label="Forget {k.pipeline.name} for {k.field.field}" onclick={() => void forgetField(k.pipeline.id, k.field.field, k.field.files)}>Forget</button></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+</div>
+
+<div class="tf-stg-sec">
+  <h2>Images load from</h2>
+  <p class="tf-stg-p">Hosts whose images load when you open them, without asking first. knobas still loads nothing until you open an image.</p>
+  {#if hosts.length === 0}
+    <p class="tf-dim">None: an image at an address is offered, and loads when you press <i>Load it</i>.</p>
+  {:else}
+    <table class="tf-tbl tf-rnd-tbl">
+      <thead><tr><th>Host</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+      <tbody>
+        {#each hosts as host (host)}
+          <tr>
+            <td><code class="tf-mono">{host}</code></td>
+            <td class="tf-right"><button class="tf-btn tf-sm tf-ghost" aria-label="Forget {host}" onclick={() => void forgetHost(host)}>Forget</button></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
 </div>
 
 {#if editingPipe !== null}

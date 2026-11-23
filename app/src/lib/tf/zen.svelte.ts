@@ -16,7 +16,7 @@ export const ZEN_KEY = "z";
 export const ZEN_KEY_LABEL = ZEN_KEY.toUpperCase();
 
 /** The renderers Zen mode applies to. */
-export const ZEN_RENDERERS: readonly string[] = ["markdown", "pdf", "jar", "image", "openapi", "mermaid", "d2", "graphviz", "html"];
+export const ZEN_RENDERERS: readonly string[] = ["markdown", "pdf", "jar", "image", "openapi", "xml", "mermaid", "d2", "graphviz", "html"];
 
 /** Whether a file drawn by `drawAs` may be shown in Zen mode. */
 export function zenApplies(drawAs: string | null): boolean {

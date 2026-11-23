@@ -1,0 +1,1814 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ORDER xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opentrans.org/XMLSchema/2.1 ../schemas/opentrans/opentrans_2_1.xsd" xmlns="http://www.opentrans.org/XMLSchema/2.1" xmlns:bmecat="http://www.bmecat.org/bmecat/2005" xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="2.1" type="standard">
+  <ORDER_HEADER>
+    <CONTROL_INFO>
+      <STOP_AUTOMATIC_PROCESSING>Stop automatic processing</STOP_AUTOMATIC_PROCESSING>
+      <GENERATOR_INFO>Generator info</GENERATOR_INFO>
+      <GENERATION_DATE>2026-11-01</GENERATION_DATE>
+    </CONTROL_INFO>
+    <SOURCING_INFO>
+      <QUOTATION_ID>2026-79911</QUOTATION_ID>
+      <AGREEMENT type="buyer" default="true">
+        <bmecat:AGREEMENT_ID>2026-48721</bmecat:AGREEMENT_ID>
+        <bmecat:AGREEMENT_LINE_ID>1</bmecat:AGREEMENT_LINE_ID>
+        <bmecat:AGREEMENT_START_DATE>2026-11-03</bmecat:AGREEMENT_START_DATE>
+        <bmecat:AGREEMENT_END_DATE>2026-12-09</bmecat:AGREEMENT_END_DATE>
+        <bmecat:SUPPLIER_IDREF type="supplier_specific">7676348</bmecat:SUPPLIER_IDREF>
+        <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+        <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+        <MIME_INFO>
+          <MIME>
+            <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.pajonk-meyer.example/work-safety</bmecat:MIME_SOURCE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.erwes-ag.example/tools</bmecat:MIME_SOURCE>
+            <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+            <FILE_HASH_VALUE type="WHIRLPOOL" lang="deu">File hash value</FILE_HASH_VALUE>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <MIME_PURPOSE>thumbnail</MIME_PURPOSE>
+            <bmecat:MIME_ORDER>192</bmecat:MIME_ORDER>
+          </MIME>
+          <MIME>
+            <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.kolb-boyde.example/office-supplies</bmecat:MIME_SOURCE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.schmidtchen-soboll.example/hydraulics</bmecat:MIME_SOURCE>
+            <FILE_HASH_VALUE type="SHA512" lang="deu">File hash value</FILE_HASH_VALUE>
+            <FILE_HASH_VALUE type="WHIRLPOOL" lang="deu">File hash value</FILE_HASH_VALUE>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <MIME_PURPOSE>data_sheet</MIME_PURPOSE>
+            <bmecat:MIME_ORDER>469</bmecat:MIME_ORDER>
+          </MIME>
+        </MIME_INFO>
+      </AGREEMENT>
+      <AGREEMENT type="supplier" default="true">
+        <bmecat:AGREEMENT_ID>2026-69152</bmecat:AGREEMENT_ID>
+        <bmecat:AGREEMENT_LINE_ID>2</bmecat:AGREEMENT_LINE_ID>
+        <bmecat:AGREEMENT_START_DATE>2026-10-31</bmecat:AGREEMENT_START_DATE>
+        <bmecat:AGREEMENT_END_DATE>2026-12-26</bmecat:AGREEMENT_END_DATE>
+        <bmecat:SUPPLIER_IDREF type="supplier_specific">7676348</bmecat:SUPPLIER_IDREF>
+        <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+        <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+        <MIME_INFO>
+          <MIME>
+            <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.klabuhn-kwadwo.example/office-supplies</bmecat:MIME_SOURCE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.geisler-gruppe.example/work-safety</bmecat:MIME_SOURCE>
+            <FILE_HASH_VALUE type="RIPEMD256" lang="deu">File hash value</FILE_HASH_VALUE>
+            <FILE_HASH_VALUE type="SHA256" lang="deu">File hash value</FILE_HASH_VALUE>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <MIME_PURPOSE>freehand_sketch</MIME_PURPOSE>
+            <bmecat:MIME_ORDER>370</bmecat:MIME_ORDER>
+          </MIME>
+          <MIME>
+            <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.hohnheiser-jegorov.example/fasteners</bmecat:MIME_SOURCE>
+            <bmecat:MIME_SOURCE lang="deu">https://www.gerschler-ohg.example/electrical</bmecat:MIME_SOURCE>
+            <FILE_HASH_VALUE type="HAVAL" lang="deu">File hash value</FILE_HASH_VALUE>
+            <FILE_HASH_VALUE type="RIPEMD320" lang="deu">File hash value</FILE_HASH_VALUE>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+            <MIME_PURPOSE>conformity</MIME_PURPOSE>
+            <bmecat:MIME_ORDER>27</bmecat:MIME_ORDER>
+          </MIME>
+        </MIME_INFO>
+      </AGREEMENT>
+      <CATALOG_REFERENCE>
+        <bmecat:CATALOG_ID>2026-03876</bmecat:CATALOG_ID>
+        <bmecat:CATALOG_VERSION>2.1</bmecat:CATALOG_VERSION>
+        <bmecat:CATALOG_NAME lang="deu">Netzwerkkabel Cat 6, 5 m</bmecat:CATALOG_NAME>
+      </CATALOG_REFERENCE>
+    </SOURCING_INFO>
+    <ORDER_INFO>
+      <ORDER_ID>2026-56041</ORDER_ID>
+      <ORDER_DATE>2026-10-27</ORDER_DATE>
+      <DELIVERY_DATE type="fixed">
+        <DELIVERY_START_DATE>2026-11-06</DELIVERY_START_DATE>
+        <DELIVERY_END_DATE>2026-12-20</DELIVERY_END_DATE>
+      </DELIVERY_DATE>
+      <bmecat:LANGUAGE default="true">deu</bmecat:LANGUAGE>
+      <bmecat:LANGUAGE default="true">deu</bmecat:LANGUAGE>
+      <bmecat:MIME_ROOT lang="deu">Mime root</bmecat:MIME_ROOT>
+      <PARTIES>
+        <PARTY>
+          <bmecat:PARTY_ID type="party_specific">8123426</bmecat:PARTY_ID>
+          <bmecat:PARTY_ID type="party_specific">4751063</bmecat:PARTY_ID>
+          <PARTY_ROLE>central_regulator</PARTY_ROLE>
+          <PARTY_ROLE>ipp_operator</PARTY_ROLE>
+          <ADDRESS>
+            <bmecat:NAME lang="deu">Aaron Reichling</bmecat:NAME>
+            <bmecat:NAME lang="deu">Leopold Roos</bmecat:NAME>
+            <bmecat:NAME2 lang="deu">Meisch-Ripken</bmecat:NAME2>
+            <bmecat:NAME2 lang="deu">Becker, Gast und Mohrhard</bmecat:NAME2>
+            <bmecat:NAME3 lang="deu">Nikolai Lippe</bmecat:NAME3>
+            <bmecat:NAME3 lang="deu">Robert Zaituc</bmecat:NAME3>
+            <bmecat:DEPARTMENT lang="deu">Storl, Harter und Kovacs</bmecat:DEPARTMENT>
+            <bmecat:DEPARTMENT lang="deu">Knies-Tepper</bmecat:DEPARTMENT>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-13796</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Franz Hedermann</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Hamza Frantz</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Marcel</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Burak</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Bitte an Tor 3 anliefern.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="administrativ">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="others">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="private">+490912506993</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="office">+4949416945769</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+499936005022</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="private">+49272731721111</bmecat:FAX>
+              <bmecat:URL>https://www.ruter-kawohl.example/work-safety</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>nisa.mebold@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>lorena.konig@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-30927</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Viktoria Konya</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Isabelle Riermeier</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Alisa</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Eddi</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Ware bitte auf Europalette.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Teillieferung ist möglich.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="others">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="commercial">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="private">+49376764903388</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="private">+490282614465</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+4900596066176</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="office">+495839523818</bmecat:FAX>
+              <bmecat:URL>https://www.burger-schonball.example/fasteners</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>gregor.orthmann@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>laura.restle@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <bmecat:STREET lang="deu">Flensburger Str. 30c</bmecat:STREET>
+            <bmecat:STREET lang="deu">Gregor-Mendel-Str. 84</bmecat:STREET>
+            <bmecat:ZIP lang="deu">74226</bmecat:ZIP>
+            <bmecat:ZIP lang="deu">34000</bmecat:ZIP>
+            <bmecat:BOXNO lang="deu">Gierener Weg 284</bmecat:BOXNO>
+            <bmecat:BOXNO lang="deu">Boxno</bmecat:BOXNO>
+            <bmecat:ZIPBOX lang="deu">86549</bmecat:ZIPBOX>
+            <bmecat:ZIPBOX lang="deu">73432</bmecat:ZIPBOX>
+            <bmecat:CITY lang="deu">Laurensstadt</bmecat:CITY>
+            <bmecat:CITY lang="deu">Schwerin</bmecat:CITY>
+            <bmecat:STATE lang="deu">Bayern</bmecat:STATE>
+            <bmecat:STATE lang="deu">Rheinland-Pfalz</bmecat:STATE>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY_CODED>DE</bmecat:COUNTRY_CODED>
+            <bmecat:VAT_ID>DE633100933</bmecat:VAT_ID>
+            <TAX_NUMBER>DE170474323</TAX_NUMBER>
+            <bmecat:PHONE lang="deu" type="private">+49836101612479</bmecat:PHONE>
+            <bmecat:PHONE lang="deu" type="office">+4954881184935</bmecat:PHONE>
+            <bmecat:FAX lang="deu" type="private">+499409376808</bmecat:FAX>
+            <bmecat:FAX lang="deu" type="private">+492969791112</bmecat:FAX>
+            <bmecat:EMAIL>bruno.soller@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:EMAIL>jona.marx@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:URL>https://www.osenberg-gmbh.example/tools</bmecat:URL>
+            <bmecat:ADDRESS_REMARKS lang="deu">Teillieferung ist möglich.</bmecat:ADDRESS_REMARKS>
+            <bmecat:ADDRESS_REMARKS lang="deu">Bitte an Tor 3 anliefern.</bmecat:ADDRESS_REMARKS>
+          </ADDRESS>
+          <ADDRESS>
+            <bmecat:NAME lang="deu">Wilhelm Hönig</bmecat:NAME>
+            <bmecat:NAME lang="deu">Alea Gast</bmecat:NAME>
+            <bmecat:NAME2 lang="deu">Reitze Gruppe</bmecat:NAME2>
+            <bmecat:NAME2 lang="deu">Thiomas GmbH &amp; Co. KG</bmecat:NAME2>
+            <bmecat:NAME3 lang="deu">Valerie Mehl</bmecat:NAME3>
+            <bmecat:NAME3 lang="deu">Finn Scheurer</bmecat:NAME3>
+            <bmecat:DEPARTMENT lang="deu">Vahlensieck, Achilles und Hillard</bmecat:DEPARTMENT>
+            <bmecat:DEPARTMENT lang="deu">Ullmann-Kappe</bmecat:DEPARTMENT>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-57922</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Diana Neubert</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Zehra Hadwich</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Philine</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Pit</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Bitte an Tor 3 anliefern.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="others">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="technical">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="office">+4948302454336</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="mobile">+495266325852</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+497936839198</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="office">+49163500114945</bmecat:FAX>
+              <bmecat:URL>https://www.strohschank-ug.example/tools</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>saphira.birkemeyer@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>yunus.poehn@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-06641</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Lutz Hahn</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Denise Lax</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Josephin</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Kian</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Teillieferung ist möglich.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Ware bitte auf Europalette.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="commercial">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="office">+49810673043555</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="private">+493330413703</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="private">+494537692918</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="private">+4918890352831</bmecat:FAX>
+              <bmecat:URL>https://www.kulma-hohl.example/hydraulics</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>josy.schonberg@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>isabell.kedzierski@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <bmecat:STREET lang="deu">Kleine Kirchstr. 43</bmecat:STREET>
+            <bmecat:STREET lang="deu">Helmestr. 84a</bmecat:STREET>
+            <bmecat:ZIP lang="deu">12045</bmecat:ZIP>
+            <bmecat:ZIP lang="deu">15017</bmecat:ZIP>
+            <bmecat:BOXNO lang="deu">Boxno</bmecat:BOXNO>
+            <bmecat:BOXNO lang="deu">Weyerweg 542</bmecat:BOXNO>
+            <bmecat:ZIPBOX lang="deu">88774</bmecat:ZIPBOX>
+            <bmecat:ZIPBOX lang="deu">13654</bmecat:ZIPBOX>
+            <bmecat:CITY lang="deu">Tonyland</bmecat:CITY>
+            <bmecat:CITY lang="deu">Muhammedburg</bmecat:CITY>
+            <bmecat:STATE lang="deu">Sachsen-Anhalt</bmecat:STATE>
+            <bmecat:STATE lang="deu">Sachsen</bmecat:STATE>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY_CODED>DE</bmecat:COUNTRY_CODED>
+            <bmecat:VAT_ID>DE804197508</bmecat:VAT_ID>
+            <TAX_NUMBER>DE404823326</TAX_NUMBER>
+            <bmecat:PHONE lang="deu" type="mobile">+4906366171046</bmecat:PHONE>
+            <bmecat:PHONE lang="deu" type="office">+4971648633448</bmecat:PHONE>
+            <bmecat:FAX lang="deu" type="private">+49774865966379</bmecat:FAX>
+            <bmecat:FAX lang="deu" type="private">+496107541964</bmecat:FAX>
+            <bmecat:EMAIL>frederik.leo@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:EMAIL>enie.kohnle@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:URL>https://www.bayer-gmbh.example/fasteners</bmecat:URL>
+            <bmecat:ADDRESS_REMARKS lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:ADDRESS_REMARKS>
+            <bmecat:ADDRESS_REMARKS lang="deu">Ware bitte auf Europalette.</bmecat:ADDRESS_REMARKS>
+          </ADDRESS>
+          <ACCOUNT>
+            <HOLDER>Holder</HOLDER>
+            <BANK_ACCOUNT type="standard">1</BANK_ACCOUNT>
+            <BANK_CODE type="bic">JTTIJMY86KZ</BANK_CODE>
+            <BANK_NAME>Scherer AG</BANK_NAME>
+            <BANK_COUNTRY>DE</BANK_COUNTRY>
+          </ACCOUNT>
+          <ACCOUNT>
+            <HOLDER>Holder</HOLDER>
+            <BANK_ACCOUNT type="standard">1</BANK_ACCOUNT>
+            <BANK_CODE type="bic">GSSJCN1TXXX</BANK_CODE>
+            <BANK_NAME>Hallmann, Müller und Oeser</BANK_NAME>
+            <BANK_COUNTRY>DE</BANK_COUNTRY>
+          </ACCOUNT>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.kumbernuss-slotta.example/work-safety</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.vogelgsang-haverney.example/tools</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="SHA1" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>repair_manual</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>19</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.hensel-kuhlee.example/hydraulics</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.golling-gmbh.example/work-safety</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="RIPEMD320" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="SHA256" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>verification_report</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>132</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </PARTY>
+        <PARTY>
+          <bmecat:PARTY_ID type="party_specific">9376364</bmecat:PARTY_ID>
+          <bmecat:PARTY_ID type="party_specific">6928153</bmecat:PARTY_ID>
+          <PARTY_ROLE>customer</PARTY_ROLE>
+          <PARTY_ROLE>remittee</PARTY_ROLE>
+          <ADDRESS>
+            <bmecat:NAME lang="deu">Henrick Stoutjesdijk</bmecat:NAME>
+            <bmecat:NAME lang="deu">Nathan Pollmächer</bmecat:NAME>
+            <bmecat:NAME2 lang="deu">Kastner UG</bmecat:NAME2>
+            <bmecat:NAME2 lang="deu">Lorenz GmbH</bmecat:NAME2>
+            <bmecat:NAME3 lang="deu">Laurens Grün</bmecat:NAME3>
+            <bmecat:NAME3 lang="deu">Eliah Bruder</bmecat:NAME3>
+            <bmecat:DEPARTMENT lang="deu">Geissler, Frosch und Vogelgsang</bmecat:DEPARTMENT>
+            <bmecat:DEPARTMENT lang="deu">Lindner AG</bmecat:DEPARTMENT>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-36424</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Josua Meier</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Levi Schwartz</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Ahmed</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Bianka</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Bitte an Tor 3 anliefern.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="technical">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="mobile">+493126864638</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="private">+49067756463096</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="private">+4901463793772</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="private">+49746060641652</bmecat:FAX>
+              <bmecat:URL>https://www.sokolowski-erm.example/work-safety</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>pius.damaske@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>lewis.huttcher@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-91651</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Betty Orth</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Jamie Kohlmann</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Damien</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Maik</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="administrativ">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="office">+494064542639</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="private">+49868414941276</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+490528896425</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="office">+49949308531698</bmecat:FAX>
+              <bmecat:URL>https://www.schockel-hort.example/fasteners</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>mandy.knetsch@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>armin.muhleis@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <bmecat:STREET lang="deu">Hardenbergstr. 46a</bmecat:STREET>
+            <bmecat:STREET lang="deu">Brückenstr. 793</bmecat:STREET>
+            <bmecat:ZIP lang="deu">98415</bmecat:ZIP>
+            <bmecat:ZIP lang="deu">94768</bmecat:ZIP>
+            <bmecat:BOXNO lang="deu">Am Kemperstiegel 66c</bmecat:BOXNO>
+            <bmecat:BOXNO lang="deu">Boxno</bmecat:BOXNO>
+            <bmecat:ZIPBOX lang="deu">99027</bmecat:ZIPBOX>
+            <bmecat:ZIPBOX lang="deu">35465</bmecat:ZIPBOX>
+            <bmecat:CITY lang="deu">Dinslaken</bmecat:CITY>
+            <bmecat:CITY lang="deu">Nord Jelladorf</bmecat:CITY>
+            <bmecat:STATE lang="deu">Mecklenburg-Vorpommern</bmecat:STATE>
+            <bmecat:STATE lang="deu">Hamburg</bmecat:STATE>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY_CODED>DE</bmecat:COUNTRY_CODED>
+            <bmecat:VAT_ID>DE993576114</bmecat:VAT_ID>
+            <TAX_NUMBER>DE852184756</TAX_NUMBER>
+            <bmecat:PHONE lang="deu" type="mobile">+4958513187741</bmecat:PHONE>
+            <bmecat:PHONE lang="deu" type="mobile">+4960200861026</bmecat:PHONE>
+            <bmecat:FAX lang="deu" type="office">+490137252285</bmecat:FAX>
+            <bmecat:FAX lang="deu" type="private">+49963428604652</bmecat:FAX>
+            <bmecat:EMAIL>philip.hamann@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:EMAIL>alea.kofferschlager@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:URL>https://www.walton-biedermann.example/electrical</bmecat:URL>
+            <bmecat:ADDRESS_REMARKS lang="deu">Teillieferung ist möglich.</bmecat:ADDRESS_REMARKS>
+            <bmecat:ADDRESS_REMARKS lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:ADDRESS_REMARKS>
+          </ADDRESS>
+          <ADDRESS>
+            <bmecat:NAME lang="deu">Cora Schäffel</bmecat:NAME>
+            <bmecat:NAME lang="deu">Alisha Burkhard</bmecat:NAME>
+            <bmecat:NAME2 lang="deu">Alexa, Orthmann und Haug</bmecat:NAME2>
+            <bmecat:NAME2 lang="deu">Kummle, Arndt und Gotz</bmecat:NAME2>
+            <bmecat:NAME3 lang="deu">Dorian Matschke</bmecat:NAME3>
+            <bmecat:NAME3 lang="deu">Leann Deuschle</bmecat:NAME3>
+            <bmecat:DEPARTMENT lang="deu">Rodehau-Schäffer</bmecat:DEPARTMENT>
+            <bmecat:DEPARTMENT lang="deu">Borsch, Sievers und Schlicht</bmecat:DEPARTMENT>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-42005</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Matis Gross</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Katja Richter</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Pia</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Janek</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Ware bitte auf Europalette.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="commercial">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="office">+498788285854</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="mobile">+491200872381</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+4929793947677</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="office">+49976285058535</bmecat:FAX>
+              <bmecat:URL>https://www.walton-norris.example/hydraulics</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>lana.kraft@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>thore.poeschl@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <CONTACT_DETAILS>
+              <bmecat:CONTACT_ID>2026-89236</bmecat:CONTACT_ID>
+              <bmecat:CONTACT_NAME lang="deu">Frederick Kulma</bmecat:CONTACT_NAME>
+              <bmecat:CONTACT_NAME lang="deu">Dustin Von</bmecat:CONTACT_NAME>
+              <bmecat:FIRST_NAME lang="deu">Theodor</bmecat:FIRST_NAME>
+              <bmecat:FIRST_NAME lang="deu">Phil</bmecat:FIRST_NAME>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:TITLE lang="deu">Title</bmecat:TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Teillieferung ist möglich.</bmecat:ACADEMIC_TITLE>
+              <bmecat:ACADEMIC_TITLE lang="deu">Bitte an Tor 3 anliefern.</bmecat:ACADEMIC_TITLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <CONTACT_ROLE lang="deu" type="special_treatment">Contact role</CONTACT_ROLE>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:CONTACT_DESCR lang="deu">Contact descr</bmecat:CONTACT_DESCR>
+              <bmecat:PHONE lang="deu" type="private">+497564114052</bmecat:PHONE>
+              <bmecat:PHONE lang="deu" type="mobile">+49331069212622</bmecat:PHONE>
+              <bmecat:FAX lang="deu" type="office">+49589856128864</bmecat:FAX>
+              <bmecat:FAX lang="deu" type="private">+49577417981815</bmecat:FAX>
+              <bmecat:URL>https://www.tuschmo-saflanis.example/tools</bmecat:URL>
+              <bmecat:EMAILS>
+                <bmecat:EMAIL>denny.schmitz@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:EMAIL>bryan.briesenick@example.com</bmecat:EMAIL>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+                <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+              </bmecat:EMAILS>
+              <bmecat:AUTHENTIFICATION>
+                <bmecat:LOGIN>Login</bmecat:LOGIN>
+                <bmecat:PASSWORD>Password</bmecat:PASSWORD>
+              </bmecat:AUTHENTIFICATION>
+            </CONTACT_DETAILS>
+            <bmecat:STREET lang="deu">Hindenburgstr. 69</bmecat:STREET>
+            <bmecat:STREET lang="deu">Am Kronefeld 25c</bmecat:STREET>
+            <bmecat:ZIP lang="deu">55611</bmecat:ZIP>
+            <bmecat:ZIP lang="deu">27664</bmecat:ZIP>
+            <bmecat:BOXNO lang="deu">Domblick 84</bmecat:BOXNO>
+            <bmecat:BOXNO lang="deu">Kursiefer Weg 11c</bmecat:BOXNO>
+            <bmecat:ZIPBOX lang="deu">62267</bmecat:ZIPBOX>
+            <bmecat:ZIPBOX lang="deu">18360</bmecat:ZIPBOX>
+            <bmecat:CITY lang="deu">Neu Levkedorf</bmecat:CITY>
+            <bmecat:CITY lang="deu">Theastadt</bmecat:CITY>
+            <bmecat:STATE lang="deu">Berlin</bmecat:STATE>
+            <bmecat:STATE lang="deu">Berlin</bmecat:STATE>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY lang="deu">Deutschland</bmecat:COUNTRY>
+            <bmecat:COUNTRY_CODED>DE</bmecat:COUNTRY_CODED>
+            <bmecat:VAT_ID>DE402143158</bmecat:VAT_ID>
+            <TAX_NUMBER>DE720611424</TAX_NUMBER>
+            <bmecat:PHONE lang="deu" type="private">+49417162605439</bmecat:PHONE>
+            <bmecat:PHONE lang="deu" type="mobile">+493933739638</bmecat:PHONE>
+            <bmecat:FAX lang="deu" type="office">+490572568079</bmecat:FAX>
+            <bmecat:FAX lang="deu" type="office">+495271672474</bmecat:FAX>
+            <bmecat:EMAIL>jimmy.schulze@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:EMAIL>riccardo.thranhardt@example.com</bmecat:EMAIL>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:PUBLIC_KEY type="Type">Public key</bmecat:PUBLIC_KEY>
+            <bmecat:URL>https://www.beggerow-gmbh.example/tools</bmecat:URL>
+            <bmecat:ADDRESS_REMARKS lang="deu">Teillieferung ist möglich.</bmecat:ADDRESS_REMARKS>
+            <bmecat:ADDRESS_REMARKS lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:ADDRESS_REMARKS>
+          </ADDRESS>
+          <ACCOUNT>
+            <HOLDER>Holder</HOLDER>
+            <BANK_ACCOUNT type="iban">1</BANK_ACCOUNT>
+            <BANK_CODE type="bic">JUMUBZ1Q</BANK_CODE>
+            <BANK_NAME>Thyssen-Chapron</BANK_NAME>
+            <BANK_COUNTRY>DE</BANK_COUNTRY>
+          </ACCOUNT>
+          <ACCOUNT>
+            <HOLDER>Holder</HOLDER>
+            <BANK_ACCOUNT type="iban">1</BANK_ACCOUNT>
+            <BANK_CODE type="bic">NFAQFO1NOIW</BANK_CODE>
+            <BANK_NAME>Schwanbeck OHG</BANK_NAME>
+            <BANK_COUNTRY>DE</BANK_COUNTRY>
+          </ACCOUNT>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.frohn-battke.example/work-safety</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.roleder-ug.example/electrical</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="SHA512" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="Tiger160" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>warranty</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>436</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.hugo-gilde.example/work-safety</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.dressler-schwarzmeier.example/hydraulics</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="LMHash" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="SHA512" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>signatur_file</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>260</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </PARTY>
+      </PARTIES>
+      <CUSTOMER_ORDER_REFERENCE>
+        <ORDER_ID>2026-04978</ORDER_ID>
+        <LINE_ITEM_ID>1</LINE_ITEM_ID>
+        <ORDER_DATE>2026-10-19</ORDER_DATE>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <CUSTOMER_IDREF type="customer_specific">8123426</CUSTOMER_IDREF>
+      </CUSTOMER_ORDER_REFERENCE>
+      <ORDER_PARTIES_REFERENCE>
+        <bmecat:BUYER_IDREF type="buyer_specific">4751063</bmecat:BUYER_IDREF>
+        <bmecat:SUPPLIER_IDREF type="supplier_specific">9376364</bmecat:SUPPLIER_IDREF>
+        <INVOICE_RECIPIENT_IDREF type="buyer_specific">6928153</INVOICE_RECIPIENT_IDREF>
+        <SHIPMENT_PARTIES_REFERENCE>
+          <DELIVERY_IDREF type="iln">7676348</DELIVERY_IDREF>
+          <FINAL_DELIVERY_IDREF type="duns">8123426</FINAL_DELIVERY_IDREF>
+          <DELIVERER_IDREF type="customer_specific">4751063</DELIVERER_IDREF>
+        </SHIPMENT_PARTIES_REFERENCE>
+      </ORDER_PARTIES_REFERENCE>
+      <DOCEXCHANGE_PARTIES_REFERENCE>
+        <DOCUMENT_ISSUER_IDREF type="iln">9376364</DOCUMENT_ISSUER_IDREF>
+        <DOCUMENT_RECIPIENT_IDREF type="duns">6928153</DOCUMENT_RECIPIENT_IDREF>
+        <DOCUMENT_RECIPIENT_IDREF type="buyer_specific">7676348</DOCUMENT_RECIPIENT_IDREF>
+      </DOCEXCHANGE_PARTIES_REFERENCE>
+      <bmecat:CURRENCY>EUR</bmecat:CURRENCY>
+      <PAYMENT>
+        <CARD type="Maestro">
+          <CARD_NUM>1</CARD_NUM>
+          <CARD_AUTH_CODE>Card auth</CARD_AUTH_CODE>
+          <CARD_REF_NUM>1</CARD_REF_NUM>
+          <CARD_EXPIRATION_DATE>2026-12-14</CARD_EXPIRATION_DATE>
+          <CARD_HOLDER_NAME>Bürobedarf</CARD_HOLDER_NAME>
+        </CARD>
+        <CENTRAL_REGULATION>true</CENTRAL_REGULATION>
+        <PAYMENT_TERMS>
+          <PAYMENT_TERM type="unece">Payment term</PAYMENT_TERM>
+          <PAYMENT_TERM type="other">Payment term</PAYMENT_TERM>
+          <TIME_FOR_PAYMENT>
+            <PAYMENT_DATE>2026-11-25</PAYMENT_DATE>
+            <DISCOUNT_FACTOR>0.19</DISCOUNT_FACTOR>
+          </TIME_FOR_PAYMENT>
+          <TIME_FOR_PAYMENT>
+            <PAYMENT_DATE>2026-11-20</PAYMENT_DATE>
+            <DISCOUNT_FACTOR>0.19</DISCOUNT_FACTOR>
+          </TIME_FOR_PAYMENT>
+          <VALUE_DATE>2026-11-23</VALUE_DATE>
+        </PAYMENT_TERMS>
+      </PAYMENT>
+      <TERMS_AND_CONDITIONS>Rechnung bitte mit Bestellnummer.</TERMS_AND_CONDITIONS>
+      <PARTIAL_SHIPMENT_ALLOWED>true</PARTIAL_SHIPMENT_ALLOWED>
+      <bmecat:TRANSPORT>
+        <bmecat:INCOTERM>Inc</bmecat:INCOTERM>
+        <bmecat:LOCATION>Location</bmecat:LOCATION>
+        <bmecat:TRANSPORT_REMARK lang="deu">Bitte an Tor 3 anliefern.</bmecat:TRANSPORT_REMARK>
+        <bmecat:TRANSPORT_REMARK lang="deu">Bitte an Tor 3 anliefern.</bmecat:TRANSPORT_REMARK>
+      </bmecat:TRANSPORT>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="eu-embargo">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="other">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <MIME_INFO>
+        <MIME>
+          <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.siebert-caspari.example/hydraulics</bmecat:MIME_SOURCE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.schmidtchen-gmbh.example/hydraulics</bmecat:MIME_SOURCE>
+          <FILE_HASH_VALUE type="SHA1" lang="deu">File hash value</FILE_HASH_VALUE>
+          <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <MIME_PURPOSE>original_document</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>279</bmecat:MIME_ORDER>
+        </MIME>
+        <MIME>
+          <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.filipowski-albert.example/office-supplies</bmecat:MIME_SOURCE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.porth-gmbh.example/electrical</bmecat:MIME_SOURCE>
+          <FILE_HASH_VALUE type="RIPEMD160" lang="deu">File hash value</FILE_HASH_VALUE>
+          <FILE_HASH_VALUE type="SHA256" lang="deu">File hash value</FILE_HASH_VALUE>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <MIME_PURPOSE>data_sheet</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>45</bmecat:MIME_ORDER>
+        </MIME>
+      </MIME_INFO>
+      <REMARKS lang="deu" type="invoice">Bitte an Tor 3 anliefern.</REMARKS>
+      <REMARKS lang="deu" type="dispatchnotification">Teillieferung ist möglich.</REMARKS>
+      <HEADER_UDX>Header udx</HEADER_UDX>
+    </ORDER_INFO>
+  </ORDER_HEADER>
+  <ORDER_ITEM_LIST>
+    <ORDER_ITEM>
+      <LINE_ITEM_ID>1</LINE_ITEM_ID>
+      <PRODUCT_ID>
+        <bmecat:SUPPLIER_PID type="supplier_specific">RH-9203-263</bmecat:SUPPLIER_PID>
+        <bmecat:SUPPLIER_IDREF type="supplier_specific">8123426</bmecat:SUPPLIER_IDREF>
+        <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+        <LOT_NUMBER>LOT-2026-99466</LOT_NUMBER>
+        <LOT_NUMBER>LOT-2026-51158</LOT_NUMBER>
+        <SERIAL_NUMBER>SN-2026-44771</SERIAL_NUMBER>
+        <SERIAL_NUMBER>SN-2026-36157</SERIAL_NUMBER>
+        <bmecat:INTERNATIONAL_PID type="gtin">4019537441633</bmecat:INTERNATIONAL_PID>
+        <bmecat:INTERNATIONAL_PID type="gtin">4083753601416</bmecat:INTERNATIONAL_PID>
+        <bmecat:BUYER_PID type="buyer_specific">LQ-9847-146</bmecat:BUYER_PID>
+        <bmecat:BUYER_PID type="buyer_specific">VH-8227-745</bmecat:BUYER_PID>
+        <bmecat:DESCRIPTION_SHORT lang="deu">Netzwerkkabel Cat 6, 5 m</bmecat:DESCRIPTION_SHORT>
+        <bmecat:DESCRIPTION_SHORT lang="deu">Kugellager 6204-2RS</bmecat:DESCRIPTION_SHORT>
+        <bmecat:DESCRIPTION_LONG lang="deu">Maßband 5 m. Mit Ersatzteilgarantie über zehn Jahre.</bmecat:DESCRIPTION_LONG>
+        <bmecat:DESCRIPTION_LONG lang="deu">Europalette 1200 x 800. Geprüft nach DIN EN ISO 9001.</bmecat:DESCRIPTION_LONG>
+        <MANUFACTURER_INFO>
+          <bmecat:MANUFACTURER_IDREF type="supplier_specific">4751063</bmecat:MANUFACTURER_IDREF>
+          <bmecat:MANUFACTURER_PID>BL-6794-657</bmecat:MANUFACTURER_PID>
+          <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">XP-3622-601</bmecat:MANUFACTURER_TYPE_DESCR>
+          <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">FR-2232-666</bmecat:MANUFACTURER_TYPE_DESCR>
+        </MANUFACTURER_INFO>
+        <bmecat:PRODUCT_TYPE>service</bmecat:PRODUCT_TYPE>
+      </PRODUCT_ID>
+      <PRODUCT_FEATURES>
+        <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Bürobedarf</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">GP-5103-347</bmecat:REFERENCE_FEATURE_GROUP_ID>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">OK-5804-421</bmecat:REFERENCE_FEATURE_GROUP_ID>
+        <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Werkzeuge</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Hydraulik</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+        <bmecat:GROUP_PRODUCT_ORDER>24</bmecat:GROUP_PRODUCT_ORDER>
+        <FEATURE>
+          <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+          <bmecat:FNAME lang="deu">Schutzart</bmecat:FNAME>
+          <bmecat:FVALUE lang="deu">240 mm</bmecat:FVALUE>
+          <bmecat:FVALUE lang="deu">Edelstahl A2</bmecat:FVALUE>
+          <bmecat:FUNIT>C62</bmecat:FUNIT>
+          <bmecat:FORDER>6</bmecat:FORDER>
+          <bmecat:FDESCR lang="deu">Bürobedarf</bmecat:FDESCR>
+          <bmecat:FDESCR lang="deu">Hydraulik</bmecat:FDESCR>
+          <bmecat:FVALUE_DETAILS lang="deu">240 mm</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_DETAILS lang="deu">2,4 kg</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_TYPE>set</bmecat:FVALUE_TYPE>
+        </FEATURE>
+        <FEATURE>
+          <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+          <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+          <bmecat:FVALUE lang="deu">240 mm</bmecat:FVALUE>
+          <bmecat:FVALUE lang="deu">IP 54</bmecat:FVALUE>
+          <bmecat:FUNIT>C62</bmecat:FUNIT>
+          <bmecat:FORDER>454</bmecat:FORDER>
+          <bmecat:FDESCR lang="deu">Elektrotechnik</bmecat:FDESCR>
+          <bmecat:FDESCR lang="deu">Arbeitsschutz</bmecat:FDESCR>
+          <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_DETAILS lang="deu">Edelstahl A2</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+        </FEATURE>
+      </PRODUCT_FEATURES>
+      <PRODUCT_COMPONENTS>
+        <PRODUCT_COMPONENT>
+          <PRODUCT_ID>
+            <bmecat:SUPPLIER_PID type="supplier_specific">HH-4918-524</bmecat:SUPPLIER_PID>
+            <bmecat:SUPPLIER_IDREF type="supplier_specific">9376364</bmecat:SUPPLIER_IDREF>
+            <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+            <LOT_NUMBER>LOT-2026-37875</LOT_NUMBER>
+            <LOT_NUMBER>LOT-2026-17549</LOT_NUMBER>
+            <SERIAL_NUMBER>SN-2026-86045</SERIAL_NUMBER>
+            <SERIAL_NUMBER>SN-2026-76586</SERIAL_NUMBER>
+            <bmecat:INTERNATIONAL_PID type="gtin">4083206726338</bmecat:INTERNATIONAL_PID>
+            <bmecat:INTERNATIONAL_PID type="gtin">4075254881268</bmecat:INTERNATIONAL_PID>
+            <bmecat:BUYER_PID type="buyer_specific">MN-1713-781</bmecat:BUYER_PID>
+            <bmecat:BUYER_PID type="buyer_specific">UX-1616-703</bmecat:BUYER_PID>
+            <bmecat:DESCRIPTION_SHORT lang="deu">LED-Arbeitsleuchte 30 W</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Sechskantschraube M8 x 40, verzinkt</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_LONG lang="deu">Hydrauliköl HLP 46, 20 l. Im Karton geliefert, sofort einsetzbar.</bmecat:DESCRIPTION_LONG>
+            <bmecat:DESCRIPTION_LONG lang="deu">Kabelbinder 200 mm, schwarz. Geprüft nach DIN EN ISO 9001.</bmecat:DESCRIPTION_LONG>
+            <MANUFACTURER_INFO>
+              <bmecat:MANUFACTURER_IDREF type="buyer_specific">6928153</bmecat:MANUFACTURER_IDREF>
+              <bmecat:MANUFACTURER_PID>CA-9721-792</bmecat:MANUFACTURER_PID>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">GM-3226-484</bmecat:MANUFACTURER_TYPE_DESCR>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">HW-5004-127</bmecat:MANUFACTURER_TYPE_DESCR>
+            </MANUFACTURER_INFO>
+            <bmecat:PRODUCT_TYPE>major</bmecat:PRODUCT_TYPE>
+          </PRODUCT_ID>
+          <PRODUCT_FEATURES>
+            <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Bürobedarf</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="flat">WD-2628-649</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">BT-5648-907</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Bürobedarf</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Elektrotechnik</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="hierarchy">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:GROUP_PRODUCT_ORDER>178</bmecat:GROUP_PRODUCT_ORDER>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Schutzart</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Länge</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">RAL 7016</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>139</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Hydraulik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">RAL 7016</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">RAL 7016</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+            </FEATURE>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>59</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Bürobedarf</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Hydraulik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">RAL 7016</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">240 mm</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>choice</bmecat:FVALUE_TYPE>
+            </FEATURE>
+          </PRODUCT_FEATURES>
+          <QUANTITY>11</QUANTITY>
+          <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+          <PRODUCT_PRICE_FIX>
+            <bmecat:PRICE_AMOUNT>446.26</bmecat:PRICE_AMOUNT>
+            <ALLOW_OR_CHARGES_FIX>
+              <ALLOW_OR_CHARGE type="surcharge">
+                <ALLOW_OR_CHARGE_SEQUENCE>140</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>packing</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>272.30</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGE type="surcharge">
+                <ALLOW_OR_CHARGE_SEQUENCE>48</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Elektrotechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>special_work_times</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>28.70</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGES_TOTAL_AMOUNT>35.92</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+            </ALLOW_OR_CHARGES_FIX>
+            <bmecat:PRICE_FLAG type="incl_duty">true</bmecat:PRICE_FLAG>
+            <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>69</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>standard_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>174.10</TAX_AMOUNT>
+              <TAX_BASE>127.02</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Teillieferung ist möglich.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>163</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>parking_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>433.93</TAX_AMOUNT>
+              <TAX_BASE>387.86</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <bmecat:PRICE_QUANTITY>3</bmecat:PRICE_QUANTITY>
+            <PRICE_BASE_FIX>
+              <PRICE_UNIT_VALUE>456.94</PRICE_UNIT_VALUE>
+              <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+              <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+            </PRICE_BASE_FIX>
+          </PRODUCT_PRICE_FIX>
+        </PRODUCT_COMPONENT>
+        <PRODUCT_COMPONENT>
+          <PRODUCT_ID>
+            <bmecat:SUPPLIER_PID type="supplier_specific">GR-8587-553</bmecat:SUPPLIER_PID>
+            <bmecat:SUPPLIER_IDREF type="supplier_specific">7676348</bmecat:SUPPLIER_IDREF>
+            <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+            <LOT_NUMBER>LOT-2026-97509</LOT_NUMBER>
+            <LOT_NUMBER>LOT-2026-77332</LOT_NUMBER>
+            <SERIAL_NUMBER>SN-2026-97119</SERIAL_NUMBER>
+            <SERIAL_NUMBER>SN-2026-78896</SERIAL_NUMBER>
+            <bmecat:INTERNATIONAL_PID type="gtin">4030927760264</bmecat:INTERNATIONAL_PID>
+            <bmecat:INTERNATIONAL_PID type="gtin">4025976091926</bmecat:INTERNATIONAL_PID>
+            <bmecat:BUYER_PID type="buyer_specific">PI-6688-609</bmecat:BUYER_PID>
+            <bmecat:BUYER_PID type="buyer_specific">XG-1636-976</bmecat:BUYER_PID>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Schutzhandschuhe Größe 9</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Winkelschleifer 125 mm</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_LONG lang="deu">Kabelbinder 200 mm, schwarz. Geprüft nach DIN EN ISO 9001.</bmecat:DESCRIPTION_LONG>
+            <bmecat:DESCRIPTION_LONG lang="deu">Kabelbinder 200 mm, schwarz. Im Karton geliefert, sofort einsetzbar.</bmecat:DESCRIPTION_LONG>
+            <MANUFACTURER_INFO>
+              <bmecat:MANUFACTURER_IDREF type="supplier_specific">8123426</bmecat:MANUFACTURER_IDREF>
+              <bmecat:MANUFACTURER_PID>RX-4609-297</bmecat:MANUFACTURER_PID>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">BX-3140-504</bmecat:MANUFACTURER_TYPE_DESCR>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">DO-1150-891</bmecat:MANUFACTURER_TYPE_DESCR>
+            </MANUFACTURER_INFO>
+            <bmecat:PRODUCT_TYPE>professional_services</bmecat:PRODUCT_TYPE>
+          </PRODUCT_ID>
+          <PRODUCT_FEATURES>
+            <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Elektrotechnik</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">AC-2919-231</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">EI-9456-863</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Werkzeuge</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Befestigungstechnik</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="hierarchy">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="hierarchy">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:GROUP_PRODUCT_ORDER>171</bmecat:GROUP_PRODUCT_ORDER>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Schutzart</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">Edelstahl A2</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>331</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">IP 54</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+            </FEATURE>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Länge</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Länge</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">240 mm</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>189</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">RAL 7016</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">2,4 kg</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+            </FEATURE>
+          </PRODUCT_FEATURES>
+          <QUANTITY>8</QUANTITY>
+          <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+          <PRODUCT_PRICE_FIX>
+            <bmecat:PRICE_AMOUNT>284.78</bmecat:PRICE_AMOUNT>
+            <ALLOW_OR_CHARGES_FIX>
+              <ALLOW_OR_CHARGE type="allowance">
+                <ALLOW_OR_CHARGE_SEQUENCE>162</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>express</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>26.18</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGE type="allowance">
+                <ALLOW_OR_CHARGE_SEQUENCE>462</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Arbeitsschutz</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Werkzeuge</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>freight</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>65.97</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGES_TOTAL_AMOUNT>115.34</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+            </ALLOW_OR_CHARGES_FIX>
+            <bmecat:PRICE_FLAG type="incl_packing">true</bmecat:PRICE_FLAG>
+            <bmecat:PRICE_FLAG type="incl_freight">true</bmecat:PRICE_FLAG>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>473</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>reduced_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>342.88</TAX_AMOUNT>
+              <TAX_BASE>65.77</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Teillieferung ist möglich.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>350</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>zero_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>125.67</TAX_AMOUNT>
+              <TAX_BASE>227.71</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <bmecat:PRICE_QUANTITY>17</bmecat:PRICE_QUANTITY>
+            <PRICE_BASE_FIX>
+              <PRICE_UNIT_VALUE>365.98</PRICE_UNIT_VALUE>
+              <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+              <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+            </PRICE_BASE_FIX>
+          </PRODUCT_PRICE_FIX>
+        </PRODUCT_COMPONENT>
+      </PRODUCT_COMPONENTS>
+      <QUANTITY>16</QUANTITY>
+      <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+      <PRODUCT_PRICE_FIX>
+        <bmecat:PRICE_AMOUNT>81.12</bmecat:PRICE_AMOUNT>
+        <ALLOW_OR_CHARGES_FIX>
+          <ALLOW_OR_CHARGE type="surcharge">
+            <ALLOW_OR_CHARGE_SEQUENCE>311</ALLOW_OR_CHARGE_SEQUENCE>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_TYPE>postage</ALLOW_OR_CHARGE_TYPE>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_VALUE>
+              <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+            </ALLOW_OR_CHARGE_VALUE>
+            <ALLOW_OR_CHARGE_BASE>269.75</ALLOW_OR_CHARGE_BASE>
+          </ALLOW_OR_CHARGE>
+          <ALLOW_OR_CHARGE type="surcharge">
+            <ALLOW_OR_CHARGE_SEQUENCE>303</ALLOW_OR_CHARGE_SEQUENCE>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_TYPE>small_order</ALLOW_OR_CHARGE_TYPE>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_VALUE>
+              <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+            </ALLOW_OR_CHARGE_VALUE>
+            <ALLOW_OR_CHARGE_BASE>346.90</ALLOW_OR_CHARGE_BASE>
+          </ALLOW_OR_CHARGE>
+          <ALLOW_OR_CHARGES_TOTAL_AMOUNT>342.37</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+        </ALLOW_OR_CHARGES_FIX>
+        <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+        <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+        <TAX_DETAILS_FIX>
+          <bmecat:CALCULATION_SEQUENCE>467</bmecat:CALCULATION_SEQUENCE>
+          <bmecat:TAX_CATEGORY>super_reduced_rate</bmecat:TAX_CATEGORY>
+          <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+          <bmecat:TAX>0.19</bmecat:TAX>
+          <TAX_AMOUNT>301.32</TAX_AMOUNT>
+          <TAX_BASE>239.83</TAX_BASE>
+          <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+          <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+        </TAX_DETAILS_FIX>
+        <TAX_DETAILS_FIX>
+          <bmecat:CALCULATION_SEQUENCE>147</bmecat:CALCULATION_SEQUENCE>
+          <bmecat:TAX_CATEGORY>super_reduced_rate</bmecat:TAX_CATEGORY>
+          <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+          <bmecat:TAX>0.19</bmecat:TAX>
+          <TAX_AMOUNT>486.85</TAX_AMOUNT>
+          <TAX_BASE>267.87</TAX_BASE>
+          <bmecat:EXEMPTION_REASON lang="deu">Teillieferung ist möglich.</bmecat:EXEMPTION_REASON>
+          <bmecat:EXEMPTION_REASON lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:EXEMPTION_REASON>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+        </TAX_DETAILS_FIX>
+        <bmecat:PRICE_QUANTITY>7</bmecat:PRICE_QUANTITY>
+        <PRICE_BASE_FIX>
+          <PRICE_UNIT_VALUE>355.02</PRICE_UNIT_VALUE>
+          <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+          <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+        </PRICE_BASE_FIX>
+      </PRODUCT_PRICE_FIX>
+      <PRICE_LINE_AMOUNT>344.73</PRICE_LINE_AMOUNT>
+      <PARTIAL_SHIPMENT_ALLOWED>true</PARTIAL_SHIPMENT_ALLOWED>
+      <DELIVERY_DATE type="fixed">
+        <DELIVERY_START_DATE>2026-11-05</DELIVERY_START_DATE>
+        <DELIVERY_END_DATE>2026-12-13</DELIVERY_END_DATE>
+      </DELIVERY_DATE>
+      <SOURCING_INFO>
+        <QUOTATION_ID>2026-44557</QUOTATION_ID>
+        <AGREEMENT type="buyer" default="true">
+          <bmecat:AGREEMENT_ID>2026-12433</bmecat:AGREEMENT_ID>
+          <bmecat:AGREEMENT_LINE_ID>1</bmecat:AGREEMENT_LINE_ID>
+          <bmecat:AGREEMENT_START_DATE>2026-10-23</bmecat:AGREEMENT_START_DATE>
+          <bmecat:AGREEMENT_END_DATE>2026-12-25</bmecat:AGREEMENT_END_DATE>
+          <bmecat:SUPPLIER_IDREF type="supplier_specific">4751063</bmecat:SUPPLIER_IDREF>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.mintzlaff-gmbh.example/office-supplies</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.sporrer-metzger.example/tools</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="LMHash" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="NTLM" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>others</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>309</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.beyer-donie.example/tools</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.roschinsky-hasse.example/work-safety</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="RIPEMD128" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="SHA256" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>repair_manual</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>130</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </AGREEMENT>
+        <AGREEMENT type="supplier" default="true">
+          <bmecat:AGREEMENT_ID>2026-32175</bmecat:AGREEMENT_ID>
+          <bmecat:AGREEMENT_LINE_ID>2</bmecat:AGREEMENT_LINE_ID>
+          <bmecat:AGREEMENT_START_DATE>2026-10-24</bmecat:AGREEMENT_START_DATE>
+          <bmecat:AGREEMENT_END_DATE>2026-12-09</bmecat:AGREEMENT_END_DATE>
+          <bmecat:SUPPLIER_IDREF type="supplier_specific">9376364</bmecat:SUPPLIER_IDREF>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.cierpinski-kupfer.example/hydraulics</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.steidl-reitze.example/work-safety</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="WHIRLPOOL" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="MD5" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>normal</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>467</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.kuhnemund-ug.example/tools</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.tietze-ug.example/tools</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="SHA256" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="HAVAL" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>signatur_file</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>392</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </AGREEMENT>
+        <CATALOG_REFERENCE>
+          <bmecat:CATALOG_ID>2026-49034</bmecat:CATALOG_ID>
+          <bmecat:CATALOG_VERSION>2.1</bmecat:CATALOG_VERSION>
+          <bmecat:CATALOG_NAME lang="deu">LED-Arbeitsleuchte 30 W</bmecat:CATALOG_NAME>
+        </CATALOG_REFERENCE>
+      </SOURCING_INFO>
+      <CUSTOMER_ORDER_REFERENCE>
+        <ORDER_ID>2026-07230</ORDER_ID>
+        <LINE_ITEM_ID>1</LINE_ITEM_ID>
+        <ORDER_DATE>2026-10-24</ORDER_DATE>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <CUSTOMER_IDREF type="customer_specific">6928153</CUSTOMER_IDREF>
+      </CUSTOMER_ORDER_REFERENCE>
+      <CUSTOMER_ORDER_REFERENCE>
+        <ORDER_ID>2026-80344</ORDER_ID>
+        <LINE_ITEM_ID>2</LINE_ITEM_ID>
+        <ORDER_DATE>2026-11-01</ORDER_DATE>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <CUSTOMER_IDREF type="customer_specific">7676348</CUSTOMER_IDREF>
+      </CUSTOMER_ORDER_REFERENCE>
+      <bmecat:ACCOUNTING_INFO>
+        <bmecat:COST_CATEGORY_ID type="cost_center">2026-98422</bmecat:COST_CATEGORY_ID>
+        <bmecat:COST_TYPE>Cost type</bmecat:COST_TYPE>
+        <bmecat:COST_ACCOUNT>1</bmecat:COST_ACCOUNT>
+      </bmecat:ACCOUNTING_INFO>
+      <SHIPMENT_PARTIES_REFERENCE>
+        <DELIVERY_IDREF type="duns">8123426</DELIVERY_IDREF>
+        <FINAL_DELIVERY_IDREF type="gln">4751063</FINAL_DELIVERY_IDREF>
+        <DELIVERER_IDREF type="customer_specific">9376364</DELIVERER_IDREF>
+      </SHIPMENT_PARTIES_REFERENCE>
+      <bmecat:TRANSPORT>
+        <bmecat:INCOTERM>Inc</bmecat:INCOTERM>
+        <bmecat:LOCATION>Location</bmecat:LOCATION>
+        <bmecat:TRANSPORT_REMARK lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:TRANSPORT_REMARK>
+        <bmecat:TRANSPORT_REMARK lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:TRANSPORT_REMARK>
+      </bmecat:TRANSPORT>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="other">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="wto-embargo">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <bmecat:SPECIAL_TREATMENT_CLASS type="Type">Special treatment</bmecat:SPECIAL_TREATMENT_CLASS>
+      <bmecat:SPECIAL_TREATMENT_CLASS type="Type">Special treatment</bmecat:SPECIAL_TREATMENT_CLASS>
+      <MIME_INFO>
+        <MIME>
+          <bmecat:MIME_SOURCE lang="deu">https://media.tidewater.example/products/akku-bohrschrauber-18v.png</bmecat:MIME_SOURCE>
+          <bmecat:MIME_DESCR lang="deu">Produktbild Akku-Bohrschrauber 18 V</bmecat:MIME_DESCR>
+          <MIME_PURPOSE>normal</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>1</bmecat:MIME_ORDER>
+        </MIME>
+        <MIME>
+          <bmecat:MIME_SOURCE lang="deu">../media/kugellager-6204-2rs.png</bmecat:MIME_SOURCE>
+          <bmecat:MIME_DESCR lang="deu">Kugellager 6204-2RS, Ansicht von vorn</bmecat:MIME_DESCR>
+          <MIME_PURPOSE>detail</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>2</bmecat:MIME_ORDER>
+        </MIME>
+        <MIME>
+          <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+          <MIME_EMBEDDED>
+            <MIME_DATA xmime:contentType="application/pdf">
+              JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+              CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+              CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUg
+              ODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0Yy
+              IDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNzQ3ID4+CnN0cmVhbQpC
+              VCAvRjIgMjAgVGYgNzIgNzYwIFRkIChMaWVmZXJiZWRpbmd1bmdlbiAyMDI2KSBUaiBFVApCVCAv
+              RjEgMTEgVGYgNzIgNzI0IFRkIChUaWRld2F0ZXIgV2Vya3pldWdoYW5kZWwgR21iSCwgSGFmZW5z
+              dHJhc3NlIDEyLCAyMDQ1NyBIYW1idXJnKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzA3IFRkICgp
+              IFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTAgVGQgKDEuIExpZWZlcnVuZyBmcmVpIEhhdXMgYWIg
+              ZWluZW0gQmVzdGVsbHdlcnQgdm9uIDI1MCwwMCBFVVIuKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIg
+              NjczIFRkICgyLiBBbmxpZWZlcnVuZyB3ZXJrdGFncyB6d2lzY2hlbiA4IHVuZCAxNiBVaHIsIFRv
+              ciAzLikgVGogRVQKQlQgL0YxIDExIFRmIDcyIDY1NiBUZCAoMy4gVGVpbGxpZWZlcnVuZ2VuIHNp
+              bmQgbmFjaCBBYnNwcmFjaGUgbW9lZ2xpY2guKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjM5IFRk
+              ICg0LiBQYWxldHRlbjogRXVyb3BhbGV0dGUsIGhvZWNoc3RlbnMgMSw4MCBtIGhvY2guKSBUaiBF
+              VApCVCAvRjEgMTEgVGYgNzIgNjIyIFRkICg1LiBaYWhsdW5nc3ppZWwgMzAgVGFnZSBuZXR0bywg
+              MTQgVGFnZSBtaXQgMiAlIFNrb250by4pIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MDUgVGQgKCkg
+              VGogRVQKQlQgL0YxIDExIFRmIDcyIDU4OCBUZCAoU3RhbmQ6IDEuIE5vdmVtYmVyIDIwMjYuIERp
+              ZXNlcyBCbGF0dCBpc3QgZWluIEJlaXNwaWVsIGF1cyBkZW0ga25vYmFzLUNsaWNrZHVtbXkuKSBU
+              aiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5
+              cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVu
+              ZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hl
+              bHZldGljYS1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iagp4cmVmCjAg
+              NwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAw
+              MCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMTA0OCAw
+              MDAwMCBuIAowMDAwMDAxMTQ1IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAg
+              UiA+PgpzdGFydHhyZWYKMTI0NwolJUVPRgo=
+            </MIME_DATA>
+            <FILE_NAME>Lieferbedingungen-2026.pdf</FILE_NAME>
+            <FILE_SIZE>1451</FILE_SIZE>
+          </MIME_EMBEDDED>
+          <bmecat:MIME_DESCR lang="deu">Lieferbedingungen 2026</bmecat:MIME_DESCR>
+          <MIME_PURPOSE>others</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>3</bmecat:MIME_ORDER>
+        </MIME>
+      </MIME_INFO>
+      <REMARKS lang="deu" type="orderchange">Rechnung bitte mit Bestellnummer 4711. Rahmenvertrag: https://wiki.tidewater.example/einkauf/rahmenvertrag-2026 (im Repository unter ../contracts/rahmenvertrag-2026.pdf).</REMARKS>
+      <REMARKS lang="deu" type="orderchange">Ware bitte auf Europalette.</REMARKS>
+      <ITEM_UDX>
+        <UDX.TIDEWATER.APPROVAL>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlaW5rYXVmLnRpZGV3YXRlci5leGFtcGxlIiwic3ViIjoibS5icmFuZHRAdGlkZXdhdGVyLmV4YW1wbGUiLCJvcmRlciI6IjQ3MTEiLCJhcHByb3ZlZCI6dHJ1ZSwibGltaXRfZXVyIjoyNTAwMCwiaWF0IjoxNzk1MDAwMDAwLCJleHAiOjE3OTUwODY0MDB9.bm90IGEgcmVhbCBzaWduYXR1cmUsIDMyIGJ5dGVzISEh</UDX.TIDEWATER.APPROVAL>
+        <UDX.TIDEWATER.ROUTING>{"route":"express","carrier":"Elbe Logistik","dock":3,"window":{"from":"08:00","to":"16:00"},"pallets":[{"type":"EUR","count":2}]}</UDX.TIDEWATER.ROUTING>
+        <UDX.TIDEWATER.LABEL>&lt;?xml version="1.0"?&gt;&lt;label xmlns="urn:tidewater:label:1"&gt;&lt;to&gt;Elbe Maschinenbau AG&lt;/to&gt;&lt;dock&gt;3&lt;/dock&gt;&lt;barcode type="gs1-128"&gt;(00)340123450000000018&lt;/barcode&gt;&lt;link&gt;https://track.elbe-logistik.example/s/340123450000000018&lt;/link&gt;&lt;/label&gt;</UDX.TIDEWATER.LABEL>
+        <UDX.TIDEWATER.BATCH>TW2026A7781KQ40Z9XLMR3</UDX.TIDEWATER.BATCH>
+        <UDX.TIDEWATER.THUMBNAIL>iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAH3UlEQVR42u1dvcpeRRCeaxEUhCAhaFALa7uUYqWVjTdgaWlhCou0gpXY5RICKe2svA6J9SdbzMey7t/8nt2zUwwE8r3ve84+zzwzO7s7C+/+/ech7FyDGIQgQAxEECAsCBAWBAgLAtzS3rx9+/Dyl1ckS58JAmwM9AcffapqdyUG3AHwr7/5Th3wkaXfvAMhYFfQRwC9+Orbhx9+/OnRfvvj9cOff/09Zelv88+m75pRiB3JsA0BRp6OYM2CzDX8nZEyBAEUge95OMWztQ2VoqUQOxABVpX5lrdfDfqIDC1VWDU8wA4enzxsRdB7ZKipwoqKAAH82USAFeV+d+BniLBKWIDVvP5OwNeIsJoawCpe7zGFW8XKZPFKNYArwL+z3EvCwhUkcCVALdZ7eVxprUJSbh7PVssNbkmAEnwrr+8VZ75//vGUeRedytzAkwTgDb6F5JeAf/ns+SOYr794KjL8nvSdJSEsQ4IXCcAbfKvKWwLp5efPxICPLP1GrhLayuBNAtgN/NxTkld6gN4jAyqDprJ5kgB2AT8H3svbOaqgRQQvEsDq4JfAS8H6/bMnD79+8mHV0v9p5AxaRPAgAawMPsZ4ban/+cl7VbMIDdJk0ZoEsCL4uddTgNfy4pF6UIigoQaWJACLCp8UfPT6WVBePX3/0YvTv60IUP7OLNlQDbRIoFkxBIvyLvdFKbG+BN7a+0sVoBIhzw00ikVaJABt6ZeCPyv5adAR+KuyfyTCLPHykCAlgVYoAM0lXe6LceL9riYlQR4KNJaS4eq4nz43G++l5dxanb+3XmD5TOmdNUggDQVwpfRbgV+Wa2vnBHpWLiRZFZ64JNAMBaAh/Zy5Lg7yKM5zijBaK3i1lUWqMozegaue+TqIJBSwCZB7iEXMxwyfCrzlOn65+DRbdOpNTSU5QY6BKwFy76d6GMrXDPgj7/ECXkIEnK3MkIA7lhIVAM/EDx+4N2gz4GuWWj1K1TMkQDJTSSBNCMEz8RslfbPge24n0wppMyTgJIXShBC4sZ/6oOgtowHqgb+C18+ogeQdOe+Xq4ApAbixfybue9TTvfb9S6a2nHxAkguAh/dL5/s7gK9JAk4o4KoArO79muDXGj9IGklYkcBTBYCT/FGZyS2raoBfq+y1GkPVKodXkSCNGVUFOMkgUKd+lEHBQfDygl6ljDJFKtvQcIkgVT/q++fvPPu+YCn/XO9H8DkDj4Og1aolb00jeR4OCagqwAkDYJX89difpkGj6R5nPvw4Hzc4cYtOwNneNUqCW+PBUUFqMghW8p/+tvXSvTo/VsQ4UutxkALVgEqCXgW0VyBKY0gdd0oYACv573l/bycPN8/wPE/HIUGvENbbWYQqYBUGwCL7772spvdfAb6EBFwVoDoFZTYAs/Gf8gC95E/L+68En0uCGRXQSAbzMCAiADf+t+S/J3VU708DciX4OQko4LRUoBcaqWGAkgfAbPzXmPvjVm6p9+MLrtJpi/PsrfDYmh1xws1MHqBOgF72P5r3kxRmoVZrOE5ShRxVRTl5gIgAnPk/p/hDiXFpEFaQ/loomAXIeowo9QDQTgA5Gycpv7Fqx02KCoz2RmjMkGYTQRMCWNW8V4v93FyAu0biSgDODMCa2UnWVu7AnZ5tVqatlXJ2JgCaFUAuASiDtvKlDOg0VnkAp04yCpmgPQPgJDcU2Vy9/z4lnFmNFWUm4EIAjU2Qq8d/ah4ws0n2NgTolTkpA7bDDRzpGaUEaFUElydAK7EJAugRgIrHbQiw+gyAOhMIAgQBggARAm5GgEgCD08CYxoY08AoBN2xEBSl4ANLwbEYdPhiUCwHH74cHBtCYkNIbAk7fUtYbAo9fFNobAs/fFt4HAw5/GBIHA07/GhYHA6Nw6FxPPz04+HRIOLwBhHRIubwFjHRJCqaREWbuNPbxEWjyMMbRUar2GgVG82iT28WHe3io118XBhx+oURcWVMXBkTl0adfmlUXBt3+LVxcXFkXBwZV8fG1bFxefTxl0fH9fFxffz/QoH0hSy8bDWTTmNz8DVWO0Fzk4SkUkclwWhnkYf1dvJYgK8p/aoEyEOBBglm5Be3mCcAkAjUpJFj6TcQeMzwZ34Xw48G+JqHZOGd8slYaZWOWk8vidCbckmt/J1ZwmmsY2jGfRMClKFASgJOXmCtAuj9nHivBb72vkew2jSpUa+fLbVSDb24NM1ET6tUbQm+CQG0SZCrgcbUDL24Zhrqkcd66dK1NfhmBNAmQY0IK00Z88KTBvBe4JsSwIIEJRG0Q4NE6rWA9wTfnABWJMjr9Nbl2lGZWWsf4RXguxCgRgLtbV1l/T55pVY5F78HPV1jx/BI2TyPuoH3eTppsYizgler8/es/JzGyiKlyON5zhGuOFFrERJGClFaCXLtbzy3k10BvjsBamVji5Cwg5WSf1UPRHcCIAlKNVhxp6/HziL0+qsaYF5CgNpSsnVusNK5gfKY2pUYXEqAlhrcLSzU5P5Kr1+KAD012J0INeBXa3G3DAHuRIQdgF+WAK2wYFV5s6pMrij32xBgpAgexRlp0WlVj9+OALVWLS1l8JhKtgpJubfvAPx2BGi1b2mZpPFDrZHE6PeobWiCAIpk6CmDlaGn7wj6bQjQIsSMQlANv3d3wG9NgBlizNrdgD6aAGFBgLAgQFgQICwIEBYECMvsP6e2WSBAHxUpAAAAAElFTkSuQmCC</UDX.TIDEWATER.THUMBNAIL>
+        <UDX.TIDEWATER.AUDIT>H4sIAAAAAAACE1XKsQ3CMBAF0D5T/BIkgmwnAZQNEBQULOCIi3USvkP2kYnYhMUogVe/4MKu9b51Hdxh9D0uWtlYBR5REt0pGVbH/NBi6yb87wFzIU6UaCLBooK8nUqUm31nD+9GF7BoxplpphLFSDBRtffLOP3cAW4/9g4nzZlrZRWm8pSERNViMbINrlrQNR8xT/jttwAAAA==</UDX.TIDEWATER.AUDIT>
+      </ITEM_UDX>
+    </ORDER_ITEM>
+    <ORDER_ITEM>
+      <LINE_ITEM_ID>2</LINE_ITEM_ID>
+      <PRODUCT_ID>
+        <bmecat:SUPPLIER_PID type="supplier_specific">EW-9819-461</bmecat:SUPPLIER_PID>
+        <bmecat:SUPPLIER_IDREF type="supplier_specific">6928153</bmecat:SUPPLIER_IDREF>
+        <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+        <LOT_NUMBER>LOT-2026-92110</LOT_NUMBER>
+        <LOT_NUMBER>LOT-2026-48928</LOT_NUMBER>
+        <SERIAL_NUMBER>SN-2026-77192</SERIAL_NUMBER>
+        <SERIAL_NUMBER>SN-2026-33784</SERIAL_NUMBER>
+        <bmecat:INTERNATIONAL_PID type="gtin">4062603865833</bmecat:INTERNATIONAL_PID>
+        <bmecat:INTERNATIONAL_PID type="gtin">4031891574253</bmecat:INTERNATIONAL_PID>
+        <bmecat:BUYER_PID type="buyer_specific">NT-6464-079</bmecat:BUYER_PID>
+        <bmecat:BUYER_PID type="buyer_specific">NX-9870-424</bmecat:BUYER_PID>
+        <bmecat:DESCRIPTION_SHORT lang="deu">Maßband 5 m</bmecat:DESCRIPTION_SHORT>
+        <bmecat:DESCRIPTION_SHORT lang="deu">Sechskantschraube M8 x 40, verzinkt</bmecat:DESCRIPTION_SHORT>
+        <bmecat:DESCRIPTION_LONG lang="deu">Maßband 5 m. Für den Dauereinsatz in Werkstatt und Montage.</bmecat:DESCRIPTION_LONG>
+        <bmecat:DESCRIPTION_LONG lang="deu">Winkelschleifer 125 mm. Für den Dauereinsatz in Werkstatt und Montage.</bmecat:DESCRIPTION_LONG>
+        <MANUFACTURER_INFO>
+          <bmecat:MANUFACTURER_IDREF type="duns">7676348</bmecat:MANUFACTURER_IDREF>
+          <bmecat:MANUFACTURER_PID>UQ-1833-196</bmecat:MANUFACTURER_PID>
+          <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">BQ-9609-192</bmecat:MANUFACTURER_TYPE_DESCR>
+          <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">NL-8735-281</bmecat:MANUFACTURER_TYPE_DESCR>
+        </MANUFACTURER_INFO>
+        <bmecat:PRODUCT_TYPE>license</bmecat:PRODUCT_TYPE>
+      </PRODUCT_ID>
+      <PRODUCT_FEATURES>
+        <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Arbeitsschutz</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">US-4438-351</bmecat:REFERENCE_FEATURE_GROUP_ID>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID type="flat">OI-9083-236</bmecat:REFERENCE_FEATURE_GROUP_ID>
+        <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Befestigungstechnik</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Bürobedarf</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+        <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+        <bmecat:GROUP_PRODUCT_ORDER>292</bmecat:GROUP_PRODUCT_ORDER>
+        <FEATURE>
+          <bmecat:FNAME lang="deu">Werkstoff</bmecat:FNAME>
+          <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+          <bmecat:FVALUE lang="deu">Edelstahl A2</bmecat:FVALUE>
+          <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+          <bmecat:FUNIT>C62</bmecat:FUNIT>
+          <bmecat:FORDER>331</bmecat:FORDER>
+          <bmecat:FDESCR lang="deu">Hydraulik</bmecat:FDESCR>
+          <bmecat:FDESCR lang="deu">Elektrotechnik</bmecat:FDESCR>
+          <bmecat:FVALUE_DETAILS lang="deu">240 mm</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_DETAILS lang="deu">2,4 kg</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_TYPE>choice</bmecat:FVALUE_TYPE>
+        </FEATURE>
+        <FEATURE>
+          <bmecat:FNAME lang="deu">Spannung</bmecat:FNAME>
+          <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+          <bmecat:FVALUE lang="deu">RAL 7016</bmecat:FVALUE>
+          <bmecat:FVALUE lang="deu">2,4 kg</bmecat:FVALUE>
+          <bmecat:FUNIT>C62</bmecat:FUNIT>
+          <bmecat:FORDER>27</bmecat:FORDER>
+          <bmecat:FDESCR lang="deu">Werkzeuge</bmecat:FDESCR>
+          <bmecat:FDESCR lang="deu">Bürobedarf</bmecat:FDESCR>
+          <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_DETAILS lang="deu">IP 54</bmecat:FVALUE_DETAILS>
+          <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+        </FEATURE>
+      </PRODUCT_FEATURES>
+      <PRODUCT_COMPONENTS>
+        <PRODUCT_COMPONENT>
+          <PRODUCT_ID>
+            <bmecat:SUPPLIER_PID type="supplier_specific">WT-9829-501</bmecat:SUPPLIER_PID>
+            <bmecat:SUPPLIER_IDREF type="supplier_specific">8123426</bmecat:SUPPLIER_IDREF>
+            <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+            <LOT_NUMBER>LOT-2026-22209</LOT_NUMBER>
+            <LOT_NUMBER>LOT-2026-86042</LOT_NUMBER>
+            <SERIAL_NUMBER>SN-2026-29653</SERIAL_NUMBER>
+            <SERIAL_NUMBER>SN-2026-10562</SERIAL_NUMBER>
+            <bmecat:INTERNATIONAL_PID type="gtin">4078131527914</bmecat:INTERNATIONAL_PID>
+            <bmecat:INTERNATIONAL_PID type="gtin">4064978390408</bmecat:INTERNATIONAL_PID>
+            <bmecat:BUYER_PID type="buyer_specific">ZD-8963-644</bmecat:BUYER_PID>
+            <bmecat:BUYER_PID type="buyer_specific">EP-7866-533</bmecat:BUYER_PID>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Akku-Bohrschrauber 18 V</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Schutzhandschuhe Größe 9</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_LONG lang="deu">LED-Arbeitsleuchte 30 W. Mit Ersatzteilgarantie über zehn Jahre.</bmecat:DESCRIPTION_LONG>
+            <bmecat:DESCRIPTION_LONG lang="deu">Hydrauliköl HLP 46, 20 l. Mit Ersatzteilgarantie über zehn Jahre.</bmecat:DESCRIPTION_LONG>
+            <MANUFACTURER_INFO>
+              <bmecat:MANUFACTURER_IDREF type="duns">4751063</bmecat:MANUFACTURER_IDREF>
+              <bmecat:MANUFACTURER_PID>ZO-7924-384</bmecat:MANUFACTURER_PID>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">BE-4653-833</bmecat:MANUFACTURER_TYPE_DESCR>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">KA-4526-825</bmecat:MANUFACTURER_TYPE_DESCR>
+            </MANUFACTURER_INFO>
+            <bmecat:PRODUCT_TYPE>must_be_configured</bmecat:PRODUCT_TYPE>
+          </PRODUCT_ID>
+          <PRODUCT_FEATURES>
+            <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Bürobedarf</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">PH-1544-160</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="flat">LS-8989-948</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Arbeitsschutz</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Arbeitsschutz</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="hierarchy">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:GROUP_PRODUCT_ORDER>288</bmecat:GROUP_PRODUCT_ORDER>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Werkstoff</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Schutzart</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">IP 54</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">RAL 7016</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>298</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Hydraulik</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Elektrotechnik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">Edelstahl A2</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">RAL 7016</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>set</bmecat:FVALUE_TYPE>
+            </FEATURE>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Schutzart</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">18 V</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">240 mm</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>109</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Bürobedarf</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Werkzeuge</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">240 mm</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>range</bmecat:FVALUE_TYPE>
+            </FEATURE>
+          </PRODUCT_FEATURES>
+          <QUANTITY>20</QUANTITY>
+          <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+          <PRODUCT_PRICE_FIX>
+            <bmecat:PRICE_AMOUNT>395.99</bmecat:PRICE_AMOUNT>
+            <ALLOW_OR_CHARGES_FIX>
+              <ALLOW_OR_CHARGE type="surcharge">
+                <ALLOW_OR_CHARGE_SEQUENCE>296</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Werkzeuge</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>small_order</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>287.28</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGE type="allowance">
+                <ALLOW_OR_CHARGE_SEQUENCE>45</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>rebate</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>428.20</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGES_TOTAL_AMOUNT>361.18</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+            </ALLOW_OR_CHARGES_FIX>
+            <bmecat:PRICE_FLAG type="incl_packing">true</bmecat:PRICE_FLAG>
+            <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>253</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>parking_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>235.69</TAX_AMOUNT>
+              <TAX_BASE>434.16</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>262</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>standard_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>417.52</TAX_AMOUNT>
+              <TAX_BASE>107.57</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Bitte an Tor 3 anliefern.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Teillieferung ist möglich.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <bmecat:PRICE_QUANTITY>12</bmecat:PRICE_QUANTITY>
+            <PRICE_BASE_FIX>
+              <PRICE_UNIT_VALUE>22.01</PRICE_UNIT_VALUE>
+              <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+              <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+            </PRICE_BASE_FIX>
+          </PRODUCT_PRICE_FIX>
+        </PRODUCT_COMPONENT>
+        <PRODUCT_COMPONENT>
+          <PRODUCT_ID>
+            <bmecat:SUPPLIER_PID type="supplier_specific">PZ-6285-609</bmecat:SUPPLIER_PID>
+            <bmecat:SUPPLIER_IDREF type="supplier_specific">9376364</bmecat:SUPPLIER_IDREF>
+            <CONFIG_CODE_FIX>Config code fix</CONFIG_CODE_FIX>
+            <LOT_NUMBER>LOT-2026-80197</LOT_NUMBER>
+            <LOT_NUMBER>LOT-2026-30003</LOT_NUMBER>
+            <SERIAL_NUMBER>SN-2026-71131</SERIAL_NUMBER>
+            <SERIAL_NUMBER>SN-2026-53459</SERIAL_NUMBER>
+            <bmecat:INTERNATIONAL_PID type="gtin">4012456175030</bmecat:INTERNATIONAL_PID>
+            <bmecat:INTERNATIONAL_PID type="gtin">4026761389679</bmecat:INTERNATIONAL_PID>
+            <bmecat:BUYER_PID type="buyer_specific">WR-3197-004</bmecat:BUYER_PID>
+            <bmecat:BUYER_PID type="buyer_specific">DR-2953-295</bmecat:BUYER_PID>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Dichtungsring 40 x 3</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_SHORT lang="deu">Hydrauliköl HLP 46, 20 l</bmecat:DESCRIPTION_SHORT>
+            <bmecat:DESCRIPTION_LONG lang="deu">Sechskantschraube M8 x 40, verzinkt. Für den Dauereinsatz in Werkstatt und Montage.</bmecat:DESCRIPTION_LONG>
+            <bmecat:DESCRIPTION_LONG lang="deu">Netzwerkkabel Cat 6, 5 m. Geprüft nach DIN EN ISO 9001.</bmecat:DESCRIPTION_LONG>
+            <MANUFACTURER_INFO>
+              <bmecat:MANUFACTURER_IDREF type="buyer_specific">6928153</bmecat:MANUFACTURER_IDREF>
+              <bmecat:MANUFACTURER_PID>BG-2812-811</bmecat:MANUFACTURER_PID>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">IN-8698-056</bmecat:MANUFACTURER_TYPE_DESCR>
+              <bmecat:MANUFACTURER_TYPE_DESCR lang="deu">KJ-6264-464</bmecat:MANUFACTURER_TYPE_DESCR>
+            </MANUFACTURER_INFO>
+            <bmecat:PRODUCT_TYPE>bundle</bmecat:PRODUCT_TYPE>
+          </PRODUCT_ID>
+          <PRODUCT_FEATURES>
+            <bmecat:REFERENCE_FEATURE_SYSTEM_NAME>Befestigungstechnik</bmecat:REFERENCE_FEATURE_SYSTEM_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="flat">IZ-7871-701</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID type="hierarchy">AE-7234-287</bmecat:REFERENCE_FEATURE_GROUP_ID>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Arbeitsschutz</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_NAME lang="deu">Werkzeuge</bmecat:REFERENCE_FEATURE_GROUP_NAME>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:REFERENCE_FEATURE_GROUP_ID2 type="flat">Reference feature group id2</bmecat:REFERENCE_FEATURE_GROUP_ID2>
+            <bmecat:GROUP_PRODUCT_ORDER>388</bmecat:GROUP_PRODUCT_ORDER>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Farbe</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Werkstoff</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">Edelstahl A2</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">240 mm</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>484</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Werkzeuge</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">Edelstahl A2</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>set</bmecat:FVALUE_TYPE>
+            </FEATURE>
+            <FEATURE>
+              <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+              <bmecat:FNAME lang="deu">Gewicht</bmecat:FNAME>
+              <bmecat:FVALUE lang="deu">RAL 7016</bmecat:FVALUE>
+              <bmecat:FVALUE lang="deu">RAL 7016</bmecat:FVALUE>
+              <bmecat:FUNIT>C62</bmecat:FUNIT>
+              <bmecat:FORDER>243</bmecat:FORDER>
+              <bmecat:FDESCR lang="deu">Befestigungstechnik</bmecat:FDESCR>
+              <bmecat:FDESCR lang="deu">Arbeitsschutz</bmecat:FDESCR>
+              <bmecat:FVALUE_DETAILS lang="deu">Edelstahl A2</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_DETAILS lang="deu">18 V</bmecat:FVALUE_DETAILS>
+              <bmecat:FVALUE_TYPE>choice</bmecat:FVALUE_TYPE>
+            </FEATURE>
+          </PRODUCT_FEATURES>
+          <QUANTITY>20</QUANTITY>
+          <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+          <PRODUCT_PRICE_FIX>
+            <bmecat:PRICE_AMOUNT>274.55</bmecat:PRICE_AMOUNT>
+            <ALLOW_OR_CHARGES_FIX>
+              <ALLOW_OR_CHARGE type="allowance">
+                <ALLOW_OR_CHARGE_SEQUENCE>20</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Elektrotechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Hydraulik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>postage</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>19.83</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGE type="allowance">
+                <ALLOW_OR_CHARGE_SEQUENCE>153</ALLOW_OR_CHARGE_SEQUENCE>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Arbeitsschutz</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+                <ALLOW_OR_CHARGE_TYPE>recycling</ALLOW_OR_CHARGE_TYPE>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+                <ALLOW_OR_CHARGE_VALUE>
+                  <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+                </ALLOW_OR_CHARGE_VALUE>
+                <ALLOW_OR_CHARGE_BASE>215.25</ALLOW_OR_CHARGE_BASE>
+              </ALLOW_OR_CHARGE>
+              <ALLOW_OR_CHARGES_TOTAL_AMOUNT>453.71</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+            </ALLOW_OR_CHARGES_FIX>
+            <bmecat:PRICE_FLAG type="incl_freight">true</bmecat:PRICE_FLAG>
+            <bmecat:PRICE_FLAG type="incl_duty">true</bmecat:PRICE_FLAG>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>311</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>zero_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>162.71</TAX_AMOUNT>
+              <TAX_BASE>201.41</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Bitte an Tor 3 anliefern.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <TAX_DETAILS_FIX>
+              <bmecat:CALCULATION_SEQUENCE>203</bmecat:CALCULATION_SEQUENCE>
+              <bmecat:TAX_CATEGORY>super_reduced_rate</bmecat:TAX_CATEGORY>
+              <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+              <bmecat:TAX>0.19</bmecat:TAX>
+              <TAX_AMOUNT>296.19</TAX_AMOUNT>
+              <TAX_BASE>376.58</TAX_BASE>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+              <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+            </TAX_DETAILS_FIX>
+            <bmecat:PRICE_QUANTITY>23</bmecat:PRICE_QUANTITY>
+            <PRICE_BASE_FIX>
+              <PRICE_UNIT_VALUE>132.30</PRICE_UNIT_VALUE>
+              <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+              <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+            </PRICE_BASE_FIX>
+          </PRODUCT_PRICE_FIX>
+        </PRODUCT_COMPONENT>
+      </PRODUCT_COMPONENTS>
+      <QUANTITY>19</QUANTITY>
+      <bmecat:ORDER_UNIT>C62</bmecat:ORDER_UNIT>
+      <PRODUCT_PRICE_FIX>
+        <bmecat:PRICE_AMOUNT>325.68</bmecat:PRICE_AMOUNT>
+        <ALLOW_OR_CHARGES_FIX>
+          <ALLOW_OR_CHARGE type="surcharge">
+            <ALLOW_OR_CHARGE_SEQUENCE>290</ALLOW_OR_CHARGE_SEQUENCE>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Befestigungstechnik</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Arbeitsschutz</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_TYPE>bulk_goods</ALLOW_OR_CHARGE_TYPE>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_VALUE>
+              <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+            </ALLOW_OR_CHARGE_VALUE>
+            <ALLOW_OR_CHARGE_BASE>497.59</ALLOW_OR_CHARGE_BASE>
+          </ALLOW_OR_CHARGE>
+          <ALLOW_OR_CHARGE type="allowance">
+            <ALLOW_OR_CHARGE_SEQUENCE>89</ALLOW_OR_CHARGE_SEQUENCE>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Werkzeuge</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_NAME lang="deu">Bürobedarf</ALLOW_OR_CHARGE_NAME>
+            <ALLOW_OR_CHARGE_TYPE>project_bonus</ALLOW_OR_CHARGE_TYPE>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_DESCR lang="deu">Allow or charge descr</ALLOW_OR_CHARGE_DESCR>
+            <ALLOW_OR_CHARGE_VALUE>
+              <AOC_PERCENTAGE_FACTOR>0.19</AOC_PERCENTAGE_FACTOR>
+            </ALLOW_OR_CHARGE_VALUE>
+            <ALLOW_OR_CHARGE_BASE>96.96</ALLOW_OR_CHARGE_BASE>
+          </ALLOW_OR_CHARGE>
+          <ALLOW_OR_CHARGES_TOTAL_AMOUNT>117.54</ALLOW_OR_CHARGES_TOTAL_AMOUNT>
+        </ALLOW_OR_CHARGES_FIX>
+        <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+        <bmecat:PRICE_FLAG type="incl_insurance">true</bmecat:PRICE_FLAG>
+        <TAX_DETAILS_FIX>
+          <bmecat:CALCULATION_SEQUENCE>414</bmecat:CALCULATION_SEQUENCE>
+          <bmecat:TAX_CATEGORY>reduced_rate</bmecat:TAX_CATEGORY>
+          <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+          <bmecat:TAX>0.19</bmecat:TAX>
+          <TAX_AMOUNT>16.57</TAX_AMOUNT>
+          <TAX_BASE>100.00</TAX_BASE>
+          <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+          <bmecat:EXEMPTION_REASON lang="deu">Bitte an Tor 3 anliefern.</bmecat:EXEMPTION_REASON>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+        </TAX_DETAILS_FIX>
+        <TAX_DETAILS_FIX>
+          <bmecat:CALCULATION_SEQUENCE>280</bmecat:CALCULATION_SEQUENCE>
+          <bmecat:TAX_CATEGORY>standard_rate</bmecat:TAX_CATEGORY>
+          <bmecat:TAX_TYPE>Tax type</bmecat:TAX_TYPE>
+          <bmecat:TAX>0.19</bmecat:TAX>
+          <TAX_AMOUNT>67.72</TAX_AMOUNT>
+          <TAX_BASE>368.02</TAX_BASE>
+          <bmecat:EXEMPTION_REASON lang="deu">Ware bitte auf Europalette.</bmecat:EXEMPTION_REASON>
+          <bmecat:EXEMPTION_REASON lang="deu">Bitte an Tor 3 anliefern.</bmecat:EXEMPTION_REASON>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+          <bmecat:JURISDICTION lang="deu">Jurisdiction</bmecat:JURISDICTION>
+        </TAX_DETAILS_FIX>
+        <bmecat:PRICE_QUANTITY>16</bmecat:PRICE_QUANTITY>
+        <PRICE_BASE_FIX>
+          <PRICE_UNIT_VALUE>391.31</PRICE_UNIT_VALUE>
+          <bmecat:PRICE_UNIT>C62</bmecat:PRICE_UNIT>
+          <bmecat:PRICE_UNIT_FACTOR>0.19</bmecat:PRICE_UNIT_FACTOR>
+        </PRICE_BASE_FIX>
+      </PRODUCT_PRICE_FIX>
+      <PRICE_LINE_AMOUNT>278.65</PRICE_LINE_AMOUNT>
+      <PARTIAL_SHIPMENT_ALLOWED>true</PARTIAL_SHIPMENT_ALLOWED>
+      <DELIVERY_DATE type="fixed">
+        <DELIVERY_START_DATE>2026-10-29</DELIVERY_START_DATE>
+        <DELIVERY_END_DATE>2026-12-17</DELIVERY_END_DATE>
+      </DELIVERY_DATE>
+      <SOURCING_INFO>
+        <QUOTATION_ID>2026-23294</QUOTATION_ID>
+        <AGREEMENT type="supplier" default="true">
+          <bmecat:AGREEMENT_ID>2026-64735</bmecat:AGREEMENT_ID>
+          <bmecat:AGREEMENT_LINE_ID>1</bmecat:AGREEMENT_LINE_ID>
+          <bmecat:AGREEMENT_START_DATE>2026-10-24</bmecat:AGREEMENT_START_DATE>
+          <bmecat:AGREEMENT_END_DATE>2026-12-13</bmecat:AGREEMENT_END_DATE>
+          <bmecat:SUPPLIER_IDREF type="supplier_specific">7676348</bmecat:SUPPLIER_IDREF>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.schlangen-gmbh.example/work-safety</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.anggreny-cordes.example/work-safety</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="MD5" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="HAVAL" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>original_document</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>308</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.travan-kg.example/tools</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.sutschet-gmbh.example/tools</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="HAVAL" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="RIPEMD160" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>normal</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>319</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </AGREEMENT>
+        <AGREEMENT type="buyer" default="true">
+          <bmecat:AGREEMENT_ID>2026-73955</bmecat:AGREEMENT_ID>
+          <bmecat:AGREEMENT_LINE_ID>2</bmecat:AGREEMENT_LINE_ID>
+          <bmecat:AGREEMENT_START_DATE>2026-10-31</bmecat:AGREEMENT_START_DATE>
+          <bmecat:AGREEMENT_END_DATE>2026-12-08</bmecat:AGREEMENT_END_DATE>
+          <bmecat:SUPPLIER_IDREF type="supplier_specific">8123426</bmecat:SUPPLIER_IDREF>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <AGREEMENT_DESCR lang="deu">Agreement descr</AGREEMENT_DESCR>
+          <MIME_INFO>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.pingpank-ludolf.example/hydraulics</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.tafelmeier-reinke.example/fasteners</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="LMHash" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>directions</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>99</bmecat:MIME_ORDER>
+            </MIME>
+            <MIME>
+              <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.golling-tschirch.example/tools</bmecat:MIME_SOURCE>
+              <bmecat:MIME_SOURCE lang="deu">https://www.lepthin-smieja.example/tools</bmecat:MIME_SOURCE>
+              <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+              <FILE_HASH_VALUE type="RIPEMD128" lang="deu">File hash value</FILE_HASH_VALUE>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+              <MIME_PURPOSE>others</MIME_PURPOSE>
+              <bmecat:MIME_ORDER>97</bmecat:MIME_ORDER>
+            </MIME>
+          </MIME_INFO>
+        </AGREEMENT>
+        <CATALOG_REFERENCE>
+          <bmecat:CATALOG_ID>2026-96813</bmecat:CATALOG_ID>
+          <bmecat:CATALOG_VERSION>2.1</bmecat:CATALOG_VERSION>
+          <bmecat:CATALOG_NAME lang="deu">Akku-Bohrschrauber 18 V</bmecat:CATALOG_NAME>
+        </CATALOG_REFERENCE>
+      </SOURCING_INFO>
+      <CUSTOMER_ORDER_REFERENCE>
+        <ORDER_ID>2026-37325</ORDER_ID>
+        <LINE_ITEM_ID>1</LINE_ITEM_ID>
+        <ORDER_DATE>2026-10-28</ORDER_DATE>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <CUSTOMER_IDREF type="customer_specific">4751063</CUSTOMER_IDREF>
+      </CUSTOMER_ORDER_REFERENCE>
+      <CUSTOMER_ORDER_REFERENCE>
+        <ORDER_ID>2026-75267</ORDER_ID>
+        <LINE_ITEM_ID>2</LINE_ITEM_ID>
+        <ORDER_DATE>2026-11-06</ORDER_DATE>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <ORDER_DESCR lang="deu">Order descr</ORDER_DESCR>
+        <CUSTOMER_IDREF type="customer_specific">9376364</CUSTOMER_IDREF>
+      </CUSTOMER_ORDER_REFERENCE>
+      <bmecat:ACCOUNTING_INFO>
+        <bmecat:COST_CATEGORY_ID type="project">2026-91921</bmecat:COST_CATEGORY_ID>
+        <bmecat:COST_TYPE>Cost type</bmecat:COST_TYPE>
+        <bmecat:COST_ACCOUNT>1</bmecat:COST_ACCOUNT>
+      </bmecat:ACCOUNTING_INFO>
+      <SHIPMENT_PARTIES_REFERENCE>
+        <DELIVERY_IDREF type="duns">6928153</DELIVERY_IDREF>
+        <FINAL_DELIVERY_IDREF type="party_specific">7676348</FINAL_DELIVERY_IDREF>
+        <DELIVERER_IDREF type="customer_specific">8123426</DELIVERER_IDREF>
+      </SHIPMENT_PARTIES_REFERENCE>
+      <bmecat:TRANSPORT>
+        <bmecat:INCOTERM>Inc</bmecat:INCOTERM>
+        <bmecat:LOCATION>Location</bmecat:LOCATION>
+        <bmecat:TRANSPORT_REMARK lang="deu">Lieferung nur werktags zwischen 8 und 16 Uhr.</bmecat:TRANSPORT_REMARK>
+        <bmecat:TRANSPORT_REMARK lang="deu">Rechnung bitte mit Bestellnummer.</bmecat:TRANSPORT_REMARK>
+      </bmecat:TRANSPORT>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="other">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <bmecat:INTERNATIONAL_RESTRICTIONS type="other">International restrictions</bmecat:INTERNATIONAL_RESTRICTIONS>
+      <bmecat:SPECIAL_TREATMENT_CLASS type="Type">Special treatment</bmecat:SPECIAL_TREATMENT_CLASS>
+      <bmecat:SPECIAL_TREATMENT_CLASS type="Type">Special treatment</bmecat:SPECIAL_TREATMENT_CLASS>
+      <MIME_INFO>
+        <MIME>
+          <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.restle-wilhelm.example/work-safety</bmecat:MIME_SOURCE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.moguenara-laack.example/office-supplies</bmecat:MIME_SOURCE>
+          <FILE_HASH_VALUE type="PANAMA" lang="deu">File hash value</FILE_HASH_VALUE>
+          <FILE_HASH_VALUE type="RIPEMD320" lang="deu">File hash value</FILE_HASH_VALUE>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <MIME_PURPOSE>data_sheet</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>477</bmecat:MIME_ORDER>
+        </MIME>
+        <MIME>
+          <bmecat:MIME_TYPE>application/pdf</bmecat:MIME_TYPE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.streese-ohg.example/hydraulics</bmecat:MIME_SOURCE>
+          <bmecat:MIME_SOURCE lang="deu">https://www.liebold-hornung.example/electrical</bmecat:MIME_SOURCE>
+          <FILE_HASH_VALUE type="Tiger128" lang="deu">File hash value</FILE_HASH_VALUE>
+          <FILE_HASH_VALUE type="SHA384" lang="deu">File hash value</FILE_HASH_VALUE>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_DESCR lang="deu">Mime descr</bmecat:MIME_DESCR>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <bmecat:MIME_ALT lang="deu">Mime alt</bmecat:MIME_ALT>
+          <MIME_PURPOSE>logo</MIME_PURPOSE>
+          <bmecat:MIME_ORDER>5</bmecat:MIME_ORDER>
+        </MIME>
+      </MIME_INFO>
+      <REMARKS lang="deu" type="general">Lieferung nur werktags zwischen 8 und 16 Uhr.</REMARKS>
+      <REMARKS lang="deu" type="orderchange">Ware bitte auf Europalette.</REMARKS>
+      <ITEM_UDX>Item udx</ITEM_UDX>
+    </ORDER_ITEM>
+  </ORDER_ITEM_LIST>
+  <ORDER_SUMMARY>
+    <TOTAL_ITEM_NUM>1</TOTAL_ITEM_NUM>
+    <TOTAL_AMOUNT>312.34</TOTAL_AMOUNT>
+  </ORDER_SUMMARY>
+</ORDER>

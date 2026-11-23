@@ -67,9 +67,19 @@ export type AuthPlace = "bearer" | "basic" | "header" | "query" | "cookie";
 export type ClientsFound = { bruno: boolean, };
 
 /**
+ * An image fetched: what it is, how big, and its bytes.
+ */
+export type FetchedImage = { url: string, mime: string, size: number, base64: string, };
+
+/**
  * One redirect followed.
  */
 export type Hop = { status: number, url: string, };
+
+/**
+ * The hosts kept: their images load when their dialog opens.
+ */
+export type ImageHosts = { hosts: Array<string>, };
 
 /**
  * What an open did: the argument vector, the folder, and what was left out.

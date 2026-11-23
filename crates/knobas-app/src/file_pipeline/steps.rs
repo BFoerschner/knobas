@@ -131,6 +131,14 @@ pub(super) fn run(
         PipeStep::Pretty { format } => pretty(*format, input, &mut out)?,
         PipeStep::Convert { from, to } => convert(*from, *to, input, &mut out)?,
         PipeStep::HexDump => hex_dump(input, &mut out)?,
+        PipeStep::Take { .. }
+        | PipeStep::HexDecode
+        | PipeStep::Inflate
+        | PipeStep::UrlDecode
+        | PipeStep::Unescape
+        | PipeStep::JsonString
+        | PipeStep::Jwt
+        | PipeStep::Charset { .. } => super::values::run(step, input, &mut out)?,
         // A program, not Rust: `super::run_command` runs it.
         PipeStep::Command { .. } => {
             return Err(Failure::Error(

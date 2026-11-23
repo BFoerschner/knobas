@@ -1,0 +1,188 @@
+/**
+ * The XML view (its design, 2026-11-23, sections 5 to 9): the first frame before any worker answer, folding by caret,
+ * key and *Levels*, the way down and the element picked, folds kept while the window lives, and a broken file.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import TfDocView from "./TfDocView.svelte";
+import { forgetFolds } from "./doc.svelte";
+import { localDocEngine, type DocEngine } from "../../../render/doc-port";
+import type { RenderPort } from "../../../render/port";
+import { BROKEN, fixture } from "../../../render/doc-fixture";
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+
+const quiet: RenderPort = { highlight: () => ({ focus: () => {}, cancel: () => {} }) };
+/** An engine that never answers: what the first frame draws alone. */
+const never: DocEngine = () => new Promise(() => {});
+
+beforeEach(() => {
+  target = document.createElement("div");
+  target.className = "tf-fileview";
+  document.body.appendChild(target);
+  Element.prototype.scrollIntoView = function () {};
+  forgetFolds();
+});
+
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+});
+
+const SMALL = ["<?xml version='1.0'?>", "<a xmlns='urn:a'>", "  <b>", "    <c>one</c>", "    <c>two</c>", "  </b>", "  <d>", "    <e/>", "  </d>", "</a>"].join("\n");
+
+function draw(text: string, extra: Record<string, unknown> = {}) {
+  view = mount(TfDocView, { target, props: { text, path: "orders/a.xml", repo: "r", render: quiet, engine: localDocEngine(), ...extra } });
+  flushSync();
+}
+
+async function settle() {
+  // The first document loads the outline's module: wait until the head says the outline landed.
+  for (let round = 0; round < 60 && words(target.querySelector(".tf-xv-head")) === "Reading…"; round += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  }
+  for (let round = 0; round < 6; round += 1) {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  }
+}
+
+const words = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const rows = () => [...target.querySelectorAll<HTMLElement>(".tf-l[data-n]")].map((r) => Number(r.dataset["n"]));
+const row = (n: number) => target.querySelector<HTMLElement>(`.tf-l[data-n="${n}"]`)!;
+const head = () => words(target.querySelector(".tf-xv-head"));
+function key(k: string, extra: KeyboardEventInit = {}) {
+  row(rows()[0]!).dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...extra }));
+  flushSync();
+}
+const stepper = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-xv-step button")];
+
+test("the first frame is the lines, the caret's column and the rail's head, before any worker answer", () => {
+  draw(SMALL, { engine: never });
+  expect(rows()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  // Every row holds the caret's column from the first frame, empty until the outline lands.
+  expect(target.querySelectorAll(".tf-xv-cc")).toHaveLength(10);
+  expect(target.querySelector(".tf-xv-caret")).toBeNull();
+  expect(head()).toBe("Reading…");
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).not.toBeNull();
+  expect(words(target.querySelector(".tf-xv-crumbs"))).toBe("Pick a line: the way down to it stands here.");
+});
+
+test("the outline lands as paint: carets where something folds, and the head says what the root names", async () => {
+  draw(SMALL);
+  await settle();
+  expect(target.querySelectorAll(".tf-xv-caret")).toHaveLength(3);
+  expect(row(2).querySelector(".tf-xv-caret")).not.toBeNull();
+  expect(head()).toBe("Not checked Its namespace is urn:a. knobas does not check a document against a schema.");
+});
+
+test("a caret folds; the fold is one line with its count, and a press on the count unfolds", async () => {
+  draw(SMALL);
+  await settle();
+  row(3).querySelector<HTMLButtonElement>(".tf-xv-caret")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  expect(rows()).toEqual([1, 2, 3, 7, 8, 9, 10]);
+  expect(words(row(3).querySelector(".tf-xv-fold"))).toBe("2 elements");
+  expect(words(row(3).querySelector(".tf-xv-shut"))).toBe("</b>");
+  row(3).querySelector<HTMLButtonElement>(".tf-xv-fold")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  expect(rows()).toHaveLength(10);
+});
+
+test("← on a leaf goes to its holder's line, and a second ← folds it; Shift → opens everything under", async () => {
+  draw(SMALL);
+  await settle();
+  row(4).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  key("ArrowLeft");
+  expect(row(3).classList.contains("tf-xv-cur")).toBe(true);
+  key("ArrowLeft");
+  expect(rows()).toEqual([1, 2, 3, 7, 8, 9, 10]);
+  key("ArrowLeft");
+  expect(row(2).classList.contains("tf-xv-cur")).toBe(true);
+  // A shut fold is one line: its closing tag stands on it, dim.
+  key("ArrowLeft", { shiftKey: true });
+  expect(rows()).toEqual([1, 2]);
+  key("ArrowRight", { shiftKey: true });
+  expect(rows()).toHaveLength(10);
+});
+
+test("Levels: the number is the document's depth when it opens, + is off there, − and the digits fold by level", async () => {
+  draw(fixture("order-4711.xml"));
+  await settle();
+  const [fewer, number, more] = stepper();
+  expect(words(number)).toBe("9");
+  expect(more!.disabled).toBe(true);
+  fewer!.click();
+  flushSync();
+  expect(words(stepper()[1])).toBe("8");
+  key("3");
+  expect(rows()).toHaveLength(96);
+  expect(words(stepper()[1])).toBe("3");
+  key("+");
+  expect(words(stepper()[1])).toBe("4");
+  key("-");
+  key("-");
+  expect(words(stepper()[1])).toBe("2");
+  expect(rows()).toHaveLength(16);
+  stepper()[1]!.click();
+  flushSync();
+  expect(words(stepper()[1])).toBe("9");
+});
+
+test("a picked line draws the way down to it, each name going to its line", async () => {
+  draw(SMALL);
+  await settle();
+  row(5).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  const crumbs = () => [...target.querySelectorAll(".tf-xv-crumbs button")].map((b) => words(b));
+  expect(crumbs()).toEqual(["a", "b", "c[2]"]);
+  key("ArrowUp");
+  await settle();
+  expect(crumbs()).toEqual(["a", "b", "c[1]"]);
+});
+
+test("folds stay for the same content: drawn folded in the first frame, with no outline", async () => {
+  draw(SMALL);
+  await settle();
+  key("1");
+  expect(rows()).toEqual([1, 2, 3, 7, 10]);
+  unmount(view!);
+  view = null;
+  draw(SMALL, { engine: never });
+  expect(rows()).toEqual([1, 2, 3, 7, 10]);
+});
+
+test("changed content opens unfolded and offers the folds as before", async () => {
+  draw(SMALL);
+  await settle();
+  row(3).querySelector<HTMLButtonElement>(".tf-xv-caret")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await settle();
+  unmount(view!);
+  view = null;
+  draw(SMALL.replace("<a xmlns='urn:a'>", "<a xmlns='urn:a'>\n  <!-- new -->"));
+  await settle();
+  expect(rows()).toHaveLength(11);
+  const offer = [...target.querySelectorAll("button")].find((b) => words(b) === "Fold as before (1)")!;
+  offer.click();
+  flushSync();
+  expect(rows()).toEqual([1, 2, 3, 4, 8, 9, 10, 11]);
+});
+
+test("a file that is not well formed opens, folds as far as it reads and says where it breaks", async () => {
+  draw(BROKEN);
+  await settle();
+  expect(rows()).toHaveLength(5);
+  expect(head()).toBe("Not well formed At line 4, `</PRICES>` closes nothing open here: `<ITEM>` is open.".replace(/`/g, ""));
+  expect(words(target.querySelector(".tf-oas-modes button[aria-pressed='true']"))).toBe("Findings 1");
+  target.querySelector<HTMLButtonElement>(".tf-xv-head .tf-oas-ref")!.click();
+  flushSync();
+  expect(row(4).classList.contains("tf-xv-cur")).toBe(true);
+});

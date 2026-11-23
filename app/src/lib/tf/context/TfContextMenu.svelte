@@ -185,6 +185,7 @@
       case "file":
       case "folder":
       case "line":
+      case "value":
         code = thing.repoId;
         break;
       case "repo":
@@ -212,11 +213,11 @@
     const headRead = entity !== null ? head(entity) : code !== null ? head(code) : none;
     const checkoutRead = code !== null ? checkout(code) : none;
     const forgeRead =
-      thing.kind === "file" || thing.kind === "folder" || thing.kind === "line"
+      thing.kind === "file" || thing.kind === "folder" || thing.kind === "line" || thing.kind === "value"
         ? headRead.then((detail) => {
             const at = detail?.default_branch ?? null;
             if (at === null) return null;
-            const line = thing.kind === "line" ? thing.line : null;
+            const line = thing.kind === "line" || thing.kind === "value" ? thing.line : null;
             return ports.objectPage(thing.repoId, { kind: "file", path: thing.path, line, at }).then((url) => url, () => null);
           })
         : none;
@@ -497,6 +498,8 @@
         return void fieldProvider()?.assign(act.entityId);
       case "priority":
         return void fieldProvider()?.priority(act.entityId, act.value, act.label);
+      case "run":
+        return act.run();
       case "clone": {
         const title = keyOf(act.repoId);
         return void ports.clone({ entityId: act.repoId, title }).then(() => push({ text: `Cloning ${title}` }), failed("Could not clone"));

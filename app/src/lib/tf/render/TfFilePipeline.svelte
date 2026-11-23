@@ -14,11 +14,16 @@
   #2265: *Add step* also lists the person's own command steps (*Your commands*, saved in Settings › Renderers).
   *Save as default for `*.json.gz`…* asks for a name and a pattern and hands them to `onsave`; a pipeline shown
   because it is a pattern's default says so where *Not saved* stands.
+
+  On a value (the XML view's design, 2026-11-23, section 16; `source="value"`): `value → step → step → renderer`, the
+  last box a select of the renderers that can take what the chain gives, and where the chain came from said in
+  `status` (*knobas's guess*, *Kept as …*).
 -->
 <script lang="ts">
   import type { CommandStep } from "../../ipc/app";
   import type { PipeFormat, PipeStep } from "../../ipc/entity";
-  import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
+  import { CHARSETS, FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
+  import type { Charset } from "../../ipc/entity";
   import { inlineEditor } from "../inline-editor";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { programOf } from "../path";
@@ -43,6 +48,11 @@
     savedName = "",
     onsave,
     onaddcommand,
+    source = "bytes",
+    renderers = null,
+    renderer = "",
+    onrenderer = () => {},
+    status = null,
     layers = sharedLayers,
   }: {
     steps: PipeStep[];
@@ -74,6 +84,14 @@
     onsave?: ((name: string, pattern: string) => Promise<void>) | undefined;
     /** Starts a new command step where the bar stands. Without it, *Add a command step…* goes to Settings › Renderers, where they are made. */
     onaddcommand?: (() => void) | undefined;
+    /** What the chain starts from: a file's bytes, or a value taken out of a file. */
+    source?: "bytes" | "value";
+    /** The renderers the last box offers, a select; `null` where it is a label (a file's). */
+    renderers?: readonly { id: string; label: string }[] | null;
+    renderer?: string;
+    onrenderer?: (id: string) => void;
+    /** What the bar says of where its steps came from, in place of *Not saved*. */
+    status?: string | null;
     layers?: Layers | undefined;
   } = $props();
 
@@ -177,7 +195,7 @@
 
 <div class="tf-pipe" bind:this={bar} {@attach onclose !== null && inlineEditor(onclose, { back: closeTo, focus: ".tf-pfilter, [aria-haspopup=menu]", layers })}>
   <div class="tf-psteps">
-    <span class="tf-plab">Pipeline</span><span class="tf-psrc">bytes</span><span class="tf-parrow" aria-hidden="true">→</span>
+    <span class="tf-plab">Pipeline</span><span class="tf-psrc">{source === "value" ? "value" : "bytes"}</span><span class="tf-parrow" aria-hidden="true">→</span>
     {#each steps as step, i (i)}
       {@const name = stepName(step, commands)}
       <span
@@ -244,6 +262,16 @@
           >
             {#each FORMATS as f (f.format)}<option value={f.format}>{f.label}</option>{/each}
           </select>
+        {:else if step.step === "charset"}
+          <span class="tf-pname">read as</span>
+          <select
+            class="tf-parg"
+            aria-label="Character set"
+            value={step.charset}
+            onchange={(event) => onchange(withStep(steps, i, { step: "charset", charset: (event.currentTarget as HTMLSelectElement).value as Charset }))}
+          >
+            {#each CHARSETS as c (c.charset)}<option value={c.charset}>{c.label}</option>{/each}
+          </select>
         {:else}
           <span class="tf-pname">{name}</span>
         {/if}
@@ -253,7 +281,15 @@
         >
       </span><span class="tf-parrow" aria-hidden="true">→</span>
     {/each}
-    <span class="tf-pstep tf-prenderer">{shownAs}</span>
+    {#if renderers !== null}
+      <span class="tf-pstep tf-prenderer">
+        <select aria-label="Drawn by" value={renderer} onchange={(event) => onrenderer((event.currentTarget as HTMLSelectElement).value)}>
+          {#each renderers as r (r.id)}<option value={r.id}>{r.label}</option>{/each}
+        </select>
+      </span>
+    {:else}
+      <span class="tf-pstep tf-prenderer">{shownAs}</span>
+    {/if}
     <span class="tf-pmenu">
       <button bind:this={face} type="button" class="tf-btn tf-sm tf-ghost" aria-haspopup="menu" aria-expanded={adding} onclick={() => (adding = !adding)}
         >Add step…</button
@@ -284,7 +320,7 @@
   </div>
   <div class="tf-acts tf-trail">
     <span class="tf-dim tf-small" aria-live="polite"
-      >{running ? "Running…" : saved !== null ? `${saved.name}, the default for ${saved.pattern}` : steps.length > 0 ? "Not saved" : ""}</span
+      >{running ? "Running…" : status !== null ? status : saved !== null ? `${saved.name}, the default for ${saved.pattern}` : steps.length > 0 ? "Not saved" : ""}</span
     >
     {#if onsave !== undefined && saved === null && steps.length > 0 && saving === null}
       <button type="button" class="tf-btn tf-sm" bind:this={saveFace} onclick={() => (saving = { name: savedName, pattern: savePattern })}

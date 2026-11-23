@@ -970,6 +970,7 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
         id: id.map(str::to_owned),
         name: name.to_owned(),
         steps,
+        fields: None,
     };
     let saved = saved::save_named_pipelines(
         &f.pool,

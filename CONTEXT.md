@@ -363,7 +363,7 @@ A file of a [diff](#diff) drawn by a renderer on both sides, before and after, i
 _Avoid_: preview, visual diff (it marks no pixel), side-by-side (that is split, the lines' layout)
 
 **File pipeline**:
-The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`. A **named pipeline** is one saved with a name, which a default per file pattern names by id (so editing it changes every pattern that uses it); a **command step** is one of the person's own programs as a step, under ADR-0033.
+The ordered steps between a file's bytes and its renderer (base64 decode, gunzip, jq, pretty-print, …), each taking bytes or text and giving bytes or text. Run in the backend under a size cap and a timeout per step, and kept in the [read cache](#read-cache) by (sha, path, steps). In the viewer it is *Pipeline*, on the open file; in code `file_pipeline`, `PipeStep`, `PipeRun`. A **named pipeline** is one saved with a name, which a default per file pattern names by id (so editing it changes every pattern that uses it); a **command step** is one of the person's own programs as a step, under ADR-0033. It also runs on a value of a file (a **value pipeline**, ADR-0059), and has the steps a value is often wrapped in: hex decode, inflate, URL decode, unescape XML or HTML, JSON string, JWT, read as a character set.
 _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq's word for one step), transform
 
 **Folder renderer**:
@@ -386,8 +386,20 @@ _Avoid_: folder diff (the real files' diff), rendered diff (a file's, a [rendere
 How an OpenAPI or Swagger file is drawn: a rail that lists its endpoints by tag, by path or by schema, a page for the one picked, and beside it a request a person can send. A spec is a file, so the explorer is its renderer, drawn wherever a file is (ux31, `docs/decisions/2026-11-22-an-api-spec-is-explored-sent-from-and-opened-in-a-client.md`). In code `oas` (`TfOpenApi`, `TfOas…`); a **rail**, a **place** (`get /pets`, `schemas/Pet`, `tags/pets`). Drawn small it is the **inline form** (`TfOasInline`): a Docs code block's *API*, a comparison's two sides.
 _Avoid_: Swagger view, Try it out, API client
 
+**XML view**:
+How an XML file is drawn as a document: its own lines in the explorers' pane, with folds, addresses and paths that open, values that can be looked at, and a query (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`). It is the default for every XML file. In code `xml` (`TfDocView`, `tf-xv-`); with the JSON view to come, the **document view**, in code and prose only.
+_Avoid_: XML viewer, tree view, Checked
+
+**Outline**:
+A document read into columns of numbers, a row a node, in document order, in the document worker. What folds, what a query answers and where a value stands are rows of it. In code `XmlOutline`, `readXml`.
+_Avoid_: DOM, tree, AST
+
+**Value viewer**:
+The file viewer opened on a value of a file (an element's text, an attribute), with the pipeline bar on top. A **value pipeline** is a [file pipeline](#file-pipeline) whose first step, `Take`, takes the value out of the file (ADR-0059). A chain **kept** for a field applies to every field whose names end the same way, in the files its pattern takes, and opens on a press. A person **looks at** a value.
+_Avoid_: decoder, inspector, preview
+
 **Zen mode**:
-A file on the Code page shown alone, the repository's crumbs, header, tabs and tree hidden, for a renderer that wants the room (Markdown, PDF, JAR, an image, an API spec, a diagram, a page). `Z` or the file header's *Zen*; `Esc` leaves it. A way of reading, never a setting (ux31, `app/src/lib/tf/zen.svelte.ts`).
+A file on the Code page shown alone, the repository's crumbs, header, tabs and tree hidden, for a renderer that wants the room (Markdown, PDF, JAR, an image, an API spec, an XML file, a diagram, a page). `Z` or the file header's *Zen*; `Esc` leaves it. A way of reading, never a setting (ux31, `app/src/lib/tf/zen.svelte.ts`).
 _Avoid_: full screen, focus mode, fill the window
 
 **Pipeline**:

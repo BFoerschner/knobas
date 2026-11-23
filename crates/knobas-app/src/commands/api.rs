@@ -152,6 +152,41 @@ pub async fn api_save_answer(id: u64, name: String) -> Result<String, IpcError> 
     Ok(path.display().to_string())
 }
 
+/// An image at an address in a document, loaded on the press that asks (the XML view's design, section 14): one `GET`,
+/// no cookie, the bytes sniffed, kept in memory.
+///
+/// # Errors
+/// As [`crate::api::image::fetch`].
+#[tauri::command]
+pub async fn image_fetch(url: String) -> Result<crate::api::image::FetchedImage, IpcError> {
+    crate::api::image::fetch(&url).await
+}
+
+/// The hosts whose images load when their dialog opens.
+///
+/// # Errors
+/// The read fails.
+#[tauri::command]
+pub async fn image_hosts<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::api::image::ImageHosts, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::image::hosts(&pool).await
+}
+
+/// Stores the hosts whose images load when their dialog opens; answers them as stored.
+///
+/// # Errors
+/// The write fails.
+#[tauri::command]
+pub async fn set_image_hosts<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    hosts: crate::api::image::ImageHosts,
+) -> Result<crate::api::image::ImageHosts, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::image::set_hosts(&pool, hosts).await
+}
+
 /// Opens a spec in an application with an API spec command (ux31, section 23): knobas writes the spec and, where
 /// asked, the collection into a scratch folder of its own and runs the command on them.
 ///

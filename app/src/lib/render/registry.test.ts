@@ -91,3 +91,15 @@ test("a repository's own .html opens as Source and offers Page; Page comes after
   expect(renderersFor({ path: "a.html", binary: false }).map((r) => r.id)).toEqual(["x", "source", "html"]);
   off();
 });
+
+test("an XML file opens in the XML view, Source one pick away; an SVG stays an image with the XML view next", () => {
+  const ids = (path: string, text: string) => renderersFor({ path, binary: false, text }).map((r) => r.id);
+  expect(ids("orders/order-4711.xml", '<?xml version="1.0"?>\n<ORDER/>')).toEqual(["xml", "source"]);
+  expect(ids("build/App.csproj", "<Project Sdk='x'/>")).toEqual(["xml", "source"]);
+  expect(ids("logo.svg", "<svg xmlns='urn:svg'/>")).toEqual(["image", "xml", "source"]);
+  expect(ids("notes.txt", "<?xml version='1.0'?><a/>")).toEqual(["xml", "source"]);
+  // The path reaches the sniff: an XML ending and a start tag, not a start tag alone.
+  expect(ids("App.svelte", "<script>let a;</script>")).toEqual(["source"]);
+  expect(ids("app.config", '{ "a": 1 }')).toEqual(["source"]);
+  expect(ids("data.xml", "")).toEqual(["source"]);
+});

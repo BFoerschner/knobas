@@ -880,6 +880,72 @@ pub async fn entity_file_piped_inner(
     }
 }
 
+/// *Download* in the value viewer (the XML view's design, section 19): what
+/// `steps` gave over `path`, written to the Downloads folder under `name` (a
+/// free name beside any file there); answers the path. The run is the kept one
+/// where it is kept; nothing is written anywhere else, and a run that failed is
+/// refused with its failure.
+///
+/// # Errors
+///
+/// As [`entity_file_piped_inner`]; a failed run; the folder or the write.
+#[tauri::command]
+pub async fn entity_file_piped_save<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    path: String,
+    commit: Option<String>,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+    name: String,
+) -> Result<String, IpcError> {
+    use base64::Engine as _;
+    use tokio::io::AsyncWriteExt as _;
+    let state = crate::sources::state(&app)?;
+    let run = entity_file_piped_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &path,
+        commit.as_deref(),
+        &steps,
+    )
+    .await?;
+    let bytes = match run {
+        crate::file_pipeline::PipeRun::Done { output, .. } => match output {
+            crate::file_pipeline::PipeOutput::Text { text } => text.into_bytes(),
+            crate::file_pipeline::PipeOutput::Bytes { base64, .. } => {
+                base64::engine::general_purpose::STANDARD
+                    .decode(base64)
+                    .map_err(IpcError::internal)?
+            }
+        },
+        crate::file_pipeline::PipeRun::Failed { failure } => {
+            return Err(IpcError::invalid(format!(
+                "step {}, {}, failed: {}",
+                failure.index + 1,
+                failure.name,
+                failure.error
+            )));
+        }
+    };
+    let dir = dirs::download_dir().ok_or_else(|| {
+        IpcError::new(
+            crate::IpcErrorCode::Internal,
+            "This computer has no Downloads folder.",
+        )
+    })?;
+    let (saved, mut file) =
+        crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
+            .await
+            .map_err(|(at, error)| IpcError::internal(format!("{}: {error}", at.display())))?;
+    file.write_all(&bytes)
+        .await
+        .map_err(|error| IpcError::internal(format!("{}: {error}", saved.display())))?;
+    Ok(saved.display().to_string())
+}
+
 /// The bytes of `path` at the working tree or the index of `entity_id`'s
 /// checkout, as [`entity_file_bytes_inner`] answers them.
 async fn working_bytes(

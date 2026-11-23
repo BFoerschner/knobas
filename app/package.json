@@ -36,6 +36,7 @@
     "@types/node": "^22.20.1",
     "@usebruno/lang": "0.41.0",
     "jsdom": "30.0.1",
+    "libxml2-wasm": "^0.7.2",
     "svelte": "5.56.10",
     "svelte-check": "4.7.6",
     "svelte2tsx": "0.7.60",

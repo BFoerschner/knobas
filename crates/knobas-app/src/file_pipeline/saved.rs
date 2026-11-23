@@ -13,6 +13,11 @@
 //!   of steps with a name. A default per file pattern names it by id
 //!   (`crate::renderers::RendererDefault::pipeline`), so editing it changes
 //!   every pattern that uses it.
+//! - A named pipeline may be **kept for fields** ([`KeptField`], the XML
+//!   view's design, section 18; ADR-0059): every value whose names end as the
+//!   field says, in the files its pattern takes, opens on it. It stays a named
+//!   pipeline, so one kept for a field can also be picked as a file's. The
+//!   row carries it, so a backup does; a share export holds no setting row.
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -54,6 +59,21 @@ pub struct CommandStepDraft {
     pub timeout_secs: Option<u32>,
 }
 
+/// A field a named pipeline is kept for: how its names end, in which files,
+/// and the renderer its output is drawn by.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
+pub struct KeptField {
+    /// A file pattern, as a default per pattern has it: `*.xml`.
+    pub files: String,
+    /// How the value's names end, `/` between them and `@` for an attribute
+    /// (`MIME_EMBEDDED/MIME_DATA`), or for JSON `.` and `[]`
+    /// (`attachments[].content`). Positions are never part of it.
+    pub field: String,
+    /// The renderer the output is drawn by: `image`, `pdf`, `xml`, `text`, `hex`.
+    pub end: String,
+}
+
 /// One named pipeline: steps a default per file pattern names by id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "app.ts")]
@@ -62,6 +82,10 @@ pub struct NamedPipeline {
     pub id: String,
     pub name: String,
     pub steps: Vec<PipeStep>,
+    /// The fields it is kept for; none for a pipeline only a file pattern names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fields: Option<Vec<KeptField>>,
 }
 
 /// A named pipeline as the viewer or Settings sends it: a new one has no id.
@@ -72,6 +96,9 @@ pub struct NamedPipelineDraft {
     pub id: Option<String>,
     pub name: String,
     pub steps: Vec<PipeStep>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fields: Option<Vec<KeptField>>,
 }
 
 /// The saved command steps, in the person's order.
@@ -162,7 +189,19 @@ pub async fn save_named_pipelines(
                 index + 1
             )));
         }
-        if draft.steps.is_empty() {
+        let fields: Vec<KeptField> = draft
+            .fields
+            .iter()
+            .flatten()
+            .filter(|kept| !kept.field.trim().is_empty() && !kept.files.trim().is_empty())
+            .map(|kept| KeptField {
+                files: kept.files.trim().to_owned(),
+                field: kept.field.trim().to_owned(),
+                end: kept.end.trim().to_owned(),
+            })
+            .collect();
+        // A chain kept for a field may be no step at all: an XML string is drawn by the XML view as it is.
+        if draft.steps.is_empty() && fields.is_empty() {
             return Err(IpcError::invalid(format!("{name} has no steps")));
         }
         if out
@@ -179,6 +218,11 @@ pub async fn save_named_pipelines(
             id,
             name: name.to_owned(),
             steps: draft.steps.clone(),
+            fields: if fields.is_empty() {
+                None
+            } else {
+                Some(fields)
+            },
         });
     }
     let value = serde_json::to_value(&out).map_err(IpcError::internal)?;
