@@ -1237,6 +1237,37 @@ async fn bring_up_app<R: tauri::Runtime>(
         let generation = lifecycle.generation();
         set_db_state(handle, DbState::Migrating);
         knobas_db::migrate::run(&pool).await?;
+        // The launcher's reads made ready before the first key (the ux30 end
+        // gate, `docs/decisions/2026-11-23-the-launcher-is-ready-before-the-first-key.md`):
+        // the analyze autovacuum is owed, which would otherwise drop the
+        // launcher's kept plans a minute in, then the search copies read
+        // into the buffers. Behind the app, on a connection of its own, so
+        // it holds none of the pool's five; nothing waits on it.
+        let warm_connector = connector.clone();
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            let warmed = match warm_connector.connect().await {
+                Ok(mut conn) => {
+                    let warmed = knobas_search::warm::warm(&mut conn).await;
+                    if let Err(error) = sqlx::Connection::close(conn).await {
+                        tracing::debug!(%error, "closing the warm's connection failed");
+                    }
+                    warmed
+                }
+                Err(error) => Err(error),
+            };
+            match warmed {
+                Ok(warmed) => tracing::info!(
+                    analyzed = ?warmed.analyzed,
+                    read = ?warmed.read,
+                    left = ?warmed.left,
+                    unread = ?warmed.unread,
+                    ms = started.elapsed().as_millis(),
+                    "the launcher's reads are warm"
+                ),
+                Err(error) => tracing::warn!(%error, "the launcher's reads could not be warmed"),
+            }
+        });
         // `migrating` is the schema and nothing else (#1703, ruling D8):
         // every step from here on is `starting`, naming itself, so a slow
         // disk's boot screen says what it is waiting on.

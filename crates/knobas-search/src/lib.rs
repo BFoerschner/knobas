@@ -57,6 +57,7 @@ pub mod typed_key;
 pub mod types;
 pub(crate) mod under;
 pub mod vocab;
+pub mod warm;
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
