@@ -326,7 +326,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-statebtn { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 3px; padding: 0; }
 .tf-statebtn:disabled, .tf-statebtn[aria-disabled="true"] { cursor: default; }
 .tf-statebtn .tf-chev { font-size: calc(var(--t-2xs) * var(--fs)); opacity: 0.7; }
-.tf-statebtn .tf-chev::before { content: "▾"; }
+/* A shape, not the ▾ glyph Inter does not hold (the ux30 end gate: a system font search on the first open). */
+.tf-statebtn .tf-chev::before { content: ""; display: inline-block; width: 0; height: 0; border-inline: .25em solid transparent; border-top: .4em solid currentColor; vertical-align: .1em; }
 .tf-statebtn[aria-disabled="true"] .tf-chev { visibility: hidden; }
 .tf-jobrow .tf-swrite { font-weight: 500; }
 /* A move the source refused or knobas holds: under the status row, full width, in the source's words. */
@@ -344,7 +345,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-sheetcard .tf-fact-edit:hover, .tf-sheetcard .tf-fact-edit[aria-expanded="true"] { background: var(--sheet-2); }
 .tf-fact-edit .tf-chev { font-size: calc(var(--t-2xs) * var(--fs)); opacity: 0.65; flex: none; }
 /* Drawn, not written: the mark is no part of the value's text a reader copies or a screen reader reads. */
-.tf-fact-edit .tf-chev::after { content: "▾"; }
+.tf-fact-edit .tf-chev::after { content: ""; display: inline-block; width: 0; height: 0; border-inline: .25em solid transparent; border-top: .4em solid currentColor; vertical-align: .1em; }
 .tf-fact-edit[aria-disabled="true"] { cursor: default; background: none; }
 .tf-fact-edit[aria-disabled="true"] .tf-chev { visibility: hidden; }
 .tf-fact-edit > span:not(.tf-av, .tf-chev, .tf-lab) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
