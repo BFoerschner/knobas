@@ -2512,6 +2512,17 @@
           <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
         {/if}
         <span class="tf-trail" class:tf-heldbelow={!checkoutRead}>
+          <!-- Zen first: the trail stands from its right, so the one button that comes and goes as the reader moves
+               between files moves nothing beside it; *Render as* then takes the next file's name keeping its right edge. -->
+          {#if zenHere}
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost tf-zenbtn"
+              aria-pressed={zen.on}
+              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
+              onclick={() => zen.toggle()}>Zen</button
+            >
+          {/if}
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch
@@ -2525,15 +2536,6 @@
           {#if steps === null && ports.piped !== undefined && suggested === null && fileMade === null}
             {@const at = file.path}
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
-          {/if}
-          {#if zenHere}
-            <button
-              type="button"
-              class="tf-btn tf-sm tf-ghost tf-zenbtn"
-              aria-pressed={zen.on}
-              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
-              onclick={() => zen.toggle()}>Zen</button
-            >
           {/if}
           {#if fileMade === null}
             <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} api={drawAs === "openapi" ? specOpener : null} />

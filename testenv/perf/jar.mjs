@@ -43,8 +43,10 @@ await home();
 // whether the rows of `watch` it drew then stood elsewhere 600 ms later.
 const timed = (act, selector, text = null, watch = null) =>
   c.js(`new Promise((resolve, reject) => {
-    // Shown only: the Code page keeps a repository's page alive, so the last run's rows are in the DOM, hidden.
-    const shown = (e) => e.getClientRects().length > 0 && e.checkVisibility();
+    // Shown only: the Code page keeps a repository's page alive, so the last run's rows are in the DOM, hidden. What a
+    // text holds unseen in its room (\`visibility: hidden\`, a README's blocks under a diagram whose size is not in yet)
+    // is not drawn either, as moves-probe.js counts it: shown where it stands, it has not moved.
+    const shown = (e) => e.getClientRects().length > 0 && e.checkVisibility({ visibilityProperty: true });
     const found = () => [...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => shown(e) && (${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)})));
     const t0 = performance.now();
     (${act})();

@@ -1312,6 +1312,22 @@ test("Zen mode: Z typed into Go to file is a letter; a source file offers no Zen
   expect(zen.here).toBe(false);
 });
 
+test("Zen stands first in the header's trail: coming or going as the reader moves between files, it moves nothing beside it", async () => {
+  // The trail is right-aligned, so a button that comes or goes moves everything before it. Zen first, a Markdown file
+  // and a source file draw the same controls from *Render as* on, where they stood (ux30 end gate, `moves` repo-file).
+  const trailOf = () => [...target.querySelectorAll(".tf-fileview header .tf-trail > *")].map((e) => (e.classList.contains("tf-zenbtn") ? "zen" : e.classList.contains("tf-rsw") ? "render-as" : e.textContent?.trim() === "Pipeline" ? "pipeline" : "other"));
+  draw(openSource(MD_FILES).entityView, "README.md");
+  await settle();
+  const md = trailOf();
+  expect(md[0]).toBe("zen");
+  expect(md[1]).toBe("render-as");
+  unmount(view!);
+  view = null;
+  draw(openSource(MD_FILES).entityView, "src/retry.rs");
+  await settle();
+  expect(trailOf()).toEqual(md.slice(1));
+});
+
 test("Zen mode holds from one Markdown file to the next and ends when the file view closes", async () => {
   const props = $state({
     ports: { ...openSource(MD_FILES), submitWrite: async () => ({}) as never },

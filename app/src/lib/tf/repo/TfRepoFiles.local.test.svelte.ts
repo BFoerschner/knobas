@@ -132,7 +132,7 @@ test("the checkout's copy draws the tree and the README while the source has not
   await settle();
 
   expect(tree()).toEqual(["src", "README.md"]);
-  expect(shownFile()).toContain("at c0ffee0 Render as Markdown Zen payout-service");
+  expect(shownFile()).toContain("at c0ffee0 Zen Render as Markdown payout-service");
   expect(localReads).toEqual(["c0ffee0:README.md"]);
   expect(note()).toBe("From your clone at c0ffee0, as of the last sync.");
   // The source's top is asked behind it, and the README's guess beside the checkout's read (the ux14 Windows pass,
@@ -173,7 +173,7 @@ test("a branch that moved since the sync replaces the copy in place, and a file 
   expect(tree()).toEqual(["src", "README.md", "CHANGELOG.md"]);
   expect(note()).toBe("");
   expect(text(target.querySelector(".tf-fileview .tf-fmeta"))).toBe("As knobas read it a moment ago, at c0ffee0. Checking the code host…");
-  expect(shownFile()).toContain("Render as Markdown Zen payout-service");
+  expect(shownFile()).toContain("Zen Render as Markdown payout-service");
   release("file:README.md", newer, MOVED, "b10b-newer");
   await settle();
   expect(shownFile()).toContain("newer");
