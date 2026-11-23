@@ -6,7 +6,7 @@
   background: var(--ink); color: var(--sheet); box-shadow: var(--shadow); white-space: nowrap;
 }
 .tf-zoomlevel:empty { display: none; }
-.tf-zoomlevel b { font-weight: 800; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; }
+.tf-zoomlevel b { font-weight: 800; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; }
 .tf-zoomlevel span { font-size: calc(var(--t-xs) * var(--fs)); opacity: .8; }
 
 /* ---------- toasts: ink on the page, rising 20px into place, one line at most 680 px wide (ux21: a path or a command

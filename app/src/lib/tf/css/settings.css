@@ -30,7 +30,7 @@
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
-  font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
+  font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
 }
 .tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: calc(var(--t-md) * var(--fs)); max-width: 70ch; }
 /* A Settings page whose header carries actions: the title block on the left, `.tf-acts` on the right of its
@@ -38,7 +38,7 @@
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
+.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
 .tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
 .tf-stg-gap { margin-top: 14px; }
 /* *Load the Tidewater dataset* (`TfLoadDemo`, ux31): both labels in one cell, the hidden one keeping its room, so
@@ -212,7 +212,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */
 .tf-sc { margin-top: 26px; }
-.tf-sc-title { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
+.tf-sc-title { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
 .tf-sc-kind h3 { font-size: calc(var(--t-xs) * var(--fs)); margin: 0; font-weight: 600; color: var(--ink-2); }
@@ -297,7 +297,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-fr-guide::after { bottom: 0; }
 .tf-fr-pw { position: relative; font-size: calc(var(--t-d1) * var(--fs)); line-height: 1.25; color: var(--ink); }
 .tf-fr-pw-ui { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
-.tf-fr-pw-head { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; }
+.tf-fr-pw-head { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; }
 .tf-fr-pw-read { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); }
 .tf-fr-pw-code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-fr-proof figcaption { padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
@@ -331,8 +331,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-fr-sample-ui > span { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-fr-sample-ui .tf-fr-chips { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--ink); }
 .tf-fr-sample-head { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
-.tf-fr-key { --fs: var(--size-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: calc(-.01em + var(--ls-head, 0em)); }
-.tf-fr-h { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
+.tf-fr-key { --fs: var(--size-head); font-family: var(--head); --optical: auto; font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%; font-size: calc(var(--t-d2) * var(--fs)); line-height: 1; letter-spacing: calc(-.01em + var(--ls-head, 0em)); }
+.tf-fr-h { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; font-size: calc(var(--t-lg) * var(--fs)); }
 .tf-fr-sample-read p { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: var(--lh-read, 1.65); font-weight: var(--wt-read, 400); max-width: 62ch; }
 /* The faces knobas brings along (2026-11-20): a row each, its licence's text unfolding under it. The text is the
    licence file as written, line breaks and all, so it keeps them and wraps a long line. */
@@ -403,7 +403,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-thm-chips i { width: 18px; height: 6px; border-radius: 2px; }
 .tf-thm-ed { margin-top: 18px; display: grid; grid-template-columns: 446px minmax(0, 1fr); gap: 18px; align-items: start; }
 .tf-thm-edh { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); }
-.tf-thm-edh h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); margin: 0; }
+.tf-thm-edh h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font: 600 calc(var(--t-lg) * var(--fs)) var(--head); --optical: auto; margin: 0; }
 .tf-thm-edh .tf-thm-name { width: 260px; height: var(--control-h-sm); }
 .tf-thm-roles { border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink); }
 .tf-thm-grp { display: flex; justify-content: space-between; padding: 7px 12px 5px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: 600 calc(var(--t-xs) * var(--fs)) var(--sans); color: var(--ink-2); background: var(--sheet-2); border-bottom: 1px solid var(--rule-2); }

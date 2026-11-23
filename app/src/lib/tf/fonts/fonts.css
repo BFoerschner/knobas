@@ -4,10 +4,19 @@
   lists them for Settings › Fonts, which shows each licence.
 
   **Inter** (Interface, Headings and Reading): Inter 4.1, variable, `wght` 100 to 900 and `opsz` 14 to 32, so a
-  heading at 24 px and up draws in Inter's display cut and the 11 to 15 px of a list in its text cut, by itself
-  (`font-optical-sizing: auto`). Google Fonts' build, split by script as `@fontsource-variable/inter` 5.3.0 ships it
+  heading at 24 px and up draws in Inter's display cut (`font-optical-sizing`, on for headings only, below) and the
+  11 to 15 px of a list in its text cut. Google Fonts' build, split by script as `@fontsource-variable/inter` 5.3.0 ships it
   (`inter/SOURCE.md`); its licence reserves no name, so the split is allowed. Upright only: the few emphasised words
   in tickets and Docs take the browser's slant, and Inter's italic files would add as much again to the bundle.
+
+  **Optical sizes for headings only** (the ux30 Windows pass, 2026-11-23,
+  `docs/decisions/2026-11-23-optical-sizes-for-headings-only.md`): each size drawn with optical sizing on is an instance
+  of the font of its own, and in WebView2 on Windows every instance shapes and measures its glyphs from cold on a
+  page's first open. The 11 to 15 px of lists and text drew in five-odd instances that look the same (Inter's optical
+  axis starts at 14), and a first open at CPU 6x took 30 to 70 ms longer for them. So optical sizing is on only where
+  the heading face is set (`font-family: var(--head)` with `--optical: auto`, which its words inherit), and off
+  everywhere else, with `!important` so a `font` shorthand, which resets it, does not turn it back on. Text and lists
+  draw in the text cut they drew in; a heading keeps its display cut.
 
   `font-display: block`, not `swap`: the latin file is preloaded from `index.html`, so it has landed when the shell first
   lays out, and a face that never arrives in time is not drawn in a fallback first and then again in Inter, which
@@ -88,6 +97,9 @@
   src: url("./cascadia-code/CascadiaCodeItalic.woff2") format("woff2");
   size-adjust: 105%;
 }
+
+/* Optical sizing where a heading's face is set, and nowhere else (see the top of this file). */
+*, *::before, *::after { font-optical-sizing: var(--optical, none) !important; }
 
 /*
   **Cascadia Mono and Cascadia Code 2009.22** (2026-11-21, Björn: "maybe include also the older version of cascadia code

@@ -56,7 +56,7 @@
 .tf-oas-caret { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; opacity: .7; }
 .tf-oas-row[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
 /* The method: the view's one loud thing, in a column of its own. */
-.tf-oas-m { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); font-stretch: 62%; font-variation-settings: "wdth" 62; letter-spacing: calc(.02em + var(--ls-head, 0em)); color: var(--ink); }
+.tf-oas-m { font-size: calc(var(--t-xs) * var(--fs)); font-weight: 800; --fs: var(--size-head); font-family: var(--head); --optical: auto; font-stretch: 62%; font-variation-settings: "wdth" 62; letter-spacing: calc(.02em + var(--ls-head, 0em)); color: var(--ink); }
 /* A row says its path from the start its group shares; one still too long keeps the parts that tell it from its neighbours (`fitRows`). */
 .tf-oas-rpath { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-oas-gpre { margin-left: 8px; color: var(--ink-2); font-weight: var(--wt-ui, 400); --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); }
@@ -79,7 +79,7 @@
 .tf-oas-h .tf-oas-m { font-size: calc(var(--t-xl, 18px) * var(--fs)); }
 .tf-oas-path { --fs: var(--size-code); font: 600 calc(var(--t-lg) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
 .tf-oas-path .tf-oas-pp { font-weight: var(--wt-code, 400); }
-.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); line-height: 1.2; overflow-wrap: anywhere; }
+.tf-oas-title { margin: 0; font-size: calc(var(--t-2xl) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; line-height: 1.2; overflow-wrap: anywhere; }
 .tf-oas-sum { margin: 6px 0 0; font-size: calc(var(--t-md) * var(--fs)); }
 .tf-oas-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-oas-meta code, .tf-oas-code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }

@@ -176,7 +176,7 @@
 .tf-doc .tf-doc-link { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; }
 .tf-cmts { border-top: 1px solid var(--rule); margin-top: 44px; padding-top: 18px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 /* The heading step (design system, Heading steps): Comments, Work it belongs to, Linked from and On this page are one level. */
-.tf-cmts h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; line-height: 1.3; margin: 0 0 12px; }
+.tf-cmts h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; font-variation-settings: "wdth" 88; font-stretch: 88%; line-height: 1.3; margin: 0 0 12px; }
 .tf-cmts .tf-msg { margin-bottom: 10px; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.5; }
 .tf-cmts .tf-av { width: 28px; height: 28px; }
 .tf-cmts .tf-who { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
@@ -263,7 +263,7 @@
 }
 /* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
 .tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 100px; max-height: calc(100vh - 196px); }
-.tf .tf-rd-outline h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); margin: 0 0 8px; }
+.tf .tf-rd-outline h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
   color: var(--ink-2); font-size: calc(var(--t-md) * var(--fs));
@@ -278,7 +278,7 @@
 .tf-rd-fold { margin: 16px 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf-rd-fold > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
-  font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%;
+  font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%;
 }
 .tf-rd-fold > summary :is(.tf-count, .tf-hits) { font-variation-settings: normal; }
 .tf-rd-fold > summary::-webkit-details-marker { display: none; }
@@ -287,7 +287,7 @@
 /* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
 .tf-rd-foot { margin-top: 32px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; color: var(--ink-2); }
 .tf-rd-foot + .tf-rd-foot { margin-top: 22px; }
-.tf .tf-rd-foot h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); margin: 0 0 6px; }
+.tf .tf-rd-foot h3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; color: var(--ink); margin: 0 0 6px; }
 .tf-doc .tf-rd-foot ul { margin: 0; padding-left: 18px; line-height: 1.7; }
 .tf-doc .tf-rd-foot li { margin: 0; }
 .tf-rd-foot li::marker { color: var(--ink-2); }

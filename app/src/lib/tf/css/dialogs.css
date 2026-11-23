@@ -79,7 +79,7 @@
 /* The worklog draft's duration: the start and the minutes, then the reading in the job key's width. */
 .tf-dur { display: flex; gap: 10px; align-items: center; }
 .tf-dialog .tf-formgrid .tf-dur input { width: 112px; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-dur b { font-size: calc(var(--t-3xl) * var(--fs)); font-weight: 800; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 62; font-stretch: 62%; margin-left: 6px; font-variant-numeric: tabular-nums; line-height: 1; }
+.tf-dur b { font-size: calc(var(--t-3xl) * var(--fs)); font-weight: 800; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 62; font-stretch: 62%; margin-left: 6px; font-variant-numeric: tabular-nums; line-height: 1; }
 .tf-cands { display: flex; flex-direction: column; gap: 6px; }
 .tf-cands legend { padding: 0 0 6px; }
 
@@ -139,7 +139,7 @@
 .tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 /* Settings › Sources › Installed adapters (#1209, #1210) */
 .tf-ext-h { display: flex; align-items: center; gap: 12px; }
-.tf-ext-h h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0; }
+.tf-ext-h h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0; }
 .tf-ext-h .tf-btn { margin-left: auto; }
 .tf-ext-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;

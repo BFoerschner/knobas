@@ -25,7 +25,7 @@
 .tf-mon-fig { white-space: nowrap; }
 .tf-mon-fig b {
   display: inline-block; min-width: 1.6em; margin-right: 5px; text-align: right;
-  --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
+  --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-weight: 800; font-variation-settings: "wdth" 62; font-stretch: 62%;
   font-size: calc(var(--t-d1) * var(--fs)); line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink-2);
 }
 .tf-mon-fig.tf-mon-figerr, .tf-mon-fig.tf-mon-figerr b { color: var(--err); }
@@ -130,7 +130,7 @@
   max-height: calc(100vh - 140px); overflow-y: auto;
 }
 .tf-mon-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.tf-mon-panel h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.tf-mon-panel h2 { --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-size: calc(var(--t-xl) * var(--fs)); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .tf-mon-pstate { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-height: var(--control-h-sm); }
 .tf-mon-pbar { display: grid; gap: 4px; justify-items: start; }
 .tf-mon-pbar .tf-mbar-axis { width: 287px; }
