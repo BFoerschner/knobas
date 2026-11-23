@@ -92,12 +92,13 @@ an SSH tunnel.
 | `budget.mjs`, `budget.json` | the lines, per corpus (`fake`, `real`), and the check |
 | `long.mjs` | the long-run probe (the monitors-builds pass, 2026-11-12): Monitors left open while every source's run ends every `--every` seconds, then kept hidden behind the Inbox; main-thread time a minute, the longest task, a small read's wait, DOM, listener and heap growth, and a hover's cost at 1x and 4x, against `budget.json`'s `long` lines. `--attach` joins a running app (knobas's own WebView2), whose own syncs end its runs: an emit from the page (`plugin:event|emit`) froze the app's window for good |
 | `scrollers.mjs` | every box that scrolls on the app's pages, light and dark, with its own background and the colour under it; `--strict` fails on a transparent one, on a fixed or absolute layer over one where it draws nothing, and on a list whose wheel is hit-tested on the main thread (*A layer over a list*, below) |
+| `colour.mjs` | a computed CSS colour as `[r, g, b, alpha]` in whatever space Chromium writes it (`rgb()`, `color(srgb …)`, `oklab()`), for `scrollers.mjs`'s question whether a box paints |
 | `invalidations.mjs` | why a scroll restyles what it does, from Chromium's own invalidation records: for a rule that restyles far more than the rows that changed |
 | `profile.mjs` | a CPU profile of one moment (`--setup`, then `--act`), by function, for a slow key or page switch the frame probe names only by its task |
 | `moment.mjs` | the same moment under a Chrome trace (the inner-6x pass, 2026-11-15): each long task after `--act` split into script, style, layout and paint, and each style or layout pass in it with its elements or objects and, where script forced it, the frame that did. A profile's "(program)" is this |
 | `serve.mjs` | serves a built app on 127.0.0.1 where there is no Python (Windows) |
 | `cdp.mjs` | the DevTools-protocol client: `launch()` a headless Chrome of its own, or `attach(port)` to one listening; every wait has a deadline and each case runs under `runCase()` (*No probe waits for good*, below) |
-| `test/fake-chrome.mjs`, `test/watchdog.test.mjs`, `watchdog-test.sh` | a stand-in Chrome that leaves a chosen call unanswered, dies or never opens its socket, and the tests that every probe with cases ends, retries and reports against it (`just witness-unit`) |
+| `test/fake-chrome.mjs`, `test/watchdog.test.mjs`, `test/colour.test.mjs`, `watchdog-test.sh` | a stand-in Chrome that leaves a chosen call unanswered, dies or never opens its socket, and the tests that every probe with cases ends, retries and reports against it, and that `colour.mjs` reads each space's alpha (`just witness-unit`) |
 | `frame-budget.sh` | what `just frame-budget` runs |
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
@@ -172,6 +173,13 @@ fix reverted, both checks fail it in headless Chrome on the Mac: the chip's laye
 names the chip's layer over Inbox and Builds, whose wheels Chromium still hit-tests on the compositor (as WebView2 did:
 the ux21 pass saw those on the compositor with the layer there); it fails them anyway, since nothing guarantees which
 lists an engine spares.
+
+Whether a layer draws is read from its computed colours, and Chromium writes a `color-mix()` in the space it mixed in:
+`color(srgb r g b / a)` or `oklab(L a b / a)`, not `rgba()`. Since app themes step 1 (`e5e1f432`) every scrim is a
+`color-mix()` of `--scrim`, and a reader of `rgb()` alone took the open launcher's dimmed window for a layer that draws
+nothing over the page under it (the ux30 end gate, 2026-11-23: `div.tf-modal` over `main.tf-main`, `.tf-vlist` and the
+board; v3.2.9-ux29 the same). The scrim draws over the whole window and takes the wheel itself, so no list under it is
+wheeled. `colour.mjs` reads any space's alpha (`test/colour.test.mjs`).
 
 ## What the numbers mean
 

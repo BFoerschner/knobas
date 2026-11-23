@@ -11,6 +11,7 @@
 // done on the main thread (`wheels` below: the direct check of the same).
 import { writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep, tracer } from "./cdp.mjs";
+import { rgba } from "./colour.mjs";
 
 const args = process.argv.slice(2);
 /** `--size WxH@scale`: the page's CSS pixels and device scale (cdp.mjs; 1440x868@1 by default). */
@@ -73,7 +74,8 @@ window.__a = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   vis: (sel) => [...document.querySelectorAll(sel)].filter((e) => e.getClientRects().length),
   async click(re) { const e = __a.vis("button, a, [role=tab]").find((b) => re.test((b.innerText || "").trim())); e?.click(); await __a.sleep(900); },
-  rgba(s) { const m = s.match(/rgba?\\(([^)]+)\\)/); if (!m) return [0, 0, 0, 0]; const p = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]; },
+  // A computed colour in any space Chromium writes it in (colour.mjs): a color-mix() scrim is color(srgb ... / a).
+  rgba: ${rgba},
   tokens() { const cs = getComputedStyle(document.documentElement); const out = {}; for (const t of ["--paper", "--sheet", "--sheet-2", "--field", "--card", "--card-2"]) { const d = document.createElement("i"); d.style.color = cs.getPropertyValue(t); document.body.append(d); out[getComputedStyle(d).color] = t; d.remove(); } return out; },
   under(el) { for (let e = el.parentElement; e; e = e.parentElement) { const bg = getComputedStyle(e).backgroundColor; if (__a.rgba(bg)[3] === 1) return bg; } return getComputedStyle(document.documentElement).backgroundColor; },
   name(el) { return el.tagName.toLowerCase() + (typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\\s+/).filter((c) => !c.startsWith("svelte-")).join(".") : ""); },
