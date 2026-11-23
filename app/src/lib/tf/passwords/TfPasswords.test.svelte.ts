@@ -440,3 +440,30 @@ test("the first open sorts the folders whose rows it draws, not every folder; â†
     spy.mockRestore();
   }
 });
+
+test("leaving the page after the filter's index has had its first frame drops the second one too", async () => {
+  // The index starts two frames after the page draws. Its teardown cancelled only the first frame's handle, so a page
+  // left after that frame had run kept the second one asking: under jsdom an animation frame is a 16 ms interval, which
+  // light CI's residue pass caught (`residue.test.svelte.ts`, TfPasswords between answers, run 45151236493).
+  const frames = new Map<number, FrameRequestCallback>();
+  let handle = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.set(++handle, callback);
+    return handle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => void frames.delete(id));
+  try {
+    await open(ports());
+    const first = [...frames.values()];
+    frames.clear();
+    for (const callback of first) callback(performance.now());
+    flushSync();
+    expect(frames.size).toBeGreaterThan(0);
+
+    unmount(app!);
+    app = null;
+    expect([...frames.keys()]).toEqual([]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

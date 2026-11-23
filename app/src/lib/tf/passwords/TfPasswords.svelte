@@ -122,7 +122,10 @@
         cancel = () => clearTimeout(id);
       }
     };
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() => live && next()));
+    // The frame that is waiting, the second once the first has run: cancelling only the first left the second asking.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => live && next());
+    });
     return () => {
       live = false;
       cancelAnimationFrame(frame);
