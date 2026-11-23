@@ -177,6 +177,7 @@
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import { needles as readNeedles } from "./needles";
   import { nearEnd } from "./near-end";
+  import { fbarHeight } from "./fbar-height";
   import TicketCard from "./TicketCard.svelte";
   import TicketStack, { STACK_WINDOW_FROM } from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
@@ -1157,17 +1158,6 @@
     });
     return () => clearTimeout(most);
   });
-
-  /** The sticky table head sits under the filter bar, however many rows the bar wrapped to. */
-  function fbarHeight(wrap: HTMLElement) {
-    if (typeof ResizeObserver === "undefined") return;
-    const seen = new ResizeObserver(() => {
-      const bar = wrap.querySelector<HTMLElement>(":scope .tf-sbody > .tf-fbar");
-      if (bar) wrap.style.setProperty("--tf-fbar-h", `${bar.offsetHeight}px`);
-    });
-    seen.observe(wrap);
-    return () => seen.disconnect();
-  }
 
   /** A long key gives up its middle, so `payout-service#143` and `#138` stay told apart: what the Key column's width holds, with the number whole. */
   function keepsItsEnd(key: string): string {
