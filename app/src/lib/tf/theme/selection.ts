@@ -9,7 +9,7 @@
 export function selectionInherits(doc: Document | undefined = typeof document === "undefined" ? undefined : document): boolean {
   if (doc === undefined || doc.body === null || typeof doc.defaultView?.getComputedStyle !== "function") return false;
   // jsdom resolves no pseudo-element's style, and says so on the console.
-  if (/jsdom/i.test(doc.defaultView.navigator?.userAgent ?? "")) return false;
+  if (/jsdom/i.test(doc.defaultView.navigator.userAgent)) return false;
   const style = doc.createElement("style");
   style.textContent = ".knobas-sel-probe::selection { background-color: rgb(1, 2, 3); }";
   const outer = doc.createElement("div");

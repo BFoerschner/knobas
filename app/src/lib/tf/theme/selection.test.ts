@@ -43,7 +43,7 @@ test("highlights inherit where an element's ::selection reads its parent's, and 
       body: { append: () => added.push("+body") },
       head: { append: () => added.push("+head") },
       createElement: el,
-      defaultView: { getComputedStyle: () => (typeof answer === "string" ? { backgroundColor: answer } : answer()) },
+      defaultView: { navigator: { userAgent: "a browser" }, getComputedStyle: () => (typeof answer === "string" ? { backgroundColor: answer } : answer()) },
     };
     return { doc: doc as unknown as Document, added };
   };
