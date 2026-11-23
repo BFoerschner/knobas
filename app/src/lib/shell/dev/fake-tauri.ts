@@ -136,7 +136,9 @@ function answerTauriIpc(internals: TauriInternals, route: (cmd: string, args: Re
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const command = IPC_URL.exec(url);
     if (command === null) return network(input, init);
-    const headers = new Headers(init?.headers);
+    // Tauri passes a `Headers` of its own: read as it is, not copied (a copy a command cost the drag probe's drops).
+    const given = init?.headers;
+    const headers = given instanceof Headers ? given : new Headers(given);
     const ok = Number(headers.get("Tauri-Callback"));
     const failed = Number(headers.get("Tauri-Error"));
     const body = init?.body;

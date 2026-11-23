@@ -67,3 +67,21 @@ cards), `forty` (42 at 1440 x 868, 47 at 2560 x 1440), `open` (87), `typed` (91,
 (221 in lanes by type). Its `typed` case never typed (the filter box's selector matched nothing), and now does.
 `--attach <port>` drives knobas's own WebView2 window, and `--trace <prefix>` traces the first two rounds with the CPU
 profile.
+
+## In knobas's own window on Windows (2026-11-23, the ux30 end gate)
+
+WebView2 157 on Björn's PC, the probes' build served into a release window (`?fake-ipc` there since de1a3d30), the glide
+at the display's rate (`--hz 170`; the window idles at 170 to 176 Hz). Every case met its lines at 1440 x 868 and full
+screen (5120 x 1369) except `lanes` (221 cards at 1440, 296 full) at 4x: drop medians 103 to 126 ms and first drops 126
+to 153 ms against 100, and at 6x first drops 207 to 238 ms against 200 in some runs. Moves while held stayed at 11 to
+22 ms at 4x on the board as it opens (line 34).
+
+A trace of a laned drop at 4x: the release's task runs the board's whole read (the overlay, the bands, the held places
+of every card, the columns' card arrays and windows) twice before its frame, once for the move and once more in a
+microtask after it, with a style and layout forced inside the first. Found and fixed here: a move's write answering
+replaced its echo with one carrying the write's id, and the board was laid over its echoes again for a status that had
+not changed. The overlay now reads the moved statuses and field edits from values that keep their identity while they
+draw the same (`TicketsPage.svelte`, held by a test). In the app, where the answer lands in a task of its own, that pass
+was a second frame's work after the drop. In the window the second pass in the drop's own task remains: its trigger
+lands with the focus the drop gives the moved card, and is not yet named. Owed: name it, and take the forced layout out
+of the first pass.

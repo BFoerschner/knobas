@@ -215,7 +215,7 @@
   import { filterKeys } from "../filter-keys";
   import { echoedEntities, echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { sameStatus } from "./drop";
-  import { withFieldEchoes, withFieldRows, withStatusEchoes, withStatusRows, type LanedBy } from "./echo-board";
+  import { withFieldEchoes, withFieldRows, withStatusEchoes, withStatusRows, type FieldEchoed, type LanedBy } from "./echo-board";
   import { createCardFields, offerFields } from "./card-fields.svelte";
   import TfPeoplePick from "../job/TfPeoplePick.svelte";
   import { askReach, asking as reachAsking, moveRefusal, noteObserved, reachOf } from "./reach.svelte";
@@ -459,6 +459,38 @@
     if (field !== null && field.kind.type === "search") untrack(() => cardFields.search(at.card, field, ""));
   });
 
+  /**
+   * What the board's overlay draws, as values that keep their identity while they draw the same. A write's answer gives
+   * its move or field edit an id and a state, not a new status or field (its chip is the card's own, `writeOf`), and
+   * laid over again for it the board ran its whole read once more (bands, held places, columns) in the frame of a drop:
+   * a quarter of a laned drop at 4x in WebView2 (the ux30 end gate, 2026-11-23).
+   */
+  let drawnStatuses = new Map<string, string>();
+  const echoStatuses = $derived.by(() => {
+    const next = new Map<string, string>();
+    for (const id of echoedEntities()) {
+      const status = movedStatus(id);
+      if (status !== null) next.set(id, status);
+    }
+    if (next.size === drawnStatuses.size && [...next].every(([id, status]) => drawnStatuses.get(id) === status)) return drawnStatuses;
+    return (drawnStatuses = next);
+  });
+  let drawnFields = new Map<string, FieldEchoed>();
+  let drawnFieldsKey = "[]";
+  const echoFields = $derived.by(() => {
+    const next = new Map<string, FieldEchoed>();
+    for (const id of echoedEntities()) {
+      const fields = cardFields.echoed(id);
+      if (fields !== null) next.set(id, fields);
+    }
+    const key = JSON.stringify([...next]);
+    if (key === drawnFieldsKey) return drawnFields;
+    drawnFieldsKey = key;
+    return (drawnFields = next);
+  });
+  const statusOf = (id: string) => echoStatuses.get(id) ?? null;
+  const fieldsOf = (id: string) => echoFields.get(id) ?? null;
+
   // svelte-ignore state_referenced_locally
   // Read once, on purpose: the reader owns the typing pause and the generations, so a bridge or a pause swapped
   // mid-life would drop both. Nothing changes these props: production omits them and tests pass fakes at mount.
@@ -476,13 +508,8 @@
     // A move is drawn in its new column at once, over every read (ADR-0054); a field edit on its card, in its new lane.
     overlay: {
       // Only an entity with an echo is asked after its echoes: one read of which have one, not one a card.
-      board: (board) => {
-        const echoed = echoedEntities();
-        const statusOf = (id: string) => (echoed.has(id) ? movedStatus(id) : null);
-        const fieldsOf = (id: string) => (echoed.has(id) ? cardFields.echoed(id) : null);
-        return withFieldEchoes(withStatusEchoes(board, statusOf), fieldsOf, lanedBy());
-      },
-      rows: (rows) => withFieldRows(withStatusRows(rows, movedStatus), cardFields.echoed),
+      board: (board) => withFieldEchoes(withStatusEchoes(board, statusOf), fieldsOf, lanedBy()),
+      rows: (rows) => withFieldRows(withStatusRows(rows, statusOf), fieldsOf),
     },
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */

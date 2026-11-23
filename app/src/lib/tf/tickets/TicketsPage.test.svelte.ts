@@ -17,6 +17,7 @@ import { LANE_FIELDS, laneOf } from "./tickets";
 import { scopedTicket } from "../job/scoped.svelte";
 import { layers } from "../layers.svelte";
 import { until } from "../../shell/test-wait";
+import { withStatusEchoes } from "./echo-board";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -30,6 +31,11 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
   },
 }));
 
+// The board laid over its echoes, counted (the ux30 end gate): a write's answer must not lay it over again.
+vi.mock("./echo-board", async (original) => {
+  const real = await original<typeof import("./echo-board")>();
+  return { ...real, withStatusEchoes: vi.fn(real.withStatusEchoes) };
+});
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
 
@@ -2705,6 +2711,30 @@ test("a move from the card's menu stands the card at the top of its new column w
   expect(chipOf("PAY-3")).toBeNull();
   expect(inColumn("In progress")[0]).toBe("PAY-3");
   expect(target.querySelector('[data-entity="jira:PAY-3"]')!.getBoundingClientRect()).toEqual(box);
+});
+
+/**
+ * A move's write answered gives its echo an id, not a new status, and its chip is the card's own (`writeOf`): the board
+ * is not laid over its echoes again, which ran its whole read once more in the frame of a drop (a quarter of a laned
+ * drop at 4x in WebView2, the ux30 end gate, 2026-11-23).
+ */
+test("a move's write answering does not lay the board over its echoes again", async () => {
+  let answer: ((row: unknown) => void) | null = null;
+  const h = harness();
+  movable(h, ["In Progress", "Done"], () => new Promise((resolve) => (answer = resolve)));
+  await open(h);
+  const { moveProvider } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "In Progress");
+  flushSync();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  await until(() => answer !== null, "the move sent to the queue");
+  const laid = vi.mocked(withStatusEchoes).mock.calls.length;
+  answer!({ id: 7, state: "pending", entity_id: "jira:PAY-3", source_id: "jira" });
+  await settle();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  expect(vi.mocked(withStatusEchoes).mock.calls.length).toBe(laid);
 });
 
 test("a refused move puts the card back in its column at its place, with the source's note", async () => {
