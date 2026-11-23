@@ -265,6 +265,17 @@ export class Windowed<K = string> {
     // `:last-child` rule (the Inbox's border) changes no row in view. The read takes away none of the rows drawn before
     // it that the overscan would hold: a row under a clipping footer stays where it drew.
     const fits = this.#options.onScreen;
+    // An on-screen list before its read: the most rows that could be on screen, a window's height of them from its top,
+    // and one past, not its overscan's. The read then finds them drawn, or takes the few below its view away. Drawn with
+    // the overscan, a board's columns built cards the read changed again in the same task, and an asset's column 1800 px
+    // of rows where a window shows 900 (the ux30 end gate, Windows: the board of every ticket and a long asset column).
+    // Not once something moved its view first (`reveal` of a row past them, a key's walk): that view's rows are drawn.
+    if (fits && !this.#placed && this.#viewTop === 0) {
+      const screen = this.#heights.span(0, typeof window === "undefined" ? 0 : window.innerHeight, 0, 0);
+      const span = this.#heights.around(screen.start, Math.min(keys.length, screen.end + 1));
+      this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
+      return { ...span, on: true };
+    }
     const below = this.#placed && !grown ? (fits ? 0 : Math.min(overscan, this.#viewHeight / 4)) : overscan;
     let span = this.#heights.span(this.#viewTop, this.#viewHeight, overscan, below);
     if (this.#placed && !grown) {

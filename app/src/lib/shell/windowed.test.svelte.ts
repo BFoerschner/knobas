@@ -900,3 +900,21 @@ test("a list of text lines takes its held heights and estimate by the text's siz
   expect(stopped).toBe(1);
   vi.unstubAllGlobals();
 });
+
+test("an on-screen list draws, before it reads where it sits, a window's height of rows and one past, not its overscan's (the ux30 end gate)", () => {
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(900);
+  document.body.innerHTML = "<ol></ol>";
+  const list = document.querySelector<HTMLElement>("ol")!;
+  // An asset's column: rows of 26 px, an overscan of 1800 px.
+  const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 26, gap: 1, scrolls: true, overscan: 1800, onScreen: true });
+  let before: number[] = [];
+  const stop = $effect.root(() => {
+    before = [win.start, win.end];
+    win.list(list);
+  });
+  flushSync();
+  // 900 px hold 34 rows of 27 (the last cut by the window's foot), and one past: 35, not the 67 that 1800 px hold.
+  expect(before).toEqual([0, 35]);
+  expect([win.start, win.end]).toEqual([0, 35]);
+  stop();
+});
