@@ -16,7 +16,9 @@
 # - a changed released WIT world, which breaks every component built for it;
 # - rustfmt, the commonest red of the full gate (`justfile`, `gate`);
 # - the doc-list tables and conflict markers (`just docs-check`);
-# - the front end's own gate: svelte-check, the whole vitest suite, vite build.
+# - the front end's own gate: svelte-check, the whole vitest suite, vite build;
+# - the Linux PostgreSQL archive starting with nothing but glibc from the host
+#   (2026-11-23: 18.6.0 needed libxml2.so.2, which ubuntu-latest lost).
 #
 # Nothing here replaces `check.yml` or `just check`: clippy, the Rust tests,
 # the IPC mirror and the test builds still run there, by hand, and the full
@@ -281,3 +283,33 @@ jobs:
       - name: vitest, shard ${{ matrix.shard }} of 3
         working-directory: app
         run: npx vitest run --maxWorkers 4 --shard ${{ matrix.shard }}/3
+
+  # The PostgreSQL the Linux installers carry starts on the newest Ubuntu and
+  # on the oldest one knobas supports, with nothing from the host but glibc
+  # (docs/decisions/2026-11-23-linux-postgresql-carries-its-libraries.md).
+  # theseus's 18.6.0 linked the host's libxml2.so.2; when ubuntu-latest became
+  # 26.04, which ships libxml2.so.16 only, knobas could not start its database
+  # on a fresh install, and nothing here noticed because no light check ran
+  # PostgreSQL. One archive download and a server start: about 30 s, no cargo.
+  postgres-linux:
+    name: PostgreSQL starts (${{ matrix.os }})
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      (github.head_ref != 'ux-polish' && github.head_ref != 'main')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fetch the pinned Linux archive
+        env:
+          KNOBAS_POSTGRES_DIR: ${{ runner.temp }}/postgresql
+        run: scripts/fetch-postgres.sh x86_64-unknown-linux-gnu
+
+      - name: It starts on its own libraries
+        run: scripts/check-postgres-starts.sh "$RUNNER_TEMP"/postgresql/postgresql-*.tar.gz

@@ -30,7 +30,18 @@ use crate::report::{Found, StartReport, Step};
 /// The exact PostgreSQL version knobas runs against. Pinned rather than
 /// ranged: PG 18 changed generated-column defaults, and the schema depends on
 /// `GENERATED ALWAYS AS (...) STORED` behaving the way 18.6 does.
-pub const PG_VERSION_REQ: &str = "=18.6.0";
+///
+/// Every platform runs PostgreSQL 18.6; the third number is theseus's build of
+/// it. Linux takes `18.6.1`, the build that carries its libraries in `lib/`:
+/// `18.6.0` linked the host's `libxml2.so.2`, which Ubuntu 26.04 and Fedora 45
+/// no longer have, so the database could not start there
+/// (`docs/decisions/2026-11-23-linux-postgresql-carries-its-libraries.md`).
+/// macOS and Windows stay on `18.6.0` until their `18.6.1` is tried.
+pub const PG_VERSION_REQ: &str = if cfg!(target_os = "linux") {
+    "=18.6.1"
+} else {
+    "=18.6.0"
+};
 
 /// Name of the application database inside the server.
 pub const DATABASE_NAME: &str = "knobas";
@@ -1851,6 +1862,8 @@ fn provably_different(left: &Path, right: &Path) -> bool {
 /// them -- `remove_dir` only succeeds while they are still empty, which is
 /// exactly the safety check we want.
 fn fresh_settings() -> Settings {
+    // Every path to an install (a download, `install`'s unpack) starts here.
+    crate::install::keep_hard_links();
     let settings = Settings::new();
 
     let _ = std::fs::remove_dir(&settings.data_dir);
@@ -3888,7 +3901,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = build_settings(dir.path()).unwrap();
 
-        assert_eq!(settings.version.to_string(), "=18.6.0");
+        assert_eq!(settings.version.to_string(), PG_VERSION_REQ);
         assert_eq!(settings.host, HOST);
         assert_eq!(settings.port, 0);
         assert!(!settings.temporary);

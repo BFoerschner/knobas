@@ -50,6 +50,11 @@
       "wix": {
         "version": "3.2.8"
       }
+    },
+    "linux": {
+      "rpm": {
+        "depends": ["libssl.so.3()(64bit)"]
+      }
     }
   }
 }
