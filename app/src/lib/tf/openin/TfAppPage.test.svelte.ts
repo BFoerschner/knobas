@@ -330,8 +330,8 @@ test("Remove takes it out at once, with Undo on its toast, and goes back", async
   await settle();
   expect(saved.at(-1)).toEqual([
     [
-      { id: "terminal", name: "Terminal", command: "wt -d {path}", file_command: null, commit_command: null, range_command: null, pull_request_command: null },
-      { id: "vscode", name: "VS Code", command: "code.cmd {path}", file_command: "code.cmd --goto {file}:{line}", commit_command: null, range_command: null, pull_request_command: null },
+      { id: "terminal", name: "Terminal", command: "wt -d {path}", file_command: null, commit_command: null, range_command: null, pull_request_command: null, api_command: null },
+      { id: "vscode", name: "VS Code", command: "code.cmd {path}", file_command: "code.cmd --goto {file}:{line}", commit_command: null, range_command: null, pull_request_command: null, api_command: null },
     ],
     "vscode",
   ]);

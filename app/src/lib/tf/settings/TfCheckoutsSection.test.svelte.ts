@@ -119,6 +119,19 @@ test("↑ moves an application one up and saves the list at once; the first has 
   expect(saved.at(-1)![1]).toBe("vscode");
 });
 
+test("a save keeps every application's API spec command: the shipped Bruno has only that one, and the backend refuses it without", async () => {
+  stored.applications.push({ id: "bruno", name: "Bruno", command: "", file_command: null, api_command: "open -a Bruno {collection}" });
+  stored.applications[1] = { ...stored.applications[1]!, api_command: "open -R {file}" };
+  await draw();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
+  await settle();
+  expect(saved.at(-1)![0].map((draft) => [draft.id, draft.command, draft.api_command ?? null])).toEqual([
+    ["vscode", "code {path}", null],
+    ["fork", "open -a Fork {path}", "open -R {file}"],
+    ["bruno", "", "open -a Bruno {collection}"],
+  ]);
+});
+
 test("Make default saves the list with the new default, and Change… sets the clones root", async () => {
   await draw();
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
