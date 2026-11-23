@@ -77,6 +77,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
+  import { afterLayout } from "../../shell/after-layout";
   import TfBareHeader from "../TfBareHeader.svelte";
   import { flushSync, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
@@ -481,16 +482,28 @@
     filter.chips["state"] = chips.includes(chip) ? chips.filter((c) => c !== chip) : [...chips, chip];
   }
 
-  // The selected pipeline stays in view as the list scrolls on its own (R-9.4a).
+  // The selected pipeline stays in view as the list scrolls on its own (R-9.4a). Once the frame has laid the rail out
+  // (`afterLayout`), not in the task that mounts the page: there its reads laid out the whole new page, a run's with it,
+  // and the run's own reads waited behind them (the ux30 end gate, Windows). The frame still paints the rail scrolled.
   $effect(() => {
     if (selected === null || list === undefined) return;
     const id = selected.entity_id;
+    const rail = list;
+    let gone = false;
+    let cancel = () => {};
     void tick().then(() => {
-      // Drawn first if the window left it out.
-      win.reveal(rows.findIndex((row) => row.kind === "pipeline" && row.pipeline.entity_id === id));
-      flushSync();
-      list?.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+      if (gone) return;
+      cancel = afterLayout(rail, () => {
+        // Drawn first if the window left it out.
+        win.reveal(rows.findIndex((row) => row.kind === "pipeline" && row.pipeline.entity_id === id));
+        flushSync();
+        rail.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+      });
     });
+    return () => {
+      gone = true;
+      cancel();
+    };
   });
 
 
