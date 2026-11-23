@@ -25,6 +25,7 @@ use knobas_update::standing::{InstallKind, Standing};
 use knobas_update::store::{self, Artifact, Attempt, Files, LastUpdate, Outcome, Settings};
 use knobas_update::{manifest, schedule, verify, version};
 use tokio_util::sync::CancellationToken;
+use tracing::instrument::WithSubscriber as _;
 
 /// What the page and the cog read: everything known, from memory.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
@@ -346,6 +347,14 @@ impl Updater {
     }
 
     /// The artifact of the version on offer, when there is one and this copy has an entry.
+    /// The offer's version, for the log; empty when there is none.
+    fn offered_version(&self) -> String {
+        self.state()
+            .offer
+            .map(|offer| offer.version)
+            .unwrap_or_default()
+    }
+
     fn offered_artifact(&self) -> Option<Artifact> {
         let inner = self.lock();
         let seen = inner.stored.newest.as_ref()?;
@@ -677,9 +686,14 @@ impl Updater {
         });
         let state = self.emit();
         let this = Arc::clone(self);
-        tauri::async_runtime::spawn(async move {
-            this.run_download(artifact, token).await;
-        });
+        // The caller's subscriber goes along, so a test's capture hears the task's log lines;
+        // the app's is the global one either way.
+        tauri::async_runtime::spawn(
+            async move {
+                this.run_download(artifact, token).await;
+            }
+            .with_current_subscriber(),
+        );
         Ok(state)
     }
 
@@ -691,6 +705,16 @@ impl Updater {
         };
         // One artifact at most: another version's file goes first.
         let _ = std::fs::remove_dir_all(&self.config.cache);
+        // Never the URL: GitHub sends a release download on to a signed address, and a
+        // configured endpoint may carry a token. The file names what is fetched.
+        let version = self.offered_version();
+        tracing::info!(
+            %version,
+            file = %artifact.file_name,
+            expected_bytes = ?artifact.bytes,
+            "the update's download starts"
+        );
+        let started = std::time::Instant::now();
         let progress_to = Arc::clone(&self);
         let mut progress = move |received: u64, total: Option<u64>| {
             progress_to.set_phase(Phase::Downloading { received, total });
@@ -706,6 +730,7 @@ impl Updater {
         )
         .await;
         *self.cancel.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        log_download(&artifact.file_name, &outcome, started.elapsed());
         let phase = match outcome {
             Ok(_) => Phase::Ready,
             Err(DownloadError::Cancelled) => Phase::Idle,
@@ -796,17 +821,20 @@ impl Updater {
         });
         let state = self.emit();
         let this = Arc::clone(self);
-        tauri::async_runtime::spawn(async move {
-            if let Err((stage, message)) = this.run_install(kind, artifact).await {
-                tracing::warn!(?stage, %message, "the update did not install");
-                this.set_phase(Phase::Failed {
-                    stage,
-                    message,
-                    received: None,
-                });
-                this.emit();
+        tauri::async_runtime::spawn(
+            async move {
+                if let Err((stage, message)) = this.run_install(kind, artifact).await {
+                    tracing::warn!(?stage, %message, "the update did not install");
+                    this.set_phase(Phase::Failed {
+                        stage,
+                        message,
+                        received: None,
+                    });
+                    this.emit();
+                }
             }
-        });
+            .with_current_subscriber(),
+        );
         Ok(state)
     }
 
@@ -831,9 +859,18 @@ impl Updater {
         .await
         .map_err(|error| (Stage::Install, error.to_string()))?;
         if let Err(error) = checked {
+            tracing::warn!(
+                file = %artifact.file_name,
+                %error,
+                "the update's signature does not check out before the install; the download is removed"
+            );
             let _ = std::fs::remove_file(&downloaded);
             return Err((Stage::Signature, error.to_string()));
         }
+        tracing::info!(
+            file = %artifact.file_name,
+            "the update's signature checks out again before the install"
+        );
 
         // 2. The backup.
         self.set_phase(Phase::Installing {
@@ -928,6 +965,13 @@ impl Updater {
             step: Step::Closing,
         });
         self.emit();
+        tracing::info!(
+            from = %self.config.current,
+            to = %self.offered_version(),
+            ?kind,
+            how = ?quit,
+            "the update is handed to the quit: the installer starts after the exit (Windows), the new copy at the restart"
+        );
         self.host.quit(quit);
         Ok(())
     }
@@ -1170,6 +1214,55 @@ pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, demo: bool) {
         return;
     }
     tauri::async_runtime::spawn(updater.run_schedule());
+}
+
+/// The log lines a download ends with (the ux30 boot check): its end, with the bytes that landed
+/// and the time it took, and the signature check's result. Never the URL.
+fn log_download(file: &str, outcome: &Result<PathBuf, DownloadError>, took: std::time::Duration) {
+    let ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    match outcome {
+        Ok(landed) => {
+            let bytes = std::fs::metadata(landed).map(|meta| meta.len()).ok();
+            tracing::info!(file, ?bytes, ms, "the update's download ended");
+            tracing::info!(
+                file,
+                "the update's signature checks out against a trusted key"
+            );
+        }
+        Err(DownloadError::Signature(error)) => {
+            tracing::warn!(file, ms, %error, "the update's signature does not check out; the download is removed");
+        }
+        Err(DownloadError::Cancelled) => {
+            tracing::info!(file, ms, "the update's download was cancelled");
+        }
+        Err(DownloadError::Stopped { received, why }) => {
+            let why = without_urls(why);
+            tracing::warn!(file, received, ms, %why, "the update's download stopped");
+        }
+        Err(DownloadError::TooLarge { received }) => {
+            tracing::warn!(file, received, ms, "the update's download is too large");
+        }
+        Err(DownloadError::Disk(why)) => {
+            tracing::warn!(file, ms, %why, "the update's download could not be written");
+        }
+    }
+}
+
+/// `text` with every URL in it cut to its scheme and host: a transfer's error can name the
+/// address it failed on, and a release download's address after GitHub's redirect is signed.
+fn without_urls(text: &str) -> String {
+    text.split(' ')
+        .map(|word| match word.find("://") {
+            Some(at) => {
+                let rest = &word[at + 3..];
+                let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+                let host = authority.rsplit('@').next().unwrap_or_default();
+                format!("{}://{host}/…", &word[..at])
+            }
+            None => word.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// On `RunEvent::Exit`, after `shutdown_app` stopped the sync and PostgreSQL: start the installer
