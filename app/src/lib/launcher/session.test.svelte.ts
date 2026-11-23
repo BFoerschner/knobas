@@ -878,3 +878,21 @@ test("flush asks at once what waited for the keys to pause, and nothing where no
   await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
   expect(search).toHaveBeenCalledTimes(2);
 });
+
+test("the rows are flattened once for an answer, however often they are read, and again for the next (the ux30 Windows pass)", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw, ["one", "two"]));
+  const session = new Session(ports(search));
+  session.type("pay");
+  await vi.runAllTimersAsync();
+  flushSync();
+  const rows = session.rows;
+  expect(rows.length).toBeGreaterThan(0);
+  // The launcher reads them ten times in a key's update: each read is the same list, not a new flattening.
+  expect(session.rows).toBe(rows);
+  expect(session.current).toBe(rows[session.selected] ?? null);
+  session.type("payo");
+  await vi.runAllTimersAsync();
+  flushSync();
+  expect(session.rows).not.toBe(rows);
+  expect(session.rows).toBe(session.rows);
+});

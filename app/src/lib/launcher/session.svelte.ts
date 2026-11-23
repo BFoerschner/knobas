@@ -272,8 +272,13 @@ export class Session {
     return modeOf(this.answered, this.response);
   }
 
-  get rows(): LauncherRow[] {
-    return flatten({
+  /**
+   * The rows, flattened once for each answer and not on every read (the ux30 Windows pass, 2026-11-23): the launcher
+   * reads them ten times in a key's update, and each read flattened the answer again, 27 ms of a key's 100 at CPU 4x in
+   * WebView2 on Björn's PC. Lazy, so `#titles` is set before the first read.
+   */
+  #rows = $derived.by(() =>
+    flatten({
       mode: this.mode,
       response: this.response,
       home: this.home,
@@ -282,7 +287,11 @@ export class Session {
       extras: this.extras,
       titles: this.#titles(),
       raw: this.answered,
-    });
+    }),
+  );
+
+  get rows(): LauncherRow[] {
+    return this.#rows;
   }
 
   /**
