@@ -234,11 +234,14 @@ if (set === "extremes") {
   }
 }
 // The show-every-ticket views (ux18), made on the backend for the run as `keys.mjs` makes them.
+const windowViews = [];
 if (set === "nav" && PLACES.filter(picked).some((p) => p.name.startsWith("tickets-all"))) {
   const port = new URL(app.replace(/#.*$/, "")).searchParams.get("fake-real");
   for (const [id, layout, all] of [["perf-every-ticket", "board", true], ["perf-every-ticket-list", "list", true], ["perf-every-ticket-off", "board", false]]) {
     const view = { id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: all, saved_view: null };
-    await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) });
+    // Attached to knobas's own window (no `fake-real`), the page's own IPC saves it once the page is attached.
+    if (port === null) windowViews.push(view);
+    else await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) });
   }
 }
 // `--attach <port>`: a Chrome already listening (one on the WSL box through a tunnel, when the Mac's lock is taken).
@@ -251,6 +254,7 @@ await c.send("Runtime.enable");
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(new URL("./open-probe.js", import.meta.url), "utf8") });
 await c.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 await viewport(c, size);
+for (const view of windowViews) await js(`window.__TAURI_INTERNALS__.invoke("save_ticket_view", ${JSON.stringify({ view })})`);
 const cpu = (rate) => c.send("Emulation.setCPUThrottlingRate", { rate });
 
 /** Until the shown page's DOM has been quiet `ms`, at most `limit`. */

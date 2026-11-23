@@ -361,6 +361,12 @@ async function press(key) {
 // hold, and words many rows hold whose names are few and many. A word the database does not hold warms what it can.
 const real = new URL(app).searchParams.get("fake-real");
 if (real && picked.some((x) => x.setup === allBoard)) await makeAllViews(real);
+// Attached to knobas's own window (no `fake-real`): the views and the planning warm-up through the page's own IPC.
+if (!real && attachPort) {
+  const inPage = (cmd, args) => c.js(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}).then(() => true, (e) => String(e))`, { timeout: 60000 });
+  if (picked.some((x) => x.setup === allBoard)) for (const view of allViews()) await inPage("save_ticket_view", { view });
+  for (const raw of ["q", "iban", "payout", "retry"]) for (let i = 0; i < 12; i++) await inPage("search", { query: { raw, titles: false, limit: 40, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] } } });
+}
 if (real) {
   const ask = (raw) => fetch(`http://127.0.0.1:${real}/invoke`, { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ cmd: "search", args: { query: { raw, titles: false, limit: 40, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] } } } }) }).then((r) => r.text()).catch(() => null);
@@ -446,9 +452,13 @@ process.exit(0);
  * The views the show-every-ticket cases open (ux18), saved on the backend under their own ids: every ticket, as a board
  * and as a list. Saved again each run, as they were.
  */
+function allViews() {
+  return [["perf-every-ticket", "board"], ["perf-every-ticket-list", "list"]].map(([id, layout]) => ({ id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: true, saved_view: null }));
+}
+
 async function makeAllViews(port) {
-  for (const [id, layout] of [["perf-every-ticket", "board"], ["perf-every-ticket-list", "list"]]) {
-    const view = { id, name: id, group: "Mine", position: null, query: "", layout, columns: [], lanes: "none", card_fields: ["type", "signals", "comments", "assignee"], list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"], list_sort: null, show_all: true, saved_view: null };
+  for (const view of allViews()) {
+    const id = view.id;
     const said = await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "save_ticket_view", args: { view } }) }).then((r) => r.text());
     if (!said.includes(id)) throw new Error(`could not save the view ${id}: ${said.slice(0, 200)}`);
   }
