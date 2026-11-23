@@ -784,12 +784,36 @@
    * draws its screen at once, so no card drawn goes from under the pointer. Under 1500 px the screen shows eight a
    * column or fewer, so nothing changes there.
    */
-  function openShare(place: string, cards: MiniBoardCard[]): number | null {
+  function openShare(place: string, cards: MiniBoardCard[], index: number): number | null {
     if (!firstFrame || cards.length <= COLUMN_CAP) return null;
     const drew = drewWhole.get(place) ?? 0;
-    if (reader.all && drew === 0) return COLUMN_CAP;
+    if (reader.all && drew === 0) return landingShare(cards, index);
     return cards.length >= STACK_WINDOW_FROM && drew <= COLUMN_CAP ? COLUMN_CAP : null;
   }
+  /**
+   * How many of a show-every-ticket column's cards its landing frame draws (the ux30 end gate, Windows, Fable's ruling):
+   * the cards the window's height holds, each reckoned at its floor (`cardFloor`, never taller than it draws) and one
+   * more, at most {@link COLUMN_CAP}. The window's height from the column's top would hold fewer, so no card on screen
+   * waits. A column wholly past the window's right edge, where its board starts at the window's left at the latest,
+   * draws one card, so it says nothing of being empty; the rest of every column draws the frame after, below them.
+   */
+  function landingShare(cards: MiniBoardCard[], index: number): number {
+    const width = innerWidth.current ?? 1440;
+    if (index * (columnWidth(width) + COLUMN_GAP) >= width) return 1;
+    const height = window.innerHeight;
+    let used = 0;
+    let fit = 0;
+    for (const card of cards) {
+      if (fit >= COLUMN_CAP) break;
+      used += cardFloorOf(card) + (fit > 0 ? CARD_GAP : 0);
+      if (used > height) break;
+      fit += 1;
+    }
+    return Math.min(COLUMN_CAP, fit + 1);
+  }
+  /** The room between two columns and two cards (`tickets.css`'s `.tf-cols` and `.tf-cards` gaps). */
+  const COLUMN_GAP = 8;
+  const CARD_GAP = 6;
   /**
    * What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. Its
    * summary's lines counted by the column's width, which goes by the window (`tickets.css`), and Interface's size.
@@ -1536,7 +1560,7 @@
             <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each columnsOf(lane) as { column, cards, done, listed } (columnKey(column))}
+            {#each columnsOf(lane) as { column, cards, done, listed }, index (columnKey(column))}
               <!-- A view that shows every ticket offers no more: its whole read fills each column behind the first. -->
               {@const more = reader.all ? null : moreLine(column, cards.length, done)}
               {@const pointer = reader.all ? null : listPointer(column, cards.length)}
@@ -1557,7 +1581,7 @@
                   <span class="tf-colsts" aria-hidden="true"></span>
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={stackCards} atMost={openShare(place, stackCards)} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
+                  <TicketStack cards={stackCards} atMost={openShare(place, stackCards, index)} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}
