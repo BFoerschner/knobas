@@ -274,6 +274,8 @@
     litTab,
     MADE_PR,
     readAllRows,
+    repoPrsFilter,
+    REPO_PRS_LIMIT,
     mirrorDefault,
     mirrorStanding,
     readRepoRoute,
@@ -392,8 +394,6 @@
   const route = $derived(readRepoRoute(rest));
   const repoId = $derived(route.repoId);
 
-  /** How many pull requests the repository's read asks for: every one the mirror holds. */
-  const LIMIT = 1000;
 
   /** Whether a read again answered what the page holds: then it writes nothing, and nothing is laid out anew. */
   const sameAnswer = (held: unknown, next: unknown): boolean => held !== null && JSON.stringify(held) === JSON.stringify(next);
@@ -804,20 +804,8 @@
     }
     if (!alive()) return;
     if (!(again && sameAnswer(detail, found))) detail = found;
-    const filter: EntityFilter = {
-      sources: [found.row.source_id],
-      kinds: ["pr"],
-      updated_within_days: null,
-      order: "updated_desc",
-      context: null,
-      project: null,
-      include_deleted: false,
-      reach: null,
-      // Its own pull requests, not its source's every one (the query audit, 2026-11-12: 1,710 rows in four reads,
-      // 700 ms, for the repository's few dozen); `repoPrs` still keeps the rows whose path line is this repository.
-      parent: found.row.title,
-    };
-    await readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
+    const filter = repoPrsFilter(found.row);
+    await readAllRows((offset) => ports.listEntities(filter, REPO_PRS_LIMIT, offset)).then(
       (rows) => {
         if (!alive()) return;
         const next = repoPrs(rows, found.row);

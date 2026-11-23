@@ -433,6 +433,29 @@ function saveRecent(): void {
 }
 
 /**
+ * The row of `entityId` as a kept answer holds it (a list a page drew it in, its own detail), or `null`: what a press on
+ * the row's link knows before the page it opens has read anything, so the reads that hang off the row go with the press
+ * (the ux30 end gate, Windows: a repository's pull requests waited for its row, a second round after the page's build).
+ * The row as the mirror answered it, so a read built from it is the read the page builds from its own.
+ */
+export function heldRow(entityId: string): { entity_id: string; source_id: string; title: string } | null {
+  type Row = { entity_id?: unknown; source_id?: unknown; title?: unknown };
+  const usable = (row: Row | undefined): row is { entity_id: string; source_id: string; title: string } =>
+    row !== undefined && row.entity_id === entityId && typeof row.source_id === "string" && typeof row.title === "string";
+  for (const entry of kept.values()) {
+    if (entry.cmd === "get_entity") {
+      const row = (entry.value as { row?: Row } | null)?.row;
+      if (usable(row)) return { entity_id: row.entity_id, source_id: row.source_id, title: row.title };
+    } else if (entry.cmd === "list_entities") {
+      const rows = (entry.value as { rows?: Row[] } | null)?.rows;
+      const row = Array.isArray(rows) ? rows.find((one) => one?.entity_id === entityId) : undefined;
+      if (usable(row)) return { entity_id: row.entity_id, source_id: row.source_id, title: row.title };
+    }
+  }
+  return null;
+}
+
+/**
  * Tauri's `invoke`, answering a read of {@link READS} from memory when it
  * holds the answer. Reached through `ipc/invoke.ts`.
  */
