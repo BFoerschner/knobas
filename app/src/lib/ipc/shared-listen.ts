@@ -3,7 +3,9 @@
  * Each `listen` of Tauri's is a message to the backend, and so is each `unlisten`: a run opened from a repository's
  * Builds tab took the pipeline page's three listeners down and set the run page's three up for the same events, six
  * messages in the task that mounts the run, 14 ms of a sixth-speed main thread in WebView2. Here the first page to hear
- * an event sets its listener up, once; a page that stops hearing it leaves the set, and the listener stays for the next.
+ * an event sets its listener up; a page that stops hearing it leaves the set. The listener goes once no page hears the
+ * event when the update's microtasks are done, so a page that leaves and one that comes in the same update share it and
+ * send nothing, and nothing outlives the last page that heard it (`shell/residue.test.svelte.ts`).
  *
  * Each handler hears the events in the order they came, in the order the handlers joined. A handler that throws does not
  * keep the others from hearing it; its error is thrown again on its own.
@@ -62,7 +64,15 @@ export class SharedListeners {
       throw error;
     }
     return () => {
-      shared.handlers.delete(own);
+      if (!shared.handlers.delete(own) || shared.handlers.size > 0) return;
+      queueMicrotask(() => {
+        if (shared.handlers.size > 0 || this.#events.get(event) !== shared) return;
+        this.#events.delete(event);
+        shared.ready.then(
+          (stop) => stop(),
+          () => {},
+        );
+      });
     };
   }
 }

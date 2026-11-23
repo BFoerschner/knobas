@@ -33,14 +33,22 @@ test("the builds pages' ports hear an event through one bridge listener, however
   bridge.emit("knobas://view-fresh-test", "a");
   stopOne();
   bridge.emit("knobas://view-fresh-test", "b");
-  // A page that goes sends no unlisten; the next to hear the event sends no listen.
+  // The last page leaves and the next comes in the same update (a pipeline's page for a run's): no unlisten, no listen.
   stopTwo();
   const three: unknown[] = [];
-  await BRIDGE.listen("knobas://view-fresh-test", ({ payload }) => three.push(payload));
+  const stopThree = BRIDGE.listen("knobas://view-fresh-test", ({ payload }) => three.push(payload));
+  await stopThree;
   bridge.emit("knobas://view-fresh-test", "c");
   expect([one, two, three]).toEqual([["a"], ["a", "b"], ["c"]]);
   expect(bridge.listen).toHaveBeenCalledTimes(1);
   expect(bridge.unlisten).not.toHaveBeenCalled();
+  // Once no page hears it when an update's microtasks are done, the listener goes: nothing outlives the pages.
+  (await stopThree)();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(bridge.unlisten).toHaveBeenCalledTimes(1);
+  await BRIDGE.listen("knobas://view-fresh-test", () => {});
+  expect(bridge.listen).toHaveBeenCalledTimes(2);
 });
 
 test("a handler that joins twice leaves once for each, and one that throws keeps no other from hearing", async () => {
