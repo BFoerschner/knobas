@@ -482,6 +482,7 @@ const TfOasInline = (await import("../tf/render/TfOasInline.svelte")).default;
 const TfOasDiff = (await import("../tf/render/TfOasDiff.svelte")).default;
 const TfOasMedia = (await import("../tf/render/TfOasMedia.svelte")).default;
 const TfOasShape = (await import("../tf/render/TfOasShape.svelte")).default;
+const TfOasSchemaPage = (await import("../tf/render/TfOasSchemaPage.svelte")).default;
 const TfOasRequest = (await import("../tf/render/TfOasRequest.svelte")).default;
 const TfOasRail = (await import("../tf/render/TfOasRail.svelte")).default;
 const TfApiServersSection = (await import("../tf/settings/TfApiServersSection.svelte")).default;
@@ -1821,6 +1822,27 @@ const CASES: Case[] = [
       app: mount(TfOasShape, {
         target,
         props: { st: oasState(), shape: { props: [], variants: null, items: undefined, extra: undefined, description: "", facts: {}, base: "openapi.yaml" }, k: "schemas/A", onfollow: () => {} },
+      }),
+    }),
+  },
+  {
+    /** A schema's page (the ux30 end gate): a screenful first, the rest a step a frame; the frame asked for is given back. */
+    name: "TfOasSchemaPage",
+    source: "lib/tf/render/TfOasSchemaPage.svelte",
+    open: (target) => ({
+      app: mount(TfOasSchemaPage, {
+        target,
+        props: {
+          st: oasState(),
+          name: "A",
+          node: { type: "object" },
+          shape: { props: Array.from({ length: 60 }, (_, i) => ({ name: `p${i}`, node: { type: "string" }, required: false, words: "" })), variants: null, items: undefined, extra: undefined, description: "", facts: {}, base: "openapi.yaml" },
+          uses: { ops: [], schemas: [] },
+          sample: null,
+          screenful: true,
+          onfollow: () => {},
+          ongo: () => {},
+        },
       }),
     }),
   },
