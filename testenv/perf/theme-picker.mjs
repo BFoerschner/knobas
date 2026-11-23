@@ -2,7 +2,7 @@
 // window every frame ... if the drag stutters at 6x on Windows, apply to the preview's scope while the drag runs").
 //
 //   node testenv/perf/theme-picker.mjs --app <url> --out <file.json> [--throttle 1,4,6] [--hz 170] [--seconds 2]
-//                                      [--size WxH@s] [--attach <port>]
+//                                      [--size WxH@s] [--attach <port>] [--profile]
 //
 // `--app` is a built app on the fixture (`?fake-ipc`). `--attach <port>` drives a page already open on that DevTools
 // port (knobas's own WebView2 window on Windows, its front end served into it), keeping its size unless `--size` is
@@ -27,6 +27,8 @@ if (!app || !out) { console.error("usage: theme-picker.mjs --app <url> --out <fi
 const throttles = opt("--throttle", "1,4,6").split(",").map(Number);
 const hz = Number(opt("--hz", "170"));
 const seconds = Number(opt("--seconds", "2"));
+// `--profile`: the first rate's drag under the CPU profiler, and the functions that took the most of it, by self time.
+const profile = args.includes("--profile");
 const LINE = { 1: 100, 4: 100, 6: 200 };
 const FRAME_LINE = 34;
 setTimeout(() => { console.log("watchdog: gave up"); process.exit(3); }, 10 * 60000).unref();
@@ -57,7 +59,9 @@ await press(`() => document.querySelector('button[aria-label="Change Accent"]') 
 const picked = await until(`() => { const i = document.querySelector('.tf-thm-pop input[type="color"]'); return i ? i.getAttribute("aria-label") : null; }`, "picker");
 await sleep(1500);
 
-// One hue turn at the drag's rate: each event sent on its own task, as the picker's are.
+// One hue turn at the drag's rate: each event on its own task, every one queued at its own time from the start, as the
+// picker's messages queue (a chain of timeouts, each setting the next, fell behind long frames on its own: one timer a
+// turn of the event loop measured the probe, not the page).
 const DRAG = (n, every) => `new Promise((done) => {
   const input = document.querySelector('.tf-thm-pop input[type="color"]');
   const hex = (h) => { const f = (k) => { const x = (k + h / 60) % 6; return Math.round(255 * (1 - 0.6 * Math.max(0, Math.min(x, 4 - x, 1)))); }; return "#" + [f(5), f(3), f(1)].map((v) => v.toString(16).padStart(2, "0")).join(""); };
@@ -66,17 +70,13 @@ const DRAG = (n, every) => `new Promise((done) => {
   const tick = (t) => { frames.push(t - last); last = t; if (running) requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
   const t0 = performance.now();
-  let sent = 0;
-  const send = () => {
-    const at = t0 + sent * ${every};
-    input.value = hex((sent * 360) / ${n});
+  const send = (i) => {
+    const at = t0 + i * ${every};
+    input.value = hex((i * 360) / ${n});
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => picks.push(performance.now() - at); ch.port2.postMessage(0); });
-    sent += 1;
-    if (sent < ${n}) setTimeout(send, Math.max(0, t0 + sent * ${every} - performance.now()));
-    else setTimeout(() => { running = false; done({ picks, frames: frames.slice(1) }); }, 1000);
+    requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => { picks.push(performance.now() - at); if (picks.length === ${n}) setTimeout(() => { running = false; done({ picks, frames: frames.slice(1) }); }, 500); }; ch.port2.postMessage(0); });
   };
-  send();
+  for (let i = 0; i < ${n}; i++) setTimeout(() => send(i), i * ${every});
 })`;
 
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] ?? null; };
@@ -85,7 +85,18 @@ for (const rate of throttles) {
   await c.send("Emulation.setCPUThrottlingRate", { rate });
   await sleep(500);
   const n = Math.round(hz * seconds);
+  if (profile && rate === throttles[0]) { await c.send("Profiler.enable"); await c.send("Profiler.setSamplingInterval", { interval: 200 }); await c.send("Profiler.start"); }
   const r = await c.js(DRAG(n, 1000 / hz), { timeout: 120000 });
+  if (profile && rate === throttles[0]) {
+    const { profile: p } = await c.send("Profiler.stop");
+    const self = new Map();
+    const dt = new Map(p.samples.map((id, i) => [i, p.timeDeltas[i] ?? 0]));
+    const byId = new Map(p.nodes.map((node) => [node.id, node]));
+    p.samples.forEach((id, i) => { const f = byId.get(id).callFrame; const k = `${f.functionName || "(anon)"} ${f.url.split("/").pop()}:${f.lineNumber + 1}`; self.set(k, (self.get(k) ?? 0) + dt.get(i)); });
+    const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25);
+    results.profile = top.map(([k, us]) => [k, Math.round(us / 1000)]);
+    for (const [k, us] of top) console.log(`  ${String(Math.round(us / 1000)).padStart(6)} ms  ${k}`);
+  }
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
   const row = {
     rate, sent: n, painted: r.picks.length,

@@ -195,8 +195,12 @@ export interface Themes {
   // ---------- a person's own ----------
   /** Keeps a new own theme (a copy, an import), its name made unique; `null` past {@link MOST_THEMES}. */
   add(theme: ImportedTheme): Theme | null;
-  /** Changes an own theme: drawn by the next frame where a slot holds it, kept {@link SAVE_AFTER} ms after the last change. */
-  update(id: string, change: (theme: Theme) => Theme): void;
+  /**
+   * Changes an own theme: drawn by the next frame where a slot holds it, kept {@link SAVE_AFTER} ms after the last change.
+   * `preview` (a colour picker's drag): the window is drawn only when the change is kept, or at the next change without
+   * it, so a drag repaints the editor's preview each frame and the whole window once (the themes decisions' risk 9).
+   */
+  update(id: string, change: (theme: Theme) => Theme, preview?: boolean): void;
   /** Removes an own theme; each slot that held it lets go. Returns how to put it back as it was. */
   remove(id: string): (() => void) | null;
   /** knobas's own themes in both window slots and both code slots following; returns how to undo it. Nothing is deleted. */
@@ -279,6 +283,8 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   let trialBack: { slot: string | null } | { theme: Theme } | null = null;
   let trialTimer: ReturnType<typeof setTimeout> | null = null;
   let framed = false;
+  /** A preview's change waits for the window: drawn with the save, or the next change that is no preview. */
+  let held = false;
   let paint = 0;
   /** Whether the engine's highlights inherit, once asked. */
   let inherits: boolean | null = null;
@@ -334,6 +340,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
 
   function apply(): void {
     framed = false;
+    held = false;
     const html = root();
     const { vars, sel } = values();
     if (html) {
@@ -390,7 +397,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
     if (saving !== null) timers.clear(saving);
     saving = timers.set(() => {
       save();
-      if (framed) apply();
+      if (framed || held) apply();
       repaint();
     }, SAVE_AFTER);
   }
@@ -520,7 +527,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       save();
       return theme;
     },
-    update(id, change) {
+    update(id, change, preview = false) {
       const at = own.findIndex((t) => t.id === id);
       if (at === -1) return;
       const before = own[at]!;
@@ -534,7 +541,10 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
         else if (under && trial?.theme.id === id) trial = { ...trial, theme: next };
         else if (!under && trial?.kind === "edit" && trial.theme.id === id) stopTrial();
       }
-      if (KINDS.some((kind) => appDrawn(kind).id === id || codeDrawn(kind).id === id || appSlots[kind] === id)) applyLater();
+      if (KINDS.some((kind) => appDrawn(kind).id === id || codeDrawn(kind).id === id || appSlots[kind] === id)) {
+        if (preview) held = true;
+        else applyLater();
+      }
       saveLater();
     },
     remove(id) {
@@ -592,7 +602,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
         save();
         repaint();
       }
-      if (framed) apply();
+      if (framed || held) apply();
     },
     snapshot: () => ({ v: 1, themes: $state.snapshot(own) as Theme[], app: { ...appSlots }, code: { ...codeSlots }, asis: [...asis] }),
     restore(value) {

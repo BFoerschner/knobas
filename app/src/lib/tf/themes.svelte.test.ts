@@ -232,6 +232,44 @@ test("ten edits in one frame apply once, with the last value, and data-paint mov
   }
 });
 
+/**
+ * A colour picker's drag (the themes decisions' risk 9; the ux30 end gate, 2026-11-23): its changes are previews, which
+ * leave the window as it is, so each frame of the drag restyles the editor's preview and not the whole window. The
+ * window takes the colour at the drag's end, a change that is no preview, or with the save when no end comes.
+ */
+test("a preview's changes wait for the window until the drag ends or the change is kept", () => {
+  vi.useFakeTimers();
+  try {
+    const OWN = { ...PURPLE, id: "own-purple02" };
+    const storage = memory({ [APP_SLOT_KEY.dark]: OWN.id, [THEMES_KEY]: JSON.stringify([OWN]) });
+    const html = root();
+    const timers = { ...frames(), set: setTimeout, clear: clearTimeout };
+    const themes = createThemes(() => storage, () => html, timers);
+    const ink = (v: string, preview: boolean) => themes.update(OWN.id, (t) => ({ ...t, app: { ...t.app, ink: v } }), preview);
+    ink("#EDE4F1", true);
+    ink("#EDE4F2", true);
+    expect(timers.run()).toBe(0);
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F7");
+    expect(themes.own.find((t) => t.id === OWN.id)?.app?.ink).toBe("#EDE4F2");
+    // The drag's end: drawn by the next frame.
+    ink("#EDE4F3", false);
+    expect(timers.run()).toBe(1);
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F3");
+    // A drag with no end: the save draws it.
+    ink("#EDE4F4", true);
+    expect(timers.run()).toBe(0);
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F3");
+    vi.advanceTimersByTime(SAVE_AFTER);
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F4");
+    // And a flush (a quit, a backup) draws what waits.
+    ink("#EDE4F5", true);
+    themes.flush();
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F5");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("the paint cache equals what is on the root after every apply, and goes when the window is all knobas's", () => {
   const storage = memory();
   const html = root();

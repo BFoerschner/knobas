@@ -203,3 +203,37 @@ no box and shifts nothing; the toggle's costs the same. The first draw in Dracul
 load had Dracula's page colour in 15 of 15 loads at each size, before and after. In WebKit (a windowless `WKWebView` on
 this Mac) the check answers that highlights do not inherit, and with `data-sel-each` a deep element's selection is
 Dracula's; with `<html>`'s rule alone it would be the system's.
+
+## In knobas's own window on Windows (2026-11-23, the ux30 end gate)
+
+WebView2 157 on Björn's PC (Ryzen 5 5600X, the window idling at about 170 Hz), the probes' build served into a release
+window on a scratch profile, the PC otherwise quiet.
+
+**A closed fold laid the page out on every restyle.** On the PR files page each slot change laid out once (14 in 14 at
+every rate and both sizes), while the Mac's Chrome had none. A trace with invalidation tracking named the cause: for
+each drawn, closed `<details>` Chromium takes its `details-content` slot out of layout and puts it back on any restyle
+(even `data-sel` alone). Docs, Builds and Inbox did the same. One rule now hides a closed fold's content with
+`display: none` instead of Chromium's `content-visibility: hidden` (`css/chrome.css`, held by `tf-css.test.ts`). With it
+those four pages laid out 0 times in 10 restyles and 10 without, in either order, and their window screenshots were the
+same with and without it. **Fable's ruling (Björn away):** keep the rule; what it gives up is that the webview's own find
+(F3, or Ctrl+F while a dialog is open) no longer opens a closed fold, which agrees with knobas's find (Ctrl+F is
+knobas's, `installFindKey`, and leaves a closed fold out by the design system's rule). Deleting the rule reverses it.
+If a Chromium update changes how it hides the slot, `theme-switch.mjs` on PR files in WebView2 will count the layouts
+again. After it, slot change against toggle in ms, 1440 x 868 then full screen (5120 x 1369), colours 0 layouts in 14
+on every page and rate:
+
+| Page | 1x | 4x | 6x |
+| --- | --- | --- | --- |
+| Tickets | 10 / 11, 11 / 11 | 52 / 53, 50 / 53 | 85 / 87, 81 / 82 |
+| Repository | 4 / 4, 4 / 5 | 20 / 21, 21 / 22 | 35 / 35, 35 / 39 |
+| PR files | 10 / 10, 10 / 10 | 49 / 54, 49 / 57 | 85 / 83, 82 / 94 |
+
+The first frame of a cold load had Dracula's page colour in 5 of 5 loads at every rate and both sizes.
+
+**The colour picker dragged (risk 9).** `testenv/perf/theme-picker.mjs` sends what the system's picker sends the page,
+an `input` on the swatch's colour field, 170 times a second for 2 s. Each one was handed on to the editor, so the editor
+re-read its colours, figures and preview for every pick, and the window was restyled once a frame. A swatch now hands on
+one colour a frame, the last picked, as a preview: the editor's role list and preview follow it, and the window keeps
+its colours until the drag ends (`change`), the change is kept (300 ms after the last pick), or anything flushes the
+themes. This is the fallback the design named for risk 9; no cue was added, since the preview the person is watching
+follows every frame and the window answers the release.

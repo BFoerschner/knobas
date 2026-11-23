@@ -36,7 +36,8 @@
     /** The colour the theme it came from has here, `undefined` for ink, `null` when there is none to go back to. */
     resetTo?: string | undefined | null;
     resetName?: string;
-    onchange?: (next: string | undefined) => void;
+    /** `preview`: a colour picker's drag, handed on once a frame; its end, and every other change, without it. */
+    onchange?: (next: string | undefined, preview?: boolean) => void;
   } = $props();
 
   let open = $state(false);
@@ -76,6 +77,31 @@
     if (c !== null) onchange?.(c);
   }
 
+  /**
+   * The system's picker sends an `input` for every move of a drag, faster than the screen draws (about 170 a second
+   * on Björn's PC), and each one handed on re-reads the whole editor: its colours, figures and preview. So a drag hands
+   * on one colour a frame, the last one picked, as a preview (the editor's preview follows, the window waits), and its
+   * end (`change`) at once, which colours the window (the themes decisions' risk 9; the ux30 end gate, 2026-11-23: in
+   * knobas's WebView2 window a whole-window restyle a frame painted a pick 120 ms late at 4x and 249 ms at 6x).
+   */
+  let picked: string | null = null;
+  let pickFrame = 0;
+  function pick(event: Event): void {
+    picked = (event.currentTarget as HTMLInputElement).value.toUpperCase();
+    if (event.type === "change") return handPick(false);
+    if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
+  }
+  function handPick(preview: boolean): void {
+    if (pickFrame !== 0) cancelAnimationFrame(pickFrame);
+    pickFrame = 0;
+    const next = picked;
+    picked = null;
+    if (next !== null) onchange?.(next, preview);
+  }
+  $effect(() => () => {
+    if (pickFrame !== 0) cancelAnimationFrame(pickFrame);
+  });
+
   function keydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -114,7 +140,7 @@
           /></label
         >
         <label class="tf-thm-popf"
-          ><span>Pick</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={(event) => onchange?.((event.currentTarget as HTMLInputElement).value.toUpperCase())} /></label
+          ><span>Pick</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={pick} onchange={pick} /></label
         >
         <div class="tf-thm-popa">
           {#if inkable}

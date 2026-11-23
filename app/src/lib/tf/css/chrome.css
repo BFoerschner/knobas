@@ -187,6 +187,14 @@
 .tf-menu.tf-rd-m button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: var(--wt-ui, 400); }
 .tf-menu.tf-rd-m button.tf-syncnow:hover { background: var(--sheet-2); }
 
+/* A closed fold lays nothing out when the page restyles (a theme's colours, `data-sel`). Chromium hides a closed
+   fold's content with `content-visibility: hidden` and, in WebView2 157, takes it out of layout and puts it back on
+   every restyle: the PR files page laid out once per colour change (the ux30 end gate, 2026-11-23). Hidden by
+   `display: none` instead, it is the same empty box and nothing is laid out again. The webview's own find (F3) no
+   longer opens a closed fold, which agrees with knobas's find (Ctrl+F is knobas's, and it leaves a closed fold out).
+   Not dead CSS: `tf-css.test.ts` holds it; without it `theme-switch.mjs` in WebView2 counts the layouts again. */
+details:not([open])::details-content { content-visibility: visible; display: none; }
+
 /* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
 :is(.tf-pl-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before, .tf-logv details > summary::before, .tf-arow > .tf-fold::before {
   content: ""; display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 6px 1px 2px; color: var(--ink-2);

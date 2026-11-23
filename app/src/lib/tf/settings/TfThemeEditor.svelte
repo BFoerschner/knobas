@@ -76,23 +76,31 @@
   const surfaces = $derived(themes.colours(theme.kind));
   const DIFF_DEFAULT = $derived(diffDefault(surfaces));
 
-  function setRole(role: Role, next: string | undefined): void {
-    themes.update(theme.id, (t) => {
-      const syntax = { ...t.syntax };
-      if (next === undefined) delete syntax[role];
-      else syntax[role] = next;
-      return { ...t, syntax };
-    });
+  function setRole(role: Role, next: string | undefined, preview = false): void {
+    themes.update(
+      theme.id,
+      (t) => {
+        const syntax = { ...t.syntax };
+        if (next === undefined) delete syntax[role];
+        else syntax[role] = next;
+        return { ...t, syntax };
+      },
+      preview,
+    );
   }
 
-  function setDiff(key: DiffKey, next: string | undefined): void {
-    themes.update(theme.id, (t) => {
-      const diff = { ...t.diff };
-      if (next === undefined) delete diff[key];
-      else diff[key] = next;
-      const { diff: _gone, ...rest } = t;
-      return Object.keys(diff).length > 0 ? { ...rest, diff } : rest;
-    });
+  function setDiff(key: DiffKey, next: string | undefined, preview = false): void {
+    themes.update(
+      theme.id,
+      (t) => {
+        const diff = { ...t.diff };
+        if (next === undefined) delete diff[key];
+        else diff[key] = next;
+        const { diff: _gone, ...rest } = t;
+        return Object.keys(diff).length > 0 ? { ...rest, diff } : rest;
+      },
+      preview,
+    );
   }
 
   /** Every role under 4.5:1, fixed by lightness. */
@@ -232,7 +240,7 @@
           editable={own}
           resetTo={source ? source.syntax[role] : null}
           resetName={source?.name ?? ""}
-          onchange={(next) => setRole(role, next)}
+          onchange={(next, preview) => setRole(role, next, preview)}
         />
         <span>{ROLE_NAMES[role]}</span>
         <code class="tf-hl-{role}" {@attach cssVars(() => ({ "--hl": value ?? "var(--ink)" }))}>{SAMPLE[role]}</code>
@@ -258,7 +266,7 @@
           inkable={false}
           resetTo={source ? (source.diff?.[key] ?? undefined) : null}
           resetName={source?.name ?? ""}
-          onchange={(next) => setDiff(key, next)}
+          onchange={(next, preview) => setDiff(key, next, preview)}
         />
         <span>{DIFF_NAMES[key]}</span>
         <code></code>

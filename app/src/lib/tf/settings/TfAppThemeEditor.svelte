@@ -65,13 +65,17 @@
     swatch?.focus();
   }
 
-  function setKey(key: AppKey, next: string | undefined): void {
-    themes.update(theme.id, (t) => {
-      const app = { ...t.app };
-      if (next === undefined) delete app[key];
-      else app[key] = next;
-      return { ...t, app };
-    });
+  function setKey(key: AppKey, next: string | undefined, preview = false): void {
+    themes.update(
+      theme.id,
+      (t) => {
+        const app = { ...t.app };
+        if (next === undefined) delete app[key];
+        else app[key] = next;
+        return { ...t, app };
+      },
+      preview,
+    );
   }
 
   /**
@@ -234,7 +238,7 @@
                 leave="Auto"
                 resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
                 resetName={source?.name ?? ""}
-                onchange={(next) => setKey(key, next)}
+                onchange={(next, preview) => setKey(key, next, preview)}
               />
             {/each}
           </span>
@@ -312,7 +316,7 @@
               leave="Auto"
               resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
               resetName={source?.name ?? ""}
-              onchange={(next) => setKey(key, next)}
+              onchange={(next, preview) => setKey(key, next, preview)}
             />
           </span>
           <span class="tf-apt-foldname">{NAME[key]}</span>

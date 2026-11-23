@@ -60,6 +60,10 @@ const COLOURS: [string, string, string][] = [...spec.matchAll(/^\| `(--[a-z0-9-]
   },
 );
 
+test("a closed fold's content is hidden by display, so a restyle lays nothing out in WebView2 (ux30 end gate, 2026-11-23)", () => {
+  expect(css).toMatch(/details:not\(\[open\]\)::details-content \{ content-visibility: visible; display: none; \}/);
+});
+
 test("a held header's subline keeps its line both held and shown, so an empty one moves nothing as the header shows (2026-11-17)", () => {
   expect(css).toMatch(/\.tf-fhead\.tf-unread \.tf-sub, \.tf-fhead\.tf-holds \.tf-sub \{ min-height: 1lh; \}/);
 });
