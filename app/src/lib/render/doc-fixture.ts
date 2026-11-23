@@ -6,12 +6,21 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const ROOT = resolve(__dirname, "../../../../fixtures/doc");
+/** The fixtures as the seed pushes them onto `tidewater/ledger-api` (`testenv/seed-gitea.sh`, step 4c). */
+const ROOT = resolve(__dirname, "../../../../fixtures/doc/files/tidewater/ledger-api");
+/** Where each fixture stands in the repository. */
+const AT: Record<string, string> = {
+  "order-4710.xml": "orders/order-4710.xml",
+  "order-4711.xml": "orders/order-4711.xml",
+  "pom.xml": "build/pom.xml",
+  "kugellager-6204-2rs.png": "media/kugellager-6204-2rs.png",
+  "rahmenvertrag-2026.pdf": "contracts/rahmenvertrag-2026.pdf",
+};
 
-/** A file of `fixtures/doc/`, as text. */
-export const fixture = (name: string): string => readFileSync(resolve(ROOT, name), "utf8");
-/** A file of `fixtures/doc/`, as bytes. */
-export const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(resolve(ROOT, name)));
+/** A fixture of `fixtures/doc/`, by its name, as text. */
+export const fixture = (name: string): string => readFileSync(resolve(ROOT, AT[name] ?? name), "utf8");
+/** A fixture of `fixtures/doc/`, by its name, as bytes. */
+export const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(resolve(ROOT, AT[name] ?? name)));
 
 /** A document written on one line. */
 export const ONE_LINE = `<?xml version="1.0"?><a xmlns="urn:x"><b n="1">one</b><b n="2">two  spaces</b><c/></a>`;

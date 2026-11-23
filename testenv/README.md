@@ -875,6 +875,12 @@ volume seeded before the files existed, `main` gains them after the branches,
 so a seeded branch is behind `main` by that commit; its own commits and its
 pull request's diff are unchanged.
 
+**The XML view's documents (2026-11-23).** `fixtures/doc/files/tidewater/ledger-api/` holds two openTRANS orders,
+a Maven POM, the image the orders name and a contract (`fixtures/doc/SOURCE.md`). Section 4c pushes that folder onto
+the live `tidewater/ledger-api` the same way, after the fixture repositories' files, so the orders' relative paths
+name files the repository holds. They are not in the mock corpus, whose counts stay as they were; the browser fake
+adds them under `?fake-xml` (and a made 50 MB order under `?fake-xml-big`).
+
 `testenv/live-everything.sh` (`just live-everything`) is the live witness:
 the two forges as sources on a scratch profile, the backend with no window
 syncing them, and the launcher's `search` asked. It times the first fill until

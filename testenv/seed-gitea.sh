@@ -64,6 +64,13 @@ api() {  # api <user:pass> <METHOD> <path> [<json body>]
   API_STATUS=$(printf '%s' "$_raw" | tail -n 1)
   API_BODY=$(printf '%s' "$_raw" | sed '$d')
 }
+api_file() {  # api_file <user:pass> <METHOD> <path> <file holding the json body>: a body past one argument's length
+  _raw=$(curl -sS -u "$1" -X "$2" \
+              -H 'Content-Type: application/json' -H 'Accept: application/json' \
+              -w '\n%{http_code}' --data-binary @"$4" "$API$3")
+  API_STATUS=$(printf '%s' "$_raw" | tail -n 1)
+  API_BODY=$(printf '%s' "$_raw" | sed '$d')
+}
 
 # Accept the listed statuses, die on anything else with the server's message.
 expect() {  # expect <what> <status>...
@@ -202,9 +209,12 @@ done
 #    alone (auto_init's README, 4a's source file). Before section 5, so on a
 #    fresh volume every branch cut afterwards already holds the files and no
 #    pull request's own commits or diff change. FIXTURE_FILES may name another
-#    folder of the same shape.
+#    folder of the same shape. The XML view's documents (fixtures/doc/files,
+#    `fixtures/doc/SOURCE.md`: two openTRANS orders, a POM, the image and the
+#    contract they name) go onto `ledger-api` the same way, from a folder of
+#    their own, so the mock corpus and its counts stay as they are.
 # --------------------------------------------------------------------------
-FILES_DIR=${FIXTURE_FILES:-../fixtures/tidewater/files}
+for FILES_DIR in "${FIXTURE_FILES:-../fixtures/tidewater/files}" ../fixtures/doc/files; do
 if [ -d "$FILES_DIR/$ORG" ]; then
   for dir in "$FILES_DIR/$ORG"/*/; do
     repo=$(basename "$dir")
@@ -226,8 +236,9 @@ if [ -d "$FILES_DIR/$ORG" ]; then
         404) have=''; op=create ;;
         *)   expect "read $repo:main $path" 200 404 ;;
       esac
-      jq -n --arg op "$op" --arg p "$path" --arg sha "$have" \
-            --arg c "$(base64 <"$dir$path" | tr -d '\n')" \
+      # Through a file: a file's base64 past 128 KiB is longer than one argument may be (an XML order, 2026-11-23).
+      base64 <"$dir$path" | tr -d '\n' >"$changes.b64"
+      jq -n --arg op "$op" --arg p "$path" --arg sha "$have" --rawfile c "$changes.b64" \
             '{operation:$op, path:$p, content:$c} + (if $sha == "" then {} else {sha:$sha} end)' >"$changes.one"
       printf '%s' "$sep" >>"$changes"
       cat "$changes.one" >>"$changes"
@@ -236,15 +247,16 @@ if [ -d "$FILES_DIR/$ORG" ]; then
     printf ']' >>"$changes"
     n=$(jq 'length' "$changes")
     if [ "$n" -gt 0 ]; then
-      body=$(jq -n --slurpfile f "$changes" --arg m "Add the fixture's files ($n)" \
-             '{branch:"main", message:$m, files:$f[0]}')
-      api "$ADMIN" POST "/repos/$ORG/$repo/contents" "$body"
+      jq -n --slurpfile f "$changes" --arg m "Add the fixture's files ($n)" \
+             '{branch:"main", message:$m, files:$f[0]}' >"$changes.body"
+      api_file "$ADMIN" POST "/repos/$ORG/$repo/contents" "$changes.body"
       expect "commit $repo:main the fixture's files" 201
       say "committed $n fixture file(s) to $repo:main"
     fi
-    rm -f "$changes" "$changes.list" "$changes.one"
+    rm -f "$changes" "$changes.list" "$changes.one" "$changes.b64" "$changes.body"
   done
 fi
+done
 
 # --------------------------------------------------------------------------
 # Helpers used by the content sections below.

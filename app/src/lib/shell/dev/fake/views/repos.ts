@@ -455,11 +455,12 @@ const openapiFiles: () => Record<string, string> = (() => {
 
 /**
  * `?fake-xml` (the XML view, 2026-11-23): the two openTRANS orders, the POM, the image and the contract the orders name,
- * from `fixtures/doc/` (made by the clickdummy's data script, `fixtures/doc/SOURCE.md`).
+ * from `fixtures/doc/files/tidewater/ledger-api/`, as the seed pushes them (made by the clickdummy's data script,
+ * `fixtures/doc/SOURCE.md`).
  */
-const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/*.xml", { query: "?raw", import: "default", eager: true });
-const XML_BYTES = import.meta.glob<string>("../../../../../../../fixtures/doc/*.{png,pdf}", { query: "?url", import: "default", eager: true });
-const XML_AT: Record<string, string> = { "order-4710.xml": "orders/order-4710.xml", "order-4711.xml": "orders/order-4711.xml", "pom.xml": "build/pom.xml" };
+const XML_ROOT = "../../../../../../../fixtures/doc/files/tidewater/ledger-api/";
+const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.xml", { query: "?raw", import: "default", eager: true });
+const XML_BYTES = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.{png,pdf}", { query: "?url", import: "default", eager: true });
 const xmlOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xml");
 /**
  * What `?fake-xml` holds once read: the fixture's binary files, by path, and `?fake-xml-big`'s order, the first item
@@ -482,18 +483,14 @@ function xmlFiles(): Record<string, string> {
     const order = Object.entries(XML_TEXT).find(([f]) => f.endsWith("order-4710.xml"))?.[1];
     if (order !== undefined) out["orders/order-big.xml"] = madeBig(order);
   }
-  for (const [file, text] of Object.entries(XML_TEXT)) {
-    const name = file.slice(file.lastIndexOf("/") + 1);
-    if (XML_AT[name] !== undefined) out[XML_AT[name]] = text;
-  }
+  for (const [file, text] of Object.entries(XML_TEXT)) out[file.slice(XML_ROOT.length)] = text;
   out["media/kugellager-6204-2rs.png"] = "";
   out["contracts/rahmenvertrag-2026.pdf"] = "";
   return out;
 }
 if (xmlOn()) {
   for (const [file, url] of Object.entries(XML_BYTES)) {
-    const name = file.slice(file.lastIndexOf("/") + 1);
-    const at = name.endsWith(".png") ? `media/${name}` : `contracts/${name}`;
+    const at = file.slice(XML_ROOT.length);
     void fetch(url).then((r) => r.arrayBuffer()).then((b) => xmlHeld.binary.set(at, new Uint8Array(b)), () => {});
   }
 }

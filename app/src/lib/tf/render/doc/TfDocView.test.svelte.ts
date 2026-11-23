@@ -3,7 +3,13 @@
  * key and *Levels*, the way down and the element picked, folds kept while the window lives, and a broken file.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+const opened = vi.hoisted(() => [] as { url: string; elsewhere: boolean }[]);
+vi.mock("../../../shell/open-web", async (original) => ({
+  ...(await original<typeof import("../../../shell/open-web")>()),
+  openWeb: (url: string, how: { elsewhere?: boolean } = {}) => opened.push({ url, elsewhere: how.elsewhere === true }),
+}));
 
 import TfDocView from "./TfDocView.svelte";
 import { forgetFolds } from "./doc.svelte";
@@ -24,6 +30,7 @@ beforeEach(() => {
   document.body.appendChild(target);
   Element.prototype.scrollIntoView = function () {};
   forgetFolds();
+  opened.length = 0;
 });
 
 afterEach(() => {
@@ -185,4 +192,63 @@ test("a file that is not well formed opens, folds as far as it reads and says wh
   target.querySelector<HTMLButtonElement>(".tf-xv-head .tf-oas-ref")!.click();
   flushSync();
   expect(row(4).classList.contains("tf-xv-cur")).toBe(true);
+});
+
+const LINKED = ["<a>", "  <site>https://track.example/s/1</site>", "  <img>../media/b.png</img>", "  <doc>README.md</doc>", "</a>"].join("\n");
+const files = (paths: string[]) => ({ has: (p: string) => (p === "" ? true : paths.includes(p)), ask: () => {}, open: vi.fn(), bytes: () => new Promise<Uint8Array>(() => {}) });
+
+test("an address is a link that opens through openWeb, a press with ⌘ in the browser; W opens the picked line's", async () => {
+  draw(LINKED, { files: files(["media/b.png", "README.md"]) });
+  await settle();
+  const link = row(2).querySelector<HTMLElement>(".tf-xv-link.tf-xv-web")!;
+  expect(link.textContent).toBe("https://track.example/s/1");
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+  expect(opened).toEqual([
+    { url: "https://track.example/s/1", elsewhere: false },
+    { url: "https://track.example/s/1", elsewhere: true },
+  ]);
+  row(2).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  key("w");
+  key("W", { shiftKey: true });
+  expect(opened.slice(2)).toEqual([
+    { url: "https://track.example/s/1", elsewhere: false },
+    { url: "https://track.example/s/1", elsewhere: true },
+  ]);
+});
+
+test("a path is a link only where the repository holds a file there; an image opens in the file viewer", async () => {
+  const repo = files(["media/b.png", "README.md"]);
+  draw(LINKED.replace("orders/a.xml", "x"), { files: repo, path: "orders/a.xml" });
+  await settle();
+  row(4).querySelector<HTMLElement>(".tf-xv-link.tf-xv-path")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  expect(repo.open).toHaveBeenCalledWith("README.md");
+  row(3).querySelector<HTMLElement>(".tf-xv-link.tf-xv-path")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  expect(document.querySelector(".tf-viewer")).not.toBeNull();
+  unmount(view!);
+  view = null;
+  draw(LINKED, { files: files([]) });
+  await settle();
+  expect(row(3).querySelector(".tf-xv-link")).toBeNull();
+});
+
+test("a value knobas takes for something carries a chip at its line's end, in the first frame its line is drawn after the outline", async () => {
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0NzExIn0.c2lnbmF0dXJl";
+  draw(`<a>\n  <token>${jwt}</token>\n  <batch>TW2026A7781KQ40Z9XLMR3</batch>\n</a>`);
+  await settle();
+  expect(words(row(2).querySelector(".tf-xv-end .tf-xv-chip"))).toBe("JWT");
+  expect(row(3).querySelector(".tf-xv-chip")).toBeNull();
+});
+
+test("a file written on one line is laid out, says so, and draws as written on a press", async () => {
+  const long = `<r>${'<i n="1">one</i>'.repeat(200)}</r>`;
+  draw(long);
+  await settle();
+  expect(words(target.querySelector(".tf-xv-laid"))).toBe("Laid out by knobas");
+  expect(rows().length).toBe(202);
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "As written")!.click();
+  await settle();
+  expect(rows()).toEqual([1]);
 });

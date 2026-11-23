@@ -14,4 +14,11 @@ anybody else's.
 - `kugellager-6204-2rs.png`, `rahmenvertrag-2026.pdf`: the image the orders name and a contract, made byte by byte in
   the same script (a ball bearing drawn by a function of its pixels; a PDF of plain text).
 
+They stand as the seed pushes them onto the live `tidewater/ledger-api` (`testenv/seed-gitea.sh`, step 4c, from
+`files/tidewater/ledger-api/`): `orders/`, `build/pom.xml`, `media/` and `contracts/`, so the orders' relative paths
+(`../media/kugellager-6204-2rs.png`, `../contracts/rahmenvertrag-2026.pdf`) name files the repository holds. The
+schemas the orders name are not seeded: the XML view's check is the next pass's. The mock corpus
+(`fixtures/tidewater/files`) does not hold them, so its counts stay as they were; the browser fake adds them under
+`?fake-xml`.
+
 Large files are made in the tests that need them (the order's first item repeated), never committed.

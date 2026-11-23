@@ -325,13 +325,15 @@
   const imagePort = $derived(images ?? { fetch: imageFetch, hosts: imageHosts, setHosts: setImageHosts });
   /** Each drawn line's links, by line: read once a line is drawn, again when the repository's paths come in. */
   let linkCache = new Map<number, readonly Link[]>();
+  let linkKey = "";
   let pathsKnown = $state(false);
-  $effect(() => {
-    void text;
-    void pathsKnown;
-    linkCache = new Map();
-  });
   function linksOf(n: number, shown: string): readonly Link[] {
+    // Read again when the text drawn or the repository's paths change; `pathsKnown` is read so a line draws again then.
+    const key = `${shownText?.length ?? 0}:${layout}:${pathsKnown}`;
+    if (key !== linkKey) {
+      linkKey = key;
+      linkCache = new Map();
+    }
     const held = linkCache.get(n);
     if (held !== undefined) return held;
     const has = files === null ? null : (p: string) => files.has(p) === true;

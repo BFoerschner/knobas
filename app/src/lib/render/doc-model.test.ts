@@ -51,3 +51,12 @@ test("folds are named by their elements and found again when a line is added abo
   answerDoc(sessions, 2, { kind: "open", text: moved });
   expect(answerDoc(sessions, 2, { kind: "find", keys: [key!, "/ORDER/GONE[3]"] })).toEqual([second + 1]);
 });
+
+test("a fold whose element no longer folds is not found again, though another fold starts on its line", () => {
+  const sessions = new Map();
+  answerDoc(sessions, 1, { kind: "open", text: "<r>\n<x>\n<y/>\n</x>\n</r>" });
+  const [key] = answerDoc(sessions, 1, { kind: "keys", lines: [2] }) as string[];
+  expect(key).toBe("/r/x");
+  answerDoc(sessions, 2, { kind: "open", text: "<r>\n<x/><w>\n</w>\n</r>" });
+  expect(answerDoc(sessions, 2, { kind: "find", keys: [key!] })).toEqual([]);
+});

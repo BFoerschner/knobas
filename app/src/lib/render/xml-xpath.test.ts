@@ -100,6 +100,8 @@ test("comparisons of sets: = with any, != with any other, relational by number",
   expect(value(SMALL, "//price > 15")).toBe("true");
   expect(value(SMALL, "//price > 25")).toBe("false");
   expect(value(SMALL, "//title = //title")).toBe("true");
+  // Any node of each set, not the first alone: the match is the second title.
+  expect(value(SMALL, "//title = //title[. = 'Two']")).toBe("true");
   expect(value(SMALL, "//nothing = //title")).toBe("false");
 });
 
