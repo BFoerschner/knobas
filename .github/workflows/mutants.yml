@@ -101,6 +101,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           git diff "$BASE"..HEAD -- crates > "$RUNNER_TEMP/changed.diff"
+          mkdir -p mutants
           set +e
           for c in $CRATES; do
             cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p "$c" --shard "$SHARD" --no-shuffle -j 1 -o "mutants/$c"
@@ -144,6 +145,7 @@ jobs:
           BASE: ${{ inputs.base || 'v3.2.9-ux28' }}
         run: |
           git diff "$BASE"..HEAD -- crates > "$RUNNER_TEMP/changed.diff"
+          mkdir -p mutants
           if [ "$RUNNER_OS" = macOS ]; then site="-f crates/knobas-site/src/mac.rs"; else site="-f crates/knobas-site/src/win.rs"; fi
           set +e
           cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p knobas-site $site -f crates/knobas-site/src/wry_host.rs -f crates/knobas-site/src/lib.rs --no-shuffle -j 1 -o mutants/knobas-site; echo "site exit $?"
