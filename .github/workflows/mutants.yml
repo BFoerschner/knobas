@@ -1,0 +1,154 @@
+# Mutants on hosted runners: `cargo mutants --in-diff` over every crate a release changed, by hand only.
+#
+# Why (the ux30 end gate, 2026-11-23): the end gate runs mutants on the whole diff since the last full gate
+# (`v3.2.9-ux28..HEAD`), crate by crate. knobas-app alone has about 670 mutants in that diff and its tests take minutes
+# each (the `it` binary starts embedded PostgreSQL), which is days of the Mac's time and blocks every timing run there.
+# With the WSL box taken back by Björn, Fable ruled (xhigh, recorded in the gate's report): run them in full here, on
+# standard runners (free for this public repository), knobas-app split into shards, and the files only macOS or Windows
+# compile on those runners too, since Linux never builds them.
+#
+# Dispatch only; no secrets beyond the automatic read-only GITHUB_TOKEN (the embedded PostgreSQL's download asks
+# api.github.com which release asset to fetch, as in check.yml). Each job uploads its `mutants.out`; a job is green when
+# cargo-mutants ran, whatever it found (its exit code 2 means "missed mutants", which the gate reads from the artifact).
+#
+#   gh workflow run mutants.yml --ref ux-polish -f base=v3.2.9-ux28
+name: mutants
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: The diff's base (a tag or commit); mutants are generated only on lines changed since it
+        default: v3.2.9-ux28
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: linux ${{ matrix.crate }} ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { crate: knobas-app, shard: 0/16 }
+          - { crate: knobas-app, shard: 1/16 }
+          - { crate: knobas-app, shard: 2/16 }
+          - { crate: knobas-app, shard: 3/16 }
+          - { crate: knobas-app, shard: 4/16 }
+          - { crate: knobas-app, shard: 5/16 }
+          - { crate: knobas-app, shard: 6/16 }
+          - { crate: knobas-app, shard: 7/16 }
+          - { crate: knobas-app, shard: 8/16 }
+          - { crate: knobas-app, shard: 9/16 }
+          - { crate: knobas-app, shard: 10/16 }
+          - { crate: knobas-app, shard: 11/16 }
+          - { crate: knobas-app, shard: 12/16 }
+          - { crate: knobas-app, shard: 13/16 }
+          - { crate: knobas-app, shard: 14/16 }
+          - { crate: knobas-app, shard: 15/16 }
+          - { crate: knobas-secrets, shard: 0/1 }
+          - { crate: knobas-source-jira, shard: 0/1 }
+          - { crate: knobas-db, shard: 0/1 }
+          - { crate: knobas-core, shard: 0/1 }
+          - { crate: knobas-source-gitea, shard: 0/1 }
+          - { crate: knobas-sync, shard: 0/1 }
+          - { crate: knobas-wasm-host, shard: 0/1 }
+          - { crate: knobas-search, shard: 0/1 }
+          - { crate: knobas-mockd, shard: 0/1 }
+          - { crate: knobas-http, shard: 0/1 }
+          - { crate: knobas-adapter-sdk knobas-source-mock knobas-spi-types knobas-source-teamcity knobas-source-kuma knobas-source-confluence knobas-jar knobas-update, shard: 0/1 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+      - name: Install Tauri's Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev
+      - id: toolchain
+        name: Read the pinned toolchain
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: wasm32-wasip2
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.theseus
+          key: postgres-${{ hashFiles('crates/knobas-db/src/embedded.rs') }}-linux
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Mutants
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE: ${{ inputs.base }}
+          CRATES: ${{ matrix.crate }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          git diff "$BASE"..HEAD -- crates > "$RUNNER_TEMP/changed.diff"
+          set +e
+          for c in $CRATES; do
+            cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p "$c" --shard "$SHARD" --no-shuffle -j 1 -o "mutants/$c"
+            echo "$c exit $?"
+          done
+          exit 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutants-linux-${{ strategy.job-index }}
+          path: mutants/
+          if-no-files-found: warn
+
+  # The files only macOS or only Windows compile (Linux never built them, so its "missed" there meant "not run").
+  platform:
+    name: ${{ matrix.os }} gated files
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: toolchain
+        name: Read the pinned toolchain
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: wasm32-wasip2
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Mutants on the platform's own files
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE: ${{ inputs.base }}
+        run: |
+          git diff "$BASE"..HEAD -- crates > "$RUNNER_TEMP/changed.diff"
+          if [ "$RUNNER_OS" = macOS ]; then site="-f crates/knobas-site/src/mac.rs"; else site="-f crates/knobas-site/src/win.rs"; fi
+          set +e
+          cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p knobas-site $site -f crates/knobas-site/src/wry_host.rs -f crates/knobas-site/src/lib.rs --no-shuffle -j 1 -o mutants/knobas-site; echo "site exit $?"
+          cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p knobas-secrets -f crates/knobas-secrets/src/keyring_store.rs --no-shuffle -j 1 -o mutants/knobas-secrets; echo "secrets exit $?"
+          cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p knobas-db -f crates/knobas-db/src/socket.rs --no-shuffle -j 1 -o mutants/knobas-db; echo "db exit $?"
+          cargo mutants --in-diff "$RUNNER_TEMP/changed.diff" -p knobas-app -f crates/knobas-app/src/window_look.rs -f crates/knobas-app/src/site.rs -f crates/knobas-app/src/passwords/clipboard.rs -f crates/knobas-app/src/boot_report.rs -f crates/knobas-app/src/capture.rs -f crates/knobas-app/src/bundle.rs --no-shuffle -j 1 -o mutants/knobas-app; echo "app exit $?"
+          exit 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutants-${{ matrix.os }}
+          path: mutants/
+          if-no-files-found: warn
