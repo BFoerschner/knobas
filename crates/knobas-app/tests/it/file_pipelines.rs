@@ -563,13 +563,21 @@ async fn a_never_writing_jq_child_is_killed_at_its_timeout() {
 /// cap first: two spaces of indent a level.) The jq step now runs in a child, so the
 /// child dies and the step says why. That this test process is still here to
 /// assert is half of the claim.
+///
+/// The step gets a minute, not the usual ten seconds: building two values a
+/// million levels deep took longer than ten on a hosted runner (the ux30 gate's
+/// mutants baseline), and this test is about how the step fails, not how fast.
 #[tokio::test]
 async fn a_value_nested_deep_at_run_time_fails_the_step_not_the_app() {
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        ..Limits::default()
+    };
     for filter in [
         "reduce range(1000000) as $_ (0; [.]) | tojson",
         "def deep: reduce range(1000000) as $_ (0; [.]); deep == deep",
     ] {
-        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", Limits::default()).await;
+        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", limits).await;
         let failed = failure(&run);
         assert_eq!((failed.index, failed.name.as_str()), (0, "jq"), "{filter}");
         assert_eq!(failed.why, PipeWhy::Error, "{filter}: {failed:?}");

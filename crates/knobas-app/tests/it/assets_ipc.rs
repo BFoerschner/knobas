@@ -5270,10 +5270,12 @@ async fn the_bar_is_each_half_hours_worst_and_the_samples_come_only_when_asked()
     )
     .await;
     // The half-hour 3 hours back holds one down among ups; the outage began 20 minutes ago (a miss inside it is skipped).
+    // From minute 0: the bar's newest half-hour is the one now is in on the UTC grid, and in a half-hour's first minute
+    // only a sample taken now is in it (three of the ux30 gate's mutants baselines read no reading there).
     sqlx::query(
         "insert into knobas.monitor_sample (entity_id, taken_at, state)
          select $1, now() - make_interval(mins => m), case when m = 180 then 'down' when m <= 20 and m <> 10 then 'down' when m = 10 then null else 'up' end
-           from generate_series(1, 300) m",
+           from generate_series(0, 300) m",
     )
     .bind(&flaky)
     .execute(&pool)

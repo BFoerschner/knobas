@@ -84,6 +84,21 @@ and `process_liveness_tells_a_running_process_from_a_reaped_one`. Both test the 
 no `ps`: `process_alive` answers `false` there and `ServerWatch::is_gone` asks it only under `cfg!(unix)`, on purpose. A
 test bug, not a product bug; both tests are now `#[cfg(unix)]`, as the code they test is.
 
+### Baselines that failed on the runners (test bugs, no product change)
+
+- knobas-app `tests/it/assets_ipc.rs`, `the_bar_is_each_half_hours_worst_and_the_samples_come_only_when_asked` (three
+  of run 45227865249's app shards): the bar is on the UTC half-hour grid, and the test wrote samples at `now()` less 1
+  to 300 minutes, so in a half-hour's first minute the newest half-hour held none and the bar ended in no reading. The
+  samples now start at minute 0. Run on the Mac at 21:00:00: the old test failed (`...uuuuduuuud-`), the new one passed.
+- knobas-app `tests/it/file_pipelines.rs`, `a_value_nested_deep_at_run_time_fails_the_step_not_the_app` (four
+  shards): building two values a million levels deep for `deep == deep` passed the ten-second step limit on the runner,
+  so the step timed out instead of failing on the stack. The test is about how the step fails, so it gives the step a
+  minute.
+- knobas-search `tests/it/coverage_plans.rs` (run 45227865249): read 258 child rows against a line of 257, one
+  withdrawn row ahead of the live ones at the head of the range. Handed to its own fix agent by the gate.
+- knobas-core (run 45221186058, Ubuntu 26.04): embedded PostgreSQL 18.6.0 needs `libxml2.so.2`; rerun on 24.04 by the
+  gate.
+
 ## Equivalent: no behaviour changes
 
 - knobas-source `lib.rs:2362` (`Source::ticket_fields` → `Ok(None)`) and `:2375` (`Source::field_options` →
