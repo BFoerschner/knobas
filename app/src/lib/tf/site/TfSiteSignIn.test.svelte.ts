@@ -147,6 +147,14 @@ function type(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+test("where no site is offered (Linux), the Sign-in row names no macOS (the ux30 end gate, Linux real app)", () => {
+  store.hold([{ ...SETTING, offered: false, persists: false, open_inside: false }]);
+  section();
+  const row = [...target.querySelectorAll(".tf-stg-row")].find((el) => el.querySelector(".tf-stg-l")?.textContent?.startsWith("Sign-in"));
+  expect(row?.textContent).not.toContain("macOS");
+  expect(row?.textContent).toContain("Nothing kept: no site here");
+});
+
 test("Settings saves a sign-in from the dialog, then names it and never shows the password", async () => {
   section();
   const row = [...target.querySelectorAll(".tf-stg-row")].find((el) => el.textContent?.includes("Saved sign-in"));

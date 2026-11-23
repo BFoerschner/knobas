@@ -178,7 +178,7 @@
           <span>Kept since {kept}</span>
           <button class="tf-btn tf-sm tf-danger" disabled={saving} onclick={() => (forgetting = true)}>Forget…</button>
         {:else}
-          <span class="tf-stg-hint">{setting.persists ? "Not signed in here yet" : "Kept until knobas quits on this macOS"}</span>
+          <span class="tf-stg-hint">{!setting.offered ? "Nothing kept: no site here" : setting.persists ? "Not signed in here yet" : "Kept until knobas quits on this macOS"}</span>
         {/if}
       </div>
     </div>
