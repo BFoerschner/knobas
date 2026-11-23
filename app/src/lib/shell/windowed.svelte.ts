@@ -175,17 +175,17 @@ export class Windowed<K = string> {
     const n = this.#options.count();
     const keys = new Array<K>(n);
     for (let i = 0; i < n; i++) keys[i] = this.#options.key(i);
-    return (this.#seen.keys = keys);
+    return (this.#workedOut = keys);
   });
   /**
-   * The keys and the span as last worked out, for a row's teardown (`row`). A teardown runs while Svelte destroys
-   * effects, and there a derived read whose sources changed in the batch runs again over their old values: a focused
-   * card dropped in another column read the window's keys as its row went, which ran the column's cards and through
-   * them the board's whole read (overlay, bands, held places) once more in the drop's task, and that run, over the old
-   * echoes, left the overlay's kept answer stale, so the next pass laid the board over again too (the ux30 end gate,
-   * 2026-11-23: two passes of a laned drop's three in knobas's WebView2 window).
+   * The keys `#keys` last worked out, as a plain value, for a row's teardown (`row`), or `null` before it has. A teardown
+   * runs while Svelte destroys effects, and there a derived read whose sources changed in the batch runs again over their
+   * old values: a focused card dropped in another column read the window's keys as its row went, which ran the column's
+   * cards and through them the board's whole read (overlay, bands, held places) once more in the drop's task, and that
+   * run, over the old echoes, left the overlay's kept answer stale, so the next pass laid the board over again (the ux30
+   * end gate, 2026-11-23: four passes a laned drop in knobas's WebView2 window).
    */
-  readonly #seen: { keys: readonly K[]; start: number; end: number } = { keys: [], start: 0, end: 0 };
+  #workedOut: readonly K[] | null = null;
 
   /** The rows drawn last, while the view stays inside them with the margin to spare. */
   #held: { keys: readonly K[]; start: number; end: number } | null = null;
@@ -219,14 +219,6 @@ export class Windowed<K = string> {
   #bornIn: object | null = null;
 
   readonly #span = $derived.by((): Span & { on: boolean } => {
-    const span = this.#work();
-    this.#seen.start = span.start;
-    this.#seen.end = span.end;
-    return span;
-  });
-
-  /** The rows to draw now: `#span`'s answer. */
-  #work(): Span & { on: boolean } {
     const keys = this.#keys;
     if (keys.length < this.#options.from) {
       this.#held = null;
@@ -307,7 +299,7 @@ export class Windowed<K = string> {
     this.#held = this.#placed && grown ? { keys, start: span.start, end: span.end } : null;
     if (this.#options.onScreen) this.#lastDrawn = { start: span.start, keys: keys.slice(span.start, span.end) };
     return { ...span, on: true };
-  }
+  });
 
   /** Whether the list is long enough to window. */
   readonly on = $derived(this.#span.on);
@@ -596,10 +588,11 @@ export class Windowed<K = string> {
       const active = document.activeElement;
       if (focused === null || focused.key !== key || list === null || !list.isConnected) return;
       if (!(active === document.body || active === null || node.contains(active))) return;
-      // Only a row the window took out: one the list no longer holds (a comment box closed, a filter) is gone for good.
-      const seen = this.#seen;
-      const at = seen.keys.indexOf(key);
-      if (at < 0 || (at >= seen.start && at < seen.end)) return;
+      // Only a row the window took out: one the list no longer holds (a comment box closed, a filter, a card dropped in
+      // another column) is gone for good. Asked first of the keys last worked out, which reads nothing reactive.
+      if (this.#workedOut !== null && !this.#workedOut.includes(key)) return;
+      const at = this.#keys.indexOf(key);
+      if (at < 0 || (at >= this.start && at < this.end)) return;
       if (!list.hasAttribute("tabindex")) list.tabIndex = -1;
       list.dataset["heldFocus"] = "";
       this.#holding = focused;

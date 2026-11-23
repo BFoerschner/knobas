@@ -352,10 +352,15 @@ async fn a_site_fills_its_sources_own_credential_until_that_is_turned_off() {
         secrets: &secrets,
         registry: &registry,
     };
-    let settings = knobas_app::site::settings_and_rules(&pool, None, Some(reads()))
+    let sites = sites();
+    let settings = knobas_app::site::settings_and_rules(&pool, Some(&sites), Some(reads()))
         .await
         .expect("settings");
     assert_eq!(own(settings), Some(("mara.lindqvist".to_owned(), true)));
+    assert!(
+        sites.sign_in_rule("vault").is_some_and(|rule| rule.saved),
+        "the source's own credential, on, is a saved sign-in to the site"
+    );
 
     knobas_app::site::set_sign_in_off(&pool, "vault", true)
         .await
@@ -367,10 +372,14 @@ async fn a_site_fills_its_sources_own_credential_until_that_is_turned_off() {
             .is_none(),
         "turned off, nothing is filled"
     );
-    let settings = knobas_app::site::settings_and_rules(&pool, None, Some(reads()))
+    let settings = knobas_app::site::settings_and_rules(&pool, Some(&sites), Some(reads()))
         .await
         .expect("settings");
     assert_eq!(own(settings), Some(("mara.lindqvist".to_owned(), false)));
+    assert!(
+        sites.sign_in_rule("vault").is_some_and(|rule| !rule.saved),
+        "turned off, the site has no sign-in saved"
+    );
     knobas_app::site::set_sign_in_off(&pool, "vault", false)
         .await
         .expect("turn on");
@@ -381,4 +390,61 @@ async fn a_site_fills_its_sources_own_credential_until_that_is_turned_off() {
             .is_some(),
         "turned on again, the credential is filled"
     );
+}
+
+/// Before the adapters' descriptors are read, a site's role is unknown and it is confined; once they are, a source
+/// that is no password manager is not. Each site's rules name every other site that opens inside, and not itself
+/// (the ux30 end gate's mutants: the confinement's `||` turned `&&`, and the others' filter turned around, went
+/// unseen).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_site_is_confined_until_its_role_is_read_and_its_rules_name_the_others() {
+    let pool = knobas_db::test_util::scratch_database("site-confined-others")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    crate::support::source_config(&pool, "jira", "jira", "Jira", &json!({})).await;
+    crate::support::source_config(&pool, "wiki", "confluence", "Wiki", &json!({})).await;
+    for source in ["jira", "wiki"] {
+        knobas_app::site::set_open_inside(&pool, source, true)
+            .await
+            .expect("open inside");
+    }
+    let sites = sites();
+    let settings = knobas_app::site::settings_and_rules(&pool, Some(&sites), None)
+        .await
+        .expect("settings");
+    assert!(
+        settings.iter().all(|setting| setting.confined),
+        "unknown roles are confined"
+    );
+    for (source, other) in [("jira", "wiki"), ("wiki", "jira")] {
+        let rules = sites.rules(source).expect("its rules");
+        assert!(rules.confined, "{source}");
+        assert_eq!(
+            rules
+                .others
+                .iter()
+                .map(|o| o.source.as_str())
+                .collect::<Vec<_>>(),
+            [other],
+            "{source}'s others"
+        );
+    }
+
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    let registry = knobas_app::sources::Registry::default();
+    let reads = knobas_app::site::SignInReads {
+        secrets: &secrets,
+        registry: &registry,
+    };
+    let settings = knobas_app::site::settings_and_rules(&pool, Some(&sites), Some(reads))
+        .await
+        .expect("settings");
+    assert!(
+        settings.iter().all(|setting| !setting.confined),
+        "no password manager, read: not confined"
+    );
+    assert!(!sites.rules("wiki").expect("its rules").confined);
 }

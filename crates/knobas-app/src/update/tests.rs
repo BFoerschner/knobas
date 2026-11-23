@@ -509,3 +509,146 @@ async fn at_exit_starts_the_handed_installer_once() {
         1
     );
 }
+
+/// What the log file would hold: the lines a test's own subscriber wrote.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+    type Writer = Self;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+impl Captured {
+    /// Capture this thread's info lines, and those of the tasks it spawns, until the guard drops.
+    fn start() -> (Self, tracing::subscriber::DefaultGuard) {
+        let captured = Self::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .finish();
+        (captured, tracing::subscriber::set_default(subscriber))
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// A rig whose manifest offers `body` from a local server, at an address that carries a token.
+async fn served(body: &[u8]) -> (wiremock::MockServer, Rig) {
+    use wiremock::matchers::{method, path};
+    let server = wiremock::MockServer::builder().start().await;
+    wiremock::Mock::given(method("GET"))
+        .and(path(format!("/releases/download/v3.2.9-ux28/{FILE}")))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_bytes(body.to_vec()))
+        .mount(&server)
+        .await;
+    let rig = Rig::new();
+    let text = manifest(102).replace(
+        &format!("https://github.com/BFoerschner/knobas/releases/download/v3.2.9-ux28/{FILE}"),
+        &format!(
+            "{}/releases/download/v3.2.9-ux28/{FILE}?token=the-secret-in-the-address",
+            server.uri()
+        ),
+    );
+    rig.fetch
+        .answers
+        .lock()
+        .unwrap()
+        .insert(LATEST.to_owned(), text);
+    (server, rig)
+}
+
+/// The ux30 boot check: the updater wrote no line for its download or its signature check. Now
+/// the download's start and end (size, time), the signature's result (on landing and again
+/// before the install) and the hand-off to the quit are each a line, and no address is.
+#[tokio::test]
+async fn the_download_its_signature_and_the_hand_off_are_logged_without_the_address() {
+    let (_server, rig) = served(BODY).await;
+    let updater = rig.updater("3.2.9-ux27", nsis());
+    let (captured, _guard) = Captured::start();
+    updater.check().await.unwrap();
+    updater.download().unwrap();
+    until("the download is ready", || {
+        updater.state().phase == Phase::Ready
+    })
+    .await;
+    updater.install().unwrap();
+    until("the quit", || rig.host.did().len() == 2).await;
+
+    let log = captured.text();
+    let line = |what: &str| {
+        log.lines()
+            .find(|line| line.contains(what))
+            .unwrap_or_else(|| panic!("no line says {what:?} in:\n{log}"))
+            .to_owned()
+    };
+    let start = line("the update's download starts");
+    assert!(start.contains("version=3.2.9-ux28"), "{start}");
+    assert!(start.contains(&format!("file={FILE}")), "{start}");
+    let end = line("the update's download ended");
+    assert!(
+        end.contains(&format!("bytes=Some({})", BODY.len())),
+        "{end}"
+    );
+    assert!(end.contains("ms="), "{end}");
+    line("the update's signature checks out against a trusted key");
+    line("the update's signature checks out again before the install");
+    let hand_off = line("the update is handed to the quit");
+    assert!(hand_off.contains("to=3.2.9-ux28"), "{hand_off}");
+    assert!(hand_off.contains("how=Exit"), "{hand_off}");
+    assert!(!log.contains("the-secret-in-the-address"), "{log}");
+    assert!(!log.contains("http"), "no address in the log:\n{log}");
+}
+
+/// A download whose bytes the signature does not cover says so in the log.
+#[tokio::test]
+async fn a_download_whose_signature_does_not_check_out_is_logged() {
+    let mut forged = BODY.to_vec();
+    forged[0] ^= 0xff;
+    let (_server, rig) = served(&forged).await;
+    let updater = rig.updater("3.2.9-ux27", nsis());
+    let (captured, _guard) = Captured::start();
+    updater.check().await.unwrap();
+    updater.download().unwrap();
+    until("the download fails", || {
+        matches!(updater.state().phase, Phase::Failed { .. })
+    })
+    .await;
+    let log = captured.text();
+    assert!(
+        log.lines().any(|line| line.contains("WARN")
+            && line.contains("the update's signature does not check out")),
+        "{log}"
+    );
+    assert!(!log.contains("checks out against a trusted key"), "{log}");
+}
+
+#[test]
+fn an_address_in_a_transfer_error_keeps_only_its_host() {
+    assert_eq!(
+        without_urls(
+            "error sending request for url (https://objects.example.com/a/b?X-Amz-Signature=abc)"
+        ),
+        "error sending request for url (https://objects.example.com/…"
+    );
+    assert_eq!(
+        without_urls("http://user:pw@127.0.0.1:9/x?token=t refused"),
+        "http://127.0.0.1:9/… refused"
+    );
+    assert_eq!(without_urls("timed out"), "timed out");
+}

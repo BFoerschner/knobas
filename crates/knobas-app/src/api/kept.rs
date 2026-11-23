@@ -151,6 +151,20 @@ mod tests {
         assert_eq!(kept.size().1, LINES * 10);
     }
 
+    /// The bound is 64 MiB: two answers of 20 MiB are both kept, a third of
+    /// 30 MiB takes the oldest body (the ux30 end gate's mutants: a bound of
+    /// about 1 MiB passed the test below, which scales with it).
+    #[test]
+    fn answers_up_to_64_mib_in_all_are_kept() {
+        let mut kept = Kept::default();
+        kept.keep(sent(0, "a.yaml", 20 << 20));
+        kept.keep(sent(1, "a.yaml", 20 << 20));
+        assert!(kept.body(0).is_some() && kept.body(1).is_some());
+        kept.keep(sent(2, "a.yaml", 30 << 20));
+        assert!(kept.body(0).is_none(), "70 MiB is past the bound");
+        assert!(kept.body(1).is_some() && kept.body(2).is_some());
+    }
+
     #[test]
     fn bodies_past_the_bound_drop_oldest_first_and_keep_their_lines() {
         let mut kept = Kept::default();

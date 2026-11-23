@@ -23,8 +23,10 @@
 //! One request is `POST /invoke` with `{"cmd": "...", "args": {...}}`, and
 //! the answer `{"ok": value}` or `{"err": value}`, the rejection as the
 //! webview would see it. `POST /quit` stops it as the app's quit does: the
-//! scheduler, then the database. Killed instead, it leaves the profile's
-//! PostgreSQL running (`pg_ctl stop -D <profile>/db/data` stops that).
+//! scheduler, then the database, and so does a `SIGTERM`, `SIGINT` or `SIGHUP`
+//! (`knobas_app::stop_signals`). Killed with `SIGKILL`, it leaves the
+//! profile's PostgreSQL running (`pg_ctl stop -D <profile>/db/data` stops
+//! that).
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
@@ -70,6 +72,13 @@ fn main() {
             Err("headless: no notifications".to_owned())
         });
     knobas_app::manage_app_state(&handle, profile.clone(), quiet);
+    let quitting = handle.clone();
+    knobas_app::stop_signals::listen(move |signal| {
+        eprintln!("headless_ipc: {}, stopping", signal.name());
+        knobas_app::shutdown(&quitting);
+        std::process::exit(0);
+    })
+    .expect("the stop-signal handlers");
     tauri::async_runtime::block_on(knobas_app::bring_up(
         &handle,
         &profile,

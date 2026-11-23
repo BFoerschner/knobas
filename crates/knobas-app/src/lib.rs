@@ -67,6 +67,7 @@ mod slug;
 pub mod sources;
 pub mod standup;
 pub mod start_work;
+pub mod stop_signals;
 pub mod suggestion_pass;
 pub mod ticket_views;
 pub mod time;
@@ -1702,11 +1703,13 @@ fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState)
 /// Best-effort by design: the process is on its way out, and failing loudly
 /// here would only replace a clean exit with a panic in an exit handler.
 ///
-/// This runs only on an exit knobas is told about. A signal -- Ctrl-C under
-/// `just dev`, a `kill`, a crash -- delivers no `RunEvent` at all, so the
-/// server outlives the process. It is *not* cleaned up on the next start
-/// either: what happens is that the next start finds it alive and adopts it
-/// (see `knobas_db::EmbeddedDb::start`), reusing it as a warm start.
+/// This runs only on an exit knobas is told about. A `SIGTERM`, `SIGINT` or
+/// `SIGHUP` is told about since the ux30 end gate: `stop_signals` turns it
+/// into the event loop's exit. A `SIGKILL`, a crash or a second signal during
+/// the quit still delivers no `RunEvent` at all, so the server outlives the
+/// process. It is *not* cleaned up on the next start either: what happens is
+/// that the next start finds it alive and adopts it (see
+/// `knobas_db::EmbeddedDb::start`), reusing it as a warm start.
 ///
 /// **Adoption is no longer a one-way door.** M0's adopted handle owned nothing,
 /// so no clean quit ever stopped that server and every later run adopted it in
@@ -1758,6 +1761,12 @@ fn start_app(app: &tauri::App, demo: bool, log_sink: &logging::Sink) -> tauri::R
     // instead of Tauri's bare "state not managed".
     let handle = app.handle().clone();
     start_file_log(&handle, log_sink);
+    // A `SIGTERM`, `SIGINT` or `SIGHUP` is a quit (`stop_signals`): the
+    // event loop's exit, so the exit handler stops the database.
+    let quitting = handle.clone();
+    if let Err(error) = stop_signals::listen(move |_| quitting.exit(0)) {
+        tracing::warn!(%error, "no stop-signal handler: a signal leaves the database running");
+    }
     let profile = Profile::new(demo, &handle.path().app_data_dir()?);
     tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
     // The desktop notification sender (#339) over the real backend.

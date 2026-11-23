@@ -107,6 +107,8 @@ mod standup_ipc;
 mod start_work;
 mod state_colours_ipc;
 mod status_move;
+#[cfg(unix)]
+mod stop_signals;
 mod stored_trees;
 mod suggestion_pass;
 mod suggestions_ipc;

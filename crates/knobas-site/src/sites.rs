@@ -521,6 +521,13 @@ impl Sites {
         self.book().rules.get(source).cloned()
     }
 
+    /// Where `source`'s site asks for a sign-in and whether one is saved, as
+    /// last set ([`Self::set_sign_ins`]).
+    #[must_use]
+    pub fn sign_in_rule(&self, source: &str) -> Option<SignInRule> {
+        self.book().sign_ins.get(source).cloned()
+    }
+
     /// The paper of the current theme, for views made from now on.
     pub fn set_background(&self, rgba: (u8, u8, u8, u8)) {
         self.book().background = rgba;
