@@ -256,19 +256,10 @@ fn classify(error: reqwest::Error) -> Failure {
     if error.is_timeout() {
         return Failure::Timeout;
     }
-    if lower.contains("certificate")
-        || lower.contains("tls")
-        || lower.contains("handshake")
-        || lower.contains("unknownissuer")
-    {
+    if says_tls(&lower) {
         return Failure::Tls(words);
     }
-    if lower.contains("dns")
-        || lower.contains("lookup")
-        || lower.contains("resolve")
-        || lower.contains("name or service not known")
-        || lower.contains("nodename nor servname")
-    {
+    if says_resolve(&lower) {
         return Failure::Resolve(words);
     }
     if error.is_connect() {
@@ -278,4 +269,62 @@ fn classify(error: reqwest::Error) -> Failure {
         return Failure::Send(words);
     }
     Failure::Read(words)
+}
+
+/// The words, lower-cased, of a certificate or handshake failure.
+fn says_tls(lower: &str) -> bool {
+    lower.contains("certificate")
+        || lower.contains("tls")
+        || lower.contains("handshake")
+        || lower.contains("unknownissuer")
+}
+
+/// The words, lower-cased, of a name that did not resolve.
+fn says_resolve(lower: &str) -> bool {
+    lower.contains("dns")
+        || lower.contains("lookup")
+        || lower.contains("resolve")
+        || lower.contains("name or service not known")
+        || lower.contains("nodename nor servname")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{says_resolve, says_tls};
+
+    /// Each word alone names the stage (ux30 end gate, mutants): a failure
+    /// whose words hold only one of them is still told as that stage.
+    #[test]
+    fn each_tls_word_alone_names_the_tls_stage() {
+        for words in [
+            "invalid peer certificate",
+            "tls alert received",
+            "handshake failure",
+            "unknownissuer",
+        ] {
+            assert!(says_tls(words), "{words}");
+            assert!(!says_resolve(words), "{words}");
+        }
+    }
+
+    #[test]
+    fn each_resolve_word_alone_names_the_resolve_stage() {
+        for words in [
+            "dns error",
+            "failed to lookup address information",
+            "could not resolve host",
+            "name or service not known",
+            "nodename nor servname provided, or not known",
+        ] {
+            assert!(says_resolve(words), "{words}");
+            assert!(!says_tls(words), "{words}");
+        }
+    }
+
+    #[test]
+    fn a_refused_connection_names_neither() {
+        let words = "error sending request: client error (connect): tcp connect error: connection refused (os error 111)";
+        assert!(!says_tls(words));
+        assert!(!says_resolve(words));
+    }
 }

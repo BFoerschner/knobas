@@ -491,8 +491,7 @@ define_class!(
 /// milliseconds; its answer comes on the main thread. `None` takes every
 /// list off and lets loads through.
 pub fn confine(view: &WebView, confined: &crate::wry_host::Confined, rules: Option<&Confine>) {
-    let generation = confined.generation.get() + 1;
-    confined.generation.set(generation);
+    let generation = confined.next_generation();
     let manager = view.manager();
     peer_connections(view, rules.is_none());
     let Some(rules) = rules else {
@@ -515,13 +514,12 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined, rules: Opti
     };
     let web = objc2::rc::Weak::from_retained(&view.webview());
     let gate = Rc::downgrade(&confined.gate);
-    let current = Rc::clone(&confined.generation);
     let after = confined.clone();
     let origins = rules.origins().count();
     let started = std::time::Instant::now();
     let done = RcBlock::new(move |list: *mut WKContentRuleList, error: *mut NSError| {
         // A newer list is on its way, or the view is gone.
-        if current.get() != generation {
+        if !after.is_current(generation) {
             return;
         }
         let (Some(web), Some(gate)) = (web.load(), gate.upgrade()) else {

@@ -84,7 +84,7 @@ impl Confined {
         crate::mac::confine(view, self, rules.as_ref());
         #[cfg(windows)]
         {
-            if rules.is_some() && !self.registered.get() {
+            if self.registers(rules.is_some()) {
                 match crate::win::confine(view, self) {
                     Ok(()) => self.registered.set(true),
                     Err(error) => {
@@ -99,6 +99,39 @@ impl Confined {
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         let _ = (view, rules);
+    }
+
+    /// Take `confine` as the view's rules: false, and nothing to apply, when
+    /// they are its rules already.
+    fn take(&self, confine: Option<Confine>) -> bool {
+        if *self.rules.borrow() == confine {
+            return false;
+        }
+        *self.rules.borrow_mut() = confine;
+        true
+    }
+
+    /// Whether the request handler is still to be registered (Windows):
+    /// once, and only for a view with rules.
+    #[cfg(any(windows, test))]
+    fn registers(&self, has_rules: bool) -> bool {
+        has_rules && !self.registered.get()
+    }
+
+    /// The number of a rule list about to compile (macOS): any list asked
+    /// for before it is older.
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn next_generation(&self) -> u64 {
+        let generation = self.generation.get() + 1;
+        self.generation.set(generation);
+        generation
+    }
+
+    /// Whether the rule list numbered `generation` is still the newest one
+    /// asked for (macOS): an older one that lands late is dropped.
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn is_current(&self, generation: u64) -> bool {
+        self.generation.get() == generation
     }
 
     /// The refusal could not be put in place: nothing loads, and the site
@@ -290,11 +323,9 @@ impl SiteView for WryView {
     }
 
     fn confine(&self, confine: Option<Confine>) {
-        if *self.confined.rules.borrow() == confine {
-            return;
+        if self.confined.take(confine) {
+            self.confined.apply(&self.view);
         }
-        *self.confined.rules.borrow_mut() = confine;
-        self.confined.apply(&self.view);
     }
 
     fn set_bounds(&self, bounds: Rect) {
@@ -419,5 +450,93 @@ impl SiteView for WryView {
         // WebView2 asks "Leave site?" itself unless its own dialogs are off.
         #[cfg(windows)]
         crate::win::own_dialogs(&self.view, false);
+    }
+}
+
+/// What [`Confined`] decides without a web view (the ux30 end gate's
+/// mutants); what it hands a web view is witnessed in the real windows.
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::Confined;
+    use crate::confine::{Confine, Gate, NOT_CONFINED};
+    use crate::host::ViewEvent;
+    use crate::policy::Origin;
+    use crate::state::SiteFailure;
+
+    fn confined() -> (Confined, Rc<RefCell<Vec<ViewEvent>>>) {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let heard = Rc::clone(&events);
+        let confined = Confined {
+            rules: Rc::default(),
+            gate: Rc::new(Gate::opened()),
+            source: "vault".to_owned(),
+            event: Rc::new(move |event| heard.borrow_mut().push(event)),
+            generation: Rc::default(),
+            registered: Rc::default(),
+        };
+        (confined, events)
+    }
+
+    fn rule(own: &str) -> Confine {
+        Confine::new(Origin::parse(own).expect("origin"), Vec::new())
+    }
+
+    /// A refusal that is not in place shuts the gate and says so: the site
+    /// loads nothing (fail closed).
+    #[test]
+    fn a_refusal_not_in_place_shuts_the_gate_and_says_so() {
+        let (confined, events) = confined();
+        assert!(confined.gate.is_open());
+        confined.refused("the filter did not register");
+        assert!(confined.gate.is_shut());
+        assert_eq!(
+            *events.borrow(),
+            [ViewEvent::Failed(SiteFailure::Other(
+                NOT_CONFINED.to_owned()
+            ))]
+        );
+    }
+
+    /// New rules are taken and applied; the same rules again are not.
+    #[test]
+    fn new_rules_are_taken_and_the_same_rules_again_are_not() {
+        let (confined, _) = confined();
+        assert!(!confined.take(None), "no rules, as before");
+        assert!(confined.take(Some(rule("https://vault.example"))));
+        assert_eq!(
+            *confined.rules.borrow(),
+            Some(rule("https://vault.example"))
+        );
+        assert!(!confined.take(Some(rule("https://vault.example"))));
+        assert!(confined.take(Some(rule("https://other.example"))));
+        assert!(confined.take(None));
+        assert_eq!(*confined.rules.borrow(), None);
+    }
+
+    /// A rule list asked for after another makes the older one stale, in
+    /// every copy of the view's confinement.
+    #[test]
+    fn a_rule_list_asked_for_later_makes_the_earlier_one_stale() {
+        let (confined, _) = confined();
+        let copy = confined.clone();
+        let first = confined.next_generation();
+        assert!(copy.is_current(first));
+        let second = confined.next_generation();
+        assert_ne!(first, second);
+        assert!(!copy.is_current(first), "the earlier list is dropped");
+        assert!(copy.is_current(second));
+    }
+
+    /// The request handler is registered once, and only for a view with rules.
+    #[test]
+    fn the_request_handler_is_registered_once_and_only_with_rules() {
+        let (confined, _) = confined();
+        assert!(confined.registers(true));
+        assert!(!confined.registers(false));
+        confined.registered.set(true);
+        assert!(!confined.registers(true));
     }
 }

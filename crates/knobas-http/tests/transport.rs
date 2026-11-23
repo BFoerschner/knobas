@@ -1416,6 +1416,32 @@ fn a_json_body_and_its_content_type_both_reach_the_request() {
     );
 }
 
+/// A form body (Pleasant's OAuth2 token grant, ADR-0056): the pairs arrive
+/// percent-encoded under the form's content type. Without them the token
+/// request is a 400 that reads as a wrong password.
+#[test]
+fn a_form_body_and_its_content_type_both_reach_the_request() {
+    let client = HttpClient::new(config("https://vault.example".to_owned())).expect("client");
+    let request = client
+        .request(Method::POST, "/OAuth2/Token")
+        .form(&[("grant_type", "password"), ("username", "mara & co")])
+        .build()
+        .expect("a form body builds");
+
+    assert_eq!(
+        request
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/x-www-form-urlencoded"),
+    );
+    let body = request
+        .body()
+        .and_then(reqwest::Body::as_bytes)
+        .expect("a buffered body");
+    assert_eq!(body, b"grant_type=password&username=mara+%26+co");
+}
+
 /// The body is buffered rather than streamed, which is what lets `send` retry
 /// it: `try_clone` answers `None` for a streaming body, and a write that
 /// silently got one attempt where every read gets three would fail on the first

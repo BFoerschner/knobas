@@ -19,6 +19,12 @@ use sha2::{Digest as _, Sha256};
 
 /// How long a folder nobody opened is kept.
 pub const KEEP_DAYS: u64 = 30;
+
+/// [`KEEP_DAYS`] as the age [`sweep`] takes.
+#[must_use]
+pub fn keep() -> Duration {
+    Duration::from_secs(KEEP_DAYS * 24 * 3600)
+}
 /// The most files and bytes knobas writes for one spec.
 pub const MOST_FILES: usize = 20_000;
 pub const MOST_BYTES: usize = 64 * 1024 * 1024;
@@ -218,7 +224,7 @@ pub fn clear(root: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{MARKER, folder_for, root, sweep, write};
+    use super::{MARKER, folder_for, keep, root, sweep, write};
     use std::time::Duration;
 
     fn files(text: &str) -> Vec<(String, Vec<u8>)> {
@@ -297,15 +303,22 @@ mod tests {
         let young = r.join("young-00000000");
         write(&old, &files("o")).unwrap();
         write(&young, &files("y")).unwrap();
-        let long_ago = std::time::SystemTime::now() - Duration::from_secs(31 * 24 * 3600);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(old.join(MARKER))
-            .unwrap()
-            .set_modified(long_ago)
-            .unwrap();
+        let days_ago =
+            |days: u64| std::time::SystemTime::now() - Duration::from_secs(days * 24 * 3600);
+        let opened = |folder: &std::path::Path, at| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(folder.join(MARKER))
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        };
+        // Past the 30 days: gone. A day short of them: kept.
+        opened(&old, days_ago(31));
+        opened(&young, days_ago(29));
         std::fs::create_dir_all(r.join(".tmp-1-half")).unwrap();
-        assert_eq!(sweep(&r, Duration::from_secs(30 * 24 * 3600)), 2);
+        assert_eq!(keep(), Duration::from_secs(30 * 24 * 3600));
+        assert_eq!(sweep(&r, keep()), 2);
         assert!(!old.exists() && young.exists());
     }
 }

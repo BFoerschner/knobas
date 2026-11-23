@@ -132,44 +132,6 @@ fn key_of(virtual_key: u32) -> Key {
     }
 }
 
-/// The resource kind WebView2 names, for the log.
-fn kind_name(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
-    match context.0 {
-        1 => "document",
-        2 => "stylesheet",
-        3 => "image",
-        4 => "media",
-        5 => "font",
-        6 => "script",
-        7 => "xhr",
-        8 => "fetch",
-        9 => "text-track",
-        10 => "event-source",
-        11 => "websocket",
-        12 => "manifest",
-        13 => "signed-exchange",
-        14 => "ping",
-        15 => "csp-report",
-        _ => "other",
-    }
-}
-
-/// `scheme://host:port` of `url`, never its path or query (the vendor's
-/// news address carries the install id in its query).
-fn origin_text(url: &str) -> String {
-    url::Url::parse(url)
-        .ok()
-        .map(|url| {
-            format!(
-                "{}://{}:{}",
-                url.scheme(),
-                url.host_str().unwrap_or_default(),
-                url.port_or_known_default().unwrap_or_default()
-            )
-        })
-        .unwrap_or_else(|| "unparsed".to_owned())
-}
-
 /// The top-level address the view shows now.
 fn top_of(core: &ICoreWebView2) -> Option<String> {
     let mut source = PWSTR::null();
@@ -222,10 +184,7 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
                 request.Uri(&mut uri)?;
                 let uri = webview2_com::take_pwstr(uri);
                 let top = top_of(&webview);
-                let refused = rules
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|rule| !rule.may_request(&uri));
+                let refused = crate::glue::refuses(rules.borrow().as_ref(), &uri);
                 if !refused {
                     return Ok(());
                 }
@@ -238,8 +197,8 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
                 args.SetResponse(&response)?;
                 let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
                 let _ = args.ResourceContext(&mut context);
-                let kind = kind_name(context);
-                let origin = origin_text(&uri);
+                let kind = crate::glue::resource_kind(context.0);
+                let origin = crate::glue::origin_text(&uri);
                 let mut logged = logged.borrow_mut();
                 if logged.0 != top {
                     *logged = (top, std::collections::HashSet::new());
@@ -260,10 +219,7 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
                 let mut uri = PWSTR::null();
                 args.Uri(&mut uri)?;
                 let uri = webview2_com::take_pwstr(uri);
-                let refused = rules
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|rule| !rule.may_request(&uri));
+                let refused = crate::glue::refuses(rules.borrow().as_ref(), &uri);
                 if refused {
                     args.SetCancel(true)?;
                 }

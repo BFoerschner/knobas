@@ -4203,7 +4203,9 @@ mod tests {
     /// #1779: a postmaster killed outright (`kill -9`, a crash) leaves its
     /// `postmaster.pid` behind, still naming it. The watch reads that as
     /// gone because the process is, and a file naming a live postmaster as
-    /// running.
+    /// running. Unix only, as the liveness check is: off unix there is no
+    /// `ps`, and [`ServerWatch::is_gone`] goes by the lock file alone.
+    #[cfg(unix)]
     #[test]
     fn a_watch_sees_a_killed_postmaster_whose_lock_file_stayed() {
         let dir = tempfile::tempdir().unwrap();
@@ -4221,6 +4223,7 @@ mod tests {
         assert!(watch(alive).is_gone(), "a file naming another pid is gone");
     }
 
+    #[cfg(unix)]
     #[test]
     fn process_liveness_tells_a_running_process_from_a_reaped_one() {
         // Both directions, because a `process_alive` stuck at either answer

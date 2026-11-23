@@ -46,6 +46,54 @@ pub fn known_process(pid: u32) -> Option<u32> {
     (pid != 0).then_some(pid)
 }
 
+/// Whether a confined site's request or frame for `url` is refused: with a
+/// rule, what it does not let go; with none, nothing (ux30).
+#[must_use]
+pub fn refuses(rules: Option<&crate::confine::Confine>, url: &str) -> bool {
+    rules.is_some_and(|rule| !rule.may_request(url))
+}
+
+/// The resource kind WebView2 names by its number
+/// (`COREWEBVIEW2_WEB_RESOURCE_CONTEXT`), for the log.
+#[must_use]
+pub fn resource_kind(context: i32) -> &'static str {
+    match context {
+        1 => "document",
+        2 => "stylesheet",
+        3 => "image",
+        4 => "media",
+        5 => "font",
+        6 => "script",
+        7 => "xhr",
+        8 => "fetch",
+        9 => "text-track",
+        10 => "event-source",
+        11 => "websocket",
+        12 => "manifest",
+        13 => "signed-exchange",
+        14 => "ping",
+        15 => "csp-report",
+        _ => "other",
+    }
+}
+
+/// `scheme://host:port` of `url`, never its path or query (the vendor's
+/// news address carries the install id in its query), for the log.
+#[must_use]
+pub fn origin_text(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .map(|url| {
+            format!(
+                "{}://{}:{}",
+                url.scheme(),
+                url.host_str().unwrap_or_default(),
+                url.port_or_known_default().unwrap_or_default()
+            )
+        })
+        .unwrap_or_else(|| "unparsed".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +146,57 @@ mod tests {
         );
         assert_eq!(known_process(0), None);
         assert_eq!(known_process(4242), Some(4242));
+    }
+
+    /// A confined site refuses what its rule refuses; with no rule, nothing.
+    #[test]
+    fn a_rule_refuses_what_it_does_not_let_go_and_no_rule_refuses_nothing() {
+        let own = crate::policy::Origin::parse("https://vault.example").expect("origin");
+        let rule = crate::confine::Confine::new(own, Vec::new());
+        assert!(!refuses(Some(&rule), "https://vault.example/api"));
+        assert!(refuses(Some(&rule), "https://news.vendor.example/feed"));
+        assert!(!refuses(None, "https://news.vendor.example/feed"));
+    }
+
+    /// Every kind WebView2 numbers has its name in the log line.
+    #[test]
+    fn each_resource_kind_has_its_name() {
+        let names: Vec<&str> = (0..=16).map(resource_kind).collect();
+        assert_eq!(
+            names,
+            [
+                "other",
+                "document",
+                "stylesheet",
+                "image",
+                "media",
+                "font",
+                "script",
+                "xhr",
+                "fetch",
+                "text-track",
+                "event-source",
+                "websocket",
+                "manifest",
+                "signed-exchange",
+                "ping",
+                "csp-report",
+                "other",
+            ]
+        );
+    }
+
+    /// The log names an origin, never a path or a query.
+    #[test]
+    fn an_origin_is_its_scheme_host_and_port_and_nothing_else() {
+        assert_eq!(
+            origin_text("https://news.vendor.example/feed?install=1234#top"),
+            "https://news.vendor.example:443"
+        );
+        assert_eq!(
+            origin_text("http://10.0.0.5:8080/x"),
+            "http://10.0.0.5:8080"
+        );
+        assert_eq!(origin_text("not a url"), "unparsed");
     }
 }

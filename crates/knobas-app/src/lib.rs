@@ -1098,10 +1098,7 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
         // The API explorer's scratch folders a person has not opened for 30 days go, off the bring-up (ux31).
         let scratch = api::scratch::root(&profile.dir);
         tauri::async_runtime::spawn_blocking(move || {
-            let gone = api::scratch::sweep(
-                &scratch,
-                std::time::Duration::from_secs(api::scratch::KEEP_DAYS * 24 * 3600),
-            );
+            let gone = api::scratch::sweep(&scratch, api::scratch::keep());
             if gone > 0 {
                 tracing::info!(gone, "API client scratch folders swept");
             }
