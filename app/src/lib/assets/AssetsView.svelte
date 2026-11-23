@@ -81,6 +81,7 @@
   landed.
 -->
 <script lang="ts">
+  import TfXIcon from "../tf/TfXIcon.svelte";
   import TfSideEdge from "../tf/TfSideEdge.svelte";
   import { sideWidth } from "../tf/side-width.svelte";
   import { stateWord } from "../tf/state-word";
@@ -2087,7 +2088,7 @@
         {@attach filterKeys()}
       />
       {#if query !== ""}
-        <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}>✕</button>
+        <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}><TfXIcon /></button>
       {/if}
     </label>
     {/if}

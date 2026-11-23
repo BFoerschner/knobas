@@ -17,6 +17,7 @@
   of the page draws.
 -->
 <script lang="ts">
+  import TfXIcon from "./TfXIcon.svelte";
   import { tick, untrack } from "svelte";
 
   import { addFindBar, filterKeys } from "./filter-keys";
@@ -345,7 +346,7 @@
       <span class="tf-findn">{label}</span>
       <button type="button" disabled={count === 0} onclick={() => step(-1)} aria-label="Previous">↑</button>
       <button type="button" disabled={count === 0} onclick={() => step(1)} aria-label="Next">↓</button>
-      <button type="button" class="tf-findx" onclick={close} aria-label="Stop highlighting">✕</button>
+      <button type="button" class="tf-findx" onclick={close} aria-label="Stop highlighting"><TfXIcon /></button>
     </div>
   </div>
 {/if}

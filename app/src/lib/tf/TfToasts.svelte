@@ -8,6 +8,7 @@
   line that doesn't fit gives up its middle (`toastLine`), and its title is the whole line.
 -->
 <script lang="ts">
+  import TfXIcon from "./TfXIcon.svelte";
   import { dismiss, hold, release, toastLine, toasts, type ToastAction } from "../shell/toasts.svelte";
   import TfKeyed from "./TfKeyed.svelte";
   import { modals } from "./modals.svelte";
@@ -57,7 +58,7 @@
       {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action, index (index)}
         <button onclick={() => press(toast.id, action)}>{action.label}</button>
       {/each}
-      <button class="tf-x" aria-label="Dismiss" onclick={() => press(toast.id, null)}>✕</button>
+      <button class="tf-x" aria-label="Dismiss" onclick={() => press(toast.id, null)}><TfXIcon /></button>
     </div>
   {/each}
 </div>

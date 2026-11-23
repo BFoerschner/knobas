@@ -30,6 +30,7 @@
   the section's filter, which is the section's search.
 -->
 <script lang="ts">
+  import TfXIcon from "../TfXIcon.svelte";
   import type { Snippet } from "svelte";
 
   import { filterKeys } from "../filter-keys";
@@ -121,7 +122,7 @@
       aria-label={config.placeholder}
     />
     {#if filter.text !== ""}
-      <button type="button" class="tf-fclear" aria-label="Clear filter" onclick={clear}>✕</button>
+      <button type="button" class="tf-fclear" aria-label="Clear filter" onclick={clear}><TfXIcon /></button>
     {/if}
   </label>
   {/if}

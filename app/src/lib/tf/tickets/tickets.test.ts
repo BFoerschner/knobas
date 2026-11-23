@@ -416,3 +416,20 @@ test("the column width the floor counts by is the one tickets.css sets", () => {
   expect(css).toContain(".tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px;");
   expect(css).toMatch(/\.tf-tcard \{\s*display: block; width: 100%; text-align: left; background: var\(--sheet\); border: 1px solid var\(--rule\);\s*border-radius: 6px; padding: 8px 9px;/);
 });
+
+test("a column whose cards did not change keeps the array it was handed; the two a drop changes get new ones", async () => {
+  const { keepColumnArrays } = await import("./tickets");
+  const [a, b, c, d] = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  const todo = [a, b];
+  const doing = [c];
+  const done = [d];
+  const before = new Map([["todo", todo], ["doing", doing], ["done", done]]);
+  // `b` dropped from To Do onto Doing: To Do and Doing change, Done is the same cards in a new array.
+  const now = keepColumnArrays(before, new Map([["todo", [a]], ["doing", [b, c]], ["done", [d]]]));
+  expect(now.get("done")).toBe(done);
+  expect(now.get("todo")).not.toBe(todo);
+  expect(now.get("todo")).toEqual([a]);
+  expect(now.get("doing")).toEqual([b, c]);
+  // The same cards in another order are a change.
+  expect(keepColumnArrays(before, new Map([["todo", [b, a]]])).get("todo")).not.toBe(todo);
+});

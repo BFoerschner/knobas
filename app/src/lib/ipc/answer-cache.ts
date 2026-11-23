@@ -565,6 +565,9 @@ export function enableAnswerCache(): void {
   if (!saving) {
     saving = true;
     for (const event of ["wheel", "scroll", "pointerdown", "keydown", "touchstart"]) addEventListener(event, heard, { capture: true, passive: true });
+    // A pointer that moves with a button down is a drag (a card on the board, a splitter): input as much as a key is, so
+    // no read lands in it. A drag past a second set the warm off between two moves (the card-drag gate, ux30).
+    addEventListener("pointermove", heardDrag, { capture: true, passive: true });
     addEventListener("pagehide", saveRecent);
     setInterval(saveRecent, 60_000);
   }
@@ -625,6 +628,9 @@ let lastInput = 0;
 export const WARM_QUIET_MS = 1000;
 function heard(): void {
   lastInput = performance.now();
+}
+function heardDrag(event: PointerEvent): void {
+  if (event.buttons !== 0) lastInput = performance.now();
 }
 
 async function nextIdle(): Promise<void> {

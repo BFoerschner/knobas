@@ -83,6 +83,7 @@
 </script>
 
 <script lang="ts">
+  import TfXIcon from "../TfXIcon.svelte";
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth, sideWidths, clampWidth } from "../side-width.svelte";
   import TfStateChip from "../TfStateChip.svelte";
@@ -2040,7 +2041,7 @@
         <span class="tf-findn">{find.trim() === "" ? "" : marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
         <button type="button" disabled={marks === 0} onclick={() => jump(-1)} aria-label="Previous">↑</button>
         <button type="button" disabled={marks === 0} onclick={() => jump(1)} aria-label="Next">↓</button>
-        <button type="button" class="tf-findx" onclick={closeFind} aria-label="Stop highlighting">✕</button>
+        <button type="button" class="tf-findx" onclick={closeFind} aria-label="Stop highlighting"><TfXIcon /></button>
       </div>
     {/if}
     {#if home}

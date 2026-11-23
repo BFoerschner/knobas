@@ -7,8 +7,9 @@
  *   finger on the board scrolls it: `touch` starts no drag.
  * - **Pickup**: the pointer travels more than {@link TREMBLE} before the release. In one handler the pointer is captured
  *   on the wrap, the card's own box is emptied (`tf-held`, its room kept), a copy of it goes to the float host
- *   (`.tf-tghost`), the wrap takes `data-held`, every column `data-drop` (`yes`, `ask`, `no`; none on its own) from
- *   `drop.ts`, and the columns' boxes are read once. Reach is asked again (`pickup`); when it lands only `data-drop`
+ *   (`.tf-tghost`), the wrap takes `data-held` (which no style reads), every column `data-drop` (`yes`, `ask`, `no`;
+ *   none on its own) from `drop.ts`, and the columns' boxes are read once. The hand is a cover over the window
+ *   (`.tf-tcover`, the pointer's only), so no style of the board changes for it. Reach is asked again (`pickup`); when it lands only `data-drop`
  *   changes, never a box.
  * - **Move**: the copy follows by `transform`. The column under the pointer is found by arithmetic on the boxes read at
  *   pickup, never by `elementsFromPoint`; its cards' boxes are read when the pointer first enters it. On a column that
@@ -62,6 +63,11 @@ const STEP_MOST = 18;
 const STEP_LEAST = 2;
 /** How long a pointer rests on a card before it is asked about, in ms. */
 export const REST_MS = 120;
+/**
+ * How long past the frame after a drop a read the drag held back waits, in ms: the drop's own frames (the card in its
+ * column with its chip, then its focus) come first, and the read's answer lands after them.
+ */
+export const AFTER_DROP_MS = 200;
 
 interface Column {
   place: string;
@@ -82,6 +88,8 @@ interface Held {
   ghost: HTMLElement;
   line: HTMLElement;
   why: HTMLElement;
+  /** The pointer's hand over the window (`.tf-tcover`), `null` for the carry and once a status menu stands. */
+  cover: HTMLElement | null;
   columns: Column[];
   over: Column | null;
   /** The drawn card the landing line stands above, or `null` for the column's end. */
@@ -94,6 +102,11 @@ interface Held {
   y: number;
   /** A status menu stands: the copy waits, keys and pointer are the menu's. */
   choosing: boolean;
+  /** The board's scroller and its box, read with the columns' (at pickup and after a scroll), never on a move. */
+  scroller: HTMLElement;
+  scrollerBox: DOMRect;
+  /** What the line and the reason show now, so a move that changes neither writes nothing to them. */
+  drawn: { why: string | null; lineWidth: number | null; lineShown: boolean };
 }
 
 export interface CardDrag {
@@ -105,6 +118,12 @@ export interface CardDrag {
   holding(): boolean;
   /** Put back whatever is held: the page leaves, the layout changes. */
   putBack(): void;
+  /**
+   * Run `read` (the board read again: a move's echo, a run's end) now when no card is held; while one is, once it is
+   * dropped or put back, {@link AFTER_DROP_MS} past the frame after, once however often it was asked meanwhile. A board
+   * read under a held card draws its columns again under the copy, and its answer is a long task of its own.
+   */
+  afterDrag(read: () => void): void;
 }
 
 const statusesOf = (drop: Drop) => (drop.kind === "yes" || drop.kind === "ask" ? drop.statuses : []);
@@ -117,6 +136,33 @@ export function createCardDrag(host: CardDragHost): CardDrag {
   let rest: ReturnType<typeof setTimeout> | undefined;
   let scrolling: number | null = null;
   let remeasure: number | null = null;
+  /** The reads a held card holds back, and the wait before they run once it is let go. */
+  const heldBack = new Set<() => void>();
+  let releasing: { frame: number | null; timer: ReturnType<typeof setTimeout> | null } | null = null;
+
+  function releaseHeldBack() {
+    if (heldBack.size === 0 || releasing !== null) return;
+    const wait: { frame: number | null; timer: ReturnType<typeof setTimeout> | null } = { frame: null, timer: null };
+    releasing = wait;
+    wait.frame = requestAnimationFrame(() => {
+      wait.frame = null;
+      wait.timer = setTimeout(() => {
+        releasing = null;
+        // Picked up again meanwhile: they wait for that one's end.
+        if (held !== null) return;
+        const reads = [...heldBack];
+        heldBack.clear();
+        for (const read of reads) read();
+      }, AFTER_DROP_MS);
+    });
+  }
+
+  function dropHeldBack() {
+    heldBack.clear();
+    if (releasing?.frame != null) cancelAnimationFrame(releasing.frame);
+    if (releasing?.timer != null) clearTimeout(releasing.timer);
+    releasing = null;
+  }
 
   const floatHost = () => document.querySelector<HTMLElement>(".tf-floats") ?? document.body;
 
@@ -129,16 +175,22 @@ export function createCardDrag(host: CardDragHost): CardDrag {
       const column = { ...one.column, own: one.place === held.place, sameLane: one.lane === held.lane, lane: one.lane };
       one.column = column;
       one.drop = dropOn(held.card, column, reach, facts);
-      if (one.drop.kind === "own") delete one.node.dataset.drop;
-      else one.node.dataset.drop = one.drop.kind;
+      // Written only where it changes: the answer landing mid-drag mostly says what the window already held.
+      const kind = one.drop.kind === "own" ? undefined : one.drop.kind;
+      if (one.node.dataset.drop !== kind) {
+        if (kind === undefined) delete one.node.dataset.drop;
+        else one.node.dataset.drop = kind;
+      }
       const heads = one.node.querySelector<HTMLElement>(".tf-colsts");
-      if (heads !== null) heads.textContent = one.drop.kind === "yes" && one.drop.statuses.length > 1 ? either(one.drop.statuses) : "";
+      const words = one.drop.kind === "yes" && one.drop.statuses.length > 1 ? either(one.drop.statuses) : "";
+      if (heads !== null && heads.textContent !== words) heads.textContent = words;
     }
   }
 
   /** The columns' boxes, read once at pickup and again after a scroll (at most once a frame). */
   function measure() {
     if (held === null) return;
+    held.scrollerBox = held.scroller.getBoundingClientRect();
     for (const one of held.columns) {
       one.box = (one.node.querySelector(".tf-stack") ?? one.node).getBoundingClientRect();
       one.cards = null;
@@ -172,7 +224,16 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     const why = document.createElement("div");
     why.className = "tf-twhy";
     why.hidden = true;
-    floatHost().append(line, ghost, why);
+    const scroller = host.scroller();
+    // The hand over the whole window, under the copy, for the pointer: the board's own styles stay as they are. The wheel
+    // still scrolls the board under it.
+    let cover: HTMLElement | null = null;
+    if (!keys) {
+      cover = document.createElement("div");
+      cover.className = "tf-tcover";
+      cover.addEventListener("wheel", (event) => scroller.scrollBy(event.deltaX, event.deltaY), { passive: true });
+    }
+    floatHost().append(...(cover === null ? [] : [cover]), line, ghost, why);
     const columns = host.columns().map(
       (one): Column => ({
         ...one,
@@ -190,6 +251,7 @@ export function createCardDrag(host: CardDragHost): CardDrag {
       ghost,
       line,
       why,
+      cover,
       columns,
       over: null,
       before: null,
@@ -200,6 +262,9 @@ export function createCardDrag(host: CardDragHost): CardDrag {
       x: at?.x ?? box.left + 24,
       y: at?.y ?? box.top + 12,
       choosing: false,
+      scroller,
+      scrollerBox: scroller.getBoundingClientRect(),
+      drawn: { why: null, lineWidth: null, lineShown: false },
     };
     node.classList.add("tf-held");
     wrap.dataset.held = "";
@@ -243,16 +308,23 @@ export function createCardDrag(host: CardDragHost): CardDrag {
       if (held.over !== null) delete held.over.node.dataset.over;
       held.over = hit;
       if (hit !== null) hit.node.dataset.over = "";
+      held.cover?.classList.toggle("tf-no", hit?.drop.kind === "no");
     }
     const drop = hit?.drop ?? null;
     const refused = drop?.kind === "no" ? drop.why : null;
-    held.why.hidden = refused === null;
-    if (refused !== null) {
-      held.why.textContent = refused;
-      held.why.style.transform = `translate3d(${held.x - held.grab.x}px, ${held.y - held.grab.y + held.height + 8}px, 0)`;
+    const { drawn } = held;
+    if (refused !== drawn.why) {
+      held.why.hidden = refused === null;
+      if (refused !== null) held.why.textContent = refused;
+      drawn.why = refused;
     }
+    if (refused !== null) held.why.style.transform = `translate3d(${held.x - held.grab.x}px, ${held.y - held.grab.y + held.height + 8}px, 0)`;
     const lands = hit !== null && drop !== null && takes(drop);
-    held.line.hidden = !lands || held.keys;
+    const lineShown = lands && !held.keys;
+    if (lineShown !== drawn.lineShown) {
+      held.line.hidden = !lineShown;
+      drawn.lineShown = lineShown;
+    }
     if (!lands || hit === null) {
       held.before = null;
       return;
@@ -263,14 +335,18 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     held.before = cards[at]?.id ?? null;
     if (held.keys) return;
     const top = at === 0 ? hit.box.top + 1 : at === cards.length ? cards.at(-1)!.box.bottom + 2 : (cards[at - 1]!.box.bottom + cards[at]!.box.top) / 2 - 1;
-    held.line.style.width = `${Math.max(0, hit.box.width - 10)}px`;
+    const width = Math.max(0, hit.box.width - 10);
+    if (width !== drawn.lineWidth) {
+      held.line.style.width = `${width}px`;
+      drawn.lineWidth = width;
+    }
     held.line.style.transform = `translate3d(${hit.box.left + 5}px, ${top}px, 0)`;
   }
 
   /** Within {@link EDGE} of the scroller's edge, scroll toward it while the pointer stays there. */
   function edgeScroll(x: number, y: number) {
-    const scroller = host.scroller();
-    const box = scroller.getBoundingClientRect();
+    if (held === null) return;
+    const { scroller, scrollerBox: box } = held;
     const depth = (near: number) => (near >= EDGE ? 0 : STEP_LEAST + ((EDGE - Math.max(0, near)) / EDGE) * (STEP_MOST - STEP_LEAST));
     const dx = x < box.left + EDGE ? -depth(x - box.left) : x > box.right - EDGE ? depth(box.right - x) : 0;
     const dy = y < box.top + EDGE ? -depth(y - box.top) : y > box.bottom - EDGE ? depth(box.bottom - y) : 0;
@@ -323,7 +399,9 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     was.ghost.remove();
     was.line.remove();
     was.why.remove();
+    was.cover?.remove();
     if (was.pointer !== null && wrap?.hasPointerCapture?.(was.pointer)) wrap.releasePointerCapture(was.pointer);
+    releaseHeldBack();
     return was;
   }
 
@@ -363,6 +441,10 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     const top = at <= 0 ? hit.box.top + 6 : cards[at - 1]!.box.bottom + 6;
     was.line.hidden = true;
     was.why.hidden = true;
+    // The menu's own outside press closes it: the hand goes with the pointer's part.
+    was.cover?.remove();
+    was.cover = null;
+    was.drawn = { why: null, lineWidth: was.drawn.lineWidth, lineShown: false };
     was.ghost.style.transform = `translate3d(${hit.box.left + 5}px, ${top}px, 0)`;
     host.say(`${hit.column.name} holds ${either(statuses)}. Pick one.`);
     void host.choose(was.card, statuses, { x: hit.box.left + 29, y: top + was.height + 6 }).then((status) => {
@@ -519,6 +601,8 @@ export function createCardDrag(host: CardDragHost): CardDrag {
       window.addEventListener("pointercancel", oncancel, true);
       return () => {
         letGo();
+        // The page went: what it held back is no read of anyone's now.
+        dropHeldBack();
         clearTimeout(rest);
         press = null;
         node.removeEventListener("pointerdown", ondown);
@@ -546,6 +630,10 @@ export function createCardDrag(host: CardDragHost): CardDrag {
     holding: () => held !== null,
     putBack: () => {
       if (held !== null) putBackSaying(null);
+    },
+    afterDrag(read) {
+      if (held === null && releasing === null) return read();
+      heldBack.add(read);
     },
   };
 }

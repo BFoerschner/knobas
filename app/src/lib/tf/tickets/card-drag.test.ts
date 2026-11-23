@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { MiniBoardCard } from "../../ipc/entity";
 import { sourceRoles } from "../roles.svelte";
-import { createCardDrag, type CardDrag, type CardDragHost } from "./card-drag.svelte";
+import { AFTER_DROP_MS, createCardDrag, type CardDrag, type CardDragHost } from "./card-drag.svelte";
 import { askReach, forgetReach } from "./reach.svelte";
 
 const card = (key: string, status: string): MiniBoardCard => ({
@@ -316,4 +316,116 @@ test("the release's click reaches no other window listener, so the status menu a
   expect(outside).not.toHaveBeenCalled();
   chosen!.answer(null);
   await flush();
+});
+
+test("a move reads no box and changes nothing on the board: only the copy and the line follow, by transform", async () => {
+  lift();
+  // Into Blocked (a one-status column, no cards): the first entry reads its boxes and lights it.
+  pointer("pointermove", 630 + 100, 120);
+  const reads = vi.fn();
+  const watched = [wrap, ...wrap.querySelectorAll<HTMLElement>("*")];
+  const kept = watched.map((one) => {
+    const own = Object.getOwnPropertyDescriptor(one, "getBoundingClientRect");
+    const read = one.getBoundingClientRect.bind(one);
+    one.getBoundingClientRect = () => (reads(one.className), read());
+    return () => (own ? Object.defineProperty(one, "getBoundingClientRect", own) : delete (one as { getBoundingClientRect?: unknown }).getBoundingClientRect);
+  });
+  const board: MutationRecord[] = [];
+  const onBoard = new MutationObserver((records) => board.push(...records));
+  onBoard.observe(wrap, { subtree: true, attributes: true, childList: true, characterData: true });
+  const floating: MutationRecord[] = [];
+  const inHost = new MutationObserver((records) => floating.push(...records));
+  inHost.observe(floats, { subtree: true, attributes: true, childList: true, characterData: true });
+  try {
+    for (let y = 130; y <= 330; y += 20) pointer("pointermove", 630 + 100 + (y % 3), y);
+    await flush();
+    expect(reads).not.toHaveBeenCalled();
+    expect(board).toEqual([]);
+    // In the float host only `style` changes (the copy's and the line's transforms), and nothing is added or hidden.
+    expect(floating.map((one) => `${one.type} ${one.attributeName ?? ""}`).filter((one) => one !== "attributes style")).toEqual([]);
+  } finally {
+    onBoard.disconnect();
+    inHost.disconnect();
+    kept.forEach((undo) => undo());
+  }
+  key("Escape");
+});
+
+test("a board read asked while a card is held waits for the drop's frames and runs once; with none held it runs at once", async () => {
+  const read = vi.fn();
+  drag.afterDrag(read);
+  expect(read).toHaveBeenCalledOnce();
+  read.mockClear();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    lift();
+    // A move's echo and a run's end, twice over, while the card is held: nothing is read under it.
+    drag.afterDrag(read);
+    drag.afterDrag(read);
+    pointer("pointermove", 630 + 100, 120);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).not.toHaveBeenCalled();
+    pointer("pointerup", 630 + 100, 120);
+    expect(dropped).toHaveLength(1);
+    // The drop draws first: nothing in its frame, nor in the wait after it.
+    await vi.advanceTimersByTimeAsync(16);
+    await vi.advanceTimersByTimeAsync(AFTER_DROP_MS - 20);
+    expect(read).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(read).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a read held back is dropped with the page", async () => {
+  const read = vi.fn();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    lift();
+    drag.afterDrag(read);
+    stop?.();
+    stop = undefined;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the pointer's hand is a cover over the window, not a style of the board: the carry has none, a drop takes it away", async () => {
+  lift();
+  const cover = floats.querySelector<HTMLElement>(".tf-tcover");
+  expect(cover).not.toBeNull();
+  // Over a column that will not take it, the hand says so.
+  pointer("pointermove", 420 + 100, 200);
+  expect(cover!.classList.contains("tf-no")).toBe(true);
+  pointer("pointermove", 630 + 100, 120);
+  expect(cover!.classList.contains("tf-no")).toBe(false);
+  // The wheel over it still scrolls the board.
+  const cols = wrap.querySelector<HTMLElement>(".tf-cols")!;
+  cols.scrollBy = vi.fn();
+  cover!.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 40 }));
+  expect(cols.scrollBy).toHaveBeenCalledWith(0, 40);
+  pointer("pointerup", 630 + 100, 120);
+  expect(floats.querySelector(".tf-tcover")).toBeNull();
+  drag.carry("jira:PAY-1");
+  expect(floats.querySelector(".tf-tcover")).toBeNull();
+  key("Escape");
+});
+
+test("a status menu at the drop point takes the hand away, so a press outside it is the menu's", () => {
+  lift();
+  pointer("pointermove", 310, 200);
+  pointer("pointerup", 310, 200);
+  expect(chosen?.statuses).toEqual(["In Progress", "In Review"]);
+  expect(floats.querySelector(".tf-tcover")).toBeNull();
+  chosen!.answer(null);
+});
+
+test("no rule of the board's styles hangs on its data-held: a pickup and a drop restyle no card", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const css = readFileSync(join(__dirname, "../css/tickets.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(css.match(/[^\n{}]*\[data-held\][^\n{}]*\{/g) ?? []).toEqual([]);
 });

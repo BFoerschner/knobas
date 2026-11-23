@@ -239,12 +239,15 @@
 /* While a card is held: a column it can reach keeps its fill and takes a hairline; one it cannot loses its fill and
    steps back, as a disabled control does; the one under the pointer takes the selection's outline. No tone: "you may
    drop here" is not a state of a ticket. */
-.tf-board-wrap[data-held] { cursor: grabbing; user-select: none; }
-.tf-board-wrap[data-held] .tf-tcard { cursor: grabbing; }
+/* The hand, over the whole window while a card is carried by the pointer: a cover in the float host, under the copy, so
+   the board's own styles never change for it. Keyed on the board's `data-held`, a cursor and `user-select` restyled
+   every element of the board at the pickup and again at the drop: 2,530 of them, 31 ms of each at CPU 4x on a board of
+   221 cards (the ux30 card-drag gate). It takes the wheel on to the board (`card-drag.svelte.ts`). */
+.tf-tcover { position: fixed; inset: 0; z-index: 32; cursor: grabbing; user-select: none; }
+.tf-tcover.tf-no { cursor: not-allowed; }
 .tf-col[data-drop="yes"] .tf-stack { outline: 1px solid var(--ink-2); outline-offset: -1px; }
 .tf-col[data-drop="no"] .tf-stack { background: none; outline: 1px dashed var(--rule); outline-offset: -1px; }
 .tf-col[data-drop="no"] .tf-cards, .tf-col[data-drop="no"] h3 { opacity: 0.4; }
-.tf-col[data-drop="no"][data-over] { cursor: not-allowed; }
 .tf-col:is([data-drop="yes"], [data-drop="ask"])[data-over] .tf-stack { outline: 2px solid var(--ink); outline-offset: -2px; }
 /* A column of several statuses says them while a card is held, at its head's right end: room the line always had. */
 .tf-col h3 .tf-colsts { margin-left: auto; min-width: 0; flex: 1 1 0; text-align: right; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

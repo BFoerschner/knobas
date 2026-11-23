@@ -131,6 +131,15 @@ function drop(entity: string, gone: (echo: Echo) => boolean): void {
   else echoes[entity] = kept;
 }
 
+/**
+ * The entities with an echo now, of any kind: one read, so a board laid over its echoes asks only these after their
+ * echoes, not each of its cards (221 reads of the echoes on a laned board at every drop, the ux30 card-drag gate).
+ * Reactive: it moves when an entity gains its first echo or loses its last.
+ */
+export function echoedEntities(): Set<string> {
+  return new Set(Object.keys(echoes));
+}
+
 /** The echoes on `entity`, of `kind` when given, oldest first. */
 export function echoesOn(entity: string, kind?: string): Echo[] {
   const all = echoes[entity] ?? [];

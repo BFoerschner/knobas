@@ -350,9 +350,11 @@ test("Ready to merge? reads prototype-6's three lines, approvals, checks and con
   const lines = [...target.querySelectorAll(".tf-prck")];
   expect(lines.map((line) => line.textContent?.replace(/\s+/g, " ").trim())).toEqual([
     "● Approvals: 1 of 2",
-    "✕ Checks: Payout_IntegrationTests #1187 failed",
+    // The failed check's ✕ is drawn (`TfXIcon`): Inter has no U+2715.
+    "Checks: Payout_IntegrationTests #1187 failed",
     "✓ No conflicts with main",
   ]);
+  expect(lines[1]!.querySelector(".tf-prmk svg.tf-xicon")).not.toBeNull();
   expect(lines.map((line) => line.className)).toEqual(["tf-prck tf-warn", "tf-prck tf-err", "tf-prck tf-ok"]);
   expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);

@@ -22,6 +22,7 @@
   dialog open and says why.
 -->
 <script lang="ts">
+  import TfXIcon from "../TfXIcon.svelte";
   import { clockLabel } from "../../time/format";
   import { untrack } from "svelte";
 
@@ -466,7 +467,7 @@
                   type="button"
                   class="tf-vw-x"
                   aria-label="Remove this condition"
-                  onclick={() => (conditions = conditions.filter((_, i) => i !== at))}>✕</button
+                  onclick={() => (conditions = conditions.filter((_, i) => i !== at))}><TfXIcon /></button
                 >
                 <!-- A new field starts a new search. -->
                 {#key condition.field}
@@ -574,7 +575,7 @@
                       ><button
                         type="button"
                         aria-label="Remove this column"
-                        onclick={() => (columns = (columns ?? []).filter((_, i) => i !== at))}>✕</button
+                        onclick={() => (columns = (columns ?? []).filter((_, i) => i !== at))}><TfXIcon /></button
                       >
                     </span>
                     {/if}

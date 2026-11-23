@@ -272,6 +272,28 @@ describe("the answer cache", () => {
     expect([asked("docs_outline"), asked("monitor_roster")]).toEqual([2, 2]);
   });
 
+  it("warms nothing while a pointer moves with a button down: a drag is input, so no read lands in it", async () => {
+    await ask("docs_outline");
+    cacheEvents.moved();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "requestIdleCallback", "cancelIdleCallback"] });
+    try {
+      const warming = warm();
+      // A card held for three seconds, the pointer moving every 100 ms: no read in it.
+      for (let at = 0; at < 3000; at += 100) {
+        window.dispatchEvent(new PointerEvent("pointermove", { buttons: 1, pointerType: "mouse" }));
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      expect(asked("docs_outline")).toBe(1);
+      // A pointer that only passes over the window (no button down) holds nothing: a second after the drag, it warms.
+      window.dispatchEvent(new PointerEvent("pointermove", { buttons: 0, pointerType: "mouse" }));
+      await vi.advanceTimersByTimeAsync(2200);
+      await warming;
+      expect(asked("docs_outline")).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("passes everything through once off", async () => {
     disableAnswerCache();
     await ask("docs_outline");

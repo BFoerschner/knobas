@@ -78,6 +78,7 @@
 </script>
 
 <script lang="ts">
+  import TfXIcon from "../TfXIcon.svelte";
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import TfStateChip from "../TfStateChip.svelte";
@@ -1103,7 +1104,7 @@
               {/if}
               {#each standing.lines as line, n (n)}
                 <div class="tf-prck tf-{line.tone}">
-                  <span class="tf-prmk" aria-hidden="true">{line.tone === "ok" ? "✓" : line.tone === "err" ? "✕" : "●"}</span>
+                  <span class="tf-prmk" aria-hidden="true">{#if line.tone === "err"}<TfXIcon />{:else}{line.tone === "ok" ? "✓" : "●"}{/if}</span>
                   <span>{line.text}{#if line.why !== undefined}<span class="tf-prwhy">{line.why}</span>{/if}</span>
                 </div>
               {/each}

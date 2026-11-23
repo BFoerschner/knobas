@@ -180,7 +180,7 @@
   import TicketCard from "./TicketCard.svelte";
   import TicketStack, { STACK_WINDOW_FROM } from "./TicketStack.svelte";
   import Signals from "./Signals.svelte";
-  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, keepColumnArrays, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -212,7 +212,7 @@
   import TfRailBar from "../TfRailBar.svelte";
   import type { EscTarget } from "../escape";
   import { filterKeys } from "../filter-keys";
-  import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { echoedEntities, echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { sameStatus } from "./drop";
   import { withFieldEchoes, withFieldRows, withStatusEchoes, withStatusRows, type LanedBy } from "./echo-board";
   import { createCardFields, offerFields } from "./card-fields.svelte";
@@ -473,7 +473,13 @@
     }),
     // A move is drawn in its new column at once, over every read (ADR-0054); a field edit on its card, in its new lane.
     overlay: {
-      board: (board) => withFieldEchoes(withStatusEchoes(board, movedStatus), cardFields.echoed, lanedBy()),
+      // Only an entity with an echo is asked after its echoes: one read of which have one, not one a card.
+      board: (board) => {
+        const echoed = echoedEntities();
+        const statusOf = (id: string) => (echoed.has(id) ? movedStatus(id) : null);
+        const fieldsOf = (id: string) => (echoed.has(id) ? cardFields.echoed(id) : null);
+        return withFieldEchoes(withStatusEchoes(board, statusOf), fieldsOf, lanedBy());
+      },
       rows: (rows) => withFieldRows(withStatusRows(rows, movedStatus), cardFields.echoed),
     },
   });
@@ -685,6 +691,10 @@
       : { rows: [] as HeldColumn[], waiting: 0, stale: false },
   );
   const columnsOf = (lane: { key: string | null }) => heldColumns.rows.filter((held) => columnHold.tagOf(held) === (lane.key ?? "")).map(({ entry }) => entry);
+  /** A column with no card drawn: one array, so it is the same one each time. */
+  const NO_CARDS: MiniBoardCard[] = [];
+  /** The arrays the columns were last handed: a column whose cards did not change keeps its own (`keepColumnArrays`). */
+  let drawnCards = new Map<string, MiniBoardCard[]>();
   const heldCards = $derived.by(() => {
     const by = new Map<string, MiniBoardCard[]>();
     for (const entry of heldBoard.rows) {
@@ -693,7 +703,8 @@
       if (column === undefined) by.set(at, [entry.card]);
       else column.push(entry.card);
     }
-    return by;
+    drawnCards = keepColumnArrays(drawnCards, by);
+    return drawnCards;
   });
   // -- a column that grows draws what the screen shows first (the broad-filters pass, 2026-11-13) --
   /**
@@ -776,8 +787,10 @@
   // ---- a ticket's move (ADR-0054, ticket-edit decisions sections 3 to 13) ----
   /** Where each moved card stood on the board, for the way back of a move refused, held or withdrawn. */
   const movedFrom = new Map<string, { tag: string; rank: number }>();
-  // The refresh after a move, or a run of its source's end, reads the board again, so its echo settles.
-  $effect(() => untrack(() => watchEchoes("tickets", () => reader.refresh(), { listen: ports.listen })));
+  // The refresh after a move, or a run of its source's end, reads the board again, so its echo settles. Not under a held
+  // card: the read waits for its drop (`afterDrag`), so the columns under the copy are the ones it was picked up from.
+  const refreshBoard = () => reader.refresh();
+  $effect(() => untrack(() => watchEchoes("tickets", () => drag.afterDrag(refreshBoard), { listen: ports.listen })));
   // The notes of refused and held moves, from the queue; and a move the queue still holds, drawn after a restart.
   $effect(() => untrack(() => watchTicketNotes(ports.moves ?? {})));
   // Each read: the statuses each source uses, and a move's echo gone once the read shows its status. The read as the
@@ -1108,7 +1121,7 @@
     const at = syncRevision;
     if (!ready || at === boardAt) return;
     boardAt = at;
-    untrack(() => reader.refresh());
+    untrack(() => drag.afterDrag(refreshBoard));
   });
 
   /**
@@ -1503,6 +1516,8 @@
               {@const pointer = reader.all ? null : listPointer(column, cards.length)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               {@const place = placeAt(lane, column)}
+              <!-- Its own derived: a stack handed the array it already draws hears nothing (`keepColumnArrays`). -->
+              {@const stackCards = heldCards.get(place) ?? NO_CARDS}
               <div class="tf-col" data-place={place}>
                 <h3>
                   {columnHead(column.status, view?.columns ?? [])}
@@ -1516,7 +1531,7 @@
                   <span class="tf-colsts" aria-hidden="true"></span>
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={heldCards.get(place) ?? []} atMost={openShare(place, heldCards.get(place) ?? [])} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
+                  <TicketStack cards={stackCards} atMost={openShare(place, stackCards)} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}

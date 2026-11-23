@@ -127,6 +127,20 @@ export function withoutTicket(board: MiniBoard, key: string): MiniBoard {
   return { ...board, columns, lanes };
 }
 
+/**
+ * `now`, each column's cards as they draw, with the array `before` held for a column whose cards are the same cards in
+ * the same order: that column's stack is handed what it already draws, and draws nothing again. A drop changes two
+ * columns; handed a new array, every one of a laned board's 66 stacks windowed its cards again, 20 ms of the drop at
+ * CPU 4x on 221 cards (the ux30 card-drag gate).
+ */
+export function keepColumnArrays<T>(before: ReadonlyMap<string, T[]>, now: Map<string, T[]>): Map<string, T[]> {
+  for (const [place, cards] of now) {
+    const held = before.get(place);
+    if (held !== undefined && held !== cards && held.length === cards.length && held.every((one, at) => one === cards[at])) now.set(place, held);
+  }
+  return now;
+}
+
 /** {@link withoutTicket}'s columns, for a read that needs no lanes. */
 export function columnsWithout(columns: readonly MiniBoardColumn[], key: string): MiniBoardColumn[] {
   return columns
