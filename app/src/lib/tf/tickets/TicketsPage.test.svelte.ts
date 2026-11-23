@@ -1062,7 +1062,9 @@ test("the board head is the canonical header: title left, one group right with t
   expect(acts!.matches(".tf-acts")).toBe(true);
   expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
   const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
-  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view…", "⋯", "Sync now"]);
+  // The view's More is its drawn ⋯ (`TfMoreIcon`), named by its label.
+  expect(buttons.map((b) => b.textContent!.trim() || b.getAttribute("aria-label"))).toEqual(["Edit view…", "More for this view", "Sync now"]);
+  expect(buttons[1]!.querySelector("svg.tf-moreicon")).not.toBeNull();
   for (const b of buttons) {
     expect(b.classList.contains("tf-btn")).toBe(true);
     expect(b.classList.contains("tf-sm")).toBe(false);

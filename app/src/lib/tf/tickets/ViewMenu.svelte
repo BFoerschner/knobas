@@ -7,6 +7,7 @@
   `TfMenu` draws it.
 -->
 <script lang="ts">
+  import TfMoreIcon from "../TfMoreIcon.svelte";
   import type { SavedViewSource } from "../../ipc/search";
   import TfMenu from "../TfMenu.svelte";
 
@@ -55,7 +56,7 @@
     aria-haspopup="menu"
     aria-expanded={open}
     bind:this={button}
-    onclick={() => (open = !open)}>⋯</button
+    onclick={() => (open = !open)}><TfMoreIcon /></button
   >
   <TfMenu bind:open opener={button} label="More for {name}" className="tf-vw-m">
       {#if savedViewKind !== null}

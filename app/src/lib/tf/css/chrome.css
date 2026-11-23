@@ -472,3 +472,4 @@ div.tf-wgap { flex: none; }
 /* The drawn ✕ (`TfXIcon.svelte`): the glyph's box, on the baseline, in the text's colour; bold text, a bolder stroke. */
 .tf-xicon { display: inline-block; width: .762em; height: .7em; vertical-align: baseline; overflow: visible; fill: none; stroke: currentColor; stroke-width: 10; stroke-linecap: round; }
 .tf-toast .tf-xicon, .tf-prmk .tf-xicon { stroke-width: 12; }
+.tf-moreicon { display: inline-block; width: 1em; height: 1em; vertical-align: -.15em; fill: currentColor; }
