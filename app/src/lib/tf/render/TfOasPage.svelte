@@ -81,7 +81,10 @@
     <TfOasOperation {st} {op} k={shown.place} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, labelOf(shown.place))} {onuse} />
   {:else if shown.answer.kind === "schema"}
     {@const s = shown.answer}
-    <TfOasSchemaPage {st} name={s.name} node={s.node} shape={s.shape} uses={s.uses} sample={s.sample} given={s.given} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, s.name)} />
+    <!-- Keyed: each schema's page starts with a screenful of its own (`TfOasSchemaPage`). -->
+    {#key shown.place}
+      <TfOasSchemaPage {st} name={s.name} node={s.node} shape={s.shape} uses={s.uses} sample={s.sample} given={s.given} {prose} {onfollow} {ongo} oncopylink={copy(shown.place, s.name)} screenful />
+    {/key}
   {/if}
   </div>
 </div>

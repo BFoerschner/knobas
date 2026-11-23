@@ -171,6 +171,14 @@ test("another file a ref read is kept with the least lately used dropped past th
   expect([files.has("spec.yaml"), files.has("a.yaml"), files.has("b.yaml"), files.has("c.yaml")]).toEqual([true, true, false, true]);
 });
 
+test("a spec opened again is not indexed again: its index is the one made before (the ux30 end gate)", () => {
+  const first = new SpecFiles("api/big.yaml").open(bigSpec(5000));
+  // Another copy of the same text, as a file read again is.
+  const again = new SpecFiles("api/big.yaml").open(` ${bigSpec(5000)}`.slice(1));
+  expect(first.ok && again.ok).toBe(true);
+  if (first.ok && again.ok) expect(again.index).toBe(first.index);
+});
+
 test("a spec opened again is not parsed again: its document is the one read before", () => {
   const first = new SpecFiles("api/openapi.yaml");
   first.open(PETS_30_YAML);

@@ -12,8 +12,8 @@
  */
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
-import { refTarget, type OpRow, type PageAnswer, type Resolved, type Shape, type SpecIndex } from "../../render/openapi";
-import { firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
+import { refTarget, type OpRow, type PageAnswer, type Prop, type Resolved, type Shape, type SpecIndex } from "../../render/openapi";
+import { factsOf, firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
 import type { SpecSession } from "../../render/openapi-port";
 import type { RequestDraft } from "../../render/openapi-request";
 
@@ -36,6 +36,65 @@ export const OPEN_ALL_DEPTH = 4;
 export const OPEN_ALL_MOST = 300;
 /** After this long a page still asked for says *Reading…* (section 29). */
 export const READING_AFTER_MS = 200;
+
+/** How many properties a schema draws before *Show the other N* (`TfOasShape`). */
+export const SHAPE_PROPS = 80;
+/**
+ * How tall the properties a schema's page draws in its first frame are, at least, by {@link firstRows}' guess: the
+ * pane's height (`OasState.paneTall`) less {@link HEAD_PX}, never under this.
+ */
+export const FIRST_PX = 400;
+/** How tall a schema page's head is at least, above its properties: its name, its line, *Properties*. */
+export const HEAD_PX = 140;
+/** How many more properties each frame after the first draws. */
+export const STEP_ROWS = 12;
+
+/**
+ * How many properties a schema's page draws in its first frame (the ux30 end gate): enough to fill the page column,
+ * by a guess at each row's height from what it holds (its head line, its words, its line of facts), never under 8.
+ */
+export function firstRows(props: readonly Prop[], tall: number): number {
+  const target = Math.max(FIRST_PX, tall);
+  let px = 0;
+  let n = 0;
+  while (n < props.length && (px < target || n < 8)) {
+    const p = props[n]!;
+    px += 32;
+    if (p.words !== "") px += 20 * Math.ceil(Math.min(p.words.length, 420) / 100);
+    if (innerRef(p.node) === null && factsOf(p.node).length > 0) px += 22;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Of the properties not drawn yet, those that can widen the list's columns (`TfOasShape`'s `upTo`): the longest name
+ * (a name is the code face, so its length is its width, and it breaks anywhere, so only its whole length counts), a
+ * row of each set of notes (*read only*, *write only*, *Deprecated*), a row that is *required*, and every name of a
+ * character outside printable ASCII, whose width its length does not tell. The type and the words size no column.
+ */
+export function columnHolders(props: readonly Prop[]): Prop[] {
+  const out = new Set<Prop>();
+  let longest: Prop | null = null;
+  const notes = new Set<string>();
+  let required = false;
+  for (const p of props) {
+    if (longest === null || p.name.length > longest.name.length) longest = p;
+    if (!/^[\x20-\x7e]*$/.test(p.name)) out.add(p);
+    const own = (typeof p.node === "object" && p.node !== null && !Array.isArray(p.node) ? p.node : {}) as Record<string, unknown>;
+    const said = `${own.readOnly === true}${own.writeOnly === true}${own.deprecated === true}`;
+    if (said !== "falsefalsefalse" && !notes.has(said)) {
+      notes.add(said);
+      out.add(p);
+    }
+    if (p.required && !required) {
+      required = true;
+      out.add(p);
+    }
+  }
+  if (longest !== null) out.add(longest);
+  return props.filter((p) => out.has(p));
+}
 
 /** A place in the explorer: `""` the overview, `get /pets` an operation, `schemas/Pet` a schema, `tags/pets` a fold. */
 export type Place = string;
@@ -107,6 +166,10 @@ export class OasState {
   cursor = $state<string | null>(null);
   /** A file of the repository on the Code page, at a place in it. */
   fileHref: (file: string, place: string | null) => string | null = () => null;
+  /** The page about to be drawn goes back to a scroll: it draws whole at once, not a screenful first. */
+  drawWhole = false;
+  /** How tall the explorer's pane is, in px, as it was last fitted to the window: what a screenful is. */
+  paneTall = 0;
   #asked = 0;
 
   constructor(session: SpecSession, root: string) {

@@ -10,6 +10,7 @@
 import type { SpecChanges } from "./openapi-changes";
 import type { Opened, Operation, PageAnswer, PathRef, Resolved, Shape, SpecCall, SpecFiles, Uses } from "./openapi";
 import type { Direction } from "./openapi-example";
+import { unpackOpened } from "./openapi-pack";
 
 export type { SpecCall };
 
@@ -55,7 +56,8 @@ function workerEngine(): SpecEngine | null {
   return (session, call) =>
     new Promise((resolve) => {
       const id = ++nextCall;
-      waiting.set(id, resolve);
+      // An open's rows come as columns (`openapi-pack.ts`) and are made rows again here.
+      waiting.set(id, call.kind === "open" ? (result) => resolve(unpackOpened(result)) : resolve);
       w.postMessage({ id, session, call });
     });
 }
@@ -103,6 +105,15 @@ export function specEngine(): SpecEngine {
 
 let nextSession = 0;
 
+/**
+ * The specs opened lately on this page, by their text, the newest last (the ux30 end gate): a spec opened again (a
+ * README, then the spec again) takes its index from here in the press's own task, not a worker's round trip later.
+ * The worker is still told, so the session it keeps has the document every later call reads. The worker keeps their
+ * documents and indexes as long (`openapi.ts`' `recent`).
+ */
+const openedLately = new Map<string, Opened>();
+const OPENED_LATELY = 4;
+
 /** Reads another file of the repository: its bytes at the spec's commit. */
 export type ReadFile = (path: string) => Promise<Uint8Array>;
 
@@ -124,7 +135,20 @@ export class SpecSession {
   }
 
   open(path: string, text: string): Promise<Opened> {
-    return this.#engine(this.#id, { kind: "open", path, text }) as Promise<Opened>;
+    const asked = this.#engine(this.#id, { kind: "open", path, text }) as Promise<Opened>;
+    const held = openedLately.get(text);
+    if (held !== undefined) {
+      openedLately.delete(text);
+      openedLately.set(text, held);
+      return Promise.resolve(held);
+    }
+    return asked.then((answer) => {
+      if (answer.ok) {
+        openedLately.set(text, answer);
+        if (openedLately.size > OPENED_LATELY) openedLately.delete(openedLately.keys().next().value!);
+      }
+      return answer;
+    });
   }
 
   operation(i: number): Promise<Operation | null> {

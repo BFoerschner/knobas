@@ -447,6 +447,13 @@ export function fileLines(text: string): string[] {
   return lines;
 }
 
+/** How many lines {@link fileLines} makes of `text`, counted without making them. */
+export function countLines(text: string): number {
+  let n = 1;
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) n++;
+  return n > 1 && text.endsWith("\n") ? n - 1 : n;
+}
+
 /** A place in a file's text: a line (from 0) and a character in it. */
 export interface TextPlace {
   line: number;

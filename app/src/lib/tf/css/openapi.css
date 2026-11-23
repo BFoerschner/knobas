@@ -210,6 +210,10 @@
 .tf-oas-lab + :is(.tf-oas-fs, .tf-oas-what, .tf-oas-pick) { margin-top: -6px; }
 .tf-oas-fs > .tf-oas-f { display: grid; grid-template-columns: subgrid; padding: 0; border: 0; column-gap: 0; }
 .tf-oas-fs > .tf-oas-f + :is(.tf-oas-f, .tf-oas-fnote) { border-top: 1px solid var(--rule-2); }
+/* A property not drawn yet (`TfOasShape`'s `upTo`): no height, unseen, its name, notes and *required* holding the
+   list's columns at the widths they take once it is drawn. */
+.tf-oas-fs > .tf-oas-fheld { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; height: 0; overflow: hidden; visibility: hidden; }
+.tf-oas-fheld > .tf-oas-fr { padding-block: 0; }
 
 /* The row: what toggles. Its head line's cells stand in the list's columns. */
 .tf-oas-fr { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; padding-block: 6px; min-width: 0; }

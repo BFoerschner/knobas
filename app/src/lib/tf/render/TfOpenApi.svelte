@@ -94,7 +94,9 @@
     engine?: SpecEngine | null;
   } = $props();
 
-  let opened = $state<Opened | null>(null);
+  // Raw: the answer is replaced whole, never changed in place. A deep proxy made each of a 5,000-operation spec's rows a
+  // proxy of its own the first time the filter's list read them, on the open's frame (the ux30 end gate).
+  let opened = $state.raw<Opened | null>(null);
   let st = $state<OasState | null>(null);
   /** Shown once a read has taken long enough to be noticed. */
   let slow = $state(false);
@@ -141,18 +143,21 @@
   type Found = { op: OpRow; schema?: undefined } | { op?: undefined; schema: string };
   /** What the filter reads of each: an operation's method, path, summary, tags and operationId; a schema's name. */
   const textOf = (f: Found) => (f.op !== undefined ? `${f.op.method} ${f.op.path} ${f.op.summary} ${f.op.tags.join(" ")} ${f.op.operationId ?? ""}` : f.schema);
+  /** Built once the filter has words, not on the open: the rail draws no flat list before then. */
   const found = $derived(index === null ? [] : [...index.ops.map((op): Found => ({ op })), ...index.schemas.map((schema): Found => ({ schema }))]);
+  const NONE: Found[] = [];
   let order = $state.raw(FuzzyOrder.held<Found>(`oas:${++heldIds}`));
   $effect(() => {
     // A new spec, a new held list; the old one is dropped.
-    void found;
+    void index;
     const mine = FuzzyOrder.held<Found>(`oas:${++heldIds}`);
     order = mine;
     return () => mine.drop();
   });
   $effect(() => {
     const typed = st?.typed ?? "";
-    order.ask(typed, found, textOf);
+    // No words: the ask only drops an answer still coming, so it needs no list.
+    order.ask(typed, typed.trim() === "" ? NONE : found, textOf);
   });
   const ranked = $derived.by((): RailInput["ranked"] => {
     const typed = st?.typed ?? "";
@@ -187,7 +192,10 @@
       const status = document.querySelector<HTMLElement>(".tf-status")?.offsetHeight ?? 0;
       // The box's top with the page's scroller at 0: where it stands now, plus what the page has scrolled.
       const top = el.getBoundingClientRect().top + (scroller?.scrollTop ?? 0);
-      el.style.setProperty("--oas-h", `${paneHeight(window.innerHeight, top, status)}px`);
+      const tall = paneHeight(window.innerHeight, top, status);
+      el.style.setProperty("--oas-h", `${tall}px`);
+      const state = untrack(() => st);
+      if (state !== null) state.paneTall = tall;
     };
     fit();
     window.addEventListener("resize", fit);
@@ -231,9 +239,15 @@
     const state = st;
     if (state === null) return;
     pref = null;
+    // A page gone back to at a scroll draws whole, so the scroll it had is there to go back to.
+    state.drawWhole = scroll > 0;
     const done = await state.show(place);
-    if (done === null || st !== state) return;
+    if (done === null || st !== state) {
+      state.drawWhole = false;
+      return;
+    }
     flushSync();
+    state.drawWhole = false;
     if (pageCol !== null) pageCol.scrollTop = scroll;
   }
 

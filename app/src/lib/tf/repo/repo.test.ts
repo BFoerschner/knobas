@@ -32,6 +32,7 @@ import {
   commitHash,
   fileHash,
   fileLines,
+  countLines,
   headLine,
   lineHash,
   pickDefaultFile,
@@ -207,6 +208,12 @@ test("a file's lines drop the empty one after a final newline", () => {
   expect(fileLines("a\nb\n")).toEqual(["a", "b"]);
   expect(fileLines("a\nb")).toEqual(["a", "b"]);
   expect(fileLines("")).toEqual([""]);
+});
+
+test("a file's line count is fileLines' length, counted without splitting the text (the ux30 end gate)", () => {
+  for (const text of ["", "a", "a\n", "a\nb", "a\nb\n", "\n", "\n\n", "a\n\nb\n\n", "x".repeat(10) + "\n".repeat(5000)]) {
+    expect(countLines(text)).toBe(fileLines(text).length);
+  }
 });
 
 test("a path's directories, outermost first", () => {

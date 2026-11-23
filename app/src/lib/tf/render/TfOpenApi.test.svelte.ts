@@ -11,6 +11,8 @@ import TfOpenApi from "./TfOpenApi.svelte";
 import { columnsFor, paneHeight } from "./oas-layout";
 import { localEngine, type SpecEngine } from "../../render/openapi-port";
 import { installFindKey } from "../filter-keys";
+import { FuzzyOrder } from "../filter/ranked.svelte";
+import { columnHolders, firstRows } from "./oas.svelte";
 import { BROKEN_YAML, DEEP_30_JSON, FORM_20_JSON, MODEL_31_JSON, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../render/openapi-fixture";
 
 let target: HTMLElement;
@@ -48,7 +50,23 @@ const railText = () => rail().map((b) => text(b));
 const row = (label: string) => rail().find((b) => text(b) === label || text(b).startsWith(`${label} `))!;
 const page = () => target.querySelector(".tf-oas-page")!;
 const button = (label: string, within: ParentNode = target) => [...within.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label);
-const names = (within: ParentNode = page()) => [...within.querySelectorAll(":scope .tf-oas-fname")].map((el) => text(el));
+/** The names of the property rows drawn (not those that only hold the columns' widths until drawn). */
+const names = (within: ParentNode = page()) => [...within.querySelectorAll(":scope .tf-oas-f .tf-oas-fname")].map((el) => text(el));
+/** The rows of a schema's page not drawn yet: unseen, holding the columns' widths. */
+const held = (within: ParentNode = page()) => [...within.querySelectorAll(":scope .tf-oas-fheld .tf-oas-fname")].map((el) => text(el));
+/** Microtasks only, no timer and no frame: what the press's own task drew. */
+async function microtasks() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  flushSync();
+}
+/** Waits, frame by frame, until a schema's page has drawn its last property. */
+async function drawnWhole() {
+  for (let i = 0; i < 100 && page().querySelector(".tf-oas-fheld") !== null; i += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    flushSync();
+  }
+  expect(page().querySelector(".tf-oas-fheld")).toBeNull();
+}
 
 function type(value: string) {
   const box = target.querySelector<HTMLInputElement>(".tf-oas-railhead input")!;
@@ -268,10 +286,95 @@ test("a schema of more than 80 properties draws 80 and Show the other", async ()
   for (let i = 0; i < 81; i++) properties[`p${i}`] = { type: "string" };
   draw("w.json", JSON.stringify({ openapi: "3.0.3", info: { title: "W", version: "1" }, paths: {}, components: { schemas: { Wide: { type: "object", properties } } } }), { at: "schemas/Wide" });
   await settle();
+  await drawnWhole();
   expect(names().length).toBe(80);
   button("Show the other 1 properties", page())!.click();
   flushSync();
   expect(names().length).toBe(81);
+});
+
+/** A schema as TeamCity's `build` is: 86 properties, each with its words, and an operation that names it. */
+function wideSpec(): string {
+  const properties: Record<string, unknown> = {};
+  for (let i = 0; i < 86; i++) properties[i === 40 ? "aVeryLongPropertyNameThatSetsTheColumn" : `p${i}`] = i === 85 ? { type: "string", readOnly: true, description: "The last." } : { type: "string", description: `What property ${i} holds, in a sentence or two of the spec's own words.` };
+  return JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "W", version: "1" },
+    paths: { "/builds/{id}": { get: { responses: { "200": { description: "OK", content: { "application/json": { schema: { $ref: "#/components/schemas/Build" } } } } } } } },
+    components: { schemas: { Build: { type: "object", required: ["p85"], properties }, Other: { type: "object", properties: { build: { $ref: "#/components/schemas/Build" } } } } },
+  });
+}
+
+test("a followed ref's schema draws a screenful in the press's own frame, the rest after it, its columns held from the first", async () => {
+  draw("w.json", wideSpec(), { at: "get /builds/{id}" });
+  await settle();
+  button("Build", page())!.click();
+  await microtasks();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("Build");
+  expect(page().querySelector(".tf-oas-back")).not.toBeNull();
+  // The ux30 end gate: 86 rows drawn whole in the press's frame took 82 ms at 4x. A screenful is drawn, not all.
+  const first = names();
+  expect(first.length).toBeGreaterThanOrEqual(8);
+  expect(first.length).toBeLessThan(40);
+  // Of the rows not drawn, those that can widen a column stand already, unseen: the longest name, the one row with
+  // notes and *required* (p85 lies past the 80 drawn, so it is not one).
+  expect(held()).toEqual(["aVeryLongPropertyNameThatSetsTheColumn"]);
+  // What stands below the properties waits for the last of them.
+  expect(text(page())).not.toContain("Used by");
+  expect(text(page())).not.toContain("Show the other");
+  await drawnWhole();
+  expect(names().length).toBe(80);
+  expect(names().slice(0, first.length)).toEqual(first);
+  expect(text(page())).toContain("Used by 1");
+  expect(text(page())).toContain("Show the other 6 properties");
+});
+
+test("the rows that can widen a list's columns: the longest name, each set of notes, a required, a name past ASCII", () => {
+  const p = (name: string, node: Record<string, unknown> = {}, required = false) => ({ name, node, required, words: "" });
+  const props = [p("a"), p("longest-name"), p("b", { readOnly: true }), p("c", { readOnly: true }), p("d", {}, true), p("e", {}, true), p("f", { readOnly: true, deprecated: true }), p("naïve"), p("g")];
+  expect(columnHolders(props).map((x) => x.name)).toEqual(["longest-name", "b", "d", "f", "naïve"]);
+  expect(columnHolders([])).toEqual([]);
+});
+
+test("a schema's first frame draws the rows a window's height holds, by a guess at each, never under 8", () => {
+  const p = (words: string) => ({ name: "x", node: { type: "string" }, required: false, words });
+  expect(firstRows(Array.from({ length: 200 }, () => p("")), 868)).toBe(28);
+  expect(firstRows(Array.from({ length: 200 }, () => p("w".repeat(250))), 868)).toBe(10);
+  expect(firstRows(Array.from({ length: 200 }, () => p("w".repeat(250))), 300)).toBe(8);
+  expect(firstRows([p(""), p("")], 868)).toBe(2);
+});
+
+test("a schema's page gone back to at a scroll draws whole at once, so the scroll is there to go back to", async () => {
+  draw("w.json", wideSpec(), { at: "schemas/Other" });
+  await settle();
+  button("Build", page())!.click();
+  await settle();
+  await drawnWhole();
+  page().scrollTop = 900;
+  button("Other", page())!.click();
+  await settle();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("Other");
+  button("Back to Build", page())!.click();
+  await microtasks();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("Build");
+  expect(page().querySelector(".tf-oas-fheld")).toBeNull();
+  expect(names().length).toBe(80);
+  expect(page().scrollTop).toBe(900);
+});
+
+test("a spec's open builds no list for the filter: the 5,000 rows are read once words are typed", async () => {
+  const asked: number[] = [];
+  const ask = vi.spyOn(FuzzyOrder.prototype, "ask").mockImplementation(function (_text: string, rows: readonly unknown[]) {
+    asked.push(rows.length);
+  });
+  draw("api/big.yaml", bigSpec(5000));
+  await settle();
+  expect(rail().length).toBeGreaterThan(0);
+  expect(asked.length).toBeGreaterThan(0);
+  expect(Math.max(...asked)).toBe(0);
+  type("resource12");
+  expect(asked.at(-1)).toBe(5000 + 1250);
+  ask.mockRestore();
 });
 
 test("allOf is drawn merged and a oneOf is a choice the reader picks among", async () => {

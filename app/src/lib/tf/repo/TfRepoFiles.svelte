@@ -83,6 +83,7 @@
   import { filterKeys } from "../filter-keys";
   import { goAcross, replaceAddress } from "../opener";
   import type { SpecOpener } from "../render/oas-open.svelte";
+  import { explorerModule } from "../render/oas-module";
   import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -135,6 +136,7 @@
     editHash,
     fileHash,
     fileLines,
+    countLines,
     lineHash,
     placeHash,
     likelySections,
@@ -1535,6 +1537,8 @@
   });
 
   const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
+  /** How many lines the header says: counted, not split, so a file drawn rendered never splits its text (the ux30 end gate). */
+  const linesSaid = $derived(drawn === null || drawn.binary ? 0 : countLines(drawn.text));
 
   /**
    * Files of more lines than this draw only the lines in view and a margin (#2251), as every windowed list does past 300
@@ -1615,8 +1619,9 @@
       if (highlighting === started) highlighting = null;
     };
   });
-  // The lines in view moved: the worker does them next.
+  // The lines in view moved: the worker does them next. Only under Source: a file drawn rendered windows no lines.
   $effect(() => {
+    if (drawAs !== "source") return;
     const [from, to] = [win.start, win.end];
     untrack(() => highlighting?.focus(from, to));
   });
@@ -2509,7 +2514,7 @@
           <!-- The held line (ADR-0042) in the meta's own place, so nothing under the header moves when it comes or goes. -->
           <span class="tf-dim tf-small tf-fmeta" role="status">{behindLine(fileBehind, file.commit ?? null)}</span>
         {:else}
-          <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, lines.length)}</span>
+          <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, linesSaid)}</span>
         {/if}
         <span class="tf-trail" class:tf-heldbelow={!checkoutRead}>
           <!-- Zen first: the trail stands from its right, so the one button that comes and goes as the reader moves
@@ -2643,7 +2648,7 @@
         {#snippet oasProse(words: string)}
           <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} imagesOf={at} />
         {/snippet}
-        {#await import("../render/TfOpenApi.svelte") then { default: TfOpenApi }}
+        {#await explorerModule() then { default: TfOpenApi }}
           <TfOpenApi
             text={spec.text}
             path={spec.path}

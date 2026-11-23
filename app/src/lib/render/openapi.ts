@@ -342,7 +342,7 @@ export class SpecFiles {
   open(text: string): Opened {
     const parsed = recentParse(text, this.root);
     if (!parsed.ok) return parsed;
-    const checked = indexSpec(parsed.doc, writtenVersion(text));
+    const checked = indexOf(parsed.doc, text);
     if (!checked.ok) return checked;
     this.#docs.set(this.root, parsed.doc);
     this.#index = checked.index;
@@ -619,6 +619,20 @@ function writtenVersion(text: string): string | undefined {
  */
 const recent = new Map<string, { ok: true; doc: unknown }>();
 const RECENT = 4;
+
+/**
+ * A recent document's index, by the document: the same text is the same document (`recent`), so going back to a spec
+ * neither parses it nor walks its paths again. An index is only read once made.
+ */
+const indexed = new WeakMap<object, Opened>();
+
+function indexOf(doc: unknown, text: string): Opened {
+  const held = isObj(doc) ? indexed.get(doc) : undefined;
+  if (held !== undefined) return held;
+  const made = indexSpec(doc, writtenVersion(text));
+  if (isObj(doc)) indexed.set(doc, made);
+  return made;
+}
 
 function recentParse(text: string, path: string): ReturnType<typeof parseDoc> {
   const held = recent.get(text);
