@@ -977,9 +977,35 @@ test("⌘R on the roster presses no row's Refresh: the page's is the header's Sy
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
 });
 
-test("every monitor is drawn at once, each one row of one height, and a typed word shows the rows it matches without building any (the monitors-page pass, ux24)", async () => {
+/** Until every block of the roster holds its rows (`drawnBlocks`: a few blocks a frame after the first draw). */
+async function filled() {
+  for (let i = 0; i < 200 && target.querySelector(".tf-mon-later") !== null; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  flushSync();
+  expect(target.querySelector(".tf-mon-later"), "every block drawn").toBeNull();
+}
+
+test("the first blocks draw at once and the rest a frame or two later, each holding its rows' room meanwhile (the ux30 Windows pass)", async () => {
+  const bulk = Array.from({ length: 300 }, (_, i) => monitor(`kuma:bulk-${i}`, `api-${i} /health`));
+  await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
+  // 304 monitors are 19 blocks of 16: the first four are drawn in the first draw, more than a full-screen window holds.
+  const blocks = [...target.querySelectorAll<HTMLElement>(".tf-mon-block")];
+  expect(blocks).toHaveLength(19);
+  expect(blocks.slice(0, 4).every((b) => !b.classList.contains("tf-mon-later") && b.querySelectorAll(".tf-mon-row").length === 16)).toBe(true);
+  const later = blocks.slice(4);
+  expect(later.every((b) => b.classList.contains("tf-mon-later") && b.querySelector(".tf-mon-row") === null)).toBe(true);
+  // A block waiting for its rows holds their room: the last one its 16, as a drawn one does.
+  expect(later.map((b) => b.style.getPropertyValue("--tf-mon-rows"))).toEqual(later.map(() => "16"));
+  expect(rows()).toHaveLength(64);
+  await filled();
+  expect(rows()).toHaveLength(304);
+  // The blocks are the elements they were: filling one builds its rows, never the block.
+  expect([...target.querySelectorAll(".tf-mon-block")]).toEqual(blocks);
+});
+
+test("every monitor is drawn, each one row of one height, and a typed word shows the rows it matches without building any (the monitors-page pass, ux24)", async () => {
   const bulk = Array.from({ length: 300 }, (_, i) => monitor(`kuma:bulk-${i}`, i < 60 ? `gate-${i} /health` : `api-${i} /health`));
   await draw([], null, ports({ monitorRoster: async () => [...ROSTER, ...bulk] }));
+  await filled();
   // No windowing and no spacer rows: a roster this size is cheaper drawn whole than kept near the viewport.
   expect(rows()).toHaveLength(304);
   expect(target.querySelector(".tf-wgap")).toBeNull();

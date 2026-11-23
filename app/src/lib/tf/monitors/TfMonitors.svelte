@@ -643,6 +643,31 @@
     for (let at = 0; at < list.length; at += BLOCK) blocks.push(list.slice(at, at + BLOCK));
     return blocks;
   }
+
+  /**
+   * The blocks drawn with their rows (the ux30 Windows pass, 2026-11-23,
+   * `docs/decisions/2026-11-23-monitors-draws-the-window-first.md`): on the page's first draw the first
+   * {@link FIRST_BLOCKS}, more than a full-screen window holds, and {@link FILL_BLOCKS} more on each frame after, until
+   * every row is drawn. A block waiting for its rows holds their exact room (`tf-mon-later`), so a block filling moves
+   * nothing. Building all 218 rows in the press's task was 150 ms of script at CPU 6x in WebView2, and their style and
+   * layout 180 more, when Monitors opened again after the kept pages had let it go. Once drawn, a block stays drawn.
+   */
+  const FIRST_BLOCKS = 4;
+  const FILL_BLOCKS = 3;
+  let drawnBlocks = $state(FIRST_BLOCKS);
+  const rowBlocks = $derived(Math.ceil(rows.length / BLOCK));
+  const allBlocks = $derived(rowBlocks + Math.ceil(hiddenRows.length / BLOCK));
+  $effect(() => {
+    if (drawnBlocks >= allBlocks) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => (drawnBlocks += FILL_BLOCKS));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  });
   /**
    * A block's room while it is not drawn: its shown rows at their one height, through the CSSOM (CSP refuses an inline
    * style). The blocks stay the same 16 rows whatever is typed, so a key moves no row from one block to another.
@@ -1008,10 +1033,12 @@
   </div>
 {/snippet}
 
-<!-- A block of rows (`blocksOf`): its room is its shown rows' (`blockRoom`), and with none shown it is hidden too. -->
-{#snippet monitorBlock(block: MonitorRow[])}
+<!-- A block of rows (`blocksOf`): its room is its shown rows' (`blockRoom`), and with none shown it is hidden too. One
+     the page has not drawn yet (`drawnBlocks`) holds that room empty for a frame or two. -->
+{#snippet monitorBlock(block: MonitorRow[], at: number)}
   {@const open = matched === null ? block.length : block.filter(shows).length}
-  <div class="tf-mon-block" hidden={open === 0} {@attach blockRoom(open)}>{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}</div>
+  {@const drawn = at < drawnBlocks}
+  <div class="tf-mon-block" class:tf-mon-later={!drawn} hidden={open === 0} {@attach blockRoom(open)}>{#if drawn}{#each block as row (row.entity_id)}{@render monitorRow(row)}{/each}{/if}</div>
 {/snippet}
 
 <div class="tf-cbody tf-mon-body" {@attach sideWidth("monitor")}>
@@ -1079,14 +1106,14 @@
             <div class="tf-mon-head" aria-hidden="true">
               <span>Monitor</span><span>State</span><span class="tf-mbar-axis"><span>24 h ago</span><span>now</span></span><span class="tf-mon-up">30 days</span><span></span><span class="tf-mon-watch">{#if anyWatches}Watches{/if}</span>
             </div>
-            {#each blocksOf(rows) as block, at (at)}{@render monitorBlock(block)}{/each}
+            {#each blocksOf(rows) as block, at (at)}{@render monitorBlock(block, at)}{/each}
             {#if hiddenRows.length > 0}
               <!-- Hidden monitors are drawn after the roster, all of them, dimmed: nothing folds, so nothing redraws or moves (#2447, the monitors-page pass). -->
               <div class="tf-mon-hidhead" role="presentation" hidden={shownHidden.length === 0}>
                 <span>{counted(shownHidden.length, "hidden monitor", "hidden monitors")}</span>
                 <span class="tf-dim">{shownHidden.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span>
               </div>
-              {#each blocksOf(hiddenRows) as block, at (at)}{@render monitorBlock(block)}{/each}
+              {#each blocksOf(hiddenRows) as block, at (at)}{@render monitorBlock(block, rowBlocks + at)}{/each}
             {/if}
           </div>
         {/if}

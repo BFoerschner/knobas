@@ -61,6 +61,8 @@
 /* A block of rows (`blocksOf`) is laid out and painted only near the viewport, its room its rows' own height while it is
    not: every row is 38 px, border included, so a block drawn as it comes into view moves nothing. */
 .tf-mon-block { content-visibility: auto; contain-intrinsic-block-size: calc(var(--tf-mon-rows, 16) * 38px); }
+/* A block whose rows draw a frame later (TfMonitors' `drawnBlocks`) holds their room, so filling it moves nothing. */
+.tf-mon-block.tf-mon-later { block-size: calc(var(--tf-mon-rows, 16) * 38px); }
 .tf-mon-row:hover { background: var(--sheet-2); --tf-mon-gap: var(--sheet-2); }
 /* What is wrong carries its tone down the row's edge too, so a column of down monitors reads from across the room. */
 .tf-mon-row.tf-mon-err { box-shadow: inset 3px 0 0 var(--err); }
