@@ -36,10 +36,11 @@ fn field_value(value: Option<&serde_json::Value>) -> Option<String> {
     }
 }
 
-/// The comment rules in force for something under `inherited`, with its own
-/// prompts laid over them. A folder's rule covers everything below it: knobas
-/// asks where the server would, and asking once too often costs a field, not
-/// a refused read.
+/// The comment rules in force for a folder under `inherited`, with its own
+/// prompts laid over them. A folder's rule covers everything below it: a
+/// folder read alone (`GET folders/{id}`) says false for every rule, so
+/// knobas keeps the one above. An entry's own prompts are its rule
+/// ([`entry`]).
 fn rules(inherited: CommentRules, own: Option<&CommentPrompts>) -> CommentRules {
     let own = own.copied().unwrap_or_default();
     CommentRules {
@@ -113,7 +114,14 @@ pub fn entry(
         otp,
         expires: api::day(e.expires.as_deref()),
         changed_by: None,
-        comment: rules(inherited, e.comment_prompts.as_ref()),
+        // An entry carries the rule in force for it, inheritance and blocks
+        // applied (a folder that blocks access inheritance blocks the rule
+        // above it too), so its own prompts are the answer; the folders'
+        // rule is for an entry that carries none.
+        comment: e
+            .comment_prompts
+            .as_ref()
+            .map_or(inherited, |own| rules(CommentRules::default(), Some(own))),
         approval: Approval::None,
         attachments: if e.attachments.is_empty() {
             Attachments::None
@@ -326,6 +334,55 @@ mod tests {
         let folder: FolderRecord = serde_json::from_value(walked.items[1].payload.clone()).unwrap();
         assert_eq!(folder.parent, None);
         assert!(folder.can_add);
+    }
+
+    /// Pleasant 9.5.4 (the VM, 2026-11-23): an entry carries the comment rule
+    /// in force for it, inheritance and blocks applied. Payments/Prod asks
+    /// for a comment; Payments/Prod/PSP blocks access inheritance, which
+    /// blocks the inherited rule too, so its entries say `false` and
+    /// `IsCommentRequired` answers false. knobas asked there all the same.
+    #[test]
+    fn an_entrys_own_comment_rule_wins_over_the_folder_above_a_blocked_one() {
+        let root: ApiFolder = serde_json::from_value(serde_json::json!({
+            "Id": "root", "Name": "Root",
+            "Children": [{
+                "Id": "prod", "Name": "Prod", "ParentId": "root",
+                "CommentPrompts": {"AskForCommentOnViewPassword": true},
+                "Credentials": [{"Id": "e-prod", "Name": "ruled",
+                    "CommentPrompts": {"AskForCommentOnViewPassword": true}}],
+                "Children": [{
+                    "Id": "psp", "Name": "PSP", "ParentId": "prod",
+                    "CommentPrompts": {"AskForCommentOnViewPassword": false},
+                    "Credentials": [
+                        {"Id": "e-psp", "Name": "blocked",
+                         "CommentPrompts": {"AskForCommentOnViewPassword": false}},
+                        {"Id": "e-old", "Name": "no prompts sent"}
+                    ]
+                }]
+            }]
+        }))
+        .unwrap();
+        let walked = walk("pw", &root);
+        let read = |id: &str| {
+            let item = walked
+                .items
+                .iter()
+                .find(|i| i.entity.to_string() == format!("pw:{id}"))
+                .unwrap();
+            serde_json::from_value::<EntryRecord>(item.payload.clone())
+                .unwrap()
+                .comment
+                .read
+        };
+        assert!(read("e-prod"), "the ruled folder's entry asks");
+        assert!(
+            !read("e-psp"),
+            "the blocked folder's entry said false and asked anyway"
+        );
+        assert!(
+            read("e-old"),
+            "an entry that carries no prompts keeps the rule above it"
+        );
     }
 
     #[test]

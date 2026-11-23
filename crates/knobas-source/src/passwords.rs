@@ -609,19 +609,39 @@ pub enum Write {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         title: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "null_is_a_value"
+        )]
         #[ts(optional, type = "string | null")]
         username: Option<Option<String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "null_is_a_value"
+        )]
         #[ts(optional, type = "string | null")]
         address: Option<Option<String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "null_is_a_value"
+        )]
         #[ts(optional, type = "string | null")]
         notes: Option<Option<String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "null_is_a_value"
+        )]
         #[ts(optional, type = "string | null")]
         expires: Option<Option<chrono::NaiveDate>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "null_is_a_value"
+        )]
         #[ts(optional, type = "string | null")]
         folder: Option<Option<String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -645,6 +665,28 @@ pub enum Write {
         entity: String,
         comment: String,
     },
+}
+
+/// An edit's optional field: `null` is a value ("clear it"), told apart from
+/// a field left out, which `#[serde(default)]` reads as `None`. Plain
+/// `Option<Option<T>>` reads `null` as `None` too, so a cleared field was
+/// never sent. (A module for `with`, which ts-rs reads; it warns on
+/// `deserialize_with`.)
+mod null_is_a_value {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer, T: Serialize>(
+        value: &Option<Option<T>>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        d: D,
+    ) -> Result<Option<Option<T>>, D::Error> {
+        Option::<T>::deserialize(d).map(Some)
+    }
 }
 
 impl Write {
@@ -707,6 +749,69 @@ pub fn undeclared(source: &str, kind: WriteKind) -> crate::SourceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Edit sends a cleared field as `null` ("Notes emptied"); a field it
+    /// leaves out is unchanged. `null` read as "unchanged" made a cleared
+    /// field impossible: the real app's Save said "the edit changes nothing"
+    /// (the ux30 end gate, Pleasant 9.5.4, 2026-11-23).
+    #[test]
+    fn an_edits_null_clears_the_field_and_a_missing_one_leaves_it() {
+        let write: Write = serde_json::from_value(serde_json::json!({
+            "write": "edit_entry", "entity": "pw:e1", "comment": null,
+            "username": null, "address": null, "notes": null, "expires": null, "folder": null
+        }))
+        .unwrap();
+        let Write::EditEntry {
+            title,
+            username,
+            address,
+            notes,
+            expires,
+            folder,
+            ..
+        } = write
+        else {
+            panic!("not an edit");
+        };
+        assert_eq!(title, None);
+        assert_eq!(username, Some(None));
+        assert_eq!(address, Some(None));
+        assert_eq!(notes, Some(None));
+        assert_eq!(expires, Some(None));
+        assert_eq!(folder, Some(None));
+        let write: Write = serde_json::from_value(serde_json::json!({
+            "write": "edit_entry", "entity": "pw:e1", "comment": null, "notes": "kept"
+        }))
+        .unwrap();
+        let Write::EditEntry {
+            username,
+            notes,
+            expires,
+            folder,
+            ..
+        } = write
+        else {
+            panic!("not an edit");
+        };
+        assert_eq!((username, expires, folder), (None, None, None));
+        assert_eq!(notes, Some(Some("kept".to_owned())));
+        // And back: a cleared field is written as `null`, an unchanged one not at all.
+        let cleared = Write::EditEntry {
+            entity: "pw:e1".into(),
+            title: None,
+            username: None,
+            address: None,
+            notes: Some(None),
+            expires: None,
+            folder: None,
+            otp_key: None,
+            comment: None,
+            listed_in: None,
+        };
+        let wire = serde_json::to_value(&cleared).unwrap();
+        assert_eq!(wire["notes"], serde_json::Value::Null);
+        assert!(wire.get("notes").is_some() && wire.get("username").is_none());
+    }
 
     fn an_entry() -> EntryRecord {
         EntryRecord {
