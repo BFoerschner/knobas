@@ -2737,6 +2737,35 @@ test("a move's write answering does not lay the board over its echoes again", as
   expect(vi.mocked(withStatusEchoes).mock.calls.length).toBe(laid);
 });
 
+/**
+ * A card carries the focus its press gave it, and its row in the column it leaves goes as it lands: the window's
+ * teardown of that row asked which rows it holds while Svelte destroyed effects, where a derived runs again over the
+ * batch's old values. That ran the board's whole read once more in the drop's task, and left the overlay's kept answer
+ * stale, so the next pass laid it over again: four passes for one drop, three of a laned drop's in knobas's WebView2
+ * window (the ux30 end gate, 2026-11-23). One pass, whatever has focus.
+ */
+test("a focused card dropped in another column lays the board over its echoes once", async () => {
+  const h = harness();
+  movable(h, ["In Progress"]);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS[1]!.card, status: "To Do" }, "press", h.ports.moves!.reachableTransitions);
+  target.querySelector<HTMLElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.focus();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+  const laid = vi.mocked(withStatusEchoes).mock.calls.length;
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  expect(inColumn("In progress")[0]).toBe("PAY-2");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-2");
+  expect(vi.mocked(withStatusEchoes).mock.calls.length - laid).toBe(1);
+});
+
 test("a refused move puts the card back in its column at its place, with the source's note", async () => {
   const h = harness();
   const { ears } = movable(h);
@@ -2970,3 +2999,4 @@ test("laned by issue type, a drop in another lane is refused with the sentence a
   await settle();
   expect(sent).toEqual([]);
 });
+

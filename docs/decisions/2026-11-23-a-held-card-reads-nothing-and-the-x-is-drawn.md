@@ -85,3 +85,26 @@ draw the same (`TicketsPage.svelte`, held by a test). In the app, where the answ
 was a second frame's work after the drop. In the window the second pass in the drop's own task remains: its trigger
 lands with the focus the drop gives the moved card, and is not yet named. Owed: name it, and take the forced layout out
 of the first pass.
+
+## The second pass named (2026-11-23, later)
+
+A card has the focus its press gave it when it is dropped, and its row in the column it leaves goes as it lands. The
+column's window (`shell/windowed.svelte.ts`) noted that focus, and its teardown of the row asked which keys it holds and
+where its span runs, to tell a row the window scrolled away (whose focus the list keeps) from one that left the list. A
+teardown runs while Svelte destroys effects, and there a derived read whose sources changed in the batch runs again over
+their old values: the column's keys ran the column's cards, the held places, and the reader's overlaid board and bands.
+That was the pass after the move in the drop's task. Run over the old echoes, it also left the overlay's kept statuses
+(`echoStatuses`) at the old ones, so the next pass found them changed and laid the board over again. In knobas's window
+a laned drop laid the board over four times in its own task (instrumented build, 1x); a carry that dropped a focused
+card did the same in the page's tests.
+
+The teardown now reads the keys and span the window last worked out, kept as plain values beside its deriveds: the same
+answer (a row the list no longer holds is gone; one outside the span is held), and nothing reactive runs while effects
+are destroyed. One pass a drop, held by a test that fails on the old teardown (4 passes) and passes on the new (1).
+
+Measured on the Mac's headless Chrome (load 3 to 4), the parent (044c4708) and the fix alternated, two rounds each, the
+`lanes` case at 1440 x 868: drop median 69.0 and 68.5 ms at 4x before, 46.4 and 46.9 after; at 6x 107.2 and 107.3
+before, 73.8 and 76.5 after; the first drop at 4x 94.8 and 92.8 before, 65.0 and 65.3 after. The forced style and
+layout inside the first pass is Chromium's own focus fix-up as the focused card's old row is removed; the focus the
+drop gives the moved card needs the same update, so it stays. Owed: the window's numbers on Björn's PC (WSL and the PC
+were taken back before the fix could be measured there).
