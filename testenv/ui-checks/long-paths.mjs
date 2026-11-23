@@ -30,6 +30,9 @@
 // A screen with `under` (the small-fixes sweep, 2026-11-21: *Add a default*'s two dropdowns grew to 1,370 px with long names)
 // holds a row of controls to a table's columns: [a control in the row, the table], and each control of that row must stand
 // inside the table's column of the same place, its long names cut in their box.
+// A screen with `whole` (the ux30 end gate, 2026-11-23: Passwords' *Open web interface W* cut at the entry panel's edge in a
+// 1100 px window) holds every button under the selectors it names to the window and to every box that clips it, sideways: a
+// control is drawn whole or the screen misses.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -60,6 +63,8 @@ const BUILD_SIZES = [
   [1440, 868, 1],
   [1100, 600, 1],
 ];
+// Passwords' screens add the window's smallest at a usual height and 1440x868, the sizes the ux30 end gate read.
+const PW_SIZES = [...SIZES, [1100, 800, 1], [1440, 868, 1]];
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 const PIPELINE = "builds/teamcity%3AbuildType%3APayout_Docker";
 const RUN = "build/teamcity%3AbuildType%3APayout_Docker/teamcity%3Abuild%3APayout_Docker-611";
@@ -137,6 +142,9 @@ const SCREENS = [
   { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
   // A site's saved sign-in (ux29): Settings' row naming a long username, held to its column.
   { id: "settings-site-signin", route: "settings/source/confluence" },
+  // Passwords (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
+  { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
+  { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
@@ -288,6 +296,29 @@ const PRESS = (words) => String.raw`(() => {
   return true;
 })()`;
 
+// Runs in the page: each button under `selector` that is drawn and not shown whole, sideways, inside the window and every box
+// that clips it. Null when no button is drawn there.
+const WHOLE = (selector) => String.raw`(() => {
+  const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
+  const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
+  const buttons = [...document.querySelectorAll(${JSON.stringify(selector)})].flatMap((head) => [...head.querySelectorAll("button, a.tf-btn")]).filter((b) => b.getBoundingClientRect().width > 0);
+  if (buttons.length === 0) return "null";
+  const out = [];
+  for (const b of buttons) {
+    const r = b.getBoundingClientRect();
+    let left = Math.max(r.left, 0), right = Math.min(r.right, innerWidth);
+    for (let e = b.parentElement; e; e = e.parentElement) {
+      if (getComputedStyle(e).overflowX === "visible") continue;
+      const box = e.getBoundingClientRect();
+      left = Math.max(left, box.left);
+      right = Math.min(right, box.right);
+    }
+    const cut = Math.max(0, r.right - right) + Math.max(0, left - r.left);
+    if (cut > 0.5) out.push({ at: where(b), text: b.textContent.trim(), over: Math.round(cut) });
+  }
+  return JSON.stringify(out);
+})()`;
+
 // Opens the launcher (⌘K) under *Everything* (⌘D when it is under *Titles*), types `words` and waits for the pane to follow the
 // first row. False when the launcher or its rows never come.
 const LAUNCHER = (words) => String.raw`(async () => {
@@ -373,7 +404,9 @@ for (const [at, screen] of SCREENS.entries()) {
       const tables = screen.tables ? JSON.parse(await evaluate(TABLES(screen.tables))) : null;
       const under = screen.under ? JSON.parse(await evaluate(UNDER(screen.under))) : null;
       if (screen.under && under === null) stepped = false;
-      return { stepped, tables, under, ...JSON.parse(await evaluate(CHECK)) };
+      const whole = screen.whole ? JSON.parse(await evaluate(WHOLE(screen.whole))) : null;
+      if (screen.whole && whole === null) stepped = false;
+      return { stepped, tables, under, whole, ...JSON.parse(await evaluate(CHECK)) };
     };
     const shoot = async (name) => {
       if (!shots) return;
@@ -387,11 +420,12 @@ for (const [at, screen] of SCREENS.entries()) {
     await shoot(`${screen.id}-${size}`);
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: [screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: [screen.whole, screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),
       ...(long.under ?? []).map((u) => ({ kind: "under", at: u.at, text: "stands outside the table's column", over: u.over })),
+      ...[...(short.whole ?? []), ...(long.whole ?? [])].map((w) => ({ kind: "whole", at: w.at, text: `"${w.text}" is cut`, over: w.over })),
       ...(long.tables?.wraps ?? []).map((w) => ({ kind: "wraps", at: w.at, text: `${w.text} (${w.lines} lines)` })),
       ...(long.tables?.wider ?? []).map((w) => ({ kind: "wider", at: w.at, text: "the table is wider than its box", over: w.over })),
       ...Object.entries(long.tables?.widths ?? {})
