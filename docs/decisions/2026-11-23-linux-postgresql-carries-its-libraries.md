@@ -77,7 +77,7 @@ older Fedora and to `openssl3-libs` on 45, which carries `libcrypto.so.3` too. N
 affected: Ubuntu 26.04 still ships `libssl3t64`, and the AppImage carries its own `libssl.so.3`.
 
 **Ruled (Fable):** in the hotfix. Its first side ruling, to ticket this, rested on my claim that a desktop has
-`libssl.so.3`, which is false on Fedora 45. The lasting fix is rustls or a vendored OpenSSL (ticketed), because Fedora
+`libssl.so.3`, which is false on Fedora 45. The lasting fix is rustls or a vendored OpenSSL (#2512), because Fedora
 will drop the compat package one day.
 
 ## The checks that would have caught it
@@ -116,11 +116,21 @@ In fresh containers on the WSL box:
 
 On WSL itself, `cargo test -p knobas-db` passed 224 tests, and `knobas-app`'s postgres tests passed.
 
-**Owed once ux34 is built (Fable's condition):** its `.deb` reaches Ready on a fresh 26.04 and on 24.04 over ux33's
-data, and its `.rpm` installs with dnf on Fedora 45 and reaches Ready.
+**ux34, the hotfix built from this:**
+- Release run 45238088766's new check passed 7 of 7 on the `ubuntu-26.04` runner, for the `.deb`, `.rpm` and
+  `.AppImage`.
+- Opened on the Mac:
+  - both packages carry the pinned 18.6.1 archive;
+  - its 207 ELF files need nothing outside its `lib/` and glibc, and `UTC` is in it;
+  - both `knobas-app` binaries hold `=18.6.1` and the hard-link extractor;
+  - the `.rpm` requires `libssl.so.3()(64bit)`, `libwebkit2gtk-4.1.so.0()(64bit)` and `libgtk-3.so.0()(64bit)`.
+
+**Still owed (Fable's condition, needs containers; WSL was taken back before it could run):** ux34's `.deb` reaches
+Ready on a fresh 26.04 and on 24.04 over ux33's data, its `.rpm` installs with dnf on Fedora 45 and reaches Ready, and
+its AppImage reaches Ready on 26.04.
 
 ## Left for later
 
-- **macOS and Windows are on 18.6.0** until their 18.6.1 builds have been through a Windows pass (ticketed).
+- **macOS and Windows are on 18.6.0** until their 18.6.1 builds have been through a Windows pass (#2511).
 - **The AppImage leaves fribidi to the host.** On a bare 26.04 it stops on a missing `libfribidi.so.0`. Every GTK
   desktop has it, so nothing is needed there.
