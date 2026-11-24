@@ -4,6 +4,8 @@
  * who uses a declaration. The page never holds the model: every answer is plain data, names already in words, each
  * name that goes somewhere carrying the key it goes to.
  */
+import { loadFakes } from "./example-fakes";
+import { choiceIdOf, makeExample, tickIdOf, type ExampleOptions } from "./xsd-example";
 import {
   childElements,
   elDecl,
@@ -81,6 +83,10 @@ export type Row =
       readonly again: boolean;
       /** Its declaration is not found here. */
       readonly lost: boolean;
+      /** An optional row's tick (S4b): the particle's file and line, as the example names it; `null` where it must stand. */
+      readonly tick: string | null;
+      /** It may stand more than once: its tick carries a count. */
+      readonly many: boolean;
     }
   | { readonly k: "group"; readonly id: string; readonly words: string; readonly from: Name | null; readonly occ: Occurs; readonly items: readonly Row[]; readonly choice: Choice | null }
   | { readonly k: "any"; readonly id: string; readonly words: string; readonly occ: Occurs }
@@ -163,6 +169,8 @@ export interface FileRow {
   readonly bad: string | null;
   /** Another repository's, and where it was read. */
   readonly from: Elsewhere | null;
+  /** The address it was downloaded from; `null` for a file not downloaded. */
+  readonly url: string | null;
 }
 export interface LostRow {
   readonly depth: number;
@@ -238,6 +246,7 @@ export type XsdCall =
   | { kind: "values"; key: string; from: number }
   | { kind: "way"; key: string }
   | { kind: "check"; xml: string }
+  | { kind: "example"; key: string; options: ExampleOptions }
   | { kind: "declOf"; names: { ns: string; local: string }[] }
   | { kind: "close" };
 
@@ -299,7 +308,7 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
   if (call.kind === "open") {
     const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
     sessions.set(session, s);
-    return opened(load(s, bundled), s.lean === true);
+    return opened(load(s, bundled), s.lean === true, s.index);
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
@@ -309,11 +318,11 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      return opened(load(s, bundled), s.lean === true);
+      return opened(load(s, bundled), s.lean === true, s.index);
     }
     case "pointed":
       s.pointed = call.pointed;
-      return opened(load(s, bundled), s.lean === true);
+      return opened(load(s, bundled), s.lean === true, s.index);
     case "page":
       return pageOf(s, call.place);
     case "rows": {
@@ -332,6 +341,17 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       return wayDown(s, call.key);
     case "check":
       return checkWith(s, call.xml, bundled);
+    case "example": {
+      // Faker in the language asked for loads with the first example in it, here in the worker; until then, and where
+      // it cannot load, the fixed values stand (`example-fakes.ts`).
+      const set = s.set;
+      if (set === null) return null;
+      const options = call.options;
+      return loadFakes(options.lang).then(
+        () => makeExample(set, call.key, options),
+        () => makeExample(set, call.key, options),
+      );
+    }
     case "declOf":
       return declarationOf(s, call.names);
     case "close":
@@ -340,10 +360,10 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
   }
 }
 
-function opened(set: SchemaSet, lean = false): Opened {
+function opened(set: SchemaSet, lean = false, repo: { total: number; read: number } | null = null): Opened {
   const entry = set.docs[0];
   if (entry !== undefined && entry.bad !== null) return { ok: false, error: entry.bad, line: entry.badLine };
-  return { ok: true, index: indexOf(set, lean), need: set.need };
+  return { ok: true, index: indexOf(set, lean, repo), need: set.need };
 }
 
 // ---- The check (section 24) ----
@@ -486,7 +506,7 @@ function particleRows(s: XsdSession, p: Particle, id: string, trail: readonly ob
     const from = q.ns === "##other" ? "from another namespace" : q.ns === "##any" ? "from any namespace" : q.ns === "##local" ? "in no namespace" : q.ns === "##targetNamespace" ? "from this namespace" : `from ${q.ns}`;
     return [{ k: "any", id: `${id}/*${q.line}`, words: `${from}${q.pc === "strict" ? ", declared" : ""}`, occ: occ(q.min * lo, q.max * hi) }];
   }
-  if (q.k === "el") return [elementRow(s, q.el, `${id}/${q.el.name}`, trail, q.min * lo, q.max * hi)];
+  if (q.k === "el") return [elementRow(s, q.el, `${id}/${q.el.name}`, trail, q.min * lo, q.max * hi, q.min === 0 && q.max > 0 ? tickIdOf(q.el) : null, q.max > 1)];
   if (q.k === "grp") return [];
   const plain = q.k === "seq" && q.min === 1 && q.max === 1 && q.from === undefined;
   const inner = q.items.flatMap((it) => particleRows(s, it, plain ? id : `${id}/${q.k}${q.line}`, trail, plain ? lo : 1, plain ? hi : 1));
@@ -500,17 +520,18 @@ function particleRows(s: XsdSession, p: Particle, id: string, trail: readonly ob
       const kids = childElements(set, b).map((c) => label(set, c.el.elNs, c.el.name));
       return kids.length === 0 ? "nothing" : kids.length <= 2 ? kids.join(" + ") : `${kids[0]} and ${kids.length - 1} more`;
     });
-    // A choice is named by where it is written and what it offers: one pick holds wherever it stands (section 22).
-    choice = { id: `${q.line}:${branches.join("|")}`, branches };
+    // A choice is named by the file and line it is written at, as the example names it: one pick holds wherever it
+    // stands (section 22).
+    choice = { id: choiceIdOf(set, q) ?? `${q.line}:${branches.join("|")}`, branches };
   }
   return [{ k: "group", id: `${id}/${q.k}${q.line}`, words, from: q.from !== undefined ? nameOfKey(set, q.from) : null, occ: occ(q.min * lo, q.max * hi), items: inner, choice }];
 }
 
-function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly object[], min: number, max: number): Row {
+function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly object[], min: number, max: number, tick: string | null = null, many = false): Row {
   const set = s.set!;
   const decl = elDecl(set, el);
   const name = nameOf(set, el.elNs, el.name, decl !== null && el.ref !== null ? `el ${el.ref}` : null);
-  if (decl === null) return { k: "el", id, name: { ...name, key: null }, type: { name: null, note: null, missing: null }, notes: [], occ: occ(min, max), facts: [], docu: null, can: false, again: false, lost: true };
+  if (decl === null) return { k: "el", id, name: { ...name, key: null }, type: { name: null, note: null, missing: null }, notes: [], occ: occ(min, max), facts: [], docu: null, can: false, again: false, lost: true, tick: null, many: false };
   const t = elType(set, decl);
   const sh = t.def === null ? null : shape(set, t.def);
   const again = trail.includes(decl);
@@ -528,6 +549,8 @@ function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly 
     can,
     again,
     lost: false,
+    tick: again ? null : tick,
+    many,
   };
 }
 
@@ -783,6 +806,9 @@ function kidsOf(set: SchemaSet, el: ElementDecl): ReturnType<typeof childElement
 
 // ---- The set's index (sections 7, 8 and 13) ----
 
+/** The guessed namespaces *Seen while reading* names: one line each, a handful at most. */
+const GUESSES_SHOWN = 3;
+
 const HOW: Record<How, string> = {
   pointed: "you pointed to it",
   downloaded: "downloaded",
@@ -796,16 +822,16 @@ const HOW: Record<How, string> = {
 };
 const VERB: Record<string, string> = { import: "imported", include: "included", redefine: "redefined", override: "overridden" };
 
-export function indexOf(set: SchemaSet, lean = false): SetIndex {
+export function indexOf(set: SchemaSet, lean = false, repo: { total: number; read: number } | null = null): SetIndex {
   const files: FileRow[] = [];
   const lost: LostRow[] = [];
   const counts = new Map<string, number>();
   for (const c of set.comps.values()) counts.set(c.file, (counts.get(c.file) ?? 0) + 1);
   const listing: { kind: "file" | "lost"; at: number }[] = [];
   const listed = new Set<string>();
-  type Job = { kind: "file"; path: string; depth: number; ref: { kind: string; how: How | null; from: Elsewhere | null } | null } | { kind: "lost"; row: LostRow };
+  type Job = { kind: "file"; path: string; depth: number; ref: { kind: string; how: How | null; from: Elsewhere | null; location: string | null } | null } | { kind: "lost"; row: LostRow };
   const queue: Job[] = [];
-  const visit = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null } | null) => {
+  const visit = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null; location: string | null } | null) => {
     const doc = set.docs.find((d) => d.path === path);
     if (doc === undefined || listed.has(path)) return;
     listed.add(path);
@@ -823,9 +849,10 @@ export function indexOf(set: SchemaSet, lean = false): SetIndex {
       reading: doc.reading,
       bad: doc.bad,
       from: ref?.from ?? null,
+      url: ref?.how === "downloaded" ? ref.location : null,
     });
     for (const r of doc.refs) {
-      if (r.to !== null && r.how !== "builtin") queue.push({ kind: "file", path: r.to, depth: depth + 1, ref: { kind: r.kind, how: r.how, from: r.from } });
+      if (r.to !== null && r.how !== "builtin") queue.push({ kind: "file", path: r.to, depth: depth + 1, ref: { kind: r.kind, how: r.how, from: r.from, location: r.location } });
       else if (r.to === null && !r.reading)
         queue.push({ kind: "lost", row: { depth: depth + 1, kind: r.kind, location: r.location, namespace: r.namespace, why: r.why ?? "", address: r.address ?? (r.location !== null && isRemote(r.location) ? r.location : null), two: r.two, by: path } });
     }
@@ -887,6 +914,12 @@ export function indexOf(set: SchemaSet, lean = false): SetIndex {
   const cap = set.problems.find((p) => p.kind === "cap");
   if (cap !== undefined && cap.kind === "cap")
     seen.push([{ text: cap.what === "files" ? "The set reaches more than 400 files; knobas read the first 400." : cap.what === "bytes" ? "The set is larger than 64 MiB; knobas read what fits." : `${baseOf(cap.path)} is larger than 5 MiB, which knobas reads at most.` }]);
+  // Where a namespace was guessed: more than one file of the repository declares it, and the nearest was taken.
+  const guessed = new Map<string, { to: string; others: number }>();
+  for (const d of set.docs) for (const r of d.refs) if (r.to !== null && r.others.length > 0 && r.namespace !== null && !guessed.has(r.namespace)) guessed.set(r.namespace, { to: r.to, others: r.others.length });
+  for (const [namespace, g] of [...guessed].slice(0, GUESSES_SHOWN))
+    seen.push([{ text: `${plural(g.others + 1, "file", "files")} here declare ` }, { text: namespace, code: true }, { text: `; knobas took the nearest, ${baseOf(g.to)}.` }]);
+  if (repo !== null && repo.read < repo.total) seen.push([{ text: `knobas looked at ${count(repo.read)} of ${count(repo.total)} .xsd files here.` }]);
   if (set.docs.some((d) => d.v11)) seen.push([{ text: "A file uses XML Schema 1.1. knobas draws it; the checker (libxml2) reads 1.0 and will say so." }]);
   if (set.need.length === 0 && ![...set.comps.values()].some((c) => c.docu.length > 0)) seen.push([{ text: "These files hold no documentation. Names, types and the file's own first comment are what there is." }]);
   for (const d of set.docs) for (const p of d.problems.slice(0, 3)) seen.push([{ text: `${baseOf(d.path)}, line ${count(p.line)}: ${p.text}` }]);

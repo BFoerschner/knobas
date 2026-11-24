@@ -15,6 +15,7 @@
   import TfXsdRuns from "./TfXsdRuns.svelte";
   import TfXsdType from "./TfXsdType.svelte";
   import type { XsdState } from "./xsd.svelte";
+  import type { Candidate } from "./xsd-point";
 
   let {
     st,
@@ -24,7 +25,10 @@
     onsource = null,
     oncopylink = null,
     onpoint = null,
+    onpick = null,
+    ondownload = null,
     head = null,
+    body = null,
     scroller = $bindable(null),
   }: {
     st: XsdState;
@@ -37,8 +41,14 @@
     oncopylink?: ((place: string, label: string) => void) | null;
     /** *Point to a file…* on a reference not found here. */
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
+    /** One of the files two repositories declare, picked for a reference (section 16). */
+    onpick?: ((namespace: string | null, location: string | null, c: Candidate) => void) | null;
+    /** *Download it* on a reference that names an address (section 17). */
+    ondownload?: ((namespace: string | null, location: string | null, address: string) => Promise<void>) | null;
     /** What stands at the head's end under 1,480 px (S4's *Reference* or *Example*). */
     head?: Snippet | null;
+    /** What stands under the head in place of the reference: the example, under 1,480 px. */
+    body?: Snippet | null;
     scroller?: HTMLElement | null;
   } = $props();
 
@@ -62,10 +72,14 @@
   const USES_ALL = 5000;
   const NAMES_SHOWN = 24;
   let limit = $state(FIRST);
+  // The limit is set for a new page before it draws: set after, a page picked after another drew every row with the
+  // limit the last one grew to, then cut them to a screenful in the same frame (UBL's Invoice page, 53 rows).
+  $effect.pre(() => {
+    if (page !== null) limit = st.drawWhole ? Infinity : FIRST;
+  });
   $effect(() => {
     const at = page;
     if (at === null) return;
-    limit = st.drawWhole ? Infinity : FIRST;
     let frame = 0;
     const more = () => {
       if (limit >= at.rows.length) return;
@@ -87,7 +101,7 @@
       <div class="tf-oas-back"><button type="button" class="tf-btn tf-sm" onclick={onback}>Back to {st.backs.at(-1)?.label}</button></div>
     {/if}
     {#if page === null}
-      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} />{/if}
+      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} {onpick} {ondownload} />{/if}
     {:else}
       {@const p = page}
       <h2 class="tf-xsd-h">
@@ -102,6 +116,9 @@
         {#if oncopylink !== null}<button type="button" class="tf-oas-more" onclick={() => oncopylink?.(p.place, `${p.name.prefix}${p.name.local}`)}>Copy link</button>{/if}
         {#if onsource !== null}<button type="button" class="tf-oas-more" onclick={() => onsource?.(p.file, p.line)}>Show in Source</button>{/if}
       </div>
+      {#if body !== null}
+        {@render body()}
+      {:else}
       {#if p.type !== null || p.chain.length > 0}
         <div class="tf-xsd-chain">
           {#if p.type !== null}<span>{#if p.type.name === null && p.type.missing === null}A type of its own{:else}Type <TfXsdType type={p.type} {ongo} />{/if}</span>{/if}
@@ -147,7 +164,7 @@
       {#if p.rows.length > 0}
         <section class="tf-oas-sec">
           <h3 class="tf-oas-lab"><span>{p.holdsLabel}</span>{#if p.expandable}<span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void st.openAll(p.rows)}>Expand all</button></span>{/if}</h3>
-          <div class="tf-oas-fs"><TfXsdRows {st} at={p.key} rows={p.rows.length > limit ? p.rows.slice(0, limit) : p.rows} {ongo} /></div>
+          <div class="tf-oas-fs"><TfXsdRows {st} at={p.key} rows={p.rows.length > limit ? p.rows.slice(0, limit) : p.rows} {ongo} ticks={allIn} /></div>
         </section>
       {:else if p.empty}
         <section class="tf-oas-sec"><h3 class="tf-oas-lab"><span>Holds</span></h3><p class="tf-oas-fnote">Nothing: it stands empty.</p></section>
@@ -181,6 +198,7 @@
         </section>
       {:else if allIn && !p.key.startsWith("el ")}
         <section class="tf-oas-sec"><h3 class="tf-oas-lab"><span>Used by</span></h3><p class="tf-oas-fnote">Nothing in these files names it.</p></section>
+      {/if}
       {/if}
     {/if}
   </div>

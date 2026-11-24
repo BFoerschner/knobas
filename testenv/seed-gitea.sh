@@ -274,6 +274,19 @@ done
 [ -d ../fixtures/xsd/opentrans-2.1 ] && push_files ledger-api ../fixtures/xsd/opentrans-2.1/ schemas/opentrans/
 
 # --------------------------------------------------------------------------
+# 4e. The schema checks' live files (2026-11-24, `fixtures/schema-live/
+#    SOURCE.md`): a partner's order whose schema another repository declares
+#    (ledger-gateway, alone), one that two declare (ledger-gateway and
+#    payout-service), and one at an address on this Gitea, each repository's
+#    folder onto its main. Byte for byte, as in 4c.
+# --------------------------------------------------------------------------
+if [ -d "../fixtures/schema-live/files/$ORG" ]; then
+  for dir in "../fixtures/schema-live/files/$ORG"/*/; do
+    push_files "$(basename "$dir")" "$dir" ""
+  done
+fi
+
+# --------------------------------------------------------------------------
 # Helpers used by the content sections below.
 # --------------------------------------------------------------------------
 ensure_branch() {  # ensure_branch <repo> <branch>

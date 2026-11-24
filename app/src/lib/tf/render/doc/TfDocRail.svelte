@@ -29,6 +29,8 @@
     oncheck = null,
     onschema = null,
     onpoint = null,
+    ondownload = null,
+    onschemamenu = null,
   }: {
     st: DocState;
     /** What the list shows. */
@@ -46,7 +48,21 @@
     oncheck?: (() => void) | null;
     onschema?: (() => void) | null;
     onpoint?: (() => void) | null;
+    /** *Download it*: the schema at the address the document names, downloaded on the press (never by itself). */
+    ondownload?: ((namespace: string | null, address: string) => Promise<void>) | null;
+    /** *Schema ▾* opened: what its items will need can be read while the person reaches for one. */
+    onschemamenu?: (() => void) | null;
   } = $props();
+  /** Whether *Download it* waits on its request. */
+  let downloading = $state(false);
+  async function download(namespace: string | null, address: string) {
+    downloading = true;
+    try {
+      await ondownload?.(namespace, address);
+    } finally {
+      downloading = false;
+    }
+  }
   const head = $derived(check?.head ?? null);
   const departures = $derived(check?.found ?? []);
   let schemaMenu = $state(false);
@@ -81,7 +97,7 @@
 
 {#snippet menu()}
   {#if onstop !== null || onschema !== null || onpoint !== null}
-    <button type="button" class="tf-btn tf-sm tf-ghost tf-xv-schema" bind:this={schemaButton} aria-haspopup="menu" aria-expanded={schemaMenu} onclick={() => (schemaMenu = !schemaMenu)}>Schema ▾</button>
+    <button type="button" class="tf-btn tf-sm tf-ghost tf-xv-schema" bind:this={schemaButton} aria-haspopup="menu" aria-expanded={schemaMenu} onclick={() => ((schemaMenu = !schemaMenu), schemaMenu && onschemamenu?.())}>Schema ▾</button>
   {/if}
 {/snippet}
 
@@ -120,7 +136,11 @@
       {:else if head.k === "address"}
         <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
         <p>Its schema is at an address, <code class="tf-xv-code">{head.address}</code>. knobas fetches nothing by itself.</p>
-        <p>{#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{:else}&nbsp;{/if}</p>
+        <p>
+          {#if ondownload !== null}{@const address = head.address}{@const namespace = head.namespace}<button type="button" class="tf-oas-ref" disabled={downloading} title="One request to {address}, kept on this computer" onclick={() => void download(namespace, address)}>{downloading ? "Downloading…" : "Download it"}</button>{/if}
+          {#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{/if}
+          {#if ondownload === null && onpoint === null}&nbsp;{/if}
+        </p>
       {:else if head.k === "two"}
         <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
         <p>Two repositories declare <code class="tf-xv-code">{head.namespace}</code>.</p>

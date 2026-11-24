@@ -67,8 +67,8 @@ export function localEngine(): SpecEngine {
   const sessions = new Map<number, SpecFiles>();
   return async (session, call) => {
     const model = await import("./openapi");
-    // As the worker does: an example waits for Faker and randexp (`openapi-fakes.ts`).
-    if (call.kind === "page" || call.kind === "sample") await (await import("./openapi-fakes")).loadFakes(globalThis.navigator?.language).catch(() => {});
+    // As the worker does: an example waits for Faker and randexp (`example-fakes.ts`).
+    if (call.kind === "page" || call.kind === "sample") await (await import("./example-fakes")).loadFakes(globalThis.navigator?.language).catch(() => {});
     return model.answerCall(sessions, session, call);
   };
 }

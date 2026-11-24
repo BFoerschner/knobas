@@ -112,6 +112,30 @@ pub struct InRepoFiles {
     pub total: u32,
 }
 
+/// A schema file that declares a namespace ([`FileIndex::declaring`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Declaring {
+    /// `sync.code_repo.no`.
+    pub no: u64,
+    /// Its path in the repository.
+    pub path: String,
+}
+
+/// The schema files that declare a namespace, and whether every file the
+/// words found was read to tell.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeclaringFiles {
+    /// The shortest paths first.
+    pub files: Vec<Declaring>,
+    /// Whether every file the namespace's words and `.xsd` found was read:
+    /// past [`DECLARING_READ`] the rest are not.
+    pub whole: bool,
+}
+
+/// The most files read whole to tell whether they declare a namespace: every
+/// `.xsd` that imports one holds its words too.
+pub const DECLARING_READ: usize = 400;
+
 /// What the index knows of one repository beside its number, read from the
 /// database (`sync.code_repo`, `knobas.favourite`, `sync.item`), so a key
 /// asks the database nothing to learn which repository a number is.
@@ -378,6 +402,32 @@ impl FileIndex {
             Err(error) => {
                 tracing::warn!(%error, "the files index could not be read");
                 InRepoFiles::default()
+            }
+        }
+    }
+
+    /// The `.xsd` files of every repository whose text declares `namespace`
+    /// as its target (the XSD design, 2026-11-23, section 16, step 6), at
+    /// most `most`, the shortest paths first. Of the files whose text holds
+    /// the namespace's words, at most [`DECLARING_READ`] are read to tell.
+    /// Nothing for an empty namespace: no file is found by having none.
+    #[must_use]
+    pub fn declaring(&self, namespace: &str, most: usize) -> DeclaringFiles {
+        let Some(inner) = &self.inner else {
+            return DeclaringFiles::default();
+        };
+        match read::declaring(
+            &inner.reader.searcher(),
+            &inner.fields,
+            namespace,
+            most,
+            DECLARING_READ,
+            self.bound,
+        ) {
+            Ok(found) => found,
+            Err(error) => {
+                tracing::warn!(%error, "the files index could not be read");
+                DeclaringFiles::default()
             }
         }
     }

@@ -8,7 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import TfOpenApi from "./TfOpenApi.svelte";
-import { columnsFor, paneHeight } from "./explorer/layout";
+import { columnsFor, columnsSeen, paneHeight } from "./explorer/layout";
 import { localEngine, type SpecEngine } from "../../render/openapi-port";
 import { installFindKey } from "../filter-keys";
 import { FuzzyOrder } from "../filter/ranked.svelte";
@@ -653,4 +653,10 @@ test("a caret stands only where the opened block draws a row", async () => {
   await settle();
   const description = [...page().querySelectorAll<HTMLElement>(".tf-oas-fr")].find((r) => text(r.querySelector(".tf-oas-fname")) === "description")!;
   expect(description.classList.contains("tf-oas-can")).toBe(false);
+});
+
+test("a file view with no width, a page kept hidden, says nothing of its columns", () => {
+  expect(columnsSeen(0)).toBeNull();
+  expect(columnsSeen(1)).toBe(2);
+  expect(columnsSeen(2560)).toBe(4);
 });

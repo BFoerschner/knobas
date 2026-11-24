@@ -75,6 +75,16 @@ const settle = () => sleep(700);
 const OT = "schemas/opentrans/opentrans_2_1.xsd";
 const UBL = "ubl/xsd/maindoc/UBL-Invoice-2.1.xsd";
 const RAIL_ROWS = ".tf-xsd .tf-oas-row";
+/** The example's lines (S4), and a prep that puts the example in view: under 1,480 px the page's switch shows it. */
+const EX_LINES = ".tf-xsd .tf-xsd-xml .tf-l";
+const showExample = `async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let i = 0; i < 100 && !document.querySelector('.tf-xsd-hname'); i++) await wait(30);
+  [...document.querySelectorAll('.tf-xsd .tf-oas-pageseg button')].find((b) => b.textContent === 'Example')?.click();
+  for (let i = 0; i < 100 && !document.querySelector('${".tf-xsd .tf-xsd-xml .tf-l"}'); i++) await wait(30);
+}`;
+/** The example's seed typed: as \`A\` makes it again, with a seed known before. */
+const seedTo = (n) => `() => { const f = document.querySelector('.tf-xsd-seed'); f.value = '${n}'; f.dispatchEvent(new Event('change', { bubbles: true })); }`;
 const PAGE_ROWS = ".tf-xsd .tf-oas-page .tf-oas-fr, .tf-xsd .tf-xsd-frow";
 const pickRow = (label) => `() => [...document.querySelectorAll('.tf-xsd .tf-oas-row')].find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)} + ' ') || b.textContent.trim() === ${JSON.stringify(label)}).click()`;
 const mode = (m) => `() => [...document.querySelectorAll('.tf-xsd .tf-oas-modes button')].find((b) => b.textContent === ${JSON.stringify(m)}).click()`;
@@ -84,6 +94,12 @@ const CASES = [
   { name: "open", label: "openTRANS (4 files) opened from the README, to its overview", kind: "page", before: go(file("README.md")), act: go(file(OT)), sel: ".tf-xsd .tf-oas-title", text: "opentrans_2_1.xsd", watch: PAGE_ROWS },
   { name: "again", label: "openTRANS opened again, from UBL's invoice", kind: "page", before: go(file(UBL)), act: go(file(OT)), sel: ".tf-xsd .tf-oas-title", text: "opentrans_2_1.xsd", watch: PAGE_ROWS },
   { name: "ubl", label: "UBL's invoice (14 files, 2.8 MB) opened from the README, to its overview", kind: "page", before: go(file("README.md")), act: go(file(UBL)), sel: ".tf-xsd .tf-oas-title", text: "UBL-Invoice-2.1.xsd", watch: PAGE_ROWS },
+  // The example (S4): ORDER's from the rail, with the example in view; Everything; another seed; Check to libxml2's
+  // verdict (each run's prep makes the example again, so the verdict before it is gone).
+  { name: "example", label: "ORDER's example from the rail, to its lines", kind: "page", before: go(place(OT, "el/ORDER_HEADER")), prep: showExample, act: pickRow("ORDER"), sel: EX_LINES, text: "(ORDER)" },
+  { name: "everything", label: "Everything on ORDER's example, to its lines", kind: "press", before: go(place(OT, "el/ORDER")), prep: `async () => { await (${showExample})(); [...document.querySelectorAll('.tf-xsd-ctl button')].find((b) => b.textContent === 'Required only').click(); await new Promise((r) => setTimeout(r, 400)); }`, act: `() => [...document.querySelectorAll('.tf-xsd-ctl button')].find((b) => b.textContent === 'Everything').click()`, sel: EX_LINES, text: "every optional part" },
+  { name: "seed", label: "another seed on ORDER's example (as A), to its lines", kind: "press", before: go(place(OT, "el/ORDER")), prep: `async () => { await (${showExample})(); (${seedTo(4711)})(); await new Promise((r) => setTimeout(r, 400)); }`, act: seedTo(7), sel: EX_LINES, text: "seed 7," },
+  { name: "check", label: "Check on ORDER's example, to libxml2's verdict", kind: "press", before: go(place(OT, "el/ORDER")), prep: `async () => { await (${showExample})(); (${seedTo(4712)})(); await new Promise((r) => setTimeout(r, 400)); (${seedTo(4711)})(); await new Promise((r) => setTimeout(r, 400)); }`, act: `() => [...document.querySelectorAll('.tf-xsd-acts button')].find((b) => b.textContent === 'Check').click()`, sel: ".tf-xsd .tf-xsd-verdict b", text: "Valid" },
   { name: "pick", label: "ORDER's page from the rail", kind: "press", before: go(file(OT)), prep: `() => {}`, act: pickRow("ORDER"), sel: ".tf-xsd-hname", text: "ORDER" },
   { name: "pick-ubl", label: "UBL's Invoice page from the rail (53 documented rows)", kind: "press", before: go(file(UBL)), act: pickRow("Invoice"), sel: ".tf-xsd-hname", text: "Invoice" },
   { name: "follow", label: "a name followed into BMEcat, bmecat:dtSTRING from ORDER", kind: "press", before: go(place(OT, "el/ORDER")), act: `() => [...document.querySelectorAll('.tf-xsd .tf-oas-page button.tf-oas-ref')].find((b) => b.textContent === 'bmecat:dtSTRING').click()`, sel: ".tf-xsd-hname", text: "dtSTRING" },

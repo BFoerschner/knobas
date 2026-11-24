@@ -148,7 +148,7 @@ test("a ref into another file is read at the spec's commit through the byte read
   });
   await specDrawn();
   [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-row")].find((b) => text(b) === "GET /orders")!.click();
-  // The page's first answer waits for the example makers to load (`openapi-fakes.ts`): wait for the page, not for ticks.
+  // The page's first answer waits for the example makers to load (`example-fakes.ts`): wait for the page, not for ticks.
   await vi.waitFor(() => {
     flushSync();
     expect(text(target.querySelector(".tf-oas-page .tf-oas-h"))).toBe("GET /orders");

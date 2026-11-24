@@ -6,8 +6,8 @@
  *
  * - **The order a value is chosen in** (Björn, 2026-11-22): the spec's `example` or `default`; then `enum` or `const`;
  *   then the `format` (date-time, date, uuid, email, uri, ipv4, …); then the `pattern` (randexp, seeded, where it is
- *   simple and bounded); then the property's name (`openapi-names.ts`: `firstName`, `phone_number`, `plz`,
- *   `versicherungsnummer`, made by Faker, `openapi-fakes.ts`); then the type with its limits. A format or a pattern
+ *   simple and bounded); then the property's name (`example-names.ts`: `firstName`, `phone_number`, `plz`,
+ *   `versicherungsnummer`, made by Faker, `example-fakes.ts`); then the type with its limits. A format or a pattern
  *   beats the name. A password is always a placeholder. `example` is the last resort, for a string whose name the
  *   table does not know.
  * - **A name is read with the thing that holds it** (2026-11-22 polish): a parameter's own name (`org`, `repo`); a
@@ -23,8 +23,8 @@
  * - **Recursion is capped**: a ref met again on the way down is `null`, and nothing goes more than {@link DEPTH} deep.
  */
 import type { Shape } from "./openapi";
-import { fakeInt, fakePattern, fakeValue } from "./openapi-fakes";
-import { kindOf, nounOf, phraseOf, wordsOf, type Kind } from "./openapi-names";
+import { fakeInt, fakePattern, fakeValue } from "./example-fakes";
+import { kindOf, nounOf, phraseOf, wordsOf, type Kind } from "./example-names";
 
 /** Which way the example goes: into a request, or out of an answer. */
 export type Direction = "request" | "response" | "any";
@@ -142,7 +142,7 @@ export function fromPattern(pattern: string): string | null {
 /** Who a bare `name` belongs to where its holder is one of these: a person's name. */
 const PERSON = new Set(["user", "person", "people", "contact", "customer", "member", "employee", "account", "profile", "author", "patient", "student", "guest", "attendee", "recipient", "applicant", "kunde", "mitarbeiter", "benutzer", "teilnehmer", "owner", "assignee", "reviewer", "committer", "actor", "sender"]);
 
-/** What `name` asks for under `parent`: a bare `name` reads its holder, the rest the table (`openapi-names.ts`). */
+/** What `name` asks for under `parent`: a bare `name` reads its holder, the rest the table (`example-names.ts`). */
 function kindFor(name: string, parent: string): Kind | null {
   const kind = kindOf(name);
   if (kind !== "fullName" || wordsOf(name).join("") !== "name") return kind;

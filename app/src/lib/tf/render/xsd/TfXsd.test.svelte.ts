@@ -7,15 +7,27 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+const kept = vi.hoisted(() => ({ pointed: [] as unknown[], downloaded: new Map<string, string>() }));
+vi.mock("../../../ipc/api", async (original) => ({
+  ...(await original<typeof import("../../../ipc/api")>()),
+  xsdLocations: async () => structuredClone(kept),
+  xsdSetLocations: async (list: { pointed: unknown[] }) => ((kept.pointed = structuredClone(list.pointed)), structuredClone(kept)),
+  xsdFetch: async (address: string) => ({ url: address, sha256: "d".repeat(64), size: 1, at: "2026-11-24" }),
+  xsdDownloaded: async (sha: string) => kept.downloaded.get(sha) ?? null,
+}));
+
 import TfXsd from "./TfXsd.svelte";
 import { localXsdEngine } from "../../../render/xsd-port";
 import { familyFiles } from "../../../render/xsd-fixture";
 import { ns } from "../../../render/xml-names";
+import { XS } from "../../../render/xsd-xml";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
+  kept.pointed = [];
+  kept.downloaded.clear();
   target = document.createElement("div");
   document.body.appendChild(target);
   Element.prototype.scrollIntoView = function () {};
@@ -216,3 +228,124 @@ test("the rail follows the page: an element named by the address opens the tree 
   expect(railText()).toContain("ORDER 0..1");
   expect(rail().find((b) => text(b) === "ORDER 0..1")!.getAttribute("aria-expanded")).toBe("true");
 });
+
+test("Point to a file…: the picker lists the repository's schemas; one that declares another namespace is dim and not pickable", async () => {
+  const files = new Map(OT);
+  files.set("schemas/opentrans/bmecat_2005.xsd", familyFiles("bmecat-2005fd").get("bmecat_2005.xsd")!);
+  draw(files);
+  await settle();
+  button("Point to a file…", page().querySelector(".tf-xsd-nf")!)!.click();
+  await settle();
+  const rows = [...document.querySelectorAll<HTMLButtonElement>(".tf-xsd-pointrow")];
+  const named = (r: HTMLButtonElement) => text(r.querySelector(".tf-xsd-pointpath"));
+  // Started on the location's name: BME's own file, which declares another namespace.
+  expect(rows.map(named)).toEqual(["schemas/opentrans/bmecat_2005.xsd"]);
+  expect(rows[0]!.disabled).toBe(true);
+  expect(text(rows[0]!)).toContain(`declares ${ns("www.bmecat.org/bmecat/2005fd")}`);
+});
+
+/** openTRANS without its BMEcat: the import is answered by another synced repository, or two. */
+const BME = "schemas/opentrans/bmecat_2005.xsd";
+const BMECAT = ns("www.bmecat.org/bmecat/2005");
+function withoutBmecat() {
+  const files = new Map(OT);
+  const bme = files.get(BME)!;
+  files.delete(BME);
+  return { files, bme };
+}
+const catalog = { repo: "gitea:tidewater/catalog-tools", name: "tidewater/catalog-tools", branch: "main", path: "lib/bmecat_2005.xsd" };
+const mirror = { repo: "gitea:acme/schemas", name: "acme/schemas", branch: "trunk", path: "bmecat/bmecat_2005.xsd" };
+
+test("another synced repository answers an import by itself where it is the only one: the row says which, and at what branch", async () => {
+  const { files, bme } = withoutBmecat();
+  const readOther = vi.fn((repo: string, path: string) => Promise.resolve(repo === catalog.repo && path === catalog.path ? bme : null));
+  const elsewhere = vi.fn(() => Promise.resolve([catalog]));
+  draw(files, { readOther, elsewhere });
+  await drawn();
+  await settle(20);
+  expect(elsewhere).toHaveBeenCalledWith(BMECAT);
+  const row = [...page().querySelectorAll(".tf-xsd-frow")].find((r) => text(r).includes("bmecat_2005.xsd"))!;
+  expect(text(row)).toContain("in tidewater/catalog-tools, at main");
+  expect(readOther).toHaveBeenCalledWith(catalog.repo, catalog.path);
+  expect(page().querySelector(".tf-xsd-nf")).toBeNull();
+});
+
+test("two repositories declare it: the row asks once, with both; the pick is kept as a pointed file and read", async () => {
+  const { files, bme } = withoutBmecat();
+  const readOther = vi.fn(() => Promise.resolve(bme));
+  draw(files, { readOther, elsewhere: () => Promise.resolve([catalog, mirror]) });
+  await drawn();
+  await settle(20);
+  const lost = page().querySelector(".tf-xsd-nf")!;
+  expect(text(lost)).toContain("Two repositories declare it.");
+  // Nothing was read from either before the person picks.
+  expect(readOther).not.toHaveBeenCalled();
+  const offered = [...lost.querySelectorAll<HTMLButtonElement>(".tf-xsd-two button")].map((b) => text(b));
+  expect(offered).toEqual(["Use tidewater/catalog-tools: lib/bmecat_2005.xsd", "Use acme/schemas: bmecat/bmecat_2005.xsd"]);
+  button("Use acme/schemas: bmecat/bmecat_2005.xsd", lost)!.click();
+  await settle(30);
+  expect(kept.pointed).toEqual([{ namespace: BMECAT, location: "bmecat_2005.xsd", to: { repo: mirror.repo, path: mirror.path, name: "acme/schemas" } }]);
+  expect(readOther).toHaveBeenCalledWith(mirror.repo, mirror.path);
+  expect(page().querySelector(".tf-xsd-nf")).toBeNull();
+  const row = [...page().querySelectorAll(".tf-xsd-frow")].find((r) => text(r).includes("bmecat_2005.xsd"))!;
+  expect(text(row)).toContain("you pointed to it");
+});
+
+test("the picker lists another repository's schemas that declare the namespace, after this one's, with their branch", async () => {
+  const files = new Map(OT);
+  files.set(BME, familyFiles("bmecat-2005fd").get("bmecat_2005.xsd")!);
+  draw(files, { elsewhere: () => Promise.resolve([catalog, mirror]) });
+  await settle(20);
+  button("Point to a file…", page().querySelector(".tf-xsd-nf")!)!.click();
+  await settle();
+  const rows = [...document.querySelectorAll<HTMLButtonElement>(".tf-xsd-pointrow")];
+  expect(rows.map((r) => text(r.querySelector(".tf-xsd-pointpath")))).toEqual([
+    "tidewater/catalog-tools, at main: lib/bmecat_2005.xsd",
+    "acme/schemas, at trunk: bmecat/bmecat_2005.xsd",
+    BME,
+  ]);
+  expect(rows.map((r) => r.disabled)).toEqual([false, false, true]);
+});
+
+const seenLines = () => [...page().querySelectorAll(".tf-xsd-seen li")].map((li) => text(li));
+
+test("Seen while reading: a namespace two files here declare says which was taken, the nearest", async () => {
+  const { files, bme } = withoutBmecat();
+  files.set("vendor/bme/bmecat_2005.xsd", bme);
+  files.set("vendor/old/bme/bmecat_2005.xsd", bme);
+  draw(files);
+  await drawn();
+  await settle(20);
+  expect(seenLines()).toContain(`2 files here declare ${BMECAT}; knobas took the nearest, bmecat_2005.xsd.`);
+});
+
+test("Seen while reading: a repository with more schemas than the index reads says how many it looked at", async () => {
+  const { files, bme } = withoutBmecat();
+  // 320 schemas beside openTRANS's three and BMEcat: the index reads 300 of them, the nearest folders first.
+  for (let i = 0; i < 320; i += 1) files.set(`schemas/opentrans/z/${i}.xsd`, `<xs:schema xmlns:xs="${XS}" targetNamespace="urn:n${i}"/>`);
+  files.set("schemas/opentrans/b/bmecat_2005.xsd", bme);
+  draw(files);
+  await drawn();
+  await settle(30);
+  expect([...files.keys()].filter((p) => p.endsWith(".xsd"))).toHaveLength(324);
+  expect(seenLines()).toContain("knobas looked at 300 of 324 .xsd files here.");
+});
+
+test("an import at an address is offered, never fetched; Download it keeps the file and the set reads it from there", async () => {
+  const { files, bme } = withoutBmecat();
+  const address = ns("schemas.example/bmecat/bmecat_2005.xsd");
+  files.set(ENTRY, files.get(ENTRY)!.replace(/schemaLocation="bmecat_2005\.xsd"/, `schemaLocation="${address}"`));
+  kept.downloaded.set("d".repeat(64), bme);
+  draw(files);
+  await drawn();
+  await settle(20);
+  const lost = page().querySelector(".tf-xsd-nf")!;
+  expect(text(lost)).toContain("It is an address. knobas fetches none by itself.");
+  button("Download it", lost)!.click();
+  await settle(30);
+  expect(kept.pointed).toEqual([{ namespace: BMECAT, location: address, to: { url: address, sha256: "d".repeat(64), at: "2026-11-24" } }]);
+  expect(page().querySelector(".tf-xsd-nf")).toBeNull();
+  const row = [...page().querySelectorAll(".tf-xsd-frow")].find((r) => text(r).includes("bmecat_2005.xsd"))!;
+  expect(text(row)).toContain("downloaded");
+});
+

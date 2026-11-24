@@ -5,7 +5,7 @@ import type { DocSession } from "../../../render/doc-port";
 import type { XsdEngine } from "../../../render/xsd-port";
 import { ns } from "../../../render/xml-names";
 
-const FILE = { depth: 1, path: "schemas/s.xsd", ns: "urn:a", prefix: null, how: "imported, beside it", count: 3, found: "beside", adopted: false, reading: false, bad: null, from: null };
+const FILE = { depth: 1, path: "schemas/s.xsd", ns: "urn:a", prefix: null, how: "imported, beside it", count: 3, found: "beside", adopted: false, reading: false, bad: null, from: null, url: null };
 const INDEX = { listing: [], entry: "x", home: "urn:a", version: null, v11: false, head: null, files: [{ ...FILE, depth: 0, found: null }, FILE], lost: [], decls: [], roots: [], under: [], underOneOf: false, seen: [], ownElements: 0, ownTypes: 0, total: 3, reading: 0, ms: { read: 0, compile: 0 }, perFile: [] };
 const WORDS = { at: "B", attr: null, kind: "unexpected", text: [{ text: "B may not stand here." }], raw: "", said: true, expected: [], value: null };
 
@@ -53,4 +53,15 @@ test("what the root says, read from its first tag: the pair for its namespace, o
   expect(rootSays(`<?xml version="1.0"?>\n<o:ORDER xmlns:o="urn:o" xmlns:xsi="${xsi}" xsi:schemaLocation="urn:x x.xsd urn:o o.xsd">`)).toEqual({ name: "ORDER", namespace: "urn:o", location: "o.xsd", prefixes: { o: "urn:o", xsi } });
   expect(rootSays(`<a xmlns:i="${xsi}" i:noNamespaceSchemaLocation="a.xsd"/>`)).toMatchObject({ namespace: "", location: "a.xsd" });
   expect(rootSays(`<a xmlns="urn:a"/>`)).toMatchObject({ namespace: "urn:a", location: null });
+});
+
+test("how the schema was found reads after found: with knobas, pointed to, downloaded", async () => {
+  const doc = { places: async (paths: (string | null)[]) => paths.map(() => 1) } as unknown as DocSession;
+  const said: Record<string, string> = { bundled: "among the schemas that come with knobas", pointed: "where you pointed", downloaded: "at its address, downloaded" };
+  for (const [found, how] of Object.entries(said)) {
+    const own: XsdEngine = async (s, call) => (call.kind === "open" ? { ok: true, index: { ...INDEX, files: [INDEX.files[0], { ...FILE, found }] }, need: [] } : engine(s, call));
+    const c = new DocCheck(`r\n${found}.xml`, own);
+    await c.run(`${found}.xml`, { name: "a", namespace: "urn:a", location: "s.xsd" }, "<a/>", doc, reads, true);
+    expect(c.head).toMatchObject({ k: "checked", how });
+  }
 });

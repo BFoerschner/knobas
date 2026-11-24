@@ -5,9 +5,14 @@
  */
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
-import type { PageAnswer, Row, SetIndex, TreeRow } from "../../../render/xsd-answer";
+import type { Checked, PageAnswer, Row, SetIndex, TreeRow } from "../../../render/xsd-answer";
+import { localeOf } from "../../../render/example-fakes";
+import type { Example, ExampleOptions } from "../../../render/xsd-example";
 import type { XsdPort } from "../../../render/xsd-port";
 import type { RailMode } from "../../../render/xsd-view";
+
+/** An example's first seed (`xsd-example.ts`' `SEED`, which the page does not load: the maker runs in the worker). */
+const SEED = 4711;
 
 /** No place: the overview. */
 export const OVERVIEW = "";
@@ -41,6 +46,17 @@ export class XsdState {
   backs = $state<{ place: string; label: string; scroll: number }[]>([]);
   /** The folds and scroll the filter's first word put aside. */
   beforeFilter: { folds: string[]; scroll: number } | null = null;
+
+  // ---- The example (sections 19 to 23) ----
+  /** How examples are made: kept while the set is open, never saved. The language starts as the window's. */
+  ex = $state.raw<ExampleOptions>({ seed: SEED, optional: "required", repeats: 1, lang: localeOf(globalThis.navigator?.language), picks: {} });
+  /** The example of the element shown, with the element and settings it was made for; `null` before it is made. */
+  made = $state.raw<{ key: string; options: ExampleOptions; example: Example } | null>(null);
+  /** What the check said of it: `"checking"` while libxml2 reads it. */
+  verdict = $state.raw<Checked | "checking" | null>(null);
+  /** Under 1,480 px the example takes the page's place: which one the page shows. */
+  tab = $state<"ref" | "example">("ref");
+  #making = 0;
 
   constructor(port: XsdPort) {
     this.port = port;
@@ -149,6 +165,48 @@ export class XsdState {
   /** *Expand all* at a section's label: every row of the page, a few levels down. */
   async openAll(rows: readonly Row[]): Promise<void> {
     for (const id of openable(rows)) await this.open(id, 3);
+  }
+
+  /** Makes the example of element `key` with the settings as they stand; a newer ask wins. */
+  async makeExample(key: string): Promise<void> {
+    const run = ++this.#making;
+    const options = this.ex;
+    const example = await this.port.example(key, options);
+    if (run !== this.#making) return;
+    this.verdict = null;
+    this.made = example === null ? null : { key, options, example };
+  }
+
+  /** A control changed: the settings, and the example made again by whoever shows it. */
+  setExample(change: Partial<ExampleOptions>): void {
+    this.ex = { ...this.ex, ...change };
+  }
+
+  /** *Another* and `A`: a new seed, never the one shown. */
+  another(): void {
+    let seed = this.ex.seed;
+    while (seed === this.ex.seed) seed = 1 + Math.floor(Math.random() * 99_999);
+    this.setExample({ seed });
+  }
+
+  /** A choice's branch picked on its line: it holds wherever the choice stands, for the set's life. */
+  pick(choice: string, branch: number): void {
+    this.setExample({ picks: { ...this.ex.picks, [choice]: branch } });
+  }
+
+  /** A tick on an optional row (S4b): it stands `count` times with Required only; 0 takes the tick off. */
+  tick(id: string, count: number): void {
+    const ticks = Object.fromEntries(Object.entries(this.ex.ticks ?? {}).filter(([k]) => k !== id));
+    this.setExample({ ticks: count > 0 ? { ...ticks, [id]: count } : ticks });
+  }
+
+  /** *Check*: libxml2's verdict on the example shown. */
+  async checkExample(): Promise<void> {
+    const made = this.made;
+    if (made === null) return;
+    this.verdict = "checking";
+    const said = await this.port.check(made.example.xml);
+    if (this.made === made) this.verdict = said;
   }
 }
 

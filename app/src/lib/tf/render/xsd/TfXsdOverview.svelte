@@ -9,6 +9,7 @@
   import { occText } from "../../../render/xsd-view";
   import TfXsdRuns from "./TfXsdRuns.svelte";
   import type { XsdState } from "./xsd.svelte";
+  import { candidatesElsewhere, type Candidate } from "./xsd-point";
 
   let {
     st,
@@ -16,18 +17,36 @@
     ongo,
     onfile,
     onpoint = null,
+    onpick = null,
+    ondownload = null,
   }: {
     st: XsdState;
     index: SetIndex;
     ongo: (key: string, label: string) => void;
     onfile: (path: string) => void;
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
+    /** One of the files two repositories declare, picked: kept as a pointed file (section 16). */
+    onpick?: ((namespace: string | null, location: string | null, c: Candidate) => void) | null;
+    /** *Download it*: the address downloaded on the press (section 17); never by itself. */
+    ondownload?: ((namespace: string | null, location: string | null, address: string) => Promise<void>) | null;
   } = $props();
+  /** The address being downloaded, while its press waits. */
+  let downloading = $state<string | null>(null);
+  async function download(namespace: string | null, location: string | null, address: string) {
+    downloading = address;
+    try {
+      await ondownload?.(namespace, location, address);
+    } finally {
+      downloading = null;
+    }
+  }
 
   /** How many roots, files and lines seen the overview draws: the set's own bounds, never a whole repository. */
   const ROOTS_SHOWN = 12;
   const FILES_SHOWN = 800;
   const SEEN_SHOWN = 40;
+  /** The files offered where two repositories declare a namespace: the index answers at most 50. */
+  const TWO_SHOWN = 6;
   const base = (p: string) => p.slice(p.lastIndexOf("/") + 1).replace(/^@(repo\/[^/]+|download|knobas)\//, "");
   const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
   const head = $derived((index.head ?? "").replace(/^\s*\n/, "").replace(/\s+$/, ""));
@@ -80,7 +99,8 @@
         {@const f = row.f}
         <div class="tf-xsd-frow" data-d={Math.min(f.depth, 3)}>
           <span>
-            {#if f.path.startsWith("@knobas/")}<span class="tf-oas-code">{base(f.path)}</span>{:else}<button type="button" class="tf-oas-ref" onclick={() => onfile(f.path)}>{base(f.path)}</button>{/if}
+            <!-- A file kept outside this repository (with knobas, downloaded, another repository's) opens nowhere from here. -->
+            {#if f.path.startsWith("@")}<span class="tf-oas-code" title={f.url ?? undefined}>{f.url !== null ? base(f.url) : base(f.path)}</span>{:else}<button type="button" class="tf-oas-ref" onclick={() => onfile(f.path)}>{base(f.path)}</button>{/if}
             {#if f.from !== null} <span class="tf-xsd-from">in {f.from.name}, at {f.from.branch}</span>{/if}
             {#if f.adopted} <span class="tf-xsd-from">has no namespace of its own; included, it takes this one</span>{/if}
           </span>
@@ -95,7 +115,19 @@
           <span class="tf-xsd-how">not found here</span>
           <div class="tf-xsd-why">
             <span>{l.why}</span>
+            {#if l.two !== null && onpick !== null}
+              <!-- Asked once: the pick is kept as a pointed file, and no repository is guessed. -->
+              <span class="tf-xsd-two" role="group" aria-label="Pick the one to use">
+                {#each candidatesElsewhere(l.namespace ?? "", l.two).slice(0, TWO_SHOWN) as c (`${c.repo}\n${c.path}`)}
+                  <button type="button" class="tf-btn tf-sm" title="Use {c.repoName}: {c.path}, at {c.branch}" onclick={() => onpick?.(l.namespace, l.location, c)}>Use {c.repoName}: {c.path}</button>
+                {/each}
+              </span>
+            {/if}
             {#if onpoint !== null}<button type="button" class="tf-btn tf-sm" onclick={() => onpoint?.(l.namespace, l.location)}>Point to a file…</button>{/if}
+            {#if l.address !== null && ondownload !== null}
+              {@const address = l.address}
+              <button type="button" class="tf-btn tf-sm" title="One request to {address}, kept on this computer" disabled={downloading !== null} onclick={() => void download(l.namespace, l.location, address)}>{downloading === address ? "Downloading…" : "Download it"}</button>
+            {/if}
             {#if l.address !== null}<button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void navigator.clipboard?.writeText(l.address!)}>Copy its address</button>{/if}
           </div>
         </div>

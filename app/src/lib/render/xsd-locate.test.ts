@@ -90,6 +90,8 @@ describe("the order (section 14)", () => {
     const one = (ns: string) => (ns === NS.b ? [{ repo: "r9", name: "tidewater/catalog-tools", branch: "main", path: "xsd/b.xsd" }] : []);
     expect(locate(inn({ "main.xsd": NS.a }, { elsewhere: () => null }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toEqual({ need: [`?elsewhere:${NS.b}`] });
     expect(locate(inn({ "main.xsd": NS.a }, { elsewhere: one }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "@repo/r9/xsd/b.xsd", how: "repo" });
+    const slashed = (ns: string) => (ns === NS.b ? [{ repo: "live-gitea:t/catalog", name: "t/catalog", branch: "main", path: "b.xsd" }] : []);
+    expect(locate(inn({ "main.xsd": NS.a }, { elsewhere: slashed }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "@repo/live-gitea%3At%2Fcatalog/b.xsd" });
     // The repository's own file wins over another repository's.
     expect(locate(inn({ "main.xsd": NS.a, "q/b.xsd": NS.b }, { elsewhere: one }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "q/b.xsd" });
     const two = () => [

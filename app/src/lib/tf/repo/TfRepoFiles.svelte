@@ -116,7 +116,9 @@
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
   import { entityFilePipedSave } from "../../ipc/entity";
-  import { xmlCheck, xsdLocations } from "../../ipc/api";
+  import { filesDeclaring, xmlCheck, xsdLocations } from "../../ipc/api";
+  import type { Elsewhere } from "../../render/xsd-locate";
+  import { elsewhereOf } from "../render/xsd/xsd-point";
   import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
   import {
     commandSteps as appCommandSteps,
@@ -1981,6 +1983,16 @@
       return paths;
     });
   }
+  /** Another synced repository's file as text, at its branch's tip: a schema found or pointed to there. */
+  function otherText(other: string, p: string): Promise<string | null> {
+    const read = ports.fileBytes;
+    if (read === undefined) return Promise.resolve(null);
+    return read(other, p, null).then((bytes) => new TextDecoder().decode(bytes), () => null);
+  }
+  /** The other synced repositories' `.xsd` files that declare a namespace (the XSD design, section 16, step 6). */
+  function declaringElsewhere(namespace: string): Promise<Elsewhere[]> {
+    return filesDeclaring(namespace).then((list) => elsewhereOf(repoId, list), () => []);
+  }
   /** A file of the repository as text, at the commit shown: a schema's other files. */
   const textRead = $derived.by(() => {
     const read = imageRead;
@@ -2599,6 +2611,9 @@
             repo={repoId}
             read={textRead}
             paths={allPaths}
+            readOther={otherText}
+            elsewhere={declaringElsewhere}
+            {render}
             at={path === schema.path ? place : null}
             line={path === schema.path ? line : null}
             oncopylink={(at, label) => void copyPlace(schema.path, at, label)}
@@ -2638,6 +2653,8 @@
               paths: allPaths,
               pointed: () => xsdLocations().then((l) => l.pointed, () => []),
               on: () => xmlCheck().then((c) => c.on, () => true),
+              readOther: otherText,
+              elsewhere: declaringElsewhere,
               open: (file, at) => goAcross(at === null ? hrefOf(file) : placeHrefOf(file, at), file.slice(file.lastIndexOf("/") + 1)),
             }}
             values={piped === undefined || doc !== shownFile

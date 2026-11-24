@@ -24,7 +24,8 @@
   import TfCommand from "../TfCommand.svelte";
   import TfWords from "../TfWords.svelte";
   import { needsWords, secondsWhy } from "./form-words";
-  import { imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, type PointedSchema } from "../../ipc/api";
+  import { imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdFetch, xsdForget, xsdLocations, xsdSetLocations, type PointedSchema } from "../../ipc/api";
+  import { stillUsed, withDownload } from "../render/xsd/xsd-point";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
 
@@ -87,10 +88,32 @@
     }
   }
   async function forgetPointed(at: number) {
+    const gone = pointed[at];
     try {
       pointed = (await xsdSetLocations({ pointed: pointed.filter((_, i) => i !== at) })).pointed;
+      // A downloaded file goes with the last entry it answers.
+      if (gone !== undefined && "url" in gone.to && !stillUsed(pointed, gone.to.sha256, -1)) await xsdForget(gone.to.sha256);
     } catch (cause) {
       push({ text: `Could not forget it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+  /** The address being downloaded again, while its press waits. */
+  let again = $state<number | null>(null);
+  /** *Download again*: one request to the address, the file kept under its new SHA-256, the old one gone if unused. */
+  async function downloadAgain(at: number) {
+    const p = pointed[at];
+    if (p === undefined || !("url" in p.to)) return;
+    const before = p.to.sha256;
+    again = at;
+    try {
+      const d = await xsdFetch(p.to.url);
+      pointed = (await xsdSetLocations({ pointed: withDownload(pointed, p.namespace, p.location, d) })).pointed;
+      if (d.sha256 !== before && !stillUsed(pointed, before, -1)) await xsdForget(before);
+      push({ text: d.sha256 === before ? `${p.to.url} is as it was.` : `${p.to.url} changed; the new file answers from now on.` });
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      again = null;
     }
   }
   /** What a pointed reference answers with, in words: a file and its repository's name, or an address and its day. */
@@ -340,7 +363,10 @@
             <td><code class="tf-mono">{p.namespace || "no namespace"}</code></td>
             <td><code class="tf-mono">{p.location || "(none)"}</code></td>
             <td class="tf-small"><span class="tf-cut" title={answeredBy(p)}>{answeredBy(p)}</span></td>
-            <td class="tf-right"><button class="tf-btn tf-sm tf-ghost" aria-label="Forget the file for {p.namespace || p.location}" onclick={() => void forgetPointed(i)}>Forget</button></td>
+            <td class="tf-right">
+              {#if "url" in p.to}<button class="tf-btn tf-sm tf-ghost" aria-label="Download {p.to.url} again" disabled={again !== null} onclick={() => void downloadAgain(i)}>{again === i ? "Downloading…" : "Download again"}</button>{/if}
+              <button class="tf-btn tf-sm tf-ghost" aria-label="Forget the file for {p.namespace || p.location}" onclick={() => void forgetPointed(i)}>Forget</button>
+            </td>
           </tr>
         {/each}
       </tbody>

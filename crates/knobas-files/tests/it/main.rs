@@ -2,6 +2,7 @@
 //! and its reads, over a temporary folder.
 
 mod ask;
+mod declaring;
 mod read_alone;
 mod writes;
 

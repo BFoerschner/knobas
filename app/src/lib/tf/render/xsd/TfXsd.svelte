@@ -26,14 +26,21 @@
   import TfSideEdge from "../../TfSideEdge.svelte";
   import { sideWidth } from "../../side-width.svelte";
   import { FuzzyOrder } from "../../filter/ranked.svelte";
-  import { columnsFor, paneHeight } from "../explorer/layout";
+  import { columnsSeen, paneHeight } from "../explorer/layout";
   import { zen } from "../../zen.svelte";
   import type { DeclRow, Opened } from "../../../render/xsd-answer";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
-  import { buildIndex } from "../../../render/xsd-index";
+  import { heldIndex } from "../../../render/xsd-index";
   import { XsdPort, xsdEngine, type XsdEngine } from "../../../render/xsd-port";
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
+  import TfXsdExample from "./TfXsdExample.svelte";
+  import type { RenderPort } from "../../../render/port";
+  import TfXsdPoint from "./TfXsdPoint.svelte";
+  import { asPointed, gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "./xsd-point";
+  import { xsdLocations } from "../../../ipc/api";
+  import { ipcErrorMessage } from "../../../ipc";
+  import { push } from "../../../shell/toasts.svelte";
   import TfXsdRail from "./TfXsdRail.svelte";
   import { OVERVIEW, XsdState, labelOfPlace } from "./xsd.svelte";
 
@@ -44,6 +51,8 @@
     read,
     paths,
     readAway = null,
+    render = null,
+    readOther = null,
     elsewhere = null,
     pointed = [],
     at = null,
@@ -65,8 +74,12 @@
     read: (path: string) => Promise<string | null>;
     /** Every path of the repository at the commit: read only when a reference is not found beside its file. */
     paths: () => Promise<readonly string[]>;
+    /** The highlighter an example's lines are coloured by; no example is drawn without one. */
+    render?: RenderPort | null;
     /** A file read from elsewhere (`@repo/…`, `@download/…`). */
     readAway?: ((path: string) => Promise<string | null>) | null;
+    /** Another repository's file at its default branch's head (a pointed file, step 6). */
+    readOther?: ((repo: string, path: string) => Promise<string | null>) | null;
     /** Other synced repositories' schemas that declare a namespace. */
     elsewhere?: ((namespace: string) => Promise<Elsewhere[]>) | null;
     /** What the person pointed to (`xsd.locations`). */
@@ -82,7 +95,7 @@
     onsource?: ((file: string, line: number) => void) | null;
     /** Opens a file of the set as a file of its own. */
     onfile?: ((path: string) => void) | null;
-    /** *Point to a file…* on a reference not found here. */
+    /** *Point to a file…* on a reference not found here: the explorer's own picker when left out. */
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
     /** Where the set is read: the worker when left out. */
     engine?: XsdEngine | null;
@@ -115,8 +128,13 @@
       paths,
       read,
       pointed,
-      index: (from: string, list: readonly string[]) => buildIndex(repo, list, from, read),
-      ...(readAway !== null ? { readAway } : {}),
+      index: (from: string, list: readonly string[]) => heldIndex(repo, list, from, read),
+      readAway: (p: string) => {
+        // A pointed file of this repository is read as one of its own; another's at its own head.
+        const away = splitAway(p);
+        if (away !== null) return away.repo === repo ? read(away.path) : (readOther?.(away.repo, away.path) ?? Promise.resolve(null));
+        return readDownloaded(p) ?? readAway?.(p) ?? Promise.resolve(null);
+      },
       ...(elsewhere !== null ? { elsewhere } : {}),
     }));
     port.open(root, source, reads).then((answer) => {
@@ -125,6 +143,14 @@
       slow = false;
       if (answer.ok) state.take(answer.index);
       opened = answer;
+      // What a person pointed to answers before every guess: read once the shell stands, and the set again with it.
+      if (answer.ok && untrack(() => pointed).length === 0)
+        void xsdLocations().then(
+          (kept) => {
+            if (live && kept.pointed.length > 0) void port.repoint(asPointed(kept.pointed));
+          },
+          () => {},
+        );
     });
     return () => {
       live = false;
@@ -166,6 +192,49 @@
       });
   });
 
+  // ---- Point to a file… (section 17) ----
+  let pointing = $state<{ namespace: string | null; location: string | null } | null>(null);
+  let candidates = $state.raw<Candidate[] | null>(null);
+  function point(namespace: string | null, location: string | null) {
+    if (onpoint !== null) {
+      onpoint(namespace, location);
+      return;
+    }
+    pointing = { namespace, location };
+    candidates = null;
+    void gatherCandidates(repo, path, namespace, { paths, read, elsewhere }).then((list) => {
+      if (pointing?.namespace === namespace && pointing.location === location) candidates = list;
+    });
+  }
+  async function pickFile(c: Candidate) {
+    const at = pointing;
+    if (at === null) return;
+    pointing = null;
+    await pickFor(at.namespace, at.location, c);
+  }
+  /** *Download it*: the schema at the address downloaded on the press, kept for the reference, the set read again. */
+  async function downloadFor(namespace: string | null, location: string | null, address: string) {
+    const state = st;
+    if (state === null) return;
+    try {
+      await state.port.repoint(await keepDownload(namespace, location, address));
+      push({ text: `Downloaded ${address}. It answers ${location ?? namespace ?? "it"} from now on.` });
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+  /** Keeps `c` for a reference and reads the set again through it: the picker's pick, or one of two repositories'. */
+  async function pickFor(namespace: string | null, location: string | null, c: Candidate) {
+    const state = st;
+    if (state === null) return;
+    try {
+      await state.port.repoint(await keepPick(namespace, location, c));
+      push({ text: `${c.repoName === null ? c.path : `${c.repoName}: ${c.path}`} answers ${location ?? namespace ?? "it"} from now on.` });
+    } catch (cause) {
+      push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
   // ---- The pane ----
   let cols = $state<2 | 3 | 4>(2);
   function pane(el: HTMLElement) {
@@ -183,13 +252,13 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
-    const first = columnsFor(view.getBoundingClientRect().width);
-    if (first !== cols) cols = first;
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
-        const next = columnsFor(entries[0]?.contentRect.width ?? 0);
-        if (next !== cols) cols = next;
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
       });
       ro.observe(view);
     }
@@ -204,6 +273,21 @@
       if (y === "auto" || y === "scroll") return up;
     }
     return null;
+  }
+
+  // ---- The example (sections 19 to 23) ----
+  /** An example stands for a global element's page, where lines can be coloured. */
+  const exampleShown = $derived(render !== null && st !== null && st.page !== null && st.page.key.startsWith("el "));
+  /** `A`: another example, from anywhere in the explorer outside a field, while one is in view. */
+  function keys(event: KeyboardEvent) {
+    if (event.key !== "a" && event.key !== "A") return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+    const t = event.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
+    const state = st;
+    if (state === null || !exampleShown || (cols < 3 && state.tab !== "example")) return;
+    event.preventDefault();
+    state.another();
   }
 
   // ---- Pages: picks, followed names, the way back, and the address's place ----
@@ -328,7 +412,8 @@
 {:else}
   <!-- The pane stands from the first frame at its height, the wait inside it, so the page's height and its scrollbar
        do not change when the worker answers (`moves`, 2026-11-24: the header's buttons shifted 16 px). -->
-  <div class="tf-oas tf-oas-2 tf-xsd" data-cols={cols} {@attach pane} {@attach sideWidth("xsd-rail")}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-oas tf-oas-{cols >= 3 && render !== null ? 3 : 2} tf-xsd" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("xsd-rail")}>
     {#if index === null || st === null}
       <div class="tf-oas-wait tf-xsd-wait">{#if slow}<p class="tf-oas-reading" role="status">Reading the schema…</p>{/if}</div>
     {:else}
@@ -342,9 +427,32 @@
       onfile={(p) => onfile?.(p)}
       {onsource}
       {oncopylink}
-      {onpoint}
+      onpoint={point}
+      onpick={(namespace, location, c) => void pickFor(namespace, location, c)}
+      ondownload={downloadFor}
+      head={cols < 3 && exampleShown ? tabs : null}
+      body={cols < 3 && exampleShown && state.tab === "example" && render !== null ? examplePage : null}
       bind:scroller={pageCol}
     />
+    {#if cols >= 3 && render !== null}
+      <div class="tf-oas-col tf-xsd-excol" aria-label="Example"><TfXsdExample st={state} {render} ongo={go} /></div>
+    {/if}
     {/if}
   </div>
+{/if}
+
+{#snippet tabs()}
+  {@const state = st!}
+  <span class="tf-seg tf-oas-pageseg" role="group" aria-label="Show">
+    <button type="button" aria-pressed={state.tab === "ref"} onclick={() => (state.tab = "ref")}>Reference</button>
+    <button type="button" aria-pressed={state.tab === "example"} onclick={() => (state.tab = "example")}>Example</button>
+  </span>
+{/snippet}
+{#snippet examplePage()}
+  <TfXsdExample st={st!} render={render!} ongo={go} />
+{/snippet}
+
+{#if pointing !== null}
+  {@const at = pointing}
+  <TfXsdPoint namespace={at.namespace} location={at.location} {candidates} onpick={(c) => void pickFile(c)} onclose={() => (pointing = null)} />
 {/if}

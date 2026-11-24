@@ -152,6 +152,30 @@ pub async fn api_save_answer(id: u64, name: String) -> Result<String, IpcError> 
     Ok(path.display().to_string())
 }
 
+/// *Save to Downloads* on an example made from a schema (the XSD design,
+/// section 23): `text` written to the Downloads folder under `name`, as an
+/// answer is saved; knobas keeps no copy. Answers the path.
+///
+/// # Errors
+/// No Downloads folder, or the file cannot be written.
+#[tauri::command]
+pub async fn xsd_save_example(name: String, text: String) -> Result<String, IpcError> {
+    use tokio::io::AsyncWriteExt as _;
+    let dir = dirs::download_dir().ok_or_else(|| {
+        IpcError::new(
+            IpcErrorCode::Internal,
+            "This computer has no Downloads folder.",
+        )
+    })?;
+    let (path, mut file) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
+        .await
+        .map_err(|(path, error)| IpcError::internal(format!("{}: {error}", path.display())))?;
+    file.write_all(text.as_bytes())
+        .await
+        .map_err(|error| IpcError::internal(format!("{}: {error}", path.display())))?;
+    Ok(path.display().to_string())
+}
+
 /// An image at an address in a document, loaded on the press that asks (the XML view's design, section 14): one `GET`,
 /// no cookie, the bytes sniffed, kept in memory.
 ///
@@ -198,6 +222,63 @@ pub async fn xsd_locations<R: tauri::Runtime>(
 ) -> Result<crate::api::schemas::SchemaLocations, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     crate::api::schemas::locations(&pool).await
+}
+
+/// The `.xsd` files of the synced repositories that declare `namespace` (the
+/// XSD design, section 16, step 6), from the files index: nothing where the
+/// index holds no file.
+///
+/// # Errors
+/// `not_ready` before the app is up.
+#[tauri::command]
+pub async fn files_declaring<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    namespace: String,
+) -> Result<Vec<crate::api::schemas::DeclaringFile>, IpcError> {
+    let index = app.state::<Lifecycle>().files();
+    tokio::task::spawn_blocking(move || crate::api::schemas::declaring(&index, &namespace))
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// Downloads the schema at `address` on a press, into the profile's
+/// `schemas/` (the XSD design, section 17): never by itself.
+///
+/// # Errors
+/// As [`crate::api::schemas::download`].
+#[tauri::command]
+pub async fn xsd_fetch<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    address: String,
+) -> Result<crate::api::schemas::DownloadedSchema, IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::download(&dir, &address).await
+}
+
+/// A downloaded schema's text by its SHA-256; `null` where it is not kept.
+///
+/// # Errors
+/// A name that is no SHA-256.
+#[tauri::command]
+pub async fn xsd_downloaded<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    sha256: String,
+) -> Result<Option<String>, IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::downloaded(&dir, &sha256).await
+}
+
+/// Removes a downloaded schema's file (Settings › Pipelines › Schemas, *Forget*).
+///
+/// # Errors
+/// A name that is no SHA-256, or the file cannot be removed.
+#[tauri::command]
+pub async fn xsd_forget<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    sha256: String,
+) -> Result<(), IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::forget_download(&dir, &sha256).await
 }
 
 /// Keeps the schema files pointed to; answers them as kept.

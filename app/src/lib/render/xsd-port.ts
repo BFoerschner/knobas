@@ -12,6 +12,7 @@
  */
 import type { Checked, Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
 import type { Elsewhere, Pointed } from "./xsd-locate";
+import type { Example, ExampleOptions } from "./xsd-example";
 
 /** Runs one call of one session where the set is kept. */
 export type XsdEngine = (session: number, call: XsdCall) => Promise<unknown>;
@@ -214,6 +215,11 @@ export class XsdPort {
   /** The declaration of a document's element, by its names from the root down (section 26). */
   declOf(names: { ns: string; local: string }[]): Promise<(PageAnswer & { found: number }) | null> {
     return this.#engine(this.#id, { kind: "declOf", names }).then((r) => (r !== null && typeof r === "object" && "kind" in r ? (r as PageAnswer & { found: number }) : null));
+  }
+
+  /** An example of the element `key` names (section 19); `null` where it is no element of the set. */
+  example(key: string, options: ExampleOptions): Promise<Example | null> {
+    return this.#engine(this.#id, { kind: "example", key, options }).then((r) => (r !== null && typeof r === "object" && "xml" in r ? (r as Example) : null));
   }
 
   /** libxml2's verdict on a document against the set (section 24). */

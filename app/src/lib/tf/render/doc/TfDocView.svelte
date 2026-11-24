@@ -24,7 +24,7 @@
   import TfSideEdge from "../../TfSideEdge.svelte";
   import { sideWidth } from "../../side-width.svelte";
   import { zen } from "../../zen.svelte";
-  import { columnsFor, paneHeight } from "../explorer/layout";
+  import { columnsSeen, paneHeight } from "../explorer/layout";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocPicked from "./TfDocPicked.svelte";
   import TfDocQuery from "./TfDocQuery.svelte";
@@ -55,10 +55,12 @@
   import { DocCheck, rootSays, type RootSays } from "./doc-check.svelte";
   import TfXsdPage from "../xsd/TfXsdPage.svelte";
   import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
+  import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
   import { XsdState } from "../xsd/xsd.svelte";
   import { XsdPort } from "../../../render/xsd-port";
-  import type { Pointed } from "../../../render/xsd-locate";
-  import { buildIndex } from "../../../render/xsd-index";
+  import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
+  import { gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "../xsd/xsd-point";
+  import { heldIndex } from "../../../render/xsd-index";
 
   let {
     text,
@@ -98,6 +100,10 @@
       open?: (path: string, place: string | null) => void;
       point?: (namespace: string | null, location: string | null) => void;
       engine?: import("../../../render/xsd-port").XsdEngine;
+      /** Another synced repository's file at its branch's tip: a schema found or pointed to there. */
+      readOther?: (repo: string, path: string) => Promise<string | null>;
+      /** The other synced repositories' `.xsd` files that declare a namespace (the order's step 6). */
+      elsewhere?: (namespace: string) => Promise<Elsewhere[]>;
     } | null;
     /** How a value pipeline runs and saves over this file; `null` where no pipeline can run (no value is looked at). */
     values?: { run: (steps: PipeStep[]) => Promise<PipeRun>; save: (steps: PipeStep[], name: string) => Promise<string> } | null;
@@ -190,7 +196,79 @@
   async function runCheck(c: DocCheck, state: DocState, root: RootSays | null, port: NonNullable<typeof schema>) {
     const [pointed, on] = await Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]);
     if (check !== c) return;
-    await c.run(path, root, untrack(() => shownText) ?? text, state.session, { read: port.read, paths: port.paths, pointed, index: (from, list) => buildIndex(repo, list, from, port.read) }, on);
+    await c.run(path, root, untrack(() => shownText) ?? text, state.session, {
+        read: port.read,
+        paths: port.paths,
+        pointed,
+        index: (from, list) => heldIndex(repo, list, from, port.read),
+        readAway: (p) => {
+          const away = splitAway(p);
+          if (away === null) return readDownloaded(p) ?? Promise.resolve(null);
+          return away.repo === repo ? port.read(away.path) : (port.readOther?.(away.repo, away.path) ?? Promise.resolve(null));
+        },
+        ...(port.elsewhere !== undefined ? { elsewhere: port.elsewhere } : {}),
+      }, on);
+  }
+  // ---- *Point to a file…* (the XSD design, section 17): the document's schema answered by a file the person picks ----
+  let pointing = $state.raw<{ namespace: string; location: string | null } | null>(null);
+  let candidates = $state.raw<readonly Candidate[] | null>(null);
+  function point() {
+    const s = schema;
+    const root = st?.opened?.root ?? rootSays(text);
+    if (s === null || root === null) return;
+    if (s.point !== undefined) {
+      s.point(root.namespace || null, root.location);
+      return;
+    }
+    const at = { namespace: root.namespace, location: root.location };
+    pointing = at;
+    candidates = null;
+    void gatherCandidates(repo, path, at.namespace, { paths: s.paths, read: s.read, elsewhere: s.elsewhere ?? null }).then((list) => {
+      if (pointing === at) candidates = list;
+    });
+  }
+  /** The repository's schemas read while the person reaches for *Point to another file…*: the picker then opens on them. */
+  function warmPoint() {
+    const s = schema;
+    if (s !== null) void s.paths().then((list) => heldIndex(repo, list, path, s.read), () => null);
+  }
+  async function pickFile(c: Candidate) {
+    const at = pointing;
+    const s = schema;
+    const state = st;
+    const ch = check;
+    pointing = null;
+    if (at === null || s === null || state === null || ch === null) return;
+    try {
+      await keepPick(at.namespace, at.location, c);
+    } catch (cause) {
+      push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    push({ text: `${c.repoName === null ? c.path : `${c.repoName}: ${c.path}`} answers ${at.location ?? at.namespace} from now on.` });
+    // Checked again through the pick: the set is read as the explorer reads it, step 1 first.
+    ch.resume();
+    void runCheck(ch, state, state.opened?.root ?? rootSays(text), s);
+  }
+  /**
+   * *Download it*: a schema at an address the set names (the document's own, or one its schema imports), downloaded on
+   * the press and kept for that reference (its namespace, the address as its location), and the document checked.
+   */
+  async function download(namespace: string | null, address: string) {
+    const s = schema;
+    const state = st;
+    const ch = check;
+    const root = state?.opened?.root ?? rootSays(text);
+    if (s === null || state === null || ch === null || root === null) return;
+    try {
+      await keepDownload(namespace, address, address);
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    push({ text: `Downloaded ${address}. It answers it from now on.` });
+    ch.resume();
+    void runCheck(ch, state, root, s);
   }
   /** The declaration beside the document, for the line picked (section 26). */
   let declared = $state<XsdState | null>(null);
@@ -258,25 +336,18 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
-    // The columns from the first frame: an observer answers a frame late, and a side column put in then moved the
-    // document's bar 798 px at 2560 x 1440 (`moves`, 2026-11-24).
-    const measure = () => {
-      const now = columnsFor(view.getBoundingClientRect().width);
-      if (now !== cols) cols = now;
-    };
-    measure();
-    // Mounted on a return, the file view may not have its width yet: once more before the first paint.
-    const early = requestAnimationFrame(measure);
+    // The columns from the first frame: an observer answers a frame late.
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
-        const next = columnsFor(entries[0]?.contentRect.width ?? 0);
-        if (next !== cols) cols = next;
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
       });
       ro.observe(view);
     }
     return () => {
-      cancelAnimationFrame(early);
       window.removeEventListener("resize", fit);
       ro?.disconnect();
     };
@@ -806,7 +877,9 @@
             void runCheck(c, state, state.opened?.root ?? rootSays(text), s);
           }}
       onschema={check === null || schema?.open === undefined ? null : () => (check?.schema != null ? schema?.open?.(check.schema, null) : undefined)}
-      onpoint={schema?.point === undefined ? null : () => schema?.point?.(state.opened?.root?.namespace || null, state.opened?.root?.location ?? null)}
+      onpoint={schema === null ? null : point}
+      ondownload={schema === null ? null : download}
+      onschemamenu={schema === null ? null : warmPoint}
     >
       {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
       {#snippet copy()}
@@ -965,4 +1038,8 @@
     <button type="button" role="menuitem" onclick={() => void copyResults("lines")}>Copy the lines</button>
     <button type="button" role="menuitem" onclick={() => void copyResults("xpath")}>Copy the XPath</button>
   </TfMenu>
+{/if}
+
+{#if pointing !== null}
+  <TfXsdPoint namespace={pointing.namespace} location={pointing.location} {candidates} onpick={(c) => void pickFile(c)} onclose={() => (pointing = null)} />
 {/if}

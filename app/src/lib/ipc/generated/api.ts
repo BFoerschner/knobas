@@ -67,6 +67,31 @@ export type AuthPlace = "bearer" | "basic" | "header" | "query" | "cookie";
 export type ClientsFound = { bruno: boolean, };
 
 /**
+ * A schema file of a synced repository that declares a namespace: step 6
+ * of the order, another repository answering by itself where exactly one
+ * declares it (the XSD design, 2026-11-23, section 16).
+ */
+export type DeclaringFile = { 
+/**
+ * The repository's entity id.
+ */
+repo: string, 
+/**
+ * The branch its files are read on.
+ */
+branch: string, path: string, };
+
+/**
+ * A schema downloaded: the address asked, the file's SHA-256 (its name in
+ * the profile's `schemas/`), its size and the day.
+ */
+export type DownloadedSchema = { url: string, sha256: string, size: number, 
+/**
+ * `YYYY-MM-DD`, the day it was downloaded.
+ */
+at: string, };
+
+/**
  * An image fetched: what it is, how big, and its bytes.
  */
 export type FetchedImage = { url: string, mime: string, size: number, base64: string, };

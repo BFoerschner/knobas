@@ -384,3 +384,117 @@ pub(crate) fn in_repo(
         total,
     })
 }
+
+/// Whether `text` declares `namespace` as its target: `targetNamespace`, an
+/// `=`, and the namespace quoted, as a schema's root writes it. A schema
+/// names one target; another attribute (an import's `namespace`) is not it.
+pub(crate) fn declares(text: &str, namespace: &str) -> bool {
+    const NAME: &str = "targetNamespace";
+    let mut from = 0;
+    while let Some(at) = text[from..].find(NAME) {
+        let rest = text[from + at + NAME.len()..].trim_start();
+        from += at + NAME.len();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+            continue;
+        };
+        let value = &rest[1..];
+        let Some(end) = value.find(quote) else {
+            continue;
+        };
+        let value = &value[..end];
+        if value == namespace || value.replace("&amp;", "&") == namespace {
+            return true;
+        }
+    }
+    false
+}
+
+/// [`crate::FileIndex::declaring`]: the files whose text holds every word of
+/// `namespace` and whose path every word of `.xsd`, the shortest paths first;
+/// at most `look` of them read whole for [`declares`], at most `most` kept.
+pub(crate) fn declaring(
+    searcher: &Searcher,
+    fields: &Fields,
+    namespace: &str,
+    most: usize,
+    look: usize,
+    bound: u32,
+) -> Result<crate::DeclaringFiles, FilesError> {
+    let words = code_text::query(namespace);
+    let schema = code_text::query("xsd");
+    if words.is_empty() || schema.is_empty() || most == 0 {
+        return Ok(crate::DeclaringFiles::default());
+    }
+    let mut bits = matched(searcher, fields.body, &words.terms, bound)?;
+    let named = matched(searcher, fields.ptok, &schema.terms, bound)?;
+    for (held, named) in bits.iter_mut().zip(&named) {
+        for (word, other) in held.iter_mut().zip(named) {
+            *word &= *other;
+        }
+    }
+    let by = by_repo(searcher, &bits, look, None)?;
+    let candidates: u32 = by.values().map(|found| found.files).sum();
+    let mut every: Vec<(At, u64)> = by
+        .into_iter()
+        .flat_map(|(no, found)| found.first.into_iter().map(move |at| (at, no)))
+        .collect();
+    every.sort_unstable();
+    let mut files = Vec::new();
+    let mut looked = 0_u32;
+    for ((_, ord, doc), no) in every.into_iter().take(look) {
+        if files.len() >= most {
+            break;
+        }
+        looked += 1;
+        let stored: TantivyDocument = searcher.doc(DocAddress::new(ord, doc))?;
+        let path = stored
+            .get_first(fields.path)
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if !path.to_ascii_lowercase().ends_with(".xsd") {
+            continue;
+        }
+        let holds = stored
+            .get_first(fields.text)
+            .and_then(|value| value.as_str())
+            .is_some_and(|text| declares(text, namespace));
+        if holds {
+            files.push(crate::Declaring {
+                no,
+                path: path.to_owned(),
+            });
+        }
+    }
+    Ok(crate::DeclaringFiles {
+        files,
+        whole: looked >= candidates,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::declares;
+
+    #[test]
+    fn a_schema_declares_the_namespace_its_root_targets_and_no_other() {
+        let opentrans = r#"<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.opentrans.org/XMLSchema/2.1" elementFormDefault="qualified"><xsd:import namespace="http://www.bmecat.org/bmecat/2005"/>"#;
+        assert!(declares(
+            opentrans,
+            "http://www.opentrans.org/XMLSchema/2.1"
+        ));
+        // An import's namespace is not a target.
+        assert!(!declares(opentrans, "http://www.bmecat.org/bmecat/2005"));
+        // A namespace that only begins the target is not it.
+        assert!(!declares(opentrans, "http://www.opentrans.org/XMLSchema/2"));
+        assert!(declares(
+            "<xs:schema targetNamespace = 'urn:a&amp;b'>",
+            "urn:a&b"
+        ));
+        assert!(!declares("<xs:schema targetNamespace>urn:a", "urn:a"));
+        assert!(!declares("<xs:schema targetNamespace=\"urn:a", "urn:a"));
+    }
+}

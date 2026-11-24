@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Its schema is declared by two other repositories: knobas asks which. One departure: a quantity in words. -->
+<PartnerOrder xmlns="urn:tidewater:partner-order:2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="urn:tidewater:partner-order:2 partner-order-2.xsd">
+  <OrderId>P-18</OrderId>
+  <Partner>Hafenkontor Nord</Partner>
+  <Line>
+    <Article>Kugellager 6204-2RS</Article>
+    <Quantity>12</Quantity>
+  </Line>
+  <Line>
+    <Article>Wellendichtring 20x35x7</Article>
+    <Quantity>zwölf</Quantity>
+  </Line>
+</PartnerOrder>

@@ -1,6 +1,18 @@
 /** Settings › Renderers, the pipelines half (#2265): command steps added, named pipelines listed and edited by reference. */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+/** The schemas kept, the files downloaded, and what was asked: as the backend keeps them. */
+const schemas = vi.hoisted(() => ({ pointed: [] as unknown[], files: new Set<string>(), fetched: [] as string[], next: "" }));
+vi.mock("../../ipc/api", async (original) => ({
+  ...(await original<typeof import("../../ipc/api")>()),
+  xmlCheck: async () => ({ on: true }),
+  xsdLocations: async () => ({ pointed: structuredClone(schemas.pointed) }),
+  // As IPC carries it: JSON, which a page's state proxies pass through.
+  xsdSetLocations: async (list: { pointed: unknown[] }) => ((schemas.pointed = JSON.parse(JSON.stringify(list.pointed))), { pointed: structuredClone(schemas.pointed) }),
+  xsdFetch: async (url: string) => (schemas.fetched.push(url), schemas.files.add(schemas.next), { url, sha256: schemas.next, size: 1, at: "2026-11-24" }),
+  xsdForget: async (sha: string) => void schemas.files.delete(sha),
+}));
 
 import type { CommandStep, CommandStepDraft, NamedPipeline, NamedPipelineDraft, RendererDefault } from "../../ipc/app";
 import { createRendererDefaults } from "../../render/defaults.svelte";
@@ -10,6 +22,9 @@ import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
+  schemas.pointed = [];
+  schemas.files.clear();
+  schemas.fetched = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -156,3 +171,33 @@ test("a command step's command and a pipeline's steps and patterns keep to one l
   expect(used!.querySelector(".tf-words")?.getAttribute("title")).toBe(patterns.join(" "));
   expect(used!.querySelector(".tf-words-more")?.textContent).toBe("+2");
 });
+
+test("Schemas: Download again keeps the row in its place and drops the old file once nothing uses it; Forget drops a file with its last row", async () => {
+  const [one, two] = ["1".repeat(64), "2".repeat(64)];
+  const url = "https://schemas.example/b.xsd";
+  const by = (sha: string) => ({ url, sha256: sha, at: "2026-11-01" });
+  schemas.pointed = [
+    { namespace: "urn:a", location: "a.xsd", to: { repo: "r", path: "a.xsd" } },
+    { namespace: "urn:b", location: url, to: by(one) },
+    { namespace: "urn:c", location: "c.xsd", to: by(one) },
+  ];
+  schemas.files = new Set([one]);
+  schemas.next = two;
+  app = mount(TfPipelinesSettings, { target, props: stores([], [], []) });
+  await settle();
+  const rows = () => [...target.querySelectorAll(".tf-stg-sec tbody tr")].filter((tr) => tr.textContent?.includes("urn:")).map((tr) => text(tr.querySelector("td")));
+  expect(rows()).toEqual(["urn:a", "urn:b", "urn:c"]);
+  // Downloaded again: the same row, the new file; the old one stays, urn:c still uses it.
+  [...target.querySelectorAll<HTMLButtonElement>("button")].filter((b) => text(b) === "Download again")[0]!.click();
+  await settle();
+  expect(schemas.fetched).toEqual([url]);
+  expect(rows()).toEqual(["urn:a", "urn:b", "urn:c"]);
+  expect((schemas.pointed[1] as { to: { sha256: string } }).to.sha256).toBe(two);
+  expect([...schemas.files].sort()).toEqual([one, two]);
+  // urn:c forgotten: the last row that uses the old file, which goes with it.
+  button("Forget the file for urn:c").click();
+  await settle();
+  expect(rows()).toEqual(["urn:a", "urn:b"]);
+  expect([...schemas.files]).toEqual([two]);
+});
+

@@ -143,7 +143,7 @@ export function locate(inn: LocateIn, from: string, fromNamespace: string, kind:
   for (const p of inn.pointed) {
     if ((p.namespace || "") !== (namespace ?? "") || (p.location || "") !== (location ?? "")) continue;
     if ("url" in p.to) return { to: `@download/${p.to.sha256}`, how: "downloaded", others: [] };
-    return { to: `@repo/${p.to.repo}/${p.to.path}`, how: "pointed", others: [] };
+    return { to: `@repo/${encodeURIComponent(p.to.repo)}/${p.to.path}`, how: "pointed", others: [] };
   }
 
   // 2. Beside the file that names it.
@@ -205,7 +205,7 @@ export function locate(inn: LocateIn, from: string, fromNamespace: string, kind:
     if (repos.size === 1) {
       const name = location === null ? "" : baseOf(location).toLowerCase();
       const pick = there.find((e) => baseOf(e.path).toLowerCase() === name) ?? there[0]!;
-      return { to: `@repo/${pick.repo}/${pick.path}`, how: "repo", others: [], from: pick };
+      return { to: `@repo/${encodeURIComponent(pick.repo)}/${pick.path}`, how: "repo", others: [], from: pick };
     }
     if (repos.size > 1) return { to: null, why: "Two repositories declare it.", address: null, mismatch: null, two: there };
   }
