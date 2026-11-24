@@ -35,7 +35,7 @@
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
   import TfXsdPoint from "./TfXsdPoint.svelte";
-  import { asPointed, gatherCandidates, keepPick, splitAway, type Candidate } from "./xsd-point";
+  import { asPointed, gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "./xsd-point";
   import { xsdLocations } from "../../../ipc/api";
   import { ipcErrorMessage } from "../../../ipc";
   import { push } from "../../../shell/toasts.svelte";
@@ -128,7 +128,7 @@
         // A pointed file of this repository is read as one of its own; another's at its own head.
         const away = splitAway(p);
         if (away !== null) return away.repo === repo ? read(away.path) : (readOther?.(away.repo, away.path) ?? Promise.resolve(null));
-        return readAway?.(p) ?? Promise.resolve(null);
+        return readDownloaded(p) ?? readAway?.(p) ?? Promise.resolve(null);
       },
       ...(elsewhere !== null ? { elsewhere } : {}),
     }));
@@ -206,6 +206,17 @@
     if (at === null) return;
     pointing = null;
     await pickFor(at.namespace, at.location, c);
+  }
+  /** *Download it*: the schema at the address downloaded on the press, kept for the reference, the set read again. */
+  async function downloadFor(namespace: string | null, location: string | null, address: string) {
+    const state = st;
+    if (state === null) return;
+    try {
+      await state.port.repoint(await keepDownload(namespace, location, address));
+      push({ text: `Downloaded ${address}. It answers ${location ?? namespace ?? "it"} from now on.` });
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
   }
   /** Keeps `c` for a reference and reads the set again through it: the picker's pick, or one of two repositories'. */
   async function pickFor(namespace: string | null, location: string | null, c: Candidate) {
@@ -397,6 +408,7 @@
       {oncopylink}
       onpoint={point}
       onpick={(namespace, location, c) => void pickFor(namespace, location, c)}
+      ondownload={downloadFor}
       bind:scroller={pageCol}
     />
     {/if}

@@ -4,9 +4,9 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
-import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, DeclaringFile, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
+import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, DeclaringFile, DownloadedSchema, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
 
-export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, DeclaringFile, SentLine, SpecToOpen, XmlCheck };
+export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, DeclaringFile, DownloadedSchema, SentLine, SpecToOpen, XmlCheck };
 
 /** Sends one request, once. A refusal before anything was sent rejects; a failure is an answer. */
 export function apiSend(send: ApiSend): Promise<ApiAnswer> {
@@ -113,6 +113,21 @@ export function xsdSetLocations(list: SchemaLocations): Promise<SchemaLocations>
  */
 export function filesDeclaring(namespace: string): Promise<DeclaringFile[]> {
   return invoke<DeclaringFile[]>("files_declaring", { namespace });
+}
+
+/** Downloads the schema at `address` on a press into the profile's `schemas/` (the XSD design, section 17). */
+export function xsdFetch(address: string): Promise<DownloadedSchema> {
+  return invoke<DownloadedSchema>("xsd_fetch", { address });
+}
+
+/** A downloaded schema's text by its SHA-256; `null` where it is not kept. */
+export function xsdDownloaded(sha256: string): Promise<string | null> {
+  return invoke<string | null>("xsd_downloaded", { sha256 });
+}
+
+/** Removes a downloaded schema's file. */
+export function xsdForget(sha256: string): Promise<void> {
+  return invoke<void>("xsd_forget", { sha256 });
 }
 
 /** Whether an XML file is checked against its schema when one is found (`xml.check`, on by default). */

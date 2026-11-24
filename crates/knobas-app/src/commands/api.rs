@@ -217,6 +217,46 @@ pub async fn files_declaring<R: tauri::Runtime>(
         .map_err(IpcError::internal)
 }
 
+/// Downloads the schema at `address` on a press, into the profile's
+/// `schemas/` (the XSD design, section 17): never by itself.
+///
+/// # Errors
+/// As [`crate::api::schemas::download`].
+#[tauri::command]
+pub async fn xsd_fetch<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    address: String,
+) -> Result<crate::api::schemas::DownloadedSchema, IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::download(&dir, &address).await
+}
+
+/// A downloaded schema's text by its SHA-256; `null` where it is not kept.
+///
+/// # Errors
+/// A name that is no SHA-256.
+#[tauri::command]
+pub async fn xsd_downloaded<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    sha256: String,
+) -> Result<Option<String>, IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::downloaded(&dir, &sha256).await
+}
+
+/// Removes a downloaded schema's file (Settings › Pipelines › Schemas, *Forget*).
+///
+/// # Errors
+/// A name that is no SHA-256, or the file cannot be removed.
+#[tauri::command]
+pub async fn xsd_forget<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    sha256: String,
+) -> Result<(), IpcError> {
+    let dir = app.state::<crate::profile::Profile>().inner().dir.clone();
+    crate::api::schemas::forget_download(&dir, &sha256).await
+}
+
 /// Keeps the schema files pointed to; answers them as kept.
 ///
 /// # Errors

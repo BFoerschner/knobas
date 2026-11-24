@@ -77,6 +77,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::api::schemas::SchemaLocations::export_all(cfg)?;
     crate::api::schemas::XmlCheck::export_all(cfg)?;
     crate::api::schemas::DeclaringFile::export_all(cfg)?;
+    crate::api::schemas::DownloadedSchema::export_all(cfg)?;
     // passwords.ts (ADR-0056)
     knobas_source::passwords::Offers::export_all(cfg)?;
     knobas_source::passwords::EntryRecord::export_all(cfg)?;

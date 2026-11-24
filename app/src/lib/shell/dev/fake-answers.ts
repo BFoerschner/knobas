@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, filesDeclaring } from "../../ipc/api";
+import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, filesDeclaring, xsdFetch, xsdDownloaded, xsdForget } from "../../ipc/api";
 import type { appStatus, commandSteps, diffPipelines, folderRender, folderRenderers, folderRenderPicks, folderRenderCompare, setFolderRenderPick, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, folderRenderTree, folderRenderFile, folderRenderFileBytes, folderRenderArchiveOpen, folderRenderOpen, folderRenderStore, setFolderRenderStore, clearFolderRenderStore, setFolderRenderers, setJavaPath, frontendReady, installedFonts, javaRuntime, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
@@ -96,6 +96,9 @@ export interface Answers {
   xsd_locations: Answer<typeof xsdLocations>;
   xsd_set_locations: Answer<typeof xsdSetLocations>;
   files_declaring: Answer<typeof filesDeclaring>;
+  xsd_fetch: Answer<typeof xsdFetch>;
+  xsd_downloaded: Answer<typeof xsdDownloaded>;
+  xsd_forget: Answer<typeof xsdForget>;
   api_open_in: Answer<typeof apiOpenIn>;
   api_clients_found: Answer<typeof apiClientsFound>;
   api_scratch_size: Answer<typeof apiScratchSize>;

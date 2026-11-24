@@ -11,11 +11,13 @@ vi.mock("../../../shell/open-web", async (original) => ({
   openWeb: (url: string, how: { elsewhere?: boolean } = {}) => opened.push({ url, elsewhere: how.elsewhere === true }),
 }));
 
-const kept = vi.hoisted(() => ({ pointed: [] as unknown[] }));
+const kept = vi.hoisted(() => ({ pointed: [] as unknown[], downloaded: new Map<string, string>() }));
 vi.mock("../../../ipc/api", async (original) => ({
   ...(await original<typeof import("../../../ipc/api")>()),
   xsdLocations: async () => structuredClone(kept),
   xsdSetLocations: async (list: { pointed: unknown[] }) => ((kept.pointed = structuredClone(list.pointed)), structuredClone(kept)),
+  xsdFetch: async (address: string) => ({ url: address, sha256: "e".repeat(64), size: 1, at: "2026-11-24" }),
+  xsdDownloaded: async (sha: string) => kept.downloaded.get(sha) ?? null,
 }));
 
 import TfDocView from "./TfDocView.svelte";
@@ -36,6 +38,7 @@ const never: DocEngine = () => new Promise(() => {});
 
 beforeEach(() => {
   kept.pointed = [];
+  kept.downloaded.clear();
   target = document.createElement("div");
   target.className = "tf-fileview";
   document.body.appendChild(target);
@@ -460,3 +463,23 @@ test("two repositories declare it: the head asks; Point to a file… picks one, 
   expect(words(target.querySelector(".tf-xv-verdict"))).toContain("5 departures");
   expect(words(target.querySelector(".tf-xv-head"))).toContain("you pointed to it");
 });
+
+test("a document whose schema is at an address is offered it; Download it keeps the file and checks the document", async () => {
+  const address = ns("schemas.example/opentrans/opentrans_2_1.xsd");
+  // The whole family downloaded is one file here: openTRANS's own, whose imports stand beside it in the repository.
+  const family = familyFiles("opentrans-2.1", "schemas/opentrans/");
+  kept.downloaded.set("e".repeat(64), family.get("schemas/opentrans/opentrans_2_1.xsd")!);
+  const schema = { ...schemaPort({ drop: "schemas/opentrans/opentrans_2_1.xsd" }), pointed: async () => structuredClone(kept.pointed) as never[] };
+  const order = fixture("order-4711.xml").replace("../schemas/opentrans/opentrans_2_1.xsd", address);
+  view = mount(TfDocView, { target, props: { text: order, path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema } });
+  flushSync();
+  await checked();
+  for (let i = 0; i < 50 && !words(target.querySelector(".tf-xv-head")).includes("at an address"); i += 1) await settle();
+  expect(words(target.querySelector(".tf-xv-head"))).toContain(`Its schema is at an address, ${address}. knobas fetches nothing by itself.`);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-xv-head button")].find((b) => words(b) === "Download it")!.click();
+  await settle();
+  await checked();
+  expect(kept.pointed).toEqual([{ namespace: ns("www.opentrans.org/XMLSchema/2.1"), location: address, to: { url: address, sha256: "e".repeat(64), at: "2026-11-24" } }]);
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("downloaded");
+});
+

@@ -163,6 +163,8 @@ export interface FileRow {
   readonly bad: string | null;
   /** Another repository's, and where it was read. */
   readonly from: Elsewhere | null;
+  /** The address it was downloaded from; `null` for a file not downloaded. */
+  readonly url: string | null;
 }
 export interface LostRow {
   readonly depth: number;
@@ -806,9 +808,9 @@ export function indexOf(set: SchemaSet, lean = false, repo: { total: number; rea
   for (const c of set.comps.values()) counts.set(c.file, (counts.get(c.file) ?? 0) + 1);
   const listing: { kind: "file" | "lost"; at: number }[] = [];
   const listed = new Set<string>();
-  type Job = { kind: "file"; path: string; depth: number; ref: { kind: string; how: How | null; from: Elsewhere | null } | null } | { kind: "lost"; row: LostRow };
+  type Job = { kind: "file"; path: string; depth: number; ref: { kind: string; how: How | null; from: Elsewhere | null; location: string | null } | null } | { kind: "lost"; row: LostRow };
   const queue: Job[] = [];
-  const visit = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null } | null) => {
+  const visit = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null; location: string | null } | null) => {
     const doc = set.docs.find((d) => d.path === path);
     if (doc === undefined || listed.has(path)) return;
     listed.add(path);
@@ -826,9 +828,10 @@ export function indexOf(set: SchemaSet, lean = false, repo: { total: number; rea
       reading: doc.reading,
       bad: doc.bad,
       from: ref?.from ?? null,
+      url: ref?.how === "downloaded" ? ref.location : null,
     });
     for (const r of doc.refs) {
-      if (r.to !== null && r.how !== "builtin") queue.push({ kind: "file", path: r.to, depth: depth + 1, ref: { kind: r.kind, how: r.how, from: r.from } });
+      if (r.to !== null && r.how !== "builtin") queue.push({ kind: "file", path: r.to, depth: depth + 1, ref: { kind: r.kind, how: r.how, from: r.from, location: r.location } });
       else if (r.to === null && !r.reading)
         queue.push({ kind: "lost", row: { depth: depth + 1, kind: r.kind, location: r.location, namespace: r.namespace, why: r.why ?? "", address: r.address ?? (r.location !== null && isRemote(r.location) ? r.location : null), two: r.two, by: path } });
     }

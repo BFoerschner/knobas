@@ -100,7 +100,7 @@ pub fn image_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 /// What an answer that is no image was, in a few words.
-fn what_it_was(bytes: &[u8], content_type: &str) -> String {
+pub(crate) fn what_it_was(bytes: &[u8], content_type: &str) -> String {
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(256)]).to_ascii_lowercase();
     if head.contains("<html") || head.contains("<!doctype html") {
         return "an HTML page".to_owned();
@@ -144,18 +144,102 @@ fn answered(url: &str, mime: &str, bytes: &[u8]) -> FetchedImage {
     }
 }
 
-fn failed(failure: &Failure) -> IpcError {
+/// What one `GET` is for, in the words its failures say.
+#[derive(Clone, Copy)]
+pub(crate) struct Fetching {
+    /// `image`, `schema`.
+    pub noun: &'static str,
+    /// `loaded`, `downloaded`.
+    pub done: &'static str,
+    /// `load`, `download`.
+    pub verb: &'static str,
+}
+
+/// An image's words.
+const IMAGE: Fetching = Fetching {
+    noun: "image",
+    done: "loaded",
+    verb: "load",
+};
+
+fn failed(failure: &Failure, what: Fetching) -> IpcError {
     IpcError::invalid(match failure {
         Failure::Resolve(said)
         | Failure::Connect(said)
         | Failure::Tls(said)
         | Failure::Send(said)
         | Failure::Read(said) => {
-            format!("The image could not be loaded: {said}")
+            format!("The {} could not be {}: {said}", what.noun, what.done)
         }
-        Failure::Timeout => "The image did not load in 30 s.".to_owned(),
-        Failure::Stopped => "The load was stopped.".to_owned(),
+        Failure::Timeout => format!("The {} did not {} in 30 s.", what.noun, what.verb),
+        Failure::Stopped => format!("The {} was stopped.", what.verb),
     })
+}
+
+/// One `GET` of `url` through the person client: no cookie, no credential,
+/// no retry; a redirect followed on the same origin only, five at most; at
+/// most `cap` bytes read. Answers the last answer, whatever its status.
+///
+/// # Errors
+///
+/// The request failed, or a redirect leaves the origin.
+pub(crate) async fn one_get(
+    url: &url::Url,
+    cap: usize,
+    what: Fetching,
+) -> Result<person::Answer, IpcError> {
+    let direct = url.host_str().is_some_and(super::send::is_this_computer);
+    let client = Client::new(&ClientOptions {
+        connect_timeout: Duration::from_secs(10),
+        extra_roots_pem: None,
+        direct,
+    })
+    .map_err(IpcError::internal)?;
+    let from = origin(url);
+    let mut request = person::Request {
+        method: knobas_http::Method::GET,
+        url: url.clone(),
+        headers: Vec::new(),
+        body: None,
+    };
+    let mut hops = 0;
+    loop {
+        let answer = client
+            .send(
+                request.clone(),
+                Duration::from_secs(30),
+                cap + 1,
+                std::future::pending(),
+            )
+            .await
+            .map_err(|failure| failed(&failure, what))?;
+        let next = if (300..400).contains(&answer.status) {
+            answer
+                .headers
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case("location"))
+                .and_then(|(_, v)| request.url.join(v).ok())
+        } else {
+            None
+        };
+        match next {
+            Some(next) if origin(&next) == from && hops < MAX_HOPS => {
+                hops += 1;
+                request = person::Request {
+                    url: next,
+                    ..request
+                };
+            }
+            Some(next) => {
+                return Err(IpcError::invalid(format!(
+                    "The address sends elsewhere, to {}: knobas follows a redirect on the {}'s own site only.",
+                    next.host_str().unwrap_or("another site"),
+                    what.noun
+                )));
+            }
+            None => return Ok(answer),
+        }
+    }
 }
 
 /// The image at `address`: kept, or asked for once.
@@ -180,57 +264,7 @@ pub async fn fetch(address: &str) -> Result<FetchedImage, IpcError> {
             "knobas loads images from http and https addresses only.",
         ));
     }
-    let direct = url.host_str().is_some_and(super::send::is_this_computer);
-    let client = Client::new(&ClientOptions {
-        connect_timeout: Duration::from_secs(10),
-        extra_roots_pem: None,
-        direct,
-    })
-    .map_err(IpcError::internal)?;
-    let from = origin(&url);
-    let mut request = person::Request {
-        method: knobas_http::Method::GET,
-        url: url.clone(),
-        headers: Vec::new(),
-        body: None,
-    };
-    let mut hops = 0;
-    let answer = loop {
-        let answer = client
-            .send(
-                request.clone(),
-                Duration::from_secs(30),
-                IMAGE_CAP + 1,
-                std::future::pending(),
-            )
-            .await
-            .map_err(|failure| failed(&failure))?;
-        let next = if (300..400).contains(&answer.status) {
-            answer
-                .headers
-                .iter()
-                .find(|(n, _)| n.eq_ignore_ascii_case("location"))
-                .and_then(|(_, v)| request.url.join(v).ok())
-        } else {
-            None
-        };
-        match next {
-            Some(next) if origin(&next) == from && hops < MAX_HOPS => {
-                hops += 1;
-                request = person::Request {
-                    url: next,
-                    ..request
-                };
-            }
-            Some(next) => {
-                return Err(IpcError::invalid(format!(
-                    "The address sends elsewhere, to {}: knobas follows a redirect on the image's own site only.",
-                    next.host_str().unwrap_or("another site")
-                )));
-            }
-            None => break answer,
-        }
-    };
+    let answer = one_get(&url, IMAGE_CAP, IMAGE).await?;
     if answer.status != 200 {
         return Err(IpcError::invalid(format!(
             "The server answered {} {}.",

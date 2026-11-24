@@ -112,6 +112,12 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     },
     // The fixture's other repositories hold no schema: another repository answers nothing.
     files_declaring: () => [],
+    // The dev fake reaches no address: a download says so, and nothing was ever downloaded.
+    xsd_fetch: () => {
+      throw { code: "invalid", message: "The schema could not be downloaded: the dev fake reaches no address.", source_id: null };
+    },
+    xsd_downloaded: () => null,
+    xsd_forget: () => undefined,
     set_image_hosts: (args) => {
       fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
       return structuredClone(fakeImageHosts);

@@ -7,11 +7,13 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-const kept = vi.hoisted(() => ({ pointed: [] as unknown[] }));
+const kept = vi.hoisted(() => ({ pointed: [] as unknown[], downloaded: new Map<string, string>() }));
 vi.mock("../../../ipc/api", async (original) => ({
   ...(await original<typeof import("../../../ipc/api")>()),
   xsdLocations: async () => structuredClone(kept),
   xsdSetLocations: async (list: { pointed: unknown[] }) => ((kept.pointed = structuredClone(list.pointed)), structuredClone(kept)),
+  xsdFetch: async (address: string) => ({ url: address, sha256: "d".repeat(64), size: 1, at: "2026-11-24" }),
+  xsdDownloaded: async (sha: string) => kept.downloaded.get(sha) ?? null,
 }));
 
 import TfXsd from "./TfXsd.svelte";
@@ -25,6 +27,7 @@ let view: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
   kept.pointed = [];
+  kept.downloaded.clear();
   target = document.createElement("div");
   document.body.appendChild(target);
   Element.prototype.scrollIntoView = function () {};
@@ -326,5 +329,23 @@ test("Seen while reading: a repository with more schemas than the index reads sa
   await settle(30);
   expect([...files.keys()].filter((p) => p.endsWith(".xsd"))).toHaveLength(324);
   expect(seenLines()).toContain("knobas looked at 300 of 324 .xsd files here.");
+});
+
+test("an import at an address is offered, never fetched; Download it keeps the file and the set reads it from there", async () => {
+  const { files, bme } = withoutBmecat();
+  const address = ns("schemas.example/bmecat/bmecat_2005.xsd");
+  files.set(ENTRY, files.get(ENTRY)!.replace(/schemaLocation="bmecat_2005\.xsd"/, `schemaLocation="${address}"`));
+  kept.downloaded.set("d".repeat(64), bme);
+  draw(files);
+  await drawn();
+  await settle(20);
+  const lost = page().querySelector(".tf-xsd-nf")!;
+  expect(text(lost)).toContain("It is an address. knobas fetches none by itself.");
+  button("Download it", lost)!.click();
+  await settle(30);
+  expect(kept.pointed).toEqual([{ namespace: BMECAT, location: address, to: { url: address, sha256: "d".repeat(64), at: "2026-11-24" } }]);
+  expect(page().querySelector(".tf-xsd-nf")).toBeNull();
+  const row = [...page().querySelectorAll(".tf-xsd-frow")].find((r) => text(r).includes("bmecat_2005.xsd"))!;
+  expect(text(row)).toContain("downloaded");
 });
 

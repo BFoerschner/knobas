@@ -5,7 +5,7 @@ import type { DocSession } from "../../../render/doc-port";
 import type { XsdEngine } from "../../../render/xsd-port";
 import { ns } from "../../../render/xml-names";
 
-const FILE = { depth: 1, path: "schemas/s.xsd", ns: "urn:a", prefix: null, how: "imported, beside it", count: 3, found: "beside", adopted: false, reading: false, bad: null, from: null };
+const FILE = { depth: 1, path: "schemas/s.xsd", ns: "urn:a", prefix: null, how: "imported, beside it", count: 3, found: "beside", adopted: false, reading: false, bad: null, from: null, url: null };
 const INDEX = { listing: [], entry: "x", home: "urn:a", version: null, v11: false, head: null, files: [{ ...FILE, depth: 0, found: null }, FILE], lost: [], decls: [], roots: [], under: [], underOneOf: false, seen: [], ownElements: 0, ownTypes: 0, total: 3, reading: 0, ms: { read: 0, compile: 0 }, perFile: [] };
 const WORDS = { at: "B", attr: null, kind: "unexpected", text: [{ text: "B may not stand here." }], raw: "", said: true, expected: [], value: null };
 

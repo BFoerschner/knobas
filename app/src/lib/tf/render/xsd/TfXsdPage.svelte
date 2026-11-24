@@ -26,6 +26,7 @@
     oncopylink = null,
     onpoint = null,
     onpick = null,
+    ondownload = null,
     head = null,
     scroller = $bindable(null),
   }: {
@@ -41,6 +42,8 @@
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
     /** One of the files two repositories declare, picked for a reference (section 16). */
     onpick?: ((namespace: string | null, location: string | null, c: Candidate) => void) | null;
+    /** *Download it* on a reference that names an address (section 17). */
+    ondownload?: ((namespace: string | null, location: string | null, address: string) => Promise<void>) | null;
     /** What stands at the head's end under 1,480 px (S4's *Reference* or *Example*). */
     head?: Snippet | null;
     scroller?: HTMLElement | null;
@@ -91,7 +94,7 @@
       <div class="tf-oas-back"><button type="button" class="tf-btn tf-sm" onclick={onback}>Back to {st.backs.at(-1)?.label}</button></div>
     {/if}
     {#if page === null}
-      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} {onpick} />{/if}
+      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} {onpick} {ondownload} />{/if}
     {:else}
       {@const p = page}
       <h2 class="tf-xsd-h">

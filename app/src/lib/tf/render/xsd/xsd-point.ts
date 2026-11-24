@@ -2,7 +2,7 @@
  * Pointing a reference at a file (the XSD design, section 17): the candidates a picker lists, and the answer kept in
  * `xsd.locations` for the namespace and location asked for, the last given winning.
  */
-import { xsdLocations, xsdSetLocations, type DeclaringFile, type PointedSchema } from "../../../ipc/api";
+import { xsdDownloaded, xsdFetch, xsdLocations, xsdSetLocations, type DeclaringFile, type DownloadedSchema, type PointedSchema } from "../../../ipc/api";
 import { buildIndex } from "../../../render/xsd-index";
 import { keyOf } from "../../../time/format";
 import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
@@ -23,12 +23,16 @@ export function candidatesOf(repo: string, declares: readonly (readonly [string,
   return declares.filter(([, ns]) => ns !== null).map(([path, ns]) => ({ repo, repoName: null, path, declares: ns ?? "" }));
 }
 
+/** `list` with `entry` the answer for its namespace and location: in the place of the one it replaces, else last. */
+function put(list: readonly PointedSchema[], entry: PointedSchema): PointedSchema[] {
+  const at = list.findIndex((p) => p.namespace === entry.namespace && p.location === entry.location);
+  return at === -1 ? [...list, entry] : list.map((p, i) => (i === at ? entry : p));
+}
+
 /** The list kept with one answer more for `namespace` and `location`: the last given wins. */
 export function withPointed(list: readonly PointedSchema[], namespace: string | null, location: string | null, c: Candidate): PointedSchema[] {
-  const ns = namespace ?? "";
-  const loc = location ?? "";
   const to: PointedSchema["to"] = c.repoName === null ? { repo: c.repo, path: c.path } : { repo: c.repo, path: c.path, name: c.repoName };
-  return [...list.filter((p) => !(p.namespace === ns && p.location === loc)), { namespace: ns, location: loc, to }];
+  return put(list, { namespace: namespace ?? "", location: location ?? "", to });
 }
 
 /** The kept list as the set's reader takes it. */
@@ -81,4 +85,35 @@ export async function gatherCandidates(repo: string, from: string, namespace: st
 export async function keepPick(namespace: string | null, location: string | null, c: Candidate): Promise<Pointed[]> {
   const kept = await xsdSetLocations({ pointed: withPointed((await xsdLocations()).pointed, namespace, location, c) });
   return asPointed(kept.pointed);
+}
+
+/** A downloaded schema's SHA-256 from its path in a set (`@download/<sha256>`), `null` for any other path. */
+export function downloadedSha(path: string): string | null {
+  return /^@download\/([0-9a-f]{64})$/.exec(path)?.[1] ?? null;
+}
+
+/** A downloaded schema's text, read from the profile; `null` where it is not kept. */
+export function readDownloaded(path: string): Promise<string | null> | null {
+  const sha = downloadedSha(path);
+  return sha === null ? null : xsdDownloaded(sha).catch(() => null);
+}
+
+/** The list kept with a download as the answer for `namespace` and `location`: the last given wins. */
+export function withDownload(list: readonly PointedSchema[], namespace: string | null, location: string | null, d: DownloadedSchema): PointedSchema[] {
+  return put(list, { namespace: namespace ?? "", location: location ?? "", to: { url: d.url, sha256: d.sha256, at: d.at } });
+}
+
+/**
+ * *Download it* (section 17): the schema at `address` downloaded on the press, kept as the answer for `namespace` and
+ * `location`; the list as kept, as the set reads it.
+ */
+export async function keepDownload(namespace: string | null, location: string | null, address: string): Promise<Pointed[]> {
+  const d = await xsdFetch(address);
+  const kept = await xsdSetLocations({ pointed: withDownload((await xsdLocations()).pointed, namespace, location, d) });
+  return asPointed(kept.pointed);
+}
+
+/** Whether a downloaded file is still the answer of any entry but the one at `except`: its file stays while one is. */
+export function stillUsed(list: readonly PointedSchema[], sha256: string, except: number): boolean {
+  return list.some((p, i) => i !== except && "url" in p.to && p.to.sha256 === sha256);
 }

@@ -59,7 +59,7 @@
   import { XsdState } from "../xsd/xsd.svelte";
   import { XsdPort } from "../../../render/xsd-port";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
-  import { gatherCandidates, keepPick, splitAway, type Candidate } from "../xsd/xsd-point";
+  import { gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "../xsd/xsd-point";
   import { buildIndex } from "../../../render/xsd-index";
 
   let {
@@ -203,7 +203,7 @@
         index: (from, list) => buildIndex(repo, list, from, port.read),
         readAway: (p) => {
           const away = splitAway(p);
-          if (away === null) return Promise.resolve(null);
+          if (away === null) return readDownloaded(p) ?? Promise.resolve(null);
           return away.repo === repo ? port.read(away.path) : (port.readOther?.(away.repo, away.path) ?? Promise.resolve(null));
         },
         ...(port.elsewhere !== undefined ? { elsewhere: port.elsewhere } : {}),
@@ -244,6 +244,26 @@
     // Checked again through the pick: the set is read as the explorer reads it, step 1 first.
     ch.resume();
     void runCheck(ch, state, state.opened?.root ?? rootSays(text), s);
+  }
+  /**
+   * *Download it*: a schema at an address the set names (the document's own, or one its schema imports), downloaded on
+   * the press and kept for that reference (its namespace, the address as its location), and the document checked.
+   */
+  async function download(namespace: string | null, address: string) {
+    const s = schema;
+    const state = st;
+    const ch = check;
+    const root = state?.opened?.root ?? rootSays(text);
+    if (s === null || state === null || ch === null || root === null) return;
+    try {
+      await keepDownload(namespace, address, address);
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    push({ text: `Downloaded ${address}. It answers it from now on.` });
+    ch.resume();
+    void runCheck(ch, state, root, s);
   }
   /** The declaration beside the document, for the line picked (section 26). */
   let declared = $state<XsdState | null>(null);
@@ -853,6 +873,7 @@
           }}
       onschema={check === null || schema?.open === undefined ? null : () => (check?.schema != null ? schema?.open?.(check.schema, null) : undefined)}
       onpoint={schema === null ? null : point}
+      ondownload={schema === null ? null : download}
     >
       {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
       {#snippet copy()}

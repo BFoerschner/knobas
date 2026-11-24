@@ -128,3 +128,4 @@ mod wiring;
 mod working_reads;
 mod working_tree;
 mod worklog_ipc;
+mod xsd_download;

@@ -188,7 +188,7 @@ export class DocCheck {
       return;
     }
     this.schema = file.path;
-    const against = baseOf(file.path);
+    const against = file.url !== null ? baseOf(file.url) : baseOf(file.path);
     const how = file.from !== null ? `in ${file.from.name}, at ${file.from.branch}` : (FOUND[file.found ?? ""] ?? "");
     this.head = { k: "looking", found: against, how };
     const checked: Checked = await port.check(text);

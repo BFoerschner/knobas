@@ -82,6 +82,16 @@ repo: string,
 branch: string, path: string, };
 
 /**
+ * A schema downloaded: the address asked, the file's SHA-256 (its name in
+ * the profile's `schemas/`), its size and the day.
+ */
+export type DownloadedSchema = { url: string, sha256: string, size: number, 
+/**
+ * `YYYY-MM-DD`, the day it was downloaded.
+ */
+at: string, };
+
+/**
  * An image fetched: what it is, how big, and its bytes.
  */
 export type FetchedImage = { url: string, mime: string, size: number, base64: string, };
