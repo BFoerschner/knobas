@@ -1071,6 +1071,26 @@
     return context.archive(file, side);
   }
 
+  /**
+   * Another file of a schema's set at a side (S7), through the diff's own reader: a file the change touches is read at
+   * the side asked for, one it does not touch once, at the side after, for both sides (the XSD design, section 27).
+   */
+  const setTexts = new Map<string, Promise<string | null>>();
+  function setRead(side: Side, path: string): Promise<string | null> {
+    const reader = context;
+    if (reader === null) return Promise.resolve(null);
+    const touched = files.some((f) => f.path === path || f.old_path === path);
+    const at: Side = touched ? side : "new";
+    const key = `${at}\n${path}`;
+    let held = setTexts.get(key);
+    if (held === undefined) {
+      const file = { path, old_path: null, change: "modified", additions: 0, deletions: 0, hunks: [], truncated: false } as unknown as DrawnFile;
+      held = (reader.bytes !== undefined ? reader.bytes(file, at).then((b) => (b === null ? null : new TextDecoder().decode(b))) : reader.text(file, at)).catch(() => null);
+      setTexts.set(key, held);
+    }
+    return held;
+  }
+
   /** Each side's read while it is out, so a second asker waits for the same one. */
   const reading = new Map<string, Promise<void>>();
   function loadSide(file: DrawnFile, side: Side): Promise<void> | undefined {
@@ -1968,6 +1988,7 @@
         {commands}
         {archives}
         reopen={(side) => listingAt(file, side)}
+        setRead={context === null ? null : setRead}
         expandable={context !== null && piped === null && file.made === undefined}
         expanded={piped ? undefined : expandedOf(key)}
         onexpand={(hunk, how) => void expand(lineOf(file), hunk, how)}

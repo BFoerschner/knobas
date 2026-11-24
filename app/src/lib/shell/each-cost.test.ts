@@ -321,6 +321,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfApiServersSection.svelte  list.servers": "a handful by what it is: the servers a person saved",
   "tf/render/TfFileViewer.svelte  content.text.replace(/\\r?\\n$/, \"\").split(\"\\n\")": "capped where it is read or drawn: an attachment or artifact preview's text, read up to the preview's cap",
   "tf/render/TfPdf.svelte  shown.sizes": "capped where it is read or drawn: a PDF's pages drawn as they come into view",
+  "tf/render/xsd/TfXsdDiff.svelte  row.facts": "a handful by what it is: the facts that differ in one opened declaration",
   "tf/diff/TfJarDiff.svelte  cut.hunks": "capped where it is read: an opened entry's hunks, their first 400 lines (`firstLines`) until *Show the other N lines*",
   "tf/diff/TfJarDiff.svelte  hunk.lines": "capped where it is read: one hunk's lines, inside the opened entry's first 400",
   "tf/diff/TfJarDiff.svelte  c.blocks": "a handful by what it is: the classes of one changed class family whose outline differs",

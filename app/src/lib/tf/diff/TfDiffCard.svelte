@@ -113,6 +113,7 @@
     commands,
     archives = undefined,
     reopen = undefined,
+    setRead = null,
     ends = null,
     choices = [],
     opened = null,
@@ -167,6 +168,8 @@
     archives?: Omit<ArchivePorts, "open"> | undefined;
     /** A JAR's side listed again where the backend let it go. */
     reopen?: ((side: Side) => Promise<ArchiveIndex | null>) | undefined;
+    /** Another file of a schema's set at a side (S7): the diff's reader. */
+    setRead?: ((side: Side, path: string) => Promise<string | null>) | null;
     /** Where each side is read, for the stage's caption (`main at 4f2a91c`, *working tree*). */
     ends?: { old: string; new: string } | null;
     /** The renderers that can draw this comparison, and *Render as*'s menu, pattern and two presses. */
@@ -634,6 +637,7 @@
         {commands}
         {...archives ? { archives } : {}}
         {...reopen ? { reopen } : {}}
+        {setRead}
         changed={rendered.renderer.id === "markdown" ? changedLines(file) : null}
         partial={file.truncated || more !== null || waiting}
         {...frame ? { frame } : {}}

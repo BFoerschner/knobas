@@ -38,6 +38,7 @@ import {
 import { baseOf, isRemote, type Elsewhere, type How, type Pointed, type SchemaIndex } from "./xsd-locate";
 import { findingWords, type Finding, type Words } from "./xsd-findings";
 import { rx } from "./xsd-pattern";
+import { changes, runsOf, KIND as KIND_WORDS, type Dir } from "./xsd-changes";
 import { XS, localOf, nsOf } from "./xsd-xml";
 
 // ---- What crosses to the page ----
@@ -248,7 +249,39 @@ export type XsdCall =
   | { kind: "check"; xml: string }
   | { kind: "example"; key: string; options: ExampleOptions }
   | { kind: "declOf"; names: { ns: string; local: string }[] }
+  /** Two versions of a schema compared by what they declare (S7): the sessions of each side, `null` for no schema there. */
+  | { kind: "changes"; old: number | null; new: number | null; before: string; after: string }
   | { kind: "close" };
+
+/** A row of a schema's comparison (S7): a declaration that changed, came, went, or changed through one it names. */
+export interface ChangeRow {
+  readonly key: string;
+  readonly mark: "changed" | "added" | "removed" | "through";
+  /** What it is, in words: *element*, *complex type*. */
+  readonly kind: string;
+  readonly label: string;
+  /** Its place on its side (`el/ORDER`): the removed one's on the side before. */
+  readonly place: string;
+  /** A row changed through another: that one's name. */
+  readonly via: string | null;
+  readonly facts: readonly { readonly place: string; readonly text: readonly Run[]; readonly dir: Dir | null }[];
+  /** What changed, in one line. */
+  readonly say: string;
+  readonly dirs: Readonly<Partial<Record<Dir, number>>>;
+}
+
+export interface ChangesAnswer {
+  readonly rows: readonly ChangeRow[];
+  readonly changed: number;
+  readonly added: number;
+  readonly removed: number;
+  readonly through: number;
+  readonly same: number;
+  readonly counts: Readonly<Record<Dir, number>>;
+  /** Each side is a schema. */
+  readonly sides: { readonly old: boolean; readonly new: boolean };
+  readonly ms: number;
+}
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
 export interface SchemaIndexWire {
@@ -305,6 +338,7 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
 
 /** Answers one call of one session. */
 export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall, bundled: Bundled): unknown {
+  if (call.kind === "changes") return changesOf(call.old === null ? null : (sessions.get(call.old)?.set ?? null), call.new === null ? null : (sessions.get(call.new)?.set ?? null), call.before, call.after);
   if (call.kind === "open") {
     const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
     sessions.set(session, s);
@@ -953,3 +987,49 @@ export function indexOf(set: SchemaSet, lean = false, repo: { total: number; rea
 }
 
 export { isBuiltin };
+
+// ---- Two versions compared (S7, the XSD design's section 27) ----
+
+/** The comparison as rows: what changed itself, came and went in the file's order, then what changed through them. */
+export function changesOf(a: SchemaSet | null, b: SchemaSet | null, before: string, after: string): ChangesAnswer {
+  const t0 = performance.now();
+  const ch = changes(a, b, before, after);
+  const sideOf = (_key: string, mark: ChangeRow["mark"]) => (mark === "removed" ? a : b) ?? a ?? b!;
+  const lineOf = (key: string, mark: ChangeRow["mark"]) => sideOf(key, mark).comps.get(key)?.line ?? 0;
+  const plain = (text: string) => text.replace(/[\u0001\u0002]/g, "");
+  const row = (key: string, mark: ChangeRow["mark"], facts: readonly { place: string; text: string; dir: Dir | null }[], via: string | null): ChangeRow => {
+    const set = sideOf(key, mark);
+    const comp = set.comps.get(key);
+    const dirs: Partial<Record<Dir, number>> = {};
+    for (const f of facts) if (f.dir !== null) dirs[f.dir] = (dirs[f.dir] ?? 0) + 1;
+    return {
+      key,
+      mark,
+      kind: comp === undefined ? "" : KIND_WORDS[comp.kind],
+      label: labelOfKey(set, key),
+      place: placeOf(set, key),
+      via: via === null ? null : labelOfKey(b ?? set, via),
+      facts: facts.map((f) => ({ place: f.place, text: runsOf(f.text), dir: f.dir })),
+      say: facts.slice(0, 3).map((f) => `${f.place === "" ? "" : `${f.place}: `}${plain(f.text)}`).join(" · "),
+      dirs,
+    };
+  };
+  const own = [
+    ...ch.changed.map((c) => ({ key: c.key, mark: "changed" as const, facts: c.facts })),
+    ...ch.added.map((key) => ({ key, mark: "added" as const, facts: [] })),
+    ...ch.removed.map((key) => ({ key, mark: "removed" as const, facts: [] })),
+  ].sort((x, y) => lineOf(x.key, x.mark) - lineOf(y.key, y.mark));
+  const through = [...ch.through].sort(([x], [y]) => lineOf(x, "through") - lineOf(y, "through"));
+  const rows = [...own.map((r) => row(r.key, r.mark, r.facts, null)), ...through.map(([key, via]) => row(key, "through", [], via))];
+  return {
+    rows,
+    changed: ch.changed.length,
+    added: ch.added.length,
+    removed: ch.removed.length,
+    through: ch.through.size,
+    same: ch.same,
+    counts: { stricter: ch.counts.stricter, looser: ch.counts.looser, different: ch.counts.different },
+    sides: { old: a !== null, new: b !== null },
+    ms: performance.now() - t0,
+  };
+}

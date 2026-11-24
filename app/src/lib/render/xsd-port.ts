@@ -10,7 +10,7 @@
  *   reference is not found in this one (`?elsewhere:<namespace>`).
  * - **A schema opened again** reads its files from the worker's kept trees (by text): only the compile runs again.
  */
-import type { Checked, Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
+import type { ChangesAnswer, Checked, Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
 import type { Elsewhere, Pointed } from "./xsd-locate";
 import type { Example, ExampleOptions } from "./xsd-example";
 
@@ -119,6 +119,16 @@ export class XsdPort {
 
   constructor(engine: XsdEngine) {
     this.#engine = engine;
+  }
+
+  /** The session's id where its engine keeps it: a comparison names both sides' (S7). */
+  get id(): number {
+    return this.#id;
+  }
+
+  /** The engine the set is kept by: two sides compared must be kept by one. */
+  get engine(): XsdEngine {
+    return this.#engine;
   }
 
   /** Reads the opened file alone and answers at once; the files it names are read after (`onindex`). */
@@ -239,4 +249,15 @@ export class XsdPort {
     this.#closed = true;
     void this.#engine(this.#id, { kind: "close" });
   }
+}
+
+/**
+ * Two versions of a schema compared by what they declare (S7): each side a port opened on the same engine, `null` for a
+ * side that holds no schema; `before` and `after` the compared file's path on each side.
+ */
+export async function compareSets(old: XsdPort | null, now: XsdPort | null, before: string, after: string): Promise<ChangesAnswer | null> {
+  const by = now ?? old;
+  if (by === null) return null;
+  const answer = await by.engine(by.id, { kind: "changes", old: old?.id ?? null, new: now?.id ?? null, before, after });
+  return answer !== null && typeof answer === "object" && "rows" in answer ? (answer as ChangesAnswer) : null;
 }

@@ -41,6 +41,7 @@
   import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import TfPdfDiff from "../render/TfPdfDiff.svelte";
   import TfOasDiff from "../render/TfOasDiff.svelte";
+  import TfXsdDiff from "../render/xsd/TfXsdDiff.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import { imageMode as sharedImageMode, type ImageModeChoice } from "./image-mode.svelte";
   import { isListing, meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
@@ -74,6 +75,7 @@
     archives = bridgeArchive(),
     reopen = () => Promise.resolve(null),
     classMode = sharedClassMode,
+    setRead = null,
   }: {
     plan: RenderedPlan;
     path: string;
@@ -109,6 +111,8 @@
     reopen?: (side: Side) => Promise<ArchiveIndex | null>;
     /** How a changed class is diffed, one choice app-wide. */
     classMode?: ClassModeChoice;
+    /** Another file of a schema's set at a side (S7): the diff's own reader; none, a schema reads its own file alone. */
+    setRead?: ((side: Side, path: string) => Promise<string | null>) | null;
   } = $props();
 
   // ---- Changed blocks (ux26, ruling 3) ----
@@ -161,6 +165,8 @@
   export function nextChange(step: 1 | -1, entering = false): boolean {
     // An API spec steps through its marked operations and schemas (ux31, section 13).
     if (id === "openapi") return oasStage?.nextChange(step, entering) ?? false;
+    // A schema steps through its declarations that changed (S7).
+    if (id === "xsd") return xsdStage?.nextChange(step, entering) ?? false;
     readChanges();
     const to = entering ? (step === 1 ? 0 : changes.length - 1) : at + step;
     if (!marksOn || to < 0 || to >= changes.length || stage === null) return false;
@@ -196,7 +202,10 @@
   };
   const neitherSpec = $derived(id === "openapi" && sides.length > 0 && sides.every(noSpec));
   /** The columns the stage draws: one for a PDF or an API spec (their own two), a JAR, a swipe or an onion, else one a side. */
-  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || overlaid || neitherSpec ? 1 : sides.length);
+  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || id === "xsd" || overlaid || neitherSpec ? 1 : sides.length);
+  /** A schema's stage (`TfXsdDiff`, S7), and what it says for the foot. */
+  let xsdStage = $state<ReturnType<typeof TfXsdDiff> | null>(null);
+  let xsdSay = $state("");
   /** An API spec's stage (`TfOasDiff`), and what it says for the foot. */
   let oasStage = $state<ReturnType<typeof TfOasDiff> | null>(null);
   let oasSay = $state("");
@@ -287,6 +296,7 @@
     if (unread[0] === "old") return "Reading the side before…";
     if (unread[0] === "new") return ends?.new === "working tree" ? "Reading the working tree's side…" : "Reading the side after…";
     if (id === "openapi") return oasSay;
+    if (id === "xsd") return xsdSay;
     if (image) return sides.flatMap((side) => (sizes[side] ? [`${NAME[side]} ${sizes[side]}`] : [])).join(", ");
     if (jarCompare !== null) return compareWords(jarCompare, jarSides?.old === null ? "added" : jarSides?.new === null ? "removed" : null);
     if (marksOn && changes.length > 0) {
@@ -382,6 +392,18 @@
     </div>
   {:else if neitherSpec}
     <div class="tf-rside tf-rside-doc"><p class="tf-jar-dnote tf-roas-no">Neither side is an OpenAPI or Swagger spec: Lines has the change.</p></div>
+  {:else if id === "xsd"}
+    {@const failed = sides.find((side) => failure(side) !== null)}
+    {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
+    <div class="tf-rside">
+      {#if failed !== undefined}
+        <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
+      {:else if old !== undefined && nu !== undefined}
+        <TfXsdDiff bind:this={xsdStage} before={old === null ? null : textOf(old)} after={nu === null ? null : textOf(nu)} {path} read={(side, p) => (setRead === null ? Promise.resolve(null) : setRead(side, p))} onsay={(words) => (xsdSay = words)} />
+      {:else}
+        {@render waiting(sides[0] ?? "new")}
+      {/if}
+    </div>
   {:else if id === "openapi"}
     {@const failed = sides.find((side) => failure(side) !== null)}
     {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}

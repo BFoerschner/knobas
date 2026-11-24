@@ -13,6 +13,7 @@
 import type { ArchiveIndex, DiffFile } from "../../ipc/entity";
 import type { Opened } from "../../render/defaults";
 import type { Renderer } from "../../render/registry";
+import { ns } from "../../render/xml-names";
 
 export type Side = "old" | "new";
 
@@ -97,6 +98,8 @@ const SPEC_KEY = /^(["']?)(openapi|swagger)\1[ \t]*:/;
  * with a plain name, changed away from its first lines, keeps *Lines*).
  */
 export function specHint(file: DiffFile): string | undefined {
+  // A schema is planned from its name (S7): a `.xsd` needs no hint from its hunks; one that is no schema says so in the stage.
+  if (/\.xsd$/i.test(file.path) && file.change !== "binary") return XSD_HINT;
   if (!SPEC_EXT.test(file.path) || file.change === "binary") return undefined;
   if (SPEC_NAME.test(file.path)) return "openapi: 3.0.0";
   for (const side of ["new", "old"] as const) {
@@ -112,6 +115,9 @@ export function specHint(file: DiffFile): string | undefined {
   for (const hunk of file.hunks) for (const line of hunk.lines) if (SPEC_KEY.test(line.text)) return line.text;
   return undefined;
 }
+
+/** What a `.xsd`'s plan is sniffed by: an XML Schema's first tag. */
+const XSD_HINT = `<xs:schema xmlns:xs="${ns("www.w3.org/2001/XMLSchema")}"/>`;
 
 /** An added file's new side, or a deleted file's old one, from its hunks: `null` where they hold less than the file. */
 export function hunkText(file: DiffFile, side: Side): string | null {

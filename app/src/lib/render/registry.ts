@@ -178,7 +178,7 @@ export const JAR: Renderer = {
  * from-it.md`): a `*.xsd` whose first element is an XML Schema's `schema` (`xsd-sniff.ts`), drawn with every file it
  * reaches as one set (`tf/render/xsd/TfXsd.svelte`, its model in the schema worker). Ahead of the XML view, so a
  * schema opens as Schema and *Render as* offers the XML view and Source; a `.xsd` that is no schema opens as before.
- * Not in a comparison yet (the design's S7).
+ * In a comparison it is compared by what it declares (S7, `tf/render/xsd/TfXsdDiff.svelte`).
  */
 export const XSD: Renderer = {
   id: "xsd",
@@ -187,7 +187,7 @@ export const XSD: Renderer = {
   fences: [],
   input: "text",
   output: "html",
-  diff: false,
+  diff: true,
   sniff: (text) => isXsd(text),
 };
 

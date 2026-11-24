@@ -157,3 +157,39 @@
 .tf-xsd-stage { position: relative; min-width: 0; }
 .tf-oas.tf-xsd-under { visibility: hidden; }
 .tf-xsd-opened { position: absolute; inset: 0 0 auto; }
+
+/* ---- A schema in a comparison (S7, `TfXsdDiff`): one list as wide as the stage, a row a declaration ---- */
+.tf-xsd-cmp { display: flex; flex-direction: column; min-height: 100%; background: var(--sheet); }
+.tf-xsd-csum { padding: 8px 12px; border-bottom: 1px solid var(--rule-2); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-csum .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-cnot { color: var(--warn); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-clist { flex: 1; min-height: 0; }
+.tf-xsd-crow { border-bottom: 1px solid var(--rule-2); }
+.tf-xsd-cbtn { width: 100%; min-height: 34px; box-sizing: border-box; display: grid; grid-template-columns: 14px minmax(calc(120px * var(--fs)), max-content) minmax(0, max-content) minmax(0, 1fr) auto; align-items: center; column-gap: 10px; padding: 0 12px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); box-shadow: inset 3px 0 0 var(--mark-edge, transparent); }
+.tf-xsd-cbtn:hover { background: var(--sheet-2); }
+.tf-xsd-cbtn .tf-oas-caret { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: none; }
+.tf-xsd-cbtn[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
+.tf-xsd-crow.tf-xsd-cur > .tf-xsd-cbtn { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--mark-edge, transparent), inset 0 0 0 1px var(--focus); }
+.tf-xsd-crow[data-mark="added"] { --mark-edge: var(--ok); }
+.tf-xsd-crow[data-mark="removed"] { --mark-edge: var(--err); }
+.tf-xsd-crow[data-mark="changed"] { --mark-edge: var(--warn); }
+.tf-xsd-crow[data-mark="through"] { --mark-edge: var(--rule); }
+.tf-xsd-cmark { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
+.tf-xsd-cname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-xsd-cname .tf-xsd-pre { font-weight: 400; color: var(--ink-2); }
+.tf-xsd-csay { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+/* Which way a change goes, where XML Schema says: the word first, its tone second. */
+.tf-xsd-dirs { display: inline-flex; gap: 4px; }
+.tf-xsd-dir { font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.tf-xsd-dir[data-dir="stricter"] { color: var(--warn); background: var(--warn-bg); }
+.tf-xsd-dir[data-dir="looser"] { color: var(--ok); background: var(--ok-bg); }
+.tf-xsd-dir[data-dir="different"] { color: var(--ink-2); background: var(--sheet-2); }
+.tf-xsd-cfacts { margin: 0; padding: 4px 12px 10px 38px; list-style: none; display: grid; gap: 4px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-cfacts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.tf-xsd-cplace { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xsd-cpair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--rule-2); background: var(--sheet); }
+.tf-xsd-cside { min-width: 0; max-height: 420px; overflow: auto; overscroll-behavior: contain; padding: 6px 0 12px; background: var(--sheet); }
+.tf-xsd-cmore { margin: 0; padding: 10px 12px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-cside + .tf-xsd-cside { border-left: 1px solid var(--rule); }
+.tf-xsd-cwhich { display: block; padding: 0 12px 4px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-cside .tf-xsd-gone { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); padding: 8px 12px; }
