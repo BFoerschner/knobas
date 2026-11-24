@@ -74,6 +74,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
+    cardIn,
     DIFF_CEILING,
     FILL_PAGE,
     EXPAND_STEP,
@@ -1705,7 +1706,7 @@
       // The files drawn are the ones near the view: the one at its top is among them.
       for (const file of nearFiles()) {
         const key = keyOf(file);
-        const card = host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
+        const card = cardIn(host, key);
         if (card === null) continue;
         if (card.getBoundingClientRect().top > top) break;
         at = key;
@@ -1867,7 +1868,7 @@
   const heldBack = () =>
     fileWin.before + fileWin.after > 0 ||
     [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
-  const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
+  const cardOf = (key: string) => (filesHost === null ? null : cardIn(filesHost, key));
   /** The file a mark is changing, and where its head stands on screen. */
   let marking: { key: string; path: string; on: boolean; top: number } | null = null;
 
