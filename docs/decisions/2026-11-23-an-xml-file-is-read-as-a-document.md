@@ -57,6 +57,19 @@ With the schema explorer's model (`docs/decisions/2026-11-23-an-xml-schema-is-ex
 
 Measured on the built app (`testenv/perf/doc.mjs` with `?fake-xsd`, headless Chrome on the WSL box under the pc ticket, median of five, ms at 1x / 6x): at 1440 x 868 the order opened to its check's verdict, five departures, 61 / 239, `N` to the first departure 18 / 132; at 2560 x 1440 at 1.25 the verdict 77 / 320, `N` 20 / 142; at 1920 x 1080 at 2 the verdict 282 and `N` 153 at 6x. **Over its line**: the verdict at 6x on 2560 x 1440 at 1.25, 320 against 300 for a page; the page itself is usable from its first lines (178), and the verdict is paint on lines that stand, like the carets, which land at 269 to 327 there on the same build. `N` at 6x on 1920 x 1080 at 2 is 153 against 150. No line moved when the marks landed.
 
+## The JSON view, built (J1, 2026-11-24)
+
+Section 25: a JSON file opens in the same view.
+
+- **Which files**: `*.json`, `*.geojson`, `*.webmanifest`, `*.har`, `*.ipynb`, `*.jsonl` and `*.ndjson` whose text starts with `{` or `[` (`render/json-sniff.ts`); `*.jsonc` and `*.json5` stay Source. The registry's *JSON view* stands after the API explorer, so an OpenAPI spec in JSON opens as *API* with *JSON view* next, and ahead of Source, so it is every other JSON file's default.
+- **The outline** (`render/json-outline.ts`, the spike's `scanJson`) is the XML outline's columns where they mean the same, row 0 the document and the root under it; its nesting is walked with a stack of its own, so a deep file cannot overflow the reader. A line-delimited file holds a value a line. A file that is not JSON is drawn, and the head says where it stops, as for XML.
+- **The model's JSON half** (`render/doc-json.ts`): an object folds counting its members, an array its items; the way down is a jq path's steps (`.`, `orders`, `[2]`, `attachments`, `[0]`, `content`); folds are kept by their jq paths; the picked value says *Object*, *Array*, *String*, *Number* or *Literal*, an object its members, an array its items by kind. **A string is a value**: its bytes inside its quotes, read as a JSON string (`TakeAs::JsonString`), its sibling members `type`, `contentType` or `mime` saying what it is, `fileName` what it is called; a field is named by its last two members, an array's items `[]` (`attachments[].content`). A one-line file is laid out, every value written as it stands.
+- **The head says *Well formed* and *JSON is not checked against a schema*.** No schema is looked for; the XPath field is not drawn (jq is J2's).
+- **A pipeline's JSON answer** (a `.json.gz` through *gunzip* and *jq*) is drawn by the JSON view too, the default for its name.
+- **The export** (`fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json`, the clickdummy's) is in the seed's step 4c and `?fake-xml`.
+
+Measured on the built app (`testenv/perf/doc.mjs`, the same setting as X2), ms at 1x / 6x: at 1440 x 868 the export opened from the README to its carets 25 / 99, its 48 orders folded by their caret 8 / 21, three levels by the key 14 / 63; at 2560 x 1440 at 1.25, 39 / 155, 6 / 26, 14 / 95. Nothing moved (`moves.mjs`, json-export, at 2560 x 1440 at 1.25, 1x and 6x).
+
 ## Not in this pass
 
 An XPath step in file pipelines. XML and JSON compared by element. JSON Schema. YAML. Folds across restarts. A query in an address. Thumbnails.

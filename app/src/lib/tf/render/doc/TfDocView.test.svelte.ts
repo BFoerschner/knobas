@@ -483,3 +483,33 @@ test("a document whose schema is at an address is offered it; Download it keeps 
   expect(words(target.querySelector(".tf-xv-head"))).toContain("downloaded");
 });
 
+
+// ---- The JSON view (J1, the design's section 25) ----
+
+test("a JSON file opens in the same view: its folds count items and members, the head says it is well formed, no XPath field", async () => {
+  const exportText = (await import("node:fs")).readFileSync((await import("node:path")).resolve(__dirname, "../../../../../../fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json"), "utf8");
+  view = mount(TfDocView, { target, props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json" } });
+  flushSync();
+  await settle();
+  expect(head()).toContain("Well formed");
+  expect(head()).toContain("JSON is not checked against a schema.");
+  expect(target.querySelector(".tf-xv-qfield")).toBeNull();
+  // The export goes five levels deep; every level is open when it opens.
+  expect(words(target.querySelector(".tf-xv-stepn"))).toBe("5");
+  // `orders` on line 6 folded by its caret: one line, counting its 48 items.
+  row(6).querySelector<HTMLElement>(".tf-xv-caret")!.click();
+  flushSync();
+  expect(words(row(6).querySelector(".tf-xv-fold"))).toBe("48 items");
+  expect(words(row(6).querySelector(".tf-xv-shut"))).toBe("]");
+  expect(rows().slice(0, 7)).toEqual([1, 2, 3, 4, 5, 6, 1189]);
+  // The base64 PDF beside its type carries its chip; picked, its way down is the jq path's steps.
+  unmount(view);
+  const line = exportText.slice(0, exportText.indexOf('"content": "JVBERi0x')).split("\n").length;
+  view = mount(TfDocView, { target, props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json", line } });
+  flushSync();
+  await settle();
+  row(line).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  expect([...target.querySelectorAll(".tf-xv-crumbs button")].map((b) => words(b))).toEqual([".", "orders", "[2]", "attachments", "[0]", "content"]);
+  expect(words(row(line).querySelector(".tf-xv-chip"))).toContain("PDF");
+});

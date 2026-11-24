@@ -6,6 +6,8 @@
  * What crosses to the page is small and asked for: once, the fold table (a few columns); on a pick, the way down and
  * what the picked element holds; on leaving a file, its folds' names. The outline itself never crosses.
  */
+import { jsonByLine, jsonCrumbs, jsonFoldRows, jsonFoldTable, jsonOnLine, jsonPicked, jsonValuesOn, layOutJson } from "./doc-json";
+import { jsonAt, jsonPathOf, readJson, stepsOf, type JsonOutline } from "./json-outline";
 import { XSI_NS } from "./xml-names";
 import { layOutXml } from "./doc-line";
 import { CHARACTERS, ELEMENTS, LINES, type FoldTable } from "./doc-folds";
@@ -50,9 +52,13 @@ export interface DocOpened {
   defaultNs: boolean;
 }
 
+/** Which reader a document is read by. */
+export type DocKind = "xml" | "json" | "jsonl";
+
 /** One call of a session. */
 export type DocCall =
-  | { kind: "open"; text: string }
+  /** `as`: the reader, the XML view's by default; `jsonl` reads a value a line. */
+  | { kind: "open"; text: string; as?: DocKind }
   | { kind: "at"; line: number }
   | { kind: "keys"; lines: number[] }
   | { kind: "find"; keys: string[] }
@@ -99,7 +105,7 @@ export interface ValueAt {
   /** Where its bytes are in the file, counted from after a byte-order mark. */
   from: number;
   to: number;
-  read: "xml_text" | "xml_attribute";
+  read: "xml_text" | "xml_attribute" | "json_string";
   /** Its start, references read: 4 KB at most. */
   head: string;
   /** Its whole length in characters, and without its white space. */
@@ -129,7 +135,7 @@ export interface Kept {
   origin?: Kept;
   /** UTF-8 bytes before every 4,096th character: a character's place made a byte's quickly. */
   bytesAt?: Uint32Array;
-  outline: XmlOutline;
+  outline: XmlOutline | JsonOutline;
   byLine: Int32Array;
   folds: FoldTable;
   /** Each fold's row. */
@@ -137,22 +143,29 @@ export interface Kept {
 }
 
 /** The outlines read lately, by text, the newest last: a file opened again asks nothing of the reader. */
-const recent: { text: string; kept: Kept }[] = [];
+const recent: { text: string; as: DocKind; kept: Kept }[] = [];
 /** Section 32, risk 12: four documents or 256 MB of text, whichever is less. */
 const RECENT = 4;
 const RECENT_TEXT = 256 * 1024 * 1024;
 
-function keep(text: string): Kept {
-  const at = recent.findIndex((r) => r.text.length === text.length && r.text === text);
+function keep(text: string, as: DocKind = "xml"): Kept {
+  const at = recent.findIndex((r) => r.as === as && r.text.length === text.length && r.text === text);
   if (at !== -1) {
     const [hit] = recent.splice(at, 1);
     recent.push(hit!);
     return hit!.kept;
   }
-  const outline = readXml(text);
-  const foldRows = foldingRows(outline);
-  const kept: Kept = { outline, byLine: elementsByLine(outline), folds: foldTable(outline, foldRows), foldRows };
-  recent.push({ text, kept });
+  let kept: Kept;
+  if (as === "xml") {
+    const outline = readXml(text);
+    const foldRows = foldingRows(outline);
+    kept = { outline, byLine: elementsByLine(outline), folds: foldTable(outline, foldRows), foldRows };
+  } else {
+    const outline = readJson(text, as === "jsonl");
+    const foldRows = jsonFoldRows(outline);
+    kept = { outline, byLine: jsonByLine(outline), folds: jsonFoldTable(outline, foldRows), foldRows };
+  }
+  recent.push({ text, as, kept });
   let held = recent.reduce((sum, r) => sum + r.text.length, 0);
   while (recent.length > RECENT || (held > RECENT_TEXT && recent.length > 1)) held -= recent.shift()!.text.length;
   return kept;
@@ -322,6 +335,7 @@ function prefixesAt(o: XmlOutline, node: number): Record<string, string> {
 
 function opened(k: Kept): DocOpened {
   const o = k.outline;
+  if (o.kind === "json") return { lines: o.lines, nodes: o.n - 1, folds: k.folds, error: o.error, root: null, defaultNs: false };
   const root = o.root;
   const namespace = root === -1 ? "" : o.uris[o.ns[root]!]!;
   return {
@@ -346,7 +360,7 @@ export type DocSessions = Map<number, DocSessionState>;
 /** Answers one call of session `session`: in the worker, or on this thread. */
 export function answerDoc(sessions: DocSessions, session: number, call: DocCall): unknown {
   if (call.kind === "open") {
-    const k = keep(call.text);
+    const k = keep(call.text, call.as ?? "xml");
     sessions.set(session, { k, last: [] });
     return opened(k);
   }
@@ -356,7 +370,8 @@ export function answerDoc(sessions: DocSessions, session: number, call: DocCall)
   }
   const held = sessions.get(session);
   if (held === undefined) return null;
-  const k = held.k;
+  if (held.k.outline.kind === "json") return answerJson(held, call);
+  const k = held.k as Kept & { outline: XmlOutline };
   const o = k.outline;
   if (call.kind === "at") {
     const node = nodeOnLine(o, k.byLine, call.line);
@@ -424,6 +439,51 @@ export function answerDoc(sessions: DocSessions, session: number, call: DocCall)
       if (f !== -1 && k.foldRows[f] === node) out.push(l);
     }
     return out;
+  }
+  return null;
+}
+
+/** A JSON document's calls (section 25): folds, the way down, the picked value, values and a layout; jq is J2's. */
+function answerJson(held: DocSessionState, call: DocCall): unknown {
+  const k = held.k;
+  const o = k.outline as JsonOutline;
+  if (call.kind === "at") {
+    const id = jsonOnLine(o, k.byLine, call.line);
+    if (id <= 0) return { crumbs: [], picked: null };
+    return { crumbs: jsonCrumbs(o, id), picked: jsonPicked(o, id) };
+  }
+  if (call.kind === "keys") {
+    // A fold's name across versions of the file: its jq path.
+    return call.lines.map((line) => {
+      const f = k.folds.byLine[line] ?? -1;
+      return f === -1 ? null : jsonPathOf(o, k.foldRows[f]!);
+    });
+  }
+  if (call.kind === "find") {
+    const out: number[] = [];
+    for (const key of call.keys) {
+      const steps = stepsOf(key);
+      const id = steps === null ? -1 : jsonAt(o, steps);
+      if (id <= 0) continue;
+      const l = o.line[id]!;
+      const f = k.folds.byLine[l] ?? -1;
+      if (f !== -1 && k.foldRows[f] === id) out.push(l);
+    }
+    return out;
+  }
+  if (call.kind === "values") {
+    const src = k.origin ?? k;
+    const out: Record<number, ValueAt[]> = {};
+    for (const line of call.lines) out[line] = jsonValuesOn(o, k.byLine, line, call.all, (at) => byteAt(src, at), src.outline as JsonOutline);
+    return out;
+  }
+  if (call.kind === "layout") {
+    const laid = layOutJson(o);
+    const next = keep(laid, "json");
+    if (next !== k) next.origin = k.origin ?? k;
+    held.k = next;
+    held.last = [];
+    return { text: laid, opened: opened(next) };
   }
   return null;
 }
@@ -541,7 +601,7 @@ const HEAD = 4096;
 
 /** The values on a line: its element's long attributes and its text where it holds no element. With `all`, any. */
 export function valuesOn(k: Kept, line: number, all: boolean): ValueAt[] {
-  const o = k.outline;
+  const o = k.outline as XmlOutline;
   const el = nodeOnLine(o, k.byLine, line);
   if (el <= 0 || (!all && o.line[el] !== line)) return [];
   const out: ValueAt[] = [];
@@ -566,7 +626,7 @@ export function valuesOn(k: Kept, line: number, all: boolean): ValueAt[] {
   const field = namePathOf(o, el);
   // In a layout, a value's place is the file's: the same row of the file as written.
   const src = k.origin ?? k;
-  const so = src.outline;
+  const so = src.outline as XmlOutline;
   const place = (from: number, to: number, read: ValueAt["read"], node: number, name: string, f: string, raw: string, what: typeof said) => {
     const head = decode(raw.length > HEAD ? raw.slice(0, HEAD) : raw);
     let bare = 0;

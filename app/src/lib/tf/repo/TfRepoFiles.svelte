@@ -119,6 +119,7 @@
   import { filesDeclaring, xmlCheck, xsdLocations } from "../../ipc/api";
   import type { Elsewhere } from "../../render/xsd-locate";
   import { elsewhereOf } from "../render/xsd/xsd-point";
+  import { isDelimited } from "../../render/json-sniff";
   import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
   import {
     commandSteps as appCommandSteps,
@@ -2352,7 +2353,7 @@
       <TfNothingHere message="There is no folder renderer named “{singleNow.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
-  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi" || drawAs === "xsd"} class:tf-fv-doc={drawAs === "xml"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi" || drawAs === "xsd"} class:tf-fv-doc={drawAs === "xml" || drawAs === "json"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
     {#if renderedNow !== null}
       {@const graftFolder = renderedNow.folder}
       <TfMadeBar
@@ -2633,7 +2634,7 @@
             onback={() => history.back()}
           />
         {/await}
-      {:else if drawAs === "xml"}
+      {:else if drawAs === "xml" || drawAs === "json"}
         <!-- An XML file (the XML view, 2026-11-23): its view and its worker load with the first document opened. -->
         {@const doc = drawn}
         {#await docViewModule() then { default: TfDocView }}
@@ -2643,6 +2644,7 @@
           <TfDocView
             text={doc.text}
             path={doc.path}
+            kind={drawAs === "json" ? (isDelimited(doc.path) ? "jsonl" : "json") : "xml"}
             repo={repoId}
             sha={doc === shownFile ? (file.sha ?? null) : null}
             {render}

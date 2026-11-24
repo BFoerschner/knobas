@@ -1,0 +1,1189 @@
+{
+  "exported": "2026-11-23T10:30:00Z",
+  "source": "https://erp.tidewater.example/api/orders?month=2026-11",
+  "schema": "../schemas/opentrans/opentrans_2_1.xsd",
+  "count": 48,
+  "orders": [
+    {
+      "id": "2026-4680",
+      "date": "2026-11-19",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7700KQ54Z9XLMR3"
+    },
+    {
+      "id": "2026-4681",
+      "date": "2026-11-15",
+      "status": "open",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7701KQ90Z9XLMR3"
+    },
+    {
+      "id": "2026-4682",
+      "date": "2026-11-05",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "approval": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlaW5rYXVmLnRpZGV3YXRlci5leGFtcGxlIiwic3ViIjoibS5icmFuZHRAdGlkZXdhdGVyLmV4YW1wbGUiLCJvcmRlciI6IjQ3MTEiLCJhcHByb3ZlZCI6dHJ1ZSwibGltaXRfZXVyIjoyNTAwMCwiaWF0IjoxNzk1MDAwMDAwLCJleHAiOjE3OTUwODY0MDB9.bm90IGEgcmVhbCBzaWduYXR1cmUsIDMyIGJ5dGVzISEh",
+      "routing": "{\"route\":\"express\",\"carrier\":\"Elbe Logistik\",\"dock\":3,\"window\":{\"from\":\"08:00\",\"to\":\"16:00\"},\"pallets\":[{\"type\":\"EUR\",\"count\":2}]}",
+      "label": "<?xml version=\"1.0\"?><label xmlns=\"urn:tidewater:label:1\"><to>Elbe Maschinenbau AG</to><dock>3</dock><barcode type=\"gs1-128\">(00)340123450000000018</barcode><link>https://track.elbe-logistik.example/s/340123450000000018</link></label>",
+      "attachments": [
+        {
+          "name": "Lieferbedingungen-2026.pdf",
+          "type": "application/pdf",
+          "content": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNzQ3ID4+CnN0cmVhbQpCVCAvRjIgMjAgVGYgNzIgNzYwIFRkIChMaWVmZXJiZWRpbmd1bmdlbiAyMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzI0IFRkIChUaWRld2F0ZXIgV2Vya3pldWdoYW5kZWwgR21iSCwgSGFmZW5zdHJhc3NlIDEyLCAyMDQ1NyBIYW1idXJnKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzA3IFRkICgpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTAgVGQgKDEuIExpZWZlcnVuZyBmcmVpIEhhdXMgYWIgZWluZW0gQmVzdGVsbHdlcnQgdm9uIDI1MCwwMCBFVVIuKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjczIFRkICgyLiBBbmxpZWZlcnVuZyB3ZXJrdGFncyB6d2lzY2hlbiA4IHVuZCAxNiBVaHIsIFRvciAzLikgVGogRVQKQlQgL0YxIDExIFRmIDcyIDY1NiBUZCAoMy4gVGVpbGxpZWZlcnVuZ2VuIHNpbmQgbmFjaCBBYnNwcmFjaGUgbW9lZ2xpY2guKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjM5IFRkICg0LiBQYWxldHRlbjogRXVyb3BhbGV0dGUsIGhvZWNoc3RlbnMgMSw4MCBtIGhvY2guKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjIyIFRkICg1LiBaYWhsdW5nc3ppZWwgMzAgVGFnZSBuZXR0bywgMTQgVGFnZSBtaXQgMiAlIFNrb250by4pIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MDUgVGQgKCkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDU4OCBUZCAoU3RhbmQ6IDEuIE5vdmVtYmVyIDIwMjYuIERpZXNlcyBCbGF0dCBpc3QgZWluIEJlaXNwaWVsIGF1cyBkZW0ga25vYmFzLUNsaWNrZHVtbXkuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYS1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMTA0OCAwMDAwMCBuIAowMDAwMDAxMTQ1IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTI0NwolJUVPRgo="
+        },
+        {
+          "name": "kugellager.png",
+          "content": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAADF0lEQVR42u1bsUpdQRCdn0lACEFExViktksZRDCp0lilS5kyjUWK1wpWks5PCFjaWeU7gtY3nAvzGNaZ2dm9+yQxUwzIc+/OzJk5M7t799L9w+/pfxZKABKAp1H08+ZmOv++Wsvxh0/Ty9cHs+Bv+T+M/ecBYIelo5AvX7+5IscyMJsEZDgA0ul37z/OTl3+uJ5u7341CZ7Bs5hDgvHXAgDjZJR7nK6BwfOPBIJGpDpHHEaOctoSBgI6R1BjEQAy1TfteCmSGk8OgIz6En5L6Z1naTZQj/OtUedidrSzP53t767l/HBnFvkbxnDxbM2GHhBoU84jOhjHjl6/3W4SBgZzRLKjFwQa7bx0vObk1ZtXs9TGRYHoAYFGOh91nJ2/2NuaJQKCBGIkCBSt9p5iRObzyemjVIdjq+0Xs0SdrD0HHdDlZQNsjXYHirY6z3kULsuRVu5H54BOD4Roi6RI6luKPOetFIZoewL8xv+PzueBwC2yRgXqTX3NefB5aTWvdY9ShwdChApUW9tbhoKH0hCNr3BiyfIYz5YZwfVB/gZbPCp4ewcTAG9tD2RldMpKHilULau9ssByB5H6rExlejUB4EUfBnk89YxZuvb3FlSwyQLcywKyuO9Ff4nz5T6/5dygBoKXBVYtoJbKX4u+x0U8WzvU4MMUD4iy9kSywOsIpBlhISmjXy5jvRTEcy3LU4z1uo8MQmmHZ7sGPrWkv1QsKzHS0qNMzy7NAwG6JBWkLbCxhQakVX8tkj1Ke52PgNAaDKaBCwDzP1L8amkHhSOOrDCHFpCSjpFiqNUBirY/a8lrcX/pUVVJy5aCDFuj7fARABH+lwBoxo08ucVcGsgtNq1p3AOAh7aWMZhj9Pm9Zhd0t2RlFQCrA5Rrcsk5bTw4OBoAjdfQrdlk7UG0TkCR9b/sAOU63IrMaACsTNP2I1Yn0PYFCUBSIItgtsFcCOVSODdDuR3OA5E8EstD0TwWzxcj+WosX47m6/G8IJFXZPKSVF6Ty4uSeVU2L0vndfn8YCI/mcmPpvKzufxwMj+dTQCev/wBGmxLKiYsaHoAAAAASUVORK5CYII="
+        }
+      ],
+      "image": "../media/kugellager-6204-2rs.png",
+      "datasheet": "https://media.tidewater.example/datasheets/TW-6204-2RS.pdf",
+      "notes": "data:text/plain;base64,QW5saWVmZXJ1bmcgbnVyIGFuIFRvciAzLgpCaXR0ZSBhdmlzaWVyZW4u",
+      "audit": "H4sIAAAAAAAAE1XKSwqAIBAA0L2nmAsYo1mEt/EXCKnDZEG3b+Gm3vpp1KtUSuIMuFllIHByPUXwD+RCjbvQ/7KAI+J2j1Mmz67GzzKg0KKG0OqeuYx2XkRHTixejBoKGHAAAAA=",
+      "batch": "TW2026A7702KQ50Z9XLMR3"
+    },
+    {
+      "id": "2026-4683",
+      "date": "2026-11-05",
+      "status": "shipped",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7703KQ32Z9XLMR3"
+    },
+    {
+      "id": "2026-4684",
+      "date": "2026-11-11",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7704KQ12Z9XLMR3"
+    },
+    {
+      "id": "2026-4685",
+      "date": "2026-11-15",
+      "status": "shipped",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7705KQ92Z9XLMR3"
+    },
+    {
+      "id": "2026-4686",
+      "date": "2026-11-07",
+      "status": "shipped",
+      "buyer": {
+        "name": "Donau Fördertechnik GmbH",
+        "city": "Linz",
+        "country": "AT"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7706KQ78Z9XLMR3"
+    },
+    {
+      "id": "2026-4687",
+      "date": "2026-11-15",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7707KQ48Z9XLMR3"
+    },
+    {
+      "id": "2026-4688",
+      "date": "2026-11-11",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Donau Fördertechnik GmbH",
+        "city": "Linz",
+        "country": "AT"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7708KQ38Z9XLMR3"
+    },
+    {
+      "id": "2026-4689",
+      "date": "2026-11-01",
+      "status": "open",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7709KQ68Z9XLMR3"
+    },
+    {
+      "id": "2026-4690",
+      "date": "2026-11-19",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7710KQ18Z9XLMR3"
+    },
+    {
+      "id": "2026-4691",
+      "date": "2026-11-09",
+      "status": "open",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "attachments": [
+        {
+          "name": "Lieferbedingungen-2026.pdf",
+          "type": "application/pdf",
+          "content": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgL0YyIDYgMCBSID4+ID4+ID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNzQ3ID4+CnN0cmVhbQpCVCAvRjIgMjAgVGYgNzIgNzYwIFRkIChMaWVmZXJiZWRpbmd1bmdlbiAyMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzI0IFRkIChUaWRld2F0ZXIgV2Vya3pldWdoYW5kZWwgR21iSCwgSGFmZW5zdHJhc3NlIDEyLCAyMDQ1NyBIYW1idXJnKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzA3IFRkICgpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTAgVGQgKDEuIExpZWZlcnVuZyBmcmVpIEhhdXMgYWIgZWluZW0gQmVzdGVsbHdlcnQgdm9uIDI1MCwwMCBFVVIuKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjczIFRkICgyLiBBbmxpZWZlcnVuZyB3ZXJrdGFncyB6d2lzY2hlbiA4IHVuZCAxNiBVaHIsIFRvciAzLikgVGogRVQKQlQgL0YxIDExIFRmIDcyIDY1NiBUZCAoMy4gVGVpbGxpZWZlcnVuZ2VuIHNpbmQgbmFjaCBBYnNwcmFjaGUgbW9lZ2xpY2guKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjM5IFRkICg0LiBQYWxldHRlbjogRXVyb3BhbGV0dGUsIGhvZWNoc3RlbnMgMSw4MCBtIGhvY2guKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjIyIFRkICg1LiBaYWhsdW5nc3ppZWwgMzAgVGFnZSBuZXR0bywgMTQgVGFnZSBtaXQgMiAlIFNrb250by4pIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MDUgVGQgKCkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDU4OCBUZCAoU3RhbmQ6IDEuIE5vdmVtYmVyIDIwMjYuIERpZXNlcyBCbGF0dCBpc3QgZWluIEJlaXNwaWVsIGF1cyBkZW0ga25vYmFzLUNsaWNrZHVtbXkuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYS1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMTA0OCAwMDAwMCBuIAowMDAwMDAxMTQ1IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTI0NwolJUVPRgo="
+        },
+        {
+          "name": "kugellager.png",
+          "content": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAADF0lEQVR42u1bsUpdQRCdn0lACEFExViktksZRDCp0lilS5kyjUWK1wpWks5PCFjaWeU7gtY3nAvzGNaZ2dm9+yQxUwzIc+/OzJk5M7t799L9w+/pfxZKABKAp1H08+ZmOv++Wsvxh0/Ty9cHs+Bv+T+M/ecBYIelo5AvX7+5IscyMJsEZDgA0ul37z/OTl3+uJ5u7341CZ7Bs5hDgvHXAgDjZJR7nK6BwfOPBIJGpDpHHEaOctoSBgI6R1BjEQAy1TfteCmSGk8OgIz6En5L6Z1naTZQj/OtUedidrSzP53t767l/HBnFvkbxnDxbM2GHhBoU84jOhjHjl6/3W4SBgZzRLKjFwQa7bx0vObk1ZtXs9TGRYHoAYFGOh91nJ2/2NuaJQKCBGIkCBSt9p5iRObzyemjVIdjq+0Xs0SdrD0HHdDlZQNsjXYHirY6z3kULsuRVu5H54BOD4Roi6RI6luKPOetFIZoewL8xv+PzueBwC2yRgXqTX3NefB5aTWvdY9ShwdChApUW9tbhoKH0hCNr3BiyfIYz5YZwfVB/gZbPCp4ewcTAG9tD2RldMpKHilULau9ssByB5H6rExlejUB4EUfBnk89YxZuvb3FlSwyQLcywKyuO9Ff4nz5T6/5dygBoKXBVYtoJbKX4u+x0U8WzvU4MMUD4iy9kSywOsIpBlhISmjXy5jvRTEcy3LU4z1uo8MQmmHZ7sGPrWkv1QsKzHS0qNMzy7NAwG6JBWkLbCxhQakVX8tkj1Ke52PgNAaDKaBCwDzP1L8amkHhSOOrDCHFpCSjpFiqNUBirY/a8lrcX/pUVVJy5aCDFuj7fARABH+lwBoxo08ucVcGsgtNq1p3AOAh7aWMZhj9Pm9Zhd0t2RlFQCrA5Rrcsk5bTw4OBoAjdfQrdlk7UG0TkCR9b/sAOU63IrMaACsTNP2I1Yn0PYFCUBSIItgtsFcCOVSODdDuR3OA5E8EstD0TwWzxcj+WosX47m6/G8IJFXZPKSVF6Ty4uSeVU2L0vndfn8YCI/mcmPpvKzufxwMj+dTQCev/wBGmxLKiYsaHoAAAAASUVORK5CYII="
+        }
+      ],
+      "batch": "TW2026A7711KQ40Z9XLMR3"
+    },
+    {
+      "id": "2026-4692",
+      "date": "2026-11-07",
+      "status": "open",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7712KQ16Z9XLMR3"
+    },
+    {
+      "id": "2026-4693",
+      "date": "2026-11-13",
+      "status": "open",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7713KQ62Z9XLMR3"
+    },
+    {
+      "id": "2026-4694",
+      "date": "2026-11-01",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7714KQ26Z9XLMR3"
+    },
+    {
+      "id": "2026-4695",
+      "date": "2026-11-21",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7715KQ82Z9XLMR3"
+    },
+    {
+      "id": "2026-4696",
+      "date": "2026-11-19",
+      "status": "shipped",
+      "buyer": {
+        "name": "Donau Fördertechnik GmbH",
+        "city": "Linz",
+        "country": "AT"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7716KQ62Z9XLMR3"
+    },
+    {
+      "id": "2026-4697",
+      "date": "2026-11-13",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7717KQ26Z9XLMR3"
+    },
+    {
+      "id": "2026-4698",
+      "date": "2026-11-17",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7718KQ88Z9XLMR3"
+    },
+    {
+      "id": "2026-4699",
+      "date": "2026-11-05",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Donau Fördertechnik GmbH",
+        "city": "Linz",
+        "country": "AT"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7719KQ98Z9XLMR3"
+    },
+    {
+      "id": "2026-4700",
+      "date": "2026-11-13",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7720KQ26Z9XLMR3"
+    },
+    {
+      "id": "2026-4701",
+      "date": "2026-11-21",
+      "status": "shipped",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7721KQ88Z9XLMR3"
+    },
+    {
+      "id": "2026-4702",
+      "date": "2026-11-05",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7722KQ82Z9XLMR3"
+    },
+    {
+      "id": "2026-4703",
+      "date": "2026-11-17",
+      "status": "shipped",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7723KQ26Z9XLMR3"
+    },
+    {
+      "id": "2026-4704",
+      "date": "2026-11-07",
+      "status": "open",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7724KQ78Z9XLMR3"
+    },
+    {
+      "id": "2026-4705",
+      "date": "2026-11-15",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7725KQ56Z9XLMR3"
+    },
+    {
+      "id": "2026-4706",
+      "date": "2026-11-09",
+      "status": "open",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7726KQ90Z9XLMR3"
+    },
+    {
+      "id": "2026-4707",
+      "date": "2026-11-03",
+      "status": "open",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7727KQ70Z9XLMR3"
+    },
+    {
+      "id": "2026-4708",
+      "date": "2026-11-05",
+      "status": "open",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7728KQ20Z9XLMR3"
+    },
+    {
+      "id": "2026-4709",
+      "date": "2026-11-11",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7729KQ18Z9XLMR3"
+    },
+    {
+      "id": "2026-4710",
+      "date": "2026-11-09",
+      "status": "open",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7730KQ88Z9XLMR3"
+    },
+    {
+      "id": "2026-4711",
+      "date": "2026-11-21",
+      "status": "open",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7731KQ14Z9XLMR3"
+    },
+    {
+      "id": "2026-4712",
+      "date": "2026-11-15",
+      "status": "shipped",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7732KQ26Z9XLMR3"
+    },
+    {
+      "id": "2026-4713",
+      "date": "2026-11-13",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7733KQ36Z9XLMR3"
+    },
+    {
+      "id": "2026-4714",
+      "date": "2026-11-15",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Donau Fördertechnik GmbH",
+        "city": "Linz",
+        "country": "AT"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7734KQ62Z9XLMR3"
+    },
+    {
+      "id": "2026-4715",
+      "date": "2026-11-17",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7735KQ14Z9XLMR3"
+    },
+    {
+      "id": "2026-4716",
+      "date": "2026-11-05",
+      "status": "shipped",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7736KQ78Z9XLMR3"
+    },
+    {
+      "id": "2026-4717",
+      "date": "2026-11-03",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7737KQ20Z9XLMR3"
+    },
+    {
+      "id": "2026-4718",
+      "date": "2026-11-09",
+      "status": "open",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7738KQ50Z9XLMR3"
+    },
+    {
+      "id": "2026-4719",
+      "date": "2026-11-17",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Weserstahl GmbH",
+        "city": "Bremen",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7739KQ62Z9XLMR3"
+    },
+    {
+      "id": "2026-4720",
+      "date": "2026-11-17",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7740KQ32Z9XLMR3"
+    },
+    {
+      "id": "2026-4721",
+      "date": "2026-11-03",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7741KQ84Z9XLMR3"
+    },
+    {
+      "id": "2026-4722",
+      "date": "2026-11-13",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7742KQ18Z9XLMR3"
+    },
+    {
+      "id": "2026-4723",
+      "date": "2026-11-21",
+      "status": "open",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 1,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 189.9
+        }
+      ],
+      "total": 189.9,
+      "batch": "TW2026A7743KQ60Z9XLMR3"
+    },
+    {
+      "id": "2026-4724",
+      "date": "2026-11-21",
+      "status": "confirmed",
+      "buyer": {
+        "name": "Alpenrand Technik GmbH",
+        "city": "Rosenheim",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7744KQ56Z9XLMR3"
+    },
+    {
+      "id": "2026-4725",
+      "date": "2026-11-11",
+      "status": "invoiced",
+      "buyer": {
+        "name": "Nordlicht Anlagenbau KG",
+        "city": "Kiel",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7745KQ88Z9XLMR3"
+    },
+    {
+      "id": "2026-4726",
+      "date": "2026-11-07",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 9,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 1709.1
+        }
+      ],
+      "total": 1709.1,
+      "batch": "TW2026A7746KQ74Z9XLMR3"
+    },
+    {
+      "id": "2026-4727",
+      "date": "2026-11-21",
+      "status": "open",
+      "buyer": {
+        "name": "Elbe Maschinenbau AG",
+        "city": "Hamburg",
+        "country": "DE"
+      },
+      "currency": "EUR",
+      "items": [
+        {
+          "line": 1,
+          "sku": "TW-18V-0457",
+          "name": "Akku-Bohrschrauber 18 V",
+          "quantity": 17,
+          "unit": "C62",
+          "price": 189.9,
+          "amount": 3228.3
+        }
+      ],
+      "total": 3228.3,
+      "batch": "TW2026A7747KQ64Z9XLMR3"
+    }
+  ]
+}

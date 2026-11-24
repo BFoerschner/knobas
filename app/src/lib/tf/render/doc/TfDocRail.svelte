@@ -30,6 +30,7 @@
     onschema = null,
     onpoint = null,
     ondownload = null,
+    json = false,
     onschemamenu = null,
   }: {
     st: DocState;
@@ -50,6 +51,8 @@
     onpoint?: (() => void) | null;
     /** *Download it*: the schema at the address the document names, downloaded on the press (never by itself). */
     ondownload?: ((namespace: string | null, address: string) => Promise<void>) | null;
+    /** A JSON document: no schema is looked for (the design's section 25). */
+    json?: boolean;
     /** *Schema ▾* opened: what its items will need can be read while the person reaches for one. */
     onschemamenu?: (() => void) | null;
   } = $props();
@@ -112,6 +115,10 @@
       <p>
         <button type="button" class="tf-oas-ref" onclick={() => ongo(broken.line)}>At line {broken.line.toLocaleString("en")}</button>, {@render said(broken.message.charAt(0).toLowerCase() + broken.message.slice(1))}
       </p>
+      <p>&nbsp;</p>
+    {:else if json}
+      <div class="tf-xv-verdict"><b class="tf-xv-quiet">Well formed</b></div>
+      <p>JSON is not checked against a schema.</p>
       <p>&nbsp;</p>
     {:else if head !== null && head.k !== "idle"}
       {#if head.k === "looking"}

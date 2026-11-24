@@ -47,6 +47,7 @@
   import { ipcErrorMessage } from "../../../ipc";
   import { KEPT_HOSTS_LOAD_BY_ITSELF } from "./doc-keys";
   import { wantsLayout } from "../../../render/doc-line";
+  import type { DocKind } from "../../../render/doc-model";
   import { DocSession, docEngine, type DocEngine } from "../../../render/doc-port";
   import { languageOf } from "../../../render/engines";
   import type { RenderPort } from "../../../render/port";
@@ -75,6 +76,7 @@
     files = null,
     images = null,
     schema = null,
+    kind = "xml",
   }: {
     text: string;
     /** The file's path from the repository's top. */
@@ -92,6 +94,8 @@
      * The schema check (X2): the repository's files as text and its paths at the commit shown, what was pointed to,
      * whether checking is on, and what opens a schema or points a reference; `null` where nothing is checked.
      */
+    /** The reader: the XML view's, the JSON view's, or a value a line (`.jsonl`, `.ndjson`). */
+    kind?: DocKind;
     schema?: {
       read: (path: string) => Promise<string | null>;
       paths: () => Promise<readonly string[]>;
@@ -146,7 +150,7 @@
     const state = new DocState(session, `${untrack(() => repo)}\n${at}${laying ? "\nlaid" : ""}`, contentOf(source, untrack(() => sha)), lines);
     st = state;
     let live = true;
-    void session.open(source).then(async (answer) => {
+    void session.open(source, untrack(() => kind)).then(async (answer) => {
       // A worker that failed answers no table: the lines stay as drawn, unfolding nothing.
       if (!live || answer === null || typeof answer !== "object" || !("folds" in answer)) return;
       if (!laying) {
@@ -168,7 +172,8 @@
   let check = $state<DocCheck | null>(null);
   $effect(() => {
     const state = st;
-    const port = schema;
+    // JSON has no check (section 25): JSON Schema is not in this pass.
+    const port = kind === "xml" ? schema : null;
     if (state === null || port === null) {
       check = null;
       return;
@@ -303,7 +308,7 @@
   }
 
   /** The path the highlighter reads: the file's own where it names XML, else an XML file's. */
-  const colourAs = $derived(languageOf(path) === "xml" || languageOf(path) === "xsl" ? path : "document.xml");
+  const colourAs = $derived(kind !== "xml" ? (languageOf(path) === "json" ? path : "document.json") : languageOf(path) === "xml" || languageOf(path) === "xsl" ? path : "document.xml");
 
   /** The longest line as drawn, in characters: every row is as wide, so a line's end holds to the pane's edge. */
   const longest = $derived.by(() => {
@@ -863,6 +868,7 @@
     {@const state = st}
     <TfDocRail
       st={state}
+      json={kind !== "xml"}
       bind:mode
       ongo={(n) => void go(n)}
       {check}
@@ -927,6 +933,8 @@
           </span>
         </span>
       </div>
+      <!-- The query is XPath; the JSON view asks with jq (J2). -->
+      {#if kind === "xml"}
       <TfDocQuery
         st={state}
         size={text.length}
@@ -938,6 +946,7 @@
         }}
         onleave={() => code?.focus()}
       />
+      {/if}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       {#if shownText === null}
         <div class="tf-xv-lines"><p class="tf-xv-laying" role="status">Laying out…</p></div>

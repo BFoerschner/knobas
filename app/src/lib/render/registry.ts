@@ -25,6 +25,7 @@
 
 import { isOpenApi } from "./openapi-sniff";
 import { isXmlFile } from "./xml-sniff";
+import { isJsonFile } from "./json-sniff";
 import { isXsd } from "./xsd-sniff";
 
 export type RendererInput = "text" | "bytes";
@@ -209,6 +210,24 @@ export const XML: Renderer = {
   sniff: isXmlFile,
 };
 
+/**
+ * JSON view (the XML view's design, 2026-11-23, section 25): a JSON file drawn as a document in the XML view's pane,
+ * its objects and arrays folding, the way down a jq path, its strings' values looked at through a pipeline. It takes
+ * a `.json`, `.geojson`, `.webmanifest`, `.har`, `.ipynb`, `.jsonl` or `.ndjson` whose text starts with `{` or `[`
+ * (`json-sniff.ts`). After the API explorer, so an OpenAPI spec in JSON opens as API with the JSON view next; ahead of
+ * Source, so it is the default for every other JSON file.
+ */
+export const JSON_VIEW: Renderer = {
+  id: "json",
+  name: "JSON view",
+  patterns: ["*.json", "*.geojson", "*.webmanifest", "*.har", "*.ipynb", "*.jsonl", "*.ndjson"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: false,
+  sniff: isJsonFile,
+};
+
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
 export const BYTES_CAP = 50 * 1024 * 1024;
 
@@ -232,7 +251,7 @@ export const SOURCE: Renderer = {
 export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XSD, XML, SOURCE, HTML];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XSD, XML, JSON_VIEW, SOURCE, HTML];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
