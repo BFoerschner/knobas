@@ -38,7 +38,8 @@ export function forgetHeld(): void {
 
 /** An example's file name, as the maker names it: the element's local name, the seed. */
 export function exampleFileName(element: string, seed: number): string {
-  return `${element.slice(element.indexOf(":") + 1)}-example-${seed}.xml`;
+  // An XML name's prefix goes, as the maker's `root.name` has none: not an entity id's key.
+  return `${element.replace(/^[^:]*:/, "")}-example-${seed}.xml`;
 }
 
 /** How an example was made, in the header's meta: what the made-by comment says, its lines, and that it is not saved. */
