@@ -97,29 +97,6 @@
 .tf-xsd-roots { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 18px; }
 .tf-xsd-seen { margin: 0; padding-left: 18px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); display: grid; gap: 4px; max-width: 80ch; }
 
-/* ---- NEW: the example ---- */
-.tf-xsd-ex { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 420px; box-sizing: border-box; }
-.tf-xsd-exhead { display: flex; align-items: baseline; gap: 8px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
-.tf-xsd-exhead b { font-weight: 600; color: var(--ink); }
-/* The controls: one grid, a label and its control a row, so nothing moves when a value changes. */
-.tf-xsd-ctl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
-.tf-xsd-ctl > span:nth-child(even) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-.tf-xsd-ctl select, .tf-xsd-seed { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); padding: 0 6px; }
-.tf-xsd-seed { width: 9ch; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-variant-numeric: tabular-nums; }
-.tf-xsd-xml { flex: 1; min-height: 160px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); position: relative; }
-.tf-xsd-xpad { position: relative; min-width: max-content; }
-.tf-xsd-l { position: absolute; left: 0; right: 0; height: 20px; display: grid; grid-template-columns: 5ch minmax(0, 1fr); column-gap: 10px; white-space: pre; padding-right: 10px; box-sizing: border-box; }
-.tf-xsd-ln { text-align: right; color: var(--muted); user-select: none; }
-.tf-xsd-l[data-key]:hover { background: var(--rule-2); cursor: pointer; }
-.tf-xsd-l.tf-xsd-here { background: var(--mark); }
-/* XML, in the file viewer's own syntax tokens. */
-.tf-xsd-xt { color: var(--hl-tag); } .tf-xsd-xa { color: var(--hl-attr); } .tf-xsd-xs { color: var(--hl-str); } .tf-xsd-xc { color: var(--hl-com); font-style: var(--hl-com-style, italic); } .tf-xsd-xp { color: var(--hl-punct); }
-.tf-xsd-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--control-gap); min-height: var(--control-h); }
-/* What the check said. A verdict is something that happened, so it takes a tone. */
-.tf-xsd-verdict { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: calc(var(--t-sm) * var(--fs)); min-height: calc(20px * var(--fs)); }
-.tf-xsd-verdict.tf-ok b { color: var(--ok); } .tf-xsd-verdict.tf-err b { color: var(--err); } .tf-xsd-verdict.tf-warn b { color: var(--warn); }
-.tf-xsd-verdict .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
-.tf-xsd-notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 /* The wait, inside the pane that already holds its height. */
 .tf-oas.tf-xsd > .tf-xsd-wait { grid-column: 1 / -1; align-self: start; padding: 12px; }
 /* The rail's list keeps its scrollbar's room: a tree that opens past a screenful must not narrow the rows drawn. */
@@ -137,3 +114,30 @@
 .tf-xsd-pointpath, .tf-xsd-pointns { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; }
 /* Two repositories declare it (section 16): each of their files, picked once. */
 .tf-xsd-two { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---- The example (sections 19 to 23): beside the reference from 1,480 px, in its place under it ---- */
+.tf-oas-col.tf-xsd-excol { display: flex; flex-direction: column; min-height: 0; }
+.tf-xsd-ex { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 420px; box-sizing: border-box; }
+.tf-oas-page .tf-xsd-ex { padding: 14px 0 0; height: calc(var(--oas-h) - 120px); }
+.tf-xsd-exhead { display: flex; align-items: baseline; gap: 8px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+.tf-xsd-exhead b { font-weight: 600; color: var(--ink); }
+/* The controls: one grid, a label and its control a row, so nothing moves when a value changes. */
+.tf-xsd-ctl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-ctl > span:nth-child(even) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.tf-xsd-ctl select, .tf-xsd-seed { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); padding: 0 6px; }
+.tf-xsd-seed { width: 9ch; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-variant-numeric: tabular-nums; }
+.tf-xsd-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--control-gap); min-height: var(--control-h); }
+/* The line count holds its room: "Making it…" and "1,784 lines" are as wide. */
+.tf-xsd-excount { min-width: 11ch; font-variant-numeric: tabular-nums; }
+/* What the check said. A verdict is something that happened, so it takes a tone; its line holds its room. */
+.tf-xsd-verdict { display: flex; align-items: baseline; gap: 2px 10px; font-size: calc(var(--t-sm) * var(--fs)); height: calc(20px * var(--fs)); overflow: hidden; white-space: nowrap; }
+.tf-xsd-verdict > span:not(.tf-dim) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-xsd-verdict.tf-ok b { color: var(--ok); } .tf-xsd-verdict.tf-err b { color: var(--err); } .tf-xsd-verdict.tf-warn b { color: var(--warn); }
+.tf-xsd-verdict .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
+/* The notes hold the room of two lines, so the document under them stands still when a setting changes. */
+.tf-xsd-notes { margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 3px; height: calc(2 * 1.4em + 3px); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.4; color: var(--ink-2); }
+.tf-xsd-notes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The document: Source's lines in a box of their own that takes the rest of the column. */
+.tf-xsd-xml { flex: 1; min-height: 160px; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); overflow: hidden; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xsd-xml > .tf-code.tf-lscroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; position: relative; padding: 6px 0 12px; --under: var(--sheet-2); background: var(--sheet-2); }
+.tf-xsd-xml .tf-l { cursor: pointer; }

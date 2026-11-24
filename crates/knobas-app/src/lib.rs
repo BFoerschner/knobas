@@ -994,6 +994,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::xsd_fetch,
         commands::api::xsd_downloaded,
         commands::api::xsd_forget,
+        commands::api::xsd_save_example,
         commands::api::xml_check,
         commands::api::set_xml_check,
         commands::api::api_open_in,

@@ -494,6 +494,7 @@ const TfDocRail = (await import("../tf/render/doc/TfDocRail.svelte")).default;
 const TfXsd = (await import("../tf/render/xsd/TfXsd.svelte")).default;
 const TfXsdPage = (await import("../tf/render/xsd/TfXsdPage.svelte")).default;
 const TfXsdRail = (await import("../tf/render/xsd/TfXsdRail.svelte")).default;
+const TfXsdExample = (await import("../tf/render/xsd/TfXsdExample.svelte")).default;
 const { XsdState } = await import("../tf/render/xsd/xsd.svelte");
 const { XsdPort } = await import("../render/xsd-port");
 const TfDocResults = (await import("../tf/render/doc/TfDocResults.svelte")).default;
@@ -1836,6 +1837,16 @@ const CASES: Case[] = [
     name: "TfXsdPage",
     source: "lib/tf/render/xsd/TfXsdPage.svelte",
     open: (target) => ({ app: mount(TfXsdPage, { target, props: { st: new XsdState(new XsdPort(() => deferred(null))), ongo: () => {}, onback: () => {}, onfile: () => {} } }) }),
+  },
+  {
+    /** An example: made in the schema's worker, which answers late; a setting changed meanwhile asks again. */
+    name: "TfXsdExample",
+    source: "lib/tf/render/xsd/TfXsdExample.svelte",
+    open: (target) => {
+      const st = new XsdState(new XsdPort(() => deferred(null)));
+      st.page = { key: "el {urn:a}A" } as unknown as import("../render/xsd-answer").PageAnswer;
+      return { app: mount(TfXsdExample, { target, props: { st, render: { highlight: () => ({ focus: () => {}, cancel: () => {} }) }, ongo: () => {} } }) };
+    },
   },
   {
     /** A schema's rail: the page it follows answers late. */

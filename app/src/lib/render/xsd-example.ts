@@ -100,7 +100,7 @@ function choiceIdsOf(set: SchemaSet): Map<object, string> {
   return ids;
 }
 /** A choice's id. A group's choice opened by `openGroup` is a copy: it is known by the group's own content. */
-function choiceIdOf(set: SchemaSet, q: ModelGroup): string | null {
+export function choiceIdOf(set: SchemaSet, q: ModelGroup): string | null {
   const ids = choiceIdsOf(set);
   const direct = ids.get(q);
   if (direct !== undefined) return direct;

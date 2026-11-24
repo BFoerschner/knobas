@@ -130,6 +130,11 @@ export function xsdForget(sha256: string): Promise<void> {
   return invoke<void>("xsd_forget", { sha256 });
 }
 
+/** *Save to Downloads*: an example made from a schema written to the Downloads folder under `name`; answers the path. */
+export function xsdSaveExample(name: string, text: string): Promise<string> {
+  return invoke<string>("xsd_save_example", { name, text });
+}
+
 /** Whether an XML file is checked against its schema when one is found (`xml.check`, on by default). */
 export function xmlCheck(): Promise<XmlCheck> {
   return invoke<XmlCheck>("xml_check");

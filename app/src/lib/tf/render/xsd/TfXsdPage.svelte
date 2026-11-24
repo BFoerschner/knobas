@@ -28,6 +28,7 @@
     onpick = null,
     ondownload = null,
     head = null,
+    body = null,
     scroller = $bindable(null),
   }: {
     st: XsdState;
@@ -46,6 +47,8 @@
     ondownload?: ((namespace: string | null, location: string | null, address: string) => Promise<void>) | null;
     /** What stands at the head's end under 1,480 px (S4's *Reference* or *Example*). */
     head?: Snippet | null;
+    /** What stands under the head in place of the reference: the example, under 1,480 px. */
+    body?: Snippet | null;
     scroller?: HTMLElement | null;
   } = $props();
 
@@ -109,6 +112,9 @@
         {#if oncopylink !== null}<button type="button" class="tf-oas-more" onclick={() => oncopylink?.(p.place, `${p.name.prefix}${p.name.local}`)}>Copy link</button>{/if}
         {#if onsource !== null}<button type="button" class="tf-oas-more" onclick={() => onsource?.(p.file, p.line)}>Show in Source</button>{/if}
       </div>
+      {#if body !== null}
+        {@render body()}
+      {:else}
       {#if p.type !== null || p.chain.length > 0}
         <div class="tf-xsd-chain">
           {#if p.type !== null}<span>{#if p.type.name === null && p.type.missing === null}A type of its own{:else}Type <TfXsdType type={p.type} {ongo} />{/if}</span>{/if}
@@ -188,6 +194,7 @@
         </section>
       {:else if allIn && !p.key.startsWith("el ")}
         <section class="tf-oas-sec"><h3 class="tf-oas-lab"><span>Used by</span></h3><p class="tf-oas-fnote">Nothing in these files names it.</p></section>
+      {/if}
       {/if}
     {/if}
   </div>

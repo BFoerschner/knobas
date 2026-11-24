@@ -5,7 +5,7 @@
  * name that goes somewhere carrying the key it goes to.
  */
 import { loadFakes } from "./example-fakes";
-import { makeExample, type ExampleOptions } from "./xsd-example";
+import { choiceIdOf, makeExample, type ExampleOptions } from "./xsd-example";
 import {
   childElements,
   elDecl,
@@ -516,8 +516,9 @@ function particleRows(s: XsdSession, p: Particle, id: string, trail: readonly ob
       const kids = childElements(set, b).map((c) => label(set, c.el.elNs, c.el.name));
       return kids.length === 0 ? "nothing" : kids.length <= 2 ? kids.join(" + ") : `${kids[0]} and ${kids.length - 1} more`;
     });
-    // A choice is named by where it is written and what it offers: one pick holds wherever it stands (section 22).
-    choice = { id: `${q.line}:${branches.join("|")}`, branches };
+    // A choice is named by the file and line it is written at, as the example names it: one pick holds wherever it
+    // stands (section 22).
+    choice = { id: choiceIdOf(set, q) ?? `${q.line}:${branches.join("|")}`, branches };
   }
   return [{ k: "group", id: `${id}/${q.k}${q.line}`, words, from: q.from !== undefined ? nameOfKey(set, q.from) : null, occ: occ(q.min * lo, q.max * hi), items: inner, choice }];
 }

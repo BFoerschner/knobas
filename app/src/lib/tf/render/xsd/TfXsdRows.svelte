@@ -19,6 +19,8 @@
   import type { XsdState } from "./xsd.svelte";
 
   let { st, at, rows, ongo }: { st: XsdState; at: string; rows: readonly Row[]; ongo: (key: string, label: string) => void } = $props();
+  /** A choice's branches in its select: a schema's own list, written by hand. */
+  const BRANCHES_SHOWN = 200;
 
   /** A list of more than 80 rows draws 80 and *Show the other* (section 10); shown whole, at most a set's bound. */
   const ROWS_SHOWN = 80;
@@ -111,6 +113,17 @@
       <div class="tf-xsd-gl">
         <b>{row.words}</b>
         {#if row.from !== null}<span>from the group <TfXsdName name={row.from} {ongo} /></span>{/if}
+        {#if row.choice !== null && st.made !== null}
+          {@const id = row.choice.id}
+          {@const passed = st.made.example.choices.find((c) => c.id === id)}
+          {#if passed !== undefined}
+            <label class="tf-xsd-takes"
+              >The example takes <select aria-label="The example takes" value={passed.picked} onchange={(e) => st.pick(id, Number((e.currentTarget as HTMLSelectElement).value))}
+                >{#each passed.names.slice(0, BRANCHES_SHOWN) as name, i (i)}<option value={i}>{name}</option>{/each}</select
+              ></label
+            >
+          {/if}
+        {/if}
         <TfXsdOcc occ={row.occ} />
       </div>
       <div class="tf-oas-in"><div class="tf-oas-fs"><TfXsdRows {st} at={row.id} rows={row.items} {ongo} /></div></div>

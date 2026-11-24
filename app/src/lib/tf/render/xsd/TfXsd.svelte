@@ -34,6 +34,8 @@
   import { XsdPort, xsdEngine, type XsdEngine } from "../../../render/xsd-port";
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
+  import TfXsdExample from "./TfXsdExample.svelte";
+  import type { RenderPort } from "../../../render/port";
   import TfXsdPoint from "./TfXsdPoint.svelte";
   import { asPointed, gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "./xsd-point";
   import { xsdLocations } from "../../../ipc/api";
@@ -49,6 +51,7 @@
     read,
     paths,
     readAway = null,
+    render = null,
     readOther = null,
     elsewhere = null,
     pointed = [],
@@ -71,6 +74,8 @@
     read: (path: string) => Promise<string | null>;
     /** Every path of the repository at the commit: read only when a reference is not found beside its file. */
     paths: () => Promise<readonly string[]>;
+    /** The highlighter an example's lines are coloured by; no example is drawn without one. */
+    render?: RenderPort | null;
     /** A file read from elsewhere (`@repo/…`, `@download/…`). */
     readAway?: ((path: string) => Promise<string | null>) | null;
     /** Another repository's file at its default branch's head (a pointed file, step 6). */
@@ -270,6 +275,21 @@
     return null;
   }
 
+  // ---- The example (sections 19 to 23) ----
+  /** An example stands for a global element's page, where lines can be coloured. */
+  const exampleShown = $derived(render !== null && st !== null && st.page !== null && st.page.key.startsWith("el "));
+  /** `A`: another example, from anywhere in the explorer outside a field, while one is in view. */
+  function keys(event: KeyboardEvent) {
+    if (event.key !== "a" && event.key !== "A") return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+    const t = event.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
+    const state = st;
+    if (state === null || !exampleShown || (cols < 3 && state.tab !== "example")) return;
+    event.preventDefault();
+    state.another();
+  }
+
   // ---- Pages: picks, followed names, the way back, and the address's place ----
   let pageCol = $state<HTMLElement | null>(null);
   let shownAt: string | null | undefined = undefined;
@@ -392,7 +412,8 @@
 {:else}
   <!-- The pane stands from the first frame at its height, the wait inside it, so the page's height and its scrollbar
        do not change when the worker answers (`moves`, 2026-11-24: the header's buttons shifted 16 px). -->
-  <div class="tf-oas tf-oas-2 tf-xsd" data-cols={cols} {@attach pane} {@attach sideWidth("xsd-rail")}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-oas tf-oas-{cols >= 3 && render !== null ? 3 : 2} tf-xsd" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("xsd-rail")}>
     {#if index === null || st === null}
       <div class="tf-oas-wait tf-xsd-wait">{#if slow}<p class="tf-oas-reading" role="status">Reading the schema…</p>{/if}</div>
     {:else}
@@ -409,11 +430,27 @@
       onpoint={point}
       onpick={(namespace, location, c) => void pickFor(namespace, location, c)}
       ondownload={downloadFor}
+      head={cols < 3 && exampleShown ? tabs : null}
+      body={cols < 3 && exampleShown && state.tab === "example" && render !== null ? examplePage : null}
       bind:scroller={pageCol}
     />
+    {#if cols >= 3 && render !== null}
+      <div class="tf-oas-col tf-xsd-excol" aria-label="Example"><TfXsdExample st={state} {render} ongo={go} /></div>
+    {/if}
     {/if}
   </div>
 {/if}
+
+{#snippet tabs()}
+  {@const state = st!}
+  <span class="tf-seg tf-oas-pageseg" role="group" aria-label="Show">
+    <button type="button" aria-pressed={state.tab === "ref"} onclick={() => (state.tab = "ref")}>Reference</button>
+    <button type="button" aria-pressed={state.tab === "example"} onclick={() => (state.tab = "example")}>Example</button>
+  </span>
+{/snippet}
+{#snippet examplePage()}
+  <TfXsdExample st={st!} render={render!} ongo={go} />
+{/snippet}
 
 {#if pointing !== null}
   {@const at = pointing}

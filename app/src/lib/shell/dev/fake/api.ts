@@ -118,6 +118,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     },
     xsd_downloaded: () => null,
     xsd_forget: () => undefined,
+    xsd_save_example: (args) => `~/Downloads/${String(args["name"])}`,
     set_image_hosts: (args) => {
       fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
       return structuredClone(fakeImageHosts);

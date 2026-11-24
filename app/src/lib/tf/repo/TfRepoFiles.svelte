@@ -2613,6 +2613,7 @@
             paths={allPaths}
             readOther={otherText}
             elsewhere={declaringElsewhere}
+            {render}
             at={path === schema.path ? place : null}
             line={path === schema.path ? line : null}
             oncopylink={(at, label) => void copyPlace(schema.path, at, label)}

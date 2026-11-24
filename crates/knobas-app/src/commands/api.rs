@@ -152,6 +152,30 @@ pub async fn api_save_answer(id: u64, name: String) -> Result<String, IpcError> 
     Ok(path.display().to_string())
 }
 
+/// *Save to Downloads* on an example made from a schema (the XSD design,
+/// section 23): `text` written to the Downloads folder under `name`, as an
+/// answer is saved; knobas keeps no copy. Answers the path.
+///
+/// # Errors
+/// No Downloads folder, or the file cannot be written.
+#[tauri::command]
+pub async fn xsd_save_example(name: String, text: String) -> Result<String, IpcError> {
+    use tokio::io::AsyncWriteExt as _;
+    let dir = dirs::download_dir().ok_or_else(|| {
+        IpcError::new(
+            IpcErrorCode::Internal,
+            "This computer has no Downloads folder.",
+        )
+    })?;
+    let (path, mut file) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
+        .await
+        .map_err(|(path, error)| IpcError::internal(format!("{}: {error}", path.display())))?;
+    file.write_all(text.as_bytes())
+        .await
+        .map_err(|error| IpcError::internal(format!("{}: {error}", path.display())))?;
+    Ok(path.display().to_string())
+}
+
 /// An image at an address in a document, loaded on the press that asks (the XML view's design, section 14): one `GET`,
 /// no cookie, the bytes sniffed, kept in memory.
 ///
