@@ -3,7 +3,7 @@
  * `xsd.locations` for the namespace and location asked for, the last given winning.
  */
 import { xsdDownloaded, xsdFetch, xsdLocations, xsdSetLocations, type DeclaringFile, type DownloadedSchema, type PointedSchema } from "../../../ipc/api";
-import { buildIndex } from "../../../render/xsd-index";
+import { heldIndex } from "../../../render/xsd-index";
 import { keyOf } from "../../../time/format";
 import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
 
@@ -57,6 +57,14 @@ export function candidatesElsewhere(namespace: string, list: readonly Elsewhere[
   return list.map((e) => ({ repo: e.repo, repoName: e.name, branch: e.branch, path: e.path, declares: namespace }));
 }
 
+/** This repository's candidates: its index, read once a listing and shared with the set's own need of it. */
+function ownCandidates(repo: string, paths: readonly string[], from: string, read: (path: string) => Promise<string | null>): Promise<Candidate[]> {
+  return heldIndex(repo, paths, from, read).then(
+    (index) => candidatesOf(repo, index.declares),
+    () => [],
+  );
+}
+
 /** Where the picker's candidates are read: this repository's schemas, and other repositories' that declare a namespace. */
 export interface CandidateReads {
   readonly paths: () => Promise<readonly string[]>;
@@ -70,13 +78,10 @@ export interface CandidateReads {
  */
 export async function gatherCandidates(repo: string, from: string, namespace: string | null, reads: CandidateReads): Promise<Candidate[]> {
   const away = namespace === null || namespace === "" || reads.elsewhere === null ? Promise.resolve([]) : reads.elsewhere(namespace).catch(() => []);
-  const here = reads
-    .paths()
-    .then((list) => buildIndex(repo, list, from, reads.read))
-    .then(
-      (index) => candidatesOf(repo, index.declares),
-      () => [],
-    );
+  const here = reads.paths().then(
+    (list) => ownCandidates(repo, list, from, reads.read),
+    () => [],
+  );
   const [mine, there] = await Promise.all([here, away]);
   return [...mine, ...candidatesElsewhere(namespace ?? "", there)];
 }

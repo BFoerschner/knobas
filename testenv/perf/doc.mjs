@@ -91,6 +91,16 @@ const CASES = [
     for (let i = 0; i < 100 && !/departures/.test(document.querySelector('.tf-xv-verdict')?.textContent ?? ''); i++) await wait(50);
     document.querySelector('.tf-xv-lines .tf-code').focus();
   }`, act: key("n"), sel: '.tf-xv-frow[aria-selected="true"] .tf-xv-fline' },
+  // Point to a file… (S3), from the Schema menu once the order is checked: the repository's schemas indexed on the press
+  // (some 70 of the fixture's files), those that fit first, the picker's first rows drawn. A picker a run before left
+  // open is closed first.
+  { name: "point", label: "Point to another file… from the Schema menu, to the picker's rows", kind: "press", before: go(file(ORDER)), prep: `async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('.tf-xsd-point .tf-dclose')?.click();
+    await wait(100);
+    for (let i = 0; i < 100 && !/departures/.test(document.querySelector('.tf-xv-verdict')?.textContent ?? ''); i++) await wait(50);
+    document.querySelector('.tf-xv-schema').click();
+  }`, act: click("[role=menuitem]", "Point to another file…"), sel: ".tf-xsd-pointrow" },
   { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
   { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
   { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },

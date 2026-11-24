@@ -30,7 +30,7 @@
   import { zen } from "../../zen.svelte";
   import type { DeclRow, Opened } from "../../../render/xsd-answer";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
-  import { buildIndex } from "../../../render/xsd-index";
+  import { heldIndex } from "../../../render/xsd-index";
   import { XsdPort, xsdEngine, type XsdEngine } from "../../../render/xsd-port";
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
@@ -123,7 +123,7 @@
       paths,
       read,
       pointed,
-      index: (from: string, list: readonly string[]) => buildIndex(repo, list, from, read),
+      index: (from: string, list: readonly string[]) => heldIndex(repo, list, from, read),
       readAway: (p: string) => {
         // A pointed file of this repository is read as one of its own; another's at its own head.
         const away = splitAway(p);

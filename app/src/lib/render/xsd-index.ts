@@ -105,3 +105,25 @@ export async function buildIndex(repo: string, paths: readonly string[], from: s
   for (const p of [...mine.keys()]) if (!here.has(p)) mine.delete(p);
   return { declares: declares.filter(([, n]) => n !== null), catalogs, total: xsds.length, read: readCount };
 }
+
+/**
+ * Each listing's index, read once, by the repository and the folder asked from (the bound reads the nearest folders
+ * first). The page hands the same list of paths for the same commit and a new one for another, so the set's own need
+ * of the index (a reference not found beside its file) and *Point to a file…* after it share one read: the picker's
+ * press was 168 ms at 6x on 1440 x 868 reading every `.xsd` again, against 150. Held weakly by the list.
+ */
+const held = new WeakMap<readonly string[], Map<string, Promise<SchemaIndexWire>>>();
+export function heldIndex(repo: string, paths: readonly string[], from: string, read: (path: string) => Promise<string | null>): Promise<SchemaIndexWire> {
+  let byKey = held.get(paths);
+  if (byKey === undefined) held.set(paths, (byKey = new Map()));
+  const key = `${repo}\n${from.slice(0, from.lastIndexOf("/") + 1)}`;
+  let index = byKey.get(key);
+  if (index === undefined) {
+    const mine = byKey;
+    index = buildIndex(repo, paths, from, read);
+    index.catch(() => mine.delete(key));
+    byKey.set(key, index);
+  }
+  return index;
+}
+

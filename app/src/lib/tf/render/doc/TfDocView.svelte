@@ -60,7 +60,7 @@
   import { XsdPort } from "../../../render/xsd-port";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
   import { gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "../xsd/xsd-point";
-  import { buildIndex } from "../../../render/xsd-index";
+  import { heldIndex } from "../../../render/xsd-index";
 
   let {
     text,
@@ -200,7 +200,7 @@
         read: port.read,
         paths: port.paths,
         pointed,
-        index: (from, list) => buildIndex(repo, list, from, port.read),
+        index: (from, list) => heldIndex(repo, list, from, port.read),
         readAway: (p) => {
           const away = splitAway(p);
           if (away === null) return readDownloaded(p) ?? Promise.resolve(null);
@@ -226,6 +226,11 @@
     void gatherCandidates(repo, path, at.namespace, { paths: s.paths, read: s.read, elsewhere: s.elsewhere ?? null }).then((list) => {
       if (pointing === at) candidates = list;
     });
+  }
+  /** The repository's schemas read while the person reaches for *Point to another file…*: the picker then opens on them. */
+  function warmPoint() {
+    const s = schema;
+    if (s !== null) void s.paths().then((list) => heldIndex(repo, list, path, s.read), () => null);
   }
   async function pickFile(c: Candidate) {
     const at = pointing;
@@ -874,6 +879,7 @@
       onschema={check === null || schema?.open === undefined ? null : () => (check?.schema != null ? schema?.open?.(check.schema, null) : undefined)}
       onpoint={schema === null ? null : point}
       ondownload={schema === null ? null : download}
+      onschemamenu={schema === null ? null : warmPoint}
     >
       {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
       {#snippet copy()}

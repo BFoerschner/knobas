@@ -30,6 +30,7 @@
     onschema = null,
     onpoint = null,
     ondownload = null,
+    onschemamenu = null,
   }: {
     st: DocState;
     /** What the list shows. */
@@ -49,6 +50,8 @@
     onpoint?: (() => void) | null;
     /** *Download it*: the schema at the address the document names, downloaded on the press (never by itself). */
     ondownload?: ((namespace: string | null, address: string) => Promise<void>) | null;
+    /** *Schema ▾* opened: what its items will need can be read while the person reaches for one. */
+    onschemamenu?: (() => void) | null;
   } = $props();
   /** Whether *Download it* waits on its request. */
   let downloading = $state(false);
@@ -94,7 +97,7 @@
 
 {#snippet menu()}
   {#if onstop !== null || onschema !== null || onpoint !== null}
-    <button type="button" class="tf-btn tf-sm tf-ghost tf-xv-schema" bind:this={schemaButton} aria-haspopup="menu" aria-expanded={schemaMenu} onclick={() => (schemaMenu = !schemaMenu)}>Schema ▾</button>
+    <button type="button" class="tf-btn tf-sm tf-ghost tf-xv-schema" bind:this={schemaButton} aria-haspopup="menu" aria-expanded={schemaMenu} onclick={() => ((schemaMenu = !schemaMenu), schemaMenu && onschemamenu?.())}>Schema ▾</button>
   {/if}
 {/snippet}
 
