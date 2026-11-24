@@ -54,10 +54,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function draw(files: DiffFile[], fake: ReturnType<typeof fakeCompareBackend>, more: Record<string, unknown> = {}) {
+function draw(files: DiffFile[], fake: ReturnType<typeof fakeCompareBackend>, more: Record<string, unknown> = {}, host: HTMLElement = target) {
   const saved = (more["saved"] as FolderRenderer[] | undefined) ?? [SITE];
   view = mount(TfDiffView, {
-    target,
+    target: host,
     props: {
       files,
       context: { text: () => Promise.resolve(null), bytes: () => Promise.resolve(new TextEncoder().encode("x")) },
@@ -154,7 +154,7 @@ test("a side that failed before turns the bar red, and What it said opens its st
   barButton("What it said")!.click();
   flushSync();
   expect(target.querySelector(".tf-dffail pre")!.textContent).toBe("lowcode: no project file\n");
-  expect(barButton("Run again")).toBeDefined();
+  expect(barButton("Run"), "a failed side wants a run").toBeDefined();
 });
 
 test("Run N folder renders presses at most 20 folders, and Stop all stops every lane asked", async () => {
@@ -228,4 +228,91 @@ test("a generated JAR that differs is drawn rendered, each side listed from its 
   expect(listed.sort()).toEqual(["a:libs/app.jar", "b:libs/app.jar"]);
   expect([...jar.querySelectorAll(".tf-jdiff-row")].map((r) => r.textContent!.replace(/\s+/g, " ").trim())).toEqual(["M a.txt 5 B"]);
   expect(jar.textContent).not.toContain("A binary file");
+});
+
+test("a generated file picked lands with its head at the band's foot, and the rail marks it, a one-line file among others too (2026-11-24)", async () => {
+  // Björn, 2026-11-24: "the top line where the current filename is shown hides single line files". A generated file's
+  // key holds U+0000, which `CSS.escape` writes as U+FFFD, so the view never found its card: a pick scrolled it into view
+  // at the scroller's top, under the band and the head stuck there, and the rail never marked a generated file.
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  let top = 0;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: (px: number) => (top = px) });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 20_000 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 800 });
+  // Where each card starts down the page: the folder's two generated files (one line each), then a file of the change.
+  const starts: Record<string, number> = { "docs\u0000index.md": 300, "docs\u0000steps/04-alert.md": 3_000, "lib/x.rs": 3_075 };
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const key = this.getAttribute("data-file");
+    const [y, height] = this.classList.contains("tf-dband") ? [0, 44] : key !== null && key in starts ? [starts[key]! - top, 63] : [0, 0];
+    return { top: y, bottom: y + height, left: 0, right: 0, width: 0, height, x: 0, y, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    const fake = fakeCompareBackend();
+    fake.keep(laneOf(SHA), "a");
+    fake.keep(laneOf(WT), "b");
+    fake.answers.set("a\nb", DIFFERS);
+    rendering.set(true);
+    draw([file("docs/index.md"), file("docs/steps/03-retry.md"), file("lib/x.rs")], fake, {}, page);
+    await settle();
+    const made = (name: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-flist button.tf-dmade")].find((b) => b.querySelector(".tf-fname")!.textContent === name)!;
+    const pill = () => target.querySelector(".tf-flist [aria-current=true] .tf-fname")?.textContent;
+    made("steps/04-alert.md").click();
+    flushSync();
+    // Its head at the band's foot, not under the band at the scroller's top.
+    expect(top).toBe(3_000 - 44);
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("steps/04-alert.md");
+    // The reader scrolls a little: the file whose head is at the band's foot is still the one marked.
+    top += 10;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+    expect(pill()).toBe("steps/04-alert.md");
+    // The first generated file, picked from further down, lands the same way.
+    made("index.md").click();
+    flushSync();
+    expect(top).toBe(300 - 44);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+});
+
+test("the window back in focus looks at each folder's sides again: a side the tool changed under turns stale (2026-11-24)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("docs/index.md"), file("lib/x.rs")], fake);
+  await settle();
+  expect(barButton("Run again")).toBeDefined();
+  const looks = fake.asked.length;
+  // The tool changed: the backend's key for the commit's side moved, and what it holds is from an earlier state.
+  fake.keep(laneOf(SHA), "a", false);
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(fake.asked.slice(looks).map((a) => [a.ask, a.lane])).toEqual([
+    ["look", laneOf(SHA)],
+    ["look", laneOf(WT)],
+  ]);
+  expect(bar().querySelector("[role=status]")!.textContent).toBe("Made before Low-code site changed.");
+  expect(target.querySelectorAll(".tf-dunder .tf-diff").length, "what was compared stays where it is").toBe(2);
+  expect(barButton("Run")).toBeDefined();
+});
+
+test("a generated file's last line break ends its last line: no empty line after it, and an added line counts one (2026-11-24)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("docs/index.md"), file("lib/x.rs")], fake);
+  await settle();
+  const counts = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-flist button.tf-dmade")].find((b) => b.querySelector(".tf-fname")!.textContent === name)!.querySelector(".tf-n")!.textContent!.trim();
+  expect(counts("index.md")).toBe("+1 −1");
+  expect(counts("steps/04-alert.md")).toBe("+1 −0");
 });

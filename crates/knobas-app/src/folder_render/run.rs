@@ -94,6 +94,74 @@ pub fn argv(command: &str, copy: &Path, out: &Path) -> Result<Vec<String>, Strin
         .collect())
 }
 
+/// What says which tool `command` runs, for the cache key (2026-11-24, Björn:
+/// a drawing made by an older version of a tool was compared with one made
+/// by the new version). For the program, and for each other word that holds
+/// no placeholder and names an existing absolute file (a jar, a script): its
+/// canonical path, size and modification time. The program is found as the
+/// run finds it: a word with a path separator as written, else the first
+/// file of that name on `search` (on Windows with `.exe` where the name has
+/// no extension). A program not found is stamped by its word, so a look never
+/// fails over it and the run says why as before. A wrapper script's imports,
+/// `npx` or a plugin elsewhere stay unseen: *Run again* runs them anew.
+#[must_use]
+pub fn tool_stamp(command: &str, search: Option<&std::ffi::OsStr>) -> String {
+    use std::fmt::Write as _;
+    let Ok(words) = knobas_core::checkout::open::words(command) else {
+        return String::new();
+    };
+    let mut stamp = String::new();
+    for (at, word) in words.iter().enumerate() {
+        if [PATH, OUT, OUTDIR].iter().any(|p| word.contains(p)) {
+            continue;
+        }
+        let file = if at == 0 {
+            program_file(word, search)
+        } else {
+            Path::new(word)
+                .is_absolute()
+                .then(|| std::path::PathBuf::from(word))
+        };
+        let meta = file
+            .as_ref()
+            .and_then(|f| std::fs::metadata(f).ok())
+            .filter(std::fs::Metadata::is_file);
+        match (file, meta) {
+            (Some(file), Some(meta)) => {
+                let path = std::fs::canonicalize(&file).unwrap_or(file);
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos());
+                let _ = write!(stamp, "{}\0{}\0{modified}\0", path.display(), meta.len());
+            }
+            _ if at == 0 => {
+                let _ = write!(stamp, "?{word}\0");
+            }
+            _ => {}
+        }
+    }
+    stamp
+}
+
+/// The file the program word `word` starts: as written where it names a
+/// folder, else the first regular file of that name on `search`.
+fn program_file(word: &str, search: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    if word.contains('/') || (cfg!(windows) && word.contains('\\')) {
+        return Some(std::path::PathBuf::from(word));
+    }
+    let name = if cfg!(windows) && Path::new(word).extension().is_none() {
+        format!("{word}.exe")
+    } else {
+        word.to_owned()
+    };
+    std::env::split_paths(search?)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.join(&name))
+        .find(|candidate| candidate.is_file())
+}
+
 /// Run `command` over the copy at `copy`, writing under `out`, started in
 /// `cwd`.
 pub async fn run(
@@ -382,6 +450,58 @@ pub fn kind_of(bytes: &[u8], declared: FolderOutput, ext: Option<&str>) -> Drawn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tool's stamp (2026-11-24): a tool changed on disk under the same
+    /// command is another stamp, so what it made before is never current.
+    #[test]
+    fn a_tool_changed_on_disk_is_another_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let tool = bin.join(if cfg!(windows) {
+            "lowcode.exe"
+        } else {
+            "lowcode"
+        });
+        std::fs::write(&tool, "version 1").unwrap();
+        let plugin = dir.path().join("site.jar");
+        std::fs::write(&plugin, "plugin 1").unwrap();
+        let search = Some(bin.as_os_str());
+        let command = format!(
+            "lowcode docs {{path}} --out {{outdir}} --plugin {}",
+            plugin.display()
+        );
+        let first = tool_stamp(&command, search);
+        assert_eq!(
+            tool_stamp(&command, search),
+            first,
+            "the same tool, the same stamp"
+        );
+        assert!(
+            !first.contains("{path}") && !first.contains("{outdir}") && !first.contains("docs")
+        );
+        std::fs::write(&tool, "version 2, a longer one").unwrap();
+        let second = tool_stamp(&command, search);
+        assert_ne!(second, first, "a new version of the program");
+        std::fs::write(&plugin, "plugin 2, a longer one").unwrap();
+        assert_ne!(
+            tool_stamp(&command, search),
+            second,
+            "a new version of a file the command names"
+        );
+        // A program found nowhere is stamped by its word, and the look goes on.
+        assert_eq!(
+            tool_stamp("no-such-tool {path} {out}", search),
+            "?no-such-tool\0"
+        );
+        // A program named by its path is taken as written.
+        let by_path = tool_stamp(&format!("{} {{path}}", tool.display()), None);
+        let canonical = std::fs::canonicalize(&tool).unwrap();
+        assert!(
+            by_path.starts_with(&format!("{}\0", canonical.display())),
+            "{by_path:?}"
+        );
+    }
 
     #[test]
     fn the_placeholders_are_filled_in_their_words() {

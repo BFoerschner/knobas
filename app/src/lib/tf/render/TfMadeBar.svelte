@@ -116,6 +116,8 @@
     }
     if (drawn !== null) {
       const now_ = short(view.commit);
+      // The folder is where it was: the tool or its command changed since (2026-11-24, the tool's stamp in the key).
+      if (now_ !== null && now_ === short(drawn.commit)) return { text: `Made at ${now_} ${ago(drawn.drawn_at, now())}, before ${name} changed.`, tone: "warn" };
       return {
         text: `Made at ${short(drawn.commit) ?? "an earlier commit"} ${ago(drawn.drawn_at, now())}.${now_ === null ? "" : ` The folder is at ${now_} now.`}`,
         tone: "warn",

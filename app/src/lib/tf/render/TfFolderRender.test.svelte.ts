@@ -231,6 +231,16 @@ test("a drawing of an earlier commit is shown under a line saying so, while the 
   expect(target.querySelector(".tf-banner.tf-warn")!.textContent).toContain("what your checkout changed in this folder is not in it");
 });
 
+test("a drawing at the folder's own commit is one the tool made before it changed (2026-11-24)", async () => {
+  const older = { ...drawnAs({ kind: "text" }), commit: "a".repeat(40) };
+  const f = fake([view({ drawn: older, current: false, running: { state: "running", elapsed_ms: 0 } })]);
+  await draw(f.ports);
+  const meta = target.querySelector(".tf-fmeta")!.textContent!.replace(/\s+/g, " ");
+  expect(meta).toContain("Drawn at aaaaaaa");
+  expect(meta).toContain("before Lister changed");
+  expect(meta).not.toContain("the folder is at");
+});
+
 test("a folder too big to copy says by how much, and from where", async () => {
   const f = fake([view({ failure: { why: "too_big", files: 1500, bytes: 80 * 1024 * 1024, cap_files: 1000, cap_bytes: 64 * 1024 * 1024, from: "forge" } })]);
   await draw(f.ports);

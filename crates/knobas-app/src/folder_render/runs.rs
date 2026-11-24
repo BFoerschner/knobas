@@ -21,10 +21,13 @@
 //!
 //! # What is kept
 //!
-//! Keyed by the renderer's fingerprint (its command and output), the copy's
-//! name and the folder's content: from the clone, every path, mode and blob
-//! under it, so the same folder on another branch or commit is the same
-//! drawing; from the forge, which names no blob, the commit and the folder.
+//! Keyed by the renderer's fingerprint (its command and output), the tool's
+//! stamp (the program's path, size and modification time, [`tool_stamp`]),
+//! the copy's name and the folder's content: from the clone, every path, mode
+//! and blob under it, so the same folder on another branch or commit is the
+//! same drawing; from the forge, which names no blob, the commit and the
+//! folder. A tool changed on disk is a new key: what it made before is drawn
+//! as made from an earlier state, never as current.
 //!
 //! - In memory, [`MEMORY_BYTES`] at most, the least recently used dropped
 //!   first. A failed run is kept for the session, so coming back does not
@@ -48,7 +51,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::copy::{self, Bytes, Item, Scratch};
 use super::keep::{self, KeepError, Made};
-use super::run::{DrawnKind, Ran};
+use super::run::{DrawnKind, Ran, tool_stamp};
 use super::store;
 use super::{FolderOutput, FolderRenderer, OUTPUT_CAP, hex};
 
@@ -249,13 +252,44 @@ pub struct Resolved {
     pub source_id: Option<String>,
 }
 
+/// How long a command's tool stamp is reused: a diff with many folders stats
+/// the tool once per round of looks, not once per folder.
+const STAMP_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The tool stamp of `command` now ([`tool_stamp`] over this process's
+/// `PATH`, which the run hands the tool), reused for [`STAMP_FOR`].
+fn stamp_now(command: &str) -> String {
+    static MEMO: LazyLock<Mutex<HashMap<String, (Instant, String)>>> =
+        LazyLock::new(Mutex::default);
+    if let Some((at, stamp)) = MEMO
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(command)
+        && at.elapsed() < STAMP_FOR
+    {
+        return stamp.clone();
+    }
+    let stamp = tool_stamp(command, std::env::var_os("PATH").as_deref());
+    let mut memo = MEMO.lock().unwrap_or_else(PoisonError::into_inner);
+    memo.retain(|_, (at, _)| at.elapsed() < STAMP_FOR);
+    memo.insert(command.to_owned(), (Instant::now(), stamp.clone()));
+    stamp
+}
+
 /// The cache key of a folder read from the clone: every path, kind, mode and
-/// blob under it, with the renderer and the copy's name.
+/// blob under it, with the renderer, its tool's stamp and the copy's name.
 #[must_use]
 pub fn clone_key(renderer: &FolderRenderer, copy_name: &str, items: &[Item]) -> String {
+    clone_key_by(renderer, &stamp_now(&renderer.command), copy_name, items)
+}
+
+/// [`clone_key`] with the tool's stamp given.
+fn clone_key_by(renderer: &FolderRenderer, stamp: &str, copy_name: &str, items: &[Item]) -> String {
     use sha2::Digest as _;
     let mut hash = sha2::Sha256::new();
     hash.update(renderer.fingerprint().as_bytes());
+    hash.update([0]);
+    hash.update(stamp.as_bytes());
     hash.update([0]);
     hash.update(copy_name.as_bytes());
     for item in items {
@@ -275,6 +309,7 @@ pub fn forge_key(renderer: &FolderRenderer, copy_name: &str, commit: &str, folde
     let mut hash = sha2::Sha256::new();
     for part in [
         renderer.fingerprint().as_str(),
+        stamp_now(&renderer.command).as_str(),
         copy_name,
         "forge",
         commit,
@@ -1447,6 +1482,24 @@ mod tests {
         }
     }
 
+    /// Björn, 2026-11-24: one side of a comparison was drawn by an older
+    /// version of the tool and taken as current. The tool's stamp is in the
+    /// key, so the same folder under a changed tool is another drawing.
+    #[test]
+    fn the_tool_s_stamp_is_in_the_key() {
+        let r = renderer("lister {path}".to_owned(), FolderOutput::Text, 30);
+        let items = [file("a.md", "1111")];
+        assert_ne!(
+            clone_key_by(&r, "tool\x001\x00", "app", &items),
+            clone_key_by(&r, "tool\x002\x00", "app", &items)
+        );
+        let now = tool_stamp(&r.command, std::env::var_os("PATH").as_deref());
+        assert_eq!(
+            clone_key(&r, "app", &items),
+            clone_key_by(&r, &now, "app", &items)
+        );
+    }
+
     #[test]
     fn a_lane_is_a_slot_of_its_own_and_the_plain_slot_keeps_its_name() {
         let plain = slot();
@@ -1525,6 +1578,36 @@ mod tests {
     fn text_of(runs: &Runs, view: &FolderRenderView) -> String {
         let drawn = view.drawn.as_ref().expect("a drawing");
         String::from_utf8(runs.output(&drawn.token).expect("its bytes").to_vec()).unwrap()
+    }
+
+    /// Björn, 2026-11-24: "I once made a folderview with an now outdated
+    /// tool, and it didn't rerender". The tool changed on disk under the same
+    /// command: what it made before is shown as made from an earlier state,
+    /// not as current, and an open runs the new tool.
+    #[tokio::test]
+    async fn a_tool_changed_on_disk_makes_what_it_made_before_stale() {
+        let place = Place::new("tool-changed");
+        let script = place.script("v.sh", "echo one\n");
+        let r = renderer(format!("sh {script} {{path}}"), FolderOutput::Text, 10);
+        let runs = place.runs();
+        let files = [("a.txt", "A")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let first = settled(&runs, &r, &files).await;
+        assert!(first.current, "{first:?}");
+        assert_eq!(text_of(&runs, &first).trim(), "one");
+        place.script("v.sh", "echo two, from a newer version\n");
+        tokio::time::sleep(STAMP_FOR + std::time::Duration::from_millis(100)).await;
+        let look = runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
+        assert!(!look.current, "made by the older tool: {look:?}");
+        assert_eq!(
+            look.drawn.map(|d| d.token),
+            first.drawn.map(|d| d.token),
+            "the older drawing is shown while the new tool runs"
+        );
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let second = settled(&runs, &r, &files).await;
+        assert!(second.current);
+        assert_eq!(text_of(&runs, &second).trim(), "two, from a newer version");
     }
 
     /// A tool that prints: the copy holds the folder under its own name, the
