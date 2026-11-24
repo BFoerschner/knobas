@@ -59,7 +59,35 @@ ahead that differed would read the board twice.
 ## Proof and what is owed
 
 Each change has a test that failed before it: `hover-reads.press.test.ts` (the pull requests and the checkout),
-`press-reads.test.ts`, and the board's "the cards the window's height holds and one more". The Windows pass after them is
-owed: Björn took the PC back (the evening block) before the head's build with these changes could be measured in the
-window. Owed there: `open.mjs --attach` (rounds first, return, late) at 1440x868 and full screen at 1x, 4x and 6x,
-every place, and `keys.mjs --attach` at the same sizes and rates, on a Windows build that includes 483d78a8.
+`press-reads.test.ts`, `shared-listen.test.ts` (one listener for the window), `fbar-height.test.ts` (the board's top and
+left heard after layout), `tickets.test.ts`'s landing count, and the board's "the cards the window's height holds and
+one more".
+
+In the window, 6x, drawn, base is round two's head (9385d922):
+
+- **Repository:** 1440 went from 304 and 344 to 232 to 293; full screen from 318 and 343 to 232 to 296. One 1440 gate
+  run read 313, and one full-screen run that started at load 2.8 read 357. The page's build varies from run to run (its
+  longest task 66 to 125 ms), and about 50 ms of it is first-use template parsing.
+- **Ticket:** 1440 went from 292 to 260 to 278; full screen from 295 and 302 to 257 to 278.
+- **Board of every ticket:** 1440 stayed at 300 to 334 (base 305 and 306); full screen read 294 to 361 (base 288 and
+  298). It did not move: the answer's task builds the landing cards and lays them out (about 65 ms of text shaping at 6x).
+
+The gate shape on the final Windows build (0cba19d2, the backend of ux-polish at the time, the front end before
+a4d99f06, 955a4968, f00d8c05 and c44bf4e5), at 1440 and full screen:
+
+- **Opens at 1x:** 0 over at 1440; at full screen 1 over, the ticket list's first open (104.6).
+- **Opens at 6x:** 2 over at 1440 (the board 316, the repository 313). At full screen, 4 over in the quiet run (a docs
+  page 309, a run from a repository's Builds tab 301, Monitors 322, the long asset column 317). In each run a different
+  two to four places sat 1 to 7 % over.
+- **Opens at 4x, before 4x was dropped:** 0 over at 1440; 3 over at full screen (the board 224, the ticket list 216,
+  the long asset column 207).
+- **Keys at 6x, against 150:** every median within at both sizes; 1 press of 189 over at 1440 and 4 of 189 at full
+  screen (152 to 176), each a case's slowest of seven.
+
+Round two's head was over the same way on Builds (302 to 322), the run from a repository (317 and 334) and the long
+asset column (307 and 312) in this pass's comparison: those predate these changes. Builds' first open is the style and
+layout of its page as it is shown, about 270 ms traced.
+
+Not run: the keys at 1x at both sizes. Björn stopped the end gate; they go to the nightly. Fable's second ruling holds
+the rest: the board's own read at the address change, then a landing cap of seven, then six, named as a changed
+reading, only if the board is over on its own.
