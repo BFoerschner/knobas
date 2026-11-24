@@ -31,11 +31,20 @@ run. The repository's *Pull requests* tab reads only the mirror, so it waited fo
 2. **The PR page reads its live view again when the queue says the write was sent**, not waiting for the read-back
    behind a run.
 3. **A new pull request's queued row says *Open*** at once, with *Queued* then *Sent* where its time goes.
+4. **A change made at the forge** (a colleague's merge on Gitea's site) arrived with the next run, 300 s on the live
+   sources (the setting's floor is 60 s). Now the PR page reads its live view again when shown again or when the window
+   comes back, once its last read is 5 s old; where that view says another state than the mirror's row, the row is
+   read back from the forge once per pair; and the header's state chip holds the room of its longest word, so the
+   change moves nothing after it. No polling: Björn asked for none, and it moves things under a reader who did nothing.
+5. **The repository page walks its repository** (ADR-0047's refresh under a parent, what ⌘R does) by itself, 100 ms
+   after it opens and at each moment it reads its lists again, at most once in 30 s, in the background lane. A walk
+   that found nothing tells nothing (`RefreshOutcome::Unchanged`, ADR-0047 amended). Rows a walk brings land in their
+   places: a drawn row keeps its place and takes its new state, a new one goes in above the first. Measured: a merge
+   on Gitea's site, then *Pull requests* opened, says *Merged* 742 ms after the tab drew; with the tab kept and the
+   window back 35 s later, 466 ms (before: *Open* until the next run).
 
-**Owed by the same ruling** (later commits on the branch): a landed write's read-back stops a scheduled run in its way
-(ADR-0031 amended); the repository page walks its repository when shown (ADR-0047's refresh under a parent), so a
-change made at the forge shows on *Pull requests* when it is opened; the PR header's chip holds its width, the PR page
-refreshes the mirror's row where its live view says another state, and reads again on its return. No polling.
+**Owed by the same ruling** (a later commit on the branch): a landed write's read-back stops a scheduled run in its way
+(ADR-0031 amended).
 
 **Reversing it** is `pr-state.svelte.ts` and its callers (`TfPr`, `TfRepo`, `TfCode`, `TfRepoBranches`,
 `TfConnections`, the launcher's `Results`).

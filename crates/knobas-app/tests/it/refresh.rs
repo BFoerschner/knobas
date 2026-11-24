@@ -1244,7 +1244,10 @@ async fn a_walk_is_gone_only_when_it_answers_the_parent_deleted() {
 }
 
 /// A walk that found nothing leaves the position byte for byte, as an idle
-/// run does, and still says it refreshed.
+/// run does, and still says it refreshed. It tells the shell nothing (the
+/// pr-state fix, 2026-11-24): the repository page walks its repository each
+/// time it is shown, and a walk with no news must not drop every answer the
+/// window holds.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_walk_that_found_nothing_leaves_the_position() {
     let f = fixture("refresh_under_idle").await;
@@ -1265,6 +1268,10 @@ async fn a_walk_that_found_nothing_leaves_the_position() {
         live_title(&f.state.pool, REPO).await,
         None,
         "nothing written"
+    );
+    assert!(
+        f.heard().is_empty(),
+        "no item:refreshed for a walk with no news"
     );
     f.state.scheduler.shutdown().await;
 }

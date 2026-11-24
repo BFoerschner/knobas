@@ -1624,6 +1624,43 @@ test("the tab's count and its State filter read the state a queued merge leaves;
   expect(text([...target.querySelectorAll(".tf-rprs tbody tr")].find((tr) => text(tr).startsWith("#142"))!.querySelector(".tf-chip"))).toBe("Open");
 });
 
+test("the page walks its repository at the forge once it drew, and a walk that brought a merge lands the rows in place (Fable's ruling 2)", async () => {
+  const walks: string[] = [];
+  let walked = false;
+  const merged = { ...PRS[0]!, state: { text: "merged", tone: "ok" as const } };
+  const opened = row(`${REPO}#150`, "pr", "Opened at the forge", { path: "tidewater/payout-service", state: { text: "open", tone: "info" } });
+  const base = ports();
+  await draw(
+    [REPO, "prs"],
+    ports({
+      walk: async (id) => (walks.push(id), (walked = true), { outcome: "refreshed" }),
+      // The forge sorts the merged one first now: the drawn list keeps it where it was.
+      listEntities: async (...args) => (walked ? { ...(await base.listEntities(...args)), rows: [opened, PRS[1]!, merged, PRS[2]!] } : base.listEntities(...args)),
+    }),
+  );
+  const rows = () => [...target.querySelectorAll(".tf-rprs tbody tr")].map((tr) => [text(tr.querySelector("td")), text(tr.querySelector(".tf-chip"))]);
+  expect(rows()).toEqual([["#142", "Open"], ["#139", "Merged"]]);
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(walks).toEqual([REPO]);
+  expect(rows()).toEqual([["#150", "Open"], ["#142", "Merged"], ["#139", "Merged"]]);
+});
+
+test("a walk that brought nothing reads nothing again, and the page walks again only after a while", async () => {
+  const walks: string[] = [];
+  let reads = 0;
+  const base = ports();
+  await draw([REPO, "prs"], ports({ walk: async (id) => (walks.push(id), { outcome: "run_in_flight" }), listEntities: async (...args) => (reads++, base.listEntities(...args)) }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(walks).toEqual([REPO]);
+  const after = reads;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(walks, "the window back within 30 s walks nothing").toEqual([REPO]);
+  expect(reads).toBe(after);
+});
+
 test("Branches names a tip's author by the name the record gives, else the account, and the reader's own reads you (F-107)", async () => {
   await draw(
     [REPO, "branches"],

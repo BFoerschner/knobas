@@ -338,8 +338,9 @@ export function syncRole(role: string): Promise<RoleRun[]> {
  * resolve once the refresh has ended, with how it ended. A refresh that read
  * something also ends on `EVENTS.itemRefreshed` with no write.
  */
-export function refreshEntity(entityId: string): Promise<EntityRefresh> {
-  return invoke<EntityRefresh>("refresh_entity", { entityId });
+export function refreshEntity(entityId: string, behind = false): Promise<EntityRefresh> {
+  // `behind`: a page asks it by itself (the repository page's walk when shown), in the background lane.
+  return invoke<EntityRefresh>("refresh_entity", { entityId, behind });
 }
 
 /**

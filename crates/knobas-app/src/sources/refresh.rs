@@ -60,7 +60,11 @@ pub async fn refresh(
 ) -> Result<RefreshOutcome, RefreshError> {
     let outcome = scheduler.refresh(entity_id, lock).await;
     let ended = match &outcome {
-        Ok(RefreshOutcome::Refreshed) => RefreshEnd::Refreshed,
+        // A walk that found nothing new tells the shell nothing, so no page
+        // reads again and the window keeps its answers; one that follows a
+        // write still ends it, as the write's echoes wait for that event.
+        Ok(RefreshOutcome::Unchanged) if write_id.is_none() => return outcome,
+        Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => RefreshEnd::Refreshed,
         Ok(RefreshOutcome::Gone) => RefreshEnd::Gone,
         Ok(RefreshOutcome::NotOffered | RefreshOutcome::RunInFlight)
         | Err(
@@ -129,7 +133,8 @@ pub async fn of_reader(
     entity_id: &str,
 ) -> Result<EntityRefresh, crate::IpcError> {
     match refresh(scheduler, entity_id, None, Lock::Try).await {
-        Ok(RefreshOutcome::Refreshed) => Ok(EntityRefresh::Refreshed),
+        // The mirror holds what the source holds either way.
+        Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => Ok(EntityRefresh::Refreshed),
         Ok(RefreshOutcome::Gone) => Ok(EntityRefresh::Gone),
         Ok(RefreshOutcome::NotOffered) => Ok(EntityRefresh::NotOffered),
         Ok(RefreshOutcome::RunInFlight) => Ok(EntityRefresh::RunInFlight),
