@@ -26,6 +26,15 @@ The judgement calls went to Fable (xhigh) under Björn's standing instruction; O
 - Rust: `folder_render::runs::tests::a_tool_changed_on_disk_makes_what_it_made_before_stale` (fails without the stamp: the older drawing answered `current: true`), `the_tool_s_stamp_is_in_the_key`, `run::tests::a_tool_changed_on_disk_is_another_stamp`.
 - Vitest: `folder-compare.test.svelte.ts` (both kept: a press asks both with `again`; a stale side is never compared and *Run* runs it alone; a compare drawn stays when a side turns stale, and goes with other ends; three of them fail without the fix), `TfDiffFolder.test.svelte.ts` (the labels, primary and words), `TfMadeBar` and `TfFolderRender` (the Files tab's words).
 
+## Found in the real app, and fixed after
+
+The main path ran on the WSL box under its own Xvfb with a scratch profile and the live Gitea (`tidewater/payout-service` cloned through *Clone*, a folder renderer `sh gen.sh {path} {outdir}` on `docs` whose script says its version in every file it makes):
+
+- **A kept Compare never looked again.** Its folder sides asked the backend once, when built; with the tool bumped from v1 to v2 while Compare stood, it still said what v1 made on both sides. The window back in focus, or the page shown again, now looks at each grouped folder's two sides again (a look starts nothing), as Compare already reads the working tree again then (ruling 6 of 2026-11-20). Held by a test in `TfDiffView.folders.test.svelte.ts` that fails without it.
+- **A phantom last line.** The view diffs a generated text file itself, and `lineDiff` split `x\n` into `x` and an empty line: every generated card drew an empty line 2 on each side, and an added one-line file counted `+2`. The last line break now ends the last line, as the JAR view already does. Held by a test that fails without it.
+
+After both: the Files tab drew `docs` with v1; Compare with the working tree took that drawing for `main` and ran the working tree's side alone with v1. The tool bumped to v2, Compare said "Not rendered since Gen changed." with nothing compared and *Run* primary. *Run* ran both sides with v2 at once (the tool's log: two v2 runs in the same second), and the cards showed `gen v2` on both sides. *Run again* ran both again (two more). The one-line generated file picked in the list was marked, its line clear of the heads; another landed at the band's foot (88 px against the band's 87).
+
 ## Reversing it
 
 Take `tool_stamp` out of `clone_key` and `forge_key`, `wants` out of `FolderCompare`, and the stale arm back into `#tokenOf`.
