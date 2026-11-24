@@ -66,24 +66,24 @@ test("the fallback is the one tickets.css falls back to", () => {
   for (const px of uses) expect(px).toBe(FBAR_FALLBACK_PX);
 });
 
-test("each layout tells where the board's cards start: the scroller's top and its bar, read before any write", () => {
+test("each layout tells where the board's cards start: the scroller's top and its bar, and its left, read before any write", () => {
   vi.stubGlobal("ResizeObserver", Seen);
   const wrap = document.createElement("div");
   wrap.innerHTML = `<div class="tf-sbody"><div class="tf-fbar"></div></div>`;
   const bar = wrap.querySelector<HTMLElement>(".tf-fbar")!;
   const height = { px: 79 };
   Object.defineProperty(bar, "offsetHeight", { get: () => height.px });
-  vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({ top: 120 } as DOMRect);
-  const heard: number[] = [];
+  vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({ top: 120, left: 260 } as DOMRect);
+  const heard: number[][] = [];
   const writes: string[] = [];
   vi.spyOn(wrap.style, "setProperty").mockImplementation((name) => void writes.push(`${heard.length}:${name}`));
-  fbarHeight(wrap, (px) => heard.push(px));
+  fbarHeight(wrap, (top, left) => heard.push([top, left]));
   told!();
-  expect(heard).toEqual([199]);
+  expect(heard).toEqual([[199, 260]]);
   // The top was read before the bar's height was written.
   expect(writes).toEqual(["1:--tf-fbar-h"]);
   // A page held hidden tells nothing.
   height.px = 0;
   told!();
-  expect(heard).toEqual([199]);
+  expect(heard).toEqual([[199, 260]]);
 });

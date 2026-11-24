@@ -183,7 +183,7 @@
   import { readTicketAhead } from "../job/press-reads";
   import type { Attachment } from "svelte/attachments";
   import Signals from "./Signals.svelte";
-  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, keepColumnArrays, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, landingCount, columnWidth, columnName, columnWords, keepColumnArrays, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -796,22 +796,13 @@
    * How many of a show-every-ticket column's cards its landing frame draws (the ux30 end gate, Windows, Fable's ruling):
    * the cards the window's height below the board's top holds, each reckoned at its floor (`cardFloor`, never taller
    * than it draws) and one more, at most {@link COLUMN_CAP}. The height from the column's own top, under its head, would
-   * hold fewer, so no card on screen waits. A column wholly past the window's right edge, where its board starts at the window's left at the latest,
-   * draws one card, so it says nothing of being empty; the rest of every column draws the frame after, below them.
+   * hold fewer, so no card on screen waits. A column wholly past the window's right edge, counted from where the board
+   * starts with its padding left out, draws one card, so it says nothing of being empty; the rest of every column draws
+   * the frame after, below them.
    */
   function landingShare(cards: MiniBoardCard[], index: number): number {
     const width = innerWidth.current ?? 1440;
-    if (index * (columnWidth(width) + COLUMN_GAP) >= width) return 1;
-    const height = window.innerHeight - cardsTop;
-    let used = 0;
-    let fit = 0;
-    for (const card of cards) {
-      if (fit >= COLUMN_CAP) break;
-      used += cardFloorOf(card) + (fit > 0 ? CARD_GAP : 0);
-      if (used > height) break;
-      fit += 1;
-    }
-    return Math.min(COLUMN_CAP, fit + 1);
+    return landingCount(cards, cardFloorOf, { index, column: columnWidth(width), width, height: window.innerHeight, top: cardsTop, left: cardsLeft });
   }
   /**
    * Where the board's cards start on screen, as the scroller last laid out said (`fbarHeight`): the window's height
@@ -819,11 +810,18 @@
    * column's head stands between them, so this still reckons more room than a column has.
    */
   let cardsTop = 0;
+  /**
+   * Where the board starts from the window's left, right of the views list, as the same layout said; 0 until it has. A
+   * column starts at least this far plus its place's columns from the left (Fable's ruling, the ux30 end gate: counted
+   * from the window's edge, no column of an eight-column board at 1440 was ever past the right edge).
+   */
+  let cardsLeft = 0;
   /** The scroller's bar height (`--tf-fbar-h`) and where its cards start, from one observer. */
-  const boardHeights = (wrap: HTMLElement) => fbarHeight(wrap, (px) => (cardsTop = px));
-  /** The room between two columns and two cards (`tickets.css`'s `.tf-cols` and `.tf-cards` gaps). */
-  const COLUMN_GAP = 8;
-  const CARD_GAP = 6;
+  const boardHeights = (wrap: HTMLElement) =>
+    fbarHeight(wrap, (top, left) => {
+      cardsTop = top;
+      cardsLeft = left;
+    });
   /**
    * What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. Its
    * summary's lines counted by the column's width, which goes by the window (`tickets.css`), and Interface's size.

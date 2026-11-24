@@ -41,8 +41,20 @@ profile, offline, the head's own Windows build. Tracing slows the page about a t
   briefs, the ticket, its card's sections and its sub-tasks, each with the page's arguments (`jobCandidates`,
   `cardFilters`), at `pointerdown` or `Enter` on a card or row; the page finds them in the answer cache.
 
+- **A repository's page and its tabs share the window's listeners** (`ipc/shared-listen.ts`'s `windowListen`, which
+  Builds' pages already used): its parts heard the same events with a listener each, nine listen messages in the task
+  that built it.
+- **The landing share reckons the height below the board's top, and a column past the window's right edge from where
+  the board starts** (Fable's second ruling, step 3 finished), both as the scroller's observer reads them after layout:
+  counted from the window's top and left edges, a 1440 window's columns, the ones past its right edge too, still drew
+  seven or eight cards each.
+
 Nothing on screen draws differently: the same parts draw in the same frames, the reads they wait for are on their way
-sooner. No on-screen part is deferred (step 6), so Björn's "drawn whole" reads as it did.
+sooner. No on-screen part is deferred, so Björn's "drawn whole" reads as it did. A landing that waited one frame more
+before the rest of its columns (a changed reading) was tried and bought nothing, since at 1440 the rest already drew
+after the drawn frame; it was taken out. The board's own read sent at the address change (step 3 of Fable's second
+ruling) waits: its arguments come from the view's filter as the page builds it from its suggestions, and a copy made
+ahead that differed would read the board twice.
 
 ## Proof and what is owed
 

@@ -9,11 +9,12 @@
 export const FBAR_FALLBACK_PX = 47;
 
 /**
- * `heardTop`, where given, hears where the board's cards start on screen, the scroller's top and its bar under it, each
- * time the scroller is laid out: read in the observer's callback, after the frame's layout, so it lays nothing out (the
- * ux30 end gate, Windows: the board of every ticket draws in the frame it lands the cards the height below it holds).
+ * `heard`, where given, hears where the board's cards start on screen, the scroller's top and its bar under it, and its
+ * left edge, each time the scroller is laid out: read in the observer's callback, after the frame's layout, so it lays
+ * nothing out (the ux30 end gate, Windows: the board of every ticket draws in the frame it lands the cards the height
+ * below it holds, and a column wholly past the window's right edge one).
  */
-export function fbarHeight(wrap: HTMLElement, heardTop?: (px: number) => void) {
+export function fbarHeight(wrap: HTMLElement, heard?: (top: number, left: number) => void) {
   if (typeof ResizeObserver === "undefined") return;
   let inForce = FBAR_FALLBACK_PX;
   const seen = new ResizeObserver(() => {
@@ -21,7 +22,10 @@ export function fbarHeight(wrap: HTMLElement, heardTop?: (px: number) => void) {
     // A page held hidden lays nothing out: its bar measures 0 and says nothing of the height it will have.
     const px = bar?.offsetHeight ?? 0;
     // Read before the write below, which would lay the page out again for it.
-    if (px !== 0) heardTop?.(wrap.getBoundingClientRect().top + px);
+    if (px !== 0 && heard) {
+      const box = wrap.getBoundingClientRect();
+      heard(box.top + px, box.left);
+    }
     if (px === 0 || px === inForce) return;
     inForce = px;
     wrap.style.setProperty("--tf-fbar-h", `${px}px`);

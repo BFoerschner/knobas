@@ -590,3 +590,32 @@ export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
 export function ticketAddress(card: Pick<MiniBoardCard, "entity_id">): string {
   return entityAddress("ticket", card.entity_id);
 }
+
+/** The room between two board columns and two cards (`tickets.css`'s `.tf-cols` and `.tf-cards` gaps). */
+const COLUMN_GAP = 8;
+const CARD_GAP = 6;
+
+/**
+ * How many of a show-every-ticket column's cards the frame its board lands draws (the ux30 end gate, Windows, Fable's
+ * ruling): the cards the window's height below the board's `top` holds, each at its `floor` (`cardFloor`, never taller
+ * than it draws), and one more, at most {@link COLUMN_CAP}; one for a column wholly past the window's right edge, the
+ * board starting at `left` and the column `index` columns of `column` px and their gaps right of it. `top` and `left` are
+ * 0 until a layout has given them, which reckons the whole window: never fewer cards than show.
+ */
+export function landingCount<C>(
+  cards: readonly C[],
+  floor: (card: C) => number,
+  at: { index: number; column: number; width: number; height: number; top: number; left: number },
+): number {
+  if (at.left + at.index * (at.column + COLUMN_GAP) >= at.width) return 1;
+  const room = at.height - at.top;
+  let used = 0;
+  let fit = 0;
+  for (const card of cards) {
+    if (fit >= COLUMN_CAP) break;
+    used += floor(card) + (fit > 0 ? CARD_GAP : 0);
+    if (used > room) break;
+    fit += 1;
+  }
+  return Math.min(COLUMN_CAP, fit + 1);
+}

@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
+  landingCount,
   cardFloor,
   columnWidth,
   columnHead,
@@ -432,4 +433,24 @@ test("a column whose cards did not change keeps the array it was handed; the two
   expect(now.get("doing")).toEqual([b, c]);
   // The same cards in another order are a change.
   expect(keepColumnArrays(before, new Map([["todo", [b, a]]])).get("todo")).not.toBe(todo);
+});
+
+// The ux30 end gate, Windows (Fable's ruling): the landing frame of a board of every ticket draws a column's screen of
+// cards and one more, at most eight; a column wholly past the window's right edge, counted from where the board starts
+// right of the views list, one. Counted from the window's left edge, no column of an eight-column board at 1440 was.
+test("a board's landing draws the cards a column shows and one more, and one in a column past the window's right edge", () => {
+  const cards = Array.from({ length: 50 }, (_, i) => i);
+  const floor = () => 100;
+  const at = { column: 195, width: 1440, height: 868, top: 0, left: 0 };
+  // The whole window: eight hold, capped at eight.
+  expect(landingCount(cards, floor, { ...at, index: 0 })).toBe(8);
+  // Below the board's top at 268 px: 600 px hold five (100 + 106 * 4 = 524), and one more.
+  expect(landingCount(cards, floor, { ...at, index: 0, top: 268 })).toBe(6);
+  // Column 6 starts 6 * 203 = 1218 px right of the board: on screen counted from the window's edge, past it from a board
+  // that starts at 260 (1478 px); column 5 (1275 px) is on screen either way.
+  expect(landingCount(cards, floor, { ...at, index: 6 })).toBe(8);
+  expect(landingCount(cards, floor, { ...at, index: 5, left: 260 })).toBe(8);
+  expect(landingCount(cards, floor, { ...at, index: 6, left: 260 })).toBe(1);
+  // A short column draws what it holds and the one more it lacks.
+  expect(landingCount([1, 2], floor, { ...at, index: 0 })).toBe(3);
 });
