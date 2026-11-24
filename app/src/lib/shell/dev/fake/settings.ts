@@ -223,7 +223,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     },
     named_pipelines: () => pipelines,
     set_named_pipelines: (args) => {
-      pipelines = (args["pipelines"] as NamedPipelineDraft[]).map((d, i) => ({ id: d.id ?? idOf(d.name, i, "pipeline"), name: d.name.trim(), steps: d.steps }));
+      pipelines = (args["pipelines"] as NamedPipelineDraft[]).map((d, i) => ({ id: d.id ?? idOf(d.name, i, "pipeline"), name: d.name.trim(), steps: d.steps, ...(d.fields != null && d.fields.length > 0 ? { fields: d.fields } : {}) }));
       return pipelines;
     },
     diff_pipelines: () => diffPipelinesOn,

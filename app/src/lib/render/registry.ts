@@ -24,6 +24,7 @@
  */
 
 import { isOpenApi } from "./openapi-sniff";
+import { isXmlFile } from "./xml-sniff";
 
 export type RendererInput = "text" | "bytes";
 export type RendererOutput = "svg" | "html" | "image" | "lines";
@@ -41,9 +42,10 @@ export interface Renderer {
   /**
    * What the file must hold besides a name its patterns take (ux18): a renderer that recognises its files by content
    * (an OpenAPI spec is any YAML or JSON with a top-level `openapi` key) takes a file only when this answers `true`
-   * for its text, and never where no text is at hand (a binary file, a diff's file list).
+   * for its text, and never where no text is at hand (a binary file, a diff's file list). It is handed the file's path
+   * too (the XML view's design, section 4): an XML ending and a start tag make an XML file, a start tag alone does not.
    */
-  readonly sniff?: (text: string) => boolean;
+  readonly sniff?: (text: string, path: string) => boolean;
 }
 
 /** Image: drawn from the file's bytes as an `<img>`, which runs no script even for SVG. */
@@ -169,6 +171,25 @@ export const JAR: Renderer = {
   diff: true,
 };
 
+/**
+ * The XML view (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`): an XML file drawn as a document, its
+ * own lines in the explorers' pane with folds, the way down to a line, and a query (`tf/render/doc/TfDocView.svelte`).
+ * It takes a file whose text starts with an XML declaration, at any name, or one with an XML ending whose first thing
+ * is a start tag (`xml-sniff.ts`). After the renderers that come first for their files (an `.svg` opens as Image), so
+ * it is the next pick there; ahead of Source, so it is the default for every other XML file. Its outline is read in
+ * the document worker; the view, its CSS and the worker load with the first document opened.
+ */
+export const XML: Renderer = {
+  id: "xml",
+  name: "XML view",
+  patterns: ["*"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: false,
+  sniff: isXmlFile,
+};
+
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
 export const BYTES_CAP = 50 * 1024 * 1024;
 
@@ -192,7 +213,7 @@ export const SOURCE: Renderer = {
 export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, SOURCE, HTML];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XML, SOURCE, HTML];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
@@ -223,9 +244,9 @@ export function accepts(pattern: string, path: string): boolean {
  * Whether `renderer` can draw `file` by what it holds: a binary file only by a renderer that reads bytes, and a
  * renderer with a `sniff` only a text file whose text it recognises.
  */
-export function fits(renderer: Renderer, file: { binary: boolean; text?: string }): boolean {
+export function fits(renderer: Renderer, file: { path?: string; binary: boolean; text?: string }): boolean {
   if (file.binary && renderer.input !== "bytes") return false;
-  return renderer.sniff === undefined || (!file.binary && file.text !== undefined && renderer.sniff(file.text));
+  return renderer.sniff === undefined || (!file.binary && file.text !== undefined && renderer.sniff(file.text, file.path ?? ""));
 }
 
 /**

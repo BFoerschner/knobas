@@ -19,6 +19,8 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // The XML view's folds and what was asked, kept while the window lives (its design, sections 8 and 23): each test starts with none.
+  "tf/render/doc/doc.svelte.ts#kept": async () => (await import("../tf/render/doc/doc.svelte")).forgetFolds(),
   // The hosts a change was confirmed for, until knobas quits (ux31, ADR-0057): each test asks afresh.
   "tf/render/oas.svelte.ts#confirmedHosts": async () => (await import("../tf/render/oas.svelte")).confirmedHosts.clear(),
   // The Passwords page's one read, the folds opened and what the clipboard holds (ADR-0056): each test starts with none.

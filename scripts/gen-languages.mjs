@@ -94,8 +94,14 @@ if (missed.length > 0) console.error(`gen-languages: no id for ${missed.join(", 
 // File names and extensions knobas has always read (`highlight-core.ts` until 2026-11-21).
 const BY_NAME = { dockerfile: "docker", containerfile: "docker", makefile: "make", justfile: "just", "cargo.lock": "toml", "go.mod": "go", ".gitignore": "shellscript", ".env": "dotenv" };
 const BY_EXT_OWN = { h: "c", hpp: "cpp", cc: "cpp", htm: "html", svg: "xml", kts: "kotlin", mjs: "javascript", cjs: "javascript", gradle: "groovy" };
+// The endings whose files are XML (the XML view's design, 2026-11-23, section 4). Source colours each as XML, and the
+// XML view's sniff (`render/xml-sniff.ts`) reads this list from the generated file. An ending a Shiki grammar already
+// claims keeps it (`xsl`), and `xslt` is that grammar too.
+const XML_ENDINGS = ["xml", "xsd", "xsl", "xslt", "wsdl", "svg", "xhtml", "rss", "atom", "xlf", "xliff", "plist", "csproj", "vbproj", "fsproj", "vcxproj", "props", "targets", "nuspec", "resx", "config", "xaml", "axml", "pom", "jrxml", "fxml", "kml", "gpx", "drawio", "iml", "wxs", "dita", "ditamap", "xmi", "manifest"];
+const XML_OWN = { xslt: "xsl" };
 const byExt = Object.fromEntries([...known].sort(([a], [b]) => a.localeCompare(b)));
 Object.assign(byExt, BY_EXT_OWN);
+for (const ending of XML_ENDINGS) if (byExt[ending] === undefined) byExt[ending] = XML_OWN[ending] ?? "xml";
 const byFence = Object.fromEntries([...known].sort(([a], [b]) => a.localeCompare(b)));
 
 const sorted = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
@@ -118,6 +124,9 @@ export const BY_NAME: Readonly<Record<string, LangId>> = ${json(BY_NAME)};
 
 /** Extensions, lower case. */
 export const BY_EXT: Readonly<Record<string, LangId>> = ${json(byExt)};
+
+/** The endings whose files are XML, lower case: Source colours each, and the XML view sniffs a file of one. */
+export const XML_ENDINGS: readonly string[] = ${JSON.stringify(XML_ENDINGS).replace(/,/g, ", ")};
 
 /** A Markdown fence's language, lower case. */
 export const BY_FENCE: Readonly<Record<string, LangId>> = ${json(byFence)};

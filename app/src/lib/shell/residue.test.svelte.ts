@@ -76,6 +76,11 @@ const oasEngine = (_session: number, call: { kind: string }) =>
 /** An explorer's state over {@link oasEngine}. */
 const oasState = () => new OasState(new SpecSession(oasEngine as never, null), "openapi.yaml");
 
+/** A highlighter that never answers. */
+function lateRender() {
+  return { highlight: () => ({ focus() {}, cancel() {} }) };
+}
+
 function deferred<T>(value: T): Promise<T> {
   return new Promise<T>((resolve) => {
     pending.push({ resolve: resolve as (v: unknown) => void, value });
@@ -350,6 +355,9 @@ vi.mock("../ipc/api", () => ({
   apiCancel: () => deferred(undefined),
   apiAnswerBody: () => deferred(new Uint8Array()),
   apiSaveAnswer: () => deferred(""),
+  imageFetch: () => deferred({ url: "", mime: "image/png", size: 0, base64: "" }),
+  imageHosts: () => deferred({ hosts: [] }),
+  setImageHosts: () => deferred({ hosts: [] }),
   apiHoldSecret: () => deferred(undefined),
   apiForgetHeld: () => deferred(undefined),
   apiClientsFound: () => deferred({ bruno: false }),
@@ -478,6 +486,13 @@ const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
 const TfOasAnswer = (await import("../tf/render/TfOasAnswer.svelte")).default;
+const TfLines = (await import("../tf/code/TfLines.svelte")).default;
+const TfDocView = (await import("../tf/render/doc/TfDocView.svelte")).default;
+const TfDocRail = (await import("../tf/render/doc/TfDocRail.svelte")).default;
+const TfDocResults = (await import("../tf/render/doc/TfDocResults.svelte")).default;
+const TfValueViewer = (await import("../tf/render/TfValueViewer.svelte")).default;
+const { DocState } = await import("../tf/render/doc/doc.svelte");
+const { DocSession } = await import("../render/doc-port");
 const TfOasInline = (await import("../tf/render/TfOasInline.svelte")).default;
 const TfOasDiff = (await import("../tf/render/TfOasDiff.svelte")).default;
 const TfOasMedia = (await import("../tf/render/TfOasMedia.svelte")).default;
@@ -1781,6 +1796,50 @@ const CASES: Case[] = [
                   }
                 : null,
             ),
+        },
+      }),
+    }),
+  },
+  {
+    /** A file's lines (the XML view's step X1): its colours answer late, and ⌘F's overlay is on the ladder. */
+    name: "TfLines",
+    source: "lib/tf/code/TfLines.svelte",
+    open: (target) => ({ app: mount(TfLines, { target, props: { text: "a\nb", path: "a.xml", render: lateRender(), find: "overlay", rows: new Uint32Array([1, 2]), scrolls: true } }) }),
+  },
+  {
+    /** The XML view: its outline answers late; the pane's resize listener and its observer go with it. */
+    name: "TfDocView",
+    source: "lib/tf/render/doc/TfDocView.svelte",
+    open: (target) => ({ app: mount(TfDocView, { target, props: { text: "<a>\n<b/>\n</a>", path: "a.xml", render: lateRender(), engine: () => deferred(null) } }) }),
+  },
+  {
+    /** The XML view's rail: what the outline says lands late. */
+    name: "TfDocRail",
+    source: "lib/tf/render/doc/TfDocRail.svelte",
+    open: (target) => ({ app: mount(TfDocRail, { target, props: { st: new DocState(new DocSession(() => deferred(null)), "r\na.xml", "c", 3), ongo: () => {} } }) }),
+  },
+  {
+    /** A query's results: the examples answer late. */
+    name: "TfDocResults",
+    source: "lib/tf/render/doc/TfDocResults.svelte",
+    open: (target) => ({ app: mount(TfDocResults, { target, props: { st: new DocState(new DocSession(() => deferred(null)), "r\na.xml", "c", 3), ongo: () => {}, onask: () => {} } }) }),
+  },
+  {
+    /** The value viewer: its chain's run answers late. */
+    name: "TfValueViewer",
+    source: "lib/tf/render/TfValueViewer.svelte",
+    open: (target) => ({
+      app: mount(TfValueViewer, {
+        target,
+        props: {
+          value: { from: 0, to: 4, read: "xml_text", name: "MIME_DATA", field: "A/MIME_DATA", length: 4, fileName: null, line: 1 },
+          path: "a.xml",
+          pipelines: [],
+          run: () => deferred({ outcome: "done", name: "value", output: { kind: "text", text: "abc" } }),
+          save: () => deferred("/tmp/x"),
+          keep: () => deferred([]),
+          render: lateRender(),
+          onclose: () => {},
         },
       }),
     }),

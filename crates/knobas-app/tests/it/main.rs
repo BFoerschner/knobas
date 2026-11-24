@@ -56,6 +56,7 @@ mod files_on_sync;
 mod folder_render;
 mod held_files;
 mod held_store;
+mod image_fetch;
 mod inbox_ipc;
 mod ipc;
 mod item_card;

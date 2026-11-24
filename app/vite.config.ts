@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => ({
     port: 1420,
     strictPort: true,
     // The browser's fake reads the fixture repositories' files (`fake/launcher.ts`), which live beside `app/`.
-    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files"] },
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files", "../fixtures/doc"] },
   },
   build: {
     // **Three documents, not one** (#503, #2381). `index.html` is the shell; the second

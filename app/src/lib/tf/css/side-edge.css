@@ -16,6 +16,7 @@
 @property --side-assets { syntax: "*"; inherits: false; }
 @property --side-monitor { syntax: "*"; inherits: false; }
 @property --side-oas-rail { syntax: "*"; inherits: false; }
+@property --side-doc-rail { syntax: "*"; inherits: false; }
 
 /* The edge stands out of flow on the line between the sidebar and the main column: a grid's absolutely placed child
    takes its grid area as its box, so `grid-column` puts it at the start of the column after a left rail (`start`) or

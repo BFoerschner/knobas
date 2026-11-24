@@ -40,6 +40,7 @@ mod child;
 mod jq;
 pub mod saved;
 mod steps;
+mod values;
 
 #[cfg(feature = "test-util")]
 pub use child::use_helper;
@@ -103,6 +104,44 @@ impl PipeFormat {
     }
 }
 
+/// How [`PipeStep::Take`] reads the bytes it cuts out of the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum TakeAs {
+    /// As they are.
+    Bytes,
+    /// An element's text: XML's references read, CDATA as written.
+    XmlText,
+    /// An attribute's value, inside its quotes: XML's references read.
+    XmlAttribute,
+    /// A JSON string, with or without its quotes: its escapes read.
+    JsonString,
+}
+
+/// A character set the *read as* step reads bytes in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum Charset {
+    Windows1252,
+    #[serde(rename = "iso_8859_15")]
+    Iso885915,
+    Utf16le,
+    Utf16be,
+}
+
+impl Charset {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Windows1252 => "Windows-1252",
+            Self::Iso885915 => "ISO-8859-15",
+            Self::Utf16le => "UTF-16 LE",
+            Self::Utf16be => "UTF-16 BE",
+        }
+    }
+}
+
 /// One step of a pipeline.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "step", rename_all = "snake_case")]
@@ -133,6 +172,31 @@ pub enum PipeStep {
     Command {
         id: String,
     },
+    /// A value of the file (ADR-0059): bytes `from` to `to` of the input, read
+    /// as `read` says. The first step of a value pipeline: the web view names a
+    /// byte range, never the value.
+    Take {
+        from: u64,
+        to: u64,
+        read: TakeAs,
+    },
+    /// Pairs of hex digits, with or without spaces and colons, as bytes.
+    HexDecode,
+    /// zlib, then raw deflate.
+    Inflate,
+    /// `%xx` read as the byte it names.
+    UrlDecode,
+    /// XML's references and HTML's named entities read.
+    Unescape,
+    /// A JSON string's text, its escapes read.
+    JsonString,
+    /// A JWT's header and payload as JSON, its times written out; its
+    /// signature counted, never checked.
+    Jwt,
+    /// Bytes in a character set, as UTF-8 text.
+    Charset {
+        charset: Charset,
+    },
 }
 
 impl PipeStep {
@@ -151,6 +215,14 @@ impl PipeStep {
             Self::Convert { from, to } => format!("{} to {}", from.name(), to.name()),
             Self::HexDump => "hex dump".to_owned(),
             Self::Command { id } => id.clone(),
+            Self::Take { .. } => "take the value".to_owned(),
+            Self::HexDecode => "hex decode".to_owned(),
+            Self::Inflate => "inflate".to_owned(),
+            Self::UrlDecode => "URL decode".to_owned(),
+            Self::Unescape => "unescape XML or HTML".to_owned(),
+            Self::JsonString => "JSON string".to_owned(),
+            Self::Jwt => "JWT".to_owned(),
+            Self::Charset { charset } => format!("read as {}", charset.name()),
         }
     }
 
@@ -196,7 +268,16 @@ impl PipeStep {
                 }
             }
             Self::HexDump => format!("{name}.hexdump"),
-            Self::Command { .. } => name.to_owned(),
+            Self::Command { .. }
+            | Self::UrlDecode
+            | Self::Unescape
+            | Self::JsonString
+            | Self::Charset { .. } => name.to_owned(),
+            // A value goes by no file's name: what it holds picks its renderer.
+            Self::Take { .. } => "value".to_owned(),
+            Self::HexDecode => strip(&["hex"]),
+            Self::Inflate => strip(&["zz", "deflate", "zlib"]),
+            Self::Jwt => with_extension(name, "json"),
         }
     }
 }
