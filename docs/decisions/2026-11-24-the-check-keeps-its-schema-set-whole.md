@@ -63,10 +63,19 @@ other; median of five, ms to the verdict (the carets in brackets), lines 100 at 
 | The other order, before | 73 (39) | 264 (168) | 92 (34) | 362 to 398 (266 to 271) |
 | The other order, after | 40 (25) | 198 (198) | 42 (33) | 274 to 281 (274 to 281) |
 
-- **Within its line now** at 6x on 2560 x 1440 at 1.25: the other order, drawn in its carets' frame. At 1440 both were
-  within before, and land in their carets' frame now.
-- **Still over at 6x on 2560 x 1440 at 1.25**: opened again, 308 to 313. The verdict lands with the carets now, and the
-  carets are over by themselves, before and after (the outline's own paint).
+- **After merging `4c95c72f`** (E1, Z1), the same cases at 2560 x 1440 at 1.25 against that base: at 6x, opened again
+  351 → 283 (carets 277 → 283), the other order 365 → 265 (carets 281 → 265), the first open 697 → 694 (carets 519 →
+  529); at 1x, 92 → 52, 90 → 43 and 232 → 245. Rerun alone, alternating, the first open's carets are 112 / 100 against
+  113 / 113 at 1x and 529 / 531 against 517 / 508 at 6x: within the runs' own spread.
+- **Within its line now** at 6x on 2560 x 1440 at 1.25: the other order, and on `4c95c72f` the order opened again, each
+  drawn in its carets' frame. On `6a8e9d08` the order opened again was 308 to 313, its carets alike and over by
+  themselves (the outline's own paint). At 1440 both were within before, and land in their carets' frame now.
 - **The first open stays over** at 1x and 6x on both sizes, unchanged: it reads and parses the set (BMEcat's 250 KB),
   and loads and compiles libxml2. Nothing safe made it cheaper.
 - Nothing moved (`moves.sh --fixture-only --throttle 1,6 --sizes 2560x1440@1.25 --only xml-checked,xml-plain,xsd-open`).
+- **The real app** (the Linux build on its own Xvfb on the WSL box, a scratch profile, live Gitea, each file opened by a
+  real click in the tree): order-4711 first, 5 departures, *Checked by libxml2 in 72 ms; the schema's 4 files read in
+  175 ms*; the README; order-4711 again, the same 5 departures on the same lines, 8 ms and 1 ms; order-4710, *Valid*, 9
+  ms and 1 ms. On a scratch branch whose schema then took no `ORDER_INFO`, after *Refresh*: order-4711's first
+  departure moved from line 93 to 91, and order-4710 had one, on line 91; back on `main`, both as before. The branch was
+  deleted afterwards.
