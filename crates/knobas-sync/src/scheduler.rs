@@ -1832,6 +1832,21 @@ impl WeakScheduler {
 struct RunEntry {
     watchers: Arc<Watchers>,
     first_run_claimed: bool,
+    /// How the run may be stopped so a landed write's read-back goes first
+    /// ([`Scheduler::stand_aside`]); `None` for a run a person pressed or
+    /// joined, a first sync or a backfill, which never stand aside.
+    aside: Option<StandAside>,
+}
+
+/// A run's stop for a landed write's read-back (ADR-0031 as amended
+/// 2026-11-24, the pr-state fix): cancelled by [`Scheduler::stand_aside`],
+/// selected beside the quit's around the locked run only, so dropping the
+/// run rolls its transaction back and the waiting refresh gets the lock.
+#[derive(Clone, Default)]
+struct StandAside {
+    token: CancellationToken,
+    /// The write it stood aside for, which its row names.
+    write: Arc<std::sync::Mutex<Option<i64>>>,
 }
 
 /// Everything this scheduler remembers about a source *id*, under one lock.
@@ -2173,6 +2188,77 @@ impl Scheduler {
         crate::refresh::of_entity(self.deps(), entity_id, lock).await
     }
 
+    /// **Stop the run of `source_id` in flight so write `write_id`'s
+    /// read-back goes first** (ADR-0031 as amended 2026-11-24, the pr-state
+    /// fix; Fable's ruling 1). A run holds the source's lock for its whole
+    /// walk of the forge, and every landed write starts one, so a second
+    /// write's read-back waited out the first's whole run (3.5 s at seed
+    /// size, minutes at Björn's). Answers whether a run was stopped.
+    ///
+    /// The stopped run ends as a quit-cancelled one does: its transaction
+    /// rolled back, its row closed with [`RunResult::stood_aside`]'s
+    /// verdict, its watchers told once, no verdict on the credential and the
+    /// backoff untouched. The run after the write
+    /// ([`sync_after_write`](Self::sync_after_write)) starts again from the
+    /// same stored position.
+    ///
+    /// **Not stopped**, and the read-back waits as before: a run a person
+    /// pressed or joined, a first sync or a backfill (no leave, see
+    /// [`RunEntry::aside`]); a source with no stored position, whose run owes
+    /// a full sync and its sweep; and a source with no run that ended `ok`
+    /// within max(10 min, twice its interval), which a stream of writes
+    /// would otherwise never let sync.
+    pub async fn stand_aside(&self, source_id: &str, write_id: i64) -> bool {
+        let aside = {
+            let claims = self.inner.claims.lock().await;
+            // The entry outlives its run (ADR-0005): only a run still going is
+            // stopped. `attach(None)` asks without enrolling anyone.
+            claims
+                .runs
+                .get(source_id)
+                .filter(|entry| entry.watchers.attach(None) == Attach::Joined)
+                .and_then(|entry| entry.aside.clone())
+        };
+        let Some(aside) = aside else {
+            return false;
+        };
+        let may: Result<Option<bool>, sqlx::Error> = sqlx::query_scalar(
+            "select c.cursor is not null
+                    and coalesce(max(r.finished_at) > now() - make_interval(
+                            secs => greatest(600, 2 * c.sync_interval_secs)::double precision),
+                        false)
+               from knobas.source_config c
+               left join knobas.sync_run r
+                 on r.source_id = c.id and r.finished_at is not null and r.outcome = 'ok'
+              where c.id = $1
+              group by c.cursor, c.sync_interval_secs",
+        )
+        .bind(source_id)
+        .fetch_optional(&self.deps().pool)
+        .await;
+        if !matches!(may, Ok(Some(true))) {
+            return false;
+        }
+        *aside
+            .write
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(write_id);
+        aside.token.cancel();
+        true
+    }
+
+    /// Whether a run of `source_id` that may stand aside is in flight.
+    pub async fn may_stand_aside(&self, source_id: &str) -> bool {
+        let claims = self.inner.claims.lock().await;
+        claims.runs.get(source_id).is_some_and(|entry| {
+            entry.watchers.attach(None) == Attach::Joined
+                && entry
+                    .aside
+                    .as_ref()
+                    .is_some_and(|aside| !aside.token.is_cancelled())
+        })
+    }
+
     /// Ask for a manual sync, wait for its ending, and say whether the run was
     /// this caller's own or one it was enrolled in.
     async fn trigger_and_wait(&self, source_id: &str) -> Result<Triggered, TriggerError> {
@@ -2180,9 +2266,12 @@ impl Scheduler {
         let sink = Arc::new(RunEnded {
             done: std::sync::Mutex::new(Some(done)),
         });
+        // The run after a write may stand aside for the next write's
+        // read-back, as a scheduled one may: create-then-merge would
+        // otherwise wait out the create's whole run (the pr-state fix).
         let triggered = self
             .inner
-            .trigger(source_id, SyncTrigger::Manual, Some(sink))
+            .trigger_as(source_id, SyncTrigger::Manual, Some(sink), true)
             .await?;
         let _ = wait.await;
         Ok(triggered)
@@ -2628,11 +2717,33 @@ impl ProgressSink for RunEnded {
 }
 
 impl Inner {
+    /// [`trigger_as`](Self::trigger_as), standing aside for a landed write
+    /// only where the ticker started it: a run a person asked for keeps going.
     async fn trigger(
         self: &Arc<Self>,
         source_id: &str,
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
+    ) -> Result<Triggered, TriggerError> {
+        self.trigger_as(
+            source_id,
+            trigger,
+            progress,
+            trigger == SyncTrigger::Schedule,
+        )
+        .await
+    }
+
+    /// Start or join a run of `source_id`. `may_stand_aside`: the run may be
+    /// stopped for a landed write's read-back (the ticker's, and the run
+    /// after a write); a caller that may not, joining a run that may, takes
+    /// that leave away. A first sync and a backfill never stand aside.
+    async fn trigger_as(
+        self: &Arc<Self>,
+        source_id: &str,
+        trigger: SyncTrigger,
+        progress: Option<Arc<dyn ProgressSink>>,
+        may_stand_aside: bool,
     ) -> Result<Triggered, TriggerError> {
         // Derived, never passed alongside: see `impl From<SyncTrigger> for
         // RunMode`. This is what makes "the log says `backfill`" and "the run
@@ -2663,6 +2774,9 @@ impl Inner {
                 // the wizard's *Retry*, which is the same command asking a
                 // second time -- gets work rather than this run again.
                 entry.first_run_claimed |= asks_for_the_first_sync;
+                if !may_stand_aside {
+                    entry.aside = None;
+                }
                 return Ok(Triggered::Existing(run_id));
             }
             let unclaimed = !entry.first_run_claimed;
@@ -2698,6 +2812,7 @@ impl Inner {
         // The caller that started the run is a watcher like any other; nothing
         // below this line knows which of them it was.
         watchers.attach(progress);
+        let aside = StandAside::default();
         claims.runs.insert(
             source_id.to_owned(),
             RunEntry {
@@ -2706,6 +2821,9 @@ impl Inner {
                 // wizard that got here first is watching the run it asked for,
                 // and its *Retry* must not be handed this one back.
                 first_run_claimed: asks_for_the_first_sync,
+                aside: (may_stand_aside
+                    && matches!(trigger, SyncTrigger::Schedule | SyncTrigger::Manual))
+                .then(|| aside.clone()),
             },
         );
         drop(claims);
@@ -2730,13 +2848,13 @@ impl Inner {
         if self.cancel.is_cancelled() {
             drop(tasks);
             inner
-                .run_task_in_background(id, run_id, mode, watchers)
+                .run_task_in_background(id, run_id, mode, watchers, aside)
                 .await;
             return Err(TriggerError::ShuttingDown);
         }
         let handle = tokio::spawn(async move {
             inner
-                .run_task_in_background(id, run_id, mode, watchers)
+                .run_task_in_background(id, run_id, mode, watchers, aside)
                 .await
         });
         tasks.retain(|task| !task.is_finished());
@@ -2755,10 +2873,11 @@ impl Inner {
         run_id: i64,
         mode: RunMode,
         watchers: Arc<Watchers>,
+        aside: StandAside,
     ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(knobas_http::on_lane(
             knobas_http::Lane::Background,
-            self.run_task(source_id, run_id, mode, watchers),
+            self.run_task(source_id, run_id, mode, watchers, aside),
         ))
     }
 
@@ -2771,6 +2890,7 @@ impl Inner {
         run_id: i64,
         mode: RunMode,
         watchers: Arc<Watchers>,
+        aside: StandAside,
     ) {
         // The permit is what caps concurrency. Acquired *after* the log row
         // exists, so a queued run is visible as "running" in the UI rather
@@ -2816,6 +2936,15 @@ impl Inner {
                 tokio::select! {
                     biased;
                     () = self.cancel.cancelled() => (RunResult::cancelled(), None),
+                    () = aside.token.cancelled() => {
+                        let write = aside
+                            .write
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .unwrap_or_default();
+                        tracing::info!(source_id, run_id, write, "the run stood aside for a landed write's read-back");
+                        (RunResult::stood_aside(write), None)
+                    }
                     ran = run_keeping_the_adapter(
                         &self.deps,
                         &source_id,

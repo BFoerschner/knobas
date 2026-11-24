@@ -545,6 +545,113 @@ async fn a_refresh_waits_behind_a_run_in_flight_whose_older_payload_does_not_ove
     f.state.scheduler.shutdown().await;
 }
 
+/// A run of `trigger` of its own, not the one [`mirrored`] just finished:
+/// that run's row closes a moment before its watchers do, and a trigger in
+/// between joins it.
+async fn a_run_of_its_own(f: &Fixture, trigger: knobas_sync::SyncTrigger) {
+    let last: i64 = sqlx::query_scalar("select max(id) from knobas.sync_run where source_id = $1")
+        .bind(SOURCE)
+        .fetch_one(&f.state.pool)
+        .await
+        .unwrap();
+    tokio::time::timeout(PATIENCE, async {
+        while f
+            .state
+            .scheduler
+            .trigger(SOURCE, trigger, None)
+            .await
+            .expect("a run starts")
+            == last
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("a run of its own starts");
+}
+
+/// **A scheduled run stands aside for a landed write's read-back** (ADR-0031
+/// as amended 2026-11-24, the pr-state fix). The source holds a position, so
+/// the run is incremental; it is held at the door, the lock in its hands. The
+/// write lands: its read-back must not wait for the run, which is stopped,
+/// rolled back and logged as standing aside, and the run after the write
+/// starts again from the same position.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_writes_read_back_stops_a_scheduled_run_in_its_way() {
+    let f = fixture("refresh_stands_aside").await;
+    mirrored(&f).await;
+    let entered = f.remote.syncs_entered.load(Ordering::SeqCst);
+    a_run_of_its_own(&f, knobas_sync::SyncTrigger::Schedule).await;
+    until("the scheduled run holds the lock", || async {
+        f.remote.syncs_entered.load(Ordering::SeqCst) > entered
+    })
+    .await;
+
+    let id = write_queue::submit_in_background(&f.state, comment())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the read-back goes first, the door still shut", || async {
+        live_title(&f.state.pool, TICKET).await.as_deref() == Some("after")
+    })
+    .await;
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 1);
+    let aside: Option<String> = sqlx::query_scalar(
+        "select error from knobas.sync_run where source_id = $1 and trigger = 'schedule'
+            and finished_at is not null and error like 'stood aside%'",
+    )
+    .bind(SOURCE)
+    .fetch_optional(&f.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        aside,
+        Some(format!("{}{id}", knobas_sync::run_log::STOOD_ASIDE_PREFIX)),
+        "the stopped run's row says which write it stood aside for"
+    );
+    assert_eq!(
+        knobas_sync::run_log::failures_since_last_ok(&f.state.pool, SOURCE)
+            .await
+            .unwrap(),
+        0,
+        "standing aside is no failure of the source"
+    );
+
+    f.open_the_door();
+    run_after(&f.state.pool, SOURCE, id).await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// A run a person pressed is not stopped: the read-back waits for it, as
+/// before (Fable's ruling 1).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_writes_read_back_waits_for_a_run_a_person_pressed() {
+    let f = fixture("refresh_waits_for_a_person").await;
+    mirrored(&f).await;
+    let entered = f.remote.syncs_entered.load(Ordering::SeqCst);
+    a_run_of_its_own(&f, knobas_sync::SyncTrigger::Manual).await;
+    until("the pressed run holds the lock", || async {
+        f.remote.syncs_entered.load(Ordering::SeqCst) > entered
+    })
+    .await;
+    let id = write_queue::submit_in_background(&f.state, comment())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        f.remote.refreshes.load(Ordering::SeqCst),
+        0,
+        "the read-back waits for the pressed run"
+    );
+    f.open_the_door();
+    run_after(&f.state.pool, SOURCE, id).await;
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 1);
+    f.state.scheduler.shutdown().await;
+}
+
 /// A refresh that fails is only a failed read: the write stays `sent`, the
 /// run after it still starts, and the shell hears `failed`.
 #[tokio::test(flavor = "multi_thread")]

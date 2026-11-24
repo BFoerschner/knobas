@@ -892,14 +892,24 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// and the next scheduled sync re-reads the source either way.
 pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let entity = read_back(&scheduler.deps().pool, write).await;
-    if let Err(error) = crate::sources::refresh::refresh(
+    let refresh = crate::sources::refresh::refresh(
         scheduler,
         &entity,
         Some(write.id),
         knobas_sync::refresh::Lock::Wait,
-    )
-    .await
-    {
+    );
+    tokio::pin!(refresh);
+    // The read-back asks for the lock first; once it waits, a run that may
+    // stand aside is stopped, so Postgres hands the lock to the read-back and
+    // a run started in the gap queues behind it (ADR-0031 as amended
+    // 2026-11-24). A read-back that never waits (nothing in flight, a kind the
+    // adapter does not read) stops nothing.
+    let refreshed = tokio::select! {
+        biased;
+        refreshed = &mut refresh => refreshed,
+        () = stand_aside_once_waiting(scheduler, write) => refresh.await,
+    };
+    if let Err(error) = refreshed {
         tracing::warn!(
             source = %write.source_id,
             write_id = write.id,
@@ -915,6 +925,40 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             %error,
             "a write landed but the mirror could not be re-read for it"
         );
+    }
+}
+
+/// How long a landed write's read-back is watched for its wait on the run's
+/// lock before nothing is stopped: building the source (its keychain read)
+/// comes first.
+const ASIDE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Stop the run of `write`'s source in flight, where one that may stand
+/// aside goes and the read-back's ask for the lock is waiting on it
+/// ([`Scheduler::stand_aside`]); answers once that is done or given up on.
+async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
+    if !scheduler.may_stand_aside(&write.source_id).await {
+        return;
+    }
+    let pool = &scheduler.deps().pool;
+    let started = std::time::Instant::now();
+    while started.elapsed() < ASIDE_PATIENCE {
+        let waiting: Result<bool, sqlx::Error> = sqlx::query_scalar(
+            "select exists (select 1 from pg_locks where locktype = 'advisory' and not granted)",
+        )
+        .fetch_one(pool)
+        .await;
+        if matches!(waiting, Ok(true)) {
+            if scheduler.stand_aside(&write.source_id, write.id).await {
+                tracing::info!(
+                    source = %write.source_id,
+                    write_id = write.id,
+                    "a run stood aside so the landed write's read-back went first"
+                );
+            }
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
