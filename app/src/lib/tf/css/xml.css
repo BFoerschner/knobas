@@ -53,6 +53,9 @@
    the pane's edge. */
 .tf-xv-lines { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--sheet); }
 .tf-xv-lines > .tf-code.tf-lscroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; position: relative; padding: 6px 0 12px; --under: var(--sheet); background: var(--sheet); }
+/* The miniature form (step E1): the document alone, as tall as the box it is put in, drawn as the view draws it. */
+.tf-xv-inline { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tf-xv-inline > .tf-xv-doc { flex: 1; min-height: 0; }
 .tf-code.tf-lines .tf-l { --row-bg: var(--under); background: var(--row-bg); }
 .tf-code.tf-lines .tf-l:hover { --row-bg: var(--sheet-2); }
 .tf-code.tf-lines .tf-l.tf-at { --row-bg: var(--warn-bg); }

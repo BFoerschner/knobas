@@ -4,6 +4,7 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
+import type { PipeRun, PipeStep } from "./entity";
 import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, DeclaringFile, DownloadedSchema, FetchedImage, JsonQueryAnswer, JsonPathStep, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
 
 export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, DeclaringFile, DownloadedSchema, JsonQueryAnswer, JsonPathStep, SentLine, SpecToOpen, XmlCheck };
@@ -133,6 +134,19 @@ export function xsdForget(sha256: string): Promise<void> {
 /** *Save to Downloads*: an example made from a schema written to the Downloads folder under `name`; answers the path. */
 export function xsdSaveExample(name: string, text: string): Promise<string> {
   return invoke<string>("xsd_save_example", { name, text });
+}
+
+/**
+ * A file pipeline over a document knobas holds in memory (an example opened in the XML view, step E1): `steps` over
+ * `text`'s bytes as the file `name`, as `entityFilePiped` runs them over a file's. A step that fails is an answer.
+ */
+export function textPiped(text: string, name: string, steps: PipeStep[]): Promise<PipeRun> {
+  return invoke<PipeRun>("text_piped", { text, name, steps });
+}
+
+/** *Download* in the value viewer over a document held in memory: {@link textPiped}'s answer saved as `saveAs`. */
+export function textPipedSave(text: string, name: string, steps: PipeStep[], saveAs: string): Promise<string> {
+  return invoke<string>("text_piped_save", { text, name, steps, saveAs });
 }
 
 /**

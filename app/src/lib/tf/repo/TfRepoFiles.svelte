@@ -86,6 +86,9 @@
   import { explorerModule } from "../render/oas-module";
   import { docViewModule } from "../render/doc/doc-module";
   import { xsdModule } from "../render/xsd/xsd-module";
+  import { exampleFileName, exampleOfPlace, heldOptions, shown as exampleShown } from "../render/xsd/example-held.svelte";
+  import { contentOf } from "../../render/content-key";
+  import { xsdSaveExample } from "../../ipc/api";
   import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -2098,6 +2101,34 @@
     };
   };
 
+  // ---- An example opened in the XML view (E1): a place of its schema, its own name in the header ----
+  /** The element whose example the schema explorer shows as the XML view, from the address; `null` otherwise. */
+  const exampleHere = $derived(drawAs === "xsd" && drawn !== null && path === drawn.path ? exampleOfPlace(place) : null);
+  /** The header's name and meta: the explorer's, once it has the example; before, the name its held seed makes. */
+  const exampleHead = $derived.by(() => {
+    if (exampleHere === null || drawn === null) return null;
+    const said = exampleShown.head;
+    if (said !== null && said.place === place) return said;
+    const seed = heldOptions(`${repoId}\n${drawn.path}\n${contentOf(drawn.text, null)}`)?.seed ?? 4711;
+    return { place, name: exampleFileName(exampleHere, seed), meta: "Example made by knobas. Not saved.", xml: null };
+  });
+  async function copyExample(xml: string) {
+    try {
+      await navigator.clipboard.writeText(xml);
+      push({ text: "Copied the example", subject: "copy-example" });
+    } catch (cause) {
+      push({ text: `Could not copy it: ${cause instanceof Error ? cause.message : String(cause)}`, tone: "err" });
+    }
+  }
+  async function saveExample(name: string, xml: string) {
+    try {
+      const saved = await xsdSaveExample(name, xml);
+      push({ text: `Saved ${saved.slice(saved.lastIndexOf("/") + 1)} to Downloads` });
+    } catch (cause) {
+      push({ text: `Could not save it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
   // ---- Zen mode (ux31, `../zen.svelte.ts`) ----
   /** Whether the shown file is one Zen mode applies to: drawn by a renderer that wants the room, on the shown page. */
   const zenHere = $derived(shownPage() && file !== null && fileMade === null && zenApplies(drawAs));
@@ -2441,6 +2472,28 @@
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
       {@const cut = file.path.lastIndexOf("/") + 1}
+      {#if exampleHead !== null}
+      {@const ex = exampleHead}
+      <!-- An example opened in the XML view (E1): its own name after the schema's path, and the file actions an unsaved
+           document has. Nothing of the schema's file (Render as, Pipeline, Open in, Edit) stands for it. -->
+      <header>
+        <span class="tf-p"><span class="tf-pdir">{file.path}{" › "}</span>{ex.name}</span>
+        <span class="tf-dim tf-small tf-fmeta">{ex.meta}</span>
+        <span class="tf-trail">
+          {#if zenHere}
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost tf-zenbtn"
+              aria-pressed={zen.on}
+              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
+              onclick={() => zen.toggle()}>Zen</button
+            >
+          {/if}
+          <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void copyExample(ex.xml)}>Copy</button>
+          <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void saveExample(ex.name, ex.xml)}>Save to Downloads</button>
+        </span>
+      </header>
+      {:else}
       <header>
         <span class="tf-p">{#if cut > 0}<span class="tf-pdir">{file.path.slice(0, cut)}</span>{/if}{file.path.slice(cut)}</span>
         {#if fileBehind !== null}
@@ -2481,6 +2534,7 @@
           {/if}
         </span>
       </header>
+      {/if}
       {#if queued !== null}
         <div class="tf-banner tf-warn">
           A commit of this file {queued.state === "sent" ? "was sent" : "is queued"}: “{queued.text}”. It shows here once {sourceName(source)} has it.

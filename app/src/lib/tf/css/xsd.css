@@ -139,7 +139,6 @@
 .tf-xsd-notes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The document: Source's lines in a box of their own that takes the rest of the column. */
 .tf-xsd-xml { flex: 1; min-height: 160px; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); overflow: hidden; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
-.tf-xsd-xml > .tf-code.tf-lscroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; position: relative; padding: 6px 0 12px; --under: var(--sheet-2); background: var(--sheet-2); }
 .tf-xsd-xml .tf-l { cursor: pointer; }
 
 /* ---- A tick on each optional row (S4b): a column of its own, after how often, its room held from the first frame ---- */
@@ -152,3 +151,9 @@
 .tf-xsd-tickroom { display: inline-block; width: calc(5ch + 8px); height: calc(18px * var(--fs)); font-size: calc(var(--t-xs) * var(--fs)); }
 /* Beside an XML document no example is made: no tick. */
 .tf-xv .tf-xsd-tick { display: none; }
+
+/* An example opened in the XML view (E1): drawn over the explorer, which stays laid out under it, so going back moves
+   nothing. */
+.tf-xsd-stage { position: relative; min-width: 0; }
+.tf-oas.tf-xsd-under { visibility: hidden; }
+.tf-xsd-opened { position: absolute; inset: 0 0 auto; }

@@ -14,6 +14,8 @@ vi.mock("../../../ipc/api", async (original) => ({
 }));
 
 import TfXsd from "./TfXsd.svelte";
+import { forgetHeld, shown } from "./example-held.svelte";
+import { layers } from "../../layers.svelte";
 import { localXsdEngine } from "../../../render/xsd-port";
 import { familyFiles } from "../../../render/xsd-fixture";
 import type { RenderPort } from "../../../render/port";
@@ -25,6 +27,8 @@ const quiet: RenderPort = { highlight: () => ({ focus: () => {}, cancel: () => {
 
 beforeEach(() => {
   saved.length = 0;
+  // An example's settings are held for its schema until knobas quits: each test starts from the first ones.
+  forgetHeld();
   target = document.createElement("div");
   document.body.appendChild(target);
   Element.prototype.scrollIntoView = function () {};
@@ -185,4 +189,108 @@ test("a tick on an optional row puts it in a Required only example; its count sa
   // The example made again: Note's own two lines and Must, as before the tick.
   await until(() => count() === "5 lines");
   expect(maybes()).toBe(0);
+});
+
+// ---- The example as a miniature XML view, and opened in the XML view (E1) ----
+
+
+test("the example is drawn by the XML view's document: Levels and folds, no rail; the controls hold their place when it is made again", async () => {
+  await opened();
+  expect(ex()?.querySelector(".tf-xsd-xml .tf-xv-inline")).not.toBeNull();
+  expect(ex()?.querySelector(".tf-xv-rail")).toBeNull();
+  await until(() => (ex()?.querySelectorAll(".tf-xv-caret").length ?? 0) > 0);
+  expect(ex()!.querySelectorAll(".tf-xv-step button").length).toBe(3);
+  const acts = target.querySelector(".tf-xsd-acts")!;
+  const before = [...acts.children].map((c) => text(c));
+  button("Everything")!.click();
+  flushSync();
+  // While it is made again, the box and the buttons stay; only the count says it.
+  expect([...acts.children].slice(0, 4).map((c) => text(c))).toEqual(before.slice(0, 4));
+  expect(ex()?.querySelector(".tf-xsd-xml .tf-xv-inline")).not.toBeNull();
+});
+
+test("Check marks the example's departures at their lines' ends in the miniature view", async () => {
+  await opened();
+  // Valid examples have no marks.
+  button("Check")!.click();
+  await until(() => /Valid/.test(text(target.querySelector(".tf-xsd-verdict"))));
+  expect(target.querySelectorAll(".tf-xsd-xml .tf-xv-bad").length).toBe(0);
+});
+
+function drawAt(files: Map<string, string>, entry: string, place: { at: string }, onplace: (p: string, how: string, label: string) => void, onback = vi.fn()) {
+  view = mount(TfXsd, {
+    target,
+    props: {
+      text: files.get(entry)!,
+      path: entry,
+      repo: "r",
+      read: (p: string) => Promise.resolve(files.get(p) ?? null),
+      paths: () => Promise.resolve([...files.keys()]),
+      engine: localXsdEngine(),
+      render: quiet,
+      get at() {
+        return place.at;
+      },
+      onplace,
+      onback,
+    },
+  });
+  flushSync();
+}
+
+test("Open in XML view pushes the example's place; there the full XML view stands over the hidden explorer, checked against this schema", async () => {
+  const place = $state({ at: "el/ORDER" });
+  const asked: [string, string, string][] = [];
+  const onback = vi.fn();
+  drawAt(OT, ENTRY, place, (p, how, label) => asked.push([p, how, label]), onback);
+  await until(() => button("Example") !== undefined);
+  button("Example")!.click();
+  await until(() => /\d lines/.test(count()));
+  button("Open in XML view")!.click();
+  expect(asked.at(-1)).toEqual(["example/ORDER", "push", "ORDER-example-4711.xml"]);
+  place.at = "example/ORDER";
+  await until(() => target.querySelector(".tf-xsd-opened .tf-xv-rail") !== null);
+  const under = target.querySelector<HTMLElement>(".tf-xsd.tf-xsd-under")!;
+  expect(under.hasAttribute("inert") || (under as HTMLElement & { inert?: boolean }).inert === true).toBe(true);
+  await until(() => /Valid|departure/.test(text(target.querySelector(".tf-xsd-opened .tf-xv-verdict"))));
+  expect(text(target.querySelector(".tf-xsd-opened .tf-xv-head"))).toContain("Against opentrans_2_1.xsd, found where the example was made.");
+  expect(shown.head?.name).toBe("ORDER-example-4711.xml");
+  expect(shown.head?.meta).toMatch(/^Example made by knobas, seed 4711, required parts only\. [\d,]+ lines\. Not saved\.$/);
+  // One verdict: the column's says the same, with no press.
+  expect(text(target.querySelector(".tf-xsd-verdict"))).toMatch(/^Valid/);
+  // A does nothing while the view shows.
+  const seed = () => target.querySelector<HTMLInputElement>(".tf-xsd-seed")?.value ?? "";
+  target.querySelector(".tf-xsd-opened .tf-l")!.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+  flushSync();
+  expect(seed()).toBe("4711");
+  // Esc leaves it by Back, since a press here opened it.
+  const panel = layers.open.at(-1);
+  expect(panel?.kind).toBe("panel");
+  panel!.close();
+  expect(onback).toHaveBeenCalledTimes(1);
+  place.at = "el/ORDER";
+  await until(() => target.querySelector(".tf-xsd-opened") === null);
+  expect(target.querySelector(".tf-xsd-under")).toBeNull();
+  expect(shown.head).toBeNull();
+});
+
+test("an address straight to an example makes it with the settings held for the schema; Esc there goes to the element", async () => {
+  const place = $state({ at: "el/ORDER" });
+  drawAt(OT, ENTRY, place, () => {});
+  await until(() => button("Example") !== undefined);
+  button("Example")!.click();
+  await until(() => /\d lines/.test(count()));
+  const field = target.querySelector<HTMLInputElement>(".tf-xsd-seed")!;
+  field.value = "99";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  unmount(view!);
+  view = null;
+  const asked: [string, string, string][] = [];
+  const cold = $state({ at: "example/ORDER" });
+  drawAt(OT, ENTRY, cold, (p, how, label) => asked.push([p, how, label]));
+  await until(() => target.querySelector(".tf-xsd-opened .tf-l") !== null);
+  expect(shown.head?.name).toBe("ORDER-example-99.xml");
+  layers.open.at(-1)!.close();
+  expect(asked.at(-1)).toEqual(["el/ORDER", "replace", "ORDER"]);
 });

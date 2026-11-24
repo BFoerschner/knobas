@@ -8,7 +8,8 @@
  * changes something on a host that is not this computer, without the page's yes.
  */
 import type { ApiAnswer, ApiSend, JsonQueryAnswer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "../../../ipc/api";
-import { repoFileBytes } from "./views/repos";
+import { fakeValuePiped, repoFileBytes } from "./views/repos";
+import type { PipeStep } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 
@@ -163,6 +164,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     xsd_downloaded: () => null,
     xsd_forget: () => undefined,
     xsd_save_example: (args) => `~/Downloads/${String(args["name"])}`,
+    // A value of a document held in memory (E1): taken out of the text as a file's value is.
+    text_piped: (args) => fakeValuePiped(String(args["text"]), (args["steps"] as PipeStep[] | undefined) ?? []),
+    text_piped_save: (args) => `~/Downloads/${String(args["saveAs"])}`,
     // The dev fake has no jq: a session answers the path filters `fakeJq` reads, and says so for others.
     json_query_open: (args) => fakeJqOpen(typeof args["text"] === "string" ? args["text"] : null, typeof args["entityId"] === "string" ? args["entityId"] : null, typeof args["path"] === "string" ? args["path"] : null),
     json_query: (args) => fakeJq(Number(args["id"]), String(args["filter"])),

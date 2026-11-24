@@ -1075,7 +1075,7 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
 }
 
 /** A value pipeline in the dev fake: `take` and the steps that need no decompressor, on the file's text. */
-function fakeValuePiped(text: string, steps: PipeStep[]): PipeRun {
+export function fakeValuePiped(text: string, steps: PipeStep[]): PipeRun {
   let bytes = new TextEncoder().encode(text.replace(/^\uFEFF/, ""));
   const decode = (b: Uint8Array) => new TextDecoder().decode(b);
   const named: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };

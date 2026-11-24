@@ -60,6 +60,7 @@
   import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
   import { XsdState } from "../xsd/xsd.svelte";
   import { XsdPort } from "../../../render/xsd-port";
+  import type { Checked } from "../../../render/xsd-answer";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
   import { gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "../xsd/xsd-point";
   import { heldIndex } from "../../../render/xsd-index";
@@ -80,6 +81,9 @@
     kind = "xml",
     jq = null,
     onpipeline = null,
+    inline = false,
+    verdict = undefined,
+    against = null,
   }: {
     text: string;
     /** The file's path from the repository's top. */
@@ -103,6 +107,21 @@
     jq?: { open: () => Promise<number> } | null;
     /** *Use as this file's pipeline*: the filter as a jq step on the file. */
     onpipeline?: ((filter: string) => void) | null;
+    /**
+     * The miniature form (step E1): the document alone, in its box's height, with no rail, no query and no side column.
+     * Folds and their keys, *Levels*, values and links are the view's own.
+     */
+    inline?: boolean;
+    /**
+     * A verdict made elsewhere (the example column's *Check*): its departures stand at their lines' ends. Left out, the
+     * document's own schema is looked for (`schema`).
+     */
+    verdict?: Checked | "checking" | null | undefined;
+    /**
+     * The schema set the document is checked against, as it is open elsewhere (an example opened from its schema): no
+     * schema is looked for. `name` is the schema's file as the head says it. With `verdict`, the verdict is that set's.
+     */
+    against?: { port: XsdPort; name: string; path: string } | null;
     schema?: {
       read: (path: string) => Promise<string | null>;
       paths: () => Promise<readonly string[]>;
@@ -192,12 +211,13 @@
   $effect(() => {
     const state = st;
     // JSON has no check (section 25): JSON Schema is not in this pass.
-    const port = kind === "xml" ? schema : null;
-    if (state === null || port === null) {
+    // A verdict given is read untracked: each new one is placed by the check made here, not a new check.
+    const checks = kind === "xml" && (schema !== null || untrack(() => verdict) !== undefined || against !== null);
+    if (state === null || !checks) {
       check = null;
       return;
     }
-    const c = new DocCheck(`${untrack(() => repo)}\n${untrack(() => path)}`, port.engine ?? null);
+    const c = new DocCheck(`${untrack(() => repo)}\n${untrack(() => path)}`, schema?.engine ?? null);
     check = c;
     return () => c.close();
   });
@@ -209,8 +229,26 @@
     const state = st;
     const port = schema;
     const landed = state?.opened ?? null;
-    if (c === null || state === null || port === null || landed === null || landed.error !== null) return;
+    if (c === null || state === null || port === null || against !== null || verdict !== undefined || landed === null || landed.error !== null) return;
     untrack(() => void runCheck(c, state, landed.root ?? rootSays(text), port));
+  });
+  // A verdict made elsewhere: placed on its lines once the outline has landed, and again with each new one.
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const said = verdict;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || said === undefined || landed === null || landed.error !== null) return;
+    untrack(() => void c.take(said, state.session, against));
+  });
+  // The set it came from: the document checked against it, once the outline has landed.
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const set = against;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || set === null || verdict !== undefined || landed === null || landed.error !== null) return;
+    untrack(() => void c.runOn(set, shownText ?? text, state.session));
   });
   // A document that is not well formed has no check: the head is the outline's, and no mark stands.
   $effect(() => {
@@ -487,7 +525,8 @@
             repoId: repo,
             path,
             line: n,
-            link: !layout,
+            // A document held in memory (an example) is at no address: no line of it is linked.
+            link: !layout && files !== null,
             does: {
               look: () => void lookAt(n),
               through: (step) => void lookAt(n, step === null ? "none" : ({ step } as PipeStep)),
@@ -804,6 +843,8 @@
       void lookAt(state.cursor);
       return;
     }
+    // The miniature form has no query and no list to step through: those keys are its host's.
+    if (inline && (isKey(DOC_KEYS.query, key) || isKey(DOC_KEYS.next, key) || isKey(DOC_KEYS.previous, key))) return;
     if (isKey(DOC_KEYS.query, key) && !event.shiftKey) {
       done();
       field?.focus();
@@ -884,9 +925,10 @@
 {#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {NUM.format(len)} characters long.">{NUM.format(len - CLIP.keep)} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{NUM.format(st.folds.end[f]! - n)} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{NUM.format(inside)} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="tf-oas tf-xv tf-oas-{cols >= 3 ? 3 : 2}" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("doc-rail")}>
+<div class={inline ? "tf-xv tf-xv-inline" : `tf-oas tf-xv tf-oas-${cols >= 3 ? 3 : 2}`} data-cols={inline ? undefined : cols} onkeydown={keys} {@attach inline ? null : pane} {@attach inline ? null : sideWidth("doc-rail")}>
   {#if st !== null}
     {@const state = st}
+    {#if !inline}
     <TfDocRail
       st={state}
       json={kind !== "xml"}
@@ -916,6 +958,7 @@
       {/snippet}
     </TfDocRail>
     <TfSideEdge side="doc-rail" />
+    {/if}
     <div class="tf-oas-col tf-xv-doc">
       <div class="tf-xv-bar">
         <span class="tf-xv-crumbs">
@@ -955,7 +998,7 @@
         </span>
       </div>
       <!-- The query is XPath; the JSON view asks with jq, where a session can be opened (section 26). -->
-      {#if kind === "xml" || jq !== null}
+      {#if !inline && (kind === "xml" || jq !== null)}
       <TfDocQuery
         st={state}
         lang={kind === "xml" ? "XPath" : "jq"}
@@ -1000,7 +1043,7 @@
       </div>
       {/if}
     </div>
-    {#if cols >= 3}
+    {#if !inline && cols >= 3}
       {@const here = check?.byLine.get(state.cursor)}
       <!-- One column, whatever it holds: a stepped-to departure whole, over what the schema says of the element. -->
       <div class="tf-xv-sidecol">

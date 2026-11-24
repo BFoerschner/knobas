@@ -898,8 +898,6 @@ pub async fn entity_file_piped_save<R: tauri::Runtime>(
     steps: Vec<crate::file_pipeline::PipeStep>,
     name: String,
 ) -> Result<String, IpcError> {
-    use base64::Engine as _;
-    use tokio::io::AsyncWriteExt as _;
     let state = crate::sources::state(&app)?;
     let run = entity_file_piped_inner(
         &state.pool,
@@ -912,6 +910,23 @@ pub async fn entity_file_piped_save<R: tauri::Runtime>(
         &steps,
     )
     .await?;
+    save_run(run, &name).await
+}
+
+/// What a pipeline run gave, written to the Downloads folder under `name` (a
+/// free name beside any file there); answers the path. A run that failed is
+/// refused with its failure. The value viewer's *Download*, over a file or over
+/// a document knobas holds in memory.
+///
+/// # Errors
+///
+/// A failed run; no Downloads folder; the write.
+pub(crate) async fn save_run(
+    run: crate::file_pipeline::PipeRun,
+    name: &str,
+) -> Result<String, IpcError> {
+    use base64::Engine as _;
+    use tokio::io::AsyncWriteExt as _;
     let bytes = match run {
         crate::file_pipeline::PipeRun::Done { output, .. } => match output {
             crate::file_pipeline::PipeOutput::Text { text } => text.into_bytes(),
@@ -936,10 +951,9 @@ pub async fn entity_file_piped_save<R: tauri::Runtime>(
             "This computer has no Downloads folder.",
         )
     })?;
-    let (saved, mut file) =
-        crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
-            .await
-            .map_err(|(at, error)| IpcError::internal(format!("{}: {error}", at.display())))?;
+    let (saved, mut file) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(name))
+        .await
+        .map_err(|(at, error)| IpcError::internal(format!("{}: {error}", at.display())))?;
     file.write_all(&bytes)
         .await
         .map_err(|error| IpcError::internal(format!("{}: {error}", saved.display())))?;

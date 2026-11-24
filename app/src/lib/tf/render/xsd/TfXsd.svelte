@@ -12,6 +12,10 @@
   **Addresses** name a place (`el/ORDER`, `type/bmecat:dtSTRING`). A pick in the rail replaces the place; a followed
   name pushes one, so the app's Back is the explorer's Back. A place this version of the file lacks opens the overview
   and says so.
+
+  **An example opened in the XML view** (step E1; Fable, 2026-11-24) is a place of its own, `example/ORDER`: the
+  explorer lands ORDER underneath, hidden and inert, and draws the full XML view over it in its pane's box, checked
+  against the set it holds. Back and `Esc` show the explorer again as it was left; nothing is read again.
 -->
 <script lang="ts" module>
   let heldIds = 0;
@@ -43,6 +47,12 @@
   import { push } from "../../../shell/toasts.svelte";
   import TfXsdRail from "./TfXsdRail.svelte";
   import { OVERVIEW, XsdState, labelOfPlace } from "./xsd.svelte";
+  import TfDocView from "../doc/TfDocView.svelte";
+  import { textPiped, textPipedSave } from "../../../ipc/api";
+  import { contentOf } from "../../../render/content-key";
+  import { layers } from "../../layers.svelte";
+  import type { Example, ExampleOptions } from "../../../render/xsd-example";
+  import { EXAMPLE_PLACE, exampleMeta, exampleOfPlace, heldOptions, holdOptions, shown } from "./example-held.svelte";
 
   let {
     text,
@@ -112,6 +122,10 @@
     const root = path;
     const port = new XsdPort(untrack(() => engine) ?? xsdEngine());
     const state = new XsdState(port);
+    // The example's settings, as they were left for this schema (held until knobas quits).
+    exKey = `${untrack(() => repo)}\n${root}\n${contentOf(source, null)}`;
+    const kept = heldOptions(exKey);
+    if (kept !== undefined) state.ex = kept;
     st = state;
     opened = null;
     shownAt = undefined;
@@ -160,6 +174,79 @@
   });
 
   const index = $derived(opened !== null && opened.ok ? (st?.index ?? opened.index) : null);
+
+  // ---- The example opened in the XML view (E1) ----
+  /** What the example's settings are held by: the repository, the path and the content. */
+  let exKey = "";
+  $effect(() => {
+    const options = st?.ex;
+    if (options !== undefined) untrack(() => holdOptions(exKey, options));
+  });
+  /** The element an `example/` address names; `null` on every other place. */
+  const exampleAt = $derived(render === null ? null : exampleOfPlace(at));
+  /** The place the explorer shows: under an opened example, its element's page. */
+  const under = $derived(exampleAt !== null ? `el/${exampleAt}` : at);
+  /** The example drawn as the XML view: the explorer's own, taken when the view opens and still while it shows. */
+  let snap = $state.raw<{ key: string; options: ExampleOptions; example: Example } | null>(null);
+  /** Whether the view was opened by a press here (Back leaves it), or reached by an address (`Esc` replaces it). */
+  let pushed = false;
+  $effect(() => {
+    const state = st;
+    const name = exampleAt;
+    if (state === null || name === null) {
+      snap = null;
+      return;
+    }
+    const page = state.page;
+    if (page === null || !page.key.startsWith("el ") || state.current !== `el/${name}`) return;
+    const made = state.made;
+    if (made !== null && made.key === page.key) {
+      if (untrack(() => snap)?.key !== page.key) snap = made;
+      return;
+    }
+    untrack(() => void state.makeExample(page.key));
+  });
+  // One verdict: the view's check is the column's, so going back shows it, and nothing is checked twice.
+  $effect(() => {
+    const state = st;
+    const taken = snap;
+    if (state === null || taken === null || state.made !== taken || state.verdict !== null) return;
+    untrack(() => void state.checkExample());
+  });
+  // The header says the example's name and how it was made.
+  $effect(() => {
+    const taken = snap;
+    const place = at;
+    if (taken === null || place === null) return;
+    const head = { place, name: taken.example.fileName, meta: exampleMeta(taken.options, taken.example.lines.length), xml: taken.example.xml };
+    shown.head = head;
+    return () => {
+      if (shown.head === head) shown.head = null;
+    };
+  });
+  // While it shows, `Esc` leaves it before it leaves the page: an inline panel's rung.
+  $effect(() => {
+    const name = exampleAt;
+    if (snap === null || name === null) return;
+    return untrack(() => layers.add({ kind: "panel", close: () => leaveExample(name) }));
+  });
+  function leaveExample(name: string) {
+    if (pushed && onback !== null) onback();
+    else onplace?.(`el/${name}`, "replace", name);
+    pushed = false;
+  }
+  /** *Open in XML view*: the example shown, as a place of its own. */
+  function openExample() {
+    const state = st;
+    const made = state?.made ?? null;
+    if (state === null || made === null) return;
+    const place = placeOfKey(made.key);
+    if (!place.startsWith("el/")) return;
+    pushed = true;
+    onplace?.(`${EXAMPLE_PLACE}${place.slice(3)}`, "push", made.example.fileName);
+  }
+  /** The set the opened example is checked against: the explorer's own port, named as the overview names its entry. */
+  const against = $derived(st === null || index === null ? null : { port: st.port, name: path.slice(path.lastIndexOf("/") + 1), path, round });
 
   // ---- The filter: the launcher's rules over a list the picker holds for the set (section 8) ----
   const decls = $derived(index === null ? [] : index.decls);
@@ -285,7 +372,7 @@
     const t = event.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
     const state = st;
-    if (state === null || !exampleShown || (cols < 3 && state.tab !== "example")) return;
+    if (state === null || !exampleShown || snap !== null || (cols < 3 && state.tab !== "example")) return;
     event.preventDefault();
     state.another();
   }
@@ -360,7 +447,8 @@
   }
 
   $effect(() => {
-    const place = at;
+    // An opened example's element is the place underneath it: an `example/` place never reaches the set.
+    const place = under;
     const hit = line;
     const state = st;
     if (state === null || index === null) return;
@@ -399,6 +487,8 @@
       state.expand.clear();
       const scroll = pageCol?.scrollTop ?? 0;
       void land(state.current, scroll);
+      // The opened example is checked again against the set as it now stands; its text stays.
+      if (snap !== null && state.made === snap) void state.checkExample();
     });
   });
 </script>
@@ -413,7 +503,8 @@
   <!-- The pane stands from the first frame at its height, the wait inside it, so the page's height and its scrollbar
        do not change when the worker answers (`moves`, 2026-11-24: the header's buttons shifted 16 px). -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="tf-oas tf-oas-{cols >= 3 && render !== null ? 3 : 2} tf-xsd" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("xsd-rail")}>
+  <div class="tf-xsd-stage">
+  <div class="tf-oas tf-oas-{cols >= 3 && render !== null ? 3 : 2} tf-xsd" class:tf-xsd-under={snap !== null} inert={snap !== null} data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("xsd-rail")}>
     {#if index === null || st === null}
       <div class="tf-oas-wait tf-xsd-wait">{#if slow}<p class="tf-oas-reading" role="status">Reading the schema…</p>{/if}</div>
     {:else}
@@ -435,9 +526,26 @@
       bind:scroller={pageCol}
     />
     {#if cols >= 3 && render !== null}
-      <div class="tf-oas-col tf-xsd-excol" aria-label="Example"><TfXsdExample st={state} {render} ongo={go} /></div>
+      <div class="tf-oas-col tf-xsd-excol" aria-label="Example"><TfXsdExample st={state} {render} ongo={go} onopen={openExample} /></div>
     {/if}
     {/if}
+  </div>
+  {#if snap !== null && st !== null && render !== null}
+    {@const state = st}
+    {@const doc = snap.example}
+    <!-- The example as the XML view, in the explorer's own box: the explorer stays drawn under it, so Back moves nothing. -->
+    <div class="tf-xsd-opened">
+      <TfDocView
+        text={doc.xml}
+        path={doc.fileName}
+        {repo}
+        {render}
+        verdict={state.made === snap ? state.verdict : undefined}
+        against={against}
+        values={{ run: (steps) => textPiped(doc.xml, doc.fileName, steps), save: (steps, name) => textPipedSave(doc.xml, doc.fileName, steps, name) }}
+      />
+    </div>
+  {/if}
   </div>
 {/if}
 
@@ -449,7 +557,7 @@
   </span>
 {/snippet}
 {#snippet examplePage()}
-  <TfXsdExample st={st!} render={render!} ongo={go} />
+  <TfXsdExample st={st!} render={render!} ongo={go} onopen={openExample} />
 {/snippet}
 
 {#if pointing !== null}

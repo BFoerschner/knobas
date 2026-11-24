@@ -996,6 +996,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::xsd_downloaded,
         commands::api::xsd_forget,
         commands::api::xsd_save_example,
+        commands::api::text_piped,
+        commands::api::text_piped_save,
         commands::api::json_query_open,
         commands::api::json_query,
         commands::api::json_query_close,
