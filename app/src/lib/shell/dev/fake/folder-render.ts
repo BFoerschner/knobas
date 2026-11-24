@@ -52,6 +52,11 @@ let bulkFiles = 3000;
 /** `?fake-rerender-same` and `?fake-rerender-fail` (ux26): the working tree's lane makes the same as a commit's, or fails. */
 let laneSame = false;
 let laneFails = false;
+/**
+ * `?fake-rerender-short` (2026-11-24): both sides' generated folders hold files of 0, 1 and 2 changed lines at the top
+ * (`a/`), the middle (`m/`) and the end (`z/`) of the list, with long ones between, so a pick of a short one is seen.
+ */
+let laneShort = false;
 
 const enc = (text: string) => new TextEncoder().encode(text);
 
@@ -76,6 +81,15 @@ export function madeFiles(folder: string, n: number, long: boolean, working = fa
   else files.set("CHANGELOG.md", enc(`# Changes\n\nRun ${n}.\n`));
   for (let i = 1; i <= bulkFiles; i++) files.set(`bulk/part-${String(i).padStart(4, "0")}.txt`, enc(`part ${i} of the bulk\n`));
   if (long) files.set(`docs/${"a-very-long-generated-folder-name-for-the-long-paths-check/".repeat(2)}and-a-long-file-name-at-the-end.md`.slice(0, 140), enc("# Long\n"));
+  if (laneShort) {
+    const lines = (n: number, tail: string) => Array.from({ length: n }, (_, i) => `line ${i + 1}${tail}\n`).join("");
+    for (const at of ["a", "m", "z"]) {
+      if (working) files.set(`${at}/empty.txt`, enc(""));
+      files.set(`${at}/one.txt`, enc(working ? "one, regenerated\n" : "one\n"));
+      files.set(`${at}/two.txt`, enc(working ? "one, regenerated\ntwo, regenerated\n" : "one\ntwo\n"));
+    }
+    for (const at of ["b", "y"]) files.set(`${at}/long.md`, enc(lines(150, working ? ", regenerated" : "")));
+  }
   if (working) {
     // The working tree's generated folder (ux26): three files differ, one is new, one differs only in line endings.
     files.set("docs/steps.md", enc("# Steps\n\n1. Take the order.\n2. Take the payment.\n3. Retry a failed payment three times.\n4. Ship it.\n\nBack to [the start](../README.md).\n"));
@@ -181,9 +195,9 @@ function settle(drafts: FolderRendererDraft[]): FolderRenderer[] {
 let seeded: FolderRenderer[] = [];
 
 keepSeed(drawn, bytes, failed, running, made, runsOf);
-const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails });
+const atLoad = seedOf({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails, laneShort });
 onFakeReset(() => {
-  ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails } = atLoad());
+  ({ bridge, saved, seeded, tokens, storeSet, longMade, bulkFiles, laneSame, laneFails, laneShort } = atLoad());
   picks = [];
 });
 
@@ -201,6 +215,7 @@ export function seed(params: URLSearchParams): void {
   if (params.has("fake-rerender-two")) seeded = [...seeded, DIAGRAM];
   laneSame = params.has("fake-rerender-same");
   laneFails = params.has("fake-rerender-fail");
+  laneShort = params.has("fake-rerender-short");
   // `?fake-rerender-kept=<folder>`: that folder of payout-service already made, as a store holds it across a restart.
   const kept = params.get("fake-rerender-kept");
   if (kept !== null) {
