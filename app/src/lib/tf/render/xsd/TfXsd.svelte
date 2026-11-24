@@ -372,7 +372,7 @@
     const t = event.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
     const state = st;
-    if (state === null || !exampleShown || snap !== null || (cols < 3 && state.tab !== "example")) return;
+    if (state === null || !exampleShown || (cols < 3 && state.tab !== "example")) return;
     event.preventDefault();
     state.another();
   }
