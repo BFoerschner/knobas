@@ -569,9 +569,11 @@
         return `${name} is running…`;
       case "failed":
         return `${name} made nothing`;
+      case "stale":
+        // A side made from an earlier state is held, not compared (2026-11-24): nothing of it is listed yet.
+        return group.made === null ? "Not rendered yet" : `Made by ${name}`;
       case "made":
       case "same":
-      case "stale":
       case "comparing":
         return `Made by ${name}`;
       default:

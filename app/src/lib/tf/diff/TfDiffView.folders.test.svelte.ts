@@ -154,7 +154,7 @@ test("a side that failed before turns the bar red, and What it said opens its st
   barButton("What it said")!.click();
   flushSync();
   expect(target.querySelector(".tf-dffail pre")!.textContent).toBe("lowcode: no project file\n");
-  expect(barButton("Run again")).toBeDefined();
+  expect(barButton("Run"), "a failed side wants a run").toBeDefined();
 });
 
 test("Run N folder renders presses at most 20 folders, and Stop all stops every lane asked", async () => {

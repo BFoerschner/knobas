@@ -1,7 +1,7 @@
 /**
  * A grouped folder's bar in a comparison (ux26, the decision list's section 9): each state's words and tone in one row
- * whose node never changes; *Render with* only where two renderers take the folder; *Run* primary only while nothing is
- * kept.
+ * whose node never changes; *Render with* only where two renderers take the folder; *Run* (primary) while a side wants a
+ * run, *Run again* (both sides anew) once both are made.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -64,12 +64,27 @@ test("nothing kept: Not rendered yet, Run is primary, and the note box stands", 
   expect(bar().querySelector("select"), "one renderer: no Render with").toBeNull();
 });
 
-test("one side kept: the other side is named, and Run is no longer primary", async () => {
+test("one side kept: the other side is named, and Run runs it", async () => {
   draw((fake) => fake.keep(laneOf(SHA), "a", true, "flows/card-capture"));
   await settle();
   expect(status()).toBe("Not rendered yet for your working tree.");
-  expect(run().classList.contains("tf-primary")).toBe(false);
+  expect(run().classList.contains("tf-primary")).toBe(true);
+  expect(run().textContent).toBe("Run");
+});
+
+test("both sides kept: Run again runs both anew (2026-11-24)", async () => {
+  // Björn: "in comparisons it doesn't rerun the tool for the folders when I click run again".
+  const { fake } = draw((fake) => {
+    fake.keep(laneOf(SHA), "a", true, "flows/card-capture");
+    fake.keep(laneOf(WT), "b", true, "flows/card-capture");
+  });
+  await settle();
   expect(run().textContent).toBe("Run again");
+  expect(run().classList.contains("tf-primary")).toBe(false);
+  run().click();
+  await settle();
+  expect(fake.asked.filter((a) => a.ask === "again").map((a) => a.lane)).toEqual([laneOf(SHA), laneOf(WT)]);
+  expect(run().textContent).toBe("Stop");
 });
 
 test("the words change through running and made, the bar's node and box do not", async () => {
@@ -91,15 +106,39 @@ test("the words change through running and made, the bar's node and box do not",
   expect(target.querySelector(".tf-dfnote")!.textContent).toBe("Its generated files are the same on both sides.");
 });
 
-test("made from an earlier state of the working tree turns the bar warn", async () => {
-  draw((fake) => {
+test("a side made from an earlier state is held, not compared: the bar says why the box is empty, and Run runs it", async () => {
+  // 2026-11-24: what two tools (or two states) made is no diff.
+  const { fake } = draw((fake) => {
     fake.keep(laneOf(SHA), "a", true, "flows/card-capture");
     fake.keep(laneOf(WT), "old", false, "flows/card-capture");
   });
   await settle();
-  expect(status()).toBe("Made from an earlier state of your working tree.");
+  expect(status()).toBe("Not rendered for your working tree as it is now.");
+  expect(bar().classList.contains("tf-warn")).toBe(false);
+  expect(fake.compared).toEqual([]);
+  expect(target.querySelector(".tf-dfnote")).not.toBeNull();
+  expect(run().textContent).toBe("Run");
+  expect(run().classList.contains("tf-primary")).toBe(true);
+});
+
+test("a commit's side made before the tool changed says so: held, or warned under what was compared", async () => {
+  const { fake, compare } = draw((fake) => {
+    fake.keep(laneOf(SHA), "a-old-tool", false, "flows/card-capture");
+    fake.keep(laneOf(WT), "b", true, "flows/card-capture");
+  });
+  await settle();
+  expect(status()).toBe("Not rendered since Low-code docs changed.");
+  expect(fake.compared).toEqual([]);
+  // Both made by the tool as it is, compared; then the commit's side turns stale: what was compared stays, warned.
+  fake.keep(laneOf(SHA), "a", true, "flows/card-capture");
+  compare.before.look();
+  await settle();
+  expect(fake.compared).toEqual([["a", "b", true]]);
+  fake.keep(laneOf(SHA), "a", false, "flows/card-capture");
+  compare.before.look();
+  await settle();
+  expect(status()).toBe("Made before Low-code docs changed.");
   expect(bar().classList.contains("tf-warn")).toBe(true);
-  expect(run().textContent).toBe("Run again");
 });
 
 test("a failure that answers a press of Run here shows what it said under the bar", async () => {
