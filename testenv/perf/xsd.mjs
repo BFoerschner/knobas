@@ -73,7 +73,6 @@ const place = (path, at) => `${REPO}/at/${encodeURIComponent(at)}/${path}`;
 const settle = () => sleep(700);
 
 const OT = "schemas/opentrans/opentrans_2_1.xsd";
-
 const UBL = "ubl/xsd/maindoc/UBL-Invoice-2.1.xsd";
 const RAIL_ROWS = ".tf-xsd .tf-oas-row";
 const PAGE_ROWS = ".tf-xsd .tf-oas-page .tf-oas-fr, .tf-xsd .tf-xsd-frow";
