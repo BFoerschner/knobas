@@ -44,6 +44,44 @@ const urlOf = (path: string) => ROOT + encodeURI(path);
 /** The compiled schema kept for the set last checked. */
 let held: { key: string; validator: { validate: (doc: unknown) => void; dispose: () => void }; schema: { dispose: () => void }; asked: string[] } | null = null;
 
+/** Where libxml2 looks for `location` named in a file it knows by `base`. */
+function resolved(base: string, location: string): string {
+  if (isRemote(location)) return location;
+  if (base.startsWith(ROOT)) return urlOf(joinPath(decodeURI(base.slice(ROOT.length)), location) ?? location);
+  try {
+    return new URL(location, base).href;
+  } catch {
+    return location;
+  }
+}
+
+/**
+ * Where each reference was found, as libxml2 will ask for it. libxml2 knows a file by the address it asked for, not by
+ * where knobas found it: a file answered elsewhere (by name, by namespace, pointed to, in another repository, bundled)
+ * has its own references resolved against the reference's address. So every address a file is known by aliases its
+ * references too, down the set, until no new address appears.
+ */
+function aliasAll(set: SchemaSet): void {
+  const known = new Map(set.docs.map((d) => [d.path, new Set([urlOf(d.path)])]));
+  for (let grew = true, round = 0; grew && round <= set.docs.length; round += 1) {
+    grew = false;
+    for (const d of set.docs)
+      for (const r of d.refs) {
+        if (r.to === null || r.location === null) continue;
+        const to = urlOf(r.to);
+        const by = known.get(r.to);
+        for (const base of [...(known.get(d.path) ?? [])]) {
+          const asked = resolved(base, r.location);
+          if (asked !== to && !provided.alias.has(asked)) provided.alias.set(asked, to);
+          if (by !== undefined && !by.has(asked)) {
+            by.add(asked);
+            grew = true;
+          }
+        }
+      }
+  }
+}
+
 /** Why the set cannot be checked yet, or `null`. */
 export function cannotCheck(set: SchemaSet, xmlLength: number): { why: string; detail: string[] } | null {
   if (xmlLength > CHECK_CAP) return { why: "larger than knobas checks", detail: [`The document is over ${CHECK_CAP / 1024 / 1024} MiB.`] };
@@ -74,12 +112,7 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
       const t = text(d.path);
       if (t !== null) provided.buffers.set(urlOf(d.path), enc.encode(t));
     }
-    for (const d of set.docs)
-      for (const r of d.refs) {
-        if (r.to === null || r.location === null) continue;
-        const asked = isRemote(r.location) ? r.location : urlOf(joinPath(d.path, r.location) ?? r.location);
-        if (asked !== urlOf(r.to)) provided.alias.set(asked, urlOf(r.to));
-      }
+    aliasAll(set);
   }
   provided.asked = [];
   if (!registered) {
