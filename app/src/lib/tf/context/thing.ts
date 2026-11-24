@@ -38,6 +38,12 @@ export type Thing =
   | { kind: "file" | "folder"; repoId: string; path: string }
   /** A line of a file, from 1. */
   | { kind: "line"; repoId: string; path: string; line: number }
+  /**
+   * A line of a document view that holds a value (the XML view's design, 2026-11-23, sections 15 and 22): the line's own
+   * rows, and the value's. `does` is the view's own: it opens the value viewer, and asks the query. `link` is false in a
+   * document laid out by knobas, whose line numbers are not the file's.
+   */
+  | { kind: "value"; repoId: string; path: string; line: number; link: boolean; does: ValueDoes }
   /** A branch drawn as a row of a repository's Branches tab: its name, not an entity. */
   | { kind: "branch-name"; repoId: string; name: string }
   /** A test of a run, by its name. */
@@ -52,6 +58,18 @@ export type Thing =
   | { kind: "space"; id: string; name: string; hash: string }
   /** An Inbox line, by its key: the Inbox page's own writes on it (`ops`, the backend's offer on the line). */
   | { kind: "inbox"; key: string; title: string; open: string | null; ops: readonly string[]; entityId: string | null; sourceId: string | null };
+
+/** What a document view does for a value's rows. */
+export interface ValueDoes {
+  /** *Look at this value*, on knobas's guess or as text. */
+  look: () => void;
+  /** *Send it through* a step: `base64_decode`, `url_decode`, `unescape`, `jwt`; `null` opens the viewer with no step. */
+  through: (step: "base64_decode" | "url_decode" | "unescape" | "jwt" | null) => void;
+  /** Copies the line's element as an XPath that finds it alone. */
+  copyXPath: () => void;
+  /** *Query for elements like this*. */
+  like: () => void;
+}
 
 /** What a thing was found as: `own` is the page's own, from its heading. */
 export interface Found {

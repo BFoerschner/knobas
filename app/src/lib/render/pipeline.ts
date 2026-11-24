@@ -4,8 +4,8 @@
  * (`entityFilePiped`, `knobas_app::file_pipeline`). This module is the pure half: the *Add step* menu, a step's
  * name, moving a step, and what a run's answer draws as.
  */
-import type { CommandStep, NamedPipelineDraft } from "../ipc/app";
-import type { PipeFormat, PipeRun, PipeStep } from "../ipc/entity";
+import type { CommandStep, KeptField, NamedPipelineDraft } from "../ipc/app";
+import type { Charset, PipeFormat, PipeRun, PipeStep } from "../ipc/entity";
 
 /** The decompress step's choices, by the name the step goes by. */
 export const DECOMPRESSORS: readonly { step: "gunzip" | "unzstd" | "bunzip2" | "unxz"; label: string; ext: readonly string[] }[] = [
@@ -69,8 +69,23 @@ export const STEP_CHOICES: readonly StepChoice[] = [
       return { step: "convert", from, to: from === "json" ? "yaml" : "json" };
     },
   },
+  { id: "hex_decode", label: "hex decode", io: "text → bytes", make: () => ({ step: "hex_decode" }) },
+  { id: "inflate", label: "inflate (zlib, deflate)", io: "bytes → bytes", make: () => ({ step: "inflate" }) },
+  { id: "url_decode", label: "URL decode", io: "text → text", make: () => ({ step: "url_decode" }) },
+  { id: "unescape", label: "Unescape XML or HTML", io: "text → text", make: () => ({ step: "unescape" }) },
+  { id: "json_string", label: "JSON string", io: "text → text", make: () => ({ step: "json_string" }) },
+  { id: "jwt", label: "Read as a JWT", io: "text → JSON", make: () => ({ step: "jwt" }) },
+  { id: "charset", label: "Read as a character set", io: "bytes → text", make: () => ({ step: "charset", charset: "windows1252" }) },
   { id: "base64_encode", label: "base64 encode", io: "bytes → text", make: () => ({ step: "base64_encode" }) },
   { id: "hex_dump", label: "Hex dump", io: "bytes → text", make: () => ({ step: "hex_dump" }) },
+];
+
+/** The character sets *Read as* reads, by the name it goes by. */
+export const CHARSETS: readonly { charset: Charset; label: string }[] = [
+  { charset: "windows1252", label: "Windows-1252" },
+  { charset: "iso_8859_15", label: "ISO-8859-15" },
+  { charset: "utf16le", label: "UTF-16 LE" },
+  { charset: "utf16be", label: "UTF-16 BE" },
 ];
 
 /** The decompressor a file's extension names; gzip when it names none. */
@@ -106,6 +121,22 @@ export function stepName(step: PipeStep, commands: readonly CommandStep[] = []):
       return `${LABEL[step.from]} to ${LABEL[step.to]}`;
     case "hex_dump":
       return "hex dump";
+    case "take":
+      return "take the value";
+    case "hex_decode":
+      return "hex decode";
+    case "inflate":
+      return "inflate";
+    case "url_decode":
+      return "URL decode";
+    case "unescape":
+      return "unescape XML or HTML";
+    case "json_string":
+      return "JSON string";
+    case "jwt":
+      return "JWT";
+    case "charset":
+      return `read as ${CHARSETS.find((c) => c.charset === step.charset)?.label ?? step.charset}`;
   }
 }
 
@@ -160,12 +191,13 @@ export function pipelinePattern(path: string): string {
  * place, keeping its id, so every pattern that names it follows; else one more, new.
  */
 export function savedAs(
-  list: readonly { id: string; name: string; steps: PipeStep[] }[],
+  list: readonly { id: string; name: string; steps: PipeStep[]; fields?: KeptField[] }[],
   name: string,
   steps: readonly PipeStep[],
 ): NamedPipelineDraft[] {
   const key = name.trim().toLowerCase();
-  const drafts: NamedPipelineDraft[] = list.map((p) => ({ id: p.id, name: p.name, steps: p.steps }));
+  // Every pipeline's kept fields go with it: a save of one must not lose another's (the XML view, section 18).
+  const drafts: NamedPipelineDraft[] = list.map((p) => ({ id: p.id, name: p.name, steps: p.steps, ...(p.fields === undefined ? {} : { fields: p.fields }) }));
   const at = drafts.findIndex((p) => p.name.toLowerCase() === key);
   if (at === -1) return [...drafts, { id: null, name: name.trim(), steps: [...steps] }];
   return drafts.map((p, i) => (i === at ? { ...p, steps: [...steps] } : p));

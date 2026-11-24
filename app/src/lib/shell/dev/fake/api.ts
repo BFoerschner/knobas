@@ -19,7 +19,9 @@ const fakeHeld = new Map<string, Set<string>>();
 const fakeServers: SavedServers = { servers: [{ id: "tidewater-teamcity", name: "Tidewater TeamCity", url: "https://teamcity.tidewater.test", ca_file: null }], last: {} };
 /** Sends *Stop* was pressed for. */
 const stopped = new Set<number>();
-keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped);
+/** The hosts whose images load when their dialog opens (the XML view, section 14). */
+const fakeImageHosts: { hosts: string[] } = { hosts: [] };
+keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped, fakeImageHosts);
 
 const local = (host: string) => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(host) || host.endsWith(".localhost");
 
@@ -91,6 +93,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       return structuredClone(fakeServers);
     },
     api_save_answer: (args) => `~/Downloads/${String(args["name"])}`,
+    // An image at an address (the XML view, section 14): the fake has no network, and says so.
+    image_fetch: () => {
+      throw { code: "invalid", message: "The image could not be loaded: the dev fake reaches no address.", source_id: null };
+    },
+    image_hosts: () => structuredClone(fakeImageHosts),
+    set_image_hosts: (args) => {
+      fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
+      return structuredClone(fakeImageHosts);
+    },
     // Open in an API client (ux31, section 23): the argument vector, as `open_checkout` answers; nothing runs.
     // `?fake-no-bruno` answers that Bruno is not on this computer.
     api_open_in: (args) => {

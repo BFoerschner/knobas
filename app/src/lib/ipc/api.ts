@@ -4,9 +4,9 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
-import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, Hop, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen } from "./generated/api";
+import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen } from "./generated/api";
 
-export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, Hop, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen };
+export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen };
 
 /** Sends one request, once. A refusal before anything was sent rejects; a failure is an answer. */
 export function apiSend(send: ApiSend): Promise<ApiAnswer> {
@@ -80,4 +80,19 @@ export function apiScratchSize(): Promise<number> {
 /** Removes every API client scratch folder. */
 export function apiScratchClear(): Promise<void> {
   return invoke<void>("api_scratch_clear", {});
+}
+
+/** An image at an address in a document, loaded on the press that asks (the XML view, section 14): one `GET`, no cookie. */
+export function imageFetch(url: string): Promise<FetchedImage> {
+  return invoke<FetchedImage>("image_fetch", { url });
+}
+
+/** The hosts whose images load when their dialog opens. */
+export function imageHosts(): Promise<ImageHosts> {
+  return invoke<ImageHosts>("image_hosts");
+}
+
+/** Stores the hosts whose images load when their dialog opens; answers them as stored. */
+export function setImageHosts(hosts: ImageHosts): Promise<ImageHosts> {
+  return invoke<ImageHosts>("set_image_hosts", { hosts });
 }

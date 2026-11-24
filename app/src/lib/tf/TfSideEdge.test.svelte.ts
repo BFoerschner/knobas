@@ -650,6 +650,7 @@ describe("every sidebar is wired", () => {
     assets: ".tree",
     monitor: ".tf-cbody.tf-mon-body",
     "oas-rail": ".tf-oas",
+    "doc-rail": ".tf-oas.tf-xv",
   };
   /** Every rule's selector, its declarations and the at-rules around it, from CSS (a component's `<style>` alone). */
   function rules(text: string, component: boolean): { selector: string; body: string; within: string[] }[] {
@@ -693,7 +694,7 @@ describe("every sidebar is wired", () => {
     const named = new Set(sources.flatMap(({ text }) => [...text.matchAll(/<TfSideEdge side="([\w-]+)"/g)].map((match) => match[1])));
     expect([...named].sort()).toEqual([...SIDE_IDS].sort());
     // Tickets' preview of the selected ticket went in ux18, and its edge with it.
-    expect(Object.keys(SIDES)).toHaveLength(15);
+    expect(Object.keys(SIDES)).toHaveLength(16);
     expect(Object.keys(SIDES)).not.toContain("tickets-preview");
   });
 });

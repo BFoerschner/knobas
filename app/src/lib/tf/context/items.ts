@@ -86,7 +86,9 @@ export type Act =
   /** *Assign to…* on a ticket (ADR-0054, section 26): the page offering field edits opens its people picker at the card. */
   | { do: "assign"; entityId: string }
   /** *Priority ▸ ⟨name⟩* on a ticket: the page offering field edits queues it. */
-  | { do: "priority"; entityId: string; value: string; label: string };
+  | { do: "priority"; entityId: string; value: string; label: string }
+  /** A page's own deed for a thing it drew (a document view's value): run where the page handed it. */
+  | { do: "run"; run: () => void };
 
 export interface Item {
   id: string;
@@ -452,6 +454,26 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
             : [{ id: "docs-hide", label: hidden ? "Unhide" : "Hide from Docs", act: { do: "docs-hide", id: thing.id, name: thing.name, hidden: !hidden } } satisfies Item]),
         ],
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: thing.name, said: "Copied the name" } }],
+      );
+    }
+    case "value": {
+      const does = thing.does;
+      const line: Thing = { kind: "line", repoId: thing.repoId, path: thing.path, line: thing.line };
+      const lineRows = thingEntries(line, ctx, facts).filter((entry) => thing.link || !("id" in entry) || (entry.id !== "copy-link" && entry.id !== "copy-path"));
+      return grouped(
+        [{ id: "look", label: "Look at this value", hint: "Space", act: { do: "run", run: () => does.look() } }],
+        [
+          { id: "through-base64", label: "Send it through base64 decode", act: { do: "run", run: () => does.through("base64_decode") } },
+          { id: "through-url", label: "Send it through URL decode", act: { do: "run", run: () => does.through("url_decode") } },
+          { id: "through-unescape", label: "Send it through unescape XML or HTML", act: { do: "run", run: () => does.through("unescape") } },
+          { id: "through-jwt", label: "Read it as a JWT", act: { do: "run", run: () => does.through("jwt") } },
+          { id: "through-other", label: "Another step, or another renderer…", act: { do: "run", run: () => does.through(null) } },
+        ],
+        [
+          { id: "copy-xpath", label: "Copy XPath", act: { do: "run", run: () => does.copyXPath() } },
+          { id: "like", label: "Query for elements like this", act: { do: "run", run: () => does.like() } },
+        ],
+        lineRows,
       );
     }
     case "file":

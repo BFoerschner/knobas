@@ -325,6 +325,35 @@ async fn a_run_is_kept_by_sha_and_pipeline() {
     assert_eq!(f.shelf.reads.load(Ordering::SeqCst), 1, "one byte read");
 }
 
+/// A value pipeline (ADR-0059): `Take` cuts the value out of the file, then
+/// base64 and gunzip unwrap it; the same chain again is the kept run, with no
+/// second byte read.
+#[tokio::test]
+async fn a_value_is_taken_out_of_the_file_unwrapped_and_kept() {
+    use base64::Engine as _;
+    use knobas_app::file_pipeline::TakeAs;
+    let f = fixture().await;
+    let wrapped = base64::engine::general_purpose::STANDARD.encode(gzip(b"the log, gzipped"));
+    let file = format!("<?xml version=\"1.0\"?>\n<a>\n  <AUDIT>\n{wrapped}\n  </AUDIT>\n</a>\n");
+    let from = file.find("<AUDIT>").expect("the element") + "<AUDIT>".len();
+    let to = file.find("</AUDIT>").expect("its end");
+    f.put("order.xml", file.into_bytes());
+    let chain = [
+        PipeStep::Take {
+            from: from as u64,
+            to: to as u64,
+            read: TakeAs::XmlText,
+        },
+        PipeStep::Base64Decode,
+        PipeStep::Gunzip,
+    ];
+    let first = f.piped("order.xml", &chain).await;
+    assert_eq!(done(&first).1, "the log, gzipped");
+    let again = f.piped("order.xml", &chain).await;
+    assert!(Arc::ptr_eq(&first, &again), "the kept run, not a new one");
+    assert_eq!(f.shelf.reads.load(Ordering::SeqCst), 1, "one byte read");
+}
+
 /// The reversed pipeline is another key: it is run, not answered from the
 /// forward one's.
 #[tokio::test]
@@ -970,6 +999,7 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
         id: id.map(str::to_owned),
         name: name.to_owned(),
         steps,
+        fields: None,
     };
     let saved = saved::save_named_pipelines(
         &f.pool,

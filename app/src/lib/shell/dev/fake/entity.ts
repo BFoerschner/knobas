@@ -611,6 +611,8 @@ export function handlers(): Handlers {
       if (run === undefined) throw { code: "invalid", message: `${String(args["entityId"])}'s source reads no file bytes`, source_id: null };
       return run;
     },
+    // *Download* in the value viewer: the fake saves nothing and names where it would have.
+    entity_file_piped_save: (args) => `~/Downloads/${String(args["name"])}`,
     // Every fake source's credential may make every write it declares (#2040);
     // a commit onto a repository's protected `main` is refused (#2241).
     refused_writes: (args) => {

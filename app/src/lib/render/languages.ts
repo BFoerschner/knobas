@@ -634,7 +634,42 @@ export const BY_EXT: Readonly<Record<string, LangId>> = {
   "htm": "html",
   "svg": "xml",
   "gradle": "groovy",
+  "xsd": "xml",
+  "xslt": "xsl",
+  "wsdl": "xml",
+  "xhtml": "xml",
+  "rss": "xml",
+  "atom": "xml",
+  "xlf": "xml",
+  "xliff": "xml",
+  "plist": "xml",
+  "csproj": "xml",
+  "vbproj": "xml",
+  "fsproj": "xml",
+  "vcxproj": "xml",
+  "props": "xml",
+  "targets": "xml",
+  "nuspec": "xml",
+  "resx": "xml",
+  "config": "xml",
+  "xaml": "xml",
+  "axml": "xml",
+  "pom": "xml",
+  "jrxml": "xml",
+  "fxml": "xml",
+  "kml": "xml",
+  "gpx": "xml",
+  "drawio": "xml",
+  "iml": "xml",
+  "wxs": "xml",
+  "dita": "xml",
+  "ditamap": "xml",
+  "xmi": "xml",
+  "manifest": "xml",
 };
+
+/** The endings whose files are XML, lower case: Source colours each, and the XML view sniffs a file of one. */
+export const XML_ENDINGS: readonly string[] = ["xml", "xsd", "xsl", "xslt", "wsdl", "svg", "xhtml", "rss", "atom", "xlf", "xliff", "plist", "csproj", "vbproj", "fsproj", "vcxproj", "props", "targets", "nuspec", "resx", "config", "xaml", "axml", "pom", "jrxml", "fxml", "kml", "gpx", "drawio", "iml", "wxs", "dita", "ditamap", "xmi", "manifest"];
 
 /** A Markdown fence's language, lower case. */
 export const BY_FENCE: Readonly<Record<string, LangId>> = {

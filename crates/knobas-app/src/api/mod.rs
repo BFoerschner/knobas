@@ -10,9 +10,12 @@
 //!   credentials." Nothing is stored: no keychain item, no settings row.
 //! - [`kept`]: what was sent and answered, in memory only, bounded.
 //! - [`servers`]: servers a person saved, a name and an address, no secret.
+//! - [`image`]: an image at an address in a document, loaded on a press (the
+//!   XML view, section 14), by the same client.
 
 pub mod found;
 pub mod held;
+pub mod image;
 pub mod kept;
 pub mod open;
 pub mod scratch;

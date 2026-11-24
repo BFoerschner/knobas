@@ -276,6 +276,8 @@ export type {
   PipeRun,
   PipeStep,
   PipeWhy,
+  Charset,
+  TakeAs,
   PipelineReason,
   PipelineRepository,
   PipelineRow,
@@ -1071,6 +1073,11 @@ export function downloadAttachment(entityId: string, attachmentId: string): Prom
  */
 export function entityFilePiped(entityId: string, path: string, commit: string | null, steps: PipeStep[]): Promise<PipeRun> {
   return invoke<PipeRun>("entity_file_piped", { entityId, path, commit, steps });
+}
+
+/** *Download* in the value viewer: what `steps` gave over `path`, saved to Downloads as `name`; answers the path. */
+export function entityFilePipedSave(entityId: string, path: string, commit: string | null, steps: PipeStep[], name: string): Promise<string> {
+  return invoke<string>("entity_file_piped_save", { entityId, path, commit, steps, name });
 }
 
 /**

@@ -61,6 +61,7 @@ export type {
   InstalledFont,
   JavaRuntime,
   FoundJava,
+  KeptField,
   NamedPipeline,
   NamedPipelineDraft,
   RenderContent,

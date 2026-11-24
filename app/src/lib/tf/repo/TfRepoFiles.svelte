@@ -84,6 +84,7 @@
   import { goAcross, replaceAddress } from "../opener";
   import type { SpecOpener } from "../render/oas-open.svelte";
   import { explorerModule } from "../render/oas-module";
+  import { docViewModule } from "../render/doc/doc-module";
   import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -97,8 +98,7 @@
   import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
-  import { codeRows } from "../fonts.svelte";
-  import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
+  import { renderPort, type RenderPort } from "../../render/port";
   import { allRenderers, BYTES_CAP, type Renderer } from "../../render/registry";
   import { defaultPipeline, MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
@@ -107,14 +107,14 @@
   import TfDiagram from "../render/TfDiagram.svelte";
   import TfBytesImage from "../render/TfBytesImage.svelte";
   import TfPdf from "../render/TfPdf.svelte";
-  import { findCount, stepMatch } from "../builds/run-reads";
-  import { fileHits, firstHitOn, lineOfHit, needles, segments } from "./file-lines";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
+  import TfLines from "../code/TfLines.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
+  import { entityFilePipedSave } from "../../ipc/entity";
   import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
   import {
     commandSteps as appCommandSteps,
@@ -135,16 +135,13 @@
     commitKind,
     editHash,
     fileHash,
-    fileLines,
     countLines,
     lineHash,
     placeHash,
     likelySections,
     pickDefaultFile,
     repoHash,
-    selectedText,
     sourceName,
-    type TextPlace,
   } from "./repo";
   import { LANDING_README, landingGuess } from "./hover-reads";
   import TfWaiting from "../TfWaiting.svelte";
@@ -1536,20 +1533,9 @@
     return { ...shownFile, ...pipedFile(ran) };
   });
 
-  const lines = $derived(drawn === null || drawn.binary ? [] : fileLines(drawn.text));
   /** How many lines the header says: counted, not split, so a file drawn rendered never splits its text (the ux30 end gate). */
   const linesSaid = $derived(drawn === null || drawn.binary ? 0 : countLines(drawn.text));
 
-  /**
-   * Files of more lines than this draw only the lines in view and a margin (#2251), as every windowed list does past 300
-   * rows: drawn whole, a 400-line file was 90 ms of a return's build at 6x, and its tokens landing as much again (the
-   * inner-6x pass, 2026-11-15). Copying, a line link and *Find in file* reach the lines not drawn.
-   */
-  const WHOLE_UP_TO = 300;
-  // A line is 13 px at its code row height (`fonts.svelte.ts`, `codeRows`): 16 px Joined, 20.8 Open.
-  const rowsOf = codeRows(13, 1.6);
-  const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: rowsOf.estimate, from: WHOLE_UP_TO + 1, textSize: rowsOf.textSize });
-  let code = $state<HTMLElement | null>(null);
   /** A rendered file's words (a README, a diagram, a command's output), for ⌘F's find bar: a person reading it means words, not *Go to file*'s names (Round 17). */
   let rendered = $state<HTMLElement | null>(null);
 
@@ -1590,73 +1576,8 @@
     return { bytes, read: () => Promise.resolve(bytes) };
   });
 
-  /**
-   * Each line's tokens as the worker sent them, by line index; not reactive
-   * itself, `painted` counts the answers so the drawn rows read them again.
-   */
-  let tokensOf: (LineTokens | undefined)[] = [];
-  let painted = $state(0);
-  let highlighting: HighlightJob | null = null;
-  $effect(() => {
-    const read = drawn;
-    if (read === null || read.binary || drawAs !== "source") return;
-    const got: (LineTokens | undefined)[] = [];
-    tokensOf = got;
-    untrack(() => (painted += 1));
-    const started = render.highlight(
-      { text: read.text, path: read.path, focus: untrack(() => [win.start, win.end]) },
-      {
-        onLines(from, answered) {
-          if (tokensOf !== got) return;
-          for (let i = 0; i < answered.length; i += 1) got[from + i] = answered[i];
-          painted += 1;
-        },
-      },
-    );
-    highlighting = started;
-    return () => {
-      started.cancel();
-      if (highlighting === started) highlighting = null;
-    };
-  });
-  // The lines in view moved: the worker does them next. Only under Source: a file drawn rendered windows no lines.
-  $effect(() => {
-    if (drawAs !== "source") return;
-    const [from, to] = [win.start, win.end];
-    untrack(() => highlighting?.focus(from, to));
-  });
-
-  /** *Find in file* (#2299): what is typed, its hits, and the hit stepped to. */
+  /** What is typed into *Find in file*: it stays as the reader moves between files (#2299). */
   let typed = $state("");
-  let current = $state(0);
-  const found = $derived(needles(typed));
-  const hits = $derived(fileHits(lines, found));
-
-  /** Line `index`'s segments: its tokens and hits, `null` to draw its text as it is. */
-  function shade(text: string, index: number) {
-    void painted;
-    return segments(text, tokensOf[index], found);
-  }
-
-  function findIn(event: Event) {
-    typed = (event.currentTarget as HTMLInputElement).value;
-    current = 0;
-  }
-
-  /** Steps to the next or previous hit, drawing its line if the window left it out, and scrolls it to the middle. */
-  function jump(step: 1 | -1) {
-    if (hits.total === 0) return;
-    current = stepMatch(current, step, hits.total);
-    win.reveal(lineOfHit(hits, current));
-    flushSync();
-    code?.querySelector("mark.tf-curm")?.scrollIntoView?.({ block: "center" });
-  }
-
-  function findKeys(event: KeyboardEvent) {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    jump(event.shiftKey ? -1 : 1);
-  }
 
   /**
    * Another file opens at its top. The shell's one scroller (`.tf-main`) is shared by every file, so without this a
@@ -1689,46 +1610,6 @@
     once.observe(view);
   });
 
-  /** The file and line last scrolled to, so a refresh of the file leaves the reader where they are. */
-  let shownLine: string | null = null;
-  $effect(() => {
-    const at = line;
-    const read = file;
-    if (at === null || read === null || read.binary || editing) return;
-    const key = `${read.path}\u0000${at}`;
-    if (key === shownLine) return;
-    shownLine = key;
-    void tick().then(() => {
-      win.reveal(at - 1);
-      flushSync();
-      code?.querySelector(".tf-l.tf-at")?.scrollIntoView?.({ block: "center" });
-    });
-  });
-
-  /** Where `node` at `offset` sits in the file's text, if it is inside a drawn line's text. */
-  function placeOf(node: Node | null, offset: number): TextPlace | null {
-    const el = node instanceof Element ? node : (node?.parentElement ?? null);
-    const row = el?.closest<HTMLElement>(".tf-l");
-    if (!row || !code?.contains(row)) return null;
-    const n = Number(row.dataset["n"]) - 1;
-    const body = row.lastElementChild;
-    if (body === null || !body.contains(node)) return { line: n, offset: 0 };
-    const before = document.createRange();
-    before.setStart(body, 0);
-    before.setEnd(node!, offset);
-    return { line: n, offset: Math.min(before.toString().length, lines[n]?.length ?? 0) };
-  }
-
-  /** Copies the file's own text between the selection's ends: no line numbers, every line between. */
-  function copyLines(event: ClipboardEvent) {
-    const selection = document.getSelection();
-    if (selection === null || selection.isCollapsed || event.clipboardData === null) return;
-    const from = placeOf(selection.anchorNode, selection.anchorOffset);
-    const to = placeOf(selection.focusNode, selection.focusOffset);
-    if (from === null || to === null) return;
-    event.clipboardData.setData("text/plain", selectedText(lines, from, to));
-    event.preventDefault();
-  }
 
   /** Why the file shown cannot be edited, `null` where it can. */
   const notEditable = $derived(
@@ -2067,6 +1948,20 @@
     return goToFile(grafts.size === 0 ? paths : graftedPaths(paths, grafted), goTyped);
   });
   const going = $derived(goTyped.trim() !== "");
+
+  /** The repository's paths at the commit, as a set: what a path in an XML file is tried against (the XML view, section 13). */
+  const pathSet = $derived(searched === null ? null : new Set(searched.paths));
+  /** What the XML view reads of the repository's files. */
+  const docFiles = $derived.by(() => {
+    const set = pathSet;
+    const read = imageRead;
+    return {
+      has: (p: string) => (set === null ? null : p === "" ? true : set.has(p)),
+      ask: () => readEvery(),
+      open: (p: string) => goAcross(hrefOf(p), p.slice(p.lastIndexOf("/") + 1)),
+      bytes: (p: string) => (read === null ? Promise.reject(new Error(`${p} cannot be read`)) : read(p)),
+    };
+  });
 
   function openPath(full: string) {
     goTyped = "";
@@ -2420,7 +2315,7 @@
       <TfNothingHere message="There is no folder renderer named “{singleNow.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
-  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-doc={drawAs === "xml"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
     {#if renderedNow !== null}
       {@const graftFolder = renderedNow.folder}
       <TfMadeBar
@@ -2669,6 +2564,26 @@
             prose={oasProse}
           />
         {/await}
+      {:else if drawAs === "xml"}
+        <!-- An XML file (the XML view, 2026-11-23): its view and its worker load with the first document opened. -->
+        {@const doc = drawn}
+        {#await docViewModule() then { default: TfDocView }}
+          {@const piped = ports.piped}
+          {@const entity = at}
+          {@const readAt = fileReadAt(disk, doc.path, file.commit ?? null)}
+          <TfDocView
+            text={doc.text}
+            path={doc.path}
+            repo={repoId}
+            sha={doc === shownFile ? (file.sha ?? null) : null}
+            {render}
+            line={path === doc.path ? line : null}
+            files={docFiles}
+            values={piped === undefined || doc !== shownFile
+              ? null
+              : { run: (steps) => piped(entity, doc.path, readAt, steps), save: (steps, name) => entityFilePipedSave(entity, doc.path, readAt, steps, name) }}
+          />
+        {/await}
       {:else if drawAs === "markdown"}
         <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} imagesOf={at} /></div>
         <TfFindBar root={() => rendered} within="in this file" />
@@ -2681,23 +2596,7 @@
         <div class="tf-rendered" bind:this={rendered}><TfCommandOutput {renderer} text={drawn.text} {commands} /></div>
         <TfFindBar root={() => rendered} within="in this file" />
       {:else}
-        <div class="tf-findbar">
-          <label class="tf-fsearch">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
-              ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-            >
-            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} {@attach filterKeys()} />
-            <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
-          </label>
-          <span class="tf-nav2">
-            <button type="button" aria-label="Previous match" onclick={() => jump(-1)}>↑</button><button
-              type="button"
-              aria-label="Next match"
-              onclick={() => jump(1)}>↓</button
-            >
-          </span>
-        </div>
-        <pre class="tf-code" bind:this={code} oncopy={copyLines} {@attach win.list}>{#each win.slice(lines) as text, i (win.start + i)}{@const n = win.start + i + 1}{@const segs = shade(text, n - 1)}<div class="tf-l" class:tf-at={n === line} data-n={n} {@attach win.row(n - 1)}><span>{n}</span><span>{#if segs === null}{text || " "}{:else}{@const base = firstHitOn(hits, n - 1) ?? 0}{#each segs as seg, at (at)}{#if seg.hit !== null}<mark class={seg.kind === "" ? undefined : `tf-hl-${seg.kind}`} class:tf-curm={base + seg.hit === current}>{seg.text}</mark>{:else if seg.kind !== ""}<span class="tf-hl-{seg.kind}">{seg.text}</span>{:else}{seg.text}{/if}{/each}{/if}</span></div>{/each}</pre>
+        <TfLines text={drawn.text} path={drawn.path} {render} {line} bind:typed />
       {/if}
       {/if}
       </TfWaiting>
