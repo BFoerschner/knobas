@@ -7,8 +7,9 @@
  * after the press is answered from it, or joins it while it is out (`readViewAhead`). Each is asked once a session, and only after the
  * pointer has stood on the link a moment, so a pointer swept across a list asks nothing.
  */
-import { codeFacts, getEntity, readViewAhead, repoBranchPulls, repoPipelines } from "../../ipc/entity";
-import { likelySections } from "./repo";
+import { heldRow } from "../../ipc/answer-cache";
+import { codeFacts, forgetCheckoutsAhead, getEntity, listEntities, readCheckoutAhead, readViewAhead, repoBranchPulls, repoPipelines } from "../../ipc/entity";
+import { likelySections, REPO_PRS_LIMIT, repoPrsFilter } from "./repo";
 
 /** The file a landing that names none opens first, its README, as the Files tab guesses it (`TfRepoFiles.svelte`). */
 export const LANDING_README = "README.md";
@@ -58,6 +59,13 @@ export function readLandingAhead(entityId: string): void {
   quiet(repoBranchPulls(entityId));
   quiet(repoPipelines(entityId));
   for (const section of ["files", "commits", "branches"]) quiet(readViewAhead(entityId, section, PRESS_KEEP_MS));
+  // The header's last two waits (the ux30 end gate, Windows, Fable's ruling: a page's reads go with the press). Its pull
+  // requests are read by the row's source and name, which the page took from its row's read and so asked a round after
+  // it, behind the page's build: 140 ms more at CPU 6x. The list the row was pressed in holds both. Its checkout the page
+  // asked once built.
+  const row = heldRow(entityId);
+  if (row !== null) quiet(listEntities(repoPrsFilter(row), REPO_PRS_LIMIT, 0));
+  quiet(readCheckoutAhead(entityId, PRESS_KEEP_MS));
 }
 
 /** When each landing's reads were last asked, by entity. */
@@ -90,6 +98,7 @@ export function forgetLandingReads(): void {
   landingAsked.clear();
   pagesHeld.clear();
   guessed.clear();
+  forgetCheckoutsAhead();
 }
 
 /** A repository's landing that `href` names (`#/repo/<id>`), else `null`. */

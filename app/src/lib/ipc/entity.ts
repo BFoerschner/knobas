@@ -1554,7 +1554,39 @@ export function setClonesRoot(path: string | null): Promise<void> {
  * entity that is neither a repo nor a branch.
  */
 export function entityCheckout(entityId: string): Promise<CheckoutView> {
+  const ahead = checkoutsAhead.get(entityId);
+  if (ahead !== undefined) {
+    // Taken once: the page's ask after a press. A focus or a clone's end after it reads again.
+    checkoutsAhead.delete(entityId);
+    return ahead;
+  }
   return invoke<CheckoutView>("entity_checkout", { entityId });
+}
+
+/**
+ * Checkouts read ahead of a press (`tf/repo/hover-reads.ts`, the ux30 end gate, Windows), by entity: the repository's
+ * header waits for its checkout, and the page asked it once it was built, 156 ms after the press at CPU 6x, its answer
+ * behind the build. The page's first ask takes the read under way, or landed within `keepMs`.
+ */
+const checkoutsAhead = new Map<string, Promise<CheckoutView>>();
+
+/** Every checkout read ahead forgotten: a test's fresh window. */
+export function forgetCheckoutsAhead(): void {
+  checkoutsAhead.clear();
+}
+
+/** Reads `entityId`'s checkout ahead of a press, for {@link entityCheckout}'s next ask to take within `keepMs` of landing. */
+export function readCheckoutAhead(entityId: string, keepMs: number): Promise<CheckoutView> {
+  const held = checkoutsAhead.get(entityId);
+  if (held !== undefined) return held;
+  const read = invoke<CheckoutView>("entity_checkout", { entityId });
+  checkoutsAhead.set(entityId, read);
+  const done = () =>
+    setTimeout(() => {
+      if (checkoutsAhead.get(entityId) === read) checkoutsAhead.delete(entityId);
+    }, keepMs);
+  read.then(done, done);
+  return read;
 }
 
 /**

@@ -676,7 +676,7 @@ test("an include knobas could not fill is a placeholder that says why and names 
   expect(boxes.map((b) => b.querySelector("button")?.textContent ?? null)).toEqual(["Open this part in Confluence", null, null, null]);
   boxes[0]!.querySelector("button")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2", { source: "confluence" });
   expect(target.querySelector(".tf-doc .tf-incl")).toBeNull();
 });
 
@@ -690,7 +690,10 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   [...target.querySelectorAll("button")].find((b) => b.textContent === "Open in Confluence")!.click();
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  // Both name the page's own source, so with two sources on one server each opens its own site, signed in as itself
+  // (the ux30 gate's real app: Confluence two's page opened Confluence's site).
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2", { source: "confluence" });
+  expect(vi.mocked(io.openExternal).mock.calls.every(([, how]) => how?.source === "confluence")).toBe(true);
   expect(acks.item?.text).toBe("Opening in the browser");
 });
 
@@ -780,7 +783,7 @@ test("a placeholder inside a table cell draws as its block with Open this part i
   expect(macro.textContent).toContain("This part is a Confluence expand macro, which knobas does not draw.");
   [...macro.querySelectorAll("button")].find((b) => b.textContent === "Open this part in Confluence")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2", { source: "confluence" });
 });
 
 test("a code block's language and Copy sit in a strip above the code, and nothing sits inside the code (#2083)", async () => {

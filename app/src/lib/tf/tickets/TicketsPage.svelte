@@ -180,6 +180,8 @@
   import { fbarHeight } from "./fbar-height";
   import TicketCard from "./TicketCard.svelte";
   import TicketStack, { STACK_WINDOW_FROM } from "./TicketStack.svelte";
+  import { readTicketAhead } from "../job/press-reads";
+  import type { Attachment } from "svelte/attachments";
   import Signals from "./Signals.svelte";
   import { assigneeName, assigneeOptions, cardFloor, COLUMN_CAP, columnHead, columnWidth, columnName, columnWords, keepColumnArrays, LANE_FIELDS, listName, listPointer, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
@@ -784,12 +786,44 @@
    * draws its screen at once, so no card drawn goes from under the pointer. Under 1500 px the screen shows eight a
    * column or fewer, so nothing changes there.
    */
-  function openShare(place: string, cards: MiniBoardCard[]): number | null {
+  function openShare(place: string, cards: MiniBoardCard[], index: number): number | null {
     if (!firstFrame || cards.length <= COLUMN_CAP) return null;
     const drew = drewWhole.get(place) ?? 0;
-    if (reader.all && drew === 0) return COLUMN_CAP;
+    if (reader.all && drew === 0) return landingShare(cards, index);
     return cards.length >= STACK_WINDOW_FROM && drew <= COLUMN_CAP ? COLUMN_CAP : null;
   }
+  /**
+   * How many of a show-every-ticket column's cards its landing frame draws (the ux30 end gate, Windows, Fable's ruling):
+   * the cards the window's height below the board's top holds, each reckoned at its floor (`cardFloor`, never taller
+   * than it draws) and one more, at most {@link COLUMN_CAP}. The height from the column's own top, under its head, would
+   * hold fewer, so no card on screen waits. A column wholly past the window's right edge, where its board starts at the window's left at the latest,
+   * draws one card, so it says nothing of being empty; the rest of every column draws the frame after, below them.
+   */
+  function landingShare(cards: MiniBoardCard[], index: number): number {
+    const width = innerWidth.current ?? 1440;
+    if (index * (columnWidth(width) + COLUMN_GAP) >= width) return 1;
+    const height = window.innerHeight - cardsTop;
+    let used = 0;
+    let fit = 0;
+    for (const card of cards) {
+      if (fit >= COLUMN_CAP) break;
+      used += cardFloorOf(card) + (fit > 0 ? CARD_GAP : 0);
+      if (used > height) break;
+      fit += 1;
+    }
+    return Math.min(COLUMN_CAP, fit + 1);
+  }
+  /**
+   * Where the board's cards start on screen, as the scroller last laid out said (`fbarHeight`): the window's height
+   * below it is what a column shows. 0 until it has, which reckons the whole window, never fewer cards than show. A
+   * column's head stands between them, so this still reckons more room than a column has.
+   */
+  let cardsTop = 0;
+  /** The scroller's bar height (`--tf-fbar-h`) and where its cards start, from one observer. */
+  const boardHeights = (wrap: HTMLElement) => fbarHeight(wrap, (px) => (cardsTop = px));
+  /** The room between two columns and two cards (`tickets.css`'s `.tf-cols` and `.tf-cards` gaps). */
+  const COLUMN_GAP = 8;
+  const CARD_GAP = 6;
   /**
    * What a column's window reckons an undrawn card at: never taller than it draws, so a key draws the screen's cards. Its
    * summary's lines counted by the column's width, which goes by the window (`tickets.css`), and Interface's size.
@@ -1212,6 +1246,24 @@
     reader.chooseLayout(next);
   }
 
+  /**
+   * A press on a card or a row asks the reads the ticket's page waits on (`job/press-reads.ts`, the ux30 end gate,
+   * Windows): at the pointer's going down, or the `Enter` that opens it, before the page is built.
+   */
+  const pressAhead: Attachment<HTMLElement> = (root) => {
+    const pressed = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof PointerEvent ? event.button !== 0 : event.key !== "Enter") return;
+      const id = (event.target as Element | null)?.closest?.<HTMLElement>("[data-entity]")?.dataset.entity;
+      if (id) readTicketAhead(id);
+    };
+    root.addEventListener("pointerdown", pressed);
+    root.addEventListener("keydown", pressed);
+    return () => {
+      root.removeEventListener("pointerdown", pressed);
+      root.removeEventListener("keydown", pressed);
+    };
+  };
+
   /** A click, a double click or `Enter`: the ticket page (spec #2227), the card selected for the way back. There is no preview to fill. */
   function openTicket(card: MiniBoardCard) {
     session.selected = card.entity_id;
@@ -1318,7 +1370,7 @@
   let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")}>
+<div class="tf-tickets" class:tf-rail-shut={!railOpen} {@attach sideWidth("tickets-views")} {@attach pressAhead}>
   <TfSideEdge side="tickets-views" />
   <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
   {#if subtasksOf === null}
@@ -1395,7 +1447,7 @@
     </div>
   </nav>
 
-  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach fbarHeight} {@attach drag.attach}>
+  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach boardHeights} {@attach drag.attach}>
     {#if subtasksOf !== null || back !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
       <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
@@ -1536,7 +1588,7 @@
             <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each columnsOf(lane) as { column, cards, done, listed } (columnKey(column))}
+            {#each columnsOf(lane) as { column, cards, done, listed }, index (columnKey(column))}
               <!-- A view that shows every ticket offers no more: its whole read fills each column behind the first. -->
               {@const more = reader.all ? null : moreLine(column, cards.length, done)}
               {@const pointer = reader.all ? null : listPointer(column, cards.length)}
@@ -1557,7 +1609,7 @@
                   <span class="tf-colsts" aria-hidden="true"></span>
                 </h3>
                 <div class="tf-stack">
-                  <TicketStack cards={stackCards} atMost={openShare(place, stackCards)} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
+                  <TicketStack cards={stackCards} atMost={openShare(place, stackCards, index)} cut={(all) => drawnNow(place, all)} onwin={holdWin(place)} floor={cardFloorOf}>
                     {#snippet card(card, row)}
                       <TicketCard
                         {card}

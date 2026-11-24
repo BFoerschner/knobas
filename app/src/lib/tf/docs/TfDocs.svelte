@@ -119,7 +119,7 @@
   import { drawn } from "../../detail/relations";
   import type { PipelinePorts } from "../builds/pipeline-ports";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
-  import { routeWeb as realOpenExternal, webPlaceName } from "../../shell/open-web";
+  import { routeWeb as realOpenExternal, webPlaceName, type WebHow } from "../../shell/open-web";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { dismiss, push, undoable } from "../../shell/toasts.svelte";
@@ -249,7 +249,8 @@
     getEntity: typeof realEntityHead;
     /** The header's *Refresh* (#2136); the bridge's when omitted. */
     refresh?: DetailRefreshPorts;
-    openExternal: (url: string) => Promise<void>;
+    /** Opens `url` in its source's site or the browser; `how.source` is the page's own source (ux30 gate). */
+    openExternal: (url: string, how?: WebHow) => Promise<void>;
     copy: (text: string) => Promise<void>;
     /** What the page's source refuses its credential (#2053); the IPC read when omitted. */
     refusedWrites?: RefusedWritesPort;
@@ -1520,9 +1521,11 @@
   );
   let composer = $state<HTMLTextAreaElement | null>(null);
 
-  async function open(url: string): Promise<void> {
+  async function open(url: string, source: string | null = null): Promise<void> {
+    // The page's own source: with two sources on one server, its site signs in with its own credential (ux30 gate).
+    const how = source === null ? {} : { source };
     try {
-      await acknowledged(openingWords(webPlaceName(url)), () => io.openExternal(url));
+      await acknowledged(openingWords(webPlaceName(url, how)), () => io.openExternal(url, how));
     } catch (cause) {
       push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -2149,7 +2152,7 @@
               />
               {#if p.web_url}
                 {@const url = p.web_url}
-                <button type="button" class="tf-btn tf-ghost" title="Open in {p.source_name}" onclick={() => open(url)}><span class="tf-cut">Open in {p.source_name}</span></button>
+                <button type="button" class="tf-btn tf-ghost" title="Open in {p.source_name}" onclick={() => open(url, p.source_id)}><span class="tf-cut">Open in {p.source_name}</span></button>
               {/if}
               {#if !syncInMore && !beside}
                 <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
@@ -2195,7 +2198,7 @@
                 editable={p.writes.includes("update_page") && p.version !== null}
                 refusal={refusal("update_page")}
                 {stems}
-                onopen={open}
+                onopen={(url) => open(url, p.source_id)}
                 oncopy={copy}
                 oncopylink={(section, heading) => copySection(p, section, heading)}
                 onsave={(section, text) => saveSection(p, section, text)}
@@ -2224,7 +2227,7 @@
                       entityId={p.entity_id}
                       sourceName={p.source_name}
                       webUrl={p.web_url}
-                      onopen={open}
+                      onopen={(url) => open(url, p.source_id)}
                       oncopy={copy}
                       {stems}
                     />

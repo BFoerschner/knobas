@@ -9,7 +9,7 @@
  * of *Files* (`TfRepoFiles`) keep their own, older ones.
  */
 import { untrack } from "svelte";
-import { listen as tauriListen } from "@tauri-apps/api/event";
+import { windowListen } from "../../ipc/shared-listen";
 
 import { EVENTS } from "../../ipc";
 import type { ViewFresh } from "../../ipc/entity";
@@ -49,7 +49,7 @@ export function onViewFresh(
   $effect(() => {
     const where = at();
     if (where === null) return;
-    const hear: EchoListen = listen ?? ((event, handler) => tauriListen(event, handler));
+    const hear: EchoListen = listen ?? ((event, handler) => windowListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
     void Promise.resolve()

@@ -16,6 +16,7 @@ import type {
   DiffFile,
   DiffRead,
   EntityDetail,
+  EntityFilter,
   EntityPage,
   EntityRow,
   SourceView,
@@ -275,6 +276,29 @@ export function commitHash(repoId: string, commitId: string): string {
 export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: readonly EntityRow[]): EntityRow | null {
   if (row.path === null) return null;
   return repos.find((repo) => repo.kind === "repo" && repo.source_id === row.source_id && repo.title === row.path) ?? null;
+}
+
+/** How many pull requests a repository's read asks for: every one the mirror holds. */
+export const REPO_PRS_LIMIT = 1000;
+
+/**
+ * The read of a repository's pull requests (`TfRepo.svelte`'s `readRow`), and the one a press on its link asks ahead
+ * (`hover-reads.ts`), the same filter so the page's ask joins the press's in the answer cache. Its own pull requests,
+ * not its source's every one (the query audit, 2026-11-12: 1,710 rows in four reads, 700 ms, for the repository's few
+ * dozen); `repoPrs` still keeps the rows whose path line is this repository.
+ */
+export function repoPrsFilter(row: Pick<EntityRow, "source_id" | "title">): EntityFilter {
+  return {
+    sources: [row.source_id],
+    kinds: ["pr"],
+    updated_within_days: null,
+    order: "updated_desc",
+    context: null,
+    project: null,
+    include_deleted: false,
+    reach: null,
+    parent: row.title,
+  };
 }
 
 /**

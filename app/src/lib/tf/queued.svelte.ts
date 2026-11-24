@@ -42,7 +42,7 @@
  * (`takeAgain`).
  */
 import type { QueuedWrite } from "../ipc/sources";
-import { listen as tauriListen } from "@tauri-apps/api/event";
+import { windowListen } from "../ipc/shared-listen";
 
 import { EVENTS } from "../ipc";
 import type { RefreshEnded, SourceSyncStatus } from "../ipc/sources";
@@ -185,7 +185,7 @@ export interface EchoWatch {
  * stops a listen still being set up.
  */
 export function watchEchoes(surface: string, reread: () => void, how: EchoWatch = {}): () => void {
-  const listen = how.listen ?? ((event, handler) => tauriListen(event, handler));
+  const listen = how.listen ?? ((event, handler) => windowListen(event, handler));
   const mine = () => Object.entries(echoes).flatMap(([entity, all]) => all.filter((m) => m.surface === surface).map((m) => ({ entity, m })));
   let dead = false;
   const offs: (() => void)[] = [];

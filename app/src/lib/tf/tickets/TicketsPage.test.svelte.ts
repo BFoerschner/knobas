@@ -2608,6 +2608,28 @@ test("a view that shows every ticket draws eight a column in the frame its board
   expect(firstCards.every((card) => card.isConnected)).toBe(true);
 });
 
+test("a view that shows every ticket draws, in the frame its board lands, the cards the window's height holds and one more (ux30 end gate)", async () => {
+  // A window 300 px high holds three of these cards at their floor (84 px a one-line summary with an avatar, 6 px apart).
+  const height = vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], bulk("To Do", 20, "Bulk"));
+  await open(h, null, "v");
+  expect(columns()).toEqual([{ head: "To do 20", cards: 4, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
+  height.mockRestore();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
+});
+
 // ---- moving a ticket (ADR-0054, ticket-edit decisions sections 3 to 12) ----
 
 /** The move ports a test drives: the writes queued, the follow's ears, and the events the page listens to. */

@@ -129,6 +129,8 @@ test("a press on a repository's link reads its landing at once, and the page's a
     { cmd: "entity_view", args: { entityId: id, section: "files" } },
     { cmd: "entity_view", args: { entityId: id, section: "commits" } },
     { cmd: "entity_view", args: { entityId: id, section: "branches" } },
+    // The header's checkout (the ux30 end gate, Windows).
+    { cmd: "entity_checkout", args: { entityId: id } },
   ]);
   const view = { sections: [], actions: [] };
   for (const answer of answers.slice(4)) answer(view);
@@ -136,10 +138,10 @@ test("a press on a repository's link reads its landing at once, and the page's a
   // Landed before the page asked: taken once, and an ask after that reads again.
   expect(await entityView(id, "files")).toEqual(view);
   await flush();
-  expect(sent).toHaveLength(7);
+  expect(sent).toHaveLength(8);
   void entityView(id, "files");
   await flush();
-  expect(sent).toHaveLength(8);
+  expect(sent).toHaveLength(9);
   // A tab's link (`/commits`) and a pull request's link read nothing at the press.
   sent.length = 0;
   root.querySelector("#tab")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
@@ -183,7 +185,7 @@ test("an address on a repository's landing reads it before the page is built; a 
   expect(sent).toEqual([]);
   readLandingAtAddress("#/repo/gitea%3Atidewater%2Fpayout-service");
   await flush();
-  expect(sent.map((s) => s.cmd)).toEqual(["get_entity", "code_facts", "repo_branch_pulls", "repo_pipelines", "entity_view", "entity_view", "entity_view"]);
+  expect(sent.map((s) => s.cmd)).toEqual(["get_entity", "code_facts", "repo_branch_pulls", "repo_pipelines", "entity_view", "entity_view", "entity_view", "entity_checkout"]);
 });
 
 test("a press and the address it sets read the landing once", async () => {

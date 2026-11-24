@@ -91,7 +91,7 @@
   import TfFolderPickMenu from "../render/TfFolderPickMenu.svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
-  import { listen as tauriListen } from "@tauri-apps/api/event";
+  import { windowListen } from "../../ipc/shared-listen";
   import { EVENTS, ipcErrorMessage } from "../../ipc";
   import { openLink } from "../../shell/external-links";
   import type { CheckoutView, Fetched, LocalDir, TreeEntry, TreeSections, ViewBlock, ViewFresh, ViewSection } from "../../ipc/entity";
@@ -745,7 +745,7 @@
   // big-folder pass, 2026-11-13: a page opened while the clone was behind kept reading every folder from the forge).
   $effect(() => {
     const where = at;
-    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
     void listen(EVENTS.checkoutFetched, ({ payload }) => {
@@ -1742,7 +1742,7 @@
   // The app read the top directory again behind its answer, and it moved (#2242).
   $effect(() => {
     const where = at;
-    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {

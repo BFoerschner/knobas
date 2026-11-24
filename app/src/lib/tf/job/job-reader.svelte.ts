@@ -40,7 +40,7 @@ import { bridgeTicketBoard, type JobPorts } from "./ports";
 import { entityCheckout } from "../../ipc/entity";
 import { parentOf } from "../sets/apply";
 import { countSubtasks, readAssetLines, readUnpushed } from "./card-sections";
-import { reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
+import { cardFilters, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
 /** The reads the reader makes: the job's own ports, without its writes. */
 export type JobReaderPorts = Pick<
@@ -271,8 +271,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
 
   /** The card's read for `id`; `null` when it fails: nothing reached, and no section has anything in it. */
   function askCard(id: string): Promise<CardRows | null> {
-    const order = [SECTION_READS.code, SECTION_READS.builds, SECTION_READS.pages, SECTION_READS.monitors];
-    return ports.cardReads!(id, order.map((read) => reachFilter(id, read.kinds, read.order, read.role)), SECTION_LIMIT).catch(() => null);
+    return ports.cardReads!(id, cardFilters(id), SECTION_LIMIT).catch(() => null);
   }
 
   /** The reach itself, for the labels, and the reached assets for their section. */
