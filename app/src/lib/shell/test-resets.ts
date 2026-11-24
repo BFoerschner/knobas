@@ -22,6 +22,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The XML view's folds and what was asked, kept while the window lives (its design, sections 8 and 23): each test starts with none.
   "tf/render/doc/doc.svelte.ts#kept": async () => (await import("../tf/render/doc/doc.svelte")).forgetFolds(),
   "tf/render/doc/doc-check.svelte.ts#stopped": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetStopped(),
+  // What checks hold from one document to the next (the schema session cache, 2026-11-24): the Settings the next starts
+  // on, the asks seen whole (and with them the departures' lines). Each test reads its own.
+  "tf/render/doc/doc-check.svelte.ts#lastSettings": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
+  "tf/render/doc/doc-check.svelte.ts#seenWhole": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
   // An example's settings, held until knobas quits by schema (E1), and what the header says of an opened one.
   "tf/render/xsd/example-held.svelte.ts#held": async () => (await import("../tf/render/xsd/example-held.svelte")).forgetHeld(),
   // The hosts a change was confirmed for, until knobas quits (ux31, ADR-0057): each test asks afresh.
