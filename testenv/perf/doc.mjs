@@ -64,6 +64,31 @@ const timed = (act, selector, text = null, watch = null) =>
     };
     tick();
   })`);
+// In the page: run `act`, then the ms to the painted frame each of `marks` ({ name, sel, text }) first stands in, and
+// whether the rows of `watch` drawn by the last of them stood elsewhere 600 ms later.
+const timedMarks = (act, marks, watch = null) =>
+  c.js(`new Promise((resolve, reject) => {
+    const shown = (e) => e.getClientRects().length > 0 && e.checkVisibility({ visibilityProperty: true });
+    const marks = ${JSON.stringify(marks)};
+    const found = (m) => [...document.querySelectorAll(m.sel)].some((e) => shown(e) && (m.text == null || e.textContent.includes(m.text)));
+    const at = {};
+    const t0 = performance.now();
+    (${act})();
+    const deadline = t0 + 15000;
+    const tops = () => new Map([...document.querySelectorAll(${JSON.stringify(watch ?? "nothing-here")})].filter(shown).slice(0, 30).map((e) => [e, Math.round(e.getBoundingClientRect().top)]));
+    const movedSince = (first) => [...first].some(([e, top]) => !e.isConnected || !shown(e) || Math.round(e.getBoundingClientRect().top) !== top);
+    const tick = () => {
+      const now = marks.filter((m) => at[m.name] === undefined && found(m));
+      if (now.length > 0) requestAnimationFrame(() => { for (const m of now) at[m.name] ??= performance.now() - t0; });
+      if (marks.every((m) => at[m.name] !== undefined || now.includes(m))) return requestAnimationFrame(() => requestAnimationFrame(() => {
+        const first = tops();
+        setTimeout(() => resolve({ at, moved: movedSince(first) }), 600);
+      }));
+      if (performance.now() > deadline) return reject(new Error("never drew " + marks.filter((m) => at[m.name] === undefined).map((m) => m.name).join(", ")));
+      requestAnimationFrame(tick);
+    };
+    tick();
+  })`);
 const go = (hash) => `() => { location.hash = ${JSON.stringify(hash)}; }`;
 const click = (sel, text = null) =>
   `() => [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => e.getClientRects().length > 0 && (${JSON.stringify(text)} === null || e.textContent.includes(${JSON.stringify(text)}))).click()`;
@@ -73,6 +98,15 @@ const key = (k) => `() => document.querySelector('.tf-xv-lines .tf-code').dispat
 const settle = () => sleep(700);
 
 const ORDER = "orders/order-4711.xml";
+/** A prep: `path` opened until its verdict says `says`, then `then` opened. */
+const checkedThen = (path, says, then) => `async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    location.hash = ${JSON.stringify(file(path))};
+    for (let i = 0; i < 200 && !document.querySelector('.tf-xv-verdict')?.textContent.includes(${JSON.stringify(says)}); i++) await wait(50);
+    location.hash = ${JSON.stringify(file(then))};
+    await wait(300);
+  }`;
+
 /** The JSON view's export (J1): 48 orders, 1,189 lines, five levels. */
 const EXPORT = "exports/orders-2026-11.json";
 const OTHER = "orders/order-4710.xml";
@@ -86,6 +120,12 @@ const CASES = [
   // The check (X2): the order opened until libxml2's verdict stands in the rail's head, its five marks painted on lines
   // that already stand (none of them may move).
   { name: "checked", label: "the order opened from the README, to its check's verdict (5 departures)", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: ".tf-xv-verdict b", text: "departures", watch: LINE_ROWS },
+  // The check's three opens (the schema session cache, 2026-11-24), each to its first lines, its carets and its verdict
+  // in one run: the first (a fresh page each run: nothing of the set is held), the order opened again after it was
+  // checked, and the other order on the same schema after this one was checked.
+  { name: "checked-first", label: "the order opened first, from the README on a fresh page", kind: "page", fresh: true, before: go(file("README.md")), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
+  { name: "checked-again", label: "the order opened again, from the README after it was checked", kind: "page", before: go(file(ORDER)), prep: checkedThen(ORDER, "departures", "README.md"), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
+  { name: "checked-other", label: "the other order (order-4710, valid) opened from the README after this one was checked", kind: "page", before: go(file(ORDER)), prep: checkedThen(ORDER, "departures", "README.md"), act: go(file(OTHER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "Valid" }], watch: LINE_ROWS },
   { name: "next", label: "N to the first departure, its line picked", kind: "press", before: go(file("README.md")), prep: `async () => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     location.hash = ${JSON.stringify(file(ORDER))};
@@ -187,22 +227,47 @@ for (const t of throttles) {
     const ran = await runCase(c, { name: k.label, throttle: t, prepare: home }, async () => {
       await c.send("Emulation.setCPUThrottlingRate", { rate: t });
       const times = [];
+      const marked = Object.fromEntries((k.marks ?? []).map((m) => [m.name, []]));
       let moved = false;
       for (let i = 0; i < RUNS; i++) {
+        if (k.fresh) {
+          await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+          await c.send("Page.navigate", { url: "about:blank" });
+          await sleep(300);
+          await home();
+          await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+        }
         await c.js(`(${k.before})()`);
         await sleep(k.name.startsWith("big") ? 4000 : 900);
         if (k.prep) {
           await c.js(`(${k.prep})()`);
           await settle();
         }
+        if (k.marks) {
+          const r = await timedMarks(k.act, k.marks, k.watch ?? null);
+          for (const m of k.marks) marked[m.name].push(r.at[m.name]);
+          moved ||= r.moved;
+          continue;
+        }
         const r = await timed(k.act, k.sel, k.text ?? null, k.watch ?? null);
         times.push(r.ms);
         moved ||= r.moved;
       }
-      return { times, moved };
+      return { times, moved, marked };
     });
     if (ran.failedToRun) { over++; console.log(failedLine({ name: k.label, throttle: t, failedToRun: ran.failedToRun })); continue; }
-    const { times, moved } = ran.value;
+    const { times, moved, marked } = ran.value;
+    if (k.marks) {
+      for (const m of k.marks) {
+        const ts = marked[m.name].sort((a, b) => a - b);
+        const median = ts[Math.floor(ts.length / 2)];
+        const limit = line(k.kind, t);
+        const ok = median <= limit && !moved;
+        if (!ok) over++;
+        console.log(`${t}x ${size.name} ${k.label}, to its ${m.name}: ${median.toFixed(1)} ms (line ${limit})${moved ? ", MOVED" : ""} ${ok ? "ok" : "OVER"}  [${ts.map((x) => x.toFixed(0)).join(" ")}]`);
+      }
+      continue;
+    }
     times.sort((a, b) => a - b);
     const median = times[Math.floor(times.length / 2)];
     const limit = k.kind === "outline" ? Infinity : line(k.kind, t);

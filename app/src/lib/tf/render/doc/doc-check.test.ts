@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { DocCheck, entryFor, rootSays } from "./doc-check.svelte";
+import { DocCheck, entryFor, likelyKept, rootSays, sameAsk, settingsFor } from "./doc-check.svelte";
 import type { DocSession } from "../../../render/doc-port";
 import type { XsdEngine } from "../../../render/xsd-port";
 import { ns } from "../../../render/xml-names";
@@ -26,7 +26,7 @@ test("a departure stands on the line its path names, not on libxml2's line, whic
   // Where the path names no node, libxml2's line is all there is.
   const lost = { places: async (paths: (string | null)[]) => paths.map(() => -1) } as unknown as DocSession;
   const d = new DocCheck("r\nb.xml", engine);
-  await d.run("b.xml", { name: "a", namespace: "urn:a", location: "s.xsd" }, "<a/>", lost, reads, true);
+  await d.run("b.xml", { name: "a", namespace: "urn:a", location: "s.xsd" }, "<a></a>", lost, reads, true);
   expect(d.found.map((f) => f.line)).toEqual([65535]);
 });
 
@@ -41,7 +41,7 @@ test("a document that says nothing of a schema is not looked for; off is off", a
 
 test("the entry a check reads imports the root's namespace from the document's folder, with the document's prefixes", () => {
   const e = entryFor("orders/o.xml", { name: "ORDER", namespace: "urn:o", location: "../s/o.xsd", prefixes: { bmecat: "urn:b" } })!;
-  expect(e.path).toBe("orders/.knobas-schema-of-o.xml.xsd");
+  expect(e.path).toBe("orders/.knobas-document-schema.xsd");
   expect(e.text).toContain('<xs:import namespace="urn:o" schemaLocation="../s/o.xsd"/>');
   expect(e.text).toContain('xmlns:bmecat="urn:b"');
   expect(entryFor("o.xml", { name: "a", namespace: "", location: "a.xsd" })!.text).toContain('<xs:include schemaLocation="a.xsd"/>');
@@ -64,4 +64,151 @@ test("how the schema was found reads after found: with knobas, pointed to, downl
     await c.run(`${found}.xml`, { name: "a", namespace: "urn:a", location: "s.xsd" }, "<a/>", doc, reads, true);
     expect(c.head).toMatchObject({ k: "checked", how });
   }
+});
+
+// ---- Started with the view (the schema session cache, 2026-11-24) ----
+
+/** A promise and the hand that settles it. */
+function deferred<T>(): { promise: Promise<T>; settle: (v: T) => void } {
+  let settle!: (v: T) => void;
+  const promise = new Promise<T>((r) => (settle = r));
+  return { promise, settle };
+}
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const ROOT = { name: "a", namespace: "urn:a", location: "s.xsd" };
+const placed = { places: async (paths: (string | null)[]) => paths.map(() => 3) } as unknown as DocSession;
+
+test("started before the outline, a check reads no file and draws nothing until it lands", async () => {
+  const calls: string[] = [];
+  const read: string[] = [];
+  const miss: XsdEngine = async (_s, call) => {
+    calls.push(call.kind);
+    if (call.kind === "open") return { ok: true, index: INDEX, need: ["schemas/s.xsd"] };
+    if (call.kind === "addFiles") return { ok: true, index: INDEX, need: [] };
+    return engine(_s, call);
+  };
+  const outline = deferred<boolean>();
+  const c = new DocCheck("r\na.xml", miss);
+  const done = c.run("a.xml", ROOT, "<a/>", placed, { ...reads, read: async (p: string) => (read.push(p), "<x/>") }, true, outline.promise);
+  await flush();
+  expect(read).toEqual([]);
+  expect(calls).toEqual(["open"]);
+  expect(c.head).toEqual({ k: "idle" });
+  outline.settle(true);
+  await done;
+  expect(read).toEqual(["schemas/s.xsd"]);
+  expect(c.head).toMatchObject({ k: "checked", count: 1 });
+});
+
+test("a set kept whole is checked beside the outline, and its verdict waits for the outline to be drawn", async () => {
+  const calls: string[] = [];
+  const kept: XsdEngine = async (s, call) => (calls.push(call.kind), engine(s, call));
+  const outline = deferred<boolean>();
+  const c = new DocCheck("r\na.xml", kept);
+  const done = c.run("a.xml", ROOT, "<a/>", placed, reads, true, outline.promise);
+  await flush();
+  expect(calls).toEqual(["open", "check"]);
+  expect(c.head).toEqual({ k: "idle" });
+  expect(c.found).toEqual([]);
+  outline.settle(true);
+  await done;
+  expect(c.head).toMatchObject({ k: "checked", count: 1 });
+  expect(c.found.map((f) => f.line)).toEqual([3]);
+});
+
+test("an outline that is not well formed draws nothing of the check, and nothing is read", async () => {
+  const read: string[] = [];
+  const miss: XsdEngine = async (_s, call) => (call.kind === "open" ? { ok: true, index: INDEX, need: ["schemas/s.xsd"] } : engine(_s, call));
+  const c = new DocCheck("r\na.xml", miss);
+  await c.run("a.xml", ROOT, "<a/>", placed, { ...reads, read: async (p: string) => (read.push(p), null) }, true, Promise.resolve(false));
+  await flush();
+  expect(read).toEqual([]);
+  expect(c.head).toEqual({ k: "idle" });
+  // Nor a document without a schema, nor a check that is off.
+  await c.run("a.xml", { name: "a", namespace: "", location: null }, "<a/>", placed, reads, true, Promise.resolve(false));
+  expect(c.head).toEqual({ k: "idle" });
+});
+
+test("an ask seen whole before is checked right behind its open, before the open answers", async () => {
+  const keep = { scope: "r", at: "c1" };
+  const order: string[] = [];
+  let opened = deferred<unknown>();
+  const slow: XsdEngine = async (s, call) => {
+    order.push(call.kind);
+    if (call.kind === "open") return opened.promise;
+    return engine(s, call);
+  };
+  expect(likelyKept("a.xml", ROOT, keep, [])).toBe(false);
+  const first = new DocCheck("r\na.xml", slow);
+  const one = first.run("a.xml", ROOT, "<a/>", placed, { ...reads, keep }, true);
+  await flush();
+  // Never seen whole: the check waits for the open.
+  expect(order).toEqual(["open"]);
+  opened.settle({ ok: true, index: INDEX, need: [] });
+  await one;
+  expect(first.head).toMatchObject({ k: "checked" });
+  // Seen whole: likely kept, for a document beside it that says the same; not at another commit, nor pointed elsewhere.
+  expect(likelyKept("b.xml", ROOT, keep, [])).toBe(true);
+  expect(likelyKept("b.xml", ROOT, { ...keep, at: "c2" }, [])).toBe(false);
+  expect(likelyKept("b.xml", ROOT, keep, [{ namespace: "urn:a", location: "s.xsd", to: { repo: "r", path: "t.xsd" } }])).toBe(false);
+  expect(likelyKept("b.xml", ROOT, null, [])).toBe(false);
+  order.length = 0;
+  opened = deferred<unknown>();
+  const again = new DocCheck("r\nb.xml", slow);
+  const two = again.run("b.xml", ROOT, "<a/>", placed, { ...reads, keep }, true);
+  await flush();
+  expect(order).toEqual(["open", "check"]);
+  opened.settle({ ok: true, index: INDEX, need: [] });
+  await two;
+  expect(again.head).toMatchObject({ k: "checked", count: 1 });
+  // At another commit it was never seen whole.
+  order.length = 0;
+  opened = deferred<unknown>();
+  const moved = new DocCheck("r\nc.xml", slow);
+  const three = moved.run("c.xml", ROOT, "<a/>", placed, { ...reads, keep: { ...keep, at: "c2" } }, true);
+  await flush();
+  expect(order).toEqual(["open"]);
+  opened.settle({ ok: true, index: INDEX, need: [] });
+  await three;
+});
+
+test("a check starts on the Settings the last one read, and says whether they read the same again", async () => {
+  const on = { on: true, pointed: [] };
+  const first = settingsFor(async () => on);
+  expect(first.held).toBeNull();
+  expect(await first.same).toBe(false);
+  await first.fresh;
+  const second = settingsFor(async () => on);
+  expect(second.held).toEqual(on);
+  expect(await second.same).toBe(true);
+  const third = settingsFor(async () => ({ on: false, pointed: [] }));
+  expect(third.held).toEqual(on);
+  expect(await third.same).toBe(false);
+  expect(settingsFor(async () => on).held).toEqual({ on: false, pointed: [] });
+});
+
+test("the root read from the first tag and from the outline ask for one check, whatever order its prefixes come in", () => {
+  const a = { name: "o", namespace: "urn:o", location: "o.xsd", prefixes: { b: "urn:b", c: "urn:c" } };
+  const b = { name: "o", namespace: "urn:o", location: "o.xsd", prefixes: { c: "urn:c", b: "urn:b" } };
+  expect(sameAsk("x.xml", a, b)).toBe(true);
+  expect(entryFor("x.xml", a)).toEqual(entryFor("x.xml", b));
+  expect(sameAsk("x.xml", a, { ...b, location: "p.xsd" })).toBe(false);
+  expect(sameAsk("x.xml", a, { ...b, prefixes: { b: "urn:other" } })).toBe(false);
+  expect(sameAsk("x.xml", a, null)).toBe(false);
+});
+
+test("a document checked again places its departures as its worker did, without asking it again", async () => {
+  let asked = 0;
+  const counting = { places: async (paths: (string | null)[]) => (asked++, paths.map(() => 7)) } as unknown as DocSession;
+  const one = new DocCheck("r\na.xml", engine);
+  await one.run("a.xml", ROOT, "<a>one</a>", counting, reads, true);
+  expect(one.found.map((f) => f.line)).toEqual([7]);
+  expect(asked).toBe(1);
+  const two = new DocCheck("r\na.xml", engine);
+  await two.run("a.xml", ROOT, "<a>one</a>", counting, reads, true);
+  expect(two.found.map((f) => f.line)).toEqual([7]);
+  expect(asked).toBe(1);
+  // Another text is read to another outline: asked.
+  await two.run("a.xml", ROOT, "<a>two</a>", counting, reads, true);
+  expect(asked).toBe(2);
 });

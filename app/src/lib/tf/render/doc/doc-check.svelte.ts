@@ -9,12 +9,17 @@
  *   the person's pointing, the catalog, the index, another repository and the schemas that come with knobas, is the
  *   one the explorer takes.
  * - **The check runs once the set is whole**, by libxml2 in the schema worker, on the document's text.
+ * - **It starts with the view**, the root read from the text's first tag, but reads no file before the outline has
+ *   landed, and draws nothing before it: a set kept whole (`xsd-kept.ts`) is checked beside the outline, so the verdict
+ *   lands with it.
  * - **A departure is put on its line by libxml2's path to the node** (the document worker's `places`), never by its
  *   line, which is 16 bits.
  * - **Stop checking this file** holds until knobas quits.
  */
 import type { DocSession } from "../../../render/doc-port";
 import type { Checked, Departure, PageAnswer, SetIndex } from "../../../render/xsd-answer";
+import type { Pointed } from "../../../render/xsd-locate";
+import type { KeepAt } from "../../../render/xsd-kept";
 import type { Words } from "../../../render/xsd-findings";
 import { isRemote } from "../../../render/xsd-locate";
 import { XsdPort, xsdEngine, type XsdEngine, type XsdReads } from "../../../render/xsd-port";
@@ -39,6 +44,39 @@ export type Head =
   | { readonly k: "two"; readonly namespace: string }
   | { readonly k: "no-schema"; readonly namespace: string | null }
   | { readonly k: "off" };
+
+/** The Settings a check reads: whether XML files are checked, and the files pointed to. */
+export interface CheckSettings {
+  readonly on: boolean;
+  readonly pointed: readonly Pointed[];
+}
+/** The Settings the last check read: the next check starts on them while they are read again. */
+let lastSettings: CheckSettings | null = null;
+const sameSettings = (a: CheckSettings, b: CheckSettings) => a.on === b.on && JSON.stringify(a.pointed) === JSON.stringify(b.pointed);
+
+/**
+ * The Settings a check starts on, without waiting for their read: those the last check read, where they answer the
+ * same once read again (`same`); else `null`, and the check waits for `fresh`. Two reads of the profile at 6x come to
+ * some 50 ms, enough to put the check's first answer behind the outline's paint.
+ */
+export function settingsFor(read: () => Promise<CheckSettings>): { held: CheckSettings | null; same: Promise<boolean>; fresh: Promise<CheckSettings> } {
+  const held = heldSettings();
+  const fresh = read().then((s) => {
+    lastSettings = s;
+    return s;
+  });
+  return { held, same: held === null ? Promise.resolve(false) : fresh.then((s) => sameSettings(s, held)), fresh };
+}
+/** The Settings the last check read, `null` before the first. */
+export function heldSettings(): CheckSettings | null {
+  return lastSettings;
+}
+/** Forgets what checks hold from one document to the next: the Settings, the asks seen whole, the lines (tests). */
+export function forgetHeld(): void {
+  lastSettings = null;
+  seenWhole.clear();
+  linesKept.length = 0;
+}
 
 /** A departure placed on its line. */
 export interface Placed {
@@ -101,19 +139,82 @@ export function rootSays(text: string): RootSays | null {
 
 /**
  * The schema a document asks for, written as an entry the explorer's set reads: an import of its namespace from the
- * document's own folder, or an include of its no-namespace location. `null` where it says nothing of a schema.
+ * document's own folder, or an include of its no-namespace location. `null` where it says nothing of a schema. Named
+ * by its folder alone, so two documents of one folder that say the same of their schema ask for one set, and the
+ * second takes the set the first kept (`xsd-kept.ts`).
  */
 export function entryFor(path: string, root: RootSays): { path: string; text: string } | null {
   if (root.namespace === "" && root.location === null) return null;
-  const at = `${dirOf(path)}.knobas-schema-of-${baseOf(path)}.xsd`;
+  const at = `${dirOf(path)}.knobas-document-schema.xsd`;
   const loc = root.location === null ? "" : ` schemaLocation="${esc(root.location)}"`;
   const body = root.namespace === "" ? `<xs:include${loc}/>` : `<xs:import namespace="${esc(root.namespace)}"${loc}/>`;
-  // The document's own prefixes stand first, so a name in a finding is written as the document writes it.
+  // The document's own prefixes stand first, so a name in a finding is written as the document writes it; in one order,
+  // so the root read from the first tag and from the outline ask for one set.
   const binds = Object.entries(root.prefixes ?? {})
     .filter(([p]) => p !== "xs" && /^[A-Za-z_][\w.-]*$/.test(p))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([p, uri]) => ` xmlns:${p}="${esc(uri)}"`)
     .join("");
   return { path: at, text: `<xs:schema xmlns:xs="${XS}"${binds}>${body}</xs:schema>` };
+}
+
+/** Whether two readings of a root ask for the same check: the same location and the same entry. */
+export function sameAsk(path: string, a: RootSays | null, b: RootSays | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.namespace === b.namespace && a.location === b.location && entryFor(path, a)?.text === entryFor(path, b)?.text;
+}
+
+/** The largest document checked right behind the open (it crosses to the worker twice where the set is not kept). */
+export const ASK_BEHIND_CAP = 4 * 1024 * 1024;
+/** How many asks seen whole are remembered: a hint, the worker's kept sets decide. */
+const SEEN_WHOLE = 32;
+/** The asks (pin, entry, files pointed to) checked whole before, the least recent first. */
+const seenWhole = new Set<string>();
+const hintOf = (keep: KeepAt, entry: { path: string; text: string }, pointed: readonly Pointed[]) => JSON.stringify([keep, entry.path, entry.text, pointed]);
+/**
+ * Whether a check is likely answered by a set the worker kept whole: the same ask (pin, entry, files pointed to) was
+ * checked whole before. A hint, never a promise; only such a check starts beside the outline.
+ */
+export function likelyKept(path: string, root: RootSays | null, keep: KeepAt | null | undefined, pointed: readonly Pointed[]): boolean {
+  const entry = root === null ? null : entryFor(path, root);
+  return keep != null && entry !== null && seenWhole.has(hintOf(keep, entry, pointed));
+}
+/** How many documents' departure lines are kept. */
+const LINES_KEPT = 8;
+/**
+ * The lines the document worker put the last departures on, by the document's text and their paths: the same text
+ * reads to the same outline, so a document checked again places its departures without asking (its verdict is drawn
+ * in the outline's frame). The least recent first.
+ */
+const linesKept: { text: string; paths: string; lines: readonly number[] }[] = [];
+function keptLines(text: string, paths: string): readonly number[] | null {
+  const at = linesKept.findIndex((k) => k.paths === paths && k.text === text);
+  if (at === -1) return null;
+  const [k] = linesKept.splice(at, 1);
+  linesKept.push(k!);
+  return k!.lines;
+}
+function keepLines(text: string, paths: string, lines: readonly number[]): void {
+  if (keptLines(text, paths) !== null) return;
+  linesKept.push({ text, paths, lines });
+  if (linesKept.length > LINES_KEPT) linesKept.shift();
+}
+/** The departures' lines, from the document's worker or as it answered them for the same text before. */
+async function placesOf(doc: DocSession, text: string, findings: readonly Departure[]): Promise<readonly number[]> {
+  if (findings.length === 0) return [];
+  const xpaths = findings.map((f) => f.xpath);
+  const paths = JSON.stringify(xpaths);
+  const kept = keptLines(text, paths);
+  if (kept !== null) return kept;
+  const lines = await doc.places(xpaths);
+  keepLines(text, paths, lines);
+  return lines;
+}
+
+function sawWhole(hint: string): void {
+  seenWhole.delete(hint);
+  seenWhole.add(hint);
+  if (seenWhole.size > SEEN_WHOLE) seenWhole.delete(seenWhole.values().next().value!);
 }
 
 export class DocCheck {
@@ -147,28 +248,48 @@ export class DocCheck {
     return stopped.has(this.key);
   }
 
-  /** Looks for the document's schema and checks the document against it. */
-  async run(path: string, root: RootSays | null, text: string, doc: DocSession, reads: XsdReads, on: boolean): Promise<void> {
+  /**
+   * Looks for the document's schema and checks the document against it. `landed` settles when the outline has landed,
+   * true where it is well formed: no file is read and nothing is drawn before it.
+   */
+  async run(path: string, root: RootSays | null, text: string, doc: DocSession, reads: XsdReads, on: boolean, landed: Promise<boolean> = Promise.resolve(true)): Promise<void> {
     const run = ++this.#run;
     this.#port?.close();
     this.#port = null;
     this.found = [];
     this.schema = null;
+    /** The outline stands well formed, and this run is still the one: what it found may be drawn. */
+    const drawn = async () => (await landed) && run === this.#run;
     const entry = root === null ? null : entryFor(path, root);
     if (entry === null) {
-      this.head = { k: "no-schema", namespace: null };
+      if (await drawn()) this.head = { k: "no-schema", namespace: null };
       return;
     }
     if (!on || this.stopped) {
-      this.head = { k: "off" };
+      if (await drawn()) this.head = { k: "off" };
       return;
     }
-    this.head = { k: "looking", found: null, how: null };
     const port = new XsdPort(this.#engine);
     this.#port = port;
     // Lean: the check draws no declaration, so none crosses back to the page.
-    const answer = await port.open(entry.path, entry.text, reads, root!.namespace, true);
+    const opening = port.open(entry.path, entry.text, reads, root!.namespace, true, landed);
+    // An ask seen whole before is likely kept whole: its check is asked right behind the open, so the worker runs it
+    // while the page draws. It counts only where the open answers the set whole, with nothing to ask again.
+    const hint = reads.keep != null ? hintOf(reads.keep, entry, reads.pointed) : null;
+    const likely = hint !== null && seenWhole.has(hint) && text.length <= ASK_BEHIND_CAP;
+    const asked = likely ? port.check(text) : null;
+    const answer = await opening;
     if (run !== this.#run) return;
+    // A set kept whole is checked beside the outline, and its departures' lines asked for: the document worker answers
+    // them right behind the outline, which it reads first. A document with none needs no line: its verdict is drawn in
+    // the outline's frame.
+    const early = answer.ok && answer.need.length === 0 ? (asked ?? port.check(text)) : null;
+    const earlyLines =
+      early === null
+        ? null
+        : early.then((c) => (c.state !== "checked" || run !== this.#run ? null : placesOf(doc, text, c.findings))).catch(() => null);
+    if (!(await drawn())) return;
+    this.head = { k: "looking", found: null, how: null };
     if (!answer.ok) {
       this.head = { k: "not-checked", warn: true, lines: [answer.error], against: null };
       return;
@@ -191,19 +312,20 @@ export class DocCheck {
     const against = file.url !== null ? baseOf(file.url) : baseOf(file.path);
     const how = file.from !== null ? `in ${file.from.name}, at ${file.from.branch}` : (FOUND[file.found ?? ""] ?? "");
     this.head = { k: "looking", found: against, how };
-    const checked: Checked = await port.check(text);
+    const checked: Checked = await (early ?? port.check(text));
     if (run !== this.#run) return;
     if (checked.state !== "checked") {
       const quiet = checked.why === "larger than knobas checks";
       this.head = { k: "not-checked", warn: !quiet, lines: checked.detail.length > 0 ? [...checked.detail] : [checked.why], against };
       return;
     }
-    const lines = await doc.places(checked.findings.map((f) => f.xpath));
+    const lines = (await earlyLines) ?? (await placesOf(doc, text, checked.findings));
     if (run !== this.#run) return;
     this.found = checked.findings
       .map((f: Departure, i) => ({ line: lines[i]! > 0 ? lines[i]! : f.line, words: f.words, raw: f.message.trim() }))
       .sort((a, b) => a.line - b.line);
     this.head = { k: "checked", count: checked.findings.length, total: checked.total, against, how, ms: checked.ms + checked.compileMs, readMs, files: index.files.length - 1 };
+    if (hint !== null) sawWhole(hint);
   }
 
   /** The document is not well formed: nothing of a check stands, and the head is the outline's. */

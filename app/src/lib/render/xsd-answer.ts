@@ -36,6 +36,7 @@ import {
   type SimpleShape,
 } from "./xsd";
 import { baseOf, isRemote, type Elsewhere, type How, type Pointed, type SchemaIndex } from "./xsd-locate";
+import { attach, detach, dropMoved, forget, keepIfWhole, keptOf, keyOf, release, sameAnswers, type Kept, type KeepAt } from "./xsd-kept";
 import { findingWords, type Finding, type Words } from "./xsd-findings";
 import { rx } from "./xsd-pattern";
 import { XS, localOf, nsOf } from "./xsd-xml";
@@ -236,7 +237,7 @@ export interface TreeRow {
 }
 
 export type XsdCall =
-  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean }
+  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean; keep?: KeepAt }
   | { kind: "addFiles"; files: { path: string; text: string | null }[]; paths?: string[]; index?: SchemaIndexWire; elsewhere?: { namespace: string; list: Elsewhere[] } }
   | { kind: "pointed"; pointed: Pointed[] }
   | { kind: "page"; place: string }
@@ -248,7 +249,9 @@ export type XsdCall =
   | { kind: "check"; xml: string }
   | { kind: "example"; key: string; options: ExampleOptions }
   | { kind: "declOf"; names: { ns: string; local: string }[] }
-  | { kind: "close" };
+  | { kind: "close" }
+  /** Every kept set dropped (`xsd-kept.ts`): a pick, a download, a Settings change. Asks no session. */
+  | { kind: "forget" };
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
 export interface SchemaIndexWire {
@@ -276,6 +279,12 @@ export interface XsdSession {
   /** What each row id stands for, for the set's life: an element and the declarations on its way down. */
   rows: Map<string, { el: ElementDecl; trail: readonly object[] }>;
   tree: Map<string, { el: ElementDecl; trail: readonly object[] }>;
+  /** What the set is kept by once whole, where the page's reads are pinned (`xsd-kept.ts`). */
+  keep?: KeepAt & { readonly key: string };
+  /** The kept set this session reads, shared until it changes it. */
+  kept?: Kept;
+  /** A kept set served once what moves under its pin has answered as it did. */
+  verifying?: boolean;
 }
 export type XsdSessions = Map<number, XsdSession>;
 
@@ -305,22 +314,59 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
 
 /** Answers one call of one session. */
 export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall, bundled: Bundled): unknown {
+  const store = keptOf(sessions);
+  if (call.kind === "forget") {
+    forget(store);
+    return null;
+  }
   if (call.kind === "open") {
-    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
+    const was = sessions.get(session);
+    if (was !== undefined) release(store, was);
+    const keep = call.keep === undefined ? undefined : { ...call.keep, key: keyOf(call.keep, call, bundled) };
+    if (keep !== undefined) {
+      dropMoved(store, keep);
+      const kept = store.get(keep.key);
+      if (kept !== undefined && kept.base.set !== null) {
+        // The set kept whole: served at once, or once what moves under the pin has answered as it did.
+        const s = attach(store, kept);
+        sessions.set(session, s);
+        const answer = opened(kept.base.set, s.lean === true, s.index);
+        if (kept.verify.length === 0 || !answer.ok) return answer;
+        s.verifying = true;
+        return { ...answer, need: [...kept.verify] };
+      }
+    }
+    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map(), ...(keep !== undefined ? { keep } : {}) };
     sessions.set(session, s);
-    return opened(load(s, bundled), s.lean === true, s.index);
+    const answer = opened(load(s, bundled), s.lean === true, s.index);
+    keepIfWhole(store, s);
+    return answer;
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
   switch (call.kind) {
     case "addFiles": {
+      if (s.verifying === true) {
+        if (s.kept !== undefined && sameAnswers(s, s.kept.verify, call.files, call.elsewhere)) {
+          delete s.verifying;
+          return opened(s.set!, s.lean === true, s.index);
+        }
+        // Something under the pin moved: the kept set is stale, and this session reads the set again.
+        if (s.kept !== undefined) store.delete(s.kept.key);
+      }
+      detach(store, s);
       for (const f of call.files) s.texts.set(f.path, f.text);
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      return opened(load(s, bundled), s.lean === true, s.index);
+      const answer = opened(load(s, bundled), s.lean === true, s.index);
+      keepIfWhole(store, s);
+      return answer;
     }
     case "pointed":
+      // Pointed elsewhere, the set is no longer the one its key names: it is read again and not kept.
+      detach(store, s);
+      delete s.keep;
       s.pointed = call.pointed;
       return opened(load(s, bundled), s.lean === true, s.index);
     case "page":
@@ -355,6 +401,7 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
     case "declOf":
       return declarationOf(s, call.names);
     case "close":
+      release(store, s);
       sessions.delete(session);
       return null;
   }

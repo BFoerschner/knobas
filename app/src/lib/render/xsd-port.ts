@@ -9,9 +9,12 @@
  * - **The repository is indexed only when asked** (`?index`, `xsd-index.ts`), and another repository only when a
  *   reference is not found in this one (`?elsewhere:<namespace>`).
  * - **A schema opened again** reads its files from the worker's kept trees (by text): only the compile runs again.
+ * - **The check's set is kept whole** where the reads are pinned to a commit (`XsdReads.keep`, `xsd-kept.ts`): a
+ *   document opened again, or another on the same schema, is answered whole by the open, with nothing read.
  */
 import type { Checked, Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
 import type { Elsewhere, Pointed } from "./xsd-locate";
+import type { KeepAt } from "./xsd-kept";
 import type { Example, ExampleOptions } from "./xsd-example";
 
 /** Runs one call of one session where the set is kept. */
@@ -59,6 +62,14 @@ function workerEngine(): XsdEngine | null {
     });
 }
 
+/**
+ * Every set the worker keeps whole is dropped (`xsd-kept.ts`): a pick, a download, *Download again*, a file pointed to
+ * forgotten. A worker not started keeps nothing.
+ */
+export function forgetKeptSets(): void {
+  worker?.postMessage({ id: ++nextCall, session: 0, call: { kind: "forget" } satisfies XsdCall });
+}
+
 /** The set kept on this thread: tests, and the fallback. */
 export function localXsdEngine(): XsdEngine {
   const sessions = new Map();
@@ -93,6 +104,8 @@ export interface XsdReads {
   /** Other synced repositories' `.xsd` that declare a namespace (`files_declaring`). */
   readonly elsewhere?: (namespace: string) => Promise<Elsewhere[]>;
   readonly pointed: readonly Pointed[];
+  /** What the reads stand on, where it does not move (a commit, or the working tree's stamp): the set is kept whole by it. */
+  readonly keep?: KeepAt | null;
 }
 
 let nextSession = 0;
@@ -121,14 +134,19 @@ export class XsdPort {
     this.#engine = engine;
   }
 
-  /** Reads the opened file alone and answers at once; the files it names are read after (`onindex`). */
-  async open(entry: string, text: string, reads: XsdReads, home?: string, lean = false): Promise<Opened> {
+  /**
+   * Reads the opened file alone and answers at once; the files it names are read after (`onindex`), once `after`
+   * settles true (the XML view's outline: its reads never slow the outline's paint). A set kept whole needs none.
+   */
+  async open(entry: string, text: string, reads: XsdReads, home?: string, lean = false, after: Promise<boolean> | null = null): Promise<Opened> {
     this.#reads = reads;
     this.#entry = entry;
-    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed], ...(home !== undefined ? { home } : {}), ...(lean ? { lean } : {}) }));
+    const keep = reads.keep ?? null;
+    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed], ...(home !== undefined ? { home } : {}), ...(lean ? { lean } : {}), ...(keep !== null ? { keep } : {}) }));
     if (answer.ok) {
       this.index = answer.index;
-      if (answer.need.length > 0) this.whole = this.#follow(answer.need);
+      const need = answer.need;
+      if (need.length > 0) this.whole = after === null ? this.#follow(need) : after.then((go) => (go ? this.#follow(need) : undefined));
     }
     return answer;
   }
