@@ -6,6 +6,7 @@ import { bundledFiles, familyFiles } from "./xsd-fixture";
 import { plain } from "./xsd-findings";
 import { sniffNamespace } from "./xsd-sniff";
 import { ns } from "./xml-names";
+import { XS } from "./xsd-xml";
 
 const ENTRY = "schemas/opentrans/opentrans_2_1.xsd";
 
@@ -58,6 +59,16 @@ describe("libxml2 judges a document against the set, from memory (section 24)", 
     files.set("vendor/bme/bmecat_2005.xsd", files.get("schemas/opentrans/bmecat_2005.xsd")!);
     files.delete("schemas/opentrans/bmecat_2005.xsd");
     const answer = await session(files).ask(fixture("order-4710.xml"));
+    expect(answer).toMatchObject({ state: "checked", findings: [] });
+  });
+
+  test("a file found elsewhere is read from there with its own files beside it: libxml2 asks for them where the reference pointed", async () => {
+    // The document's schema names opentrans/opentrans_2_1.xsd beside it; the family stands in vendor/ot/, found by name.
+    // libxml2 knows the found file by the address it asked for, and asks for its imports beside that address.
+    const files = new Map([...familyFiles("opentrans-2.1", "vendor/ot/")]);
+    const entry = "schemas/main.xsd";
+    files.set(entry, `<xs:schema xmlns:xs="${XS}"><xs:import namespace="${ns("www.opentrans.org/XMLSchema/2.1")}" schemaLocation="opentrans/opentrans_2_1.xsd"/></xs:schema>`);
+    const answer = await session(files, entry).ask(fixture("order-4710.xml"));
     expect(answer).toMatchObject({ state: "checked", findings: [] });
   });
 
