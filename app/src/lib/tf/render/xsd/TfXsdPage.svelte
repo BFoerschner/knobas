@@ -5,6 +5,8 @@
   derives from it, and who uses it. A followed name puts *Back to ⟨where you were⟩* at its top.
 -->
 <script lang="ts">
+  // Its own stylesheet: the XML view draws it too, before any schema file has loaded the explorer's.
+  import "../../css/xsd.css";
   import type { Snippet } from "svelte";
 
   import type { Docu } from "../../../render/xsd";

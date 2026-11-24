@@ -5,6 +5,8 @@
   asks for them, in any repository.
 -->
 <script lang="ts">
+  // Its own stylesheet: the XML view draws it too, before any schema file has loaded the explorer's.
+  import "../../css/xsd.css";
   import TfDialog from "../../settings/TfDialog.svelte";
   import { filterKeys } from "../../filter-keys";
   import type { Candidate } from "./xsd-point";
@@ -44,7 +46,7 @@
 <TfDialog title="Point to a file" subtitle={location ?? namespace ?? ""} {onclose} className="tf-xsd-point">
   {#snippet body()}
     <p class="tf-xsd-pointwhy">
-      {#if namespace !== null}A file that declares <code class="tf-xsd-code">{namespace === "" ? "no namespace" : namespace}</code>. {/if}It is used from now on wherever a
+      {#if namespace !== null}A file that declares <code class="tf-xsd-code">{namespace === "" ? "no namespace" : namespace}</code>.{" "}{/if}It is used from now on wherever a
       schema or a document asks for {location !== null ? "this location" : "this namespace"}.
     </p>
     <label class="tf-minif">
