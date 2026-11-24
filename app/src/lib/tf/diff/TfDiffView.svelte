@@ -72,6 +72,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { reviewSubject } from "../../shell/queued-toast";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
     cardIn,
@@ -362,6 +363,15 @@
   $effect(() => () => {
     for (const stop of unroot.values()) stop();
     unroot.clear();
+  });
+  // The window back in focus, or the page shown again: each folder's two sides look again (a look starts nothing), so a
+  // tool changed meanwhile, or the working tree, shows its side as made from an earlier state (Björn, 2026-11-24: a
+  // kept Compare drew a side an older version of the tool made as current).
+  onFocusWhileShown(pageVisible(), () => {
+    for (const compare of compares.values()) {
+      compare.before.look();
+      compare.after.look();
+    }
   });
 
   /**

@@ -279,3 +279,26 @@ test("a generated file picked lands with its head at the band's foot, and the ra
     HTMLElement.prototype.getBoundingClientRect = rect;
   }
 });
+
+test("the window back in focus looks at each folder's sides again: a side the tool changed under turns stale (2026-11-24)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("docs/index.md"), file("lib/x.rs")], fake);
+  await settle();
+  expect(barButton("Run again")).toBeDefined();
+  const looks = fake.asked.length;
+  // The tool changed: the backend's key for the commit's side moved, and what it holds is from an earlier state.
+  fake.keep(laneOf(SHA), "a", false);
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(fake.asked.slice(looks).map((a) => [a.ask, a.lane])).toEqual([
+    ["look", laneOf(SHA)],
+    ["look", laneOf(WT)],
+  ]);
+  expect(bar().querySelector("[role=status]")!.textContent).toBe("Made before Low-code site changed.");
+  expect(target.querySelectorAll(".tf-dunder .tf-diff").length, "what was compared stays where it is").toBe(2);
+  expect(barButton("Run")).toBeDefined();
+});
