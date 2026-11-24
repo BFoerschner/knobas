@@ -73,6 +73,8 @@ const key = (k) => `() => document.querySelector('.tf-xv-lines .tf-code').dispat
 const settle = () => sleep(700);
 
 const ORDER = "orders/order-4711.xml";
+/** The JSON view's export (J1): 48 orders, 1,189 lines, five levels. */
+const EXPORT = "exports/orders-2026-11.json";
 const OTHER = "orders/order-4710.xml";
 const BIG = "orders/order-big.xml";
 const LINE_ROWS = ".tf-xv .tf-l";
@@ -101,6 +103,13 @@ const CASES = [
     for (let i = 0; i < 100 && !/departures/.test(document.querySelector('.tf-xv-verdict')?.textContent ?? ''); i++) await wait(50);
     document.querySelector('.tf-xv-schema').click();
   }`, act: click("[role=menuitem]", "Point to another file…"), sel: ".tf-xsd-pointrow" },
+  // The JSON view (J1): the export opened, its 48 orders folded by their caret, three levels by the key.
+  { name: "json", label: "the JSON export (1,189 lines) opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(EXPORT)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
+  { name: "json-fold", label: "the export's orders (48 items) folded by their caret", kind: "press", before: go(file(EXPORT)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => document.querySelector('.tf-xv .tf-l[data-n="6"] .tf-xv-caret').click()`, sel: ".tf-xv-fold", text: "items" },
+  { name: "json-three", label: "three levels of the export (the 3 key)", kind: "press", before: go(file(EXPORT)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
+  // jq (J2): the session warmed by `.` first, so a key costs its filter and the marks; the dev fake answers as the helper would.
+  { name: "jq-pick", label: "a jq key that picks, .orders[] | select(.total > 2000), to its 22 values marked", kind: "press", before: go(file(EXPORT)), prep: query("."), act: query(".orders[] | select(.total > 2000)"), sel: ".tf-xv-qsay b", text: "22 values" },
+  { name: "jq-make", label: "a jq key that makes a value, .orders | map(.total) | add", kind: "press", before: go(file(EXPORT)), prep: query("."), act: query(".orders | map(.total) | add"), sel: ".tf-xv-qsay", text: "makes new values" },
   { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
   { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
   { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },

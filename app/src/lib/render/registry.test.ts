@@ -114,3 +114,13 @@ test("a schema opens as Schema, with the XML view and Source next; a .xsd that i
   // A schema at another name is the XML view's: the pattern is the cheap guard, the sniff the true one.
   expect(ids("schemas/order.xml", `<xs:schema ${XS_DECL}/>`)).toEqual(["xml", "source"]);
 });
+
+test("a JSON file opens in the JSON view, Source one pick away; an OpenAPI spec in JSON opens as API with the JSON view next", () => {
+  const ids = (path: string, text: string) => renderersFor({ path, binary: false, text }).map((r) => r.id);
+  expect(ids("exports/orders.json", '{\n  "orders": []\n}')).toEqual(["json", "source"]);
+  expect(ids("data/rows.ndjson", '{"a": 1}\n{"a": 2}\n')).toEqual(["json", "source"]);
+  expect(ids("api/openapi.json", '{"openapi": "3.1.0", "info": {"title": "x", "version": "1"}, "paths": {}}')).toEqual(["openapi", "json", "source"]);
+  // JSON with comments stays Source: jq does not read it. A .json that is no JSON is not offered the view.
+  expect(ids("tsconfig.jsonc", '{ // a comment\n}')).toEqual(["source"]);
+  expect(ids("notes.json", "not json at all")).toEqual(["source"]);
+});

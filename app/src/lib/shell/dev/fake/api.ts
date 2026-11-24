@@ -7,7 +7,8 @@
  * takes 2.6 s (so *Stop* can be pressed). A refusal the app makes before sending is made here too: a request that
  * changes something on a host that is not this computer, without the page's yes.
  */
-import type { ApiAnswer, ApiSend, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "../../../ipc/api";
+import type { ApiAnswer, ApiSend, JsonQueryAnswer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "../../../ipc/api";
+import { repoFileBytes } from "./views/repos";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 
@@ -24,6 +25,49 @@ const fakeImageHosts: { hosts: string[] } = { hosts: [] };
 /** The schema check's two rows (ADR-0058): checking on, nothing pointed to. */
 const fakeSchemas: { check: XmlCheck; locations: SchemaLocations } = { check: { on: true }, locations: { pointed: [] } };
 keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped, fakeImageHosts, fakeSchemas);
+
+/** The fake's jq sessions: each document's value, parsed once. */
+const fakeJqDocs = new Map<number, unknown>();
+keepSeed(fakeJqDocs);
+function fakeJqOpen(text: string | null, entityId: string | null, path: string | null): number {
+  const id = fakeJqDocs.size + 1;
+  let doc: unknown = null;
+  try {
+    const bytes = text === null && entityId !== null && path !== null ? repoFileBytes(entityId, path) : undefined;
+    doc = JSON.parse(text ?? (bytes === undefined ? "null" : new TextDecoder().decode(bytes)));
+  } catch {
+    doc = null;
+  }
+  fakeJqDocs.set(id, doc);
+  return id;
+}
+/**
+ * A few of jq's filters, enough for the dev fake's probes: `.`, `.a.b`, `[n]`, `[]`, `| length`, `| select(.k > n)`,
+ * `| map(.k)`, `| add`. Others say the fake has no jq.
+ */
+function fakeJq(id: number, filter: string): JsonQueryAnswer {
+  const t0 = performance.now();
+  type At = { v: unknown; path: (string | number)[] | null };
+  let at: At[] = [{ v: fakeJqDocs.get(id), path: [] }];
+  for (const stage of filter.split("|").map((p) => p.trim())) {
+    const sel = /^select\(\.(\w+) > (-?[\d.]+)\)$/.exec(stage);
+    const map = /^map\(\.(\w+)\)$/.exec(stage);
+    if (sel !== null) at = at.filter((a) => typeof (a.v as Record<string, unknown> | null)?.[sel[1]!] === "number" && (a.v as Record<string, number>)[sel[1]!]! > Number(sel[2]));
+    else if (stage === "length") at = at.map((a) => ({ v: Array.isArray(a.v) ? a.v.length : Object.keys((a.v as object | null) ?? {}).length, path: null }));
+    else if (stage === "add") at = at.map((a) => ({ v: (a.v as number[]).reduce((s, x) => s + x, 0), path: null }));
+    else if (map !== null) at = at.map((a) => ({ v: (a.v as Record<string, unknown>[]).map((x) => x[map[1]!]), path: null }));
+    else if (/^(\.\w+|\[\d*\]|\.)+$/.test(stage)) {
+      for (const step of stage.match(/\.\w+|\[\d*\]/g) ?? []) {
+        if (step === "[]") at = at.flatMap((a) => (Array.isArray(a.v) ? a.v.map((v: unknown, i: number) => ({ v, path: a.path === null ? null : [...a.path, i] })) : []));
+        else if (step.startsWith("[")) at = at.map((a) => ({ v: (a.v as unknown[] | null)?.[Number(step.slice(1, -1))], path: a.path === null ? null : [...a.path, Number(step.slice(1, -1))] }));
+        else at = at.map((a) => ({ v: (a.v as Record<string, unknown> | null)?.[step.slice(1)], path: a.path === null ? null : [...a.path, step.slice(1)] }));
+      }
+    } else return { state: "failed", why: `The dev fake reads no jq like ${stage}.`, ms: 0 };
+  }
+  const ms = Math.round(performance.now() - t0);
+  const picked = at.every((a) => a.path !== null);
+  return { state: "answered", values: at.slice(0, 500).map((a) => JSON.stringify(a.v)), count: at.length, paths: picked ? at.slice(0, 5000).map((a) => a.path!) : null, ms };
+}
 
 const local = (host: string) => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(host) || host.endsWith(".localhost");
 
@@ -119,6 +163,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     xsd_downloaded: () => null,
     xsd_forget: () => undefined,
     xsd_save_example: (args) => `~/Downloads/${String(args["name"])}`,
+    // The dev fake has no jq: a session answers the path filters `fakeJq` reads, and says so for others.
+    json_query_open: (args) => fakeJqOpen(typeof args["text"] === "string" ? args["text"] : null, typeof args["entityId"] === "string" ? args["entityId"] : null, typeof args["path"] === "string" ? args["path"] : null),
+    json_query: (args) => fakeJq(Number(args["id"]), String(args["filter"])),
+    json_query_close: () => undefined,
     set_image_hosts: (args) => {
       fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
       return structuredClone(fakeImageHosts);

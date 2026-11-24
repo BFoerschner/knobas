@@ -29,6 +29,12 @@ use crate::renderers::{Ended, run_argv};
 
 /// The first argument that makes the app binary a step's child.
 pub const ARG: &str = "--knobas-pipeline-step";
+/// The first argument that makes it a jq session's child (the XML view's
+/// design, section 26): the document once on stdin, its length in decimal
+/// first and a newline after it, then a filter a line, each a JSON string;
+/// on stdout an answer a filter, its length in decimal, a newline, and the
+/// answer as JSON ([`super::jq::SessionAnswer`]). It ends when stdin does.
+pub const SESSION_ARG: &str = "--knobas-jq-session";
 /// The step failed; its error is on stderr.
 const EXIT_ERROR: i32 = 3;
 /// The step's output passed the cap.
@@ -52,7 +58,7 @@ pub fn use_helper(program: impl Into<PathBuf>) {
 /// started from: on macOS the bundle's binary; an app moved or replaced while
 /// running fails the step with the reason, or runs the newer binary, whose
 /// refusal of a step it cannot read fails the step too, never the app.
-fn program() -> Result<PathBuf, String> {
+pub(super) fn program() -> Result<PathBuf, String> {
     match HELPER.get() {
         Some(program) => Ok(program.clone()),
         None if cfg!(target_os = "linux") => Ok(PathBuf::from("/proc/self/exe")),
@@ -118,7 +124,11 @@ fn crashed(status: Option<i32>, stderr: &[u8]) -> String {
 #[must_use]
 pub fn main_if_asked() -> Option<i32> {
     let mut args = std::env::args_os().skip(1);
-    if args.next()? != ARG {
+    let first = args.next()?;
+    if first == SESSION_ARG {
+        return Some(session());
+    }
+    if first != ARG {
         return None;
     }
     let cap = args
@@ -165,6 +175,72 @@ fn child(cap: u64) -> i32 {
         }
         Err(error) => said(&format!("no thread for the step: {error}")),
     }
+}
+
+/// A jq session's child: the document read once, then a filter a line until
+/// stdin ends, each answered on stdout. A filter that overflows the stack
+/// ends the child, and the app starts another for the next filter.
+fn session() -> i32 {
+    let worker = std::thread::Builder::new()
+        .name("knobas-jq-session".to_owned())
+        .stack_size(WORKER_STACK)
+        .spawn(|| {
+            let code = serve().map_or_else(|error| said(&error), |()| 0);
+            std::process::exit(code)
+        });
+    match worker {
+        Ok(worker) => {
+            let _ = worker.join();
+            said("the session's thread ended without an answer")
+        }
+        Err(error) => said(&format!("no thread for the session: {error}")),
+    }
+}
+
+fn serve() -> Result<(), String> {
+    use std::io::BufRead as _;
+    let mut stdin = std::io::stdin().lock();
+    let mut header = String::new();
+    stdin
+        .read_line(&mut header)
+        .map_err(|error| format!("the document could not be read: {error}"))?;
+    let length: usize = header
+        .trim()
+        .parse()
+        .map_err(|_| "the document is not framed as the app frames it".to_owned())?;
+    let mut document = vec![0; length];
+    stdin
+        .read_exact(&mut document)
+        .map_err(|error| format!("the document could not be read: {error}"))?;
+    let inputs = super::jq::session_inputs(&document).map_err(|error| match error {
+        Failure::Error(said) => said,
+        _ => "the document could not be read".to_owned(),
+    })?;
+    drop(document);
+    let mut out = std::io::stdout().lock();
+    for line in stdin.lines() {
+        let line = line.map_err(|error| format!("a filter could not be read: {error}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let answer = match serde_json::from_str::<String>(&line) {
+            Ok(filter) => super::jq::session_ask(&filter, &inputs),
+            Err(error) => super::jq::SessionAnswer {
+                error: Some(format!(
+                    "the filter is not framed as the app frames it: {error}"
+                )),
+                ..super::jq::SessionAnswer::default()
+            },
+        };
+        let json = serde_json::to_vec(&answer).map_err(|error| error.to_string())?;
+        writeln!(out, "{}", json.len())
+            .and_then(|()| out.write_all(&json))
+            .and_then(|()| out.flush())
+            .map_err(|error| format!("an answer could not be written: {error}"))?;
+    }
+    // What was read is never dropped: dropping a deep value recurses as writing one does.
+    std::mem::forget(inputs);
+    Ok(())
 }
 
 fn said(error: &str) -> i32 {

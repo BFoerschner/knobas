@@ -44,7 +44,9 @@ mod values;
 
 #[cfg(feature = "test-util")]
 pub use child::use_helper;
-pub use child::{ARG as CHILD_ARG, main_if_asked};
+pub use child::{ARG as CHILD_ARG, SESSION_ARG, main_if_asked};
+pub use jq::{SESSION_PATHS, SESSION_VALUES, SessionAnswer};
+pub mod session;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};

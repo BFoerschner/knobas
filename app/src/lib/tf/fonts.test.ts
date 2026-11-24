@@ -482,9 +482,9 @@ test("the lists of code's lines hear code's size, and the text measured in scrip
   for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte", "lib/tf/render/TfOasAnswer.svelte"]) {
     expect(source(file), file).toMatch(/const rowsOf = codeRows\((13, 1\.6|12, 1\.55|12, 1\.6)\);\s*const win = new Windowed<\w+>\(\{[^}]*estimate: rowsOf\.estimate[^}]*textSize: rowsOf\.textSize[^}]*\}\)/);
   }
-  // A file's source is drawn by `TfLines` (Source and the XML view share it): its rows hear code's size unless the view
-  // holds one height of its own.
-  expect(source("lib/tf/code/TfLines.svelte")).toMatch(/const rowsOf = codeRows\(13, 1\.6\);[\s\S]*?const win = new Windowed<\w+>\(\{[^}]*estimate: fixed \?\? rowsOf\.estimate[^}]*textSize: fixed === null \? rowsOf\.textSize : null[^}]*\}\)/);
+  // A file's source is drawn by `TfLines` (Source and the XML view share it): its rows hear code's size, and so does a
+  // view's one height of its own, given at 100 % (`TfLines.rows.test.svelte.ts`).
+  expect(source("lib/tf/code/TfLines.svelte")).toMatch(/const rowsOf = codeRows\(13, 1\.6\);[\s\S]*?const win = new Windowed<\w+>\(\{[^}]*estimate: tall \?\? rowsOf\.estimate[^}]*textSize:\s*fixed === null\s*\?\s*rowsOf\.textSize\s*:\s*\(heard\) =>\s*fonts\.onCodeRows\(/);
   expect(source("lib/tf/repo/TfRepoFiles.svelte")).toMatch(/<TfLines\b/);
   // A run's step names and the day strip's labels are fitted by a canvas: at the role's size, again when it changes.
   expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const px = \(\(command \? 11 : 12\) \* fonts\.size\(role\)\) \/ 100;\s*void fonts\.family\(role\);/);

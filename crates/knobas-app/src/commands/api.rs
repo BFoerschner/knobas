@@ -176,6 +176,67 @@ pub async fn xsd_save_example(name: String, text: String) -> Result<String, IpcE
     Ok(path.display().to_string())
 }
 
+/// Opens a jq session over a JSON document (the XML view's design, section
+/// 26): the file's bytes as `entity_file_bytes` reads them, or `text` where
+/// the view draws something else than the file (a pipeline's answer).
+/// Answers the session's id.
+///
+/// # Errors
+/// As `entity_file_bytes`; neither a file nor a text named.
+#[tauri::command]
+pub async fn json_query_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: Option<String>,
+    path: Option<String>,
+    commit: Option<String>,
+    text: Option<String>,
+) -> Result<u32, IpcError> {
+    let document = if let Some(text) = text {
+        text.into_bytes()
+    } else {
+        let (Some(entity_id), Some(path)) = (entity_id, path) else {
+            return Err(IpcError::invalid("A jq session needs a file or a text."));
+        };
+        let state = crate::sources::state(&app)?;
+        crate::commands::entity::entity_file_bytes_inner(
+            &state.pool,
+            &state.secrets,
+            &state.registry,
+            &state.live,
+            &entity_id,
+            &path,
+            commit.as_deref(),
+        )
+        .await?
+    };
+    Ok(app
+        .state::<crate::file_pipeline::session::JqSessions>()
+        .open(document))
+}
+
+/// A filter asked of session `id`: its first values, their count and the
+/// paths of what it picked; stopped past its deadline.
+///
+/// # Errors
+/// The session has ended.
+#[tauri::command]
+pub async fn json_query<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: u32,
+    filter: String,
+) -> Result<crate::file_pipeline::session::JsonQueryAnswer, IpcError> {
+    app.state::<crate::file_pipeline::session::JqSessions>()
+        .query(id, &filter)
+        .await
+}
+
+/// Ends session `id` and its helper.
+#[tauri::command]
+pub fn json_query_close<R: tauri::Runtime>(app: tauri::AppHandle<R>, id: u32) {
+    app.state::<crate::file_pipeline::session::JqSessions>()
+        .close(id);
+}
+
 /// An image at an address in a document, loaded on the press that asks (the XML view's design, section 14): one `GET`,
 /// no cookie, the bytes sniffed, kept in memory.
 ///

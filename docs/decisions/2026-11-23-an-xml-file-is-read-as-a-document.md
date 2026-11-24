@@ -57,6 +57,31 @@ With the schema explorer's model (`docs/decisions/2026-11-23-an-xml-schema-is-ex
 
 Measured on the built app (`testenv/perf/doc.mjs` with `?fake-xsd`, headless Chrome on the WSL box under the pc ticket, median of five, ms at 1x / 6x): at 1440 x 868 the order opened to its check's verdict, five departures, 61 / 239, `N` to the first departure 18 / 132; at 2560 x 1440 at 1.25 the verdict 77 / 320, `N` 20 / 142; at 1920 x 1080 at 2 the verdict 282 and `N` 153 at 6x. **Over its line**: the verdict at 6x on 2560 x 1440 at 1.25, 320 against 300 for a page; the page itself is usable from its first lines (178), and the verdict is paint on lines that stand, like the carets, which land at 269 to 327 there on the same build. `N` at 6x on 1920 x 1080 at 2 is 153 against 150. No line moved when the marks landed.
 
+## The JSON view, built (J1, 2026-11-24)
+
+Section 25: a JSON file opens in the same view.
+
+- **Which files**: `*.json`, `*.geojson`, `*.webmanifest`, `*.har`, `*.ipynb`, `*.jsonl` and `*.ndjson` whose text starts with `{` or `[` (`render/json-sniff.ts`); `*.jsonc` and `*.json5` stay Source. The registry's *JSON view* stands after the API explorer, so an OpenAPI spec in JSON opens as *API* with *JSON view* next, and ahead of Source, so it is every other JSON file's default.
+- **The outline** (`render/json-outline.ts`, the spike's `scanJson`) is the XML outline's columns where they mean the same, row 0 the document and the root under it; its nesting is walked with a stack of its own, so a deep file cannot overflow the reader. A line-delimited file holds a value a line. A file that is not JSON is drawn, and the head says where it stops, as for XML.
+- **The model's JSON half** (`render/doc-json.ts`): an object folds counting its members, an array its items; the way down is a jq path's steps (`.`, `orders`, `[2]`, `attachments`, `[0]`, `content`); folds are kept by their jq paths; the picked value says *Object*, *Array*, *String*, *Number* or *Literal*, an object its members, an array its items by kind. **A string is a value**: its bytes inside its quotes, read as a JSON string (`TakeAs::JsonString`), its sibling members `type`, `contentType` or `mime` saying what it is, `fileName` what it is called; a field is named by its last two members, an array's items `[]` (`attachments[].content`). A one-line file is laid out, every value written as it stands.
+- **The head says *Well formed* and *JSON is not checked against a schema*.** No schema is looked for; the XPath field is not drawn (jq is J2's).
+- **A pipeline's JSON answer** (a `.json.gz` through *gunzip* and *jq*) is drawn by the JSON view too, the default for its name.
+- **The export** (`fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json`, the clickdummy's) is in the seed's step 4c and `?fake-xml`.
+
+Measured on the built app (`testenv/perf/doc.mjs`, the same setting as X2), ms at 1x / 6x: at 1440 x 868 the export opened from the README to its carets 25 / 99, its 48 orders folded by their caret 8 / 21, three levels by the key 14 / 63; at 2560 x 1440 at 1.25, 39 / 155, 6 / 26, 14 / 95. Nothing moved (`moves.mjs`, json-export, at 2560 x 1440 at 1.25, 1x and 6x).
+
+## jq in the JSON view, built (J2, 2026-11-24)
+
+Section 26: the JSON view asks with jq where the XML view asks with XPath, in the same field, rail and marks.
+
+- **A helper is kept running for the document** (`crates/knobas-app/src/file_pipeline/session.rs`): the app's own binary as a child in `--knobas-jq-session` mode, the jq step's jaq, so a filter that builds a value too deep for the stack ends the child and never the app. It reads the document once; each filter after costs the filter alone. A filter has 1.5 s (20 s for a child just started, which reads the document first); past that the child is ended, the answer says so, and the next filter starts another. A session ends with its view, and after two minutes with nothing asked. Commands `json_query_open` (a file by entity and path, or text: a pipeline's answer), `json_query`, `json_query_close`; no setting, no migration.
+- **What a filter answers**: its first 500 values compact, how many it gave, and the paths of what it picked from `path(filter)`, at most 5,000. A filter that picks (`.orders[] | select(.total > 2000)`) is marked as an XPath query is: *22 values on 22 lines*, the rows in jq's order, each line marked, `Enter` and `Shift Enter` stepping through them. A filter that makes values (`.orders | map(.total) | add`) has no paths: the rail lists its values and says *The filter makes new values, so nothing is marked in the document.* jq's refusals are said in its words.
+- **The field is drawn only where a session can be opened**: a repository's file (read by the backend from the entity) or a pipeline's JSON answer (its text). The field says *jq*; the rail offers filters made from the document's own first list of objects and its first number.
+- ***Copy ▾*** holds *Copy the filter* and **Use as this file's pipeline**, which adds the filter as a jq step to the file's pipeline, so the file opens as its answer.
+- A row that holds others counts what it holds in its own words: an array its items, an object its members.
+
+Measured on the built app (`testenv/perf/doc.mjs`, the same setting as X2; the dev fake answers in the helper's place, its session warmed by `.`), ms at 1x / 6x, lines 100 / 150 for a key: at 1440 x 868, a key that picks (`.orders[] | select(.total > 2000)`, to its 22 values marked) 28 / 66, a key that makes a value (`.orders | map(.total) | add`) 10 / 22; at 2560 x 1440 at 1.25, 28 / 39 and 11 / 20. J1's cases on the same build: the export to its carets 40 / 144 and 63 / 123, its orders folded 6 / 42 and 6 / 32. Nothing moved (`moves.mjs` at 2560 x 1440 at 1.25, 1x and 6x): `json-export`, and `json-jq-late`, a key whose answer lands 400 ms late, its rows and marks drawn in the room they hold. The helper itself (`tests/it/json_query.rs`): one child answers a picking filter, a making one and a refused one in turn; a filter that loops is stopped at 1.5 s and the next answers; a value too deep ends the child and the next filter starts another.
+
 ## Not in this pass
 
 An XPath step in file pipelines. XML and JSON compared by element. JSON Schema. YAML. Folds across restarts. A query in an address. Thumbnails.
@@ -71,4 +96,4 @@ The build, `testenv/perf/doc.mjs` on the built app (`?fake-ipc&fake-xml`) in hea
 
 ## Reversing it
 
-Each part stands alone. The view: take `XML` and `JSON_VIEW` out of the registry and the files open as Source. The check in it: the setting, or `xml.check` off. Links and images: the view draws plain text where `doc-links.ts` answers none. Values: the chips and the menu rows are drawn only where `value-guess.ts` and the value thing answer; the new `PipeStep` variants can stay. The query: the rail's field. jq's helper: the three commands.
+Each part stands alone. The view: take `XML` and `JSON_VIEW` out of the registry and the files open as Source. The check in it: the setting, or `xml.check` off. Links and images: the view draws plain text where `doc-links.ts` answers none. Values: the chips and the menu rows are drawn only where `value-guess.ts` and the value thing answer; the new `PipeStep` variants can stay. The query: the rail's field. jq's helper: the three commands; without `json_query_open` the JSON view draws no field.

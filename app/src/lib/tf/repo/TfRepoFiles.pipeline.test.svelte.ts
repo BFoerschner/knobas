@@ -140,10 +140,12 @@ test("a gzipped file has no pipeline until one is added; then gunzip → jq runs
   await addStep("jq");
   expect(asked.map((a) => a.steps)).toEqual([[{ step: "gunzip" }], [{ step: "gunzip" }, { step: "jq", filter: "." }]]);
   expect(asked[1]).toMatchObject({ path: PATH, commit: "c0mmit" });
+  // JSON out is drawn by the JSON view, which loads with the first document it draws.
+  for (let i = 0; i < 200 && drawnLines().length === 0; i += 1) await settle();
   expect(drawnLines()).toEqual(["{", '"a": 1', "}"]);
   // The output meets the renderer under its own name: highlighted as `events.json`, the bar's last box says so.
   expect(requests.at(-1)?.path).toBe("fixtures/events.json");
-  expect(text(target.querySelector(".tf-prenderer"))).toBe("Source · events.json");
+  expect(text(target.querySelector(".tf-prenderer"))).toBe("JSON view · events.json");
 });
 
 test("a changed jq filter runs again once typing rests, and at once on Enter", async () => {

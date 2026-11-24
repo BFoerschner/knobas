@@ -3,7 +3,7 @@
  * the app (`doc.worker.ts`), this thread in tests and wherever a worker cannot start. The view holds a
  * {@link DocSession} and asks it for what it draws; the first frame never waits for it.
  */
-import type { CopyWhat, Crumb, DocCall, DocOpened, Picked, QueryAnswer, ResultRow, ValueAt } from "./doc-model";
+import type { DocKind, CopyWhat, Crumb, DocCall, DocOpened, Picked, QueryAnswer, ResultRow, ValueAt } from "./doc-model";
 
 /** Runs one call of one session where the outline is kept. */
 export type DocEngine = (session: number, call: DocCall) => Promise<unknown>;
@@ -100,9 +100,14 @@ export class DocSession {
     this.#engine = engine;
   }
 
-  /** Reads the document: its fold table and what its root says. */
-  open(text: string): Promise<DocOpened> {
-    return this.#engine(this.#id, { kind: "open", text }) as Promise<DocOpened>;
+  /** A jq answer's paths as rows and the lines they mark (the JSON view, section 26). */
+  jsonRows(paths: (string | number)[][]): Promise<{ rows: ResultRow[]; lines: Uint32Array }> {
+    return this.#engine(this.#id, { kind: "jsonRows", paths }).then((r) => (r as { rows: ResultRow[]; lines: Uint32Array } | null) ?? { rows: [], lines: new Uint32Array(0) });
+  }
+
+  /** Reads the document, as XML or as JSON: its fold table and what its root says. */
+  open(text: string, as: DocKind = "xml"): Promise<DocOpened> {
+    return this.#engine(this.#id, { kind: "open", text, ...(as !== "xml" ? { as } : {}) }) as Promise<DocOpened>;
   }
 
   /** The way down to a line, and what it holds. */

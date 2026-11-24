@@ -454,12 +454,12 @@ const openapiFiles: () => Record<string, string> = (() => {
 })();
 
 /**
- * `?fake-xml` (the XML view, 2026-11-23): the two openTRANS orders, the POM, the image and the contract the orders name,
- * from `fixtures/doc/files/tidewater/ledger-api/`, as the seed pushes them (made by the clickdummy's data script,
+ * `?fake-xml` (the XML view, 2026-11-23): the two openTRANS orders, the POM, the JSON view's export, the image and the
+ * contract the orders name, from `fixtures/doc/files/tidewater/ledger-api/`, as the seed pushes them (made by the clickdummy's data script,
  * `fixtures/doc/SOURCE.md`).
  */
 const XML_ROOT = "../../../../../../../fixtures/doc/files/tidewater/ledger-api/";
-const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.xml", { query: "?raw", import: "default", eager: true });
+const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.{xml,json}", { query: "?raw", import: "default", eager: true });
 const XML_BYTES = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.{png,pdf}", { query: "?url", import: "default", eager: true });
 const xmlOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xml");
 /**

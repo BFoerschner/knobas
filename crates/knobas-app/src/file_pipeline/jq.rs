@@ -158,12 +158,8 @@ fn layout() -> Pp {
     }
 }
 
-/// `filter` over every value in `input`, written to `out`.
-///
-/// Runs on the step child's thread (`super::child`): the evaluation may take
-/// [`EVAL_STACK`] below this call, which a smaller stack does not have.
-pub(super) fn run(filter: &str, input: &[u8], out: &mut Capped<'_>) -> Result<(), Failure> {
-    let floor = stack_here().saturating_sub(EVAL_STACK);
+/// `filter` parsed and compiled with knobas's functions.
+fn compile(filter: &str) -> Result<jaq_core::Filter<Guarded>, Failure> {
     let defs = jaq_core::defs()
         .chain(jaq_std::defs())
         .chain(jaq_json::defs());
@@ -177,7 +173,7 @@ pub(super) fn run(filter: &str, input: &[u8], out: &mut Capped<'_>) -> Result<()
             },
         )
         .map_err(|errors| Failure::Error(parse_errors(filter, errors)))?;
-    let compiled = Compiler::default()
+    Compiler::default()
         .with_funs(funs())
         .compile(modules)
         .map_err(|errors| {
@@ -187,7 +183,16 @@ pub(super) fn run(filter: &str, input: &[u8], out: &mut Capped<'_>) -> Result<()
                 .map(|(name, kind)| format!("{} `{name}` is not defined", kind.as_str()))
                 .collect();
             Failure::Error(said.join("; "))
-        })?;
+        })
+}
+
+/// `filter` over every value in `input`, written to `out`.
+///
+/// Runs on the step child's thread (`super::child`): the evaluation may take
+/// [`EVAL_STACK`] below this call, which a smaller stack does not have.
+pub(super) fn run(filter: &str, input: &[u8], out: &mut Capped<'_>) -> Result<(), Failure> {
+    let floor = stack_here().saturating_sub(EVAL_STACK);
+    let compiled = compile(filter)?;
     if nesting(input) > NESTING {
         return Err(too_nested());
     }
@@ -277,4 +282,148 @@ fn parse_errors(code: &str, errors: jaq_core::load::Errors<&str, ()>) -> String 
         }
     }
     format!("the filter does not parse: {}", said.join("; "))
+}
+
+// ---- A session (the XML view's design, section 26): the document read once, a filter a key ----
+
+/// The most values an answer carries, the most paths, and the most bytes of values.
+pub const SESSION_VALUES: usize = 500;
+pub const SESSION_PATHS: usize = 5_000;
+const SESSION_VALUE_BYTES: usize = 4 * 1024 * 1024;
+
+/// What a filter answered in a session.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionAnswer {
+    /// The first values, compact, at most [`SESSION_VALUES`] and 4 MiB.
+    pub values: Vec<String>,
+    /// How many values the filter gave in all.
+    pub count: u64,
+    /// The paths of what it picked, each a list of keys and indexes, at most
+    /// [`SESSION_PATHS`]; `None` where it makes new values (jq: *Invalid path
+    /// expression*).
+    pub paths: Option<Vec<Vec<serde_json::Value>>>,
+    /// The filter's error, where it has one: nothing else is answered.
+    pub error: Option<String>,
+}
+
+/// The document's values, read once for a session.
+///
+/// # Errors
+///
+/// The document is not JSON, or nests past [`NESTING`].
+pub(super) fn session_inputs(input: &[u8]) -> Result<Vec<Val>, Failure> {
+    if nesting(input) > NESTING {
+        return Err(too_nested());
+    }
+    jaq_json::read::parse_many(input)
+        .map(|value| {
+            value.map_err(|error| Failure::Error(format!("the document is not JSON: {error}")))
+        })
+        .collect()
+}
+
+/// `filter` over the session's values: the first values and their count, then
+/// the paths of what it picks (`path(filter)`), each evaluation under the
+/// stack watch.
+pub(super) fn session_ask(filter: &str, inputs: &[Val]) -> SessionAnswer {
+    let floor = stack_here().saturating_sub(EVAL_STACK);
+    let failed = |error: Failure| SessionAnswer {
+        error: Some(match error {
+            Failure::Error(said) => said,
+            Failure::TooLarge => "the answer is too large".to_owned(),
+            Failure::Stopped | Failure::Busy => "the filter was stopped".to_owned(),
+        }),
+        ..SessionAnswer::default()
+    };
+    let values = match compile(filter) {
+        Ok(compiled) => compiled,
+        Err(error) => return failed(error),
+    };
+    let compact = Pp::default();
+    let ran = catch_unwind(AssertUnwindSafe(
+        || -> Result<(Vec<String>, u64), Failure> {
+            let mut out = Vec::new();
+            let mut bytes = 0usize;
+            let mut count = 0u64;
+            for input in inputs {
+                let ctx = Ctx::<Guarded>::new(
+                    Watched {
+                        lut: &values.lut,
+                        floor,
+                    },
+                    Vars::new([]),
+                );
+                for output in values.id.run((ctx, input.clone())).map(unwrap_valr) {
+                    let output =
+                        output.map_err(|error| Failure::Error(format!("jq: error: {error}")))?;
+                    count += 1;
+                    if out.len() < SESSION_VALUES && bytes < SESSION_VALUE_BYTES {
+                        let mut text = Vec::new();
+                        write(&mut text, &compact, 0, &output)
+                            .map_err(|error| super::steps::io_failure(&error))?;
+                        bytes += text.len();
+                        out.push(String::from_utf8_lossy(&text).into_owned());
+                    }
+                }
+            }
+            Ok((out, count))
+        },
+    ));
+    let (values, count) = match ran {
+        Ok(Ok(answered)) => answered,
+        Ok(Err(error)) => return failed(error),
+        Err(unwound) => return failed(refusal(unwound)),
+    };
+    // What it picked, by path: a filter that makes values has none.
+    let paths = compile(&format!("path({filter})"))
+        .ok()
+        .and_then(|compiled| {
+            catch_unwind(AssertUnwindSafe(
+                || -> Option<Vec<Vec<serde_json::Value>>> {
+                    let mut out = Vec::new();
+                    for input in inputs {
+                        let ctx = Ctx::<Guarded>::new(
+                            Watched {
+                                lut: &compiled.lut,
+                                floor,
+                            },
+                            Vars::new([]),
+                        );
+                        for path in compiled.id.run((ctx, input.clone())).map(unwrap_valr) {
+                            let path = path.ok()?;
+                            if out.len() < SESSION_PATHS {
+                                let mut text = Vec::new();
+                                write(&mut text, &Pp::default(), 0, &path).ok()?;
+                                out.push(serde_json::from_slice(&text).ok()?);
+                            }
+                        }
+                    }
+                    Some(out)
+                },
+            ))
+            .ok()
+            .flatten()
+        });
+    SessionAnswer {
+        values,
+        count,
+        paths,
+        error: None,
+    }
+}
+
+/// What an unwound evaluation means.
+fn refusal(unwound: Box<dyn std::any::Any + Send>) -> Failure {
+    match unwound.downcast::<Refused>() {
+        Ok(refused) => match *refused {
+            Refused::TooDeep => Failure::Error(format!(
+                "the filter recursed too deep: it took {} MiB of stack",
+                EVAL_STACK / (1024 * 1024)
+            )),
+            Refused::Nested => Failure::Error(format!(
+                "fromjson was given JSON that nests deeper than {NESTING} levels"
+            )),
+        },
+        Err(other) => resume_unwind(other),
+    }
 }

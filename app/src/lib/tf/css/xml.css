@@ -64,7 +64,7 @@
 .tf-code.tf-lines .tf-l.tf-xv-bad, .tf-code.tf-lines .tf-l.tf-xv-bad:hover { --row-bg: var(--err-bg); box-shadow: inset 3px 0 0 var(--err); }
 .tf-xv-lt, .tf-code.tf-lines .tf-lt { min-width: 0; }
 .tf-xv-cc { display: block; width: 18px; }
-.tf-xv-caret { width: 18px; height: 22px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.tf-xv-caret { width: 18px; height: var(--tf-row, 22px); padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 /* The chevron is the button's own border, not an SVG: a level's worth of folded rows each draws one. */
 .tf-xv-caret::before { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1.6px 1.6px 0; border-radius: 1px; transform: translateX(-1px) rotate(-45deg); }
 .tf-xv-caret[aria-expanded="true"]::before { transform: translateY(-1px) rotate(45deg); }

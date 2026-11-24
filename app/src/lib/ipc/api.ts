@@ -4,9 +4,9 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
-import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, DeclaringFile, DownloadedSchema, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
+import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, DeclaringFile, DownloadedSchema, FetchedImage, JsonQueryAnswer, JsonPathStep, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
 
-export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, DeclaringFile, DownloadedSchema, SentLine, SpecToOpen, XmlCheck };
+export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, DeclaringFile, DownloadedSchema, JsonQueryAnswer, JsonPathStep, SentLine, SpecToOpen, XmlCheck };
 
 /** Sends one request, once. A refusal before anything was sent rejects; a failure is an answer. */
 export function apiSend(send: ApiSend): Promise<ApiAnswer> {
@@ -133,6 +133,24 @@ export function xsdForget(sha256: string): Promise<void> {
 /** *Save to Downloads*: an example made from a schema written to the Downloads folder under `name`; answers the path. */
 export function xsdSaveExample(name: string, text: string): Promise<string> {
   return invoke<string>("xsd_save_example", { name, text });
+}
+
+/**
+ * Opens a jq session over a JSON document (the XML view's design, section 26): a file read as `entity_file_bytes`
+ * reads it, or `text` where the view draws something else than the file. Answers its id.
+ */
+export function jsonQueryOpen(source: { entityId: string; path: string; commit: string | null } | { text: string }): Promise<number> {
+  return invoke<number>("json_query_open", "text" in source ? { text: source.text } : { entityId: source.entityId, path: source.path, commit: source.commit });
+}
+
+/** A jq filter asked of session `id`: its first values, their count, and the paths of what it picked. */
+export function jsonQuery(id: number, filter: string): Promise<JsonQueryAnswer> {
+  return invoke<JsonQueryAnswer>("json_query", { id, filter });
+}
+
+/** Ends session `id` and its helper. */
+export function jsonQueryClose(id: number): Promise<void> {
+  return invoke<void>("json_query_close", { id });
 }
 
 /** Whether an XML file is checked against its schema when one is found (`xml.check`, on by default). */

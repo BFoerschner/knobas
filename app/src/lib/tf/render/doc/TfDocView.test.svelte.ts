@@ -18,7 +18,12 @@ vi.mock("../../../ipc/api", async (original) => ({
   xsdSetLocations: async (list: { pointed: unknown[] }) => ((kept.pointed = structuredClone(list.pointed)), structuredClone(kept)),
   xsdFetch: async (address: string) => ({ url: address, sha256: "e".repeat(64), size: 1, at: "2026-11-24" }),
   xsdDownloaded: async (sha: string) => kept.downloaded.get(sha) ?? null,
+  jsonQuery: async (id: number, filter: string) => (jqAsked.push([id, filter]), jqAnswers.get(filter) ?? { state: "failed", why: `jq: error: no answer for ${filter}`, ms: 0 }),
+  jsonQueryClose: async (id: number) => void jqAsked.push([id, null]),
 }));
+/** What the jq session answers, by filter, and what it was asked (`null`: closed). */
+const jqAnswers = vi.hoisted(() => new Map<string, unknown>());
+const jqAsked = vi.hoisted(() => [] as [number, string | null][]);
 
 import TfDocView from "./TfDocView.svelte";
 import { forgetFolds } from "./doc.svelte";
@@ -45,6 +50,8 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = function () {};
   forgetFolds();
   opened.length = 0;
+  jqAnswers.clear();
+  jqAsked.length = 0;
 });
 
 afterEach(() => {
@@ -483,3 +490,112 @@ test("a document whose schema is at an address is offered it; Download it keeps 
   expect(words(target.querySelector(".tf-xv-head"))).toContain("downloaded");
 });
 
+
+// ---- The JSON view (J1, the design's section 25) ----
+
+test("a JSON file opens in the same view: its folds count items and members, the head says it is well formed, no XPath field", async () => {
+  const exportText = (await import("node:fs")).readFileSync((await import("node:path")).resolve(__dirname, "../../../../../../fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json"), "utf8");
+  view = mount(TfDocView, { target, props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json" } });
+  flushSync();
+  await settle();
+  expect(head()).toContain("Well formed");
+  expect(head()).toContain("JSON is not checked against a schema.");
+  expect(target.querySelector(".tf-xv-qfield")).toBeNull();
+  // The export goes five levels deep; every level is open when it opens.
+  expect(words(target.querySelector(".tf-xv-stepn"))).toBe("5");
+  // `orders` on line 6 folded by its caret: one line, counting its 48 items.
+  row(6).querySelector<HTMLElement>(".tf-xv-caret")!.click();
+  flushSync();
+  expect(words(row(6).querySelector(".tf-xv-fold"))).toBe("48 items");
+  expect(words(row(6).querySelector(".tf-xv-shut"))).toBe("]");
+  expect(rows().slice(0, 7)).toEqual([1, 2, 3, 4, 5, 6, 1189]);
+  // The base64 PDF beside its type carries its chip; picked, its way down is the jq path's steps.
+  unmount(view);
+  const line = exportText.slice(0, exportText.indexOf('"content": "JVBERi0x')).split("\n").length;
+  view = mount(TfDocView, { target, props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json", line } });
+  flushSync();
+  await settle();
+  row(line).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  expect([...target.querySelectorAll(".tf-xv-crumbs button")].map((b) => words(b))).toEqual([".", "orders", "[2]", "attachments", "[0]", "content"]);
+  expect(words(row(line).querySelector(".tf-xv-chip"))).toContain("PDF");
+});
+
+// ---- jq in the JSON view (J2, the design's section 26) ----
+
+test("jq: a picking filter marks its values' lines and lists them; a making filter says nothing is marked; the session closes with the view", async () => {
+  const exportText = (await import("node:fs")).readFileSync((await import("node:path")).resolve(__dirname, "../../../../../../fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json"), "utf8");
+  const orders = (JSON.parse(exportText) as { orders: { id: string; total: number }[] }).orders;
+  const big = orders.flatMap((o, i) => (o.total > 2000 ? [i] : []));
+  jqAnswers.set(".orders[] | select(.total > 2000)", { state: "answered", values: big.map(() => "{}"), count: big.length, paths: big.map((i) => ["orders", i]), ms: 3 });
+  jqAnswers.set(".orders | map(.total) | add", { state: "answered", values: ["98748"], count: 1, paths: null, ms: 2 });
+  const opens: number[] = [];
+  const piped: string[] = [];
+  view = mount(TfDocView, {
+    target,
+    props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json", jq: { open: async () => (opens.push(7), 7) }, onpipeline: (f: string) => piped.push(f) },
+  });
+  flushSync();
+  await settle();
+  const field = target.querySelector<HTMLInputElement>(".tf-xv-qfield input")!;
+  expect(words(target.querySelector(".tf-xv-lang"))).toBe("jq");
+  // Nothing is opened before the first filter.
+  expect(opens).toEqual([]);
+  const type = async (text: string) => {
+    field.value = text;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+  };
+  await type(".orders[] | select(.total > 2000)");
+  const say = words(target.querySelector(".tf-xv-qsay"));
+  expect(say).toContain(`${big.length} values on ${big.length} lines.`);
+  // Each order's row is the line its object starts on; the first goes there and is marked.
+  // The order's object opens on the line before its id.
+  const objectLine = exportText.slice(0, exportText.indexOf(`"id": "${orders[big[0]!]!.id}"`)).split("\n").length - 1;
+  const resultRows = [...target.querySelectorAll(".tf-xv-rrow")];
+  expect(resultRows).toHaveLength(big.length);
+  expect(words(resultRows[0]!.querySelector(".tf-xv-rkind"))).toBe("8 members");
+  expect(Number(words(resultRows[0]!.querySelector(".tf-xv-fline")))).toBe(objectLine);
+  // Pressed, the row goes to its line, which is marked.
+  (resultRows[0] as HTMLElement).click();
+  await settle();
+  expect(row(objectLine).classList.contains("tf-xv-hit")).toBe(true);
+  // A making filter: its values listed, nothing marked; the session asked again, not opened again.
+  await type(".orders | map(.total) | add");
+  expect(words(target.querySelector(".tf-xv-qsay"))).toContain("1 value The filter makes new values, so nothing is marked in the document.");
+  expect(words(target.querySelector(".tf-xv-rmade .tf-xv-rval"))).toBe("98748");
+  expect(target.querySelectorAll(".tf-xv-hit")).toHaveLength(0);
+  expect(opens).toEqual([7]);
+  // jq's own words for a filter it refuses.
+  await type(".orders[");
+  expect(words(target.querySelector(".tf-xv-qsay"))).toContain("jq: error: no answer for .orders[");
+  // *Copy ▾*: the filter as this file's pipeline.
+  await type(".orders | map(.total) | add");
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "Copy ▾")!.click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => words(b) === "Use as this file's pipeline")!.click();
+  expect(piped).toEqual([".orders | map(.total) | add"]);
+  unmount(view);
+  view = null;
+  await settle();
+  expect(jqAsked.at(-1)).toEqual([7, null]);
+  expect(jqAsked.filter(([, f]) => f !== null).every(([id]) => id === 7)).toBe(true);
+});
+
+test("jq: a JSON view without a session draws no field; jq's stop says why", async () => {
+  jqAnswers.set(".", { state: "stopped", why: "The filter ran past 1.5 s and was stopped." });
+  view = mount(TfDocView, { target, props: { text: '{\n  "a": [\n    1\n  ]\n}\n', path: "a.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json", jq: { open: async () => 3 } } });
+  flushSync();
+  await settle();
+  const field = target.querySelector<HTMLInputElement>(".tf-xv-qfield input")!;
+  field.value = ".";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(words(target.querySelector(".tf-xv-qsay"))).toBe("The filter ran past 1.5 s and was stopped.");
+  // Without onpipeline, *Copy ▾* has no pipeline to offer; without jq, no field at all.
+  unmount(view);
+  view = mount(TfDocView, { target, props: { text: '{"a": 1}', path: "a.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json" } });
+  flushSync();
+  await settle();
+  expect(target.querySelector(".tf-xv-qfield")).toBeNull();
+});
