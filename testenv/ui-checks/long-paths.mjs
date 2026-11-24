@@ -147,6 +147,11 @@ const SCREENS = [
   // Passwords (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
   // The check in the XML view (2026-11-24): the rail's head and its switch whole at the window's smallest.
   { id: "xml-checked", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", wait: 3000, whole: ".tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
+  // The schema explorer's picker and its example (S3, S4), and the JSON view's jq field (J2), 2026-11-24: their controls whole.
+  { id: "xsd-point", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", wait: 3000, press: ".tf-xv-schema", then: ["~Point to another file"], whole: ".tf-xsd-point", sizes: SMALLEST },
+  // The fixture's schema files load after the first read of the repository, so the explorer is reached from the order's head.
+  { id: "xsd-example", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", press: "opentrans_2_1.xsd", then: ["~ORDER", ".tf-xsd .tf-oas-pageseg button:last-child"], wait: 3000, whole: ".tf-xsd-ex", sizes: SMALLEST },
+  { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
@@ -311,8 +316,15 @@ const WHOLE = (selector) => String.raw`(() => {
   for (const b of buttons) {
     const r = b.getBoundingClientRect();
     let left = Math.max(r.left, 0), right = Math.min(r.right, innerWidth);
+    // Past a fixed box (a dialog's scrim, drawn where it was opened), only an ancestor that holds fixed
+    // boxes (a transform, a filter, containment: holdsFixed in TfDialog) clips it; another's overflow does not.
+    let fixed = false;
+    const holds = (s) => (s.transform !== "none" && s.transform !== "") || (s.filter !== "none" && s.filter !== "") || /\b(transform|filter|perspective)\b/.test(s.willChange) || /\b(layout|paint|strict|content)\b/.test(s.contain);
     for (let e = b.parentElement; e; e = e.parentElement) {
-      if (getComputedStyle(e).overflowX === "visible") continue;
+      const s = getComputedStyle(e);
+      if (fixed && !holds(s)) continue;
+      if (s.position === "fixed") fixed = true;
+      if (s.overflowX === "visible") continue;
       const box = e.getBoundingClientRect();
       left = Math.max(left, box.left);
       right = Math.min(right, box.right);
