@@ -3,7 +3,8 @@
  * is answered in its own task with no read.
  *
  * - **settings**: each source's *Open its pages inside knobas*, base, own and allowed origins (`site_settings`), filled
- *   once the database answers, again after each write in Settings, and again when the source list gains a source;
+ *   once the database answers, again after each write in Settings, and again when the source list gains or loses a source;
+ *   its *Kept since* also from the first status on the site's own address, as the native side records it then;
  * - **status**: each live site's state, from `site:status`, dropped on `site:closed`;
  * - **names**: each source's display name, from the source list the status bar reads;
  * - **asking**: the question the bar asks in its row (decisions §10), per source;
@@ -46,8 +47,11 @@ export interface SiteStore {
   readonly loaded: boolean;
   hold(settings: readonly SiteSetting[]): void;
   holdOne(setting: SiteSetting): void;
-  /** Whether the settings were read and one of `sources` has none: a source added since, whose settings to read again. */
-  lacks(sources: readonly string[]): boolean;
+  /**
+   * Whether the settings were read and no longer match `sources`, so they are read again: a source added since has
+   * none, or a source removed since still has one (its pages would open its site, which no source owns any more).
+   */
+  differs(sources: readonly string[]): boolean;
   nameAll(names: readonly { id: string; display_name: string }[]): void;
   /** A source's name, its id while none is known. */
   name(source: string): string;
@@ -105,8 +109,10 @@ export function createSiteStore(): SiteStore {
       settings = new Map(list.map((one) => [one.source, one]));
       loaded = true;
     },
-    lacks(sources) {
-      return loaded && sources.some((source) => !settings.has(source));
+    differs(sources) {
+      if (!loaded) return false;
+      const listed = new Set(sources);
+      return sources.some((source) => !settings.has(source)) || [...settings.keys()].some((source) => !listed.has(source));
     },
     holdOne(setting) {
       settings = set(settings, setting.source, setting);
@@ -118,6 +124,13 @@ export function createSiteStore(): SiteStore {
       return names.get(source) ?? source;
     },
     update(next) {
+      // A page on the site's own address marks its sign-in kept from now, as the native side records it at that
+      // commit (`landed`); the settings were read before, so Settings would say "Not signed in here yet" until the
+      // next read.
+      const setting = settings.get(next.source);
+      if (next.own && setting !== undefined && !setting.kept_since) {
+        settings = set(settings, next.source, { ...setting, kept_since: new Date().toISOString() });
+      }
       const was = status.get(next.source);
       if (was !== undefined && JSON.stringify(was) === JSON.stringify(next)) return;
       status = set(status, next.source, next);

@@ -6,7 +6,14 @@
  * backend does with each call is `crates/knobas-app/tests/it/job_ipc.rs`'s.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The card's *Open in ⟨source⟩* goes through `routeWeb`: spied, still the real one, so the test reads which source it
+// was handed (the ux30 gate: with two sources on one server, the first one's site opened).
+vi.mock("../../shell/open-web", async (actual) => {
+  const real = await actual<typeof import("../../shell/open-web")>();
+  return { ...real, routeWeb: vi.fn(() => Promise.resolve()) };
+});
 
 import type {
   OpenAt,
@@ -34,6 +41,7 @@ import type { FrameKinds } from "./job";
 import { cardSections, readCardReads } from "./card-sections";
 import { chosenJob, pageAsk } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
+import { routeWeb } from "../../shell/open-web";
 import { sourceRoles } from "../roles.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
@@ -1465,4 +1473,14 @@ test("a source that offers no moves, or a credential that may not, draws the chi
   } finally {
     sourceRoles.forget();
   }
+});
+
+test("Open in ⟨source⟩ hands the opening the ticket's own source, so of two sources on one server its own site opens (ux30 gate)", async () => {
+  const two = ticket({ web_url: "https://jira.example/browse/PAY-231", source: { id: "jira-two", display_name: "Jira two", adapter_kind: "jira", enabled: true } });
+  open(ID, { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(two) : Promise.reject({ code: "not_found", message: id, source_id: null })) }) });
+  await settle();
+  vi.mocked(routeWeb).mockClear();
+  [...target.querySelectorAll<HTMLAnchorElement>("a")].find((a) => a.textContent?.startsWith("Open in Jira two"))!.click();
+  await settle();
+  expect(routeWeb).toHaveBeenCalledWith("https://jira.example/browse/PAY-231", { source: "jira-two" });
 });
