@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Its schema is in another repository, tidewater/ledger-gateway, which knobas finds by itself. One departure: a quantity in words. -->
+<PartnerOrder xmlns="urn:tidewater:partner-order:1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="urn:tidewater:partner-order:1 ../../schemas/partner/partner-order.xsd">
+  <OrderId>P-17</OrderId>
+  <Partner>Hafenkontor Nord</Partner>
+  <Line>
+    <Article>Kugellager 6204-2RS</Article>
+    <Quantity>12</Quantity>
+  </Line>
+  <Line>
+    <Article>Wellendichtring 20x35x7</Article>
+    <Quantity>zwölf</Quantity>
+  </Line>
+</PartnerOrder>
