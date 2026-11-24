@@ -4,9 +4,9 @@
  * secret typed on the page is handed to the app once (`apiHoldSecret`) and the page keeps none.
  */
 import { invoke } from "./invoke";
-import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen } from "./generated/api";
+import type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "./generated/api";
 
-export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, SavedServer, SavedServers, SentLine, SpecToOpen };
+export type { ApiAnswer, ApiAuth, ApiSend, AuthPlace, ClientsFound, FetchedImage, Hop, ImageHosts, OpenedSpec, PointedSchema, PointedTo, SavedServer, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck };
 
 /** Sends one request, once. A refusal before anything was sent rejects; a failure is an answer. */
 export function apiSend(send: ApiSend): Promise<ApiAnswer> {
@@ -95,4 +95,24 @@ export function imageHosts(): Promise<ImageHosts> {
 /** Stores the hosts whose images load when their dialog opens; answers them as stored. */
 export function setImageHosts(hosts: ImageHosts): Promise<ImageHosts> {
   return invoke<ImageHosts>("set_image_hosts", { hosts });
+}
+
+/** The schema files a person pointed to, and the addresses downloaded (ADR-0058, `xsd.locations`). */
+export function xsdLocations(): Promise<SchemaLocations> {
+  return invoke<SchemaLocations>("xsd_locations");
+}
+
+/** Keeps the schema files pointed to; answers them as kept. */
+export function xsdSetLocations(list: SchemaLocations): Promise<SchemaLocations> {
+  return invoke<SchemaLocations>("xsd_set_locations", { list });
+}
+
+/** Whether an XML file is checked against its schema when one is found (`xml.check`, on by default). */
+export function xmlCheck(): Promise<XmlCheck> {
+  return invoke<XmlCheck>("xml_check");
+}
+
+/** Stores whether XML files are checked. */
+export function setXmlCheck(check: XmlCheck): Promise<XmlCheck> {
+  return invoke<XmlCheck>("set_xml_check", { check });
 }

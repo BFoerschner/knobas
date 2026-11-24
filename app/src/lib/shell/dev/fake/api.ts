@@ -7,7 +7,7 @@
  * takes 2.6 s (so *Stop* can be pressed). A refusal the app makes before sending is made here too: a request that
  * changes something on a host that is not this computer, without the page's yes.
  */
-import type { ApiAnswer, ApiSend, SavedServers, SentLine, SpecToOpen } from "../../../ipc/api";
+import type { ApiAnswer, ApiSend, SavedServers, SchemaLocations, SentLine, SpecToOpen, XmlCheck } from "../../../ipc/api";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 
@@ -21,7 +21,9 @@ const fakeServers: SavedServers = { servers: [{ id: "tidewater-teamcity", name: 
 const stopped = new Set<number>();
 /** The hosts whose images load when their dialog opens (the XML view, section 14). */
 const fakeImageHosts: { hosts: string[] } = { hosts: [] };
-keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped, fakeImageHosts);
+/** The schema check's two rows (ADR-0058): checking on, nothing pointed to. */
+const fakeSchemas: { check: XmlCheck; locations: SchemaLocations } = { check: { on: true }, locations: { pointed: [] } };
+keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped, fakeImageHosts, fakeSchemas);
 
 const local = (host: string) => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(host) || host.endsWith(".localhost");
 
@@ -98,6 +100,16 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       throw { code: "invalid", message: "The image could not be loaded: the dev fake reaches no address.", source_id: null };
     },
     image_hosts: () => structuredClone(fakeImageHosts),
+    xml_check: () => structuredClone(fakeSchemas.check),
+    set_xml_check: (args) => {
+      fakeSchemas.check = { on: (args["check"] as XmlCheck).on };
+      return structuredClone(fakeSchemas.check);
+    },
+    xsd_locations: () => structuredClone(fakeSchemas.locations),
+    xsd_set_locations: (args) => {
+      fakeSchemas.locations = structuredClone(args["list"] as SchemaLocations);
+      return structuredClone(fakeSchemas.locations);
+    },
     set_image_hosts: (args) => {
       fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
       return structuredClone(fakeImageHosts);

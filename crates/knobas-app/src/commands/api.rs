@@ -187,6 +187,58 @@ pub async fn set_image_hosts<R: tauri::Runtime>(
     crate::api::image::set_hosts(&pool, hosts).await
 }
 
+/// The schema files a person pointed to, and the addresses downloaded (the XSD
+/// design, section 17).
+///
+/// # Errors
+/// The read fails.
+#[tauri::command]
+pub async fn xsd_locations<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::api::schemas::SchemaLocations, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::schemas::locations(&pool).await
+}
+
+/// Keeps the schema files pointed to; answers them as kept.
+///
+/// # Errors
+/// A list over the cap, or the write fails.
+#[tauri::command]
+pub async fn xsd_set_locations<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    list: crate::api::schemas::SchemaLocations,
+) -> Result<crate::api::schemas::SchemaLocations, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::schemas::set_locations(&pool, list).await
+}
+
+/// Whether an XML file is checked against its schema when one is found (the
+/// XML view, section 11).
+///
+/// # Errors
+/// The read fails.
+#[tauri::command]
+pub async fn xml_check<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<crate::api::schemas::XmlCheck, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::schemas::check(&pool).await
+}
+
+/// Stores whether XML files are checked.
+///
+/// # Errors
+/// The write fails.
+#[tauri::command]
+pub async fn set_xml_check<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    check: crate::api::schemas::XmlCheck,
+) -> Result<crate::api::schemas::XmlCheck, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::api::schemas::set_check(&pool, check).await
+}
+
 /// Opens a spec in an application with an API spec command (ux31, section 23): knobas writes the spec and, where
 /// asked, the collection into a scratch folder of its own and runs the command on them.
 ///

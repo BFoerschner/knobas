@@ -155,6 +155,16 @@ export class DocSession {
     return this.#engine(this.#id, { kind: "values", lines, all }).then((r) => (r as Record<number, ValueAt[]> | null) ?? {});
   }
 
+  /** The lines of the nodes these paths name (libxml2's findings): -1 where none. */
+  places(paths: (string | null)[]): Promise<number[]> {
+    return this.#engine(this.#id, { kind: "places", paths }).then((r) => (Array.isArray(r) ? (r as number[]) : paths.map(() => -1)));
+  }
+
+  /** The element on a line, as names with their namespaces from the root down. */
+  names(line: number): Promise<{ ns: string; local: string; line: number }[]> {
+    return this.#engine(this.#id, { kind: "names", line }).then((r) => (Array.isArray(r) ? (r as { ns: string; local: string; line: number }[]) : []));
+  }
+
   close(): void {
     if (this.#closed) return;
     this.#closed = true;

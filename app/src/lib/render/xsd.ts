@@ -236,6 +236,8 @@ export interface SetInput {
   readonly index: SchemaIndex | null;
   readonly elsewhere: ((namespace: string) => readonly Elsewhere[] | null) | null;
   readonly bundled: ReadonlyMap<string, string>;
+  /** The namespace written bare: the opened file's, or a checked document's root's. */
+  readonly home?: string;
 }
 
 export interface SchemaSet {
@@ -671,6 +673,7 @@ export function loadSet(inn: SetInput): SchemaSet {
   }
   set.need = [...need];
   finish(set);
+  if (inn.home !== undefined) set.home = inn.home;
   return set;
 }
 

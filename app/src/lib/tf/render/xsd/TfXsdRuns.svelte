@@ -2,7 +2,8 @@
 <script lang="ts">
   import type { Run } from "../../../render/xsd-answer";
 
-  let { runs }: { runs: readonly Run[] } = $props();
+  /** The code face's class: the explorer's chip, or the XML view's plain code (`tf-xv-code`) in a document's words. */
+  let { runs, cls = "tf-xsd-code" }: { runs: readonly Run[]; cls?: string } = $props();
 </script>
 
-{#each runs as run, i (i)}{#if run.code}<code class="tf-xsd-code">{run.text}</code>{:else}{run.text}{/if}{/each}
+{#each runs as run, i (i)}{#if run.code}<code class={cls}>{run.text}</code>{:else}{run.text}{/if}{/each}

@@ -156,6 +156,8 @@ export interface FileRow {
   /** *imported, beside it*, or *12 declarations* for the opened file. */
   readonly how: string;
   readonly count: number;
+  /** How it was found, as a key (`beside`, `name`, …); `null` for the opened file and one still being read. */
+  readonly found: How | null;
   readonly adopted: boolean;
   readonly reading: boolean;
   readonly bad: string | null;
@@ -226,7 +228,7 @@ export interface TreeRow {
 }
 
 export type XsdCall =
-  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[] }
+  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean }
   | { kind: "addFiles"; files: { path: string; text: string | null }[]; paths?: string[]; index?: SchemaIndexWire; elsewhere?: { namespace: string; list: Elsewhere[] } }
   | { kind: "pointed"; pointed: Pointed[] }
   | { kind: "page"; place: string }
@@ -236,6 +238,7 @@ export type XsdCall =
   | { kind: "values"; key: string; from: number }
   | { kind: "way"; key: string }
   | { kind: "check"; xml: string }
+  | { kind: "declOf"; names: { ns: string; local: string }[] }
   | { kind: "close" };
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
@@ -252,6 +255,9 @@ export type Opened = { ok: true; index: SetIndex; need: string[] } | { ok: false
 
 export interface XsdSession {
   entry: string;
+  home?: string;
+  /** A check's session: its answers carry no declarations, which only the explorer draws. */
+  lean?: boolean;
   texts: Map<string, string | null>;
   paths: Set<string> | null;
   pointed: Pointed[];
@@ -281,6 +287,7 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
     index: s.index,
     elsewhere: (ns) => s.elsewhere.get(ns) ?? null,
     bundled: bundled.byNs,
+    ...(s.home !== undefined ? { home: s.home } : {}),
   };
   s.set = loadSet(inn);
   // Row and fold ids stay good across rounds: what they name is compiled data the new set reads by its names.
@@ -290,9 +297,9 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
 /** Answers one call of one session. */
 export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall, bundled: Bundled): unknown {
   if (call.kind === "open") {
-    const s: XsdSession = { entry: call.entry, texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
+    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
     sessions.set(session, s);
-    return opened(load(s, bundled));
+    return opened(load(s, bundled), s.lean === true);
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
@@ -302,11 +309,11 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      return opened(load(s, bundled));
+      return opened(load(s, bundled), s.lean === true);
     }
     case "pointed":
       s.pointed = call.pointed;
-      return opened(load(s, bundled));
+      return opened(load(s, bundled), s.lean === true);
     case "page":
       return pageOf(s, call.place);
     case "rows": {
@@ -325,16 +332,18 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       return wayDown(s, call.key);
     case "check":
       return checkWith(s, call.xml, bundled);
+    case "declOf":
+      return declarationOf(s, call.names);
     case "close":
       sessions.delete(session);
       return null;
   }
 }
 
-function opened(set: SchemaSet): Opened {
+function opened(set: SchemaSet, lean = false): Opened {
   const entry = set.docs[0];
   if (entry !== undefined && entry.bad !== null) return { ok: false, error: entry.bad, line: entry.badLine };
-  return { ok: true, index: indexOf(set), need: set.need };
+  return { ok: true, index: indexOf(set, lean), need: set.need };
 }
 
 // ---- The check (section 24) ----
@@ -587,8 +596,42 @@ function pageOf(s: XsdSession, place: string): PageAnswer | { missing: string; r
   const key = place.startsWith("el ") || place.startsWith("ty ") || place.startsWith("gr ") || place.startsWith("ag ") || place.startsWith("at ") ? place : keyOfPlace(set, place);
   const decl = key === null ? undefined : set.comps.get(key);
   if (key === null || decl === undefined) return { missing: place, reading };
-  const doc = set.docs.find((d) => d.path === decl.file);
-  const name = nameOfKey(set, key);
+  return pageOfDecl(s, key, decl);
+}
+
+/**
+ * The declaration of an element of a document (section 26): found by walking down from the root by name, with no
+ * validation in it, so it is there for a valid document and for a wrong one. The page of the deepest element found.
+ */
+export function declarationOf(s: XsdSession, names: readonly { ns: string; local: string }[]): (PageAnswer & { found: number }) | null {
+  const set = s.set;
+  const first = names[0];
+  if (set === null || first === undefined) return null;
+  const rootKey = `el {${first.ns}}${first.local}`;
+  let decl = set.comps.get(rootKey) as ElementDecl | undefined;
+  if (decl === undefined) return null;
+  let found = 1;
+  for (const n of names.slice(1)) {
+    const d = elDecl(set, decl);
+    if (d === null) break;
+    const t = elType(set, d);
+    const sh = t.def === null ? null : shape(set, t.def);
+    const next = childElements(set, sh?.content ?? null).find((c) => c.el.name === n.local && c.el.elNs === n.ns);
+    if (next === undefined) break;
+    decl = (elDecl(set, next.el) ?? next.el) as ElementDecl;
+    found += 1;
+  }
+  const d = elDecl(set, decl) ?? decl;
+  const key = (d as Partial<{ key: string }>).key;
+  const page = pageOfDecl(s, key ?? `local ${d.at ?? ""}:${d.line}:${d.name}`, d as Decl & { file?: string });
+  return { ...page, found };
+}
+
+function pageOfDecl(s: XsdSession, key: string, decl: Decl & { file?: string; over?: string }): PageAnswer {
+  const set = s.set!;
+  const file = decl.file ?? (decl.kind === "el" ? (decl.at ?? set.entry) : set.entry);
+  const doc = set.docs.find((d) => d.path === file);
+  const name = set.comps.has(key) ? nameOfKey(set, key) : decl.kind === "el" ? nameOf(set, decl.elNs, decl.name, null) : { prefix: "", local: decl.name ?? "", key: null };
   let what = "";
   let chain: PageAnswer["chain"] = [];
   let type: TypeCell | null = null;
@@ -643,11 +686,11 @@ function pageOf(s: XsdSession, place: string): PageAnswer | { missing: string; r
   return {
     kind: "page",
     key,
-    place: placeOf(set, key),
+    place: set.comps.has(key) ? placeOf(set, key) : "",
     name,
     what,
-    file: decl.file,
-    reached: decl.file !== set.entry && doc !== undefined,
+    file,
+    reached: file !== set.entry && doc !== undefined,
     line: decl.line,
     over: decl.over === undefined ? null : decl.over === "redefine" ? "Redefined here" : "Overridden here",
     chain,
@@ -753,7 +796,7 @@ const HOW: Record<How, string> = {
 };
 const VERB: Record<string, string> = { import: "imported", include: "included", redefine: "redefined", override: "overridden" };
 
-export function indexOf(set: SchemaSet): SetIndex {
+export function indexOf(set: SchemaSet, lean = false): SetIndex {
   const files: FileRow[] = [];
   const lost: LostRow[] = [];
   const counts = new Map<string, number>();
@@ -775,6 +818,7 @@ export function indexOf(set: SchemaSet): SetIndex {
       prefix: doc.tns !== set.home ? (set.prefixes.get(doc.tns) ?? null) : null,
       how: ref === null ? `${count(n)} declarations` : ref.how === null ? (VERB[ref.kind] ?? ref.kind) : `${VERB[ref.kind] ?? ref.kind}, ${ref.how === "repo" && ref.from !== null ? `in ${ref.from.name}, at ${ref.from.branch}` : HOW[ref.how]}`,
       count: n,
+      found: ref?.how ?? null,
       adopted: doc.adopted !== null,
       reading: doc.reading,
       bad: doc.bad,
@@ -796,7 +840,7 @@ export function indexOf(set: SchemaSet): SetIndex {
   }
 
   const decls: DeclRow[] = [];
-  for (const c of set.comps.values()) {
+  for (const c of lean ? [] : set.comps.values()) {
     const n = nameOfKey(set, c.key);
     let type = "";
     if (c.kind === "el") {
@@ -867,7 +911,7 @@ export function indexOf(set: SchemaSet): SetIndex {
     total: set.comps.size,
     reading: set.docs.filter((d) => d.reading).length,
     ms: { read: Math.round(set.times.read), compile: Math.round(set.times.compile) },
-    perFile: files.map((f) => ({
+    perFile: (lean ? [] : files).map((f) => ({
       path: f.path,
       elements: [...set.comps.values()].filter((c) => c.file === f.path && c.kind === "el").length,
       types: [...set.comps.values()].filter((c) => c.file === f.path && c.kind !== "el").length,

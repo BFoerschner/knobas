@@ -113,19 +113,21 @@ export class XsdPort {
   onindex: ((index: SetIndex) => void) | null = null;
   /** The last index answered. */
   index: SetIndex | null = null;
+  /** Settles once every file the set needs has been read (or found not to be). */
+  whole: Promise<void> = Promise.resolve();
 
   constructor(engine: XsdEngine) {
     this.#engine = engine;
   }
 
   /** Reads the opened file alone and answers at once; the files it names are read after (`onindex`). */
-  async open(entry: string, text: string, reads: XsdReads): Promise<Opened> {
+  async open(entry: string, text: string, reads: XsdReads, home?: string, lean = false): Promise<Opened> {
     this.#reads = reads;
     this.#entry = entry;
-    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed] }));
+    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed], ...(home !== undefined ? { home } : {}), ...(lean ? { lean } : {}) }));
     if (answer.ok) {
       this.index = answer.index;
-      if (answer.need.length > 0) void this.#follow(answer.need);
+      if (answer.need.length > 0) this.whole = this.#follow(answer.need);
     }
     return answer;
   }
@@ -207,6 +209,11 @@ export class XsdPort {
   /** The shortest way down the tree to an element: the rows to open, its own last. */
   way(key: string): Promise<string[]> {
     return this.#engine(this.#id, { kind: "way", key }).then((r) => (Array.isArray(r) ? (r as string[]) : []));
+  }
+
+  /** The declaration of a document's element, by its names from the root down (section 26). */
+  declOf(names: { ns: string; local: string }[]): Promise<(PageAnswer & { found: number }) | null> {
+    return this.#engine(this.#id, { kind: "declOf", names }).then((r) => (r !== null && typeof r === "object" && "kind" in r ? (r as PageAnswer & { found: number }) : null));
   }
 
   /** libxml2's verdict on a document against the set (section 24). */

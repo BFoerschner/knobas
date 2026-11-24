@@ -45,7 +45,7 @@ export interface DocOpened {
   folds: FoldTable;
   error: { message: string; line: number } | null;
   /** The root's name, its namespace, and where it says its schema is. */
-  root: { name: string; namespace: string; location: string | null } | null;
+  root: { name: string; namespace: string; location: string | null; prefixes: Record<string, string> } | null;
   /** Whether the root stands under a default namespace (the query's hint, section 21). */
   defaultNs: boolean;
 }
@@ -63,6 +63,10 @@ export type DocCall =
   | { kind: "like"; line: number }
   | { kind: "values"; lines: number[]; all: boolean }
   | { kind: "layout" }
+  /** The lines of the nodes libxml2's findings name by their paths (the XML view's section 12): -1 where none. */
+  | { kind: "places"; paths: (string | null)[] }
+  /** The element on a line as names with their namespaces, from the root down: what its declaration is found by. */
+  | { kind: "names"; line: number }
   | { kind: "close" };
 
 /** One row of a query's results, as the rail draws it. */
@@ -308,6 +312,14 @@ function locationOf(o: XmlOutline, root: number, namespace: string): string | nu
   return null;
 }
 
+/** The prefixes in scope at a node, its parents' too: how a document writes the names a check speaks of. */
+function prefixesAt(o: XmlOutline, node: number): Record<string, string> {
+  const scope = o.scopes[o.scope[node]!] ?? {};
+  const out: Record<string, string> = {};
+  for (const p in scope) if (p !== "" && p !== "xml") out[p] = scope[p]!;
+  return out;
+}
+
 function opened(k: Kept): DocOpened {
   const o = k.outline;
   const root = o.root;
@@ -317,7 +329,7 @@ function opened(k: Kept): DocOpened {
     nodes: o.n - 1 + o.attrs,
     folds: k.folds,
     error: o.error,
-    root: root === -1 ? null : { name: nameOf(o, root), namespace, location: locationOf(o, root, namespace) },
+    root: root === -1 ? null : { name: nameOf(o, root), namespace, location: locationOf(o, root, namespace), prefixes: prefixesAt(o, root) },
     defaultNs: root !== -1 && (o.scopes[o.scope[root]!]![""] ?? "") !== "",
   };
 }
@@ -385,6 +397,21 @@ export function answerDoc(sessions: DocSessions, session: number, call: DocCall)
     const out: Record<number, ValueAt[]> = {};
     for (const line of call.lines) out[line] = valuesOn(k, line, call.all);
     return out;
+  }
+  if (call.kind === "places") {
+    // A finding is put on its line by its path, never by libxml2's line, which is 16 bits (past 65,535 every one says
+    // 65,535) and is the file's own where knobas laid it out.
+    return call.paths.map((p) => {
+      if (p === null) return -1;
+      const node = nodeAtPath(o, p);
+      return node <= 0 ? -1 : lineOfNode(o, node);
+    });
+  }
+  if (call.kind === "names") {
+    const node = nodeOnLine(o, k.byLine, call.line);
+    const out: { ns: string; local: string; line: number }[] = [];
+    for (let at = node; at > 0; at = o.parent[at]!) if (o.type[at] === EL) out.push({ ns: o.uris[o.ns[at]!] ?? "", local: o.names[o.local[at]!]!, line: o.line[at]! });
+    return out.reverse();
   }
   if (call.kind === "find") {
     // The folds found again by their elements, as the lines they start on now.

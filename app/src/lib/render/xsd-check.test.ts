@@ -4,6 +4,7 @@ import { answerXsd, type Checked, type XsdSessions } from "./xsd-answer";
 import { fixture } from "./doc-fixture";
 import { bundledFiles, familyFiles } from "./xsd-fixture";
 import { plain } from "./xsd-findings";
+import { sniffNamespace } from "./xsd-sniff";
 import { ns } from "./xml-names";
 
 const ENTRY = "schemas/opentrans/opentrans_2_1.xsd";
@@ -15,7 +16,7 @@ function session(files: Map<string, string>, entry = ENTRY): { ask: (xml: string
   const sessions: XsdSessions = new Map();
   let a = answerXsd(sessions, 1, { kind: "open", entry, text: files.get(entry)!, paths: null, pointed: [] }, bundled) as { need: string[] };
   for (let i = 0; i < 10 && a.need.length > 0; i += 1) {
-    const index = a.need.includes("?index") ? { declares: [...files.keys()].map((p) => [p, null] as [string, null]), catalogs: [], total: 0, read: 0 } : undefined;
+    const index = a.need.includes("?index") ? { declares: [...files.entries()].map(([p, t]) => [p, sniffNamespace(t) ?? null] as [string, string | null]), catalogs: [], total: files.size, read: files.size } : undefined;
     // No other repository declares anything here.
     const away = a.need.find((p) => p.startsWith("?elsewhere:"));
     const elsewhere = away === undefined ? undefined : { namespace: away.slice("?elsewhere:".length), list: [] };
@@ -50,6 +51,14 @@ describe("libxml2 judges a document against the set, from memory (section 24)", 
     if (answer.state !== "checked") throw new Error(answer.why);
     expect(answer.asked.length).toBeGreaterThan(0);
     expect(answer.asked.every((u) => u.startsWith("mem:///set/schemas/opentrans/"))).toBe(true);
+  });
+
+  test("a file found elsewhere than beside its reference is answered from where knobas found it", async () => {
+    const files = familyFiles("opentrans-2.1", "schemas/opentrans/");
+    files.set("vendor/bme/bmecat_2005.xsd", files.get("schemas/opentrans/bmecat_2005.xsd")!);
+    files.delete("schemas/opentrans/bmecat_2005.xsd");
+    const answer = await session(files).ask(fixture("order-4710.xml"));
+    expect(answer).toMatchObject({ state: "checked", findings: [] });
   });
 
   test("a set with a file not found here is not checked, and says which", async () => {

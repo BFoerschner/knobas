@@ -52,6 +52,13 @@
   import type { RenderPort } from "../../../render/port";
   import { push } from "../../../shell/toasts.svelte";
   import { DOC_KEYS, isKey } from "./doc-keys";
+  import { DocCheck, rootSays, type RootSays } from "./doc-check.svelte";
+  import TfXsdPage from "../xsd/TfXsdPage.svelte";
+  import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
+  import { XsdState } from "../xsd/xsd.svelte";
+  import { XsdPort } from "../../../render/xsd-port";
+  import type { Pointed } from "../../../render/xsd-locate";
+  import { buildIndex } from "../../../render/xsd-index";
 
   let {
     text,
@@ -65,6 +72,7 @@
     pipelines = null,
     files = null,
     images = null,
+    schema = null,
   }: {
     text: string;
     /** The file's path from the repository's top. */
@@ -78,6 +86,19 @@
     line?: number | null;
     /** Where the outline is read: the worker when left out. */
     engine?: DocEngine | null;
+    /**
+     * The schema check (X2): the repository's files as text and its paths at the commit shown, what was pointed to,
+     * whether checking is on, and what opens a schema or points a reference; `null` where nothing is checked.
+     */
+    schema?: {
+      read: (path: string) => Promise<string | null>;
+      paths: () => Promise<readonly string[]>;
+      pointed: () => Promise<readonly Pointed[]>;
+      on: () => Promise<boolean>;
+      open?: (path: string, place: string | null) => void;
+      point?: (namespace: string | null, location: string | null) => void;
+      engine?: import("../../../render/xsd-port").XsdEngine;
+    } | null;
     /** How a value pipeline runs and saves over this file; `null` where no pipeline can run (no value is looked at). */
     values?: { run: (steps: PipeStep[]) => Promise<PipeRun>; save: (steps: PipeStep[], name: string) => Promise<string> } | null;
     /**
@@ -95,6 +116,8 @@
 
   /** The lines of a document a row is: fixed, so a windowed list of 800,000 rows holds one height. */
   const ROW = 22;
+  /** The departures one line's side column says whole: a line holds a handful at most. */
+  const DEPARTURES_SHOWN = 20;
   /** A line longer than this is drawn as its first {@link KEEP} characters and a count (section 6). */
   const CLIP = { over: 400, keep: 320 };
 
@@ -132,6 +155,66 @@
     return () => {
       live = false;
       state.close();
+    };
+  });
+
+  // ---- The schema check (X2, sections 10 to 12): run when the outline lands, by itself ----
+  let check = $state<DocCheck | null>(null);
+  $effect(() => {
+    const state = st;
+    const port = schema;
+    if (state === null || port === null) {
+      check = null;
+      return;
+    }
+    const c = new DocCheck(`${untrack(() => repo)}\n${untrack(() => path)}`, port.engine ?? null);
+    check = c;
+    return () => c.close();
+  });
+  // The check starts once the outline has landed: started beside it, its reads and copies to the worker slowed the
+  // outline's own paint by a fifth at 6x on 2560 x 1440 at 1.25 (269 to 317 ms to the carets), and the verdict, which
+  // needs the outline to place its findings, came no sooner. What the root says is read from its first tag.
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const port = schema;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || port === null || landed === null || landed.error !== null) return;
+    untrack(() => void runCheck(c, state, landed.root ?? rootSays(text), port));
+  });
+  // A document that is not well formed has no check: the head is the outline's, and no mark stands.
+  $effect(() => {
+    const c = check;
+    if (c !== null && (st?.opened?.error ?? null) !== null) untrack(() => c.clear());
+  });
+  async function runCheck(c: DocCheck, state: DocState, root: RootSays | null, port: NonNullable<typeof schema>) {
+    const [pointed, on] = await Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]);
+    if (check !== c) return;
+    await c.run(path, root, untrack(() => shownText) ?? text, state.session, { read: port.read, paths: port.paths, pointed, index: (from, list) => buildIndex(repo, list, from, port.read) }, on);
+  }
+  /** The declaration beside the document, for the line picked (section 26). */
+  let declared = $state<XsdState | null>(null);
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const n = state?.cursor ?? 0;
+    if (c === null || state === null || n <= 0 || c.head.k !== "checked") {
+      declared = null;
+      return;
+    }
+    let live = true;
+    void c.declarationOf(n, state.session).then((page) => {
+      if (!live) return;
+      if (page === null) {
+        declared = null;
+        return;
+      }
+      const shown = new XsdState(c.port ?? new XsdPort(() => Promise.resolve(null)));
+      shown.page = page;
+      declared = shown;
+    });
+    return () => {
+      live = false;
     };
   });
 
@@ -228,7 +311,7 @@
 
   function rowClass(n: number): string {
     if (st === null) return "tf-xv-l";
-    return `tf-xv-l${n === st.cursor ? " tf-xv-cur" : ""}${st.hits.has(n) ? " tf-xv-hit" : ""}`;
+    return `tf-xv-l${n === st.cursor ? " tf-xv-cur" : ""}${st.hits.has(n) ? " tf-xv-hit" : ""}${check?.byLine.has(n) === true ? " tf-xv-bad" : ""}`;
   }
 
   // ---- Values (sections 15 to 18) ----
@@ -492,7 +575,7 @@
 
   /** The lines of what the rail lists, in its order: the break of a broken file, or the matches. */
   function listed(state: DocState): number[] {
-    if (mode === "findings") return state.opened?.error ? [state.opened.error.line] : [];
+    if (mode === "findings") return state.opened?.error ? [state.opened.error.line] : [...new Set((check?.found ?? []).map((d) => d.line))];
     return state.rows.map((r) => r.line);
   }
 
@@ -689,7 +772,7 @@
 
 {#snippet caret(n: number)}{#if st !== null && (st.folds.byLine[n] ?? -1) !== -1}{@const shut = st.folded.has(n)}<button type="button" class="tf-xv-caret" data-xv-caret={n} aria-expanded={!shut} aria-label={shut ? "Unfold" : "Fold"} tabindex="-1"></button>{:else}<span class="tf-xv-cc"></span>{/if}{/snippet}
 
-{#snippet end(n: number)}{@const c = chipOf(n)}{#if c !== null}<span class="tf-xv-end">{#if c.kept !== null}<button type="button" class="tf-xv-chip tf-xv-kept" data-xv-value={n} title="Kept as {c.kept.pipeline.name}. Space looks at it.">{c.kept.pipeline.name}</button>{:else if c.guess !== null}<button type="button" class="tf-xv-chip" data-xv-value={n} title="knobas takes this for {c.guess.why}. Space looks at it.">{#if c.guess.chip.lead !== ""}<span>{c.guess.chip.lead}</span>{/if}<b>{c.guess.chip.bold}</b>{#if c.guess.chip.tail !== ""}<span>{c.guess.chip.tail}</span>{/if}</button>{/if}</span>{/if}{/snippet}
+{#snippet end(n: number)}{@const c = chipOf(n)}{@const dep = check?.byLine.get(n)}{#if dep !== undefined}<span class="tf-xv-end tf-xv-depend"><span class="tf-xv-say" title={dep.map((d) => d.raw).join("\n")}><TfXsdRuns runs={dep[0]!.words.text} cls="tf-xv-code" />{#if dep.length > 1}{" "}<span class="tf-xv-saymore">and {dep.length - 1} more</span>{/if}</span></span>{:else if c !== null}<span class="tf-xv-end">{#if c.kept !== null}<button type="button" class="tf-xv-chip tf-xv-kept" data-xv-value={n} title="Kept as {c.kept.pipeline.name}. Space looks at it.">{c.kept.pipeline.name}</button>{:else if c.guess !== null}<button type="button" class="tf-xv-chip" data-xv-value={n} title="knobas takes this for {c.guess.why}. Space looks at it.">{#if c.guess.chip.lead !== ""}<span>{c.guess.chip.lead}</span>{/if}<b>{c.guess.chip.bold}</b>{#if c.guess.chip.tail !== ""}<span>{c.guess.chip.tail}</span>{/if}</button>{/if}</span>{/if}{/snippet}
 
 {#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {NUM.format(len)} characters long.">{NUM.format(len - CLIP.keep)} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{NUM.format(st.folds.end[f]! - n)} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{NUM.format(inside)} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
 
@@ -697,7 +780,24 @@
 <div class="tf-oas tf-xv tf-oas-{cols >= 3 ? 3 : 2}" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("doc-rail")}>
   {#if st !== null}
     {@const state = st}
-    <TfDocRail st={state} bind:mode ongo={(n) => void go(n)}>
+    <TfDocRail
+      st={state}
+      bind:mode
+      ongo={(n) => void go(n)}
+      {check}
+      onstop={check === null ? null : () => check?.stop()}
+      oncheck={check === null || schema === null
+        ? null
+        : () => {
+            const c = check;
+            const s = schema;
+            if (c === null || s === null) return;
+            c.resume();
+            void runCheck(c, state, state.opened?.root ?? rootSays(text), s);
+          }}
+      onschema={check === null || schema?.open === undefined ? null : () => (check?.schema != null ? schema?.open?.(check.schema, null) : undefined)}
+      onpoint={schema?.point === undefined ? null : () => schema?.point?.(state.opened?.root?.namespace || null, state.opened?.root?.location ?? null)}
+    >
       {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
       {#snippet copy()}
         {#if state.q.state === "nodes" && state.q.count > 0}
@@ -787,7 +887,20 @@
       {/if}
     </div>
     {#if cols >= 3}
-      <TfDocPicked picked={state.picked} oncopy={copied} />
+      {@const here = check?.byLine.get(state.cursor)}
+      <!-- One column, whatever it holds: a stepped-to departure whole, over what the schema says of the element. -->
+      <div class="tf-xv-sidecol">
+        {#if here !== undefined}
+          <div class="tf-xv-depfull" role="status">
+            {#each here.slice(0, DEPARTURES_SHOWN) as d, i (i)}<p><TfXsdRuns runs={d.words.text} cls="tf-xv-code" /></p>{/each}
+          </div>
+        {/if}
+        {#if declared !== null}
+          <TfXsdPage st={declared} ongo={(key) => (check?.schema != null ? schema?.open?.(check.schema, key) : undefined)} onback={() => {}} onfile={(p) => schema?.open?.(p, null)} />
+        {:else}
+          <TfDocPicked picked={state.picked} oncopy={copied} />
+        {/if}
+      </div>
     {/if}
   {/if}
 </div>

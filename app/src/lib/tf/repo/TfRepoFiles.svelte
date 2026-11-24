@@ -116,6 +116,7 @@
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
   import { entityFilePipedSave } from "../../ipc/entity";
+  import { xmlCheck, xsdLocations } from "../../ipc/api";
   import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
   import {
     commandSteps as appCommandSteps,
@@ -2632,6 +2633,13 @@
             {render}
             line={path === doc.path ? line : null}
             files={docFiles}
+            schema={{
+              read: textRead,
+              paths: allPaths,
+              pointed: () => xsdLocations().then((l) => l.pointed, () => []),
+              on: () => xmlCheck().then((c) => c.on, () => true),
+              open: (file, at) => goAcross(at === null ? hrefOf(file) : placeHrefOf(file, at), file.slice(file.lastIndexOf("/") + 1)),
+            }}
             values={piped === undefined || doc !== shownFile
               ? null
               : { run: (steps) => piped(entity, doc.path, readAt, steps), save: (steps, name) => entityFilePipedSave(entity, doc.path, readAt, steps, name) }}

@@ -12,12 +12,15 @@
 //! - [`servers`]: servers a person saved, a name and an address, no secret.
 //! - [`image`]: an image at an address in a document, loaded on a press (the
 //!   XML view, section 14), by the same client.
+//! - [`schemas`]: the schema files a person pointed to, and whether XML files
+//!   are checked against theirs (ADR-0058).
 
 pub mod found;
 pub mod held;
 pub mod image;
 pub mod kept;
 pub mod open;
+pub mod schemas;
 pub mod scratch;
 pub mod send;
 pub mod servers;

@@ -13,7 +13,13 @@ test("open answers the fold table, what the root says and where a broken file st
   const o = answerDoc(sessions, 1, { kind: "open", text: ORDER }) as DocOpened;
   expect(o.lines).toBe(1814);
   expect(o.folds.line.length).toBeGreaterThan(100);
-  expect(o.root).toEqual({ name: "ORDER", namespace: ns("www.opentrans.org/XMLSchema/2.1"), location: "../schemas/opentrans/opentrans_2_1.xsd" });
+  expect(o.root).toEqual({
+    name: "ORDER",
+    namespace: ns("www.opentrans.org/XMLSchema/2.1"),
+    location: "../schemas/opentrans/opentrans_2_1.xsd",
+    // The prefixes it binds, which a check's findings write names with.
+    prefixes: { xsi: ns("www.w3.org/2001/XMLSchema-instance"), bmecat: ns("www.bmecat.org/bmecat/2005"), xmime: ns("www.w3.org/2005/05/xmlmime") },
+  });
   expect(o.defaultNs).toBe(true);
   const b = answerDoc(sessions, 2, { kind: "open", text: BROKEN }) as DocOpened;
   expect(b.error?.line).toBe(4);

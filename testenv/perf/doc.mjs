@@ -26,7 +26,7 @@ const big = args.includes("--big");
 const RUNS = 5;
 const REPO = "#/repo/mock%3Atidewater%2Fpayout-service";
 const file = (path) => `${REPO}/files/${path}`;
-const LINES = { page: { 1: 100, 4: 200, 6: 300 }, press: { 1: 100, 4: 100, 6: 200 } };
+const LINES = { page: { 1: 100, 4: 200, 6: 300 }, press: { 1: 100, 4: 100, 6: 150 } };
 const line = (kind, t) => (machine === "pc" ? LINES[kind][t] : LINES[kind][t] / 2);
 
 const attachTo = arg("--attach", null);
@@ -37,7 +37,7 @@ await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 const home = async () => {
-  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml${big ? "&fake-xml-big" : ""}#/inbox` });
+  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd${big ? "&fake-xml-big" : ""}#/inbox` });
   await sleep(2500);
 };
 await home();
@@ -81,6 +81,16 @@ const CASES = [
   { name: "open", label: "the order (1,814 lines) opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
   { name: "lines", label: "the order opened from the README, to its first lines", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: LINE_ROWS, watch: LINE_ROWS },
   { name: "again", label: "the order opened again, from the other order", kind: "page", before: go(file(OTHER)), act: go(file(ORDER)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
+  // The check (X2): the order opened until libxml2's verdict stands in the rail's head, its five marks painted on lines
+  // that already stand (none of them may move).
+  { name: "checked", label: "the order opened from the README, to its check's verdict (5 departures)", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: ".tf-xv-verdict b", text: "departures", watch: LINE_ROWS },
+  { name: "next", label: "N to the first departure, its line picked", kind: "press", before: go(file("README.md")), prep: `async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    location.hash = ${JSON.stringify(file(ORDER))};
+    for (let i = 0; i < 100 && !document.querySelector('.tf-xv-lines .tf-code .tf-l'); i++) await wait(50);
+    for (let i = 0; i < 100 && !/departures/.test(document.querySelector('.tf-xv-verdict')?.textContent ?? ''); i++) await wait(50);
+    document.querySelector('.tf-xv-lines .tf-code').focus();
+  }`, act: key("n"), sel: '.tf-xv-frow[aria-selected="true"] .tf-xv-fline' },
   { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
   { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
   { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },

@@ -214,20 +214,22 @@ done
 #    contract they name) go onto `ledger-api` the same way, from a folder of
 #    their own, so the mock corpus and its counts stay as they are.
 # --------------------------------------------------------------------------
-for FILES_DIR in "${FIXTURE_FILES:-../fixtures/tidewater/files}" ../fixtures/doc/files; do
-if [ -d "$FILES_DIR/$ORG" ]; then
-  for dir in "$FILES_DIR/$ORG"/*/; do
-    repo=$(basename "$dir")
+# push_files <repo> <dir/> <prefix>: every regular file under <dir/> onto <repo>'s main at <prefix><its path>, in
+# one commit of the files that are missing or differ (section 4c's way).
+push_files() {
+    repo=$1 dir=$2 prefix=$3
     api "$ADMIN" GET "/repos/$ORG/$repo"
     expect "read repo $repo for its fixture files" 200
     changes=$(mktemp)
     printf '[' >"$changes"
     sep=''
     # Every regular file, by its path in the repository; `find` is sorted so
-    # the commit lists them in one order on every machine.
-    ( cd "$dir" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) >"$changes.list"
-    while IFS= read -r path; do
-      want=$(git hash-object --no-filters "$dir$path")
+    # the commit lists them in one order on every machine. A SOURCE.md of a
+    # folder of other people's files stays in the fixtures.
+    ( cd "$dir" && find . -type f ! -name SOURCE.md | sed 's|^\./||' | LC_ALL=C sort ) >"$changes.list"
+    while IFS= read -r file; do
+      path="$prefix$file"
+      want=$(git hash-object --no-filters "$dir$file")
       api "$ADMIN" GET "/repos/$ORG/$repo/contents/$(printf '%s' "$path" | jq -sRr @uri | sed 's|%2F|/|g')?ref=main"
       case "$API_STATUS" in
         200) have=$(printf '%s' "$API_BODY" | jq -r '.sha // empty')
@@ -237,7 +239,7 @@ if [ -d "$FILES_DIR/$ORG" ]; then
         *)   expect "read $repo:main $path" 200 404 ;;
       esac
       # Through a file: a file's base64 past 128 KiB is longer than one argument may be (an XML order, 2026-11-23).
-      base64 <"$dir$path" | tr -d '\n' >"$changes.b64"
+      base64 <"$dir$file" | tr -d '\n' >"$changes.b64"
       jq -n --arg op "$op" --arg p "$path" --arg sha "$have" --rawfile c "$changes.b64" \
             '{operation:$op, path:$p, content:$c} + (if $sha == "" then {} else {sha:$sha} end)' >"$changes.one"
       printf '%s' "$sep" >>"$changes"
@@ -254,9 +256,22 @@ if [ -d "$FILES_DIR/$ORG" ]; then
       say "committed $n fixture file(s) to $repo:main"
     fi
     rm -f "$changes" "$changes.list" "$changes.one" "$changes.b64" "$changes.body"
+}
+for FILES_DIR in "${FIXTURE_FILES:-../fixtures/tidewater/files}" ../fixtures/doc/files; do
+if [ -d "$FILES_DIR/$ORG" ]; then
+  for dir in "$FILES_DIR/$ORG"/*/; do
+    push_files "$(basename "$dir")" "$dir" ""
   done
 fi
 done
+
+# --------------------------------------------------------------------------
+# 4d. The schema explorer's openTRANS (2026-11-24, `fixtures/xsd/opentrans-2.1/
+#    SOURCE.md`): its four files onto ledger-api's `schemas/opentrans/`, where
+#    the XML view's orders name them (`../schemas/opentrans/opentrans_2_1.xsd`),
+#    so an order opens checked. Byte for byte: git's blob sha decides, as in 4c.
+# --------------------------------------------------------------------------
+[ -d ../fixtures/xsd/opentrans-2.1 ] && push_files ledger-api ../fixtures/xsd/opentrans-2.1/ schemas/opentrans/
 
 # --------------------------------------------------------------------------
 # Helpers used by the content sections below.

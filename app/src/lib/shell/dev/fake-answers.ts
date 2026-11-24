@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts } from "../../ipc/api";
+import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations } from "../../ipc/api";
 import type { appStatus, commandSteps, diffPipelines, folderRender, folderRenderers, folderRenderPicks, folderRenderCompare, setFolderRenderPick, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, folderRenderTree, folderRenderFile, folderRenderFileBytes, folderRenderArchiveOpen, folderRenderOpen, folderRenderStore, setFolderRenderStore, clearFolderRenderStore, setFolderRenderers, setJavaPath, frontendReady, installedFonts, javaRuntime, namedPipelines, pagesKeptOpen, ping, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setUserRenderers, smoothScrolling, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
@@ -91,6 +91,10 @@ export interface Answers {
   image_fetch: Answer<typeof imageFetch>;
   image_hosts: Answer<typeof imageHosts>;
   set_image_hosts: Answer<typeof setImageHosts>;
+  xml_check: Answer<typeof xmlCheck>;
+  set_xml_check: Answer<typeof setXmlCheck>;
+  xsd_locations: Answer<typeof xsdLocations>;
+  xsd_set_locations: Answer<typeof xsdSetLocations>;
   api_open_in: Answer<typeof apiOpenIn>;
   api_clients_found: Answer<typeof apiClientsFound>;
   api_scratch_size: Answer<typeof apiScratchSize>;

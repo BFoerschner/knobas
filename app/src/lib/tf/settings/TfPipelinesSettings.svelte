@@ -24,7 +24,7 @@
   import TfCommand from "../TfCommand.svelte";
   import TfWords from "../TfWords.svelte";
   import { needsWords, secondsWhy } from "./form-words";
-  import { imageHosts, setImageHosts } from "../../ipc/api";
+  import { imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, type PointedSchema } from "../../ipc/api";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
 
@@ -70,6 +70,33 @@
       push({ text: `Could not forget ${host}: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
+
+  // Schemas (the XML view's section 11, the XSD design's 17): whether XML files are checked, and the files pointed to.
+  let checking = $state(true);
+  let pointed = $state<PointedSchema[]>([]);
+  $effect(() => {
+    void xmlCheck().then((c) => (checking = c.on), () => {});
+    void xsdLocations().then((l) => (pointed = l.pointed), () => {});
+  });
+  async function flipCheck() {
+    const next = !checking;
+    try {
+      checking = (await setXmlCheck({ on: next })).on;
+    } catch (cause) {
+      push({ text: `Could not change it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+  async function forgetPointed(at: number) {
+    try {
+      pointed = (await xsdSetLocations({ pointed: pointed.filter((_, i) => i !== at) })).pointed;
+    } catch (cause) {
+      push({ text: `Could not forget it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+  /** What a pointed reference answers with, in words: a file and its repository's name, or an address and its day. */
+  const answeredBy = (p: PointedSchema) => ("url" in p.to ? `${p.to.url}, downloaded ${p.to.at}` : `${p.to.name ?? p.to.repo}: ${p.to.path}`);
+  /** The files pointed to that the table draws: a list a person builds by hand, at most the row's own bound. */
+  const POINTED_SHOWN = 500;
 
   // Command steps.
   let editingStep = $state<number | "new" | null>(null);
@@ -284,6 +311,36 @@
           <tr>
             <td><code class="tf-mono">{host}</code></td>
             <td class="tf-right"><button class="tf-btn tf-sm tf-ghost" aria-label="Forget {host}" onclick={() => void forgetHost(host)}>Forget</button></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+</div>
+
+<div class="tf-stg-sec">
+  <h2>Schemas</h2>
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-xml-check"
+      >Check an XML file against its schema when one is found<small>The XML view says where a document departs from its schema, at the end of the line, and lists what it found.</small></label
+    >
+    <div class="tf-stg-c">
+      <button id="tf-xml-check" type="button" class="tf-stg-sw" role="switch" aria-checked={checking} aria-label="Check an XML file against its schema when one is found" onclick={() => void flipCheck()}><i></i></button>
+    </div>
+  </div>
+  <p class="tf-stg-p">Schema files you pointed to, for a namespace and a location a schema or a document names and nothing in its repository answers.</p>
+  {#if pointed.length === 0}
+    <p class="tf-dim">None: where a file is not found here, <i>Point to a file…</i> keeps the answer here.</p>
+  {:else}
+    <table class="tf-tbl tf-rnd-tbl">
+      <thead><tr><th>Namespace</th><th>Location</th><th>Answered by</th><th><span class="tf-sr">Actions</span></th></tr></thead>
+      <tbody>
+        {#each pointed.slice(0, POINTED_SHOWN) as p, i (`${p.namespace}\n${p.location}`)}
+          <tr>
+            <td><code class="tf-mono">{p.namespace || "no namespace"}</code></td>
+            <td><code class="tf-mono">{p.location || "(none)"}</code></td>
+            <td class="tf-small"><span class="tf-cut" title={answeredBy(p)}>{answeredBy(p)}</span></td>
+            <td class="tf-right"><button class="tf-btn tf-sm tf-ghost" aria-label="Forget the file for {p.namespace || p.location}" onclick={() => void forgetPointed(i)}>Forget</button></td>
           </tr>
         {/each}
       </tbody>

@@ -45,6 +45,18 @@ Found by the probes on the built app, and fixed:
 
 Waits for the next pass: the schema's check in the view (X2, with the schema explorer's S1 to S5), the JSON view and jq (J1, J2), comparison by element (C1), the Docs block and the file viewer's inline form (D1).
 
+## The check, built (X2, 2026-11-24)
+
+With the schema explorer's model (`docs/decisions/2026-11-23-an-xml-schema-is-explored-across-its-files-and-an-example-is-made-from-it.md`, S1, S2 and S5), an XML file that names its schema opens checked, by itself (sections 10 to 12).
+
+- **The document's schema is read as the explorer reads a set**, from an entry that imports the root's namespace from the document's folder (or includes its no-namespace location), so every step of the order is the explorer's own (`tf/render/doc/doc-check.svelte.ts`). It starts once the outline has landed: started beside it, its reads and copies slowed the outline's own paint at 6x, and the verdict, which needs the outline to place its findings, came no sooner. Its session sends no declarations back to the page.
+- **The rail's head** says each state of section 11 in the room it held: *Checking…*, *Valid* in `--ok`, *5 departures* in `--err`, *Not checked* in `--warn` and why, *Schema not found here* with *Point to a file…*, a schema at an address, *No schema*, checking off with *Check it*. *Schema ▾* holds *Stop checking this file* (until knobas quits), *Open the schema* and *Point to another file…*.
+- **A departure stands at the end of its line**, in knobas's words, the line in the error edge and ground; the rail's *Findings* lists them, `N` and `P` step through them, and from 1,480 px a stepped-to departure stands whole beside the document over the declaration of its element, found by walking down by name (`declarationOf`). A finding is put on its line by libxml2's path to the node (`places`), never by its 16-bit line.
+- **Names in a finding are written as the document writes them**: the document's prefixes, its root's namespace bare.
+- **Settings › Pipelines** gains *Schemas*: *Check an XML file against its schema when one is found* (`xml.check`, on) and the schema files pointed to (`xsd.locations`). Commands `xml_check`, `set_xml_check`, `xsd_locations`, `xsd_set_locations`; no migration.
+
+Measured on the built app (`testenv/perf/doc.mjs` with `?fake-xsd`, headless Chrome on the WSL box under the pc ticket, median of five, ms at 1x / 6x): at 1440 x 868 the order opened to its check's verdict, five departures, 61 / 239, `N` to the first departure 18 / 132; at 2560 x 1440 at 1.25 the verdict 77 / 320, `N` 20 / 142; at 1920 x 1080 at 2 the verdict 282 and `N` 153 at 6x. **Over its line**: the verdict at 6x on 2560 x 1440 at 1.25, 320 against 300 for a page; the page itself is usable from its first lines (178), and the verdict is paint on lines that stand, like the carets, which land at 269 to 327 there on the same build. `N` at 6x on 1920 x 1080 at 2 is 153 against 150. No line moved when the marks landed.
+
 ## Not in this pass
 
 An XPath step in file pipelines. XML and JSON compared by element. JSON Schema. YAML. Folds across restarts. A query in an address. Thumbnails.

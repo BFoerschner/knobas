@@ -91,6 +91,18 @@ export type OpenedSpec = { argv: Array<string>, folder: string,
 wrote: boolean, left_out: Array<[string, string]>, };
 
 /**
+ * One reference answered by hand: the namespace and location a schema or a
+ * document asked for, and what answers them.
+ */
+export type PointedSchema = { namespace: string, location: string, to: PointedTo, };
+
+/**
+ * Where a pointed reference is answered from: a file of a synced repository,
+ * or an address knobas downloaded on a press.
+ */
+export type PointedTo = { repo: string, path: string, name?: string, } | { url: string, sha256: string, at: string, };
+
+/**
  * One saved server.
  */
 export type SavedServer = { 
@@ -115,6 +127,11 @@ export type SavedServers = { servers: Array<SavedServer>,
  * `repository\npath` to a server's id.
  */
 last: { [key in string]: string }, };
+
+/**
+ * Everything pointed to.
+ */
+export type SchemaLocations = { pointed: Array<PointedSchema>, };
 
 /**
  * One line of *Sent since knobas started*.
@@ -145,3 +162,8 @@ collection: Array<[string, string]> | null,
  * `repository\npath`: which folder is this spec's.
  */
 key: string, };
+
+/**
+ * Whether an XML file is checked when a schema is found.
+ */
+export type XmlCheck = { on: boolean, };

@@ -88,7 +88,7 @@ test("the outline lands as paint: carets where something folds, and the head say
   await settle();
   expect(target.querySelectorAll(".tf-xv-caret")).toHaveLength(3);
   expect(row(2).querySelector(".tf-xv-caret")).not.toBeNull();
-  expect(head()).toBe("Not checked Its namespace is urn:a. knobas does not check a document against a schema.");
+  expect(head()).toBe("Not checked Its namespace is urn:a. knobas does not check a document against a schema here.");
 });
 
 test("a caret folds; the fold is one line with its count, and a press on the count unfolds", async () => {
@@ -283,4 +283,88 @@ test("a file written on one line is laid out, says so, and draws as written on a
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "As written")!.click();
   await settle();
   expect(rows()).toEqual([1]);
+});
+
+// ---- The schema check (X2, sections 10 to 12) ----
+
+import { localXsdEngine } from "../../../render/xsd-port";
+import { familyFiles } from "../../../render/xsd-fixture";
+
+/** The repository: the orders where the seed puts them, openTRANS's schemas where they name them. */
+function schemaPort(extra: Partial<{ on: boolean; drop: string }> = {}) {
+  const files = familyFiles("opentrans-2.1", "schemas/opentrans/");
+  if (extra.drop !== undefined) files.delete(extra.drop);
+  const read = vi.fn((p: string) => Promise.resolve(files.get(p) ?? null));
+  return { read, paths: () => Promise.resolve([...files.keys(), "orders/order-4711.xml"]), pointed: () => Promise.resolve([]), on: () => Promise.resolve(extra.on ?? true), engine: localXsdEngine() };
+}
+
+async function checked() {
+  // The check starts after the first frame: wait for its verdict, not the head the outline alone draws.
+  const done = () => /departure|Valid|Schema not found here|No schema/.test(words(target.querySelector(".tf-xv-verdict"))) || words(target.querySelector(".tf-xv-head")).includes("Checking is off");
+  for (let round = 0; round < 300 && !done(); round += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    flushSync();
+  }
+  await settle();
+}
+
+test("order-4711 opens checked: five departures at the ends of their lines, the head says against what", async () => {
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema: schemaPort() } });
+  flushSync();
+  // The first frame has its lines and no mark.
+  expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
+  await checked();
+  expect(words(target.querySelector(".tf-xv-verdict"))).toContain("5 departures");
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("Against opentrans_2_1.xsd, found beside the file its xsi:schemaLocation names.");
+  // The rail opened on Findings, one row a departure, in the document's order.
+  const rows = [...target.querySelectorAll(".tf-xv-list .tf-xv-frow")].map((r) => words(r.querySelector(".tf-xv-fline")));
+  expect(rows).toEqual(["93", "708", "829", "830", "1,184"]);
+});
+
+test("a document whose schema is not in the repository says so, quietly where it names only a namespace", async () => {
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema: schemaPort({ drop: "schemas/opentrans/opentrans_2_1.xsd" }) } });
+  flushSync();
+  await checked();
+  expect(words(target.querySelector(".tf-xv-verdict"))).toBe("Schema not found here");
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("It names ../schemas/opentrans/opentrans_2_1.xsd, and no file is there.");
+});
+
+test("checking off: the head says so and nothing is read", async () => {
+  const port = schemaPort({ on: false });
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema: port } });
+  flushSync();
+  await checked();
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("Checking is off for this file.");
+  expect(port.read).not.toHaveBeenCalled();
+});
+
+test("a document that says nothing of a schema reads nothing and says No schema", async () => {
+  const port = schemaPort();
+  draw(SMALL.replace(" xmlns='urn:a'", ""), { schema: port });
+  await checked();
+  expect(words(target.querySelector(".tf-xv-verdict"))).toBe("No schema");
+  expect(port.read).not.toHaveBeenCalled();
+});
+
+test("N steps to each departure: its line wears the mark and its sentence; Stop checking clears them in one frame", async () => {
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r2", render: quiet, engine: localDocEngine(), schema: schemaPort() } });
+  flushSync();
+  await checked();
+  const code = target.querySelector<HTMLElement>(".tf-xv-lines .tf-code")!;
+  code.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
+  await settle();
+  const line = target.querySelector<HTMLElement>('.tf-l[data-n="93"]')!;
+  expect(line.classList.contains("tf-xv-bad")).toBe(true);
+  expect(words(line.querySelector(".tf-xv-say"))).toBe("DELIVERY_DATE stands where ORDER_DATE is expected.");
+  expect(words(target.querySelector(".tf-xv-crumbs"))).toContain("DELIVERY_DATE");
+  code.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
+  await settle();
+  expect(target.querySelector('.tf-xv-frow[aria-selected="true"] .tf-xv-fline')?.textContent).toBe("708");
+  // Stop checking this file.
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "Schema ▾")!.click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => words(b) === "Stop checking this file")!.click();
+  flushSync();
+  expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("Checking is off for this file.");
 });

@@ -126,7 +126,7 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
     } catch (e) {
       schema?.dispose();
       const details = ((e as { details?: { message: string }[] }).details ?? []).map((d) => d.message.trim());
-      return { state: "not-checked", why: "not compiled", detail: details.length > 0 ? details.slice(0, 3) : [String((e as Error).message ?? e)] };
+      return { state: "not-checked", why: "not compiled", detail: details.length > 0 ? details.slice(0, 3) : [e instanceof Error ? e.message : String(e)] };
     }
   }
   const t1 = performance.now();
@@ -138,7 +138,7 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
   } catch (e) {
     const details = (e as { details?: { message: string; line: number; xpath?: string }[] }).details ?? [];
     findings = details.map((d) => ({ message: d.message, line: d.line, xpath: d.xpath ?? null }));
-    if (findings.length === 0) findings = [{ message: String((e as Error).message ?? e), line: 0, xpath: null }];
+    if (findings.length === 0) findings = [{ message: e instanceof Error ? e.message : String(e), line: 0, xpath: null }];
   } finally {
     doc?.dispose();
   }

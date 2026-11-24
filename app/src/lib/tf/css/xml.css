@@ -158,3 +158,18 @@
 /* A file written on one line, laid out by knobas (section 6): the bar says so. */
 .tf-xv-laid { flex: none; color: var(--ink-2); font-style: italic; }
 .tf-xv-laying { margin: 16px 20px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+
+/* ---- the schema check (X2, sections 11 and 12) ---- */
+.tf-xv-verdict.tf-xv-ok b { color: var(--ok); font-weight: 600; }
+.tf-xv-warn { color: var(--warn); font-weight: 600; }
+.tf-xv-verdict > .tf-xv-schema { margin-left: auto; }
+/* A departure at the end of its line: in the interface's face and the error ink, paint on a line that stands. */
+.tf-xv-depend .tf-xv-say { --fs: var(--size-ui); font-family: var(--sans); letter-spacing: var(--ls-ui); font-size: calc(var(--t-xs) * var(--fs)); color: var(--err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-xv-depend .tf-xv-say code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-saymore { color: var(--ink-2); }
+/* Beside the document: the departure whole, then the declaration of the element. */
+.tf-xv-sidecol { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.tf-xv-sidecol > .tf-oas-page { flex: 1; min-height: 0; }
+.tf-xv-depfull { flex: none; padding: 10px 16px; border-bottom: 1px solid var(--rule-2); box-shadow: inset 3px 0 0 var(--err); background: var(--err-bg); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xv-depfull p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.tf-xv-depfull code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
