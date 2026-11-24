@@ -206,6 +206,9 @@
         Drawn by {renderer.name}{#if short(drawn.commit)}&nbsp;at <span class="tf-mono">{short(drawn.commit)}</span>{/if}, {tookLabel(drawn.took_ms)}{#if drawn.from === "forge"}, read from the source{/if}
       {:else if drawn !== null && onDisk}
         Drawn {#if drawn.from === "working_tree"}from your working tree{:else}at <span class="tf-mono">{short(drawn.commit) ?? "an earlier commit"}</span>{/if} {ago(drawn.drawn_at, now())}; your working tree changed since
+      {:else if drawn !== null && short(view?.commit) !== null && short(view?.commit) === short(drawn.commit)}
+        <!-- The folder is where it was: the tool or its command changed since (2026-11-24). -->
+        Drawn at <span class="tf-mono">{short(drawn.commit)}</span> {ago(drawn.drawn_at, now())}, before {renderer.name} changed
       {:else if drawn !== null}
         Drawn at <span class="tf-mono">{short(drawn.commit) ?? "an earlier commit"}</span> {ago(drawn.drawn_at, now())}{#if short(view?.commit)}; the folder is at <span class="tf-mono">{short(view?.commit)}</span> now{/if}
       {:else}

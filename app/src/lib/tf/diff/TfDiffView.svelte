@@ -72,8 +72,10 @@
   import { push } from "../../shell/toasts.svelte";
   import { reviewSubject } from "../../shell/queued-toast";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
+    cardIn,
     DIFF_CEILING,
     FILL_PAGE,
     EXPAND_STEP,
@@ -362,6 +364,15 @@
     for (const stop of unroot.values()) stop();
     unroot.clear();
   });
+  // The window back in focus, or the page shown again: each folder's two sides look again (a look starts nothing), so a
+  // tool changed meanwhile, or the working tree, shows its side as made from an earlier state (Björn, 2026-11-24: a
+  // kept Compare drew a side an older version of the tool made as current).
+  onFocusWhileShown(pageVisible(), () => {
+    for (const compare of compares.values()) {
+      compare.before.look();
+      compare.after.look();
+    }
+  });
 
   /**
    * What each grouped folder's two runs made, as the cards column draws it (by `compareKey`): a new answer lands in one
@@ -483,9 +494,12 @@
       const token = file.made![s];
       return token === null ? "" : decode.decode(await madeRead(file, token));
     };
+    // A file's last line break ends its last line, as git reads it: kept, it drew an empty line after it on each side,
+    // and an added one-line file counted two (2026-11-24; `TfJarDiff`'s `endless`).
+    const endless = (text: string) => text.replace(/\r?\n$/, "");
     Promise.all([side("old"), side("new")]).then(
       ([before, after]) => {
-        const made = lineDiff(file.path, before, after);
+        const made = lineDiff(file.path, endless(before), endless(after));
         lined = {
           ...lined,
           [key]: { file: { ...file, hunks: made.hunks, additions: made.additions, deletions: made.deletions, ...(made.coarse ? { coarse: true as const } : {}) }, next: null, failed: null },
@@ -568,9 +582,11 @@
         return `${name} is running…`;
       case "failed":
         return `${name} made nothing`;
+      case "stale":
+        // A side made from an earlier state is held, not compared (2026-11-24): nothing of it is listed yet.
+        return group.made === null ? "Not rendered yet" : `Made by ${name}`;
       case "made":
       case "same":
-      case "stale":
       case "comparing":
         return `Made by ${name}`;
       default:
@@ -1705,7 +1721,7 @@
       // The files drawn are the ones near the view: the one at its top is among them.
       for (const file of nearFiles()) {
         const key = keyOf(file);
-        const card = host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
+        const card = cardIn(host, key);
         if (card === null) continue;
         if (card.getBoundingClientRect().top > top) break;
         at = key;
@@ -1867,7 +1883,7 @@
   const heldBack = () =>
     fileWin.before + fileWin.after > 0 ||
     [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
-  const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
+  const cardOf = (key: string) => (filesHost === null ? null : cardIn(filesHost, key));
   /** The file a mark is changing, and where its head stands on screen. */
   let marking: { key: string; path: string; on: boolean; top: number } | null = null;
 

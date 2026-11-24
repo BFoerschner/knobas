@@ -3,7 +3,8 @@
   the-working-tree.md` ruling 8; the decision list's section 9, the mock's tags 9 and 10): the made bar (`.tf-madebar`),
   one row of at least 42 px that never wraps, whose words and tone change with the two runs and never its box. Left to
   right: the folder's path (at most 40 % of the row), the status (one line, whole in its title), *Render with* where
-  more than one renderer takes the folder, *Run* / *Run again* / *Stop* (one button), *Real files*.
+  more than one renderer takes the folder, *Run* / *Run again* / *Stop* (one button: *Run* runs the sides that want it,
+  *Run again* both anew), *Real files*.
 
   Under it, inset with the info rail, until the cards of what the two made stand there: a note box of exactly 96 px. A
   side that failed says why under the bar, its stderr whole, when the failure is the answer to a press of *Run* here (it
@@ -125,13 +126,15 @@
         if (compare.compareFailed !== null) return { text: `What it made could not be compared: ${compare.compareFailed}`, tone: "err" };
         return { text: failures.map((f) => `${SIDE[f.side]}: ${lowerFirst(f.line)}`).join(" ") || `${name} could not make this folder.`, tone: "err" };
       }
-      case "stale":
-        return {
-          text: [sides.old, sides.new].includes("stale") && (sides.new === "stale" ? ends.new : ends.old) === "your working tree"
-            ? "Made from an earlier state of your working tree."
-            : `Made before ${name} changed.`,
-          tone: "warn",
-        };
+      case "stale": {
+        // A side made from an earlier state is never compared (2026-11-24): with what was compared still drawn, the
+        // bar warns it is out of date; with nothing drawn, it says why the box is empty. The working tree's words only
+        // where its side alone is stale; a commit's side is stale when the tool changed.
+        const stale = (["old", "new"] as const).filter((side) => sides[side] === "stale");
+        const tree = stale.every((side) => ends[side] === "your working tree");
+        if (compare.made !== null) return { text: tree ? "Made from an earlier state of your working tree." : `Made before ${name} changed.`, tone: "warn" };
+        return { text: tree ? "Not rendered for your working tree as it is now." : `Not rendered since ${name} changed.`, tone: "info" };
+      }
       case "same":
       case "made": {
         const made = compare.made;
@@ -150,6 +153,8 @@
   const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
   const running = $derived(phase === "running");
+  /** A press runs what is missing (*Run*), not both sides anew (*Run again*). */
+  const fresh = $derived(compare.wants || !compare.anyKept);
   /** The stderr under the bar: opened by *What it said*, or by a failure that answers a press of *Run* here. */
   let said = $state(false);
   let pressed = false;
@@ -197,12 +202,13 @@
       </select>
     </label>
   {/if}
+  <!-- *Run* runs the sides that want it (not rendered, made from an earlier state, failed); *Run again* both anew. -->
   <button
     type="button"
     class="tf-btn tf-sm tf-trail tf-madebar-run"
-    class:tf-primary={!running && !compare.anyKept}
+    class:tf-primary={!running && fresh}
     disabled={phase === "asking"}
-    onclick={press}>{running ? "Stop" : compare.anyKept || phase === "failed" ? "Run again" : "Run"}</button
+    onclick={press}>{running ? "Stop" : fresh ? "Run" : "Run again"}</button
   >
   <button type="button" class="tf-btn tf-sm tf-ghost tf-trail" onclick={onreal}>Real files</button>
 </div>

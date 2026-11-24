@@ -45,7 +45,7 @@ test("nothing but a look until a press, each side in its own lane", async () => 
   h.stop();
 });
 
-test("a press runs only the side that is not kept, and stops both while they run", async () => {
+test("a press runs only the side that is not rendered, and stops both while they run", async () => {
   vi.useFakeTimers();
   const h = harness({}, (fake) => fake.keep(laneOf(SHA), "base"));
   await settle();
@@ -95,7 +95,8 @@ test("what differs is made; a side with no folder lists every file of the other 
   h.stop();
 });
 
-test("a side made from an earlier state is compared and says it is stale; a failed side fails the compare", async () => {
+test("a side made from an earlier state is never compared: it is held, and Run runs it alone; a failed side fails the compare", async () => {
+  // Björn, 2026-11-24: one side made by an older version of the tool was compared with one made by the new version.
   const h = harness({}, (fake) => {
     fake.keep(laneOf(SHA), "a");
     fake.keep(laneOf(WT), "old-wt", false);
@@ -103,13 +104,54 @@ test("a side made from an earlier state is compared and says it is stale; a fail
   await settle();
   expect(h.compare().state).toBe("stale");
   expect(h.compare().runnable).toBe(true);
-  expect(h.fake.compared).toEqual([["a", "old-wt", true]]);
+  expect(h.compare().wants).toBe(true);
+  expect(h.fake.compared, "what two tools made is no diff").toEqual([]);
+  expect(h.compare().made).toBeNull();
   h.compare().press();
   await settle();
+  expect(h.fake.asked.filter((a) => a.ask === "again").map((a) => a.lane), "the stale side alone").toEqual([laneOf(WT)]);
   h.fake.fail(laneOf(WT));
   await settle();
   expect(h.compare().state).toBe("failed");
   expect(h.compare().runnable, "a batch does not run a failing tool again").toBe(false);
+  h.stop();
+});
+
+test("Run again with both sides kept runs both anew with the tool as it is now (2026-11-24)", async () => {
+  // Björn: "in comparisons it doesn't rerun the tool for the folders when I click run again".
+  const h = harness({}, (fake) => {
+    fake.keep(laneOf(SHA), "a");
+    fake.keep(laneOf(WT), "b");
+  });
+  await settle();
+  expect(h.compare().state).toBe("same");
+  expect(h.compare().wants).toBe(false);
+  h.compare().press();
+  await settle();
+  expect(h.fake.asked.filter((a) => a.ask === "again").map((a) => a.lane)).toEqual([laneOf(SHA), laneOf(WT)]);
+  expect(h.compare().state).toBe("running");
+  h.stop();
+});
+
+test("a side turning stale under a drawn compare keeps it drawn and says so; other ends drop it", async () => {
+  const h = harness({}, (fake) => {
+    fake.keep(laneOf(SHA), "a");
+    fake.keep(laneOf(WT), "b");
+  });
+  await settle();
+  const made = h.compare().made;
+  expect(made).not.toBeNull();
+  // The working tree moved on: its side shows its last drawing, made from an earlier state.
+  h.fake.keep(laneOf(WT), "b", false);
+  h.compare().after.look();
+  await settle();
+  expect(h.compare().state).toBe("stale");
+  expect(h.compare().made, "nothing drawn moves").toBe(made);
+  expect(h.fake.compared).toEqual([["a", "b", true]]);
+  // Another start (Local changes keeps its compare when a commit moves it): what was compared is not this folder's.
+  h.at.before = "9".repeat(40);
+  await settle();
+  expect(h.compare().made).toBeNull();
   h.stop();
 });
 
