@@ -83,12 +83,30 @@
    * on one colour a frame, the last one picked, as a preview (the editor's preview follows, the window waits), and its
    * end (`change`) at once, which colours the window (the themes decisions' risk 9; the ux30 end gate, 2026-11-23: in
    * knobas's WebView2 window a whole-window restyle a frame painted a pick 120 ms late at 4x and 249 ms at 6x).
+   * WebKit (the Mac's and Linux's windows) sends a `change` with every pick, in the task of its `input`, and nothing
+   * when the panel closes; Chromium sends `change` once, as the picker closes. So a `change` of the value an `input`
+   * gave in the same task is a move, and such a drag rests when the theme is kept, 300 ms after the last pick.
    */
   let picked: string | null = null;
   let pickFrame = 0;
+  /** A drag's last pick, which the swatch draws while its editor holds `value` until the drag ends; dropped when `value` changes. */
+  let dragged = $state<string | null>(null);
+  $effect.pre(() => {
+    void value;
+    untrack(() => (dragged = null));
+  });
+  /** The value the last `input` gave, until the task it came in ends. */
+  let moved: string | null = null;
   function pick(event: Event): void {
-    picked = (event.currentTarget as HTMLInputElement).value.toUpperCase();
-    if (event.type === "change") return handPick(false);
+    const value = (event.currentTarget as HTMLInputElement).value.toUpperCase();
+    picked = value;
+    if (event.type === "change" && moved !== value) return handPick(false);
+    if (event.type === "input") {
+      moved = value;
+      setTimeout(() => {
+        if (moved === value) moved = null;
+      });
+    }
     if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
   }
   function handPick(preview: boolean): void {
@@ -96,6 +114,9 @@
     pickFrame = 0;
     const next = picked;
     picked = null;
+    dragged = preview ? next : null;
+    // The panel's Hex field is where the moving colour reads as text, while the role list waits for it to rest.
+    if (next !== null) typed = next;
     if (next !== null) onchange?.(next, preview);
   }
   $effect(() => () => {
@@ -123,7 +144,7 @@
       aria-expanded={open}
       bind:this={swatch}
       onclick={toggle}
-      {@attach cssVars(() => (ink ? {} : { background: value ?? fallback }))}
+      {@attach cssVars(() => (ink && dragged === null ? {} : { background: dragged ?? value ?? fallback }))}
     ></button>
     {#if open}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

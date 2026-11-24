@@ -43,11 +43,36 @@
   } = $props();
 
   const own = $derived(theme.id.startsWith("own-"));
-  const set = $derived(theme.app ?? {});
-  const result = $derived(derive(theme.kind, set));
+  /**
+   * A colour picker's drag (the swatch hands on one colour a frame as a preview): the preview, the swatch in hand and
+   * its panel follow each frame; the role list keeps the theme as it stood when the drag began and takes the colour
+   * when it rests, with the window (`themes.moving`). In knobas's WebView2 window the list's restyle under some 60
+   * changed properties a frame doubled a pick's time (the ux30 end gate, 2026-11-24; Fable's ruling, in
+   * `docs/decisions/2026-11-21-a-theme-colours-the-whole-window.md`).
+   */
+  const dragging = $derived(themes.moving === theme.id);
+  let heldTheme: Theme = untrack(() => theme);
+  const listed = $derived.by(() => {
+    if (dragging) return untrack(() => heldTheme);
+    heldTheme = theme;
+    return theme;
+  });
+  /** A press in the list while a pick is held: the colour rests first, so nothing is worked out from one not shown. */
+  function settle(): void {
+    if (dragging) themes.flush();
+  }
+  const set = $derived(listed.app ?? {});
+  const result = $derived(derive(listed.kind, set));
   const colours = $derived(result.colours);
+  /**
+   * The colours the preview draws: the theme's own as they stand, a drag's pick included. While a drag holds the list,
+   * the store's colours for the theme as it stands (`coloursOf`, kept per theme object): the store has worked them out
+   * for this pick already, to tell whether the theme is still readable, so a pick derives them once, not twice.
+   */
+  const live = $derived(listed === theme ? colours : themes.coloursOf(theme));
   /** The code drawn in the preview: the theme's own where it has them, else those drawn for its side. */
   const code = $derived(Object.keys(theme.syntax).length > 0 ? theme : themes.drawn(theme.kind));
+  const listedCode = $derived(Object.keys(listed.syntax).length > 0 ? listed : themes.drawn(listed.kind));
   /** The theme this one came from, where knobas still has it: what *Reset to ⟨from⟩'s* goes back to. */
   const source = $derived(theme.from === undefined || theme.from === theme.name ? undefined : [...BUILTINS, ...themes.own].find((t) => t.name === theme.from && t.id !== theme.id));
   const sourceColours = $derived(source ? derive(source.kind, source.app ?? {}) : null);
@@ -83,6 +108,7 @@
    * accent (its words then the more readable of panel and text), or the row its file drew, where it had one.
    */
   function pickRow(which: "ink" | "accent" | "own"): void {
+    settle();
     themes.update(theme.id, (t) => {
       const app = { ...t.app };
       delete app.selRow;
@@ -97,6 +123,7 @@
   }
 
   function setMany(next: Partial<Record<AppKey, string>>, words: string): void {
+    settle();
     const was = { ...set };
     const id = theme.id;
     themes.update(id, (t) => ({ ...t, app: next }));
@@ -105,6 +132,7 @@
   }
 
   function fixIt(row: Row): void {
+    settle();
     const f = rowFigure(colours, row.keys);
     if (!f) return;
     // *Darken the button to 4.5:1* reads, once done, *Primary button: the button darkened to 4.5:1.*
@@ -113,6 +141,7 @@
   }
 
   function apart(): void {
+    settle();
     const got = tellApart(colours);
     const next = { ...set, ok: got.ok, warn: got.warn, err: got.err };
     delete next.okBg;
@@ -207,7 +236,7 @@
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
       {#if own && failures(colours).length > 0}
-        <button type="button" class="tf-btn tf-sm" onclick={() => setMany(fixAll(theme.kind, set), `${failures(colours).length === 1 ? "1 colour" : `${failures(colours).length} colours`} fixed by lightness.`)}>Fix all</button>
+        <button type="button" class="tf-btn tf-sm" onclick={() => (settle(), setMany(fixAll(theme.kind, set), `${failures(colours).length === 1 ? "1 colour" : `${failures(colours).length} colours`} fixed by lightness.`))}>Fix all</button>
       {/if}
       {#if own}
         <button type="button" class="tf-btn tf-sm" onclick={startRename}>Rename…</button>
@@ -221,7 +250,7 @@
     </div>
   </div>
   {#if band}{@render band()}{/if}
-  <div class="tf-thm-roles tf-apt-roles" bind:this={list} {@attach cssVars(() => scopeValues(theme, code, colours))}>
+  <div class="tf-thm-roles tf-apt-roles" bind:this={list} {@attach cssVars(() => scopeValues(listed, listedCode, colours))}>
     {#each HEADINGS as heading (heading.name)}
       <div class="tf-thm-grp">{heading.name}{#if heading.note}<small>{heading.note}</small>{/if}</div>
       {#each heading.rows as row (row.name)}
@@ -331,7 +360,7 @@
     <TfAppThemePreview
       {theme}
       {code}
-      {colours}
+      colours={live}
       onpick={(key) => void pickKey(key)}
       note={theme.kind !== drawnSide ? `Shown as it draws while the window is ${theme.kind}.` : "Made of knobas's own parts. Every colour here is the theme's."}
     />

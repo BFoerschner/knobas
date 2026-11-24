@@ -270,6 +270,49 @@ test("a preview's changes wait for the window until the drag ends or the change 
   }
 });
 
+/**
+ * What a picker's drag moves, for the editor's role list, which waits for the colour to rest as the window does (Fable's
+ * ruling, 2026-11-24): a theme in no slot too, which the window never draws.
+ */
+test("moving names the theme a preview moves, until a change that is no preview, the keep, a flush or the window drawn", () => {
+  vi.useFakeTimers();
+  try {
+    const OWN = { ...PURPLE, id: "own-purple03" };
+    const LOOSE = { ...PURPLE, id: "own-purple04", name: "Loose" };
+    const storage = memory({ [APP_SLOT_KEY.dark]: OWN.id, [THEMES_KEY]: JSON.stringify([OWN, LOOSE]) });
+    const html = root();
+    const timers = { ...frames(), set: setTimeout, clear: clearTimeout };
+    const themes = createThemes(() => storage, () => html, timers);
+    const ink = (id: string, v: string, preview: boolean) => themes.update(id, (t) => ({ ...t, app: { ...t.app, ink: v } }), preview);
+    expect(themes.moving).toBeNull();
+    ink(LOOSE.id, "#EDE4F1", true);
+    expect(themes.moving).toBe(LOOSE.id);
+    vi.advanceTimersByTime(SAVE_AFTER - 1);
+    expect(themes.moving).toBe(LOOSE.id);
+    vi.advanceTimersByTime(1);
+    expect(themes.moving).toBeNull();
+    ink(LOOSE.id, "#EDE4F2", true);
+    ink(LOOSE.id, "#EDE4F3", false);
+    expect(themes.moving).toBeNull();
+    ink(OWN.id, "#EDE4F4", true);
+    expect(themes.moving).toBe(OWN.id);
+    themes.flush();
+    expect(themes.moving).toBeNull();
+    // Another theme's change, which draws nothing, leaves it moving; a drawn theme's change draws the window by its
+    // frame, the moved colour with it.
+    ink(OWN.id, "#EDE4F5", true);
+    themes.update(LOOSE.id, (t) => ({ ...t, name: "Loose 2" }));
+    expect(themes.moving).toBe(OWN.id);
+    expect(timers.run()).toBe(0);
+    themes.update(OWN.id, (t) => ({ ...t, name: "Mine 2" }));
+    expect(themes.moving).toBeNull();
+    expect(timers.run()).toBe(1);
+    expect(html.props.get("--ink-dark")).toBe("#EDE4F5");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("the paint cache equals what is on the root after every apply, and goes when the window is all knobas's", () => {
   const storage = memory();
   const html = root();

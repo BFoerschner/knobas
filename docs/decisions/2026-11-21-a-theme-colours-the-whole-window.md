@@ -237,3 +237,71 @@ one colour a frame, the last picked, as a preview: the editor's role list and pr
 its colours until the drag ends (`change`), the change is kept (300 ms after the last pick), or anything flushes the
 themes. This is the fallback the design named for risk 9; no cue was added, since the preview the person is watching
 follows every frame and the window answers the release.
+
+## A picker's drag holds the role list too (2026-11-24, Fable's ruling; for Björn: new, and not yet dragged by hand)
+
+**The rule.** While a colour moves in the picker, three things follow it each frame: the preview, the swatch in hand
+and that swatch's panel, whose Hex field shows the moving colour. Everything else the editor draws from the theme's
+colours waits with the window and takes the colour when it rests: the rows' examples, hex texts, figures, warnings and
+fix buttons, the States lines, the fold's rows and *Fix all*. No cue, as for the window: a cue would restyle the list
+at each start and end of a drag only to say it is about to be right, and the preview, which the person watches, is
+right all along. A button pressed in the list while a pick is held rests it first (`settle`), so no fix is worked out
+from a colour its row does not show.
+
+**One signal for rest** (`themes.moving`): the list waits while the store names the theme a preview moves, and takes
+the colour on what draws the window: a change that is no preview, the keep 300 ms after the last pick, a flush, or the
+window drawn. List and window take a colour in the same frame.
+
+**Why.** In knobas's WebView2 window a pick restyled two subtrees under some 60 changed custom properties, the list and
+the preview, and laid out the editor: about 960 boxes a frame. The paragraph above held the window back; the list was
+the half left. Holding it also stops a warning line coming and going under each row whose figure crosses its mark
+while the colour moves, which changed row heights under the open panel during a Page drag.
+
+**What the engines send.** From the engines' sources (read 2026-11-24): Chromium (WebView2) sends `change` once, as the
+picker closes; WebKit (the Mac's and Linux's windows) sends `change` with every pick, in the task of its `input`, and
+nothing when its panel closes. The swatch reads a `change` of the value an `input` gave in the same task as a move, so
+on WebKit a drag rests with the keep, 300 ms after the last pick. Owed: one real drag in knobas's Mac window, logged,
+to confirm it; no window of knobas's was dragged by hand, on the PC or the Mac (the probe sends the picker's events).
+
+**Two costs found on the way, and taken out.**
+- The Hex field following the pick laid out the whole editor each frame (a field's text is no layout boundary; 21 dirty
+  boxes, about 970 laid out, 13.5 ms a frame at 4x traced). It is its own layout root now (`contain: strict`; its size
+  was already set). Tested in `tf-css.test.ts`.
+- A pick worked the theme's colours out two or three times: the store, to tell whether the theme is still readable,
+  derived the raw new object while every later read got its state proxy, and the editor derived them once more. The
+  store now asks of the theme as `own` holds it, and the preview takes the store's (`coloursOf`): one derive a pick.
+  Tested by counting derives (2 before, 1 after).
+- A third, in `ahead.ts`: the pages built ahead counted a key, a press, a pointer move, a wheel and a scroll as the
+  reader's input, but not an `input`, which is all the page hears of the picker's popup. A page built ahead landed in
+  the drag, with a major garbage collection after it (50 to 117 ms at 4x on the Mac). An `input` counts now.
+
+**The probe** (`theme-picker.mjs`): it finds the swatch by its name, Page by default, and fails when it is missing (it
+had looked for "Change Accent", which no longer exists, and silently took the first swatch, which was Page); it counts
+drag frames from the first pick to the last pick's paint; it then sends the end as Chromium does, a `change` in a task
+of its own, and times it to its paint against the pick line; it says which pick was the worst; `--swatch` picks the
+row, `--trace-end` traces the end.
+
+**Measured in knobas's window on Björn's PC** (head 5a1eddb6 and the fix alternated, two rounds, `--hz 170`; 1440 is a
+1456 x 907 window, full 5120 x 1369; pick median / worst in ms, lines 100 / 100 / 200):
+
+| Swatch, size | 4x head | 4x fix | 6x head | 6x fix |
+| --- | --- | --- | --- | --- |
+| Page, 1440 | 90 / 152, 98 / 286 | 40 / 90, 39 / 77 | 168 / 235, 172 / 232 | 71 / 150, 72 / 140 |
+| Page, full | 99 / 239, 97 / 282 | 38 / 75, 40 / 67 | 169 / 238, 173 / 236 | 100 / 199, 75 / 138 |
+| Panel, 1440 | 113 / 321, 98 / 180 | 42 / 79, 40 / 80 | 199 / 277, 208 / 310 | 80 / 167, 89 / 186 |
+| Panel, full | 107 / 192, 108 / 196 | 48 / 86, 47 / 95 | 209 / 296, 209 / 297 | 87 / 157, 96 / 162 |
+| Text, 1440 | 114 / 176, 114 / 173 | 45 / **115**, 47 / 77 | 205 / 298, 194 / 295 | 96 / 169, 93 / 158 |
+| Text, full | 105 / 158, 107 / 161 | 47 / 83, 44 / 79 | 201 / 318, 210 / 314 | 91 / 167, 92 / 160 |
+
+1x is within everywhere (fix medians 8 to 9 ms, head 12 to 15). The end paints in 12 to 22 ms at 1x and 4x and 28 to
+42 at 6x. Drag frames over 34 ms at 4x: head 39 to 49 a run; the fix none in eight runs, 1, 2 and 5 in three. Panel
+and Text were run because Fable named them, and they are the gated cases with Page. One run is still over: Text at
+1440, 4x, worst 115 (its repeat 77).
+
+**On the Mac** (headless Chrome, load 2 to 5, three rounds, Page): 4x median 31 to 34 ms before and 19 to 20 after,
+6x 55 to 58 before and 24 to 25 after. The worst pick at 4x went the other way, 62 to 79 before and 79 to 103 after
+(over once, 103 at 5120 x 1440), while no drag frame passed 33.4 ms in those runs: owed, to be named with the probe's
+new worst-pick index.
+
+**Reversing it:** the list reads the live colours again (`listed` is the theme itself), and the line has to be met
+another way.

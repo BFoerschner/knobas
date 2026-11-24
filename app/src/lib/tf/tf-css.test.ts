@@ -1044,3 +1044,11 @@ test("the job card keeps its scrollbar's room, so a card that grows moves nothin
   expect(card).toMatch(/overflow-y:\s*scroll/);
   expect(card).not.toMatch(/overflow:\s*auto/);
 });
+
+test("a swatch panel's Hex field is its own layout root, so the colour a picker's drag shows in it each frame lays out nothing else", () => {
+  const rule = block(code, ".tf-thm-popf .tf-stg-in");
+  expect(rule).toMatch(/contain: strict/);
+  // Size containment needs the size set: both are.
+  expect(rule).toMatch(/width: 100%/);
+  expect(rule).toMatch(/height: var\(--control-h-sm\)/);
+});

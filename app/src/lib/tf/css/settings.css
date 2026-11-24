@@ -425,7 +425,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-swp { position: relative; display: block; }
 .tf-thm-pop { position: absolute; top: calc(100% + 6px); left: -6px; z-index: 5; width: 236px; display: grid; gap: 8px; padding: 10px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--shadow); color: var(--ink); }
 .tf-thm-popf { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
-.tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+/* The Hex field is its own layout root (`contain`; its size is set): while a picker's drag moves the colour it shows it each
+   frame, and a field's new text otherwise laid out the whole editor, about 970 boxes a frame (the ux30 end gate, 2026-11-24). */
+.tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); contain: strict; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 .tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
 /* The preview stays in view while the role list scrolls. */

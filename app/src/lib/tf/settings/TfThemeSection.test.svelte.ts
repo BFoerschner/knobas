@@ -103,6 +103,90 @@ test("a row's swatch sets its key; the preview and the figure follow; Auto takes
   expect(stage().style.getPropertyValue("--ok")).toBe(derive("light", MINE.app).colours.ok);
 });
 
+test("a picker drag colours the preview and its swatch each frame; the role list holds until the drag ends, or 300 ms after the last pick", async () => {
+  draw({ [APP_SLOT_KEY.light]: MINE.id, [THEMES_KEY]: JSON.stringify([MINE]) });
+  const list = () => q(".tf-apt-roles")!;
+  const hex = () => q('[data-row="paper"] .tf-thm-hex')!.textContent!.slice(0, 7);
+  const swatch = () => q<HTMLButtonElement>('[data-row="paper"] button.tf-thm-sw')!;
+  const before = derive("light", MINE.app).colours.paper;
+  swatch().click();
+  flushSync();
+  const input = q<HTMLInputElement>('.tf-thm-pop input[type="color"]')!;
+  const frame = () => new Promise((done) => requestAnimationFrame(() => done(true)));
+  const send = (type: "input" | "change", value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event(type, { bubbles: true }));
+  };
+  send("input", "#d0e0f0");
+  await frame();
+  flushSync();
+  expect(stage().style.getPropertyValue("--paper")).toBe("#D0E0F0");
+  expect(swatch().style.getPropertyValue("background")).toMatch(/208, 224, 240|#d0e0f0/i);
+  expect(list().style.getPropertyValue("--paper")).toBe(before);
+  expect(hex()).toBe(before);
+  send("input", "#c0d0e0");
+  await frame();
+  flushSync();
+  expect(stage().style.getPropertyValue("--paper")).toBe("#C0D0E0");
+  expect(hex()).toBe(before);
+  // The drag's end: the list catches up at once.
+  send("change", "#b0c0d0");
+  flushSync();
+  expect(hex()).toBe("#B0C0D0");
+  expect(list().style.getPropertyValue("--paper")).toBe("#B0C0D0");
+  expect(stage().style.getPropertyValue("--paper")).toBe("#B0C0D0");
+  // A drag whose end never comes (WebKit's panel sends none): the list catches up with the keep, 300 ms after the last pick.
+  send("input", "#a0b0c0");
+  await frame();
+  flushSync();
+  expect(hex()).toBe("#B0C0D0");
+  await new Promise((done) => setTimeout(done, 350));
+  flushSync();
+  expect(hex()).toBe("#A0B0C0");
+  // A flush (a quit, a backup) brings it too.
+  send("input", "#909090");
+  await frame();
+  flushSync();
+  expect(hex()).toBe("#A0B0C0");
+  themes.flush();
+  flushSync();
+  expect(hex()).toBe("#909090");
+});
+
+test("a picker drag leaves a row's figure and warning as they were until the colour rests, and a fix pressed meanwhile rests it first", async () => {
+  draw({ [APP_SLOT_KEY.light]: MINE.id, [THEMES_KEY]: JSON.stringify([MINE]) });
+  const row = () => q('[data-row="ink"]')!;
+  const figure = () => row().querySelector(".tf-thm-cr")!.textContent;
+  const was = figure();
+  expect(row().querySelector(".tf-thm-why")).toBeNull();
+  row().querySelector<HTMLButtonElement>("button.tf-thm-sw")!.click();
+  flushSync();
+  const input = q<HTMLInputElement>('.tf-thm-pop input[type="color"]')!;
+  // Text the colour of its panel: far under its mark.
+  input.value = "#f0f0f0";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  expect(stage().style.getPropertyValue("--ink")).toBe("#F0F0F0");
+  expect(figure()).toBe(was);
+  expect(row().querySelector(".tf-thm-why")).toBeNull();
+  await new Promise((done) => setTimeout(done, 350));
+  flushSync();
+  expect(figure()).not.toBe(was);
+  const fix = row().querySelector<HTMLButtonElement>(".tf-thm-why .tf-btn")!;
+  expect(fix).not.toBeNull();
+  // Moving again, then the fix pressed: it works from the colour now picked, which rests first.
+  input.value = "#e8e8e8";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  fix.click();
+  flushSync();
+  const ink = themes.find(MINE.id)!.app!.ink!;
+  expect(ink).not.toBe("#E8E8E8");
+  expect(failures(derive("light", themes.find(MINE.id)!.app!).colours).map((f) => f.key)).not.toContain("ink");
+});
+
 test("a row under its mark says the pair and fixes it by lightness, with Undo on the toast", () => {
   const low = { ...MINE, app: { ...MINE.app, ok: "#7BC67E" } };
   draw({ [APP_SLOT_KEY.light]: low.id, [THEMES_KEY]: JSON.stringify([low]) });

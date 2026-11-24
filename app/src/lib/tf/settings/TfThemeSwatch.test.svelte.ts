@@ -55,6 +55,33 @@ test("a drag's end is handed on at once, not as a preview, and nothing after it"
   expect(onchange.mock.calls).toEqual([["#AB0000", false]]);
 });
 
+test("WebKit's change in the task of its input is a move, handed on as a preview; a change in a later task ends the drag", async () => {
+  const onchange = vi.fn();
+  const input = open(onchange);
+  // WebKit (the Mac's and Linux's windows) sends both for every pick, in one task, and nothing when its panel closes.
+  for (const value of ["#aa0000", "#bb0000"]) {
+    send(input, "input", value);
+    send(input, "change", value);
+  }
+  expect(onchange).not.toHaveBeenCalled();
+  await frame();
+  expect(onchange.mock.calls).toEqual([["#BB0000", true]]);
+  // Chromium's change comes as its picker closes, in a task of its own.
+  send(input, "input", "#cc0000");
+  await new Promise((done) => setTimeout(done));
+  send(input, "change", "#cc0000");
+  expect(onchange.mock.calls).toEqual([["#BB0000", true], ["#CC0000", false]]);
+});
+
+test("the panel's Hex field and the swatch show the moving colour", async () => {
+  const input = open(() => {});
+  send(input, "input", "#aa0000");
+  await frame();
+  flushSync();
+  expect(target.querySelector<HTMLInputElement>('input[aria-label="Accent as hex"]')!.value).toBe("#AA0000");
+  expect(target.querySelector<HTMLButtonElement>('button[aria-label="Change Accent"]')!.style.getPropertyValue("background")).toMatch(/170, 0, 0|#aa0000/i);
+});
+
 test("a pick waiting for its frame is dropped with the swatch", async () => {
   const onchange = vi.fn();
   const input = open(onchange);

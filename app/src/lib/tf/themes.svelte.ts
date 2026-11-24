@@ -211,6 +211,12 @@ export interface Themes {
   setUnchanged(value: Unchanged): void;
   /** Keeps what waits for its save now, and draws what waits for its frame. */
   flush(): void;
+  /**
+   * The own theme a colour picker's drag is moving (`update` with `preview`), until its colour rests: a change that is
+   * no preview, the keep {@link SAVE_AFTER} ms after the last pick, a flush, or the window drawn. The editor's role list
+   * waits for it as the window does (Fable's ruling, 2026-11-24).
+   */
+  readonly moving: string | null;
   /** Everything a backup carries of the themes. */
   snapshot(): ThemeSnapshot;
   /** A backup's themes put back as they were kept: they replace what this computer has. */
@@ -285,6 +291,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   let framed = false;
   /** A preview's change waits for the window: drawn with the save, or the next change that is no preview. */
   let held = false;
+  let moving = $state<string | null>(null);
   let paint = 0;
   /** Whether the engine's highlights inherit, once asked. */
   let inherits: boolean | null = null;
@@ -341,6 +348,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
   function apply(): void {
     framed = false;
     held = false;
+    moving = null;
     const html = root();
     const { vars, sel } = values();
     if (html) {
@@ -397,6 +405,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
     if (saving !== null) timers.clear(saving);
     saving = timers.set(() => {
       save();
+      moving = null;
       if (framed || held) apply();
       repaint();
     }, SAVE_AFTER);
@@ -533,10 +542,14 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       const before = own[at]!;
       const next = { ...change(before), id, kind: before.kind };
       own = own.map((t, i) => (i === at ? next : t));
+      if (preview) moving = id;
+      else if (moving === id) moving = null;
       // An edit that takes the drawn theme under the floor keeps drawing it on trial, and goes back unless kept; an
       // edit that brings it back over the floor ends the trial.
       if (appSlots[next.kind] === id && hasApp(next) && !asis.includes(id)) {
-        const under = unreadable(coloursOf(next)).length > 0;
+        // Asked of the theme as `own` holds it (its state proxy, the object every later read gets), so the colours worked
+        // out here are the ones the window, the slot and the editor's preview read from the cache for this pick.
+        const under = unreadable(coloursOf(own[at]!)).length > 0;
         if (under && trial === null && drawable(before)) startTrial("edit", next, { theme: before });
         else if (under && trial?.theme.id === id) trial = { ...trial, theme: next };
         else if (!under && trial?.kind === "edit" && trial.theme.id === id) stopTrial();
@@ -588,6 +601,9 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       };
     },
     startedDefault: defaultTheme,
+    get moving() {
+      return moving;
+    },
     get unchanged() {
       return unchanged;
     },
@@ -598,6 +614,7 @@ export function createThemes(storage: () => KeptStorage | null, root: () => Them
       applyUnchanged();
     },
     flush() {
+      moving = null;
       if (saving !== null) {
         save();
         repaint();
