@@ -94,6 +94,35 @@ test("Keep for this field keeps the chain as a named pipeline for the field's la
   expect([...document.querySelectorAll("button")].some((b) => words(b) === "Keep for this field…")).toBe(false);
 });
 
+test("Keep says what it waits for beside it while a name, the field or the files are empty, and keeps nothing", async () => {
+  const g = guess("JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0Zp", { base64: true })!;
+  const { keep } = draw({ guess: g });
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "Keep for this field…")!.click();
+  flushSync();
+  const keepButton = () => [...document.querySelectorAll<HTMLButtonElement>(".tf-xv-keep button")].find((b) => words(b) === "Keep")!;
+  const type = (label: string, text: string) => {
+    const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  expect(document.querySelector(".tf-xv-keep .tf-dwhy")).toBeNull();
+  expect(keepButton().disabled).toBe(false);
+  type("Name", " ");
+  expect(words(document.querySelector(".tf-xv-keep .tf-dwhy"))).toBe("Name it first.");
+  expect(keepButton().disabled).toBe(true);
+  type("Name", "Attachment");
+  type("For the field", "");
+  expect(words(document.querySelector(".tf-xv-keep .tf-dwhy"))).toBe("Say which field it is for.");
+  type("For the field", "MIME_DATA");
+  type("In the files", "");
+  expect(words(document.querySelector(".tf-xv-keep .tf-dwhy"))).toBe("Say which files it is for.");
+  document.querySelector<HTMLFormElement>(".tf-xv-keep")!.requestSubmit();
+  await settle();
+  expect(keep).not.toHaveBeenCalled();
+});
+
 test("Download saves what the chain gave under the name the document gives beside the value", async () => {
   const { save } = draw({});
   await settle();

@@ -434,7 +434,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 - **(k)** `*` is the subject of a rule that sets a `width`, `height`, `overflow` or `position`: a shared layout rule names what it lays out ([Layers](#layers));
 - **(l)** `role="menu"` appears outside `TfMenu.svelte`: a menu is `TfMenu` ([Layers](#layers));
 - **(m)** a component draws the missing line by hand inside a `TfDialog` (it is `why`), outside one in any markup but `<p class="tf-dwhy" role="status">`, or says *(needed)* (a needed field is a `.tf-req` *required*);
-- **(n)** a `TfDialog`'s footer has a primary disabled for more than a send in flight (`busy`, `sending`, `writing`, `saving` and the like), and the dialog passes no `why`;
+- **(n)** a `TfDialog`'s footer has a primary disabled for more than a send in flight (`busy`, `sending`, `writing`, `saving`, `loading` and the like), and the dialog passes no `why`;
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 

@@ -41,6 +41,7 @@
   import "../css/xml.css";
 
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfValueKeep from "./TfValueKeep.svelte";
   import TfFilePipeline from "./TfFilePipeline.svelte";
   import TfPdf from "./TfPdf.svelte";
   import TfLines from "../code/TfLines.svelte";
@@ -315,19 +316,7 @@
       {/if}
     </div>
     {#if keeping !== null}
-      <form
-        class="tf-psave tf-xv-keep"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void doKeep();
-        }}
-      >
-        <label>Name <input aria-label="Name" bind:value={keeping.name} spellcheck="false" /></label>
-        <label>For the field <input class="tf-pmono" aria-label="For the field" bind:value={keeping.field} spellcheck="false" /></label>
-        <label>in <input class="tf-pmono tf-xv-short" aria-label="In the files" bind:value={keeping.files} spellcheck="false" /></label>
-        <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing || keeping.name.trim() === "" || keeping.field.trim() === ""}>Keep</button>
-        <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (keeping = null)}>Cancel</button>
-      </form>
+      <TfValueKeep bind:keeping saving={storing} onkeep={() => void doKeep()} oncancel={() => (keeping = null)} />
     {/if}
     <div class="tf-vstage" data-shows={failure !== null || refused !== null ? "missing" : drawn}>
       {#if refused !== null}

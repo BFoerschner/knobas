@@ -315,7 +315,7 @@ function tagEnd(markup: string, start: number): number {
 }
 
 /** What may disable a dialog's primary with no line: a send in flight, which its label or the dialog already shows. */
-const IN_FLIGHT = /^!?(?:(?:queue\.)?(?:busy|flushing)|sending|writing|saving|deleting|publishing|signingIn|testing)$/;
+const IN_FLIGHT = /^!?(?:(?:\w+\.)?(?:busy|flushing|loading)|sending|writing|saving|deleting|publishing|signingIn|testing)$/;
 
 /** The `disabled={…}` of each primary in `block`, as written. */
 function disabledPrimaries(block: string): string[] {
@@ -581,6 +581,8 @@ test("(n) a dialog's primary disabled for more than a send needs `why`; a send i
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog title={heading} {why}>", "!ready"))).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "writing"))).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "sending || queue.busy"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "content.loading"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "content.loading || !ready"))).toEqual(["n"]);
   expect(rulesFor("lib/x/Y.svelte", '<TfDialog>{#snippet footer()}<button class="tf-btn tf-primary">Add</button>{/snippet}</TfDialog>')).toEqual([]);
   expect(rulesFor("lib/x/Y.svelte", '<button class="tf-btn tf-primary" disabled={!ready}>Add</button>')).toEqual([]);
 });
