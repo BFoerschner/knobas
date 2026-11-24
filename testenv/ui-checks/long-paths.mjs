@@ -153,6 +153,8 @@ const SCREENS = [
   { id: "xsd-example", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", press: "opentrans_2_1.xsd", then: ["~ORDER", ".tf-xsd .tf-oas-pageseg button:last-child"], wait: 3000, whole: ".tf-xsd-ex", sizes: SMALLEST },
   // The example opened in the XML view (E1): the header's name after the schema's path, its meta and its buttons whole.
   { id: "xsd-example-open", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", press: "opentrans_2_1.xsd", then: ["~ORDER", ".tf-xsd .tf-oas-pageseg button:last-child", "~Open in XML view"], wait: 3000, whole: ".tf-fileview header .tf-trail, .tf-xsd-opened .tf-xv-head", sizes: SMALLEST },
+  // Zen mode everywhere in Code (Z1): its button in the top bar whole, and a file in Zen, its header's path whole.
+  { id: "zen-code-file", route: `${REPO}/files/src/sepa/retry.rs`, press: ".tf-top > .tf-zenbtn", wait: 500, whole: ".tf-top, .tf-fileview header", sizes: SMALLEST },
   { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
