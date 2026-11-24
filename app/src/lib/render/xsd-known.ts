@@ -6,11 +6,12 @@ import xmlXsd from "./xsd-known/xml.xsd?raw";
 import xmldsig from "./xsd-known/xmldsig-core-schema.xsd?raw";
 
 import type { Bundled } from "./xsd-answer";
+import { ns } from "./xml-names";
 
 export const BUNDLED: Bundled = {
   byNs: new Map([
-    ["http://www.w3.org/XML/1998/namespace", "@knobas/xml.xsd"],
-    ["http://www.w3.org/2000/09/xmldsig#", "@knobas/xmldsig-core-schema.xsd"],
+    [ns("www.w3.org/XML/1998/namespace"), "@knobas/xml.xsd"],
+    [ns("www.w3.org/2000/09/xmldsig#"), "@knobas/xmldsig-core-schema.xsd"],
   ]),
   texts: new Map([
     ["@knobas/xml.xsd", xmlXsd],

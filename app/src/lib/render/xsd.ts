@@ -499,7 +499,8 @@ export function loadSet(inn: SetInput): SchemaSet {
   };
   const need = new Set<string>();
   const loaded = new Map<string, SetDoc>();
-  const queue: { path: string; adopt: string | null; by: string | null }[] = [{ path: inn.entry, adopt: null, by: null }];
+  /** Each file to read, with the namespace its reference asks for: a row still reading shows it, so it keeps its height. */
+  const queue: { path: string; adopt: string | null; by: string | null; expect?: string }[] = [{ path: inn.entry, adopt: null, by: null }];
   let bytes = 0;
   const locIn: LocateIn = {
     paths: inn.paths,
@@ -591,6 +592,7 @@ export function loadSet(inn: SetInput): SchemaSet {
     set.docs.push(doc);
     if (!inn.texts.has(job.path)) {
       doc.reading = true;
+      doc.tns = doc.own = job.expect ?? "";
       need.add(job.path);
       continue;
     }
@@ -651,14 +653,16 @@ export function loadSet(inn: SetInput): SchemaSet {
         if (kind === "override") doc.v11 = true;
         const found: Located = locate(locIn, doc.path, doc.tns, kind, namespace, location);
         if ("need" in found) for (const n of found.need) need.add(n);
+        // A file beside it still being read already has its row: the overview holds its room (section 30).
+        const pending = "need" in found ? (found.need.find((n) => !n.startsWith("?")) ?? null) : null;
         const ref: FileRef =
           "need" in found
-            ? { kind, namespace, location, line: c.line, to: null, how: null, why: null, address: null, others: [], via: null, from: null, two: null, reading: true }
+            ? { kind, namespace, location, line: c.line, to: pending, how: null, why: null, address: null, others: [], via: null, from: null, two: null, reading: true }
             : found.to === null
               ? { kind, namespace, location, line: c.line, to: null, how: null, why: found.why, address: found.address, others: [], via: null, from: null, two: found.two ?? null, reading: false }
               : { kind, namespace, location, line: c.line, to: found.to, how: found.how, why: null, address: null, others: found.others, via: found.via ?? null, from: found.from ?? null, two: null, reading: false };
         doc.refs.push(ref);
-        if (ref.to !== null && ref.how !== "builtin") queue.push({ path: ref.to, adopt: kind === "import" ? null : doc.tns, by: doc.path });
+        if (ref.to !== null && ref.how !== "builtin" && !(ref.reading && inn.texts.has(ref.to))) queue.push({ path: ref.to, adopt: kind === "import" ? null : doc.tns, by: doc.path, expect: kind === "import" ? (namespace ?? "") : doc.tns });
         if (kind === "redefine" || kind === "override") for (const r of c.c) if (r.ns === XS) declare(r, ctx, doc, kind);
       } else declare(c, ctx, doc, null);
       if (c.l === "defaultOpenContent") doc.v11 = true;

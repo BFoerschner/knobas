@@ -60,6 +60,18 @@ function unsafe(): string[] {
 
 /** The lists drawn whole, each with why it stays small. Keyed `path  list` as `eaches` writes them. */
 const SMALL: Record<string, string> = {
+  "tf/render/xsd/TfXsdOverview.svelte  index.under": "at most 16 by what the worker answers: the documents a single root holds (`indexOf`)",
+  "tf/render/xsd/TfXsdPage.svelte  p.chain": "a handful by what it is: the steps one declaration derives along",
+  "tf/render/xsd/TfXsdPage.svelte  p.docu": "a handful by what it is: one declaration's documentation, one entry a language",
+  "tf/render/xsd/TfXsdPage.svelte  paragraphs(d)": "the paragraphs of one documentation entry",
+  "tf/render/xsd/TfXsdPage.svelte  d.facts": "a handful by what it is: one dictionary entry's named facts (UBL's ccts:, about seven)",
+  "tf/render/xsd/TfXsdPage.svelte  v.held": "a handful by what it is: the facets one simple type is held to, at most eight",
+  "tf/render/xsd/TfXsdPage.svelte  v.values": "capped where it is read: a type's first 48 values (`valueOf`), the rest behind *Show the other*",
+  "tf/render/xsd/TfXsdPage.svelte  v.patterns": "a handful by what it is: the patterns one type and its bases are held to",
+  "tf/render/xsd/TfXsdPage.svelte  v.union": "a handful by what it is: a union's member types",
+  "tf/render/xsd/TfXsdPage.svelte  p.derived": "capped where it is read: the first 24 types that derive from it (`pageOf`)",
+  "tf/render/xsd/TfXsdRows.svelte  row.facts": "a handful by what it is: one row's facts, at most eight",
+  "tf/render/xsd/TfXsdRuns.svelte  runs": "the runs of one line's words",
   "tf/docs/TfDocCode.svelte  lines": "one code block's lines on a Docs page, drawn whole as its text was before it was coloured; a page's blocks are cut at DOC_BLOCKS_FIRST",
   "tf/docs/TfDocCode.svelte  codeRuns(line, tokens[n], stems)": "the runs of one line's tokens and find marks",
   "tf/settings/TfFontRole.svelte  line": "the runs of one of the specimen's lines, at most eleven",

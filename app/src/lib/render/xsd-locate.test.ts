@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { joinPath, locate, nearest, type LocateIn, type SchemaIndex } from "./xsd-locate";
+import { ns } from "./xml-names";
 
 const NS = { a: "urn:a", b: "urn:b" };
 function inn(files: Record<string, string | undefined>, opts: Partial<LocateIn> & { indexed?: boolean; catalogs?: SchemaIndex["catalogs"] } = {}): LocateIn {
@@ -81,8 +82,8 @@ describe("the order (section 14)", () => {
     const files = { "main.xsd": NS.a, "b.xsd": NS.b };
     const pointed = [{ namespace: NS.b, location: "b.xsd", to: { repo: "r2", path: "lib/b.xsd" } }];
     expect(locate(inn(files, { pointed }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "@repo/r2/lib/b.xsd", how: "pointed" });
-    const dl = [{ namespace: NS.b, location: "https://x/b.xsd", to: { url: "https://x/b.xsd", sha256: "abc", at: "2026-11-23" } }];
-    expect(locate(inn(files, { pointed: dl }), "main.xsd", NS.a, "import", NS.b, "https://x/b.xsd")).toMatchObject({ to: "@download/abc", how: "downloaded" });
+    const dl = [{ namespace: NS.b, location: "https://x.example/b.xsd", to: { url: "https://x.example/b.xsd", sha256: "abc", at: "2026-11-23" } }];
+    expect(locate(inn(files, { pointed: dl }), "main.xsd", NS.a, "import", NS.b, "https://x.example/b.xsd")).toMatchObject({ to: "@download/abc", how: "downloaded" });
   });
 
   test("another repository answers where exactly one declares the namespace, after this one; two are asked", () => {
@@ -102,6 +103,6 @@ describe("the order (section 14)", () => {
     const bundled = new Map([[NS.b, "@knobas/b.xsd"]]);
     expect(locate(inn({ "main.xsd": NS.a }, { bundled }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "@knobas/b.xsd", how: "bundled" });
     expect(locate(inn({ "main.xsd": NS.a, "b.xsd": NS.b }, { bundled }), "main.xsd", NS.a, "import", NS.b, "b.xsd")).toMatchObject({ to: "b.xsd", how: "beside" });
-    expect(locate(inn({ "main.xsd": NS.a }), "main.xsd", NS.a, "import", "http://www.w3.org/2001/XMLSchema", null)).toMatchObject({ how: "builtin" });
+    expect(locate(inn({ "main.xsd": NS.a }), "main.xsd", NS.a, "import", ns("www.w3.org/2001/XMLSchema"), null)).toMatchObject({ how: "builtin" });
   });
 });

@@ -96,6 +96,12 @@ export interface XsdReads {
 
 let nextSession = 0;
 
+/** An answer to an open, or what a worker that answered nothing usable means. */
+function opened(result: unknown): Opened {
+  if (result !== null && typeof result === "object" && "ok" in result) return result as Opened;
+  return { ok: false, error: "The schema could not be read.", line: null };
+}
+
 /** One schema set opened in one view. */
 export class XsdPort {
   readonly #engine: XsdEngine;
@@ -116,7 +122,7 @@ export class XsdPort {
   async open(entry: string, text: string, reads: XsdReads): Promise<Opened> {
     this.#reads = reads;
     this.#entry = entry;
-    const answer = (await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed] })) as Opened;
+    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed] }));
     if (answer.ok) {
       this.index = answer.index;
       if (answer.need.length > 0) void this.#follow(answer.need);
@@ -158,7 +164,7 @@ export class XsdPort {
       if (index !== undefined) call.index = index;
       if (paths !== undefined) call.paths = paths;
       if (elsewhere !== undefined) call.elsewhere = elsewhere;
-      const answer = (await this.#engine(this.#id, call)) as Opened;
+      const answer = opened(await this.#engine(this.#id, call));
       if (!answer.ok || this.#closed) return;
       this.index = answer.index;
       this.onindex?.(answer.index);
@@ -171,7 +177,7 @@ export class XsdPort {
   async repoint(pointed: readonly Pointed[]): Promise<void> {
     if (this.#reads === null) return;
     this.#reads = { ...this.#reads, pointed };
-    const answer = (await this.#engine(this.#id, { kind: "pointed", pointed: [...pointed] })) as Opened;
+    const answer = opened(await this.#engine(this.#id, { kind: "pointed", pointed: [...pointed] }));
     if (!answer.ok) return;
     this.index = answer.index;
     this.onindex?.(answer.index);
@@ -179,8 +185,8 @@ export class XsdPort {
   }
 
   /** A declaration's page, whole. */
-  page(place: string): Promise<PageAnswer | { missing: string }> {
-    return this.#engine(this.#id, { kind: "page", place }) as Promise<PageAnswer | { missing: string }>;
+  page(place: string): Promise<PageAnswer | { missing: string; reading: number }> {
+    return this.#engine(this.#id, { kind: "page", place }) as Promise<PageAnswer | { missing: string; reading: number }>;
   }
 
   /** What a row opened in place holds. */
@@ -196,6 +202,16 @@ export class XsdPort {
   /** Everyone who uses a declaration: *Show the other*. */
   uses(key: string): Promise<UseRow[]> {
     return this.#engine(this.#id, { kind: "uses", key }).then((r) => (Array.isArray(r) ? (r as UseRow[]) : []));
+  }
+
+  /** The shortest way down the tree to an element: the rows to open, its own last. */
+  way(key: string): Promise<string[]> {
+    return this.#engine(this.#id, { kind: "way", key }).then((r) => (Array.isArray(r) ? (r as string[]) : []));
+  }
+
+  /** Every value a type's enumeration allows: *Show the other 1,047*. */
+  values(key: string, from = 0): Promise<{ v: string; title: string }[]> {
+    return this.#engine(this.#id, { kind: "values", key, from }).then((r) => (Array.isArray(r) ? (r as { v: string; title: string }[]) : []));
   }
 
   close(): void {

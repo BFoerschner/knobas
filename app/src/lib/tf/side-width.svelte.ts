@@ -60,6 +60,7 @@ export const SIDES = {
   monitor: { label: "Resize the monitor", at: "end", base: 360, min: 300, share: 0.45 },
   "oas-rail": { label: "Resize the endpoints", at: "start", base: 300, min: 240, max: 520, share: 0.4 },
   "doc-rail": { label: "Resize the document's rail", at: "start", base: 300, min: 240, max: 520, share: 0.4 },
+  "xsd-rail": { label: "Resize the schema's rail", at: "start", base: 300, min: 240, max: 520, share: 0.4 },
 } as const satisfies Record<string, SideSpec>;
 
 export type SideId = keyof typeof SIDES;

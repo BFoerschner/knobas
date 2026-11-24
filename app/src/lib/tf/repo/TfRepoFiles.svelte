@@ -85,6 +85,7 @@
   import type { SpecOpener } from "../render/oas-open.svelte";
   import { explorerModule } from "../render/oas-module";
   import { docViewModule } from "../render/doc/doc-module";
+  import { xsdModule } from "../render/xsd/xsd-module";
   import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
@@ -1963,6 +1964,29 @@
     };
   });
 
+  /**
+   * Every path at the commit, as a promise: what the schema explorer's index reads (its design, section 15), only when
+   * a reference is not found beside its file. The same read *Go to file* makes, kept the same way.
+   */
+  function allPaths(): Promise<readonly string[]> {
+    if (searched !== null) return Promise.resolve(searched.paths);
+    const section = pathsSection;
+    const where = at;
+    if (section === null) return Promise.resolve(known);
+    return readSection(section, where).then((read) => {
+      const block = read?.blocks[0];
+      const paths = block?.type === "tree" ? block.entries.map((entry) => entry.name) : [];
+      if (where === at && section === pathsSection && every?.section !== section) every = { section, paths, truncated: block?.type === "tree" ? block.truncated : false };
+      return paths;
+    });
+  }
+  /** A file of the repository as text, at the commit shown: a schema's other files. */
+  const textRead = $derived.by(() => {
+    const read = imageRead;
+    const utf8 = new TextDecoder();
+    return (p: string): Promise<string | null> => (read === null ? Promise.resolve(null) : read(p).then((bytes) => utf8.decode(bytes), () => null));
+  });
+
   function openPath(full: string) {
     goTyped = "";
     location.hash = hrefOf(full);
@@ -2315,7 +2339,7 @@
       <TfNothingHere message="There is no folder renderer named “{singleNow.renderer}”." href={repoHash(repoId)} action="All files" />
     {/if}
   {:else}
-  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi"} class:tf-fv-doc={drawAs === "xml"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
+  <div class="tf-fileview" class:tf-fv-oas={drawAs === "openapi" || drawAs === "xsd"} class:tf-fv-doc={drawAs === "xml"} class:tf-fv-jar={drawAs === "jar" && jarPorts !== null} bind:this={fileview}>
     {#if renderedNow !== null}
       {@const graftFolder = renderedNow.folder}
       <TfMadeBar
@@ -2562,6 +2586,35 @@
             }}
             onback={() => history.back()}
             prose={oasProse}
+          />
+        {/await}
+      {:else if drawAs === "xsd"}
+        <!-- An XML Schema (2026-11-23): the schema explorer; its view and its worker load with the first schema opened. -->
+        {@const schema = drawn}
+        {#await xsdModule() then { default: TfXsd }}
+          <TfXsd
+            text={schema.text}
+            path={schema.path}
+            repo={repoId}
+            read={textRead}
+            paths={allPaths}
+            at={path === schema.path ? place : null}
+            line={path === schema.path ? line : null}
+            oncopylink={(at, label) => void copyPlace(schema.path, at, label)}
+            onsource={(other, n) => {
+              if (other.startsWith("@")) return;
+              picks.set(other, "source");
+              goAcross(lineHrefOf(other, n), other.slice(other.lastIndexOf("/") + 1));
+            }}
+            onfile={(other) => {
+              if (!other.startsWith("@")) goAcross(hrefOf(other), other.slice(other.lastIndexOf("/") + 1));
+            }}
+            onplace={(to, how, label) => {
+              const hash = to === "" ? hrefOf(schema.path) : placeHrefOf(schema.path, to);
+              if (how === "push") goAcross(hash, label);
+              else replaceAddress(hash);
+            }}
+            onback={() => history.back()}
           />
         {/await}
       {:else if drawAs === "xml"}

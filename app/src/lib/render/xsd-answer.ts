@@ -187,6 +187,11 @@ export interface DeclRow {
 }
 
 export interface SetIndex {
+  /**
+   * The overview's *Files* in the order they were found, breadth first: a round of reads only ever appends, so a row
+   * drawn never moves when the next files land (section 30). Each names a row of `files` or of `lost`.
+   */
+  readonly listing: readonly { readonly kind: "file" | "lost"; readonly at: number }[];
   readonly entry: string;
   readonly home: string;
   readonly version: string | null;
@@ -227,6 +232,8 @@ export type XsdCall =
   | { kind: "rows"; id: string }
   | { kind: "tree"; under: string | null }
   | { kind: "uses"; key: string }
+  | { kind: "values"; key: string; from: number }
+  | { kind: "way"; key: string }
   | { kind: "close" };
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
@@ -274,8 +281,7 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
     bundled: bundled.byNs,
   };
   s.set = loadSet(inn);
-  s.rows.clear();
-  s.tree.clear();
+  // Row and fold ids stay good across rounds: what they name is compiled data the new set reads by its names.
   return s.set;
 }
 
@@ -311,6 +317,10 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       return treeOf(s, call.under);
     case "uses":
       return s.set === null ? [] : usesOf(s.set, call.key, Infinity);
+    case "values":
+      return s.set === null ? [] : allValues(s.set, call.key).slice(call.from);
+    case "way":
+      return wayDown(s, call.key);
     case "close":
       sessions.delete(session);
       return null;
@@ -547,12 +557,13 @@ export function allValues(set: SchemaSet, key: string): { v: string; title: stri
   return (simpleShape(set, def).facets.enumeration ?? []).map((e) => ({ v: e.v, title: e.docu[0]?.text ?? "" }));
 }
 
-function pageOf(s: XsdSession, place: string): PageAnswer | { missing: string } {
+function pageOf(s: XsdSession, place: string): PageAnswer | { missing: string; reading: number } {
   const set = s.set;
-  if (set === null) return { missing: place };
+  if (set === null) return { missing: place, reading: 1 };
+  const reading = set.docs.filter((d) => d.reading).length;
   const key = place.startsWith("el ") || place.startsWith("ty ") || place.startsWith("gr ") || place.startsWith("ag ") || place.startsWith("at ") ? place : keyOfPlace(set, place);
   const decl = key === null ? undefined : set.comps.get(key);
-  if (key === null || decl === undefined) return { missing: place };
+  if (key === null || decl === undefined) return { missing: place, reading };
   const doc = set.docs.find((d) => d.path === decl.file);
   const name = nameOfKey(set, key);
   let what = "";
@@ -669,6 +680,29 @@ function treeOf(s: XsdSession, under: string | null): TreeRow[] {
   });
 }
 
+/**
+ * The shortest way down the tree from a root to an element (section 7): the ids of the rows to open, the last the
+ * element's own; `[]` where no root reaches it. Breadth first, each element once, at most 20,000 steps.
+ */
+export function wayDown(s: XsdSession, key: string): string[] {
+  const set = s.set;
+  if (set === null || !key.startsWith("el ")) return [];
+  const target = set.comps.get(key);
+  if (target === undefined) return [];
+  const queue: { el: ElementDecl; id: string; trail: readonly object[]; way: string[] }[] = set.roots.map((r) => ({ el: set.comps.get(r) as ElementDecl, id: `R${r}`, trail: [], way: [`R${r}`] }));
+  const seen = new Set<object>();
+  for (let steps = 0; queue.length > 0 && steps < 20_000; steps += 1) {
+    const at = queue.shift()!;
+    const d = elDecl(set, at.el);
+    if (d === null || seen.has(d)) continue;
+    seen.add(d);
+    s.tree.set(at.id, { el: d, trail: at.trail });
+    if (d === target) return at.way;
+    kidsOf(set, d).forEach((c, i) => queue.push({ el: c.el, id: `${at.id}/${i}`, trail: [...at.trail, d], way: [...at.way, `${at.id}/${i}`] }));
+  }
+  return [];
+}
+
 const kidsMemo = new WeakMap<object, ReturnType<typeof childElements>>();
 function kidsOf(set: SchemaSet, el: ElementDecl): ReturnType<typeof childElements> {
   let got = kidsMemo.get(el);
@@ -701,18 +735,22 @@ export function indexOf(set: SchemaSet): SetIndex {
   const lost: LostRow[] = [];
   const counts = new Map<string, number>();
   for (const c of set.comps.values()) counts.set(c.file, (counts.get(c.file) ?? 0) + 1);
+  const listing: { kind: "file" | "lost"; at: number }[] = [];
   const listed = new Set<string>();
-  const walk = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null } | null) => {
+  type Job = { kind: "file"; path: string; depth: number; ref: { kind: string; how: How | null; from: Elsewhere | null } | null } | { kind: "lost"; row: LostRow };
+  const queue: Job[] = [];
+  const visit = (path: string, depth: number, ref: { kind: string; how: How | null; from: Elsewhere | null } | null) => {
     const doc = set.docs.find((d) => d.path === path);
     if (doc === undefined || listed.has(path)) return;
     listed.add(path);
+    listing.push({ kind: "file", at: files.length });
     const n = counts.get(path) ?? 0;
     files.push({
       path,
       depth,
       ns: doc.tns,
       prefix: doc.tns !== set.home ? (set.prefixes.get(doc.tns) ?? null) : null,
-      how: ref === null ? `${count(n)} declarations` : `${VERB[ref.kind] ?? ref.kind}, ${ref.how === null ? "" : ref.how === "repo" && ref.from !== null ? `in ${ref.from.name}, at ${ref.from.branch}` : HOW[ref.how]}`,
+      how: ref === null ? `${count(n)} declarations` : ref.how === null ? (VERB[ref.kind] ?? ref.kind) : `${VERB[ref.kind] ?? ref.kind}, ${ref.how === "repo" && ref.from !== null ? `in ${ref.from.name}, at ${ref.from.branch}` : HOW[ref.how]}`,
       count: n,
       adopted: doc.adopted !== null,
       reading: doc.reading,
@@ -720,12 +758,19 @@ export function indexOf(set: SchemaSet): SetIndex {
       from: ref?.from ?? null,
     });
     for (const r of doc.refs) {
-      if (r.to !== null && r.how !== "builtin") walk(r.to, depth + 1, { kind: r.kind, how: r.how, from: r.from });
+      if (r.to !== null && r.how !== "builtin") queue.push({ kind: "file", path: r.to, depth: depth + 1, ref: { kind: r.kind, how: r.how, from: r.from } });
       else if (r.to === null && !r.reading)
-        lost.push({ depth: depth + 1, kind: r.kind, location: r.location, namespace: r.namespace, why: r.why ?? "", address: r.address ?? (r.location !== null && isRemote(r.location) ? r.location : null), two: r.two, by: path });
+        queue.push({ kind: "lost", row: { depth: depth + 1, kind: r.kind, location: r.location, namespace: r.namespace, why: r.why ?? "", address: r.address ?? (r.location !== null && isRemote(r.location) ? r.location : null), two: r.two, by: path } });
     }
   };
-  if (set.docs[0] !== undefined) walk(set.docs[0].path, 0, null);
+  if (set.docs[0] !== undefined) visit(set.docs[0].path, 0, null);
+  for (let job = queue.shift(); job !== undefined; job = queue.shift()) {
+    if (job.kind === "file") visit(job.path, job.depth, job.ref);
+    else {
+      listing.push({ kind: "lost", at: lost.length });
+      lost.push(job.row);
+    }
+  }
 
   const decls: DeclRow[] = [];
   for (const c of set.comps.values()) {
@@ -781,6 +826,7 @@ export function indexOf(set: SchemaSet): SetIndex {
 
   const first = set.docs[0];
   return {
+    listing,
     entry: set.entry,
     home: set.home,
     version: first?.version ?? null,

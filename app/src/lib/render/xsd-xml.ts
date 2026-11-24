@@ -11,10 +11,11 @@
  * - **`head`** is the file's first comment before its root: for BMEcat and openTRANS the only prose they have.
  */
 import { CDATA, COMMENT, EL, TEXT, decode, readXml, type XmlOutline } from "./xml-outline";
+import { XML_NS, XSI_NS, ns } from "./xml-names";
 
-export const XS = "http://www.w3.org/2001/XMLSchema";
-export const XSI = "http://www.w3.org/2001/XMLSchema-instance";
-export const XML_NS = "http://www.w3.org/XML/1998/namespace";
+/** XML Schema's own namespace (spelled through `ns`: a namespace name is never fetched, see `xml-names.ts`). */
+export const XS = ns("www.w3.org/2001/XMLSchema");
+export { XSI_NS as XSI, XML_NS };
 
 /** How much entity text one file may expand to: a file that asks for more is refused (the billion laughs). */
 export const ENTITY_BUDGET = 1 << 20;

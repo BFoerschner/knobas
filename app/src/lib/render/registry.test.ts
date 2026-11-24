@@ -2,6 +2,7 @@
 import { expect, test } from "vitest";
 
 import { register, renderersFor, renderersForFence, type Renderer } from "./registry";
+import { ns } from "./xml-names";
 
 const names = (list: Renderer[]) => list.map((r) => r.name);
 
@@ -102,4 +103,14 @@ test("an XML file opens in the XML view, Source one pick away; an SVG stays an i
   expect(ids("App.svelte", "<script>let a;</script>")).toEqual(["source"]);
   expect(ids("app.config", '{ "a": 1 }')).toEqual(["source"]);
   expect(ids("data.xml", "")).toEqual(["source"]);
+});
+
+const XS_DECL = `xmlns:xs="${ns("www.w3.org/2001/XMLSchema")}"`;
+
+test("a schema opens as Schema, with the XML view and Source next; a .xsd that is no schema opens as XML", () => {
+  const ids = (path: string, text: string) => renderersFor({ path, binary: false, text }).map((r) => r.id);
+  expect(ids("schemas/order.xsd", `<?xml version="1.0"?>\n<xs:schema ${XS_DECL}/>`)).toEqual(["xsd", "xml", "source"]);
+  expect(ids("schemas/odd.xsd", '<?xml version="1.0"?>\n<html/>')).toEqual(["xml", "source"]);
+  // A schema at another name is the XML view's: the pattern is the cheap guard, the sniff the true one.
+  expect(ids("schemas/order.xml", `<xs:schema ${XS_DECL}/>`)).toEqual(["xml", "source"]);
 });

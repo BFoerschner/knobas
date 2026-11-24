@@ -489,6 +489,11 @@ const TfOasAnswer = (await import("../tf/render/TfOasAnswer.svelte")).default;
 const TfLines = (await import("../tf/code/TfLines.svelte")).default;
 const TfDocView = (await import("../tf/render/doc/TfDocView.svelte")).default;
 const TfDocRail = (await import("../tf/render/doc/TfDocRail.svelte")).default;
+const TfXsd = (await import("../tf/render/xsd/TfXsd.svelte")).default;
+const TfXsdPage = (await import("../tf/render/xsd/TfXsdPage.svelte")).default;
+const TfXsdRail = (await import("../tf/render/xsd/TfXsdRail.svelte")).default;
+const { XsdState } = await import("../tf/render/xsd/xsd.svelte");
+const { XsdPort } = await import("../render/xsd-port");
 const TfDocResults = (await import("../tf/render/doc/TfDocResults.svelte")).default;
 const TfValueViewer = (await import("../tf/render/TfValueViewer.svelte")).default;
 const { DocState } = await import("../tf/render/doc/doc.svelte");
@@ -1817,6 +1822,28 @@ const CASES: Case[] = [
     name: "TfDocRail",
     source: "lib/tf/render/doc/TfDocRail.svelte",
     open: (target) => ({ app: mount(TfDocRail, { target, props: { st: new DocState(new DocSession(() => deferred(null)), "r\na.xml", "c", 3), ongo: () => {} } }) }),
+  },
+  {
+    /** The schema explorer: the set answers late; the pane's resize listener and its observer go with it. */
+    name: "TfXsd",
+    source: "lib/tf/render/xsd/TfXsd.svelte",
+    open: (target) => ({ app: mount(TfXsd, { target, props: { text: "<a/>", path: "a.xsd", read: () => deferred(null), paths: () => deferred([]), engine: () => deferred(null) } }) }),
+  },
+  {
+    /** A schema's page: its rows land a screenful first, the rest a frame at a time. */
+    name: "TfXsdPage",
+    source: "lib/tf/render/xsd/TfXsdPage.svelte",
+    open: (target) => ({ app: mount(TfXsdPage, { target, props: { st: new XsdState(new XsdPort(() => deferred(null))), ongo: () => {}, onback: () => {}, onfile: () => {} } }) }),
+  },
+  {
+    /** A schema's rail: the page it follows answers late. */
+    name: "TfXsdRail",
+    source: "lib/tf/render/xsd/TfXsdRail.svelte",
+    open: (target) => {
+      const st = new XsdState(new XsdPort(() => deferred(null)));
+      st.index = { listing: [], entry: "a.xsd", home: "", version: null, v11: false, head: null, files: [], lost: [], decls: [], roots: [], under: [], underOneOf: false, seen: [], ownElements: 0, ownTypes: 0, total: 0, reading: 0, ms: { read: 0, compile: 0 }, perFile: [] };
+      return { app: mount(TfXsdRail, { target, props: { st, ranked: null, onpick: () => {} } }) };
+    },
   },
   {
     /** A query's results: the examples answer late. */

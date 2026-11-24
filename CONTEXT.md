@@ -390,6 +390,18 @@ _Avoid_: Swagger view, Try it out, API client
 How an XML file is drawn as a document: its own lines in the explorers' pane, with folds, addresses and paths that open, values that can be looked at, and a query (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`). It is the default for every XML file. In code `xml` (`TfDocView`, `tf-xv-`); with the JSON view to come, the **document view**, in code and prose only.
 _Avoid_: XML viewer, tree view, Checked
 
+**Schema explorer**:
+How an XML Schema file is drawn: a rail that lists its elements as a tree, by element or by type, a page for the one picked, and beside it an XML example made from it. It reads the file with every file it reaches as one **schema set** (`docs/decisions/2026-11-23-an-xml-schema-is-explored-across-its-files-and-an-example-is-made-from-it.md`). In code `xsd` (`TfXsd…`, `tf-xsd-`).
+_Avoid_: XSD viewer, schema browser, diagram
+
+**Schema set**:
+An XML Schema file and every file it reaches by include, import, redefine and override, read as one model. Each file is found in a fixed order, and says how. In code `SchemaSet`.
+_Avoid_: project, workspace, closure
+
+**Not found here**:
+What a file a schema names is when no step finds it. It is said in place, never fetched by itself.
+_Avoid_: missing, unresolved, broken
+
 **Outline**:
 A document read into columns of numbers, a row a node, in document order, in the document worker. What folds, what a query answers and where a value stands are rows of it. In code `XmlOutline`, `readXml`.
 _Avoid_: DOM, tree, AST

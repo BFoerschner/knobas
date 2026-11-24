@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { childElements, elType, keyOfPlace, labelOfKey, leftoversOf, placeAtLine, placeOf, shape, type ElementDecl } from "./xsd";
+import { childElements, elType, keyOfPlace, labelOfKey, leftoversOf, loadSet, placeAtLine, placeOf, shape, type ElementDecl } from "./xsd";
 import { family, familyFiles, loadAll } from "./xsd-fixture";
+import { ns } from "./xml-names";
 
 const count = (set: ReturnType<typeof family>, kind?: string) => [...set.comps.values()].filter((c) => kind === undefined || c.kind === kind).length;
 
@@ -109,7 +110,7 @@ describe("loading in rounds", () => {
     expect(indexed).toBe(true);
     const ref = set.docs[0]!.refs[0]!;
     expect(ref.to).toBeNull();
-    expect(ref.why).toBe("bmecat_2005.xsd is there, but it declares http://www.bmecat.org/bmecat/2005fd.");
+    expect(ref.why).toBe(`bmecat_2005.xsd is there, but it declares ${ns("www.bmecat.org/bmecat/2005fd")}.`);
     expect(set.missing.size).toBeGreaterThan(100);
   });
 
@@ -132,7 +133,7 @@ describe("loading in rounds", () => {
 });
 
 describe("files with no namespace, cycles and redefinitions (section 18)", () => {
-  const xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"';
+  const xs = `xmlns:xs="${ns("www.w3.org/2001/XMLSchema")}"`;
   test("a chameleon include takes its includer's namespace, its unprefixed names with it", () => {
     const files = new Map([
       ["main.xsd", `<xs:schema ${xs} xmlns="urn:a" targetNamespace="urn:a"><xs:include schemaLocation="c.xsd"/><xs:element name="root" type="T"/></xs:schema>`],
@@ -163,7 +164,7 @@ describe("files with no namespace, cycles and redefinitions (section 18)", () =>
 });
 
 test("an extension of an extension answers three types' rows in order (section 10)", () => {
-  const xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"';
+  const xs = `xmlns:xs="${ns("www.w3.org/2001/XMLSchema")}"`;
   const files = new Map([
     [
       "m.xsd",
@@ -183,4 +184,11 @@ test("an extension of an extension answers three types' rows in order (section 1
   const r = shape(set, set.comps.get("ty {urn:a}R") as never)!;
   expect(childElements(set, r.content).map((k) => k.el.name)).toEqual(["a"]);
   expect(r.attrs).toEqual([]);
+});
+
+test("a file still being read stands under the namespace its import asks for", () => {
+  const files = familyFiles("opentrans-2.1");
+  const set = loadSet({ entry: "opentrans_2_1.xsd", texts: new Map([["opentrans_2_1.xsd", files.get("opentrans_2_1.xsd")!]]), paths: null, pointed: [], index: null, elsewhere: null, bundled: new Map() });
+  const reading = set.docs.filter((d) => d.reading);
+  expect(reading.map((d) => d.tns)).toEqual([ns("www.bmecat.org/bmecat/2005"), ns("www.w3.org/2005/05/xmlmime"), ns("www.w3.org/2000/09/xmldsig#")]);
 });

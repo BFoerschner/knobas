@@ -463,6 +463,9 @@ test("(m) a syntax role changes a token's colour, slant or weight and nothing el
  * Code's weight. `tokens.css` gives the same areas Code's letter spacing.
  */
 const CODE_AREAS: Record<string, string> = {
+  "lib/tf/css/xsd.css .tf-xsd-head": "1.6",
+  "lib/tf/css/xsd.css .tf-xsd-pat": "1.6",
+  "lib/tf/css/xsd.css .tf-xsd-xml": "1.6",
   "lib/tf/css/branches.css .tf-editor": "1.6",
   "lib/tf/css/builds.css .tf-problem pre": "1.5",
   "lib/tf/css/chains.css .tf-logv": "1.55",

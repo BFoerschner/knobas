@@ -25,6 +25,7 @@
 
 import { isOpenApi } from "./openapi-sniff";
 import { isXmlFile } from "./xml-sniff";
+import { isXsd } from "./xsd-sniff";
 
 export type RendererInput = "text" | "bytes";
 export type RendererOutput = "svg" | "html" | "image" | "lines";
@@ -172,6 +173,24 @@ export const JAR: Renderer = {
 };
 
 /**
+ * The schema explorer (`docs/decisions/2026-11-23-an-xml-schema-is-explored-across-its-files-and-an-example-is-made-
+ * from-it.md`): a `*.xsd` whose first element is an XML Schema's `schema` (`xsd-sniff.ts`), drawn with every file it
+ * reaches as one set (`tf/render/xsd/TfXsd.svelte`, its model in the schema worker). Ahead of the XML view, so a
+ * schema opens as Schema and *Render as* offers the XML view and Source; a `.xsd` that is no schema opens as before.
+ * Not in a comparison yet (the design's S7).
+ */
+export const XSD: Renderer = {
+  id: "xsd",
+  name: "Schema",
+  patterns: ["*.xsd"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: false,
+  sniff: (text) => isXsd(text),
+};
+
+/**
  * The XML view (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`): an XML file drawn as a document, its
  * own lines in the explorers' pane with folds, the way down to a line, and a query (`tf/render/doc/TfDocView.svelte`).
  * It takes a file whose text starts with an XML declaration, at any name, or one with an XML ending whose first thing
@@ -213,7 +232,7 @@ export const SOURCE: Renderer = {
 export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
 
 /** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XML, SOURCE, HTML];
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XSD, XML, SOURCE, HTML];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it

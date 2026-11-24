@@ -495,6 +495,35 @@ if (xmlOn()) {
   }
 }
 
+/**
+ * `?fake-xsd` (the schema explorer, 2026-11-23): the four schema families of `fixtures/xsd/`, as a repository would
+ * hold them. openTRANS stands where `?fake-xml`'s orders name it (`schemas/opentrans/`); `schemas/mixed/` is the same
+ * set with BME's own `bmecat_2005.xsd` beside it, which declares another namespace (the design's section 2, item 2).
+ */
+const XSD_ROOT = "../../../../../../../fixtures/xsd/";
+const XSD_TEXT = import.meta.glob<string>("../../../../../../../fixtures/xsd/**/*.xsd", { query: "?raw", import: "default" });
+/** The families' texts, read once `?fake-xsd` is asked for, never otherwise: 3.9 MB the other fakes do without. */
+const xsdHeld = new Map<string, string>();
+keepSeed(xsdHeld);
+if (new URLSearchParams(globalThis.location?.search).has("fake-xsd")) {
+  for (const [file, load] of Object.entries(XSD_TEXT)) void load().then((text) => xsdHeld.set(file, text), () => {});
+}
+function xsdFiles(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [file, text] of xsdHeld) {
+    const rel = file.slice(XSD_ROOT.length);
+    const [family, ...rest] = rel.split("/");
+    const at = rest.join("/");
+    if (family === "opentrans-2.1") {
+      out[`schemas/opentrans/${at}`] = text;
+      if (at !== "bmecat_2005.xsd") out[`schemas/mixed/${at}`] = text;
+    } else if (family === "bmecat-2005fd") out[`schemas/mixed/${at}`] = text;
+    else if (family === "ubl-2.1") out[`ubl/${at}`] = text;
+    else if (family === "cii-d16b") out[`cii/${at}`] = text;
+  }
+  return out;
+}
+
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
@@ -514,6 +543,7 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
       ...(query.has("fake-openapi") ? openapiFiles() : {}),
       ...(query.has("fake-xml") ? xmlFiles() : {}),
+      ...(query.has("fake-xsd") ? xsdFiles() : {}),
       // `?fake-ascii` (2026-11-21): ASCII art, box drawing and arrows, for the code face (`../../fake-ascii.ts`).
       ...(asciiArt() ? { "docs/states.txt": ASCII_AFTER } : {}),
       // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
