@@ -6,6 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { BranchPull, DiffFile, DiffRead, EntityDetail, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
+import { inPlaces } from "./repo";
 import {
   mirrorStanding,
   ancestors,
@@ -669,4 +670,13 @@ test("a generated folder's landing opens its README, then an index page, then it
   expect(pickMadeDefault([file("out.png")])).toBe("out.png");
   expect(pickMadeDefault([dir("img")])).toBeNull();
   expect(pickMadeDefault([file("a.txt"), file("b.txt")])).toBeNull();
+});
+
+test("a list read again while shown keeps each drawn row in its place, a new one on top, a gone one out (the pr-state fix)", () => {
+  const r = (entity_id: string, state: string) => ({ entity_id, state });
+  const held = [r("#142", "open"), r("#139", "merged"), r("#130", "open")];
+  // The forge sorted #130 first: it moved last. Drawn, it stays where the reader saw it.
+  const next = [r("#150", "open"), r("#130", "merged"), r("#142", "open")];
+  expect(inPlaces(held, next)).toEqual([r("#150", "open"), r("#142", "open"), r("#130", "merged")]);
+  expect(inPlaces(null, next), "a first read is the read as it came").toBe(next);
 });

@@ -44,6 +44,12 @@ pub enum RefreshOutcome {
     /// read or written. That run writes the item as the source holds it when
     /// it ends, or, where the run started before what changed it, the next.
     RunInFlight,
+    /// A walk under a parent (ADR-0047) emitted nothing: the mirror already
+    /// holds the parent and what stands under it as the source does. Nothing
+    /// was written, so nothing a page drew is out of date (the pr-state fix,
+    /// 2026-11-24: a page that walks its repository each time it is shown
+    /// must not drop every answer the window holds when nothing moved).
+    Unchanged,
 }
 
 /// Whether a refresh waits for the source's run lock.
@@ -236,6 +242,19 @@ async fn refresh_locked(
                 UnderAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
                 UnderAnswer::Walked { items, cursor } => (items, cursor),
             };
+            if items.is_empty() {
+                // From the position a run just left, an unchanged source
+                // emits nothing (contract clause 13): nothing to write, and
+                // no per-item work for an item nothing touched.
+                if let Some(cursor) = cursor {
+                    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+                        .bind(&cursor)
+                        .bind(source_id)
+                        .execute(&mut **tx)
+                        .await?;
+                }
+                return Ok(RefreshOutcome::Unchanged);
+            }
             let gone = items
                 .iter()
                 .any(|item| item.deleted && item.entity.to_string() == entity);

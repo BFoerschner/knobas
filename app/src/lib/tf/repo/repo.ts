@@ -893,3 +893,16 @@ export function workingWhy(checkout: CheckoutView | undefined): string | null {
   if (tree.head === null) return "no commit yet";
   return null;
 }
+
+/**
+ * A list read again while it stays shown (the pr-state fix, 2026-11-24, Fable's ruling 2): each row drawn keeps its
+ * place and takes its new state and time; a row the list did not hold goes in above the first; a row it no longer
+ * holds goes. The list sorts afresh only when it is drawn anew (the page opened, the tab shown again, the filter
+ * changed). `held` is `null` before a first read, which is the read as it came.
+ */
+export function inPlaces<R extends { entity_id: string }>(held: readonly R[] | null, next: R[]): R[] {
+  if (held === null) return next;
+  const byId = new Map(next.map((row) => [row.entity_id, row]));
+  const known = new Set(held.map((row) => row.entity_id));
+  return [...next.filter((row) => !known.has(row.entity_id)), ...held.flatMap((row) => byId.get(row.entity_id) ?? [])];
+}

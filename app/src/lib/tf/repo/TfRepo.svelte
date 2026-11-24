@@ -84,7 +84,7 @@
     ViewFresh,
     WriteAsk,
   } from "../../ipc/entity";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { EntityRefresh, QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { WriteSource } from "../../shell/queued-toast";
   import type { OpenJobPorts } from "../job/open-jobs";
   import type { ArchivePorts } from "../../render/jar-ports";
@@ -112,6 +112,8 @@
     listen?: EchoListen;
     /** The header's *Refresh* (#2135); the bridge's when left out. */
     refresh?: DetailRefreshPorts;
+    /** The page's own walk of its repository when shown (the pr-state fix); `refresh_entity` behind, the bridge's when left out. */
+    walk?: (entityId: string) => Promise<EntityRefresh>;
     /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
@@ -258,7 +260,7 @@
     submitWrite,
     type EntityRow,
   } from "../../ipc/entity";
-  import { listSources } from "../../ipc/sources";
+  import { listSources, refreshEntity } from "../../ipc/sources";
   import { windowListen } from "../../ipc/shared-listen";
   import type { EscTarget } from "../escape";
   import {
@@ -281,6 +283,7 @@
     readRepoRoute,
     repoAsks,
     repoHash,
+    inPlaces,
     repoPrs,
     repoRefusals,
     sourceName,
@@ -496,10 +499,18 @@
     factsAnswered = false;
     branchPulls = null;
     untrack(() => refresh.reset());
+    walkedAt = 0;
     readRepo(id, alive, false);
     readCheckout(id, alive);
+    // Once the landing has drawn, the repository is walked at the forge, so what changed there since the last run
+    // (a pull request merged or closed on its site) shows without one (Fable's ruling 2, 2026-11-24). A timer the
+    // page's leaving clears, so a page left at once asks nothing.
+    const walkSoon = setTimeout(() => {
+      if (alive()) untrack(walkRepo);
+    }, WALK_AFTER_MS);
     return () => {
       live = false;
+      clearTimeout(walkSoon);
     };
   });
 
@@ -639,6 +650,7 @@
   function rereadLists(): void {
     const id = repoId;
     if (!ready || id === null) return;
+    walkRepo();
     const alive = () => repoId === id;
     void readBranches(id, alive, true);
     void readRow(id, alive, true);
@@ -796,7 +808,7 @@
   });
 
   /** The repository's row, then its pull requests. */
-  async function readRow(id: string, alive: () => boolean, again: boolean): Promise<void> {
+  async function readRow(id: string, alive: () => boolean, again: boolean, inPlace = false): Promise<void> {
     let found: EntityDetail;
     try {
       found = await ports.getEntity(id);
@@ -814,7 +826,9 @@
     await readAllRows((offset) => ports.listEntities(filter, REPO_PRS_LIMIT, offset)).then(
       (rows) => {
         if (!alive()) return;
-        const next = repoPrs(rows, found.row);
+        const read = repoPrs(rows, found.row);
+        // A walk's re-read keeps each drawn row where it is (`inPlaces`); every other read sorts as it came.
+        const next = inPlace ? inPlaces(prs, read) : read;
         // When the rows were asked, which says whether a merge queued here is in them yet (`pr-state.svelte.ts`).
         prsAskedAt = asked;
         if (again && sameAnswer(prs, next)) return;
@@ -844,6 +858,38 @@
   function rereadPrs(): void {
     const id = repoId;
     if (id !== null) void readRow(id, () => repoId === id, true);
+  }
+
+  /** How long after the page opens its repository is walked: once the landing has drawn, behind its reads. */
+  const WALK_AFTER_MS = 100;
+  /** When this page last walked its repository (window clock); 0 for never. */
+  let walkedAt = 0;
+  let walking = false;
+
+  /**
+   * The repository walked at the forge (ADR-0047's refresh under a parent, what ⌘R does), asked by the page itself
+   * in the background lane, at most once in `HELD_AFTER_MS`: on open, and at each moment the page reads its lists
+   * again. Under a run of the source it reads nothing (that run brings it); a walk that found nothing new tells
+   * nothing. One that wrote something lands the pull requests in their places: a drawn row keeps its place and takes
+   * its new state, a new one goes in above the first (`inPlaces`).
+   */
+  function walkRepo(): void {
+    const id = repoId;
+    if (!ready || id === null || walking || Date.now() - walkedAt < HELD_AFTER_MS) return;
+    walking = true;
+    walkedAt = Date.now();
+    const walk = untrack(() => ports.walk) ?? ((entity: string) => refreshEntity(entity, true));
+    void Promise.resolve(id)
+      .then(walk)
+      .then(
+        (ended) => {
+          if (ended.outcome === "refreshed" && repoId === id) return readRow(id, () => repoId === id, true, true);
+        },
+        () => {},
+      )
+      .finally(() => {
+        walking = false;
+      });
   }
 
   /** The checkout, and its diff when it has changes: for the `M` marks. */

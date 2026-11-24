@@ -693,7 +693,14 @@ pub async fn sync_role<R: tauri::Runtime>(
 /// An item's detail's *Refresh* (#2107): read `entity_id` from its source
 /// and answer once the refresh has ended, with how it ended
 /// ([`crate::sources::refresh::EntityRefresh`]). The refresh tells
-/// `item:refreshed` as every refresh does, with no write behind it.
+/// `item:refreshed` as every refresh does, with no write behind it, unless
+/// it found nothing new (a walk that emitted nothing tells nothing).
+///
+/// `behind` (optional, additive; the pr-state fix, 2026-11-24): a page asks
+/// it by itself, not the reader: the repository page walks its repository
+/// when it is shown, so a pull request merged at the forge shows there. Its
+/// requests go in the background lane (`knobas_http::behind`, ADR-0042),
+/// standing aside for a person's reads of the same server.
 ///
 /// # Errors
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting
@@ -704,9 +711,15 @@ pub async fn sync_role<R: tauri::Runtime>(
 pub async fn refresh_entity<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
+    behind: Option<bool>,
 ) -> Result<crate::sources::refresh::EntityRefresh, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::refresh::of_reader(&state.scheduler, &entity_id).await
+    let read = crate::sources::refresh::of_reader(&state.scheduler, &entity_id);
+    if behind == Some(true) {
+        knobas_http::behind(read).await
+    } else {
+        read.await
+    }
 }
 
 /// What every source is doing, and when it goes next.
