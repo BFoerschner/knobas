@@ -1,6 +1,7 @@
 /**
- * The API explorer's pane (ux31, section 4): how many columns the file view's width holds, and how tall the pane
- * is. Pure, so the thresholds and the height have tests of their own.
+ * The explorers' pane (ux31, section 4; shared by the API explorer, the XML view and the schema explorer): how many
+ * columns the file view's width holds, and how tall the pane is. Pure, so the thresholds and the height have tests of
+ * their own.
  */
 
 /** From this width of the file view a request column stands beside the reference. */

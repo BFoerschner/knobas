@@ -24,7 +24,7 @@
   import TfSideEdge from "../../TfSideEdge.svelte";
   import { sideWidth } from "../../side-width.svelte";
   import { zen } from "../../zen.svelte";
-  import { columnsFor, paneHeight } from "../oas-layout";
+  import { columnsFor, paneHeight } from "../explorer/layout";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocPicked from "./TfDocPicked.svelte";
   import TfDocQuery from "./TfDocQuery.svelte";

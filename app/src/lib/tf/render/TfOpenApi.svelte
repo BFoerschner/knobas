@@ -40,7 +40,7 @@
   import { FuzzyOrder } from "../filter/ranked.svelte";
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
   import { sniffSpec } from "../../render/openapi-sniff";
-  import { columnsFor, paneHeight } from "./oas-layout";
+  import { columnsFor, paneHeight } from "./explorer/layout";
   import { zen } from "../zen.svelte";
   import { clientsFound, specOpener, type SpecOpener } from "./oas-open.svelte";
 

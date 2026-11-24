@@ -8,7 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import TfOpenApi from "./TfOpenApi.svelte";
-import { columnsFor, paneHeight } from "./oas-layout";
+import { columnsFor, paneHeight } from "./explorer/layout";
 import { localEngine, type SpecEngine } from "../../render/openapi-port";
 import { installFindKey } from "../filter-keys";
 import { FuzzyOrder } from "../filter/ranked.svelte";
