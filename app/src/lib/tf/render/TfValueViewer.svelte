@@ -110,6 +110,9 @@
   /** Where the chain came from, as the bar says it. */
   // svelte-ignore state_referenced_locally
   let origin = $state<"kept" | "guess" | "given" | "edited" | "none">(kept !== null ? "kept" : first !== null ? "given" : guess !== null ? "guess" : "none");
+  /** The name the chain is kept under: the field's kept chain, or the one kept from this dialog (the prop is as it opened). */
+  // svelte-ignore state_referenced_locally
+  let keptName = $state<string | null>(kept?.pipeline.name ?? null);
 
   const take = $derived<PipeStep>({ step: "take", from: value.from, to: value.to, read: value.read });
   let ran = $state.raw<PipeRun | null>(null);
@@ -204,7 +207,7 @@
     const said: string[] = [];
     if (sniffed !== null) said.push(`The result starts as ${/^[AEIOU]/.test(sniffed.word) ? "an" : "a"} ${sniffed.word}.`);
     if (origin === "guess" && guess !== null) said.push(`knobas takes the value for ${guess.why}.`);
-    if (origin === "kept" && kept !== null) said.push(`Kept as ${kept.pipeline.name}.`);
+    if (origin === "kept" && keptName !== null) said.push(`Kept as ${keptName}.`);
     return [...parts, ...said].join(" ");
   });
 
@@ -212,7 +215,7 @@
   // The bar numbers steps after the value: the backend's index counts `Take` as step 1.
   const failedAt = $derived(failure === null ? null : failure.index - 1);
 
-  const status = $derived(origin === "kept" && kept !== null ? `Kept as ${kept.pipeline.name}` : origin === "guess" ? "knobas's guess" : origin === "none" ? null : "Not kept");
+  const status = $derived(origin === "kept" && keptName !== null ? `Kept as ${keptName}` : origin === "guess" ? "knobas's guess" : origin === "none" ? null : "Not kept");
 
   function change(next: PipeStep[]) {
     steps = next;
@@ -245,6 +248,7 @@
       await keep(list);
       push({ text: `Kept as ${k.name.trim()} for ${k.field.trim()} in ${k.files.trim()}.` });
       keeping = null;
+      keptName = k.name.trim();
       origin = "kept";
     } catch (cause) {
       push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -306,7 +310,7 @@
     />
     <div class="tf-xv-flow" aria-live="polite">
       <span>{flow}</span>
-      {#if value.field !== null && keeping === null}
+      {#if value.field !== null && keeping === null && origin !== "kept"}
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={openKeep}>Keep for this field…</button>
       {/if}
     </div>

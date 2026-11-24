@@ -341,7 +341,7 @@
     // while the lines render and the ask writes the repository's state.
     if (files !== null && pathsTimer === null && files.has("") === null && /[\w)]\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(shown)) {
       const asked = files;
-      queueMicrotask(() => asked.ask());
+      if (alive) queueMicrotask(() => asked.ask());
       waitForPaths();
     }
     const links = linksIn(shown, path, files === null || files.has("") === null ? null : has);
@@ -350,8 +350,10 @@
   }
   let pathsTimer: ReturnType<typeof setInterval> | null = null;
   /** The repository's paths are read once; when they land, the lines drawn are read for paths again. */
+  /** Cleared when the view goes: the window draws its rows below the view two frames late, maybe after that. */
+  let alive = true;
   function waitForPaths() {
-    if (pathsTimer !== null || files === null) return;
+    if (!alive || pathsTimer !== null || files === null) return;
     pathsTimer = setInterval(() => {
       if (files?.has("") !== null) {
         if (pathsTimer !== null) clearInterval(pathsTimer);
@@ -361,7 +363,9 @@
     }, 100);
   }
   $effect(() => () => {
+    alive = false;
     if (pathsTimer !== null) clearInterval(pathsTimer);
+    pathsTimer = null;
   });
 
   /** What the image dialog shows: an image of the repository, or one at an address. */
@@ -666,20 +670,28 @@
   }
 
   /** The count of what a shut fold hides: its number loud, its word quiet. */
+  /**
+   * The lines are drawn whole up to about a screenful at the largest window, and windowed past it: a fold makes a long
+   * document short, and Source's 300 drew all 96 rows of the order's three levels in the key's frame (the probes,
+   * 2026-11-24: 106 ms at 4x on the PC, 46 after).
+   */
+  const DRAWN_WHOLE = 64;
+  /** One formatter for the counts every folded row says: `toLocaleString` builds one a call, a cost on each row drawn. */
+  const NUM = new Intl.NumberFormat("en");
   function countOf(state: DocState, n: number): { count: string; word: string } | null {
     const f = state.folds.byLine[n] ?? -1;
     if (f === -1) return null;
     const c = state.folds.count[f]!;
     const unit = UNITS[state.folds.unit[f]!]!;
-    return { count: c.toLocaleString("en"), word: c === 1 ? unit[0] : unit[1] };
+    return { count: NUM.format(c), word: c === 1 ? unit[0] : unit[1] };
   }
 </script>
 
-{#snippet caret(n: number)}{#if st !== null && (st.folds.byLine[n] ?? -1) !== -1}{@const shut = st.folded.has(n)}<button type="button" class="tf-xv-caret" data-xv-caret={n} aria-expanded={!shut} aria-label={shut ? "Unfold" : "Fold"} tabindex="-1"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 1.5 7 5 3.5 8.5" /></svg></button>{:else}<span class="tf-xv-cc"></span>{/if}{/snippet}
+{#snippet caret(n: number)}{#if st !== null && (st.folds.byLine[n] ?? -1) !== -1}{@const shut = st.folded.has(n)}<button type="button" class="tf-xv-caret" data-xv-caret={n} aria-expanded={!shut} aria-label={shut ? "Unfold" : "Fold"} tabindex="-1"></button>{:else}<span class="tf-xv-cc"></span>{/if}{/snippet}
 
 {#snippet end(n: number)}{@const c = chipOf(n)}{#if c !== null}<span class="tf-xv-end">{#if c.kept !== null}<button type="button" class="tf-xv-chip tf-xv-kept" data-xv-value={n} title="Kept as {c.kept.pipeline.name}. Space looks at it.">{c.kept.pipeline.name}</button>{:else if c.guess !== null}<button type="button" class="tf-xv-chip" data-xv-value={n} title="knobas takes this for {c.guess.why}. Space looks at it.">{#if c.guess.chip.lead !== ""}<span>{c.guess.chip.lead}</span>{/if}<b>{c.guess.chip.bold}</b>{#if c.guess.chip.tail !== ""}<span>{c.guess.chip.tail}</span>{/if}</button>{/if}</span>{/if}{/snippet}
 
-{#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {len.toLocaleString('en')} characters long.">{(len - CLIP.keep).toLocaleString("en")} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{(st.folds.end[f]! - n).toLocaleString('en')} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{inside.toLocaleString("en")} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
+{#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {NUM.format(len)} characters long.">{NUM.format(len - CLIP.keep)} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{NUM.format(st.folds.end[f]! - n)} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{NUM.format(inside)} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="tf-oas tf-xv tf-oas-{cols >= 3 ? 3 : 2}" data-cols={cols} onkeydown={keys} {@attach pane} {@attach sideWidth("doc-rail")}>
@@ -753,6 +765,7 @@
           bind:code
           text={shownText}
           path={colourAs}
+          wholeUpTo={DRAWN_WHOLE}
           {render}
           line={layout ? null : line}
           find="overlay"

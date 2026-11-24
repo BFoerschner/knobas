@@ -65,8 +65,9 @@
 .tf-xv-lt, .tf-code.tf-lines .tf-lt { min-width: 0; }
 .tf-xv-cc { display: block; width: 18px; }
 .tf-xv-caret { width: 18px; height: 22px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
-.tf-xv-caret svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.tf-xv-caret[aria-expanded="true"] svg { transform: rotate(90deg); }
+/* The chevron is the button's own border, not an SVG: a level's worth of folded rows each draws one. */
+.tf-xv-caret::before { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1.6px 1.6px 0; border-radius: 1px; transform: translateX(-1px) rotate(-45deg); }
+.tf-xv-caret[aria-expanded="true"]::before { transform: translateY(-1px) rotate(45deg); }
 .tf-xv-caret:hover, .tf-xv-l:hover .tf-xv-caret { color: var(--ink); }
 /* What a fold hides: the count loud, the closing tag dim. */
 .tf-xv-fold { display: inline-flex; align-items: center; gap: 4px; height: 18px; line-height: 18px; white-space: nowrap; margin: 0 6px; padding: 0 7px; border: 0; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); cursor: pointer; vertical-align: middle; position: relative; top: -1px; }

@@ -51,6 +51,7 @@
     rowAttach = null,
     linksOf = null,
     code = $bindable(null),
+    wholeUpTo = 300,
   }: {
     text: string;
     /** The path the highlighter reads the language from. */
@@ -87,6 +88,11 @@
     rowAttach?: ((n: number) => Attachment<HTMLElement>) | null;
     /** The element that holds the rows. */
     code?: HTMLElement | null;
+    /**
+     * Lines of a file this short or shorter are drawn whole (Source's 300, #2251). A document view, whose folds make a
+     * long file short, passes about a screenful: three levels of an order were 96 rows, all built in the key's frame.
+     */
+    wholeUpTo?: number;
   } = $props();
 
   const lines = $derived(fileLines(text));
@@ -97,9 +103,8 @@
   /**
    * Files of more lines than this draw only the lines in view and a margin (#2251), as every windowed list does past 300
    * rows: drawn whole, a 400-line file was 90 ms of a return's build at 6x, and its tokens landing as much again (the
-   * inner-6x pass, 2026-11-15). Copying, a line link and *Find in file* reach the lines not drawn.
+   * inner-6x pass, 2026-11-15). Copying, a line link and *Find in file* reach the lines not drawn. See `wholeUpTo`.
    */
-  const WHOLE_UP_TO = 300;
   // A line is 13 px at its code row height (`fonts.svelte.ts`, `codeRows`): 16 px Joined, 20.8 Open.
   const rowsOf = codeRows(13, 1.6);
   // svelte-ignore state_referenced_locally
@@ -108,7 +113,8 @@
     count,
     key: (i) => shownAt(i),
     estimate: fixed ?? rowsOf.estimate,
-    from: WHOLE_UP_TO + 1,
+    // svelte-ignore state_referenced_locally
+    from: wholeUpTo + 1,
     textSize: fixed === null ? rowsOf.textSize : null,
     // svelte-ignore state_referenced_locally
     scrolls,

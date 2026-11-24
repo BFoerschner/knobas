@@ -16,6 +16,9 @@ import { forgetFolds } from "./doc.svelte";
 import { localDocEngine, type DocEngine } from "../../../render/doc-port";
 import type { RenderPort } from "../../../render/port";
 import { BROKEN, fixture } from "../../../render/doc-fixture";
+import { readXml } from "../../../render/xml-outline";
+import { foldTable } from "../../../render/doc-model";
+import { foldedTo, visibleLines } from "../../../render/doc-folds";
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
@@ -128,15 +131,25 @@ test("Levels: the number is the document's depth when it opens, + is off there, 
   fewer!.click();
   flushSync();
   expect(words(stepper()[1])).toBe("8");
+  // The lines always window, so the rows drawn are the first of what `levels` levels leave (all of them is the model's).
+  const table = foldTable(readXml(fixture("order-4711.xml")));
+  const leftAt = (levels: number) => [...visibleLines(table, foldedTo(table, levels))];
+  const drawnFrom = (levels: number) => {
+    const drawn = rows();
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn).toEqual(leftAt(levels).slice(0, drawn.length));
+  };
+  expect(leftAt(3)).toHaveLength(96);
+  expect(leftAt(2)).toHaveLength(16);
   key("3");
-  expect(rows()).toHaveLength(96);
+  drawnFrom(3);
   expect(words(stepper()[1])).toBe("3");
   key("+");
   expect(words(stepper()[1])).toBe("4");
   key("-");
   key("-");
   expect(words(stepper()[1])).toBe("2");
-  expect(rows()).toHaveLength(16);
+  drawnFrom(2);
   stepper()[1]!.click();
   flushSync();
   expect(words(stepper()[1])).toBe("9");
@@ -263,7 +276,10 @@ test("a file written on one line is laid out, says so, and draws as written on a
   draw(long);
   await settle();
   expect(words(target.querySelector(".tf-xv-laid"))).toBe("Laid out by knobas");
-  expect(rows().length).toBe(202);
+  // 202 lines laid out, the first of them drawn: an element a line, two spaces a level.
+  expect(rows().length).toBeGreaterThan(2);
+  expect(rows()).toEqual(rows().map((_, i) => i + 1));
+  expect(row(2).querySelector(".tf-lt")?.textContent).toBe('  <i n="1">one</i>');
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "As written")!.click();
   await settle();
   expect(rows()).toEqual([1]);

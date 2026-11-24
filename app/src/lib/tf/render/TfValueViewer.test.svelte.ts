@@ -89,6 +89,9 @@ test("Keep for this field keeps the chain as a named pipeline for the field's la
   const list = (keep.mock.calls[0] as unknown as [{ name: string; steps: PipeStep[]; fields?: { field: string; files: string }[] }[]])[0];
   expect(list[0]!.steps).toEqual([{ step: "base64_decode" }]);
   expect(list[0]!.fields).toEqual([{ files: "*.xml", field: "MIME_EMBEDDED/MIME_DATA", end: "text" }]);
+  // The dialog says so at once, and offers no second keep of the chain it just kept.
+  expect(words(document.querySelector(".tf-xv-flow"))).toContain(`Kept as ${list[0]!.name}.`);
+  expect([...document.querySelectorAll("button")].some((b) => words(b) === "Keep for this field…")).toBe(false);
 });
 
 test("Download saves what the chain gave under the name the document gives beside the value", async () => {
