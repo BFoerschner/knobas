@@ -16,6 +16,7 @@
 
   let {
     st,
+    lang = "XPath",
     size,
     field = $bindable(null),
     onstep,
@@ -23,6 +24,8 @@
     onleave,
   }: {
     st: DocState;
+    /** The query's language: XPath in the XML view, jq in the JSON view (section 26). */
+    lang?: "XPath" | "jq";
     /** The document's size in characters: past 2 MiB a query waits for typing to rest. */
     size: number;
     field?: HTMLInputElement | null;
@@ -66,14 +69,14 @@
 
 <div class="tf-xv-qbar">
   <label class="tf-minif tf-xv-qfield">
-    <span class="tf-xv-lang">XPath</span>
+    <span class="tf-xv-lang">{lang}</span>
     <input
       bind:this={field}
       value={st.source}
       oninput={typed}
       onkeydown={keys}
-      placeholder="//ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID"
-      aria-label="XPath query"
+      placeholder={lang === "jq" ? ".orders[] | select(.total > 2000)" : "//ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID"}
+      aria-label={lang === "jq" ? "jq filter" : "XPath query"}
       autocomplete="off"
       spellcheck="false"
       data-xv-query=""
@@ -86,14 +89,18 @@
       {#if q.state === "empty" && st.opened?.defaultNs === true}
         <span class="tf-dim">A name finds what the document writes: no prefix needed for its own namespace.</span>
       {:else if q.state === "empty"}
-        <span class="tf-dim">XPath 1.0. Results show as you type.</span>
+        <span class="tf-dim">{lang === "jq" ? "jq, as a file pipeline's step runs it. Results show as you type." : "XPath 1.0. Results show as you type."}</span>
       {/if}
     {:else if q.state === "error"}
       <span class="tf-xv-warn">{#each coded(q.message) as part, i (i)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}</span>
     {:else if q.state === "stopped"}
       <span class="tf-xv-warn">{q.message}</span>
+    {:else if q.state === "values"}
+      <b>{plural(q.count, "value", "values")}</b>
+      The filter makes new values, so nothing is marked in the document.
+      <span class="tf-dim">{ms(q.ms)} ms</span>
     {:else if q.state === "nodes"}
-      <b>{plural(q.count, "node", "nodes")}</b>
+      <b>{lang === "jq" ? plural(q.count, "value", "values") : plural(q.count, "node", "nodes")}</b>
       {q.count === 0 ? "Nothing in the document answers." : `on ${plural(q.lines.length, "line", "lines")}.`}
       <span class="tf-dim">{ms(q.ms)} ms</span>
     {:else}

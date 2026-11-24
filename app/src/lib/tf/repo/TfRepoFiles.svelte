@@ -116,7 +116,7 @@
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
   import { entityFilePipedSave } from "../../ipc/entity";
-  import { filesDeclaring, xmlCheck, xsdLocations } from "../../ipc/api";
+  import { filesDeclaring, jsonQueryOpen, xmlCheck, xsdLocations } from "../../ipc/api";
   import type { Elsewhere } from "../../render/xsd-locate";
   import { elsewhereOf } from "../render/xsd/xsd-point";
   import { isDelimited } from "../../render/json-sniff";
@@ -2645,6 +2645,13 @@
             text={doc.text}
             path={doc.path}
             kind={drawAs === "json" ? (isDelimited(doc.path) ? "jsonl" : "json") : "xml"}
+            jq={drawAs !== "json"
+              ? null
+              : {
+                  // The file as the backend reads it where the view draws the file; else what the view draws (a pipeline's answer).
+                  open: () => (doc === shownFile ? jsonQueryOpen({ entityId: entity, path: doc.path, commit: readAt }) : jsonQueryOpen({ text: doc.text })),
+                }}
+            onpipeline={drawAs !== "json" || doc !== shownFile ? null : (filter) => pipes.set(doc.path, [...(steps ?? []), { step: "jq", filter }])}
             repo={repoId}
             sha={doc === shownFile ? (file.sha ?? null) : null}
             {render}

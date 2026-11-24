@@ -68,6 +68,7 @@ mod jira_views_ipc;
 mod job_ipc;
 mod job_lifecycle_ipc;
 mod job_pipelines_ipc;
+mod json_query;
 mod keychain_write;
 mod keys_ipc;
 mod link_on_arrival_ipc;

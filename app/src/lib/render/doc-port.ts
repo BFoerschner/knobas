@@ -100,6 +100,11 @@ export class DocSession {
     this.#engine = engine;
   }
 
+  /** A jq answer's paths as rows and the lines they mark (the JSON view, section 26). */
+  jsonRows(paths: (string | number)[][]): Promise<{ rows: ResultRow[]; lines: Uint32Array }> {
+    return this.#engine(this.#id, { kind: "jsonRows", paths }).then((r) => (r as { rows: ResultRow[]; lines: Uint32Array } | null) ?? { rows: [], lines: new Uint32Array(0) });
+  }
+
   /** Reads the document, as XML or as JSON: its fold table and what its root says. */
   open(text: string, as: DocKind = "xml"): Promise<DocOpened> {
     return this.#engine(this.#id, { kind: "open", text, ...(as !== "xml" ? { as } : {}) }) as Promise<DocOpened>;

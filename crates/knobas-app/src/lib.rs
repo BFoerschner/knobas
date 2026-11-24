@@ -451,6 +451,7 @@ pub fn manage_app_state<R: tauri::Runtime>(
     // The Docs tree as last read, read again only when the pages moved
     // (the instant-open pass, 2026-11-12, `docs::TreeCache`).
     handle.manage(docs::TreeCache::default());
+    handle.manage(file_pipeline::session::JqSessions::default());
     // The desktop notification sender and its waiter registry (#339),
     // over `backend` and the real event bridge. Managed here
     // for the same reason as `Lifecycle`: the command that reaches for
@@ -995,6 +996,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::xsd_downloaded,
         commands::api::xsd_forget,
         commands::api::xsd_save_example,
+        commands::api::json_query_open,
+        commands::api::json_query,
+        commands::api::json_query_close,
         commands::api::xml_check,
         commands::api::set_xml_check,
         commands::api::api_open_in,

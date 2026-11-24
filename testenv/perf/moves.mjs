@@ -216,6 +216,8 @@ const PLACES = [
   // the page draws; its lines land in the box that holds their room.
   { name: "xsd-example", fixture: true, fake: "fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/at/el%2FORDER/files/schemas/opentrans/opentrans_2_1.xsd`, hash: `#/repo/${REPO}/at/`, away: "#/time" },
   { name: "json-export", fixture: true, fake: "fake-xml", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/files/exports/orders-2026-11.json`, hash: `#/repo/${REPO}/files/exports/`, away: "#/time" },
+  // jq in the JSON view (J2): its answer 400 ms after the key, its marks and rows landing in the room they hold.
+  { name: "json-jq-late", fixture: true, fake: "fake-xml", late: "json_query:400", start: `#/repo/${REPO}/files/exports/orders-2026-11.json`, fill: { into: ".tf-xv-qfield input", text: ".orders[] | select(.total > 2000) | .i" }, type: { into: ".tf-xv-qfield input", key: "d" }, hash: null, ready: `${shown} .tf-xv-rrow`, away: "clear" },
   { name: "xml-plain", fixture: true, fake: "fake-xml", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/files/build/pom.xml`, hash: `#/repo/${REPO}/files/build/`, away: "#/time" },
   { name: "xml-checked", fixture: true, fake: "fake-xml&fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/files/orders/order-4711.xml`, hash: `#/repo/${REPO}/files/orders/`, away: "#/time" },
   { name: "repo-file", optional: "real", start: `#/repo/${REPO}`, press: `${shown} .tf-ftree a[href*="/files/"]:not(.tf-fdir)`, hash: `#/repo/${REPO}/files/`, away: `#/repo/${REPO}` },

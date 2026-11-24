@@ -52,6 +52,7 @@
   import { languageOf } from "../../../render/engines";
   import type { RenderPort } from "../../../render/port";
   import { push } from "../../../shell/toasts.svelte";
+  import { jsonQuery, jsonQueryClose } from "../../../ipc/api";
   import { DOC_KEYS, isKey } from "./doc-keys";
   import { DocCheck, rootSays, type RootSays } from "./doc-check.svelte";
   import TfXsdPage from "../xsd/TfXsdPage.svelte";
@@ -77,6 +78,8 @@
     images = null,
     schema = null,
     kind = "xml",
+    jq = null,
+    onpipeline = null,
   }: {
     text: string;
     /** The file's path from the repository's top. */
@@ -96,6 +99,10 @@
      */
     /** The reader: the XML view's, the JSON view's, or a value a line (`.jsonl`, `.ndjson`). */
     kind?: DocKind;
+    /** jq for a JSON document (section 26): opens the document's session, kept running while the view lives. */
+    jq?: { open: () => Promise<number> } | null;
+    /** *Use as this file's pipeline*: the filter as a jq step on the file. */
+    onpipeline?: ((filter: string) => void) | null;
     schema?: {
       read: (path: string) => Promise<string | null>;
       paths: () => Promise<readonly string[]>;
@@ -124,7 +131,10 @@
 
   const kept = $derived(pipelines ?? namedPipelines);
 
-  /** The lines of a document a row is: fixed, so a windowed list of 800,000 rows holds one height. */
+  /**
+   * The lines of a document a row is, at code's size of 100 %: one height for every row, so a windowed list of 800,000
+   * rows holds it; `TfLines` scales it with code's size.
+   */
   const ROW = 22;
   /** The departures one line's side column says whole: a line holds a handful at most. */
   const DEPARTURES_SHOWN = 20;
@@ -150,6 +160,14 @@
     const state = new DocState(session, `${untrack(() => repo)}\n${at}${laying ? "\nlaid" : ""}`, contentOf(source, untrack(() => sha)), lines);
     st = state;
     let live = true;
+    // jq, for a JSON document: its session opened with the first filter, closed with the view.
+    let jqSession: Promise<number> | null = null;
+    const opener = untrack(() => jq);
+    if (untrack(() => kind) !== "xml" && opener !== null)
+      state.jq = (filter) => {
+        jqSession ??= opener.open();
+        return jqSession.then((id) => jsonQuery(id, filter));
+      };
     void session.open(source, untrack(() => kind)).then(async (answer) => {
       // A worker that failed answers no table: the lines stay as drawn, unfolding nothing.
       if (!live || answer === null || typeof answer !== "object" || !("folds" in answer)) return;
@@ -165,6 +183,7 @@
     return () => {
       live = false;
       state.close();
+      if (jqSession !== null) void jqSession.then((id) => jsonQueryClose(id), () => {});
     };
   });
 
@@ -706,8 +725,10 @@
     copyOpen = false;
     if (state === null) return;
     remember(state.source);
-    const words = { written: "the nodes as written", values: "the values", lines: "the lines", xpath: "the XPath" }[what];
+    const words = kind === "xml" ? { written: "the nodes as written", values: "the values", lines: "the lines", xpath: "the XPath" }[what] : { written: "the values as written", values: "the values", lines: "the lines", xpath: "the filter" }[what];
     if (what === "xpath") return copied(state.source, words);
+    // A filter that makes values: what it answered is the copy, one a line.
+    if (state.q.state === "values") return copied(state.q.values.join("\n"), words);
     copied(await state.session.copy(what), words);
   }
 
@@ -889,7 +910,7 @@
     >
       {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
       {#snippet copy()}
-        {#if state.q.state === "nodes" && state.q.count > 0}
+        {#if (state.q.state === "nodes" || state.q.state === "values") && state.q.count > 0}
           <button type="button" class="tf-btn tf-sm tf-ghost" bind:this={copyButton} aria-haspopup="menu" aria-expanded={copyOpen} onclick={() => (copyOpen = !copyOpen)}>Copy ▾</button>
         {/if}
       {/snippet}
@@ -933,10 +954,11 @@
           </span>
         </span>
       </div>
-      <!-- The query is XPath; the JSON view asks with jq (J2). -->
-      {#if kind === "xml"}
+      <!-- The query is XPath; the JSON view asks with jq, where a session can be opened (section 26). -->
+      {#if kind === "xml" || jq !== null}
       <TfDocQuery
         st={state}
+        lang={kind === "xml" ? "XPath" : "jq"}
         size={text.length}
         bind:field
         onstep={step}
@@ -1043,9 +1065,14 @@
 {#if copyOpen && copyButton !== null}
   <TfMenu bind:open={copyOpen} opener={copyButton} label="Copy the results" className="tf-pmenu-m">
     <button type="button" role="menuitem" onclick={() => void copyResults("written")}>Copy as written</button>
-    <button type="button" role="menuitem" onclick={() => void copyResults("values")}>Copy the values</button>
-    <button type="button" role="menuitem" onclick={() => void copyResults("lines")}>Copy the lines</button>
-    <button type="button" role="menuitem" onclick={() => void copyResults("xpath")}>Copy the XPath</button>
+    {#if st?.q.state === "nodes"}
+      <button type="button" role="menuitem" onclick={() => void copyResults("values")}>Copy the values</button>
+      <button type="button" role="menuitem" onclick={() => void copyResults("lines")}>Copy the lines</button>
+    {/if}
+    <button type="button" role="menuitem" onclick={() => void copyResults("xpath")}>{kind === "xml" ? "Copy the XPath" : "Copy the filter"}</button>
+    {#if kind !== "xml" && onpipeline !== null}
+      <button type="button" role="menuitem" onclick={() => ((copyOpen = false), st !== null && onpipeline?.(st.source.trim()))}>Use as this file's pipeline</button>
+    {/if}
   </TfMenu>
 {/if}
 

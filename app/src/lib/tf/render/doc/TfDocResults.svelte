@@ -28,6 +28,12 @@
   const rows = $derived(st.rows);
   const win = new Windowed<number>({ count: () => rows.length, key: (i) => i, estimate: 28, from: 60, scrolls: true });
   const start = $derived(win.on ? win.start : 0);
+  /** The values a making filter's list draws: jq's answer carries 500 at most. */
+  const VALUES_SHOWN = 500;
+  /** A value is cut at this many characters in its row. */
+  const VALUE_CUT = 120;
+  /** What a row that holds others counts: an XML element its elements, a JSON array its items, an object its members. */
+  const HOLDS = { elements: ["element", "elements"], items: ["item", "items"], members: ["member", "members"] } as const;
   /** How many queries asked before the list offers. */
   const ASKED_SHOWN = 6;
   // Near the last row drawn, the next rows are asked for.
@@ -52,10 +58,17 @@
       <button type="button" class="tf-oas-row tf-xv-rrow" role="option" aria-selected={st.cur === i} data-xv-res={i} {@attach win.row(i)} onclick={() => ongo(i)}>
         <span class="tf-xv-fline">{r.line.toLocaleString("en")}</span>
         <span class="tf-xv-fname">{r.name}</span>
-        {#if r.value === null}<span class="tf-xv-rkind">{r.kids.toLocaleString("en")} {r.kids === 1 ? "element" : "elements"}</span>{:else}<span class="tf-xv-rval">{r.value}</span>{/if}
+        {#if r.value === null}<span class="tf-xv-rkind">{r.kids.toLocaleString("en")} {HOLDS[r.holds ?? "elements"][r.kids === 1 ? 0 : 1]}</span>{:else}<span class="tf-xv-rval">{r.value}</span>{/if}
       </button>
     {/each}
     {#if win.after > 0}<div class="tf-wgap" aria-hidden="true" {@attach win.room("after")}></div>{/if}
+  </div>
+{:else if q.state === "values"}
+  <!-- A filter that makes values: each a row, compact and cut; nothing in the document to go to. -->
+  <div class="tf-xv-rlist" role="presentation">
+    {#each q.values.slice(0, VALUES_SHOWN) as v, i (i)}
+      <div class="tf-oas-row tf-xv-rrow tf-xv-rmade" role="option" aria-selected="false"><span class="tf-xv-fline">{(i + 1).toLocaleString("en")}</span><span class="tf-xv-rval">{v.length > VALUE_CUT ? `${v.slice(0, VALUE_CUT - 1)}…` : v}</span></div>
+    {/each}
   </div>
 {:else if q.state === "value"}
   <div class="tf-xv-one"><span class="tf-xv-occ">{q.text}</span><span class="tf-dim">{q.type === "number" ? "a number" : q.type === "boolean" ? "true or false" : "a string"}</span></div>

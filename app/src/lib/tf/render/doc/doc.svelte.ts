@@ -10,6 +10,7 @@
 import { untrack } from "svelte";
 
 import { foldedTo, foldsUnder, holderOf, levelsOpen, noFolds, opening, stepLevels, visibleLines, rowOfLine, foldDepth, type FoldTable, type Folded } from "../../../render/doc-folds";
+import type { JsonQueryAnswer } from "../../../ipc/api";
 import type { Crumb, DocOpened, Picked, QueryAnswer, ResultRow, ValueAt } from "../../../render/doc-model";
 import type { DocSession } from "../../../render/doc-port";
 
@@ -114,6 +115,11 @@ export class DocState {
   #next: string | null = null;
   #rest: ReturnType<typeof setTimeout> | null = null;
   #keysAsked = 0;
+  /**
+   * jq, where the document is JSON (the XML view's design, section 26): a filter asked of the document's session, kept
+   * running in a helper. `null` asks the document worker's XPath.
+   */
+  jq: ((filter: string) => Promise<JsonQueryAnswer>) | null = null;
   #keysTimer: ReturnType<typeof setTimeout> | null = null;
   #atAsked = 0;
 
@@ -299,7 +305,8 @@ export class DocState {
     }
     this.#asking = source;
     if (this.q.state === "empty") this.q = { state: "asking" };
-    void this.session.query(source).then((answer) => {
+    const asked = this.jq !== null ? this.#jqAnswer(this.jq, source) : this.session.query(source);
+    void asked.then((answer) => {
       this.#asking = null;
       const waiting = this.#next;
       this.#next = null;
@@ -319,6 +326,24 @@ export class DocState {
         this.hitLines = new Uint32Array(0);
       }
     });
+  }
+
+  /**
+   * A jq answer in the query's words: a filter that picks answers its values on their lines, the worker making its
+   * paths rows; one that makes new values answers them alone; jq's errors and stops as they are.
+   */
+  async #jqAnswer(jq: (filter: string) => Promise<JsonQueryAnswer>, source: string): Promise<QueryAnswer> {
+    let answer: JsonQueryAnswer;
+    try {
+      answer = await jq(source);
+    } catch (cause) {
+      return { state: "stopped", message: cause instanceof Error ? cause.message : String(cause), ms: 0 };
+    }
+    if (answer.state === "failed") return { state: "error", message: answer.why, at: -1 };
+    if (answer.state === "stopped") return { state: "stopped", message: answer.why, ms: 0 };
+    if (answer.paths === null) return { state: "values", count: answer.count, values: answer.values, ms: answer.ms };
+    const { rows, lines } = await this.session.jsonRows(answer.paths);
+    return { state: "nodes", count: answer.count, rows, lines, ms: answer.ms };
   }
 
   /** Reads the values of the lines drawn, those not read yet. */

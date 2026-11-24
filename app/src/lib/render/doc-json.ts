@@ -5,7 +5,7 @@
  */
 import { ITEMS, MEMBERS, type FoldTable } from "./doc-folds";
 import { J_ARR, J_LIT, J_NUM, J_OBJ, J_STR, jsonPathOf, jsonStepOf, jsonValue, type JsonOutline } from "./json-outline";
-import type { Crumb, Picked, ValueAt } from "./doc-model";
+import type { Crumb, Picked, ResultRow, ValueAt } from "./doc-model";
 
 /** The first value that starts on each line (from 1), or -1. */
 export function jsonByLine(o: JsonOutline): Int32Array {
@@ -184,5 +184,48 @@ export function layOutJson(o: JsonOutline): string {
   };
   for (let c = o.first[0]!; c !== -1; c = o.next[c]!) write(c, "");
   return `${out.join("\n")}\n`;
+}
+
+/** The most of a value a result's row shows. */
+const ROW_CUT = 120;
+
+/** One result as the rail draws it: its line, its member's name or place, its value cut, or what it holds. */
+export function jsonRow(o: JsonOutline, id: number): ResultRow {
+  const kids = holds(o, id) ? o.kids[id]! : 0;
+  let value: string | null = null;
+  if (!holds(o, id)) {
+    const v = o.text.slice(o.start[id], o.end[id]);
+    value = v.length > ROW_CUT ? `${v.slice(0, ROW_CUT - 1)}…` : v;
+  } else if (kids === 0) value = o.type[id] === J_ARR ? "[]" : "{}";
+  const row: ResultRow = { node: id, line: o.line[id]!, name: jsonStepOf(o, id), value, kids };
+  if (kids > 0) row.holds = o.type[id] === J_ARR ? "items" : "members";
+  return row;
+}
+
+/**
+ * Filters to press, made from the document's own members (the field's offers, as the XML view's are): its first array of
+ * objects asked for its first item, its length, and its items with a number over a value it holds.
+ */
+export function jsonExamples(o: JsonOutline): string[] {
+  const out: string[] = ["."];
+  if (o.root <= 0) return out;
+  let list = -1;
+  for (let c = o.first[o.root]!; c !== -1 && list === -1; c = o.next[c]!) if (o.type[c] === J_ARR && o.kids[c]! > 0 && o.type[o.first[c]!] === J_OBJ) list = c;
+  if (list === -1 && o.type[o.root] === J_ARR && o.kids[o.root]! > 0) list = o.root;
+  if (list === -1) return [".", "keys", "paths(type == \"string\") | map(tostring) | join(\".\")"];
+  // The root list is `.`: its items `.[0]`, its length `length`; a member's `.orders[0]`, `.orders | length`.
+  const path = jsonPathOf(o, list);
+  const root = path === ".";
+  const piped = (f: string) => (root ? f : `${path} | ${f}`);
+  out.push(`${root ? "." : path}[0]`, piped("length"));
+  const item = o.first[list]!;
+  for (let c = o.first[item]!; c !== -1; c = o.next[c]!) {
+    if (o.type[c] !== J_NUM) continue;
+    const name = o.keys[o.key[c]!]!;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    out.push(`${root ? "." : path}[] | select(.${name} > ${o.text.slice(o.start[c], o.end[c])})`, piped(`map(.${name}) | add`));
+    break;
+  }
+  return out;
 }
 

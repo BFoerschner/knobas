@@ -6,8 +6,8 @@
  * What crosses to the page is small and asked for: once, the fold table (a few columns); on a pick, the way down and
  * what the picked element holds; on leaving a file, its folds' names. The outline itself never crosses.
  */
-import { jsonByLine, jsonCrumbs, jsonFoldRows, jsonFoldTable, jsonOnLine, jsonPicked, jsonValuesOn, layOutJson } from "./doc-json";
-import { jsonAt, jsonPathOf, readJson, stepsOf, type JsonOutline } from "./json-outline";
+import { jsonByLine, jsonCrumbs, jsonExamples, jsonFoldRows, jsonFoldTable, jsonOnLine, jsonPicked, jsonRow, jsonValuesOn, layOutJson } from "./doc-json";
+import { jsonAt, jsonPathOf, jsonValue, readJson, stepsOf, type JsonOutline } from "./json-outline";
 import { XSI_NS } from "./xml-names";
 import { layOutXml } from "./doc-line";
 import { CHARACTERS, ELEMENTS, LINES, type FoldTable } from "./doc-folds";
@@ -73,6 +73,8 @@ export type DocCall =
   | { kind: "places"; paths: (string | null)[] }
   /** The element on a line as names with their namespaces, from the root down: what its declaration is found by. */
   | { kind: "names"; line: number }
+  /** A jq answer's paths made rows by the outline (the JSON view, section 26): its results, the lines it marks. */
+  | { kind: "jsonRows"; paths: (string | number)[][] }
   | { kind: "close" };
 
 /** One row of a query's results, as the rail draws it. */
@@ -85,6 +87,8 @@ export interface ResultRow {
   value: string | null;
   /** How many elements it holds, where it holds some. */
   kids: number;
+  /** A JSON array's or object's: what it counts, its items or its members (the XML view counts elements). */
+  holds?: "items" | "members";
 }
 
 /** What a query answered (section 22). */
@@ -92,7 +96,9 @@ export type QueryAnswer =
   | { state: "nodes"; count: number; rows: ResultRow[]; lines: Uint32Array; ms: number }
   | { state: "value"; type: "number" | "string" | "boolean"; text: string; ms: number }
   | { state: "error"; message: string; at: number }
-  | { state: "stopped"; message: string; ms: number };
+  | { state: "stopped"; message: string; ms: number }
+  /** A jq filter that makes new values (section 26): nothing in the document is what it answered. */
+  | { state: "values"; count: number; values: string[]; ms: number };
 
 /** A value of the document on a line, where a value pipeline's `Take` finds it (section 16). */
 export interface ValueAt {
@@ -476,6 +482,28 @@ function answerJson(held: DocSessionState, call: DocCall): unknown {
     const out: Record<number, ValueAt[]> = {};
     for (const line of call.lines) out[line] = jsonValuesOn(o, k.byLine, line, call.all, (at) => byteAt(src, at), src.outline as JsonOutline);
     return out;
+  }
+  if (call.kind === "jsonRows") {
+    // The paths a picking filter answered, as rows in the document's order of answering; past one not found, none.
+    const ids: number[] = [];
+    for (const path of call.paths) {
+      const id = jsonAt(o, path);
+      if (id > 0) ids.push(id);
+    }
+    held.last = ids;
+    const lines = new Uint32Array([...new Set(ids.map((id) => o.line[id]!))].sort((a, b) => a - b));
+    return { rows: ids.slice(0, RESULTS_AT_ONCE).map((id) => jsonRow(o, id)), lines };
+  }
+  if (call.kind === "results") return held.last.slice(call.from, call.from + call.count).map((id) => jsonRow(o, id));
+  if (call.kind === "copy") {
+    if (call.what === "lines") return [...new Set(held.last.map((id) => o.line[id]!))].join("\n");
+    if (call.what === "values") return held.last.map((id) => jsonValue(o, id).replace(/\s+/g, " ").trim()).join("\n");
+    return held.last.map((id) => o.text.slice(o.start[id], o.end[id])).join("\n");
+  }
+  if (call.kind === "examples") return jsonExamples(o);
+  if (call.kind === "like") {
+    const id = jsonOnLine(o, k.byLine, call.line);
+    return id <= 0 ? null : jsonPathOf(o, id);
   }
   if (call.kind === "layout") {
     const laid = layOutJson(o);

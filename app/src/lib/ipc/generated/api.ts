@@ -107,6 +107,16 @@ export type Hop = { status: number, url: string, };
 export type ImageHosts = { hosts: Array<string>, };
 
 /**
+ * A step of a jq path: a member's name or an item's place.
+ */
+export type JsonPathStep = string | number;
+
+/**
+ * What a filter answered.
+ */
+export type JsonQueryAnswer = { "state": "answered", values: Array<string>, count: number, paths: Array<Array<JsonPathStep>> | null, ms: number, } | { "state": "failed", why: string, ms: number, } | { "state": "stopped", why: string, };
+
+/**
  * What an open did: the argument vector, the folder, and what was left out.
  */
 export type OpenedSpec = { argv: Array<string>, folder: string, 

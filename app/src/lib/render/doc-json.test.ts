@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
 
-import { answerDoc, type DocOpened, type DocSessions, type Picked, type Crumb, type ValueAt } from "./doc-model";
+import { answerDoc, type DocOpened, type DocSessions, type Picked, type Crumb, type ResultRow, type ValueAt } from "./doc-model";
+import { jsonExamples } from "./doc-json";
+import { readJson } from "./json-outline";
 import { ITEMS, MEMBERS, foldDepth } from "./doc-folds";
 
 const EXPORT = readFileSync(resolve(__dirname, "../../../../fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json"), "utf8");
@@ -79,4 +81,41 @@ test("a line-delimited file: each line's value is its own, the way down starting
 test("an object written on one line does not fold; one over several does", () => {
   const { opened } = session('{\n  "a": {"b": 1},\n  "c": [\n    1\n  ]\n}\n');
   expect([...opened.folds.line]).toEqual([1, 3]);
+});
+
+// ---- jq's answers on the document (J2, the design's section 26) ----
+
+test("a picking filter's paths become rows in jq's order of answering, their lines sorted once; a path not found is left out", () => {
+  const { ask } = session();
+  const answered = ask({ kind: "jsonRows", paths: [["orders", 1, "total"], ["orders", 0, "id"], ["nope"], ["orders", 0, "total"], ["orders", 0, "id"]] }) as { rows: ResultRow[]; lines: Uint32Array };
+  const id = lineOf('"id": "2026-4680"');
+  const total0 = lineOf('"total": 1709.1');
+  expect(answered.rows.map((r) => [r.name, r.value])).toEqual([
+    ["total", answered.rows[0]!.value],
+    ["id", '"2026-4680"'],
+    ["total", "1709.1"],
+    ["id", '"2026-4680"'],
+  ]);
+  expect(answered.rows[1]!.line).toBe(id);
+  expect(answered.rows[0]!.line).toBeGreaterThan(total0);
+  // Each line once, in the document's order: what the marks and N and P step through.
+  expect([...answered.lines]).toEqual([id, total0, answered.rows[0]!.line]);
+  // *Copy ▾* copies what the filter picked, in its order.
+  expect(ask({ kind: "copy", what: "values" })).toBe([answered.rows[0]!.value, "2026-4680", "1709.1", "2026-4680"].join("\n"));
+  // An object picked says what it holds; an empty array says so.
+  const order = ask({ kind: "jsonRows", paths: [["orders", 0], ["orders", 0, "buyer"]] }) as { rows: ResultRow[] };
+  expect(order.rows.map((r) => [r.name, r.kids, r.holds, r.value])).toEqual([
+    ["[0]", 8, "members", null],
+    ["buyer", 3, "members", null],
+  ]);
+  expect((ask({ kind: "jsonRows", paths: [["orders"]] }) as { rows: ResultRow[] }).rows[0]).toMatchObject({ kids: 48, holds: "items", value: null });
+  expect((session('{"a": []}').ask({ kind: "jsonRows", paths: [["a"]] }) as { rows: ResultRow[] }).rows[0]!.value).toBe("[]");
+});
+
+test("the field's offers are made from the document's own first list of objects and its first number", () => {
+  expect(jsonExamples(readJson(EXPORT))).toEqual([".", ".orders[0]", ".orders | length", ".orders[] | select(.total > 1709.1)", ".orders | map(.total) | add"]);
+  // A root array of objects is the list itself.
+  expect(jsonExamples(readJson('[{"n": 2, "s": "x"}]'))).toEqual([".", ".[0]", "length", ".[] | select(.n > 2)", "map(.n) | add"]);
+  // No list of objects: what any document answers.
+  expect(jsonExamples(readJson('{"a": 1}'))).toEqual([".", "keys", 'paths(type == "string") | map(tostring) | join(".")']);
 });

@@ -109,7 +109,7 @@ tauri = { version = "2", features = ["tracing"] }
 # naming it; a loop that has to be stoppable cannot. `process` is the working
 # tree read (#704): `git status` with a timeout that kills it.
 # `signal`: a stop signal is a quit (`stop_signals.rs`).
-tokio = { workspace = true, features = ["process", "signal", "sync"] }
+tokio = { workspace = true, features = ["process", "signal", "sync", "io-util"] }
 tokio-util = { version = "0.7", default-features = false }
 # The platform data directory `live-sources` (#2371) finds the demo profile
 # under: the one Tauri's `app_data_dir` joins the identifier to.
