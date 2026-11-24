@@ -120,3 +120,7 @@
 .tf-xsd-verdict.tf-ok b { color: var(--ok); } .tf-xsd-verdict.tf-err b { color: var(--err); } .tf-xsd-verdict.tf-warn b { color: var(--warn); }
 .tf-xsd-verdict .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-xsd-notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+/* The wait, inside the pane that already holds its height. */
+.tf-oas.tf-xsd > .tf-xsd-wait { grid-column: 1 / -1; align-self: start; padding: 12px; }
+/* The rail's list keeps its scrollbar's room: a tree that opens past a screenful must not narrow the rows drawn. */
+.tf-oas.tf-xsd .tf-oas-list { scrollbar-gutter: stable; }

@@ -183,6 +183,8 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
+    const first = columnsFor(view.getBoundingClientRect().width);
+    if (first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
@@ -317,17 +319,20 @@
   });
 </script>
 
-{#if opened === null}
-  <div class="tf-oas-wait">{#if slow}<p class="tf-oas-reading" role="status">Reading the schema…</p>{/if}</div>
-{:else if !opened.ok}
+{#if opened !== null && !opened.ok}
   <div class="tf-oas-bad" role="alert">
     <p><b>This schema could not be read.</b></p>
     <pre>{opened.error}</pre>
     {#if opened.line !== null}<p class="tf-dim">Line {opened.line}.</p>{/if}
   </div>
-{:else if index !== null && st !== null}
-  {@const state = st}
+{:else}
+  <!-- The pane stands from the first frame at its height, the wait inside it, so the page's height and its scrollbar
+       do not change when the worker answers (`moves`, 2026-11-24: the header's buttons shifted 16 px). -->
   <div class="tf-oas tf-oas-2 tf-xsd" data-cols={cols} {@attach pane} {@attach sideWidth("xsd-rail")}>
+    {#if index === null || st === null}
+      <div class="tf-oas-wait tf-xsd-wait">{#if slow}<p class="tf-oas-reading" role="status">Reading the schema…</p>{/if}</div>
+    {:else}
+    {@const state = st}
     <TfXsdRail st={state} {ranked} onpick={pick} />
     <TfSideEdge side="xsd-rail" />
     <TfXsdPage
@@ -340,5 +345,6 @@
       {onpoint}
       bind:scroller={pageCol}
     />
+    {/if}
   </div>
 {/if}

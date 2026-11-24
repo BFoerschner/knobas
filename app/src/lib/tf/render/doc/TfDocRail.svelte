@@ -150,7 +150,7 @@
   </div>
   <div class="tf-oas-modes">
     <span class="tf-seg" role="group" aria-label="The list shows">
-      <button type="button" aria-pressed={mode === "findings"} onclick={() => (mode = "findings")}>Findings{#if broken !== null}{" "}1{:else if departures.length > 0}{" "}{NUM.format(head?.k === "checked" ? head.total : departures.length)}{/if}</button>
+      <button type="button" aria-pressed={mode === "findings"} onclick={() => (mode = "findings")}>Findings{" "}<span class="tf-xv-fcount">{#if broken !== null}1{:else if departures.length > 0}{NUM.format(head?.k === "checked" ? head.total : departures.length)}{/if}</span></button>
       <button type="button" aria-pressed={mode === "results"} onclick={() => (mode = "results")}>Results</button>
     </span>
     {#if mode === "results" && copy !== null}{@render copy()}{/if}

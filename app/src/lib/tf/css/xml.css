@@ -173,3 +173,9 @@
 .tf-xv-depfull { flex: none; padding: 10px 16px; border-bottom: 1px solid var(--rule-2); box-shadow: inset 3px 0 0 var(--err); background: var(--err-bg); font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-xv-depfull p { margin: 0 0 4px; overflow-wrap: anywhere; }
 .tf-xv-depfull code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+/* The head holds the tallest of its states from the first frame (a verdict and two lines of two each), so the list
+   under it never moves when the check's longer words land (`moves`, 2026-11-24: 5 px). */
+.tf-xv-rail > .tf-xv-head { min-height: calc(26px + 4 * 1.35em + 4px + 18px + 6px); }
+.tf-xv-rail > .tf-xv-head p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+/* *Findings*' count holds its room, so the switch does not widen when the check's count lands. */
+.tf-xv-fcount { display: inline-block; min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }

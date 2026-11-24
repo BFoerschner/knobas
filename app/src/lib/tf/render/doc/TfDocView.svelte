@@ -258,6 +258,15 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
+    // The columns from the first frame: an observer answers a frame late, and a side column put in then moved the
+    // document's bar 798 px at 2560 x 1440 (`moves`, 2026-11-24).
+    const measure = () => {
+      const now = columnsFor(view.getBoundingClientRect().width);
+      if (now !== cols) cols = now;
+    };
+    measure();
+    // Mounted on a return, the file view may not have its width yet: once more before the first paint.
+    const early = requestAnimationFrame(measure);
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
@@ -267,6 +276,7 @@
       ro.observe(view);
     }
     return () => {
+      cancelAnimationFrame(early);
       window.removeEventListener("resize", fit);
       ro?.disconnect();
     };

@@ -56,6 +56,8 @@ const SIZES = [
   [960, 540, 2],
   [1100, 600, 1],
 ];
+/** The window's smallest alone: the check's screen (the gate's long paths run at 1100 x 600). */
+const SMALLEST = [[1100, 600, 1]];
 // The Builds screens add 1440x868, the size Björn's report came from (the build-header pass, 2026-11-20).
 const BUILD_SIZES = [
   [5120, 1440, 1],
@@ -143,6 +145,8 @@ const SCREENS = [
   // A site's saved sign-in (ux29): Settings' row naming a long username, held to its column.
   { id: "settings-site-signin", route: "settings/source/confluence" },
   // Passwords (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
+  // The check in the XML view (2026-11-24): the rail's head and its switch whole at the window's smallest.
+  { id: "xml-checked", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", wait: 3000, whole: ".tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
