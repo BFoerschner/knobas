@@ -13,8 +13,12 @@
 //! raises `ExitRequested` and `Exit` and so runs the whole exit handler, the
 //! database last; the windowless backend runs the same handler directly. A
 //! second signal while that quit runs ends the process at once, so a quit that
-//! hangs can still be ended the usual way: it leaves the server for the next
-//! start to adopt, as every signal did before.
+//! hangs can still be ended the usual way; the server's supervisor
+//! (`knobas_db::supervisor`) then stops it.
+//!
+//! A signal is not the only end that runs no quit: on Linux the display's end
+//! (a logout) ends the process from inside GTK, before or during a quit. The
+//! supervisor covers that too.
 //!
 //! Unix only. Windows sends a GUI process no signal: a log-off or shutdown
 //! reaches it as window messages, and a `taskkill /F` cannot be caught.
