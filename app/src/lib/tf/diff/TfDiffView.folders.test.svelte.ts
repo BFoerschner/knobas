@@ -302,3 +302,17 @@ test("the window back in focus looks at each folder's sides again: a side the to
   expect(target.querySelectorAll(".tf-dunder .tf-diff").length, "what was compared stays where it is").toBe(2);
   expect(barButton("Run")).toBeDefined();
 });
+
+test("a generated file's last line break ends its last line: no empty line after it, and an added line counts one (2026-11-24)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("docs/index.md"), file("lib/x.rs")], fake);
+  await settle();
+  const counts = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-flist button.tf-dmade")].find((b) => b.querySelector(".tf-fname")!.textContent === name)!.querySelector(".tf-n")!.textContent!.trim();
+  expect(counts("index.md")).toBe("+1 −1");
+  expect(counts("steps/04-alert.md")).toBe("+1 −0");
+});

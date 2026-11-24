@@ -494,9 +494,12 @@
       const token = file.made![s];
       return token === null ? "" : decode.decode(await madeRead(file, token));
     };
+    // A file's last line break ends its last line, as git reads it: kept, it drew an empty line after it on each side,
+    // and an added one-line file counted two (2026-11-24; `TfJarDiff`'s `endless`).
+    const endless = (text: string) => text.replace(/\r?\n$/, "");
     Promise.all([side("old"), side("new")]).then(
       ([before, after]) => {
-        const made = lineDiff(file.path, before, after);
+        const made = lineDiff(file.path, endless(before), endless(after));
         lined = {
           ...lined,
           [key]: { file: { ...file, hunks: made.hunks, additions: made.additions, deletions: made.deletions, ...(made.coarse ? { coarse: true as const } : {}) }, next: null, failed: null },
