@@ -42,6 +42,7 @@
   import TfPdfDiff from "../render/TfPdfDiff.svelte";
   import TfOasDiff from "../render/TfOasDiff.svelte";
   import TfXsdDiff from "../render/xsd/TfXsdDiff.svelte";
+  import TfDocDiff from "../render/doc/TfDocDiff.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
   import { imageMode as sharedImageMode, type ImageModeChoice } from "./image-mode.svelte";
   import { isListing, meetsLines, type ImageMode, type LineRanges, type RenderedPlan, type Side, type SideGot } from "./rendered";
@@ -167,6 +168,8 @@
     if (id === "openapi") return oasStage?.nextChange(step, entering) ?? false;
     // A schema steps through its declarations that changed (S7).
     if (id === "xsd") return xsdStage?.nextChange(step, entering) ?? false;
+    // XML and JSON step through the parts that differ (C1).
+    if (id === "xml" || id === "json") return docStage?.nextChange(step, entering) ?? false;
     readChanges();
     const to = entering ? (step === 1 ? 0 : changes.length - 1) : at + step;
     if (!marksOn || to < 0 || to >= changes.length || stage === null) return false;
@@ -202,7 +205,10 @@
   };
   const neitherSpec = $derived(id === "openapi" && sides.length > 0 && sides.every(noSpec));
   /** The columns the stage draws: one for a PDF or an API spec (their own two), a JAR, a swipe or an onion, else one a side. */
-  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || id === "xsd" || overlaid || neitherSpec ? 1 : sides.length);
+  const columns = $derived(id === "pdf" || id === "jar" || id === "openapi" || id === "xsd" || id === "xml" || id === "json" || overlaid || neitherSpec ? 1 : sides.length);
+  /** An XML or JSON document's stage (`TfDocDiff`, C1), and what it says for the foot. */
+  let docStage = $state<ReturnType<typeof TfDocDiff> | null>(null);
+  let docSay = $state("");
   /** A schema's stage (`TfXsdDiff`, S7), and what it says for the foot. */
   let xsdStage = $state<ReturnType<typeof TfXsdDiff> | null>(null);
   let xsdSay = $state("");
@@ -297,6 +303,7 @@
     if (unread[0] === "new") return ends?.new === "working tree" ? "Reading the working tree's side…" : "Reading the side after…";
     if (id === "openapi") return oasSay;
     if (id === "xsd") return xsdSay;
+    if (id === "xml" || id === "json") return docSay;
     if (image) return sides.flatMap((side) => (sizes[side] ? [`${NAME[side]} ${sizes[side]}`] : [])).join(", ");
     if (jarCompare !== null) return compareWords(jarCompare, jarSides?.old === null ? "added" : jarSides?.new === null ? "removed" : null);
     if (marksOn && changes.length > 0) {
@@ -392,6 +399,18 @@
     </div>
   {:else if neitherSpec}
     <div class="tf-rside tf-rside-doc"><p class="tf-jar-dnote tf-roas-no">Neither side is an OpenAPI or Swagger spec: Lines has the change.</p></div>
+  {:else if id === "xml" || id === "json"}
+    {@const failed = sides.find((side) => failure(side) !== null)}
+    {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}
+    <div class="tf-rside">
+      {#if failed !== undefined}
+        <p class="tf-stepfail" role="alert">The side {failed === "old" ? "before" : "after"} could not be read: {failure(failed)}</p>
+      {:else if old !== undefined && nu !== undefined}
+        <TfDocDiff bind:this={docStage} before={old === null ? null : textOf(old)} after={nu === null ? null : textOf(nu)} kind={id === "xml" ? "xml" : "json"} onsay={(words) => (docSay = words)} />
+      {:else}
+        {@render waiting(sides[0] ?? "new")}
+      {/if}
+    </div>
   {:else if id === "xsd"}
     {@const failed = sides.find((side) => failure(side) !== null)}
     {@const [old, nu] = [plan.sides.includes("old") ? bytesOf("old") : null, plan.sides.includes("new") ? bytesOf("new") : null]}

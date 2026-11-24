@@ -116,6 +116,17 @@ export function specHint(file: DiffFile): string | undefined {
   return undefined;
 }
 
+/**
+ * What an XML or JSON file's plan is sniffed by where no text tells (C1): its name alone. A JSON file read at the
+ * checkout is sniffed from its side first (an API spec, `TfDiffView`'s `sniffable`), so its caller asks only otherwise.
+ */
+export function docHint(file: DiffFile): string | undefined {
+  if (file.change === "binary") return undefined;
+  if (/\.(xml|xsl|xslt|pom|csproj|wsdl|svg|plist|xaml|resx|config)$/i.test(file.path)) return '<?xml version="1.0"?><a/>';
+  if (/\.(json|geojson|webmanifest|har|ipynb|jsonl|ndjson)$/i.test(file.path)) return "{}";
+  return undefined;
+}
+
 /** What a `.xsd`'s plan is sniffed by: an XML Schema's first tag. */
 const XSD_HINT = `<xs:schema xmlns:xs="${ns("www.w3.org/2001/XMLSchema")}"/>`;
 

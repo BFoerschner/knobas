@@ -6,6 +6,8 @@
 import type { DocKind, CopyWhat, Crumb, DocCall, DocOpened, Picked, QueryAnswer, ResultRow, ValueAt } from "./doc-model";
 
 /** Runs one call of one session where the outline is kept. */
+import type { DocChanges } from "./doc-compare";
+
 export type DocEngine = (session: number, call: DocCall) => Promise<unknown>;
 
 let worker: Worker | null = null;
@@ -175,4 +177,10 @@ export class DocSession {
     this.#closed = true;
     void this.#engine(this.#id, { kind: "close" });
   }
+}
+
+/** Two texts compared by element (C1, `doc-compare.ts`), in the document worker; `null` where it answered nothing usable. */
+export async function compareInWorker(before: string | null, after: string | null, as: "xml" | "json", engine: DocEngine = docEngine()): Promise<DocChanges | null> {
+  const answer = await engine(0, { kind: "compare", before, after, as });
+  return answer !== null && typeof answer === "object" && "rows" in answer ? (answer as DocChanges) : null;
 }

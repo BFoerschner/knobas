@@ -10,6 +10,7 @@ import { jsonByLine, jsonCrumbs, jsonExamples, jsonFoldRows, jsonFoldTable, json
 import { jsonAt, jsonPathOf, jsonValue, readJson, stepsOf, type JsonOutline } from "./json-outline";
 import { XSI_NS } from "./xml-names";
 import { layOutXml } from "./doc-line";
+import { compareDocs } from "./doc-compare";
 import { CHARACTERS, ELEMENTS, LINES, type FoldTable } from "./doc-folds";
 import { COMMENT, EL, TEXT, CDATA, PI, decode, lineOfNode, nameOf, namePathOf, nodeAtPath, pathOf, readXml, stepOf, stringOf, type XmlOutline } from "./xml-outline";
 import { XPathError, compile, describe, prefixesOf, run, type Answer } from "./xml-xpath";
@@ -75,6 +76,8 @@ export type DocCall =
   | { kind: "names"; line: number }
   /** A jq answer's paths made rows by the outline (the JSON view, section 26): its results, the lines it marks. */
   | { kind: "jsonRows"; paths: (string | number)[][] }
+  /** Two texts compared by element (C1): no session of its own. */
+  | { kind: "compare"; before: string | null; after: string | null; as: "xml" | "json" }
   | { kind: "close" };
 
 /** One row of a query's results, as the rail draws it. */
@@ -365,6 +368,7 @@ export type DocSessions = Map<number, DocSessionState>;
 
 /** Answers one call of session `session`: in the worker, or on this thread. */
 export function answerDoc(sessions: DocSessions, session: number, call: DocCall): unknown {
+  if (call.kind === "compare") return compareDocs(call.before, call.after, call.as);
   if (call.kind === "open") {
     const k = keep(call.text, call.as ?? "xml");
     sessions.set(session, { k, last: [] });

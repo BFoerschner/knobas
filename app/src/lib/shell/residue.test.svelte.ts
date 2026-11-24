@@ -496,6 +496,7 @@ const TfXsdPage = (await import("../tf/render/xsd/TfXsdPage.svelte")).default;
 const TfXsdRail = (await import("../tf/render/xsd/TfXsdRail.svelte")).default;
 const TfXsdExample = (await import("../tf/render/xsd/TfXsdExample.svelte")).default;
 const TfXsdDiff = (await import("../tf/render/xsd/TfXsdDiff.svelte")).default;
+const TfDocDiff = (await import("../tf/render/doc/TfDocDiff.svelte")).default;
 const { XS: XS_NS } = await import("../render/xsd-xml");
 const { XsdState } = await import("../tf/render/xsd/xsd.svelte");
 const { XsdPort } = await import("../render/xsd-port");
@@ -1839,6 +1840,12 @@ const CASES: Case[] = [
     name: "TfXsdPage",
     source: "lib/tf/render/xsd/TfXsdPage.svelte",
     open: (target) => ({ app: mount(TfXsdPage, { target, props: { st: new XsdState(new XsdPort(() => deferred(null))), ongo: () => {}, onback: () => {}, onfile: () => {} } }) }),
+  },
+  {
+    /** XML or JSON in a comparison (C1): compared in the document worker, which answers late. */
+    name: "TfDocDiff",
+    source: "lib/tf/render/doc/TfDocDiff.svelte",
+    open: (target) => ({ app: mount(TfDocDiff, { target, props: { before: "<a/>", after: "<b/>", kind: "xml", engine: () => deferred(null) } }) }),
   },
   {
     /** A schema in a comparison (S7): both sides' sets are read and compared in the worker, which answers late. */

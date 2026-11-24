@@ -514,7 +514,8 @@ test("where a side may be a forge's request, a plain-named spec is not read for 
   draw({ files: [SPEC], context });
   await settle();
   expect(asked).toEqual([]);
-  expect(modes("api/payouts.json")).toEqual([]);
+  // Read by its name alone it is a JSON file, compared by element (C1); never read for a sniff.
+  expect(modes("api/payouts.json")).toEqual(["Lines*", "Rendered"]);
 });
 
 test("a spec on one side only lists everything there, the other side says it is no spec, and the foot counts them added", async () => {
@@ -555,7 +556,8 @@ test("an OpenAPI spec offers Rendered where its diff or its name shows it one; a
   expect(modes("old/spec.yaml")).toEqual([]);
   expect(modes("api/openapi.yaml")).toEqual(["Lines*", "Rendered"]);
   expect(modes("api/spec.yaml")).toEqual(["Lines*", "Rendered"]);
-  expect(modes("config/app.json")).toEqual([]);
+  // A plain JSON file is compared by element (C1), not as an API.
+  expect(modes("config/app.json")).toEqual(["Lines*", "Rendered"]);
   expect(modes("docker-compose.yml")).toEqual([]);
 });
 

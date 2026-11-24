@@ -37,7 +37,7 @@ await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 const home = async () => {
-  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd${big ? "&fake-xml-big" : ""}#/inbox` });
+  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd&fake-doc-diff${big ? "&fake-xml-big" : ""}#/inbox` });
   await sleep(2500);
 };
 await home();
@@ -78,7 +78,16 @@ const EXPORT = "exports/orders-2026-11.json";
 const OTHER = "orders/order-4710.xml";
 const BIG = "orders/order-big.xml";
 const LINE_ROWS = ".tf-xv .tf-l";
+/** The newest commit, whose diff `?fake-doc-diff` gives an order's, the POM's and the export's changes (C1). */
+const COMMIT = `${REPO}/commits/${REPO.slice("#/repo/".length)}%40c90d11e4a7b2`;
+const card = (path) => `.tf-diff[data-file="${path}"]`;
+/** Picks a card in the file list (the list is windowed), sets it back to Lines, so each run's press draws the comparison anew. */
+const linesFirst = (path) => `async () => { const row = ${JSON.stringify(`.tf-flist button[title="${path}"]`)}; for (let i = 0; i < 200 && !document.querySelector(row); i++) await new Promise((r) => setTimeout(r, 30)); document.querySelector(row).click(); for (let i = 0; i < 200 && !document.querySelector(${JSON.stringify(card(path))}); i++) await new Promise((r) => setTimeout(r, 30)); (${click(`${card(path)} .tf-fh .tf-seg button`, "Lines")})(); await new Promise((r) => setTimeout(r, 300)); }`;
 const CASES = [
+  // Compared by element (C1): Rendered on a card, to its rows or its *same* line.
+  { name: "compare-order", label: "Rendered on order-4711's change (1,189 lines), to its elements that differ", kind: "page", before: go(COMMIT), prep: linesFirst("orders/order-4711.xml"), act: click(`${card("orders/order-4711.xml")} .tf-fh .tf-seg button`, "Rendered"), sel: `${card("orders/order-4711.xml")} .tf-xsd-crow .tf-xsd-cname` },
+  { name: "compare-pom", label: "Rendered on the POM laid out again, to The same document", kind: "page", before: go(COMMIT), prep: linesFirst("build/pom.xml"), act: click(`${card("build/pom.xml")} .tf-fh .tf-seg button`, "Rendered"), sel: `${card("build/pom.xml")} .tf-xsd-csum b`, text: "The same document" },
+  { name: "compare-json", label: "Rendered on the export's change (48 orders), to its values that differ", kind: "page", before: go(COMMIT), prep: linesFirst("exports/orders-2026-11.json"), act: click(`${card("exports/orders-2026-11.json")} .tf-fh .tf-seg button`, "Rendered"), sel: `${card("exports/orders-2026-11.json")} .tf-xsd-crow .tf-xsd-cname` },
   // The order opened from another file of the tree: usable once its outline has landed (the carets are paint).
   { name: "open", label: "the order (1,814 lines) opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
   { name: "lines", label: "the order opened from the README, to its first lines", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: LINE_ROWS, watch: LINE_ROWS },

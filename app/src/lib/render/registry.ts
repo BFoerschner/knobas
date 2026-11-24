@@ -206,7 +206,8 @@ export const XML: Renderer = {
   fences: [],
   input: "text",
   output: "html",
-  diff: false,
+  // Compared by element (C1, `tf/render/doc/TfDocDiff.svelte`).
+  diff: true,
   sniff: isXmlFile,
 };
 
@@ -224,7 +225,7 @@ export const JSON_VIEW: Renderer = {
   fences: [],
   input: "text",
   output: "html",
-  diff: false,
+  diff: true,
   sniff: isJsonFile,
 };
 

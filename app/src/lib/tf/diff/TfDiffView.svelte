@@ -105,7 +105,7 @@
   import { MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, type Opened, type RendererDefault } from "../../render/defaults";
   import { rendererDefaults } from "../../render/defaults.svelte";
   import { allRenderers, type Renderer } from "../../render/registry";
-  import { hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
+  import { docHint, hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
@@ -952,7 +952,9 @@
       const name = byName === null || text !== undefined ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
       const had = name === null ? undefined : byName!.get(name);
       if (had !== undefined) return had;
-      const opened = openWith(text === undefined ? { path: file.path, binary } : { path: file.path, binary, text }, all, gen ? madeList : list);
+      // An XML or JSON file by its name (C1), unless its side is read to know it for a spec first.
+      const hint = text ?? (sniffable(file) ? undefined : docHint(file));
+      const opened = openWith(hint === undefined ? { path: file.path, binary } : { path: file.path, binary, text: hint }, all, gen ? madeList : list);
       const made = { opened, choices: renderedChoices(file, opened, gen ? MADE_CAN : can) };
       if (name !== null) byName!.set(name, made);
       return made;
