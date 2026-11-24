@@ -4,7 +4,7 @@
  */
 import { afterEach, expect, test } from "vitest";
 
-import { AHEAD, forgetAhead, openAhead } from "./ahead";
+import { AHEAD, AHEAD_QUIET_MS, forgetAhead, openAhead, quietAndIdle } from "./ahead";
 import { takeAhead } from "./kept-pages.svelte";
 import type { Section } from "./route";
 
@@ -78,3 +78,21 @@ test("the page held is the one the section's nav entry goes to at that moment, w
   await pass();
   expect(takeAhead()).toEqual(["#/builds/live-teamcity%3AbuildType%3AScale", "#/code"]);
 });
+
+test("a field's input is the reader's too: a colour picker's drag, which the page hears only as inputs, keeps a page from being built ahead", async () => {
+  const field = document.body.appendChild(document.createElement("input"));
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    let quiet = false;
+    void quietAndIdle().then(() => (quiet = true));
+    for (let i = 0; i < 5; i += 1) {
+      await sleep(AHEAD_QUIET_MS / 2);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    expect(quiet).toBe(false);
+    await sleep(AHEAD_QUIET_MS + 400);
+    expect(quiet).toBe(true);
+  } finally {
+    field.remove();
+  }
+}, 10_000);

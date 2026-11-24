@@ -23,8 +23,13 @@ export const AHEAD_QUIET_MS = 1000;
 
 let lastInput = 0;
 const heard = () => (lastInput = performance.now());
-/** The reader's input, which the waits below hear; a pointer on its way to a press counts too (Fable's ruling). */
-const INPUT = ["keydown", "pointerdown", "pointermove", "wheel", "scroll", "touchstart"] as const;
+/**
+ * The reader's input, which the waits below hear; a pointer on its way to a press counts too (Fable's ruling). So does a
+ * field's `input`: a colour picker's drag happens in the system's own popup, and all the page hears of it is an `input` a
+ * pick, so a page built ahead landed in the drag (knobas's WebView2 window, the Theme editor's picker, the ux30 end gate,
+ * 2026-11-24).
+ */
+const INPUT = ["keydown", "pointerdown", "pointermove", "wheel", "scroll", "touchstart", "input"] as const;
 let listening = false;
 /** Hears the reader's input from now on, for the whole session: a page built ahead later waits on it too. */
 function listenForInput(): void {
