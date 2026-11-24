@@ -166,7 +166,7 @@ test("a link or popup from the frame, behind the reader's click, opens through t
   clicked(true);
   say({ knobas: "embed", open: "https://api.example/docs" });
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("https://api.example/docs");
+  expect(io.openExternal).toHaveBeenCalledWith("https://api.example/docs", { source: "confluence" });
   // Only from the frame itself.
   say({ knobas: "embed", open: "https://evil.example/" }, window);
   await settle();
@@ -185,7 +185,7 @@ test("an open with no click behind it opens nothing until the reader says so, an
   button("Open")!.click();
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(1);
-  expect(io.openExternal).toHaveBeenCalledWith("https://spam.example/0");
+  expect(io.openExternal).toHaveBeenCalledWith("https://spam.example/0", { source: "confluence" });
   expect(target.querySelector(".tf-doc .tf-embed .tf-macro")).toBeNull();
   // Dismissed, it opens nothing.
   say({ knobas: "embed", open: "https://spam.example/again" });
@@ -216,7 +216,7 @@ test("one click opens one tab across the page: a second embed's open on it is as
   say({ knobas: "embed", open: "https://api.example/b" }, frames[1]!.contentWindow);
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(1);
-  expect(io.openExternal).toHaveBeenCalledWith("https://api.example/a");
+  expect(io.openExternal).toHaveBeenCalledWith("https://api.example/a", { source: "confluence" });
   expect(target.querySelector(".tf-doc .tf-embed .tf-macro")?.textContent).toContain("wants to open https://api.example/b");
 });
 
@@ -256,7 +256,7 @@ test("a URL embed is the same sandboxed frame with the URL as its source, and of
   // A site that refuses to be framed cannot be told from the app: the way out is always there.
   button("Open in browser")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED);
+  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED, { source: "confluence" });
 });
 
 test("a URL embed is no taller than the window", async () => {
@@ -283,7 +283,7 @@ test("a URL embed that never loads offers Open in browser for its URL; one that 
   expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This embedded page did not load.");
   button("Open in browser")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED);
+  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED, { source: "confluence" });
 
   if (view) unmount(view);
   target.replaceChildren();
@@ -300,7 +300,7 @@ test("with Run embedded HTML off, or offline, a URL embed is a placeholder with 
   expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This part is an embedded page. Run embedded HTML is off for Confluence");
   button("Open in Confluence")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5", { source: "confluence" });
 
   if (view) unmount(view);
   target.replaceChildren();
@@ -333,7 +333,7 @@ test("with Run embedded HTML off for its source, the embed is a placeholder with
   expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("Run embedded HTML is off for Confluence");
   button("Open in Confluence")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5", { source: "confluence" });
 });
 
 test("offline, the embed is a placeholder with Open in Confluence, and runs once the network is back", async () => {
@@ -358,7 +358,7 @@ test("a frame that never says it loaded offers Open in browser", async () => {
   expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("did not load");
   button("Open in browser")!.click();
   await settle();
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5", { source: "confluence" });
 });
 
 test("a frame that reported stays, however long it then takes", async () => {

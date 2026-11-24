@@ -47,7 +47,7 @@
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { ipcErrorMessage } from "../../ipc";
-  import { routeWeb as openExternal, webPlaceName } from "../../shell/open-web";
+  import { routeWeb as openExternal, webPlaceName, type WebHow } from "../../shell/open-web";
   import { openKey } from "../page-open.svelte";
   import type { CardTable } from "./card-sections";
   import TfCardRows from "./TfCardRows.svelte";
@@ -101,7 +101,7 @@
     /** *Link something to it*: the Connections drawer. */
     onlink: () => void;
     /** Hands a web address to the browser; the shell's opener unless a test hands its own. */
-    open?: (url: string) => Promise<void>;
+    open?: (url: string, how?: WebHow) => Promise<void>;
     /** Writes the clipboard; the browser's unless a test hands its own. */
     copy?: (text: string) => Promise<void>;
     /** The status as a control that moves the ticket (ADR-0054, `TfStatusMove`); absent, the plain chip. */
@@ -218,7 +218,7 @@
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
-    acknowledged(openingWords(webPlaceName(url, { source: detail.source.id })), () => open(url)).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+    acknowledged(openingWords(webPlaceName(url, { source: detail.source.id })), () => open(url, { source: detail.source.id })).catch((cause: unknown) => push({ text: `Could not open it: ${ipcErrorMessage(cause)}`, tone: "err" }));
   }
 </script>
 

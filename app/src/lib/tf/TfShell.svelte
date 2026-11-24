@@ -680,8 +680,9 @@
         // The sites' nameplates (ADR-0050).
         siteStore.nameAll(rows);
         // A source added since the sites' settings were read has none: its Settings page would have no Site section,
-        // and its pages would open the browser, until the next start (the final suite's real window, 2026-11-22).
-        if (siteStore.lacks(rows.map((row) => row.id))) {
+        // and its pages would open the browser, until the next start (the final suite's real window, 2026-11-22). A
+        // source removed since still has one: an address on its server opened its site (the ux30 gate, Windows).
+        if (siteStore.differs(rows.map((row) => row.id))) {
           void siteSettings()
             .then((list) => {
               if (!dead) siteStore.hold(list);
