@@ -32,7 +32,26 @@
   } = $props();
 
   /** The element the page shows, where an example can be made from it: a global element's page. */
-  const key = $derived(st.page !== null && st.page.key.startsWith("el ") ? st.page.key : null);
+  const pageKey = $derived(st.page !== null && st.page.key.startsWith("el ") ? st.page.key : null);
+  /**
+   * The element the example follows: the page's, once the page has painted. Mounted beside a
+   * page's first rows, the controls shared their frame (UBL's Invoice page from the rail, 6x on 2560 x 1440 at 1.25).
+   */
+  // svelte-ignore state_referenced_locally
+  let key = $state<string | null>(pageKey);
+  $effect(() => {
+    const k = pageKey;
+    if (k === key) return;
+    // After the next frame has painted: a frame callback alone ran in that frame, before its paint.
+    let task = 0;
+    const frame = requestAnimationFrame(() => {
+      task = window.setTimeout(() => (key = k), 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(task);
+    };
+  });
   // Made again when the element or a setting changes; the document keeps its box meanwhile.
   $effect(() => {
     const k = key;
@@ -41,6 +60,7 @@
   });
   const made = $derived(st.made !== null && st.made.key === key ? st.made : null);
   const lineCount = $derived(made === null ? 0 : made.example.lines.length);
+  const v = $derived(st.verdict);
   /** The notes drawn: their room is held for two, the rest in the second's title. */
   const NOTES_SHOWN = 2;
 
@@ -124,7 +144,6 @@
       <button type="button" class="tf-btn tf-sm" disabled={made === null} onclick={() => void save()}>Save to Downloads</button>
       <span class="tf-dim tf-xsd-excount">{made === null ? "Making it…" : `${lineCount.toLocaleString("en")} lines`}</span>
     </div>
-    {@const v = st.verdict}
     <div class="tf-xsd-verdict" class:tf-ok={v !== null && v !== "checking" && v.state === "checked" && v.findings.length === 0} class:tf-err={v !== null && v !== "checking" && v.state === "checked" && v.findings.length > 0} class:tf-warn={v !== null && v !== "checking" && v.state !== "checked"} aria-live="polite">
       {#if v === null}<span class="tf-dim">Not checked yet.</span>
       {:else if v === "checking"}<span class="tf-dim">Checking…</span>

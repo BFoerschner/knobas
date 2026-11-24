@@ -72,10 +72,14 @@
   const USES_ALL = 5000;
   const NAMES_SHOWN = 24;
   let limit = $state(FIRST);
+  // The limit is set for a new page before it draws: set after, a page picked after another drew every row with the
+  // limit the last one grew to, then cut them to a screenful in the same frame (UBL's Invoice page, 53 rows).
+  $effect.pre(() => {
+    if (page !== null) limit = st.drawWhole ? Infinity : FIRST;
+  });
   $effect(() => {
     const at = page;
     if (at === null) return;
-    limit = st.drawWhole ? Infinity : FIRST;
     let frame = 0;
     const more = () => {
       if (limit >= at.rows.length) return;
@@ -160,7 +164,7 @@
       {#if p.rows.length > 0}
         <section class="tf-oas-sec">
           <h3 class="tf-oas-lab"><span>{p.holdsLabel}</span>{#if p.expandable}<span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void st.openAll(p.rows)}>Expand all</button></span>{/if}</h3>
-          <div class="tf-oas-fs"><TfXsdRows {st} at={p.key} rows={p.rows.length > limit ? p.rows.slice(0, limit) : p.rows} {ongo} /></div>
+          <div class="tf-oas-fs"><TfXsdRows {st} at={p.key} rows={p.rows.length > limit ? p.rows.slice(0, limit) : p.rows} {ongo} ticks={allIn} /></div>
         </section>
       {:else if p.empty}
         <section class="tf-oas-sec"><h3 class="tf-oas-lab"><span>Holds</span></h3><p class="tf-oas-fnote">Nothing: it stands empty.</p></section>

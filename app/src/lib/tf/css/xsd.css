@@ -143,11 +143,12 @@
 .tf-xsd-xml .tf-l { cursor: pointer; }
 
 /* ---- A tick on each optional row (S4b): a column of its own, after how often, its room held from the first frame ---- */
-.tf-xsd .tf-oas-fs { grid-template-columns: 20px fit-content(var(--oas-name)) minmax(0, 1fr) auto auto auto 6px; }
+/* The tick's column is as wide from the first frame as once its ticks are drawn: a check box and a count's room. */
+.tf-xsd .tf-oas-fs { --xsd-tick: calc(10px + 13px + 4px + 5ch + 8px); grid-template-columns: 20px fit-content(var(--oas-name)) minmax(0, 1fr) auto auto var(--xsd-tick) 6px; }
 .tf-oas-fr > .tf-xsd-tick { grid-column: 6; grid-row: 1; display: flex; align-items: center; gap: 4px; padding-left: 10px; height: calc(20px * var(--fs)); }
 .tf-xsd-tick input { margin: 0; }
-.tf-xsd-tick select { height: calc(18px * var(--fs)); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font-size: calc(var(--t-xs) * var(--fs)); padding: 0 2px; }
-/* Unticked, its count holds its room unseen. */
-.tf-xsd-tick select.tf-xsd-tickoff { visibility: hidden; }
+.tf-xsd-tick select { box-sizing: border-box; width: calc(5ch + 8px); height: calc(18px * var(--fs)); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font-size: calc(var(--t-xs) * var(--fs)); padding: 0 2px; }
+/* Unticked, the count's room: as wide as its select. */
+.tf-xsd-tickroom { display: inline-block; width: calc(5ch + 8px); height: calc(18px * var(--fs)); font-size: calc(var(--t-xs) * var(--fs)); }
 /* Beside an XML document no example is made: no tick. */
 .tf-xv .tf-xsd-tick { display: none; }
