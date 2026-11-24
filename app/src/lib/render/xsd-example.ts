@@ -99,6 +99,9 @@ function choiceIdsOf(set: SchemaSet): Map<object, string> {
   choiceIds.set(set, ids);
   return ids;
 }
+/** An optional row's tick (S4b): the file and line its particle is written at, wherever the row stands. */
+export const tickIdOf = (el: ElementDecl): string => `${el.at ?? ""}:${el.line}`;
+
 /** A choice's id. A group's choice opened by `openGroup` is a copy: it is known by the group's own content. */
 export function choiceIdOf(set: SchemaSet, q: ModelGroup): string | null {
   const ids = choiceIdsOf(set);
@@ -266,6 +269,9 @@ export function makeExample(set: SchemaSet, key: string, options: ExampleOptions
       // An element that holds itself is left out the second time where it may be.
       const again = decl !== null && trail.has(decl);
       let n = again ? q.min : count(q, true);
+      // A ticked optional row (S4b) stands with Required only, as often as its count says.
+      const ticked = !every && q.min === 0 && !again ? o.ticks?.[tickIdOf(q.el)] : undefined;
+      if (ticked !== undefined && ticked > 0) n = Math.min(q.max, ticked);
       if (again && q.min > 0 && depth >= MAX_DEPTH) {
         state.deep = true;
         n = 0;

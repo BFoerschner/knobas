@@ -5,7 +5,7 @@
  * name that goes somewhere carrying the key it goes to.
  */
 import { loadFakes } from "./example-fakes";
-import { choiceIdOf, makeExample, type ExampleOptions } from "./xsd-example";
+import { choiceIdOf, makeExample, tickIdOf, type ExampleOptions } from "./xsd-example";
 import {
   childElements,
   elDecl,
@@ -83,6 +83,10 @@ export type Row =
       readonly again: boolean;
       /** Its declaration is not found here. */
       readonly lost: boolean;
+      /** An optional row's tick (S4b): the particle's file and line, as the example names it; `null` where it must stand. */
+      readonly tick: string | null;
+      /** It may stand more than once: its tick carries a count. */
+      readonly many: boolean;
     }
   | { readonly k: "group"; readonly id: string; readonly words: string; readonly from: Name | null; readonly occ: Occurs; readonly items: readonly Row[]; readonly choice: Choice | null }
   | { readonly k: "any"; readonly id: string; readonly words: string; readonly occ: Occurs }
@@ -502,7 +506,7 @@ function particleRows(s: XsdSession, p: Particle, id: string, trail: readonly ob
     const from = q.ns === "##other" ? "from another namespace" : q.ns === "##any" ? "from any namespace" : q.ns === "##local" ? "in no namespace" : q.ns === "##targetNamespace" ? "from this namespace" : `from ${q.ns}`;
     return [{ k: "any", id: `${id}/*${q.line}`, words: `${from}${q.pc === "strict" ? ", declared" : ""}`, occ: occ(q.min * lo, q.max * hi) }];
   }
-  if (q.k === "el") return [elementRow(s, q.el, `${id}/${q.el.name}`, trail, q.min * lo, q.max * hi)];
+  if (q.k === "el") return [elementRow(s, q.el, `${id}/${q.el.name}`, trail, q.min * lo, q.max * hi, q.min === 0 && q.max > 0 ? tickIdOf(q.el) : null, q.max > 1)];
   if (q.k === "grp") return [];
   const plain = q.k === "seq" && q.min === 1 && q.max === 1 && q.from === undefined;
   const inner = q.items.flatMap((it) => particleRows(s, it, plain ? id : `${id}/${q.k}${q.line}`, trail, plain ? lo : 1, plain ? hi : 1));
@@ -523,11 +527,11 @@ function particleRows(s: XsdSession, p: Particle, id: string, trail: readonly ob
   return [{ k: "group", id: `${id}/${q.k}${q.line}`, words, from: q.from !== undefined ? nameOfKey(set, q.from) : null, occ: occ(q.min * lo, q.max * hi), items: inner, choice }];
 }
 
-function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly object[], min: number, max: number): Row {
+function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly object[], min: number, max: number, tick: string | null = null, many = false): Row {
   const set = s.set!;
   const decl = elDecl(set, el);
   const name = nameOf(set, el.elNs, el.name, decl !== null && el.ref !== null ? `el ${el.ref}` : null);
-  if (decl === null) return { k: "el", id, name: { ...name, key: null }, type: { name: null, note: null, missing: null }, notes: [], occ: occ(min, max), facts: [], docu: null, can: false, again: false, lost: true };
+  if (decl === null) return { k: "el", id, name: { ...name, key: null }, type: { name: null, note: null, missing: null }, notes: [], occ: occ(min, max), facts: [], docu: null, can: false, again: false, lost: true, tick: null, many: false };
   const t = elType(set, decl);
   const sh = t.def === null ? null : shape(set, t.def);
   const again = trail.includes(decl);
@@ -545,6 +549,8 @@ function elementRow(s: XsdSession, el: ElementDecl, id: string, trail: readonly 
     can,
     again,
     lost: false,
+    tick: again ? null : tick,
+    many,
   };
 }
 

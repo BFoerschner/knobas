@@ -97,6 +97,17 @@
         <span class="tf-oas-ftype">{#if row.lost}<span class="tf-xsd-lost">not found here</span>{:else}<TfXsdType type={row.type} {ongo} />{#if row.again} <span class="tf-xsd-own">It holds itself.</span>{/if}{/if}</span>
         <span class="tf-oas-fnotes">{#if row.notes.length > 0}<span><TfXsdRuns runs={row.notes} /></span>{/if}</span>
         <TfXsdOcc occ={row.occ} />
+        {#if row.tick !== null}
+          {@const id = row.tick}
+          {@const every = st.ex.optional === "all"}
+          {@const count = st.ex.ticks?.[id] ?? 0}
+          <!-- A tick (S4b): with Required only, a ticked optional row stands in the example; its count holds its room. -->
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <span class="tf-xsd-tick" onclick={(e) => e.stopPropagation()}>
+            <input type="checkbox" aria-label="Put {row.name.local} in the example" title={every ? "Everything puts it in the example" : `Put ${row.name.local} in the example`} checked={every || count > 0} disabled={every} onchange={(e) => st.tick(id, (e.currentTarget as HTMLInputElement).checked ? 1 : 0)} />
+            {#if row.many}<select aria-label="How often {row.name.local} stands" class:tf-xsd-tickoff={every || count === 0} disabled={every || count === 0} value={Math.max(1, count)} onchange={(e) => st.tick(id, Number((e.currentTarget as HTMLSelectElement).value))}><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select>{/if}
+          </span>
+        {/if}
         {#if row.docu !== null}<p class="tf-oas-fd">{#if row.docu.lang !== null}<span class="tf-lab tf-xsd-lang">{row.docu.lang}</span>{/if}{row.docu.text}</p>{/if}
         {#if row.facts.length > 0}<div class="tf-oas-fd tf-oas-facts">{#each row.facts as fact, i (i)}<span><TfXsdRuns runs={fact} /></span>{/each}</div>{/if}
       </div>

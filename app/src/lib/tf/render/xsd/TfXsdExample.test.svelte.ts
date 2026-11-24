@@ -145,3 +145,44 @@ test("a choice picked on its own line of the reference makes the example take th
   await until(() => doc().some((l) => l.includes("<Invoice>")));
   expect(doc().some((l) => l.includes("<Card>"))).toBe(false);
 });
+
+test("a tick on an optional row puts it in a Required only example; its count says how often; untick takes it out", async () => {
+  const schema = `<xs:schema xmlns:xs="${XS}" targetNamespace="urn:t" xmlns="urn:t" elementFormDefault="qualified">
+  <xs:element name="Note"><xs:complexType><xs:sequence><xs:element name="Must" type="xs:string"/><xs:element name="Maybe" type="xs:string" minOccurs="0" maxOccurs="3"/></xs:sequence></xs:complexType></xs:element>
+</xs:schema>`;
+  await opened(new Map([["t.xsd", schema]]), "t.xsd", "el/Note");
+  const maybes = () => doc().filter((l) => l.includes("<Maybe>")).length;
+  expect(maybes()).toBe(0);
+  button("Reference")!.click();
+  await until(() => target.querySelector(".tf-xsd-tick input") !== null);
+  // Only the optional row carries a tick; Must stands anyway.
+  expect([...target.querySelectorAll(".tf-xsd-tick input")].map((i) => i.getAttribute("aria-label"))).toEqual(["Put Maybe in the example"]);
+  const tick = target.querySelector<HTMLInputElement>(".tf-xsd-tick input")!;
+  tick.checked = true;
+  tick.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  const times = target.querySelector<HTMLSelectElement>(".tf-xsd-tick select")!;
+  expect(times.disabled).toBe(false);
+  button("Example")!.click();
+  await until(() => maybes() === 1);
+  expect(maybes()).toBe(1);
+  button("Reference")!.click();
+  flushSync();
+  const again = target.querySelector<HTMLSelectElement>(".tf-xsd-tick select")!;
+  again.value = "2";
+  again.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  button("Example")!.click();
+  await until(() => maybes() === 2);
+  expect(maybes()).toBe(2);
+  button("Reference")!.click();
+  flushSync();
+  const off = target.querySelector<HTMLInputElement>(".tf-xsd-tick input")!;
+  off.checked = false;
+  off.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  button("Example")!.click();
+  // The example made again: Note's own two lines and Must, as before the tick.
+  await until(() => count() === "5 lines");
+  expect(maybes()).toBe(0);
+});

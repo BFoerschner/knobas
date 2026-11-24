@@ -194,6 +194,12 @@ export class XsdState {
     this.setExample({ picks: { ...this.ex.picks, [choice]: branch } });
   }
 
+  /** A tick on an optional row (S4b): it stands `count` times with Required only; 0 takes the tick off. */
+  tick(id: string, count: number): void {
+    const ticks = Object.fromEntries(Object.entries(this.ex.ticks ?? {}).filter(([k]) => k !== id));
+    this.setExample({ ticks: count > 0 ? { ...ticks, [id]: count } : ticks });
+  }
+
   /** *Check*: libxml2's verdict on the example shown. */
   async checkExample(): Promise<void> {
     const made = this.made;
