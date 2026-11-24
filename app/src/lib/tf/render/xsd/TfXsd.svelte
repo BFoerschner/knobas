@@ -34,6 +34,11 @@
   import { XsdPort, xsdEngine, type XsdEngine } from "../../../render/xsd-port";
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
+  import TfXsdPoint from "./TfXsdPoint.svelte";
+  import { asPointed, candidatesOf, splitAway, withPointed, type Candidate } from "./xsd-point";
+  import { xsdLocations, xsdSetLocations } from "../../../ipc/api";
+  import { ipcErrorMessage } from "../../../ipc";
+  import { push } from "../../../shell/toasts.svelte";
   import TfXsdRail from "./TfXsdRail.svelte";
   import { OVERVIEW, XsdState, labelOfPlace } from "./xsd.svelte";
 
@@ -44,6 +49,7 @@
     read,
     paths,
     readAway = null,
+    readOther = null,
     elsewhere = null,
     pointed = [],
     at = null,
@@ -67,6 +73,8 @@
     paths: () => Promise<readonly string[]>;
     /** A file read from elsewhere (`@repo/…`, `@download/…`). */
     readAway?: ((path: string) => Promise<string | null>) | null;
+    /** Another repository's file at its default branch's head (a pointed file, step 6). */
+    readOther?: ((repo: string, path: string) => Promise<string | null>) | null;
     /** Other synced repositories' schemas that declare a namespace. */
     elsewhere?: ((namespace: string) => Promise<Elsewhere[]>) | null;
     /** What the person pointed to (`xsd.locations`). */
@@ -82,7 +90,7 @@
     onsource?: ((file: string, line: number) => void) | null;
     /** Opens a file of the set as a file of its own. */
     onfile?: ((path: string) => void) | null;
-    /** *Point to a file…* on a reference not found here. */
+    /** *Point to a file…* on a reference not found here: the explorer's own picker when left out. */
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
     /** Where the set is read: the worker when left out. */
     engine?: XsdEngine | null;
@@ -116,7 +124,12 @@
       read,
       pointed,
       index: (from: string, list: readonly string[]) => buildIndex(repo, list, from, read),
-      ...(readAway !== null ? { readAway } : {}),
+      readAway: (p: string) => {
+        // A pointed file of this repository is read as one of its own; another's at its own head.
+        const away = splitAway(p);
+        if (away !== null) return away.repo === repo ? read(away.path) : (readOther?.(away.repo, away.path) ?? Promise.resolve(null));
+        return readAway?.(p) ?? Promise.resolve(null);
+      },
       ...(elsewhere !== null ? { elsewhere } : {}),
     }));
     port.open(root, source, reads).then((answer) => {
@@ -125,6 +138,14 @@
       slow = false;
       if (answer.ok) state.take(answer.index);
       opened = answer;
+      // What a person pointed to answers before every guess: read once the shell stands, and the set again with it.
+      if (answer.ok && untrack(() => pointed).length === 0)
+        void xsdLocations().then(
+          (kept) => {
+            if (live && kept.pointed.length > 0) void port.repoint(asPointed(kept.pointed));
+          },
+          () => {},
+        );
     });
     return () => {
       live = false;
@@ -165,6 +186,37 @@
         return { decl, marks: on.length > 0 ? on : null };
       });
   });
+
+  // ---- Point to a file… (section 17) ----
+  let pointing = $state<{ namespace: string | null; location: string | null } | null>(null);
+  let candidates = $state.raw<Candidate[] | null>(null);
+  function point(namespace: string | null, location: string | null) {
+    if (onpoint !== null) {
+      onpoint(namespace, location);
+      return;
+    }
+    pointing = { namespace, location };
+    candidates = null;
+    void paths()
+      .then((list) => buildIndex(repo, list, path, read))
+      .then(
+        (index) => (candidates = candidatesOf(repo, index.declares)),
+        () => (candidates = []),
+      );
+  }
+  async function pickFile(c: Candidate) {
+    const at = pointing;
+    const state = st;
+    if (at === null || state === null) return;
+    pointing = null;
+    try {
+      const kept = await xsdSetLocations({ pointed: withPointed((await xsdLocations()).pointed, at.namespace, at.location, c) });
+      await state.port.repoint(asPointed(kept.pointed));
+      push({ text: `${c.path} answers ${at.location ?? at.namespace ?? "it"} from now on.` });
+    } catch (cause) {
+      push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
 
   // ---- The pane ----
   let cols = $state<2 | 3 | 4>(2);
@@ -342,9 +394,14 @@
       onfile={(p) => onfile?.(p)}
       {onsource}
       {oncopylink}
-      {onpoint}
+      onpoint={point}
       bind:scroller={pageCol}
     />
     {/if}
   </div>
+{/if}
+
+{#if pointing !== null}
+  {@const at = pointing}
+  <TfXsdPoint namespace={at.namespace} location={at.location} {candidates} onpick={(c) => void pickFile(c)} onclose={() => (pointing = null)} />
 {/if}

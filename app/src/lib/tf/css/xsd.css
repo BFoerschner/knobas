@@ -124,3 +124,14 @@
 .tf-oas.tf-xsd > .tf-xsd-wait { grid-column: 1 / -1; align-self: start; padding: 12px; }
 /* The rail's list keeps its scrollbar's room: a tree that opens past a screenful must not narrow the rows drawn. */
 .tf-oas.tf-xsd .tf-oas-list { scrollbar-gutter: stable; }
+
+/* ---- Point to a file… (section 17): the repository's schema files, the wanted namespace first ---- */
+.tf-dialog.tf-xsd-point { width: min(720px, calc(100vw - 48px)); }
+.tf-xsd-pointwhy { margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); max-width: 72ch; }
+.tf-xsd-point .tf-minif { max-width: none; width: 100%; }
+.tf-xsd-pointlist { margin-top: 10px; max-height: min(420px, 50vh); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet); }
+.tf-xsd-pointrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; width: 100%; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--rule-2); background: none; color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+.tf-xsd-pointrow:hover:not(:disabled), .tf-xsd-pointrow:focus-visible { background: var(--sheet-2); }
+.tf-xsd-pointrow.tf-xsd-pointno { color: var(--ink-2); cursor: default; }
+.tf-xsd-pointname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-xsd-pointpath, .tf-xsd-pointns { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; }

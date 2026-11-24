@@ -216,3 +216,18 @@ test("the rail follows the page: an element named by the address opens the tree 
   expect(railText()).toContain("ORDER 0..1");
   expect(rail().find((b) => text(b) === "ORDER 0..1")!.getAttribute("aria-expanded")).toBe("true");
 });
+
+test("Point to a file…: the picker lists the repository's schemas; one that declares another namespace is dim and not pickable", async () => {
+  const files = new Map(OT);
+  files.set("schemas/opentrans/bmecat_2005.xsd", familyFiles("bmecat-2005fd").get("bmecat_2005.xsd")!);
+  draw(files);
+  await settle();
+  button("Point to a file…", page().querySelector(".tf-xsd-nf")!)!.click();
+  await settle();
+  const rows = [...document.querySelectorAll<HTMLButtonElement>(".tf-xsd-pointrow")];
+  const named = (r: HTMLButtonElement) => text(r.querySelector(".tf-xsd-pointpath"));
+  // Started on the location's name: BME's own file, which declares another namespace.
+  expect(rows.map(named)).toEqual(["schemas/opentrans/bmecat_2005.xsd"]);
+  expect(rows[0]!.disabled).toBe(true);
+  expect(text(rows[0]!)).toContain(`declares ${ns("www.bmecat.org/bmecat/2005fd")}`);
+});
