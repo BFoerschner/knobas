@@ -135,3 +135,5 @@
 .tf-xsd-pointrow.tf-xsd-pointno { color: var(--ink-2); cursor: default; }
 .tf-xsd-pointname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
 .tf-xsd-pointpath, .tf-xsd-pointns { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; }
+/* Two repositories declare it (section 16): each of their files, picked once. */
+.tf-xsd-two { display: flex; flex-wrap: wrap; gap: 6px; }

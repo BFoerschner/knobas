@@ -35,8 +35,8 @@
   import { filterText, inMode } from "../../../render/xsd-view";
   import TfXsdPage from "./TfXsdPage.svelte";
   import TfXsdPoint from "./TfXsdPoint.svelte";
-  import { asPointed, candidatesOf, splitAway, withPointed, type Candidate } from "./xsd-point";
-  import { xsdLocations, xsdSetLocations } from "../../../ipc/api";
+  import { asPointed, gatherCandidates, keepPick, splitAway, type Candidate } from "./xsd-point";
+  import { xsdLocations } from "../../../ipc/api";
   import { ipcErrorMessage } from "../../../ipc";
   import { push } from "../../../shell/toasts.svelte";
   import TfXsdRail from "./TfXsdRail.svelte";
@@ -197,22 +197,23 @@
     }
     pointing = { namespace, location };
     candidates = null;
-    void paths()
-      .then((list) => buildIndex(repo, list, path, read))
-      .then(
-        (index) => (candidates = candidatesOf(repo, index.declares)),
-        () => (candidates = []),
-      );
+    void gatherCandidates(repo, path, namespace, { paths, read, elsewhere }).then((list) => {
+      if (pointing?.namespace === namespace && pointing.location === location) candidates = list;
+    });
   }
   async function pickFile(c: Candidate) {
     const at = pointing;
-    const state = st;
-    if (at === null || state === null) return;
+    if (at === null) return;
     pointing = null;
+    await pickFor(at.namespace, at.location, c);
+  }
+  /** Keeps `c` for a reference and reads the set again through it: the picker's pick, or one of two repositories'. */
+  async function pickFor(namespace: string | null, location: string | null, c: Candidate) {
+    const state = st;
+    if (state === null) return;
     try {
-      const kept = await xsdSetLocations({ pointed: withPointed((await xsdLocations()).pointed, at.namespace, at.location, c) });
-      await state.port.repoint(asPointed(kept.pointed));
-      push({ text: `${c.path} answers ${at.location ?? at.namespace ?? "it"} from now on.` });
+      await state.port.repoint(await keepPick(namespace, location, c));
+      push({ text: `${c.repoName === null ? c.path : `${c.repoName}: ${c.path}`} answers ${location ?? namespace ?? "it"} from now on.` });
     } catch (cause) {
       push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -395,6 +396,7 @@
       {onsource}
       {oncopylink}
       onpoint={point}
+      onpick={(namespace, location, c) => void pickFor(namespace, location, c)}
       bind:scroller={pageCol}
     />
     {/if}

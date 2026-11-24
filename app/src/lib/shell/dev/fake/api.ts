@@ -110,6 +110,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       fakeSchemas.locations = structuredClone(args["list"] as SchemaLocations);
       return structuredClone(fakeSchemas.locations);
     },
+    // The fixture's other repositories hold no schema: another repository answers nothing.
+    files_declaring: () => [],
     set_image_hosts: (args) => {
       fakeImageHosts.hosts = [...(args["hosts"] as typeof fakeImageHosts).hosts];
       return structuredClone(fakeImageHosts);

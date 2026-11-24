@@ -299,7 +299,7 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
   if (call.kind === "open") {
     const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
     sessions.set(session, s);
-    return opened(load(s, bundled), s.lean === true);
+    return opened(load(s, bundled), s.lean === true, s.index);
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
@@ -309,11 +309,11 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      return opened(load(s, bundled), s.lean === true);
+      return opened(load(s, bundled), s.lean === true, s.index);
     }
     case "pointed":
       s.pointed = call.pointed;
-      return opened(load(s, bundled), s.lean === true);
+      return opened(load(s, bundled), s.lean === true, s.index);
     case "page":
       return pageOf(s, call.place);
     case "rows": {
@@ -340,10 +340,10 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
   }
 }
 
-function opened(set: SchemaSet, lean = false): Opened {
+function opened(set: SchemaSet, lean = false, repo: { total: number; read: number } | null = null): Opened {
   const entry = set.docs[0];
   if (entry !== undefined && entry.bad !== null) return { ok: false, error: entry.bad, line: entry.badLine };
-  return { ok: true, index: indexOf(set, lean), need: set.need };
+  return { ok: true, index: indexOf(set, lean, repo), need: set.need };
 }
 
 // ---- The check (section 24) ----
@@ -783,6 +783,9 @@ function kidsOf(set: SchemaSet, el: ElementDecl): ReturnType<typeof childElement
 
 // ---- The set's index (sections 7, 8 and 13) ----
 
+/** The guessed namespaces *Seen while reading* names: one line each, a handful at most. */
+const GUESSES_SHOWN = 3;
+
 const HOW: Record<How, string> = {
   pointed: "you pointed to it",
   downloaded: "downloaded",
@@ -796,7 +799,7 @@ const HOW: Record<How, string> = {
 };
 const VERB: Record<string, string> = { import: "imported", include: "included", redefine: "redefined", override: "overridden" };
 
-export function indexOf(set: SchemaSet, lean = false): SetIndex {
+export function indexOf(set: SchemaSet, lean = false, repo: { total: number; read: number } | null = null): SetIndex {
   const files: FileRow[] = [];
   const lost: LostRow[] = [];
   const counts = new Map<string, number>();
@@ -887,6 +890,12 @@ export function indexOf(set: SchemaSet, lean = false): SetIndex {
   const cap = set.problems.find((p) => p.kind === "cap");
   if (cap !== undefined && cap.kind === "cap")
     seen.push([{ text: cap.what === "files" ? "The set reaches more than 400 files; knobas read the first 400." : cap.what === "bytes" ? "The set is larger than 64 MiB; knobas read what fits." : `${baseOf(cap.path)} is larger than 5 MiB, which knobas reads at most.` }]);
+  // Where a namespace was guessed: more than one file of the repository declares it, and the nearest was taken.
+  const guessed = new Map<string, { to: string; others: number }>();
+  for (const d of set.docs) for (const r of d.refs) if (r.to !== null && r.others.length > 0 && r.namespace !== null && !guessed.has(r.namespace)) guessed.set(r.namespace, { to: r.to, others: r.others.length });
+  for (const [namespace, g] of [...guessed].slice(0, GUESSES_SHOWN))
+    seen.push([{ text: `${plural(g.others + 1, "file", "files")} here declare ` }, { text: namespace, code: true }, { text: `; knobas took the nearest, ${baseOf(g.to)}.` }]);
+  if (repo !== null && repo.read < repo.total) seen.push([{ text: `knobas looked at ${count(repo.read)} of ${count(repo.total)} .xsd files here.` }]);
   if (set.docs.some((d) => d.v11)) seen.push([{ text: "A file uses XML Schema 1.1. knobas draws it; the checker (libxml2) reads 1.0 and will say so." }]);
   if (set.need.length === 0 && ![...set.comps.values()].some((c) => c.docu.length > 0)) seen.push([{ text: "These files hold no documentation. Names, types and the file's own first comment are what there is." }]);
   for (const d of set.docs) for (const p of d.problems.slice(0, 3)) seen.push([{ text: `${baseOf(d.path)}, line ${count(p.line)}: ${p.text}` }]);

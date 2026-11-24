@@ -29,13 +29,13 @@
   // svelte-ignore state_referenced_locally
   let typed = $state(location === null ? "" : base(location.replace(/[?#].*$/, "")));
   const fits = (c: Candidate) => namespace === null || c.declares === namespace;
-  /** The candidates the words keep, those that fit first, then by the nearer name. */
+  /** The candidates the words keep: those that fit first, this repository's before another's, then the shorter path. */
   const shown = $derived.by(() => {
     const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
     const kept = (candidates ?? []).filter((c) => words.every((w) => `${c.repoName ?? ""} ${c.path}`.toLowerCase().includes(w)));
     // A name typed that matches nothing still lists every file: the location's own name may not be the file's.
     const list = kept.length === 0 && words.length > 0 ? [...(candidates ?? [])] : kept;
-    return list.sort((a, b) => Number(fits(b)) - Number(fits(a)) || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
+    return list.sort((a, b) => Number(fits(b)) - Number(fits(a)) || Number(a.repoName !== null) - Number(b.repoName !== null) || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
   });
   /** The rows drawn: a repository's schemas, at most this many (the index's own bound). */
   const SHOWN = 300;
@@ -61,7 +61,7 @@
           {@const ok = fits(c)}
           <button type="button" role="option" aria-selected="false" class="tf-xsd-pointrow" class:tf-xsd-pointno={!ok} disabled={!ok} title={ok ? `Use ${c.path}` : `It declares ${c.declares === "" ? "no namespace" : c.declares}`} onclick={() => onpick(c)}>
             <span class="tf-xsd-pointname">{base(c.path)}</span>
-            <span class="tf-xsd-pointpath">{#if c.repoName !== null}{c.repoName}: {/if}{c.path}</span>
+            <span class="tf-xsd-pointpath">{c.repoName === null ? "" : `${c.repoName}${c.branch ? `, at ${c.branch}` : ""}: `}{c.path}</span>
             {#if !ok}<span class="tf-xsd-pointns">declares {c.declares === "" ? "no namespace" : c.declares}</span>{/if}
           </button>
         {/each}

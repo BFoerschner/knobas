@@ -990,6 +990,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::set_image_hosts,
         commands::api::xsd_locations,
         commands::api::xsd_set_locations,
+        commands::api::files_declaring,
         commands::api::xml_check,
         commands::api::set_xml_check,
         commands::api::api_open_in,

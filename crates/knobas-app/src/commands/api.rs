@@ -200,6 +200,23 @@ pub async fn xsd_locations<R: tauri::Runtime>(
     crate::api::schemas::locations(&pool).await
 }
 
+/// The `.xsd` files of the synced repositories that declare `namespace` (the
+/// XSD design, section 16, step 6), from the files index: nothing where the
+/// index holds no file.
+///
+/// # Errors
+/// `not_ready` before the app is up.
+#[tauri::command]
+pub async fn files_declaring<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    namespace: String,
+) -> Result<Vec<crate::api::schemas::DeclaringFile>, IpcError> {
+    let index = app.state::<Lifecycle>().files();
+    tokio::task::spawn_blocking(move || crate::api::schemas::declaring(&index, &namespace))
+        .await
+        .map_err(IpcError::internal)
+}
+
 /// Keeps the schema files pointed to; answers them as kept.
 ///
 /// # Errors

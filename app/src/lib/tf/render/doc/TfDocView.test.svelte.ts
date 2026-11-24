@@ -11,6 +11,13 @@ vi.mock("../../../shell/open-web", async (original) => ({
   openWeb: (url: string, how: { elsewhere?: boolean } = {}) => opened.push({ url, elsewhere: how.elsewhere === true }),
 }));
 
+const kept = vi.hoisted(() => ({ pointed: [] as unknown[] }));
+vi.mock("../../../ipc/api", async (original) => ({
+  ...(await original<typeof import("../../../ipc/api")>()),
+  xsdLocations: async () => structuredClone(kept),
+  xsdSetLocations: async (list: { pointed: unknown[] }) => ((kept.pointed = structuredClone(list.pointed)), structuredClone(kept)),
+}));
+
 import TfDocView from "./TfDocView.svelte";
 import { forgetFolds } from "./doc.svelte";
 import { localDocEngine, type DocEngine } from "../../../render/doc-port";
@@ -28,6 +35,7 @@ const quiet: RenderPort = { highlight: () => ({ focus: () => {}, cancel: () => {
 const never: DocEngine = () => new Promise(() => {});
 
 beforeEach(() => {
+  kept.pointed = [];
   target = document.createElement("div");
   target.className = "tf-fileview";
   document.body.appendChild(target);
@@ -289,6 +297,7 @@ test("a file written on one line is laid out, says so, and draws as written on a
 
 import { localXsdEngine } from "../../../render/xsd-port";
 import { familyFiles } from "../../../render/xsd-fixture";
+import { ns } from "../../../render/xml-names";
 
 /** The repository: the orders where the seed puts them, openTRANS's schemas where they name them. */
 function schemaPort(extra: Partial<{ on: boolean; drop: string }> = {}) {
@@ -403,4 +412,51 @@ test("a page kept hidden keeps its columns: on its return the side column is dra
   } finally {
     globalThis.ResizeObserver = real;
   }
+});
+
+/** openTRANS's schemas in another synced repository, `acme/schemas`, and the order's own repository without them. */
+function awayPort(declaring: { repo: string; name: string; branch: string; path: string }[]) {
+  const away = familyFiles("opentrans-2.1", "opentrans/");
+  const readOther = vi.fn((repo: string, p: string) => Promise.resolve(repo === "gitea:acme/schemas" ? (away.get(p) ?? null) : null));
+  return {
+    ...schemaPort({ drop: "schemas/opentrans/opentrans_2_1.xsd" }),
+    pointed: async () => structuredClone(kept.pointed) as never[],
+    readOther,
+    elsewhere: async () => declaring,
+  };
+}
+const ACME = { repo: "gitea:acme/schemas", name: "acme/schemas", branch: "main", path: "opentrans/opentrans_2_1.xsd" };
+const OTHER = { repo: "gitea:tidewater/catalog-tools", name: "tidewater/catalog-tools", branch: "main", path: "lib/opentrans_2_1.xsd" };
+
+test("the only other repository that declares the schema's namespace answers by itself: checked, and the head says where", async () => {
+  const schema = awayPort([ACME]);
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema } });
+  flushSync();
+  await checked();
+  expect(words(target.querySelector(".tf-xv-verdict"))).toContain("5 departures");
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("in acme/schemas, at main");
+  // Its own imports are read beside it, in that repository.
+  expect(schema.readOther).toHaveBeenCalledWith("gitea:acme/schemas", "opentrans/bmecat_2005.xsd");
+});
+
+test("two repositories declare it: the head asks; Point to a file… picks one, kept, and the document is checked through it", async () => {
+  const schema = awayPort([ACME, OTHER]);
+  view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema } });
+  flushSync();
+  await checked();
+  expect(words(target.querySelector(".tf-xv-head"))).toContain(`Two repositories declare ${ns("www.opentrans.org/XMLSchema/2.1")}.`);
+  expect(schema.readOther).not.toHaveBeenCalled();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-xv-head button")].find((b) => words(b) === "Point to a file…")!.click();
+  await settle();
+  const rows = [...document.querySelectorAll<HTMLButtonElement>(".tf-xsd-pointrow")];
+  const pick = rows.find((r) => words(r.querySelector(".tf-xsd-pointpath")) === "acme/schemas, at main: opentrans/opentrans_2_1.xsd")!;
+  expect(pick.disabled).toBe(false);
+  pick.click();
+  await settle();
+  await checked();
+  expect(kept.pointed).toEqual([
+    { namespace: ns("www.opentrans.org/XMLSchema/2.1"), location: "../schemas/opentrans/opentrans_2_1.xsd", to: { repo: "gitea:acme/schemas", path: "opentrans/opentrans_2_1.xsd", name: "acme/schemas" } },
+  ]);
+  expect(words(target.querySelector(".tf-xv-verdict"))).toContain("5 departures");
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("you pointed to it");
 });

@@ -15,6 +15,7 @@
   import TfXsdRuns from "./TfXsdRuns.svelte";
   import TfXsdType from "./TfXsdType.svelte";
   import type { XsdState } from "./xsd.svelte";
+  import type { Candidate } from "./xsd-point";
 
   let {
     st,
@@ -24,6 +25,7 @@
     onsource = null,
     oncopylink = null,
     onpoint = null,
+    onpick = null,
     head = null,
     scroller = $bindable(null),
   }: {
@@ -37,6 +39,8 @@
     oncopylink?: ((place: string, label: string) => void) | null;
     /** *Point to a file…* on a reference not found here. */
     onpoint?: ((namespace: string | null, location: string | null) => void) | null;
+    /** One of the files two repositories declare, picked for a reference (section 16). */
+    onpick?: ((namespace: string | null, location: string | null, c: Candidate) => void) | null;
     /** What stands at the head's end under 1,480 px (S4's *Reference* or *Example*). */
     head?: Snippet | null;
     scroller?: HTMLElement | null;
@@ -87,7 +91,7 @@
       <div class="tf-oas-back"><button type="button" class="tf-btn tf-sm" onclick={onback}>Back to {st.backs.at(-1)?.label}</button></div>
     {/if}
     {#if page === null}
-      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} />{/if}
+      {#if st.index !== null}<TfXsdOverview {st} index={st.index} {ongo} {onfile} {onpoint} {onpick} />{/if}
     {:else}
       {@const p = page}
       <h2 class="tf-xsd-h">

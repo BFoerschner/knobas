@@ -64,6 +64,44 @@ pub struct SchemaLocations {
     pub pointed: Vec<PointedSchema>,
 }
 
+/// A schema file of a synced repository that declares a namespace: step 6
+/// of the order, another repository answering by itself where exactly one
+/// declares it (the XSD design, 2026-11-23, section 16).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "api.ts")]
+pub struct DeclaringFile {
+    /// The repository's entity id.
+    pub repo: String,
+    /// The branch its files are read on.
+    pub branch: String,
+    pub path: String,
+}
+
+/// The most files one namespace answers: more than two already asks the
+/// person which.
+pub const DECLARING_MOST: usize = 50;
+
+/// The `.xsd` files of every synced repository that declare `namespace`, the
+/// shortest paths first, at most [`DECLARING_MOST`]. A repository the index
+/// knows no entity for is left out. Blocks: call it off the async thread.
+#[must_use]
+pub fn declaring(index: &knobas_files::FileIndex, namespace: &str) -> Vec<DeclaringFile> {
+    let repos = index.repos();
+    index
+        .declaring(namespace, DECLARING_MOST)
+        .files
+        .into_iter()
+        .filter_map(|file| {
+            let repo = repos.get(&file.no)?;
+            Some(DeclaringFile {
+                repo: repo.entity_id.clone(),
+                branch: repo.branch.clone(),
+                path: file.path,
+            })
+        })
+        .collect()
+}
+
 /// Whether an XML file is checked when a schema is found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "api.ts")]
