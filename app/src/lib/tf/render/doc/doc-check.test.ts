@@ -54,3 +54,14 @@ test("what the root says, read from its first tag: the pair for its namespace, o
   expect(rootSays(`<a xmlns:i="${xsi}" i:noNamespaceSchemaLocation="a.xsd"/>`)).toMatchObject({ namespace: "", location: "a.xsd" });
   expect(rootSays(`<a xmlns="urn:a"/>`)).toMatchObject({ namespace: "urn:a", location: null });
 });
+
+test("how the schema was found reads after found: with knobas, pointed to, downloaded", async () => {
+  const doc = { places: async (paths: (string | null)[]) => paths.map(() => 1) } as unknown as DocSession;
+  const said: Record<string, string> = { bundled: "among the schemas that come with knobas", pointed: "where you pointed", downloaded: "at its address, downloaded" };
+  for (const [found, how] of Object.entries(said)) {
+    const own: XsdEngine = async (s, call) => (call.kind === "open" ? { ok: true, index: { ...INDEX, files: [INDEX.files[0], { ...FILE, found }] }, need: [] } : engine(s, call));
+    const c = new DocCheck(`r\n${found}.xml`, own);
+    await c.run(`${found}.xml`, { name: "a", namespace: "urn:a", location: "s.xsd" }, "<a/>", doc, reads, true);
+    expect(c.head).toMatchObject({ k: "checked", how });
+  }
+});

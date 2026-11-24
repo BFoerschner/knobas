@@ -56,15 +56,15 @@ export interface RootSays {
   readonly prefixes?: Readonly<Record<string, string>>;
 }
 
-/** How a document's schema was found, in the rail's words (the XML view's section 10). */
+/** How a document's schema was found, in the rail's words after *found* (the XML view's section 10). */
 const FOUND: Record<string, string> = {
-  pointed: "you pointed to it",
-  downloaded: "downloaded",
+  pointed: "where you pointed",
+  downloaded: "at its address, downloaded",
   beside: "beside the file its xsi:schemaLocation names",
   catalog: "by the catalog",
   name: "by its name",
   namespace: "by its namespace, in this repository",
-  bundled: "comes with knobas",
+  bundled: "among the schemas that come with knobas",
 };
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
