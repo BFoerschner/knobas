@@ -146,7 +146,7 @@ test("a row opens in place; a name followed into BMEcat keeps the rail and says 
   await settle();
   expect(text(page().querySelector(".tf-xsd-hname"))).toBe(label);
   expect(text(page().querySelector(".tf-oas-meta"))).toContain("in bmecat_2005.xsd, which this file reaches");
-  expect(onplace).toHaveBeenLastCalledWith(expect.stringMatching(new RegExp(`^(el|type)/${label}$`)), "push", label);
+  expect(onplace).toHaveBeenLastCalledWith(expect.stringMatching(new RegExp(`^(el|type)/${label}$`)), "push", "ORDER");
   expect(target.querySelector(".tf-oas-rail")).not.toBeNull();
   button("Back to ORDER")!.click();
   await settle();

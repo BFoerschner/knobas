@@ -264,14 +264,16 @@
   }
 
   /** A followed link: the page left is a step back. */
-  function go(place: Place, label: string) {
+  function go(place: Place, _label: string) {
     const state = st;
     if (state === null) return;
     if (pref === null && pageOf(state.current) === pageOf(place)) return;
-    state.backs = [...state.backs, { place: state.current, label: labelOf(state.current), scroll: pageCol?.scrollTop ?? 0 }];
+    const left = labelOf(state.current);
+    state.backs = [...state.backs, { place: state.current, label: left, scroll: pageCol?.scrollTop ?? 0 }];
     shownAt = place === OVERVIEW ? null : place;
     void land(place, 0);
-    onplace?.(place, "push", label);
+    // The address's label names the place left: the crumb's `Esc` says *Back to* it, not to the page now shown.
+    onplace?.(place, "push", left);
   }
 
   const follow = (name: string) => go(`schemas/${name}`, name);

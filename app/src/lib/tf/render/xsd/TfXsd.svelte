@@ -417,15 +417,17 @@
   }
 
   /** A followed name: the page left is a step back. */
-  function go(key: string, label: string) {
+  function go(key: string, _label: string) {
     const state = st;
     if (state === null) return;
     const place = placeOfKey(key);
     if (place === state.current) return;
-    state.backs = [...state.backs, { place: state.current, label: labelOfPlace(state.current), scroll: pageCol?.scrollTop ?? 0 }];
+    const left = labelOfPlace(state.current);
+    state.backs = [...state.backs, { place: state.current, label: left, scroll: pageCol?.scrollTop ?? 0 }];
     shownAt = place === OVERVIEW ? null : place;
     void land(place, 0);
-    onplace?.(place, "push", label);
+    // The address's label names the place left: the crumb's `Esc` says *Back to* it, not to the page now shown.
+    onplace?.(place, "push", left);
   }
 
   function back() {
