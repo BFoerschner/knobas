@@ -5,7 +5,7 @@
  * js-yaml loads here and nowhere else in the app.
  */
 import { answerCall, type Opened, type SpecCall, type SpecFiles } from "./openapi";
-import { loadFakes } from "./openapi-fakes";
+import { loadFakes } from "./example-fakes";
 import { packOpened } from "./openapi-pack";
 
 const sessions = new Map<number, SpecFiles>();

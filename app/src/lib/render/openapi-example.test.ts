@@ -11,8 +11,8 @@ import { beforeAll, expect, test } from "vitest";
 import { SpecFiles } from "./openapi";
 import { DEEP_30_JSON } from "./openapi-fixture";
 import { fromPattern } from "./openapi-example";
-import { PASSWORD, fakesLoaded, loadFakes, localeOf } from "./openapi-fakes";
-import { kindOf, phraseOf, wordsOf } from "./openapi-names";
+import { PASSWORD, fakesLoaded, loadFakes, localeOf } from "./example-fakes";
+import { kindOf, phraseOf, wordsOf } from "./example-names";
 import { validates } from "./openapi-validate";
 
 function spec(schemas: Record<string, unknown>): SpecFiles {

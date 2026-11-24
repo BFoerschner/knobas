@@ -237,3 +237,130 @@ export function phraseOf(name: string, parent: string): string {
       return thing === "" ? `Some ${words.join(" ")}` : `The ${words.join(" ")} of the ${thing}`;
   }
 }
+
+// ---- The trade block: what an XML schema's names ask for (the XSD design, 2026-11-23, section 20) ----
+
+/**
+ * A kind of value a trade document's element or attribute asks for: GTIN and EAN, article numbers, order and party
+ * ids, quantities, units, tax rates, prices and amounts, lot and serial numbers, line numbers, product names and
+ * texts, feature names and values, and the people, places and banks the API explorer's table knows too. Read by the
+ * schema explorer's example maker only: the API explorer's {@link kindOf} is unchanged.
+ */
+export type TradeKind =
+  | "gtin"
+  | "iban"
+  | "bic"
+  | "email"
+  | "phone"
+  | "fax"
+  | "url"
+  | "vatId"
+  | "firstName"
+  | "lastName"
+  | "street"
+  | "zip"
+  | "city"
+  | "state"
+  | "countryCode"
+  | "country"
+  | "currency"
+  | "language"
+  | "unit"
+  | "taxRate"
+  | "price"
+  | "quantity"
+  | "serial"
+  | "count"
+  | "lineId"
+  | "articleNo"
+  | "orderId"
+  | "partyId"
+  | "version"
+  | "company"
+  | "productName"
+  | "productText"
+  | "featureName"
+  | "featureValue"
+  | "keyword"
+  | "text"
+  | "fullName"
+  | "date"
+  | "dateTime"
+  | "time"
+  | "weight"
+  | "mime";
+
+/**
+ * Each trade kind, the joined names that are it, and the endings a longer name may have; most particular first. The
+ * names are those BMEcat, openTRANS, UBL and Cross Industry Invoice use (`SUPPLIER_PID`, `PostalZone`,
+ * `RateApplicablePercent`), with their German words.
+ */
+const TRADE: readonly (readonly [TradeKind, readonly string[], readonly string[]])[] = [
+  ["gtin", ["gtin", "ean", "upc", "internationalpid", "globalid", "globaltradeitemnumber"], ["gtin", "ean"]],
+  ["iban", ["iban"], ["iban"]],
+  ["bic", ["bic", "swift", "bankcode"], ["bic"]],
+  ["email", ["email", "emails", "mail", "electronicmail", "emailaddress"], ["email", "mail"]],
+  ["phone", ["phone", "telephone", "tel", "mobile", "telefon", "completenumber"], ["phone", "telephone"]],
+  ["fax", ["fax", "telefax"], ["fax"]],
+  ["url", ["url", "uri", "website", "homepage", "mimesource", "href"], ["url", "uri"]],
+  ["vatId", ["vatid", "vatnumber", "ustid", "taxid", "taxnumber", "taxregistrationid", "companyid"], ["vatid", "taxid"]],
+  ["firstName", ["firstname", "givenname", "vorname"], ["firstname", "givenname"]],
+  ["lastName", ["lastname", "surname", "familyname", "nachname"], ["lastname", "familyname"]],
+  ["street", ["street", "streetname", "strasse", "lineone", "addressline", "boxno"], ["street", "streetname"]],
+  ["zip", ["zip", "zipbox", "postalzone", "postcode", "postcodecode", "plz"], ["zip", "postalzone", "postcode"]],
+  ["city", ["city", "cityname", "ort", "town"], ["city", "cityname"]],
+  ["state", ["state", "region", "countrysubentity", "countrysubdivisionname"], ["state"]],
+  ["countryCode", ["countrycoded", "countrycode", "identificationcode", "countryid", "territory", "areacoded"], ["countrycoded", "countrycode"]],
+  ["country", ["country", "land"], ["country"]],
+  ["currency", ["currency", "currencycode", "pricecurrency", "documentcurrencycode", "invoicecurrencycode", "currencyid"], ["currency", "currencycode"]],
+  ["language", ["language", "lang", "languagecode", "languageid", "localeid"], ["language", "languagecode"]],
+  ["unit", ["orderunit", "contentunit", "unit", "unitcode", "punit", "packageunit"], ["unit", "unitcode"]],
+  ["taxRate", ["tax", "taxrate", "percent", "rateapplicablepercent", "vat", "factor"], ["percent", "taxrate"]],
+  [
+    "price",
+    ["priceamount", "price", "amount", "pricelineamount", "totalamount", "nettoamount", "taxamount", "payableamount", "lineextensionamount", "basisamount", "chargeamount", "linetotalamount", "grandtotalamount", "duepayableamount", "taxbasistotalamount", "nettotalamount", "allowormchargeamount", "allowanceorchargevalue"],
+    ["amount", "price"],
+  ],
+  ["quantity", ["quantity", "qty", "invoicedquantity", "orderedquantity", "billedquantity", "nocuperou", "pricequantity", "quantitymin", "quantityinterval", "lowerbound", "upperbound", "basequantity"], ["quantity"]],
+  ["serial", ["lotnumber", "serialnumber", "batchnumber", "chargennummer", "seriennummer", "lotid", "batchid"], ["serialnumber", "lotnumber"]],
+  ["count", ["totalitemnum", "count", "linecountnumeric", "num", "number", "sequencenumeric"], ["num", "count", "numeric"]],
+  ["lineId", ["lineitemid", "lineid", "positionnumber"], ["lineitemid", "lineid"]],
+  ["articleNo", ["supplierpid", "buyerpid", "manufacturerpid", "pid", "supplieraid", "buyeraid", "sku", "articleid", "productid", "sellerassignedid", "buyerassignedid", "manufacturertypedescr"], ["pid", "aid", "assignedid"]],
+  [
+    "orderId",
+    ["orderid", "invoiceid", "quotationid", "rfqid", "deliverynoteid", "dispatchnotificationid", "documentid", "agreementid", "catalogid", "supplierorderid", "receiptacknowledgementid", "remittanceadviceid", "invoicelistid", "orderresponseid", "orderchangeid", "issuerassignedid", "id"],
+    ["orderid", "invoiceid"],
+  ],
+  ["partyId", ["partyid", "supplierid", "buyerid", "supplieridref", "buyeridref", "invoiceissueridref", "invoicerecipientidref", "deliveryidref", "idref", "endpointid"], ["partyid", "idref"]],
+  ["version", ["version", "catalogversion", "ublversionid"], ["version"]],
+  ["company", ["suppliername", "buyername", "manufacturername", "registrationname", "name2", "company", "firma", "bankname", "department"], ["company", "manufacturername"]],
+  ["productName", ["descriptionshort", "productname", "itemname", "catalogname"], ["descriptionshort"]],
+  ["productText", ["descriptionlong", "description", "content"], ["descriptionlong"]],
+  ["featureName", ["fname", "featurename", "variantname"], ["featurename"]],
+  ["featureValue", ["fvalue", "featurevalue", "fvaluedetails", "variantvalue"], ["featurevalue"]],
+  ["keyword", ["keyword", "segment", "remarktype", "groupname", "systemname", "classname", "fdescr"], ["keyword", "groupname", "systemname", "classname"]],
+  ["text", ["remarks", "remark", "note", "notes", "comment", "text", "includednote", "instruction", "reason", "termsandconditions", "subject", "title"], ["remarks", "note", "text", "reason"]],
+  ["fullName", ["name", "contactname", "personname", "name3", "contact"], ["contactname", "personname"]],
+  ["date", ["date", "issuedate", "duedate", "deliverydate", "generationdate", "orderdate", "invoicedate", "taxpointdate", "startdate", "enddate"], ["date"]],
+  ["dateTime", ["datetime", "timestamp", "issuedatetime"], ["datetime", "timestamp"]],
+  ["time", ["time", "issuetime"], ["time"]],
+  ["weight", ["weight", "volume", "length", "width", "depth", "grossweight", "netweight"], ["weight", "volume"]],
+  ["mime", ["mimetype", "mimecode"], ["mimetype"]],
+];
+const TRADE_BY_JOINED = new Map<string, TradeKind>();
+for (const [kind, names] of TRADE) for (const n of names) if (!TRADE_BY_JOINED.has(n)) TRADE_BY_JOINED.set(n, kind);
+
+/**
+ * What a trade document's name asks for, or `null`: the name joined, then a longer name's ending
+ * (`PRICE_LINE_AMOUNT` ends `amount`), then its last word alone; a last word that is only *name* is a keyword, not a
+ * person (`GROUP_NAME`).
+ */
+export function tradeKindOf(name: string): TradeKind | null {
+  const words = wordsOf(name);
+  const joined = words.join("");
+  const whole = TRADE_BY_JOINED.get(joined);
+  if (whole !== undefined) return whole;
+  for (const [kind, , endings] of TRADE) for (const e of endings) if (joined.endsWith(e) && joined.length > e.length) return kind;
+  const last = words.length > 1 ? (TRADE_BY_JOINED.get(words.at(-1)!) ?? null) : null;
+  return last === "fullName" ? "keyword" : last;
+}

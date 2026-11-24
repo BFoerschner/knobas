@@ -4,6 +4,8 @@
  * who uses a declaration. The page never holds the model: every answer is plain data, names already in words, each
  * name that goes somewhere carrying the key it goes to.
  */
+import { loadFakes } from "./example-fakes";
+import { makeExample, type ExampleOptions } from "./xsd-example";
 import {
   childElements,
   elDecl,
@@ -240,6 +242,7 @@ export type XsdCall =
   | { kind: "values"; key: string; from: number }
   | { kind: "way"; key: string }
   | { kind: "check"; xml: string }
+  | { kind: "example"; key: string; options: ExampleOptions }
   | { kind: "declOf"; names: { ns: string; local: string }[] }
   | { kind: "close" };
 
@@ -334,6 +337,17 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       return wayDown(s, call.key);
     case "check":
       return checkWith(s, call.xml, bundled);
+    case "example": {
+      // Faker in the language asked for loads with the first example in it, here in the worker; until then, and where
+      // it cannot load, the fixed values stand (`example-fakes.ts`).
+      const set = s.set;
+      if (set === null) return null;
+      const options = call.options;
+      return loadFakes(options.lang).then(
+        () => makeExample(set, call.key, options),
+        () => makeExample(set, call.key, options),
+      );
+    }
     case "declOf":
       return declarationOf(s, call.names);
     case "close":
