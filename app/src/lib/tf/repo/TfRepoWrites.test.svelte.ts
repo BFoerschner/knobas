@@ -654,7 +654,7 @@ test("the compare page proposes Into and From, the change and its commits, and q
   unmount(view!);
   view = null;
   await draw(["gitea:tidewater/payout-service", "prs"]);
-  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Instant SEPA spikeQueued"]);
+  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Instant SEPA spikeOpenQueued"]);
   // The tab counts it too, so it agrees with the list under it, and the toast has no tab to offer: it is on it.
   const tab = [...target.querySelectorAll(".tf-tabs a")].find((a) => text(a).startsWith("Pull requests"))!;
   expect(text(tab.querySelector(".tf-count"))).toBe(String(1 + [...target.querySelectorAll("tbody tr.tf-row")].filter((row) => text(row).includes("Open")).length));
@@ -974,7 +974,7 @@ test("two sent with one title are two rows, and the tab stays drawn (F-257)", as
   }
   view = mount(TfRepo, { target, props: { ready: true, rest: ["gitea:tidewater/payout-service", "prs"], job: null, ports: io } });
   await settle();
-  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Same wordsQueued", "Same wordsQueued"]);
+  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Same wordsOpenQueued", "Same wordsOpenQueued"]);
   expect(target.querySelector(".tf-rprs")).not.toBeNull();
 });
 

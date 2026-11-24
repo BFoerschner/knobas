@@ -59,6 +59,7 @@
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { withPrStates } from "../pr/pr-state.svelte";
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityBriefs, entityCheckouts, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
@@ -449,7 +450,12 @@
   const index = $derived(jobIndex(jobs));
   const held = $derived((entityId: string) => job !== null && index.holds(job, { entity_id: entityId }));
   const known = $derived(factsById(facts));
-  const lines = $derived(attention && everyPr ? prLines(attention, everyPr, now, known) : null);
+  /** A page of rows with a merge, close or reopen queued this session laid over it (`pr/pr-state.svelte.ts`); the same page where none moved. */
+  function laid(page: EntityPage): EntityPage {
+    const rows = withPrStates(page.rows);
+    return rows === page.rows ? page : { ...page, rows };
+  }
+  const lines = $derived(attention && everyPr ? prLines(laid(attention), laid(everyPr), now, known) : null);
   /** The open pull requests alone: what orders the repositories and counts their open ones, before the recency read lands. */
   const openLines = $derived(attention ? prLines(attention, { ...attention, rows: [] }, now, known) : null);
   const teamsByRepo = $derived(repoTeams(repos?.rows ?? [], known));
