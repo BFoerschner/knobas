@@ -7,6 +7,7 @@
  * `knobas-source-gitea`'s (its view tests and `gitea-live`); here it is a
  * stand-in shaped like it.
  */
+import { dropPrMove, heardRefresh, notePrMove } from "../pr/pr-state.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -1593,6 +1594,34 @@ test("Pull requests draws Code's row: the title over its author, the state, and 
   const row = target.querySelector(".tf-rprs tbody tr")!;
   expect(row.closest("table")!.classList.contains("tf-cprs")).toBe(true);
   expect(row.querySelectorAll("td")).toHaveLength(5);
+});
+
+test("a merge queued on the pull request's page draws its row merged at once, over a read from before it (the pr-state fix)", async () => {
+  await draw([REPO, "prs"]);
+  const stateOf = (n: string) => text([...target.querySelectorAll(".tf-rprs tbody tr")].find((tr) => text(tr).startsWith(n))!.querySelector(".tf-chip"));
+  expect(stateOf("#142")).toBe("Open");
+  // What TfPr does as the merge's queue answer lands; the mirror's row was read before it.
+  notePrMove(`${REPO}#142`, "merge", "open", 80);
+  flushSync();
+  expect(stateOf("#142")).toBe("Merged");
+  expect(stateOf("#139"), "another row is as read").toBe("Merged");
+  dropPrMove(`${REPO}#142`, 80);
+  flushSync();
+  expect(stateOf("#142"), "a refused merge: the read again").toBe("Open");
+});
+
+test("the tab's count and its State filter read the state a queued merge leaves; rows read after its read-back say what the mirror says", async () => {
+  await draw([REPO, "prs"], ports({ getEntity: repoDetail(), refresh: refreshProbe().ports }));
+  const tab = () => [...target.querySelectorAll(".tf-tabs a")].find((a) => text(a).startsWith("Pull requests"))!;
+  expect(text(tab().querySelector(".tf-count"))).toBe("1");
+  notePrMove(`${REPO}#142`, "merge", "open", 80, "gitea");
+  flushSync();
+  expect(text(tab().querySelector(".tf-count")), "no open pull request left").toBe("");
+  heardRefresh({ entity_id: `${REPO}#142`, write_id: 80, ended: "refreshed" });
+  // A read asked after the read-back is the mirror's word: here it still says open (the forge took the merge and did not move it).
+  refreshButton()!.click();
+  await settle();
+  expect(text([...target.querySelectorAll(".tf-rprs tbody tr")].find((tr) => text(tr).startsWith("#142"))!.querySelector(".tf-chip"))).toBe("Open");
 });
 
 test("Branches names a tip's author by the name the record gives, else the account, and the reader's own reads you (F-107)", async () => {

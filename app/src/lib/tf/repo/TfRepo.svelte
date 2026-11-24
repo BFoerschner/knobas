@@ -325,6 +325,7 @@
   import { parentPage } from "../page-name.svelte";
   import { itemHash } from "../job/job";
   import { jumpAcross } from "../opener";
+  import { withPrStates } from "../pr/pr-state.svelte";
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { landInPlace } from "../land-in-place";
   import { HELD_AFTER_MS } from "./view-fresh.svelte";
@@ -446,6 +447,10 @@
   let checkout = $state<CheckoutView | undefined>(undefined);
   let local = $state<DiffRead | null>(null);
   let prs = $state<EntityRow[] | null>(null);
+  /** When the pull requests drawn were asked (window clock). */
+  let prsAskedAt = $state(0);
+  /** The pull requests as drawn: a merge, close or reopen queued this session laid over the read, so the rows, the filter and the count agree. */
+  const shownPrs = $derived(prs === null ? null : withPrStates(prs, prsAskedAt));
   /** The repository's team and language (#973); `undefined` until `code_facts` answers. */
   let facts = $state<CodeFacts | undefined>(undefined);
   /** Whether `code_facts` and the checkout's read have answered, held or not: the header's subline and *Open in…* wait on them. */
@@ -805,10 +810,13 @@
     if (!alive()) return;
     if (!(again && sameAnswer(detail, found))) detail = found;
     const filter = repoPrsFilter(found.row);
+    const asked = Date.now();
     await readAllRows((offset) => ports.listEntities(filter, REPO_PRS_LIMIT, offset)).then(
       (rows) => {
         if (!alive()) return;
         const next = repoPrs(rows, found.row);
+        // When the rows were asked, which says whether a merge queued here is in them yet (`pr-state.svelte.ts`).
+        prsAskedAt = asked;
         if (again && sameAnswer(prs, next)) return;
         if (again) void landInPlace(page, () => (prs = next));
         else prs = next;
@@ -1025,7 +1033,7 @@
     return one === slot || left === undefined ? route : readRepoRoute(left);
   }
 
-  const openPrs = $derived(prs?.filter((row) => row.state?.text.toLowerCase() === "open").length ?? 0);
+  const openPrs = $derived(shownPrs?.filter((row) => row.state?.text.toLowerCase() === "open").length ?? 0);
   const localCount = $derived(
     checkout?.tree?.status === "read" ? checkout.tree.changed + checkout.tree.untracked : 0,
   );
@@ -1606,7 +1614,7 @@
                   {refreshed}
                 />
               {:else if one === "prs"}
-                <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
+                <TfRepoPrs {ports} {repoId} rows={shownPrs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
               {/if}
             </TfRepoTab>
           {/if}

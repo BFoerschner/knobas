@@ -145,6 +145,7 @@
     type PrTab,
     type Verdict,
   } from "./pr";
+  import { dropPrMove, isStateMove, notePrMove, notePrSent, prMoveOf, prStateOver } from "./pr-state.svelte";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
@@ -415,6 +416,30 @@
   });
 
   /**
+   * A merge, close or reopen queued here whose read-back has ended (`pr-state.svelte.ts`): the pull request's row is read
+   * again, and where it still says the state the write was queued over, the forge took the write and the state did not
+   * move: the move and its echo go, so nothing draws a state the forge does not hold (Fable's stuck case, 2026-11-24).
+   */
+  $effect(() => {
+    const id = prId;
+    const at = id === null ? null : (prMoveOf(id)?.landedAt ?? null);
+    if (id === null || at === null) return;
+    const asked = Date.now();
+    untrack(() => ports.getEntity(id)).then(
+      (found) => {
+        if (prId !== id) return;
+        detail = found;
+        const move = prMoveOf(id);
+        if (move === null || move.landedAt === null || asked < move.landedAt || move.base === null) return;
+        if (found.row.state?.text.trim().toLowerCase() !== move.base) return;
+        dropPrMove(id, move.write);
+        settleEchoes(id, (echo) => echo.kind === move.kind);
+      },
+      () => {},
+    );
+  });
+
+  /**
    * A refresh's re-read (#2107): the pull request's row and its live view,
    * over what the page drew; a failed read keeps it.
    */
@@ -468,6 +493,8 @@
   }
 
   const header = $derived(headerOf(view ?? null));
+  /** The state drawn: the read's, or what a merge, close or reopen queued here leaves while the read still says what it was (`pr-state.svelte.ts`). */
+  const shownState = $derived(prId === null ? header.state : prStateOver(prId, header.state, { live: true }));
   const counts = $derived(tabCounts(view ?? null));
   const readyRows = $derived(readyLines(view ?? null));
   const standing = $derived(readiness(view ?? null));
@@ -475,7 +502,7 @@
   const plainLabel = (label: string) => label.replace(/…$/, "");
   /** How a finished pull request ended, in one line; `null` while it is open. */
   const outcome = $derived.by(() => {
-    const word = header.state?.text.toLowerCase();
+    const word = shownState?.text.toLowerCase();
     if (word === "merged") return { text: header.base === null ? "Merged" : `Merged into ${header.base}`, tone: "ok" };
     if (word === "closed") return { text: "Closed without merging", tone: "muted" };
     return null;
@@ -604,6 +631,7 @@
   let reviewersPanel = $state<HTMLDivElement | null>(null);
   const pageShown = pageVisible();
 
+
   function closePick() {
     picking = false;
   }
@@ -710,7 +738,20 @@
     const own = kind.startsWith(SOURCE_ACTION);
     // A source's action says its button's words, and what was chosen names it: *Add label backport*, and a second label is a second chip.
     const text = own && chose !== "" ? `${name} ${chose}` : own ? name : kind;
-    echoWrite(id, kind, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(own && chose !== "" ? { many: true } : {}) });
+    const base = header.state?.text ?? null;
+    // A merge, close or reopen is drawn in the state it leaves at once, on every surface (the pr-state fix).
+    const moves = isStateMove(kind);
+    if (moves) notePrMove(id, kind, base, write.id, detail?.source?.id ?? null);
+    echoWrite(id, kind, text, {
+      write,
+      base,
+      following: { name },
+      follower,
+      surface: PR_SURFACE,
+      source: detail?.source?.id ?? null,
+      ...(own && chose !== "" ? { many: true } : {}),
+      ...(moves ? { onstop: () => dropPrMove(id, write.id), onsent: () => (notePrSent(id, write.id), readView(id, () => prId === id, true)) } : {}),
+    });
   }
 
   /** Echo a review queued with `verdict`: its chip and its row under Reviewers say which (F-251). */
@@ -849,7 +890,7 @@
       <div>
         <h1>{name} {title}</h1>
         <div class="tf-sub">
-          {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
+          {#if shownState !== null}<TfStateChip text={shownState.text} tone={shownState.tone ?? 'muted'} />{/if}
           {#each detail?.labels ?? [] as label (label)}
             {" "}<span class="tf-lab">{label}</span>
           {/each}
