@@ -40,7 +40,7 @@
   import { FuzzyOrder } from "../filter/ranked.svelte";
   import { SpecSession, specEngine, type ReadFile, type SpecEngine } from "../../render/openapi-port";
   import { sniffSpec } from "../../render/openapi-sniff";
-  import { columnsFor, paneHeight } from "./explorer/layout";
+  import { columnsSeen, paneHeight } from "./explorer/layout";
   import { zen } from "../zen.svelte";
   import { clientsFound, specOpener, type SpecOpener } from "./oas-open.svelte";
 
@@ -206,11 +206,13 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
-        const next = columnsFor(entries[0]?.contentRect.width ?? 0);
-        if (next !== cols) cols = next;
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
       });
       ro.observe(view);
     }

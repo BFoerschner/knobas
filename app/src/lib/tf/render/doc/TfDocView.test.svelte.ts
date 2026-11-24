@@ -368,3 +368,39 @@ test("N steps to each departure: its line wears the mark and its sentence; Stop 
   expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
   expect(words(target.querySelector(".tf-xv-head"))).toContain("Checking is off for this file.");
 });
+
+test("a page kept hidden keeps its columns: on its return the side column is drawn in the first frame", () => {
+  /** The observers of the file view: the lines' own observers are not asked. */
+  const seen: ResizeObserverCallback[] = [];
+  const real = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    readonly #cb: ResizeObserverCallback;
+    constructor(cb: ResizeObserverCallback) {
+      this.#cb = cb;
+    }
+    observe(el: Element) {
+      if (el === target) seen.push(this.#cb);
+    }
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  try {
+    draw(SMALL, { engine: never });
+    const pane = () => target.querySelector<HTMLElement>(".tf-xv")!;
+    const report = (width: number) => {
+      for (const cb of seen) cb([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+      flushSync();
+    };
+    report(2560);
+    expect(pane().dataset["cols"]).toBe("4");
+    expect(target.querySelector(".tf-xv-sidecol")).not.toBeNull();
+    // Another page shown: this one is not laid out, and its file view reports 0 px.
+    report(0);
+    expect(pane().dataset["cols"]).toBe("4");
+    expect(target.querySelector(".tf-xv-sidecol")).not.toBeNull();
+    report(1200);
+    expect(pane().dataset["cols"]).toBe("2");
+  } finally {
+    globalThis.ResizeObserver = real;
+  }
+});
