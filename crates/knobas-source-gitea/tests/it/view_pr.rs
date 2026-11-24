@@ -2199,8 +2199,21 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     let took = started.elapsed();
     assert_eq!(view.sections.len(), 4);
     assert_eq!(flight.most(), 6, "each round's reads in flight at once");
+    // Counted from when the requests arrived, not from the wall clock: a loaded machine stretched two rounds to 1.09 s
+    // in the ux30 end gate. A round of the forge is one with a read the fake holds; the two reads it doesn't serve
+    // (the branch list and the issues, answered 404 at once) cost no round of their own.
+    let unheld = [format!("{REPO}/branches"), format!("{REPO}/issues")];
+    let rounds = flight.rounds();
+    let held = rounds
+        .iter()
+        .filter(|round| round.iter().any(|read| !unheld.contains(read)))
+        .count();
+    assert_eq!(
+        held, 2,
+        "two rounds of the forge, not three ({took:?}): {rounds:#?}"
+    );
     assert!(
-        took >= Duration::from_millis(600) && took < Duration::from_millis(890),
+        took >= Duration::from_millis(600),
         "two rounds of 300 ms, not {took:?}"
     );
 }

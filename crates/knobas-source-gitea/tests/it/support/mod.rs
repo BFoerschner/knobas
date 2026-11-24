@@ -1215,6 +1215,7 @@ pub fn source(base_url: String, config: Value) -> Box<dyn Source> {
 pub struct InFlight {
     delay: Duration,
     arrivals: Mutex<Vec<Instant>>,
+    every: Mutex<Vec<(Instant, String)>>,
     most: AtomicUsize,
 }
 
@@ -1223,6 +1224,7 @@ impl InFlight {
         Arc::new(Self {
             delay,
             arrivals: Mutex::new(Vec::new()),
+            every: Mutex::new(Vec::new()),
             most: AtomicUsize::new(0),
         })
     }
@@ -1237,13 +1239,32 @@ impl InFlight {
         self.most.load(Ordering::SeqCst)
     }
 
+    /// The requests in the rounds they came in, each round's paths in arrival order: a request that arrives more
+    /// than half a held answer after the one before it starts a new round. Read from the arrivals themselves, so a
+    /// loaded machine that stretches the wall clock does not change it.
+    pub fn rounds(&self) -> Vec<Vec<String>> {
+        let mut every = self.every.lock().expect("not poisoned").clone();
+        every.sort();
+        let gap = self.delay / 2;
+        let mut rounds: Vec<Vec<String>> = Vec::new();
+        let mut last: Option<Instant> = None;
+        for (at, path) in every {
+            if last.is_none_or(|before| at.duration_since(before) > gap) {
+                rounds.push(Vec::new());
+            }
+            rounds.last_mut().expect("pushed").push(path);
+            last = Some(at);
+        }
+        rounds
+    }
+
     /// Watch every request `server` gets. Mounted before the fake's own mocks:
     /// it is the first one wiremock asks, once per request, and it never
     /// answers.
     pub async fn watch(self: &Arc<Self>, server: &MockServer) {
         let flight = Arc::clone(self);
-        Mock::given(move |_: &wiremock::Request| {
-            flight.arrive();
+        Mock::given(move |request: &wiremock::Request| {
+            flight.arrive(request.url.path());
             false
         })
         .respond_with(ResponseTemplate::new(500))
@@ -1252,11 +1273,15 @@ impl InFlight {
         .await;
     }
 
-    fn arrive(&self) {
+    fn arrive(&self, path: &str) {
         let now = Instant::now();
         let mut arrivals = self.arrivals.lock().expect("not poisoned");
         arrivals.retain(|at| now.duration_since(*at) < self.delay / 2);
         arrivals.push(now);
         self.most.fetch_max(arrivals.len(), Ordering::SeqCst);
+        self.every
+            .lock()
+            .expect("not poisoned")
+            .push((now, path.to_owned()));
     }
 }
