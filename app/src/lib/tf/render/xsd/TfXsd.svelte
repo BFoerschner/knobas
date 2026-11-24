@@ -26,7 +26,7 @@
   import TfSideEdge from "../../TfSideEdge.svelte";
   import { sideWidth } from "../../side-width.svelte";
   import { FuzzyOrder } from "../../filter/ranked.svelte";
-  import { columnsFor, paneHeight } from "../explorer/layout";
+  import { columnsSeen, paneHeight } from "../explorer/layout";
   import { zen } from "../../zen.svelte";
   import type { DeclRow, Opened } from "../../../render/xsd-answer";
   import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
@@ -183,13 +183,13 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
-    const first = columnsFor(view.getBoundingClientRect().width);
-    if (first !== cols) cols = first;
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
-        const next = columnsFor(entries[0]?.contentRect.width ?? 0);
-        if (next !== cols) cols = next;
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
       });
       ro.observe(view);
     }

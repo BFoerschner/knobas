@@ -19,6 +19,16 @@ export function columnsFor(width: number): 2 | 3 | 4 {
 }
 
 /**
+ * The columns a width read or observed holds, or `null` where the file view has no width: a page kept hidden while
+ * another is shown is not laid out and reports 0 px. Its columns stand as they were, so on its return they are drawn
+ * in the first frame; taken as two, the side column came back a frame late and moved the XML view's *Levels* 798 px
+ * at 2,560 px (`moves`, 2026-11-24).
+ */
+export function columnsSeen(width: number): 2 | 3 | 4 | null {
+  return width > 0 ? columnsFor(width) : null;
+}
+
+/**
  * The pane's height: the window's, less the box's own top with the page's scroller at 0, less the status bar and
  * {@link PANE_GAP}; at least {@link PANE_FLOOR}. Read at mount and on `resize`, never on scroll, so at scroll 0
  * every column is whole on screen, and a page scrolled down leaves the freed room unused.

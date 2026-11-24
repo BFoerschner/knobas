@@ -24,7 +24,7 @@
   import TfSideEdge from "../../TfSideEdge.svelte";
   import { sideWidth } from "../../side-width.svelte";
   import { zen } from "../../zen.svelte";
-  import { columnsFor, paneHeight } from "../explorer/layout";
+  import { columnsSeen, paneHeight } from "../explorer/layout";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocPicked from "./TfDocPicked.svelte";
   import TfDocQuery from "./TfDocQuery.svelte";
@@ -258,25 +258,18 @@
       return () => cancelAnimationFrame(frame);
     });
     const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
-    // The columns from the first frame: an observer answers a frame late, and a side column put in then moved the
-    // document's bar 798 px at 2560 x 1440 (`moves`, 2026-11-24).
-    const measure = () => {
-      const now = columnsFor(view.getBoundingClientRect().width);
-      if (now !== cols) cols = now;
-    };
-    measure();
-    // Mounted on a return, the file view may not have its width yet: once more before the first paint.
-    const early = requestAnimationFrame(measure);
+    // The columns from the first frame: an observer answers a frame late.
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver((entries) => {
-        const next = columnsFor(entries[0]?.contentRect.width ?? 0);
-        if (next !== cols) cols = next;
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
       });
       ro.observe(view);
     }
     return () => {
-      cancelAnimationFrame(early);
       window.removeEventListener("resize", fit);
       ro?.disconnect();
     };
