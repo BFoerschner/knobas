@@ -1714,11 +1714,13 @@ fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState)
 ///
 /// This runs only on an exit knobas is told about. A `SIGTERM`, `SIGINT` or
 /// `SIGHUP` is told about since the ux30 end gate: `stop_signals` turns it
-/// into the event loop's exit. A `SIGKILL`, a crash or a second signal during
-/// the quit still delivers no `RunEvent` at all, so the server outlives the
-/// process. It is *not* cleaned up on the next start either: what happens is
-/// that the next start finds it alive and adopts it (see
-/// `knobas_db::EmbeddedDb::start`), reusing it as a warm start.
+/// into the event loop's exit. The display's end on Linux (a logout), a
+/// `SIGKILL`, a crash or a second signal during the quit still delivers no
+/// `RunEvent`, or ends the process in the middle of this; the server's
+/// supervisor (`knobas_db::supervisor`, 2026-11-24) stops it then. Only a
+/// server whose supervisor died too outlives the process, and the next start
+/// finds it alive and adopts it (see `knobas_db::EmbeddedDb::start`), reusing
+/// it as a warm start.
 ///
 /// **Adoption is no longer a one-way door.** M0's adopted handle owned nothing,
 /// so no clean quit ever stopped that server and every later run adopted it in

@@ -1,4 +1,7 @@
 // A crate root resolves `mod` beside itself, so the path is spelled out.
+#[cfg(unix)]
+#[path = "embedded/app_end.rs"]
+mod app_end;
 #[path = "embedded/elsewhere.rs"]
 mod elsewhere;
 #[path = "embedded/link.rs"]
