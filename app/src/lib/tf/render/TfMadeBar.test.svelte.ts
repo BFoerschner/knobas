@@ -64,6 +64,8 @@ test("each state says itself in the bar's one row, in its colour", () => {
     [{ view: view({ running: { state: "keeping", done: 120, total: 2000 } }) }, "Keeping 120 of 2,000 files…", "info"],
     [{ view: view({ drawn: DRAWN, current: true }), made: MADE }, "Made by Low-code preview at abc1234, 14 files, 2.3 MB, 3.2s", "info"],
     [{ view: view({ drawn: DRAWN }), made: MADE }, "Made at abc1234 2 h ago. The folder is at def5678 now.", "warn"],
+    // 2026-11-24: the folder is where it was, the tool changed since (its stamp is in the key).
+    [{ view: view({ drawn: DRAWN, commit: "abc1234ffff" }), made: MADE }, "Made at abc1234 2 h ago, before Low-code preview changed.", "warn"],
     [{ view: view({ drawn: DRAWN, failure: { why: "failed", status: 2, stderr: "no project" } }), made: MADE }, "The last run failed. This is what it made at abc1234.", "err"],
     [{ view: view({ failure: { why: "failed", status: 2, stderr: "no project" } }) }, "Low-code preview could not make this folder.", "err"],
     [{ view: view({ failure: { why: "stopped" } }) }, "Low-code preview was stopped.", "info"],

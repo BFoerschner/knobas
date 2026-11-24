@@ -158,6 +158,17 @@ export function keyOf(file: DrawnFile): string {
 }
 
 /**
+ * The card (`[data-file]`) of the file keyed `key` in `host`, or null where it is not drawn. A generated file's key is
+ * `<folder>\u0000<path>`, and `CSS.escape` writes U+0000 as U+FFFD, so no selector names its card: it is found by its
+ * attribute's value (Björn, 2026-11-24: a picked one-line generated file landed under the band, behind the head above).
+ */
+export function cardIn(host: ParentNode, key: string): HTMLElement | null {
+  if (!key.includes("\u0000")) return host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
+  for (const card of host.querySelectorAll<HTMLElement>("[data-file]")) if (card.getAttribute("data-file") === key) return card;
+  return null;
+}
+
+/**
  * A line of the file, and its place among the file's lines. An `extra` line
  * is context the reader expanded, read from the file: not in the source's
  * diff, so `at` is -1 and it takes no comment.

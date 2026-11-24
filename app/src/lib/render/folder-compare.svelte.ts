@@ -4,13 +4,14 @@
  * side of a comparison, each side in a lane of its own (`cmp:<end>`), and what the two runs made compared.
  *
  * - **Only a press runs.** Each side is a `FolderRun` asked with `look` always: what is kept for the folder as it is at
- *   that end draws at once, and nothing starts on a look. `press` runs the sides that are not kept (*Run*, *Run again*),
- *   or stops every side that runs (*Stop*).
+ *   that end draws at once, and nothing starts on a look. `press` runs the sides that want a run (*Run*: not rendered,
+ *   made from an earlier state or failed), else both sides anew (*Run again*), or stops every side that runs (*Stop*).
  * - A side with no folder (`no_folder`: added or deleted with the change, or a root commit's before) is compared as
  *   nothing: every generated file of the other side is added or deleted.
  * - Once neither side runs and each is kept (or has no folder), the two are compared once per pair of tokens:
  *   `folder_render_compare` for a folder of files, the two outputs' bytes for a renderer that draws one. A side made
- *   from an earlier state (`current` false) is compared all the same, and the state says it is stale.
+ *   from an earlier state (`current` false: its folder, or the tool, changed since) is never compared: what two tools
+ *   made is no diff (Björn, 2026-11-24). A compare already drawn stays while a side turns stale, the bar saying so.
  *
  * Built inside an effect's root: its effects are the caller's.
  */
@@ -88,6 +89,22 @@ export class FolderCompare {
     this.before = new FolderRun(side((now) => now.before), ports);
     this.after = new FolderRun(side((now) => now.after), ports);
 
+    // Other ends, another repository or another command (Local changes keeps its compare when a commit moves its
+    // start): what was compared is not this folder's any more.
+    let place: string | null = null;
+    $effect(() => {
+      const now = this.#at();
+      const at = now === null ? null : JSON.stringify([now.entityId, now.renderer.id, now.renderer.command, now.folder, now.before, now.after]);
+      untrack(() => {
+        if (place !== null && at !== place) {
+          this.made = null;
+          this.#asked = null;
+          this.compareFailed = null;
+        }
+        place = at;
+      });
+    });
+
     // Both sides drawn (or one with no folder), and neither running: compare them, once per pair of tokens.
     $effect(() => {
       const old = this.#tokenOf(this.sideOf("old"), this.before);
@@ -130,10 +147,13 @@ export class FolderCompare {
     }
   }
 
-  /** The token a side's compare reads: `null` for no folder, `undefined` while it is not drawn or still runs. */
+  /**
+   * The token a side's compare reads: `null` for no folder, `undefined` while it is not drawn, still runs or was made
+   * from an earlier state (a stale side is held, never compared).
+   */
   #tokenOf(state: SideState, run: FolderRun): string | null | undefined {
     if (state === "absent") return null;
-    if (state === "kept" || state === "stale") return run.view?.drawn?.token ?? undefined;
+    if (state === "kept") return run.view?.drawn?.token ?? undefined;
     return undefined;
   }
 
@@ -163,9 +183,9 @@ export class FolderCompare {
     if (sides.includes("asking")) return "asking";
     if (sides.every((s) => s === "absent")) return "idle";
     if (sides.includes("none")) return "idle";
+    if (sides.includes("stale")) return "stale";
     const made = this.made;
     if (made === null) return "comparing";
-    if (sides.includes("stale")) return "stale";
     if (made.kind === "single") return made.same ? "same" : "made";
     return made.compare.files.length === 0 ? "same" : "made";
   }
@@ -182,13 +202,21 @@ export class FolderCompare {
     return [this.before, this.after].some((run) => run.view?.drawn != null);
   }
 
+  /** Whether a side wants a run: not rendered, made from an earlier state, or failed. A press runs just those (*Run*). */
+  get wants(): boolean {
+    return [this.sideOf("old"), this.sideOf("new")].some((s) => s === "none" || s === "stale" || s === "failed");
+  }
+
   /** Whether a press of *Run N folder renders* takes it: nothing kept for a side, or a side made from an earlier state. */
   get runnable(): boolean {
     const now = this.state;
     return now === "idle" || now === "stale";
   }
 
-  /** *Run*, *Run again* or *Stop*: stops every side that runs, else runs every side not kept for the folder as it is. */
+  /**
+   * *Run*, *Run again* or *Stop*: stops every side that runs; else runs the sides that want a run (*Run*); else runs
+   * both sides anew with the tool as it is now (*Run again*: Björn, 2026-11-24, it ran nothing while both were kept).
+   */
   press(): void {
     const runs = [
       { state: this.sideOf("old"), run: this.before },
@@ -198,7 +226,9 @@ export class FolderCompare {
       for (const r of runs) if (r.state === "running") r.run.press();
       return;
     }
-    for (const r of runs) if (r.state !== "kept" && r.state !== "absent" && r.state !== "asking") r.run.press();
+    const wants = (s: SideState) => s === "none" || s === "stale" || s === "failed";
+    const some = runs.some((r) => wants(r.state));
+    for (const r of runs) if (some ? wants(r.state) : r.state === "kept") r.run.press();
   }
 
   /** *Stop all*: every side that runs stops. */
