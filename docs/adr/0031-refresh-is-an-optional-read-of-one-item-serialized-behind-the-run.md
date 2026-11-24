@@ -12,6 +12,14 @@ After a write landed, knobas caught the mirror up with an incremental run of the
 - **A run's per-item work, for one item.** Links on arrival, a monitor's samples and alerts, the context follow and the saved-view projection, plus an event the shell re-reads on. No "synced" activity line. An id the source no longer answers for is tombstoned.
 - **A failed refresh is only a failed read.** The write stays `sent`, its [echo](../../CONTEXT.md#echo) says *sent*, and the next run settles it.
 
+## Amended 2026-11-24: a run stands aside for a landed write's read-back
+
+The pr-state fix (`docs/decisions/2026-11-24-a-pull-requests-state-shows-at-once.md`, Fable's ruling 1). A run holds the source's lock for its whole walk of the forge, and every landed write starts one, so a second write's read-back waited out the first's whole run: create a pull request, merge it, and *Merged* waited 3.5 s at seed size, minutes at Björn's.
+
+- **Serialized still, never beside a run.** The read-back asks for the lock first; once it waits, the run in its way is stopped (`Scheduler::stand_aside`): its future is dropped, its transaction rolls back, and Postgres hands the lock to the read-back, so a run started in the gap queues behind it. The run after the write starts again from the same stored position.
+- **Ends as a quit-cancelled run does**: its row closed with `stood aside: a landed write's read-back went first, write N`, its watchers told once, no verdict on the credential, the backoff untouched, not counted as a failure.
+- **Never stopped**, and the read-back waits as before: a run a person pressed or joined, a first sync or a backfill, a source with no stored position (its run owes a full sync and its sweep), a source with no run that ended `ok` within max(10 min, twice its interval), and a read-back that never waits on the lock (nothing in flight, a kind the adapter does not read).
+
 ## Rejected
 
 - Keep the run after a write and fix the paths that skip it. A run of a whole Jira is not instant, and *Refresh* on a detail has no run-shaped answer. The run stays as the follow-up.

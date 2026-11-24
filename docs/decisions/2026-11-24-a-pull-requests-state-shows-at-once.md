@@ -43,8 +43,10 @@ run. The repository's *Pull requests* tab reads only the mirror, so it waited fo
    on Gitea's site, then *Pull requests* opened, says *Merged* 742 ms after the tab drew; with the tab kept and the
    window back 35 s later, 466 ms (before: *Open* until the next run).
 
-**Owed by the same ruling** (a later commit on the branch): a landed write's read-back stops a scheduled run in its way
-(ADR-0031 amended).
+6. **A landed write's read-back stops the run in its way** (ADR-0031 amended): a scheduled run, or the run after an
+   earlier write, that holds the lock while the read-back waits is stopped and rolled back, logged as standing aside
+   for that write, and starts again after it. A run a person pressed, a first sync, a backfill and a source that has not
+   synced `ok` in max(10 min, twice its interval) are never stopped.
 
 **Reversing it** is `pr-state.svelte.ts` and its callers (`TfPr`, `TfRepo`, `TfCode`, `TfRepoBranches`,
 `TfConnections`, the launcher's `Results`).
