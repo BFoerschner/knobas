@@ -332,7 +332,34 @@ export class Windowed<K = string> {
   #growFor(set: number) {
     if (untrack(() => this.#grownFor) === set || this.#growAsked === set) return;
     this.#growAsked = set;
-    growSoon(() => (this.#grownFor = set));
+    // Dropped with the list: asked again if it is attached again.
+    this.#growSoon(
+      () => (this.#grownFor = set),
+      () => {
+        if (this.#growAsked === set) this.#growAsked = -1;
+      },
+    );
+  }
+
+  /**
+   * The grows this list asked for that have not come yet, each as what drops it. The list's teardown drops them: the
+   * grow waits on two frames and then a task, and a list gone in that time left them asking (under jsdom a frame is a
+   * 16 ms interval, residue; the XML-view branch's finding, 2026-11-24, the class of e55fa040).
+   */
+  #grows = new Set<() => void>();
+
+  /** {@link growSoon} for this list: `grow` once the frames have drawn, or `dropped` if the list goes first. */
+  #growSoon(grow: () => void, dropped: () => void) {
+    const unask = growSoon(() => {
+      this.#grows.delete(drop);
+      grow();
+    });
+    const drop = () => {
+      this.#grows.delete(drop);
+      unask();
+      dropped();
+    };
+    this.#grows.add(drop);
   }
 
   /** The rows to draw out of `items` (the list's rows, in the same order). */
@@ -539,6 +566,7 @@ export class Windowed<K = string> {
       unscale();
       unsize?.();
       if (queued) unplaced.delete(place);
+      for (const drop of [...this.#grows]) drop();
       node.removeEventListener("focusin", focusIn);
       node.removeEventListener("focusout", focusOut);
       if (this.#listNode === node) this.#listNode = null;
@@ -641,10 +669,13 @@ export class Windowed<K = string> {
     this.#landing = landing;
     const jump = {};
     jumping = jump;
-    growSoon(() => {
+    // Over when its frames have drawn, or with its list: a jump left landing had every list attached later draw as one
+    // it brought.
+    const landed = () => {
       if (jumping === jump) jumping = null;
       if (this.#landing === landing) this.#landing = null;
-    });
+    };
+    this.#growSoon(landed, landed);
     return true;
   }
 
@@ -886,26 +917,31 @@ let growWait: { frame: number | null; task: ReturnType<typeof setTimeout> | null
  * in a task of their own, not in the ones that hold its first useful frame. A page whose lists are placed in turns
  * (Builds' rail, then a pipeline's days once its runs answer) grows them all once the last has drawn.
  */
-function growSoon(grow: () => void) {
+function growSoon(grow: () => void): () => void {
   ungrown.add(grow);
-  if (growWait !== null) {
-    if (growWait.frame !== null) cancelAnimationFrame(growWait.frame);
-    if (growWait.task !== null) clearTimeout(growWait.task);
-  }
+  stopGrowWait();
   const wait: { frame: number | null; task: ReturnType<typeof setTimeout> | null } = { frame: null, task: null };
   growWait = wait;
   const later = () => (wait.task = setTimeout(growWindowsNow, 0));
   if (typeof requestAnimationFrame === "undefined") later();
   else wait.frame = requestAnimationFrame(() => (wait.frame = requestAnimationFrame(() => ((wait.frame = null), later()))));
+  // Takes `grow` back (its list went); the wait goes with the last grow it held, whichever frame or task it is on.
+  return () => {
+    if (ungrown.delete(grow) && ungrown.size === 0) stopGrowWait();
+  };
+}
+
+/** Cancels the frame or task the grow waits on. */
+function stopGrowWait() {
+  if (growWait === null) return;
+  if (growWait.frame !== null) cancelAnimationFrame(growWait.frame);
+  if (growWait.task !== null) clearTimeout(growWait.task);
+  growWait = null;
 }
 
 /** Draws now the overscan below the view of every list that waits for it (`growSoon`): when it is asked, and in tests. */
 export function growWindowsNow() {
-  if (growWait !== null) {
-    if (growWait.frame !== null) cancelAnimationFrame(growWait.frame);
-    if (growWait.task !== null) clearTimeout(growWait.task);
-    growWait = null;
-  }
+  stopGrowWait();
   const all = [...ungrown];
   ungrown.clear();
   for (const each of all) each();

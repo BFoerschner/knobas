@@ -2,6 +2,7 @@ import { flushSync } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { checkScale } from "./device-scale.svelte";
+import { trackResidue } from "./residue";
 import { gridLength } from "./windowed";
 import { growWindowsNow, laidOut, landOn, listScrolled, placeWindowsNow, Windowed } from "./windowed.svelte";
 
@@ -917,4 +918,82 @@ test("an on-screen list draws, before it reads where it sits, a window's height 
   expect(before).toEqual([0, 35]);
   expect([win.start, win.end]).toEqual([0, 35]);
   stop();
+});
+
+/**
+ * Animation frames by hand, as `TfPasswords.test.svelte.ts` drives them (e55fa040): `run` runs the frames that are due,
+ * `waiting` is the handles still asked for. Under jsdom a frame is a 16 ms interval, so one left asking is residue.
+ */
+function handFrames() {
+  const frames = new Map<number, FrameRequestCallback>();
+  let handle = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.set(++handle, callback);
+    return handle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => void frames.delete(id));
+  return {
+    run() {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const callback of due) callback(performance.now());
+    },
+    waiting: () => [...frames.keys()],
+  };
+}
+
+// The XML-view branch's finding (2026-11-24): a windowed list's grow waits on two frames and then a task, and the list's
+// teardown dropped none of them, so a list gone within a frame or two of its read left a frame asking, or the task armed.
+test.each([0, 1, 2])(
+  "a windowed list gone %i frames after it reads where it sits leaves no frame or timer of its grow behind",
+  async (ran) => {
+    const frames = handFrames();
+    const tracker = trackResidue();
+    try {
+      document.body.innerHTML = "<div></div>";
+      const win = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+      const stop = $effect.root(() => win.list(document.querySelector("div")!));
+      flushSync();
+      placeWindowsNow();
+      flushSync();
+      for (let n = 0; n < ran; n += 1) frames.run();
+      // The grow still waits: on a frame, or (both frames drawn) on its task.
+      expect(frames.waiting().length + tracker.residue().timers.length).toBeGreaterThan(0);
+
+      stop();
+      expect(frames.waiting()).toEqual([]);
+      expect(tracker.residue().timers).toEqual([]);
+    } finally {
+      tracker.stop();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+test("a list gone while its jump lands leaves no frame behind, and a list attached after it draws as any list does", () => {
+  const frames = handFrames();
+  try {
+    document.body.innerHTML = '<div class="main" style="overflow-y: auto"><ol class="files"></ol></div>';
+    const main = document.querySelector<HTMLElement>(".main")!;
+    let scrolled = 0;
+    Object.defineProperty(main, "scrollTop", { get: () => scrolled, set: (px: number) => (scrolled = px) });
+    Object.defineProperty(main, "clientHeight", { value: 300 });
+    Object.defineProperty(main, "scrollHeight", { value: 50_000 });
+    const files = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+    const stopFiles = $effect.root(() => files.list(document.querySelector<HTMLElement>(".files")!));
+    placed();
+    expect(files.land(300, 0)).toBe(true);
+    expect(frames.waiting().length).toBeGreaterThan(0);
+
+    stopFiles();
+    expect(frames.waiting()).toEqual([]);
+    // The jump is over with its list: a list attached now is not one the jump brought, and draws its overscan's rows.
+    const later = new Windowed({ count: () => 1000, key: (i) => i, estimate: 20 });
+    const stopLater = $effect.root(() => later.list(document.createElement("div")));
+    flushSync();
+    expect(later.end).toBeGreaterThan(0);
+    stopLater();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
