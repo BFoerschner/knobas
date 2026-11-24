@@ -300,6 +300,10 @@ mod tests {
         assert_eq!(image_type(b"GIF89a"), Some("image/gif"));
         assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
         assert_eq!(
+            image_type(b"\0\0\0\x1cftypavif\0\0\0\0"),
+            Some("image/avif")
+        );
+        assert_eq!(
             image_type(b"<?xml version='1.0'?><svg xmlns='a'/>"),
             Some("image/svg+xml")
         );

@@ -348,9 +348,17 @@ mod tests {
 
     #[test]
     fn take_cuts_the_bytes_and_reads_xml_text_with_its_cdata_as_written() {
-        let file = "<a>x &lt; y<![CDATA[ & <raw> ]]>&#x41;</a>";
-        assert_eq!(said(&take(3, 38, TakeAs::XmlText), file), "x < y & <raw> A");
+        // A reference inside CDATA is text as written: `&amp;` there stays five characters.
+        let file = "<a>x &lt; y<![CDATA[ & &amp; <raw> ]]>&#x41;</a>";
+        let to = (file.len() - "</a>".len()) as u64;
+        assert_eq!(
+            said(&take(3, to, TakeAs::XmlText), file),
+            "x < y & &amp; <raw> A"
+        );
         assert_eq!(said(&take(0, 3, TakeAs::Bytes), file), "<a>");
+        // XML's `&apos;` and a character reference written with a capital X.
+        let file = "<a>&#X41;&apos;</a>";
+        assert_eq!(said(&take(3, 15, TakeAs::XmlText), file), "A'");
     }
 
     #[test]
@@ -455,6 +463,14 @@ mod tests {
         );
         assert!(!out.contains("verified") && !out.contains("valid"));
         assert!(ran(&PipeStep::Jwt, b"one.two.three.four").is_err());
+
+        // A token without its signature (two parts) is read, and says it has none; `exp` is written out too.
+        let unsigned =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0NzExIiwiZXhwIjoxNzk1MDAzNjAwfQ";
+        let value: serde_json::Value =
+            serde_json::from_str(&said(&PipeStep::Jwt, unsigned)).expect("JSON");
+        assert_eq!(value["times"]["exp"], "2026-11-18 12:06:40 UTC");
+        assert_eq!(value["signature"], "none");
     }
 
     #[test]
