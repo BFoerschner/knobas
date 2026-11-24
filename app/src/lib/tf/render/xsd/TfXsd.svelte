@@ -243,7 +243,7 @@
     const place = placeOfKey(made.key);
     if (!place.startsWith("el/")) return;
     pushed = true;
-    onplace?.(`${EXAMPLE_PLACE}${place.slice(3)}`, "push", made.example.fileName);
+    onplace?.(`${EXAMPLE_PLACE}${place.slice(3)}`, "push", labelOfPlace(state.current));
   }
   /** The set the opened example is checked against: the explorer's own port, named as the overview names its entry. */
   const against = $derived(st === null || index === null ? null : { port: st.port, name: path.slice(path.lastIndexOf("/") + 1), path, round });

@@ -247,7 +247,7 @@ test("Open in XML view pushes the example's place; there the full XML view stand
   button("Example")!.click();
   await until(() => /\d lines/.test(count()));
   button("Open in XML view")!.click();
-  expect(asked.at(-1)).toEqual(["example/ORDER", "push", "ORDER-example-4711.xml"]);
+  expect(asked.at(-1)).toEqual(["example/ORDER", "push", "ORDER"]);
   place.at = "example/ORDER";
   await until(() => target.querySelector(".tf-xsd-opened .tf-xv-rail") !== null);
   const under = target.querySelector<HTMLElement>(".tf-xsd.tf-xsd-under")!;
