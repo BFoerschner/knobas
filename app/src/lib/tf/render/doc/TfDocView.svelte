@@ -337,9 +337,11 @@
     const held = linkCache.get(n);
     if (held !== undefined) return held;
     const has = files === null ? null : (p: string) => files.has(p) === true;
-    // The first line that holds something path-like asks for the repository's paths.
-    if (files !== null && files.has("") === null && /[\w)]\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(shown)) {
-      files.ask();
+    // The first line that holds something path-like asks for the repository's paths: after the draw, since this runs
+    // while the lines render and the ask writes the repository's state.
+    if (files !== null && pathsTimer === null && files.has("") === null && /[\w)]\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(shown)) {
+      const asked = files;
+      queueMicrotask(() => asked.ask());
       waitForPaths();
     }
     const links = linksIn(shown, path, files === null || files.has("") === null ? null : has);

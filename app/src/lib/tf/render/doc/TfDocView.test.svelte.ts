@@ -234,6 +234,22 @@ test("a path is a link only where the repository holds a file there; an image op
   expect(row(3).querySelector(".tf-xv-link")).toBeNull();
 });
 
+test("paths not read yet are asked for after the lines draw, as the repository page's state is written, and become links when they land", async () => {
+  // The repository page reads its paths into state when asked: an ask made while the lines render would write state
+  // inside the render (Svelte's state_unsafe_mutation, and no lines at all).
+  const read = $state<{ paths: string[] | null }>({ paths: null });
+  const asked = vi.fn(() => {
+    read.paths = ["media/b.png", "README.md"];
+  });
+  const repo = { has: (p: string) => (read.paths === null ? null : p === "" ? true : read.paths.includes(p)), ask: asked, open: vi.fn(), bytes: () => new Promise<Uint8Array>(() => {}) };
+  draw(LINKED, { files: repo });
+  await settle();
+  expect(asked).toHaveBeenCalledTimes(1);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  flushSync();
+  expect(row(4).querySelector(".tf-xv-link.tf-xv-path")?.textContent).toBe("README.md");
+});
+
 test("a value knobas takes for something carries a chip at its line's end, in the first frame its line is drawn after the outline", async () => {
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0NzExIn0.c2lnbmF0dXJl";
   draw(`<a>\n  <token>${jwt}</token>\n  <batch>TW2026A7781KQ40Z9XLMR3</batch>\n</a>`);

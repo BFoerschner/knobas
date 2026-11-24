@@ -81,15 +81,32 @@ const CASES = [
   { name: "open", label: "the order (1,814 lines) opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
   { name: "lines", label: "the order opened from the README, to its first lines", kind: "page", before: go(file("README.md")), act: go(file(ORDER)), sel: LINE_ROWS, watch: LINE_ROWS },
   { name: "again", label: "the order opened again, from the other order", kind: "page", before: go(file(OTHER)), act: go(file(ORDER)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
-  { name: "fold", label: "an ORDER_ITEM folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_ITEM>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
+  { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
   { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
   { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
   { name: "query", label: "a query key, //ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID"), sel: ".tf-xv-qsay b", text: "node" },
   { name: "query-text", label: "a query key, //*[not(*)][contains(., 'https://')]", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//*[not(*)][contains(., 'https://')]"), sel: ".tf-xv-qsay b", text: "node" },
   { name: "query-all", label: "a query key that answers every element, //*", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//*"), sel: ".tf-xv-qsay b", text: "nodes" },
-  { name: "look", label: "the attachment looked at: its chip pressed, the viewer standing", kind: "press", before: go(file(ORDER)), prep: `() => { const b = [...document.querySelectorAll('.tf-dialog .tf-btn, .tf-dclose')].find((x) => /Close/i.test(x.getAttribute('aria-label') ?? x.textContent)); b?.click(); const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<MIME_DATA')); row?.scrollIntoView({ block: 'center' }); }`, act: click(".tf-xv-chip", "PDF"), sel: ".tf-xv-dialog .tf-xv-flow", text: "→" },
+  { name: "look", label: "the attachment looked at: its chip pressed, to the PDF's first page", kind: "press", before: go(file("README.md")), prep: `async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('.tf-xv-dialog .tf-dclose')?.click();
+    location.hash = ${JSON.stringify(file(ORDER))};
+    for (let i = 0; i < 100 && !document.querySelector('.tf-xv-lines .tf-code .tf-l'); i++) await wait(50);
+    await wait(600);
+    // The cases before left the order folded to three levels, and folds stay with the document: unfold it all.
+    document.querySelector('.tf-xv-stepn').click();
+    await wait(300);
+    const box = document.querySelector('.tf-xv-lines .tf-code');
+    box.scrollTop = 1215 * box.querySelector('.tf-l').getBoundingClientRect().height;
+    for (let i = 0; i < 100 && ![...document.querySelectorAll('.tf-xv-chip')].some((c) => c.textContent.includes('PDF')); i++) await wait(50);
+  }`, act: click(".tf-xv-chip", "PDF"), sel: ".tf-xv-dialog .tf-pdf-page canvas" },
 ].filter((k) => only === null || only.includes(k.name));
-if (big) CASES.push({ name: "big", label: "the made 50 MB order opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(BIG)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS });
+// The made 50 MB order: the page's line is to its first lines (the first frame draws them from the text at hand); its
+// carets wait for the worker's outline (the design's section 27: 852 ms in Node), reported as a number, not a press.
+if (big) CASES.push(
+  { name: "big-lines", label: "the made 50 MB order opened from the README, to its first lines", kind: "page", before: go(file("README.md")), act: go(file(BIG)), sel: LINE_ROWS, watch: LINE_ROWS },
+  { name: "big", label: "the made 50 MB order opened from the README, to its carets (the worker's outline)", kind: "outline", before: go(file("README.md")), act: go(file(BIG)), sel: ".tf-xv .tf-xv-caret" },
+);
 
 // An arrow key held down the document, 30 lines: no task over 50 ms, and the worst key's frame.
 const arrows = () =>
@@ -144,7 +161,7 @@ for (const t of throttles) {
       let moved = false;
       for (let i = 0; i < RUNS; i++) {
         await c.js(`(${k.before})()`);
-        await sleep(k.name === "big" ? 4000 : 900);
+        await sleep(k.name.startsWith("big") ? 4000 : 900);
         if (k.prep) {
           await c.js(`(${k.prep})()`);
           await settle();
@@ -159,10 +176,10 @@ for (const t of throttles) {
     const { times, moved } = ran.value;
     times.sort((a, b) => a - b);
     const median = times[Math.floor(times.length / 2)];
-    const limit = line(k.kind, t);
+    const limit = k.kind === "outline" ? Infinity : line(k.kind, t);
     const ok = median <= limit && !moved;
     if (!ok) over++;
-    console.log(`${t}x ${size.name} ${k.label}: ${median.toFixed(1)} ms (line ${limit})${moved ? ", MOVED" : ""} ${ok ? "ok" : "OVER"}  [${times.map((x) => x.toFixed(0)).join(" ")}]`);
+    console.log(`${t}x ${size.name} ${k.label}: ${median.toFixed(1)} ms (${limit === Infinity ? "no line" : `line ${limit}`})${moved ? ", MOVED" : ""} ${ok ? "ok" : "OVER"}  [${times.map((x) => x.toFixed(0)).join(" ")}]`);
   }
   if (only === null || only.includes("arrows")) {
     const ran = await runCase(c, { name: "an arrow key held down the order, 30 lines", throttle: t, prepare: home }, async () => {
