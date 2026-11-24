@@ -37,6 +37,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { stateWord } from "../state-word";
+  import { prStateOver } from "../pr/pr-state.svelte";
   import { toneClass } from "../tone";
   import type { Tone } from "../../ipc/entity";
   import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
@@ -196,7 +197,7 @@
       <div class="tf-lk" data-row="link:{entry.link.id}">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
           ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{how}</span></span
-          >{@render stateOf(entry.other.state ?? null)}<span class="tf-chev" aria-hidden="true">›</span></a
+          >{@render stateOf(prStateOver(entry.other.entity_id, entry.other.state ?? null))}<span class="tf-chev" aria-hidden="true">›</span></a
         >
         <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { if (entry.link.origin === "manual") hold(event, "links", shown.indexOf(entry), entry.link.id, { title: entry.other.title, how, mono: entry.other.kind === "repo" }); onunlink(entry); }} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
       </div>
@@ -221,10 +222,10 @@
         <div class="tf-lk" data-row="{group.key}:{row.id}">
           {#if row.href !== null}
             <a class="tf-lk-go" href={row.href} onclick={onclose}
-              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}<span class="tf-chev" aria-hidden="true">›</span></a
+              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}<span class="tf-chev" aria-hidden="true">›</span></a
             >
           {:else}
-            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}</div>
+            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}</div>
           {/if}
           {#if group.setId !== null}
             <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { hold(event, group.key, rows.indexOf(row), row.id, { title: row.title, how: row.kind, mono: row.kind === kindWord("repo") }); onhide(row); }} aria-label="Hide here: {row.title}">Hide here</button>

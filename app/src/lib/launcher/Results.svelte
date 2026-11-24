@@ -25,6 +25,7 @@
   import { thingOfHash } from "../tf/context/thing";
   import { entityAddress } from "../tf/address";
   import { stateWord } from "../tf/state-word";
+  import { prStateOver } from "../tf/pr/pr-state.svelte";
   import { sentence } from "../tf/inbox/inbox";
   import { cellsOf, whyOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
@@ -179,10 +180,11 @@
     {@const row = rows[index]}
     {#if row && drawsNow(index)}
       {@const cells = cellsOf(hit, group.label)}
+      {@const state = prStateOver(hit.entity_id, hit.state ?? null)}
       <Row
         monogram={group.monogram}
-        tone={hit.state?.tone ?? null}
-        kindName={hit.state ? `${group.label}: ${stateWord(hit.state.text)}` : group.label}
+        tone={state?.tone ?? null}
+        kindName={state ? `${group.label}: ${stateWord(state.text)}` : group.label}
         cell={cells.cell}
         mono={cells.mono}
         title={cells.title}

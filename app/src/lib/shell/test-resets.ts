@@ -184,6 +184,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
+  // A pull request's state as a write this session queued leaves it (the pr-state fix), and its withdrawal listeners.
+  "tf/pr/pr-state.svelte.ts#moves": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
+  "tf/pr/pr-state.svelte.ts#stops": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
+  "tf/pr/pr-state.svelte.ts#listening": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
   // The default renderer per file pattern (#2263), as the backend answered it.
   "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
   "render/pipelines.svelte.ts#namedPipelines": async () => (await import("../render/pipelines.svelte")).namedPipelines.reset(),

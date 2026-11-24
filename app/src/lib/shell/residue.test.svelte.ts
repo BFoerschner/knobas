@@ -2554,6 +2554,8 @@ const CASES: Case[] = [
               codeFacts: () => deferred([]),
               repoPipelines: () => deferred({ pipelines: [], pull_requests: [] }),
               repoBranchPulls: () => deferred([]),
+              // The page's own walk of its repository once it drew (the pr-state fix).
+              walk: () => deferred({ outcome: "refreshed" } as never),
             },
           },
         }),

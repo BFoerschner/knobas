@@ -1764,7 +1764,7 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
     let registry = state.registry.clone();
     app.manage(state);
     let refresh = |id: &str| {
-        knobas_app::commands::sources::refresh_entity(app.handle().clone(), id.to_owned())
+        knobas_app::commands::sources::refresh_entity(app.handle().clone(), id.to_owned(), None)
     };
 
     assert_eq!(
@@ -1777,6 +1777,17 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
             .await
             .unwrap();
     assert!(title.is_some(), "the refreshed item is in the mirror");
+    // A page's own ask (the repository page's walk, the pr-state fix) reads the same, in the background lane.
+    assert_eq!(
+        knobas_app::commands::sources::refresh_entity(
+            app.handle().clone(),
+            "mrf:PAY-231".to_owned(),
+            Some(true)
+        )
+        .await
+        .expect("answers"),
+        EntityRefresh::Refreshed
+    );
     assert_eq!(
         refresh("mrf:PAY-99999").await.expect("answers"),
         EntityRefresh::Gone

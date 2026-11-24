@@ -4,8 +4,10 @@
   Code's row: its number, its title over its author (`code_facts`), its state
   chip, the job it belongs to (`job/open-jobs.ts`) and when it last moved. From
   the mirror (`list_entities`), every state, newest first; a row opens
-  `#/pr/<entity id>`. A pull request this session queued stands first with its
-  chip, *Queued* then *Sent*, until the mirror holds its title (F-242).
+  `#/pr/<entity id>`. A pull request this session queued stands first, *Open*,
+  with *Queued* then *Sent* where its time goes, until the mirror holds its
+  title (F-242); a merge, close or reopen queued this session draws the state
+  it leaves at once (`pr/pr-state.svelte.ts`).
 -->
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
@@ -25,6 +27,7 @@
   import type { EchoListen } from "../queued.svelte";
   import { jumpAcross } from "../opener";
   import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
+  import { stateWord } from "../state-word";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import { Windowed } from "../../shell/windowed.svelte";
@@ -142,9 +145,10 @@
         <tr class="tf-rsent" data-place>
           <td class="tf-prno"></td>
           <td><span class="tf-rowt" tabindex="-1" {@attach arrive}>{echo.text}</span></td>
-          <td><TfStateChip text={echo.state} tone="info" /></td>
+          <!-- Open from the press (the pr-state fix): that is the state the write makes; where its write is goes where the time goes. -->
+          <td><TfStateChip text="open" tone="info" /></td>
           <td></td>
-          <td></td>
+          <td class="tf-dim tf-nowrap">{stateWord(echo.state)}</td>
         </tr>
       {/each}
     </tbody>

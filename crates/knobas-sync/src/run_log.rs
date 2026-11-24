@@ -262,6 +262,13 @@ pub struct RunResult {
 /// how the diagnostics view names the run. It stays an `error` there.
 pub const CANCELLED_MESSAGE: &str = "cancelled: knobas is shutting down";
 
+/// What a run that stood aside for a landed write's read-back is logged with,
+/// ahead of the write's id (ADR-0031 as amended 2026-11-24, the pr-state
+/// fix): knobas stopped it so the write's item is read back at once, and the
+/// run after the write starts again from the same position. Like
+/// [`CANCELLED_MESSAGE`], it says nothing about the source.
+pub const STOOD_ASIDE_PREFIX: &str = "stood aside: a landed write's read-back went first, write ";
+
 /// What a run knobas' own rate limit stopped is logged with, ahead of the
 /// failure's own message, and the one thing that tells its row from a
 /// failure the source caused (#1980).
@@ -289,12 +296,27 @@ impl RunResult {
         }
     }
 
-    /// Whether this is [`cancelled`](Self::cancelled)'s verdict: a run the
-    /// reader stopped, which says nothing about the source (spec #1618,
-    /// ruling A8).
+    /// The verdict for a run that stood aside for write `write_id`'s
+    /// read-back ([`STOOD_ASIDE_PREFIX`]).
+    #[must_use]
+    pub fn stood_aside(write_id: i64) -> RunResult {
+        RunResult {
+            outcome: SyncOutcome::Error,
+            counts: RunCounts::default(),
+            error: Some(format!("{STOOD_ASIDE_PREFIX}{write_id}")),
+            left_out: None,
+        }
+    }
+
+    /// Whether this is [`cancelled`](Self::cancelled)'s verdict, or
+    /// [`stood_aside`](Self::stood_aside)'s: a run knobas or the reader
+    /// stopped, which says nothing about the source (spec #1618, ruling A8).
     #[must_use]
     pub fn was_cancelled(&self) -> bool {
-        self.outcome == SyncOutcome::Error && self.error.as_deref() == Some(CANCELLED_MESSAGE)
+        self.outcome == SyncOutcome::Error
+            && self.error.as_deref().is_some_and(|error| {
+                error == CANCELLED_MESSAGE || error.starts_with(STOOD_ASIDE_PREFIX)
+            })
     }
 
     /// Whether knobas' own rate limit stopped this run
@@ -593,6 +615,8 @@ pub async fn last_finished_of(
 /// stopped it, and a large first sync quit twice would otherwise climb the
 /// ladder for nothing the source did.
 ///
+/// So is a run that stood aside for a landed write ([`STOOD_ASIDE_PREFIX`]).
+///
 /// And so is a run knobas' own rate limit stopped ([`LOCAL_QUOTA_PREFIX`],
 /// #1980): the source was not asked, so the next failure it does cause
 /// waits the rung it would have without the stop.
@@ -610,12 +634,14 @@ pub async fn failures_since_last_ok(
             and finished_at is not null
             and error is distinct from $2
             and not coalesce(starts_with(error, $3), false)
+            and not coalesce(starts_with(error, $4), false)
             and id > coalesce((select max(id) from knobas.sync_run
                                 where source_id = $1 and outcome = 'ok'), 0)",
     )
     .bind(source_id)
     .bind(CANCELLED_MESSAGE)
     .bind(LOCAL_QUOTA_PREFIX)
+    .bind(STOOD_ASIDE_PREFIX)
     .fetch_one(pool)
     .await?;
     Ok(n)

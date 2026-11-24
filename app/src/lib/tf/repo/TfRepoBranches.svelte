@@ -39,6 +39,8 @@
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
+  import { prStateOver } from "../pr/pr-state.svelte";
+  import type { Tone } from "../../ipc/entity";
   import TfKey from "../TfKey.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CodeFacts, ShownView, ViewRow } from "../../ipc/entity";
@@ -371,6 +373,7 @@
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         {@const built = buildsByBranch?.get(row.name)}
+        {@const prState = standing?.pr?.state ? (standing.pr.entityId === null ? { text: standing.pr.state, tone: standing.pr.tone } : prStateOver(standing.pr.entityId, { text: standing.pr.state, tone: standing.pr.tone as Tone | null })) : null}
         <tr data-place {@attach win.row(row.name)} {@attach menuThing(() => ({ kind: "branch-name", repoId, name: row.name }))}>
           <td title={row.name}
             ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
@@ -381,7 +384,7 @@
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if prState}{" "}<TfStateChip text={prState.text} tone={prState.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.mine ? "you" : (row.author ?? "")}</td>
           <td class="tf-rbr-builds tf-nowrap"

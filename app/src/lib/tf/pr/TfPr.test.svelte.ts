@@ -25,6 +25,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { stampLabel } from "../../time/format";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
+import { heardRefresh } from "./pr-state.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { layers } from "../layers.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
@@ -1144,7 +1145,7 @@ const chips = () => [...target.querySelectorAll(".tf-fhead .tf-sub .tf-chip, .tf
 test("a landed close drops its chip and the holds it drove; the source reopening it later does not bring the chip back", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
   await queueClose();
-  expect(chips()).toEqual(["Open", "Closing, queued"]);
+  expect(chips(), "drawn closed at once (the pr-state fix)").toEqual(["Closed", "Closing, queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
   expect(chips()).toEqual(["Closed"]);
@@ -1160,7 +1161,7 @@ test("a close the read still shows open keeps its chip and its holds", async () 
   await queueClose();
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
-  expect(chips()).toEqual(["Open", "Closing, queued"]);
+  expect(chips()).toEqual(["Closed", "Closing, queued"]);
   expect(holdOf("Merge…")).toEqual(["true", "Closing, queued"]);
 });
 
@@ -1175,7 +1176,7 @@ test("a landed merge drops its chip; an edit the queue has not sent keeps its ch
   dialogButton("Save changes").click();
   await settle();
   await queueMerge();
-  expect(chips()).toEqual(["Open", "Saving edit, queued", "Merging, queued"]);
+  expect(chips()).toEqual(["Merged", "Saving edit, queued", "Merging, queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT], "merged") }));
   expect(chips()).toEqual(["Merged", "Saving edit, queued"]);
@@ -1317,6 +1318,119 @@ test("a merge, a close and a reopen each say queued, then sent, and go on the re
     view = null;
     forgetEchoes();
   }
+});
+
+// -- The state a merge, close or reopen leaves, drawn at once (the pr-state fix, 2026-11-24) --
+
+test("a queued merge draws Merged in the header in the draw of the queue's answer, and stays Merged as the read catches up", async () => {
+  let read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  const { sync, follower, sent, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  expect(chips()).toEqual(["Open"]);
+  await queueMerge();
+  expect(chips()).toEqual(["Merged", "Merging, queued"]);
+  expect(text(".tf-fhead .tf-sub")).toMatch(/^Merged /);
+  sent(80);
+  await settle();
+  expect(chips(), "the forge has not said yet: still drawn merged").toEqual(["Merged", "Merging, sent"]);
+  read = prView([COMMENT], "merged");
+  await sync.refreshed(PR, 80);
+  expect(chips()).toEqual(["Merged"]);
+});
+
+test("a close and a reopen each draw the state they leave at once", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
+  await queueClose();
+  expect(chips()[0]).toBe("Closed");
+  unmount(view!);
+  view = null;
+  forgetEchoes();
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
+  button("Reopen…")!.click();
+  flushSync();
+  dialogButton("Reopen pull request").click();
+  await settle();
+  expect(chips()).toEqual(["Open", "Reopening, queued"]);
+});
+
+test("a merge the queue refuses draws the read again: Open", async () => {
+  const read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  const { follower, io } = lifecycle(() => read);
+  const queue = echoFollower();
+  await draw([PR], io, queue.follower);
+  void follower;
+  await queueMerge();
+  expect(chips()).toEqual(["Merged", "Merging, queued"]);
+  queue.hear(80, { id: 80, state: "refused", detail: "405 Method Not Allowed" });
+  await settle();
+  expect(chips()).toEqual(["Open"]);
+});
+
+test("once the merge is sent the page reads its view again at once, not waiting for the item's refresh behind a run", async () => {
+  let read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  let asked = 0;
+  const { follower, sent, io } = lifecycle(() => (asked++, read));
+  await draw([PR], io, follower);
+  await queueMerge();
+  const before = asked;
+  read = prView([COMMENT], "merged");
+  sent(80);
+  await settle();
+  expect(asked, "a read asked on the send").toBeGreaterThan(before);
+  expect(chips(), "the read shows it: the echo goes, no refresh event needed").toEqual(["Merged"]);
+});
+
+test("a merge the forge took without moving the state: once its read-back ended and the row still says open, Merged and its chip go", async () => {
+  const read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  const { follower, sent, io } = lifecycle(() => read);
+  await draw([PR], io, follower);
+  await queueMerge();
+  sent(80);
+  await settle();
+  expect(chips()).toEqual(["Merged", "Merging, sent"]);
+  heardRefresh({ entity_id: PR, write_id: 80, ended: "refreshed" });
+  await settle();
+  expect(chips()).toEqual(["Open"]);
+});
+
+// -- A change made at the forge: the page reads it on its return, and the mirror catches up (the pr-state fix) --
+
+test("a live view that says merged where the mirror's row says open reads the row back from the forge, once", async () => {
+  const probe = refreshProbe();
+  let rows = 0;
+  await draw([PR], ports({ pr: prView([COMMENT], "merged"), refresh: probe.ports, getEntity: async () => (rows++, detail("mara")) }));
+  expect(chips()).toEqual(["Merged"]);
+  expect(probe.refreshed).toEqual([PR]);
+  expect(rows, "the row read again after the refresh").toBe(2);
+  await settle();
+  expect(probe.refreshed, "the same pair asks once").toEqual([PR]);
+});
+
+test("a view and a row that agree ask no refresh", async () => {
+  const probe = refreshProbe();
+  await draw([PR], ports({ refresh: probe.ports }));
+  expect(probe.refreshed).toEqual([]);
+});
+
+test("the window back reads the view again once its last read is 5 s old; a moment away reads nothing", async () => {
+  let asked = 0;
+  let read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  const now = vi.spyOn(Date, "now");
+  let clock = 1_000_000;
+  now.mockImplementation(() => clock);
+  await draw([PR], ports({ entityView: async () => (asked++, read) }));
+  const first = asked;
+  clock += 2_000;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(asked, "2 s away: nothing").toBe(first);
+  read = prView([COMMENT], "merged");
+  clock += 5_000;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(asked).toBe(first + 1);
+  expect(chips()).toEqual(["Merged"]);
+  now.mockRestore();
 });
 
 test("an edit says queued, then sent, and goes on the first live read asked once it is sent; a read before keeps it (#2103)", async () => {
