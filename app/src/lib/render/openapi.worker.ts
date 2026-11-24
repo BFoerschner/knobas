@@ -10,7 +10,7 @@ import { packOpened } from "./openapi-pack";
 
 const sessions = new Map<number, SpecFiles>();
 
-// Faker and randexp, for examples made from a schema (`openapi-fakes.ts`): loaded with the worker, off the page's
+// Faker and randexp, for examples made from a schema (`example-fakes.ts`): loaded with the worker, off the page's
 // thread, while the first spec parses; only a call that makes an example waits for them.
 const fakes = loadFakes(self.navigator?.language).catch(() => {});
 

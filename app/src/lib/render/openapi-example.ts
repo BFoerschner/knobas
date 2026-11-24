@@ -7,7 +7,7 @@
  * - **The order a value is chosen in** (Björn, 2026-11-22): the spec's `example` or `default`; then `enum` or `const`;
  *   then the `format` (date-time, date, uuid, email, uri, ipv4, …); then the `pattern` (randexp, seeded, where it is
  *   simple and bounded); then the property's name (`example-names.ts`: `firstName`, `phone_number`, `plz`,
- *   `versicherungsnummer`, made by Faker, `openapi-fakes.ts`); then the type with its limits. A format or a pattern
+ *   `versicherungsnummer`, made by Faker, `example-fakes.ts`); then the type with its limits. A format or a pattern
  *   beats the name. A password is always a placeholder. `example` is the last resort, for a string whose name the
  *   table does not know.
  * - **A name is read with the thing that holds it** (2026-11-22 polish): a parameter's own name (`org`, `repo`); a
