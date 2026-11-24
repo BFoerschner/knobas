@@ -23,7 +23,7 @@
   import { layers } from "../layers.svelte";
   import TfXIcon from "../TfXIcon.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
-  import { codeRows } from "../fonts.svelte";
+  import { codeRows, fonts } from "../fonts.svelte";
   import type { HighlightJob, LineTokens, RenderPort } from "../../render/port";
   import { findCount, stepMatch } from "../builds/run-reads";
   import { fileHits, firstHitOn, lineOfHit, needles, segments } from "../repo/file-lines";
@@ -69,7 +69,10 @@
     scrolls?: boolean;
     /** A line longer than `clip.over` characters is drawn as its first `clip.keep` and the `tail` snippet. */
     clip?: { over: number; keep: number } | null;
-    /** A row's height in pixels where it is not Source's code row. */
+    /**
+     * A row's height in pixels at code's size of 100 %, where it is not Source's code row (the XML view's): it follows
+     * code's size, and a line spacing taller than it.
+     */
     rowHeight?: number | null;
     /** What the lines' box is called, for a screen reader. */
     label?: string | null;
@@ -109,13 +112,32 @@
   const rowsOf = codeRows(13, 1.6);
   // svelte-ignore state_referenced_locally
   const fixed = rowHeight;
+  /** A fixed row now: its height at 100 % times code's size, on the screen's pixels, and never under code's own row. */
+  const fixedNow = (at: number) => {
+    const dpr = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
+    return Math.max(Math.round(at * (fonts.size("code") / 100) * dpr) / dpr, fonts.codeRow(13, 1.6));
+  };
+  /** The fixed row's height drawn: it changes with code's size, the list taking its rows by the ratio. */
+  let tall = $state(fixed === null ? null : fixedNow(fixed));
   const win = new Windowed<number>({
     count,
     key: (i) => shownAt(i),
-    estimate: fixed ?? rowsOf.estimate,
+    // svelte-ignore state_referenced_locally
+    estimate: tall ?? rowsOf.estimate,
     // svelte-ignore state_referenced_locally
     from: wholeUpTo + 1,
-    textSize: fixed === null ? rowsOf.textSize : null,
+    textSize:
+      fixed === null
+        ? rowsOf.textSize
+        : (heard) =>
+            fonts.onCodeRows(() => {
+              const was = tall ?? fixed;
+              const now = fixedNow(fixed);
+              if (now === was) return;
+              // The rows take it from `rowSize` below; the list measures them again once they have.
+              tall = now;
+              heard(now / was);
+            }),
     // svelte-ignore state_referenced_locally
     scrolls,
   });
@@ -362,8 +384,6 @@
     code?.prepend(el);
     return () => el.remove();
   }
-  // svelte-ignore state_referenced_locally
-  const tall = rowHeight;
   function rowSize(node: HTMLElement) {
     if (tall !== null) node.style.setProperty("--tf-row", `${tall}px`);
   }
