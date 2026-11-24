@@ -3,8 +3,7 @@
  * test needs no bridge. Each is wrapped rather than referenced, so importing
  * this module calls nothing.
  */
-import { listen as tauriListen } from "@tauri-apps/api/event";
-import { SharedListeners } from "../../ipc/shared-listen";
+import { windowListen } from "../../ipc/shared-listen";
 
 import {
   artifactBytes,
@@ -145,11 +144,7 @@ export async function readRunParameters(runId: string): Promise<StartValue[]> {
   );
 }
 
-/**
- * The bridge's listeners, one per event for the window (`shared-listen.ts`): a run opened from a pipeline page, or the
- * other way, hears the same events and sends no listen or unlisten for them.
- */
-const bridgeListeners = new SharedListeners((event, handler) => tauriListen(event, handler));
+
 
 export const BRIDGE: PipelinePorts = {
   older: (pipelineId, before) => olderPipelineRuns(pipelineId, before),
@@ -165,7 +160,9 @@ export const BRIDGE: PipelinePorts = {
   deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),
   repoBranches: (repoId) => readRepoBranches(repoId),
   runParameters: (runId) => readRunParameters(runId),
-  listen: (event, handler) => bridgeListeners.listen(event, handler),
+  // One listener per event for the window (`shared-listen.ts`): a run opened from a pipeline page, or the other way,
+  // hears the same events and sends no listen or unlisten for them.
+  listen: (event, handler) => windowListen(event, handler),
   follower: () => writeFollower(),
   refusedWrites: (asks) => refusedWrites(asks),
   getEntity: (entityId) => getEntity(entityId),

@@ -17,7 +17,8 @@ const bridge = vi.hoisted(() => {
 vi.mock("@tauri-apps/api/event", () => ({ listen: bridge.listen }));
 
 import { BRIDGE } from "../tf/builds/pipeline-ports";
-import { SharedListeners } from "./shared-listen";
+import { watchEchoes } from "../tf/queued.svelte";
+import { SharedListeners, windowListen } from "./shared-listen";
 
 afterEach(() => {
   bridge.listen.mockClear();
@@ -78,4 +79,27 @@ test("a listener the bridge refused is asked for again by the next page", async 
   await expect(shared.listen("refused", () => {})).rejects.toThrow("no bridge");
   await shared.listen("refused", () => {});
   expect(listen).toHaveBeenCalledTimes(2);
+});
+
+// The ux30 end gate, Windows: a repository's first open sent nine listen messages as its page and its tab each heard the
+// same events. Its parts hear them through the window's listeners now, as Builds' pages do.
+test("the parts of a page that hear the same events share the window's one listener for each, with Builds' pages", async () => {
+  const stopEchoes = watchEchoes("repo", () => {});
+  const stopAgain = watchEchoes("repo-files", () => {});
+  await vi.waitFor(() => expect(bridge.listen).toHaveBeenCalled());
+  const events = new Set(bridge.listen.mock.calls.map(([event]) => event));
+  // One bridge listener an event, however many parts hear it.
+  expect(bridge.listen).toHaveBeenCalledTimes(events.size);
+  const [event] = [...events];
+  const heard: unknown[] = [];
+  const stopBuilds = await BRIDGE.listen(event!, ({ payload }) => heard.push(payload));
+  const stopOwn = await windowListen(event!, () => {});
+  expect(bridge.listen).toHaveBeenCalledTimes(events.size);
+  stopEchoes();
+  stopAgain();
+  stopBuilds();
+  stopOwn();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(bridge.unlisten).toHaveBeenCalledTimes(events.size);
 });

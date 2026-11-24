@@ -259,7 +259,7 @@
     type EntityRow,
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { listen as tauriListen } from "@tauri-apps/api/event";
+  import { windowListen } from "../../ipc/shared-listen";
   import type { EscTarget } from "../escape";
   import {
     branchOptions,
@@ -676,7 +676,7 @@
   $effect(() => {
     if (!ready || repoId === null) return;
     const id = repoId;
-    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
     void listen(EVENTS.viewFresh, ({ payload }) => {
@@ -715,7 +715,7 @@
   $effect(() => {
     const from = sourceId;
     if (!ready || from === null || !visible) return;
-    const listen = untrack(() => ports.listen) ?? ((event, handler) => tauriListen(event, handler));
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
     let live = true;
     let stop: (() => void) | null = null;
     let missed = false;

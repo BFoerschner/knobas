@@ -10,7 +10,7 @@
  * Each handler hears the events in the order they came, in the order the handlers joined. A handler that throws does not
  * keep the others from hearing it; its error is thrown again on its own.
  */
-import type { EventCallback, UnlistenFn } from "@tauri-apps/api/event";
+import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 
 type Listen = (event: string, handler: EventCallback<unknown>) => Promise<UnlistenFn>;
 
@@ -27,6 +27,11 @@ interface Shared {
 export class SharedListeners {
   readonly #listen: Listen;
   readonly #events = new Map<string, Shared>();
+
+  /** Forgets every event's listener, without a word to the bridge: a test's fresh window. */
+  forget(): void {
+    this.#events.clear();
+  }
 
   constructor(listen: Listen) {
     this.#listen = listen;
@@ -75,4 +80,21 @@ export class SharedListeners {
       });
     };
   }
+}
+
+/**
+ * The window's listeners: Builds' pages, and a repository's page and its tabs, whose parts heard the same events each with
+ * a listener of its own (the ux30 end gate, Windows: a repository's first open sent nine listen messages in the task that
+ * built it, each a request of about 2.5 ms at CPU 6x in WebView2).
+ */
+const windowListeners = new SharedListeners((event, handler) => tauriListen(event, handler));
+
+/** As Tauri's `listen`, through the window's one listener per event. */
+export function windowListen<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+  return windowListeners.listen(event, handler);
+}
+
+/** Tests only: the window's listeners forgotten, so a test's own bridge is the one the next page asks. */
+export function forgetWindowListeners(): void {
+  windowListeners.forget();
 }
