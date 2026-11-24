@@ -36,6 +36,13 @@ source="confluence"`): the store kept a removed source's setting until the next 
 still routed to it. The shell read the settings again when the source list gained a source; it now does when the
 list gains or loses one (`SiteStore.differs`, which replaces `lacks`). `site.test.ts`.
 
+## After the fixes, in the Mac window
+
+The debug build on a scratch `HOME`, the page from the dev server with the change, XWiki twice on one server (*XWiki*
+and *XWiki two*, both opening inside knobas): *Open in XWiki two* on XWiki two's page made XWiki two's own site
+(`site made source="xwiki2"`, its own store, so XWiki's sign-in page), and Settings › Sources › XWiki two › Site said
+"Kept since Nov 24" with *Forget…* in the same run.
+
 ## The rest of the run, all passing
 
 - **Windows, Passwords against the real Pleasant 9.5.4 VM** (through a front of the agent's own on WSL's loopback,
@@ -59,7 +66,24 @@ list gains or loses one (`SiteStore.differs`, which replaces `lacks`). `site.tes
   origin's page loaded; the vault page's loads then reached that origin only; *Remove* in Settings remade it in 0.37 s
   and it got nothing again. After a restart the site opened signed in at a folder (`/WebClient/Main?itemId=…`, one 302,
   no sign-in POST).
-- **Saved sign-in, XWiki** (Mac window and Windows window) **and Confluence** (Windows): saved; filled on the declared
+- **The Mac window, Passwords against the VM** (a TLS front with a loopback leaf from the testenv CA the Mac trusts):
+  the writer (*Connected as tomasz.wojcik · Password Server 9.5.4.0 · 741 ms*), 20 entries in 30 folders, the filter,
+  the comment rule, PSP with none, the one-time code, the attachment, *Edit* cleared and put back exactly; after a quit
+  and a new start the password showed with nothing entered again (the demo profile's credential file); the reader's
+  PSP entries refused with *Show* and *Copy* disabled; both removed. *Open web interface* filled the form
+  (`RememberMe=true`, a lasting `.PleasantIdentity.ApplicationCookie`) and the web client opened, the rule list in
+  3.0 ms; the probe reached nothing (`RTCPeerConnection` undefined, every other-origin load refused, the own fetch 200);
+  a folder's *Open web interface* took one 302 to `/WebClient/Main?itemId=<the folder>`.
+- **Saved sign-in, XWiki and Confluence** (Mac window and Windows window): saved; filled on the declared
   page by itself with remember me (`j_rememberme=true`; Confluence's JSON `rememberMe=true`); after a quit and a new
   start the page opened signed in with nothing filled; a wrong password got one try and "⟨source⟩ did not take the
   saved sign-in"; *Remove* went back to *None*. No log line holds a password.
+- **Linux, the real window under Xvfb on WSL** (owed from earlier gates): the Code page's rows held still under real
+  pointer moves (0 of 15 rows moved; in the hovered row 0 of 10 cells moved while its button showed); the pipeline page
+  with PAY-231 chosen drew *Run on feature/PAY-231-sepa-retry* in its first frame after the press (298 ms) and nothing
+  moved in the 5 s after (the trips' late answers, mock corpus); the folder-render main path after 9fd9a7c7 on the real
+  backend: live Gitea at its https front, a scratch repository of two commits, cloned from the Code page, a folder
+  renderer of the agent's own (`javac` and `jar` into `{outdir}`), the two commits' diff with *Rendered*: greeter.jar as
+  *Bytes | Rendered*, `greeter · JAR · Java 26`, `Added.class` added, `Greeter.class and 1 nested class` changed,
+  `notes.txt` changed at the same size, "2 changed, 1 added; 1 the same", styled, and its hunks holding their grid under
+  *Split*. The scratch repository was deleted afterwards.
