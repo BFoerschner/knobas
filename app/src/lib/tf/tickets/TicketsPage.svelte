@@ -794,15 +794,15 @@
   }
   /**
    * How many of a show-every-ticket column's cards its landing frame draws (the ux30 end gate, Windows, Fable's ruling):
-   * the cards the window's height holds, each reckoned at its floor (`cardFloor`, never taller than it draws) and one
-   * more, at most {@link COLUMN_CAP}. The window's height from the column's top would hold fewer, so no card on screen
-   * waits. A column wholly past the window's right edge, where its board starts at the window's left at the latest,
+   * the cards the window's height below the board's top holds, each reckoned at its floor (`cardFloor`, never taller
+   * than it draws) and one more, at most {@link COLUMN_CAP}. The height from the column's own top, under its head, would
+   * hold fewer, so no card on screen waits. A column wholly past the window's right edge, where its board starts at the window's left at the latest,
    * draws one card, so it says nothing of being empty; the rest of every column draws the frame after, below them.
    */
   function landingShare(cards: MiniBoardCard[], index: number): number {
     const width = innerWidth.current ?? 1440;
     if (index * (columnWidth(width) + COLUMN_GAP) >= width) return 1;
-    const height = window.innerHeight;
+    const height = window.innerHeight - cardsTop;
     let used = 0;
     let fit = 0;
     for (const card of cards) {
@@ -813,6 +813,14 @@
     }
     return Math.min(COLUMN_CAP, fit + 1);
   }
+  /**
+   * Where the board's cards start on screen, as the scroller last laid out said (`fbarHeight`): the window's height
+   * below it is what a column shows. 0 until it has, which reckons the whole window, never fewer cards than show. A
+   * column's head stands between them, so this still reckons more room than a column has.
+   */
+  let cardsTop = 0;
+  /** The scroller's bar height (`--tf-fbar-h`) and where its cards start, from one observer. */
+  const boardHeights = (wrap: HTMLElement) => fbarHeight(wrap, (px) => (cardsTop = px));
   /** The room between two columns and two cards (`tickets.css`'s `.tf-cols` and `.tf-cards` gaps). */
   const COLUMN_GAP = 8;
   const CARD_GAP = 6;
@@ -1439,7 +1447,7 @@
     </div>
   </nav>
 
-  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach fbarHeight} {@attach drag.attach}>
+  <TfScroller class="tf-board-wrap{lanesDrawn > 1 ? ' tf-lanes' : lanesDrawn === 1 ? ' tf-lane-one' : ''}" {@attach boardHeights} {@attach drag.attach}>
     {#if subtasksOf !== null || back !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
       <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
