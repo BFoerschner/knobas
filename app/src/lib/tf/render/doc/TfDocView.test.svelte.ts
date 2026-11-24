@@ -461,7 +461,7 @@ test("two repositories declare it: the head asks; Point to a file… picks one, 
     { namespace: ns("www.opentrans.org/XMLSchema/2.1"), location: "../schemas/opentrans/opentrans_2_1.xsd", to: { repo: "gitea:acme/schemas", path: "opentrans/opentrans_2_1.xsd", name: "acme/schemas" } },
   ]);
   expect(words(target.querySelector(".tf-xv-verdict"))).toContain("5 departures");
-  expect(words(target.querySelector(".tf-xv-head"))).toContain("you pointed to it");
+  expect(words(target.querySelector(".tf-xv-head"))).toContain("Against opentrans_2_1.xsd, found where you pointed.");
 });
 
 test("a document whose schema is at an address is offered it; Download it keeps the file and checks the document", async () => {
