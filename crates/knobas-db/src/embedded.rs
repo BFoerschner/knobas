@@ -58,10 +58,10 @@ const HOST: &str = "127.0.0.1";
 
 /// Binary name of `pg_ctl` on this platform.
 ///
-/// Read only below `test-util`, by the immediate-stop builder the two
-/// disposable-server stops share; the shipped build reaches `pg_ctl` through
-/// `postgresql_embedded` alone.
-#[cfg(feature = "test-util")]
+/// Read by the server's [supervisor](crate::supervisor), and below
+/// `test-util` by the immediate-stop builder the two disposable-server stops
+/// share; the shipped quit reaches `pg_ctl` through `postgresql_embedded`.
+#[cfg(any(unix, feature = "test-util"))]
 pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl.exe"
 } else {
@@ -287,6 +287,11 @@ pub struct EmbeddedDb {
     /// one) and for an externally managed `existing_url`, which is never ours
     /// to stop.
     stop_settings: Option<Settings>,
+    /// Stops the server if this process ends while the handle is alive, the
+    /// display's end on Linux above all ([`crate::supervisor`]). `None` for a
+    /// server this process does not own and where none could be started.
+    /// Before `owner_lock`, so a drop kills it before the lock is released.
+    supervisor: Option<crate::supervisor::Supervisor>,
     /// Held for this handle's life when this process is responsible for
     /// stopping the server. `None` only when `existing_url` points at a
     /// server knobas does not manage at all: a managed start either takes
@@ -742,6 +747,7 @@ impl EmbeddedDb {
                 connector,
                 postgresql: None,
                 stop_settings: None,
+                supervisor: None,
                 // Never ours to stop, whatever any lock file says.
                 owner_lock: None,
             });
@@ -902,6 +908,36 @@ impl EmbeddedDb {
         Ok(())
     }
 
+    /// Start the [supervisor](crate::supervisor) of a server this process
+    /// owns, which stops it if this process ends with the server still in its
+    /// hands. A no-op for a server not ours, or one already supervised.
+    async fn supervise(&mut self) {
+        if self.supervisor.is_some() {
+            return;
+        }
+        let (Some(lock), Some(settings)) = (self.owner_lock.as_ref(), self.server_settings())
+        else {
+            return;
+        };
+        let lock = match lock.0.try_clone() {
+            Ok(lock) => lock,
+            Err(error) => {
+                tracing::warn!(%error, "the server has no supervisor");
+                return;
+            }
+        };
+        let data_dir = settings.data_dir.clone();
+        let installation_dir = settings.installation_dir.clone();
+        let at = data_dir.clone();
+        // It stats the installation and forks: off the runtime.
+        self.supervisor = off_runtime(&at, move || {
+            crate::supervisor::spawn(&data_dir, &installation_dir, &lock)
+        })
+        .await
+        .ok()
+        .flatten();
+    }
+
     /// Whether `postmaster.pid` names a live postmaster for this handle's
     /// data directory, read afresh. False for `existing_url`.
     fn server_is_running(&self) -> bool {
@@ -917,9 +953,11 @@ impl EmbeddedDb {
             .or(self.stop_settings.as_ref())
     }
 
-    /// Drop this handle the way a signal does: no `pg_ctl stop`, no pool
-    /// close, the ownership lock released. The server keeps running, owned
-    /// by nobody -- which is exactly the state a `kill -9` leaves behind.
+    /// Drop this handle the way a signal did before the server had a
+    /// [supervisor](crate::supervisor): no `pg_ctl stop`, no pool close, the
+    /// supervisor killed, the ownership lock released. The server keeps
+    /// running, owned by nobody -- the state a `kill -9` to knobas and its
+    /// supervisor both leaves behind, or a build before 2026-11-24 left.
     ///
     /// Test-only, and the only way to reach the orphan case in-process: a
     /// `kill -9` is not something a `#[tokio::test]` can do to itself, and the
@@ -948,8 +986,12 @@ impl EmbeddedDb {
             connector,
             postgresql,
             stop_settings,
+            supervisor,
             owner_lock,
         } = self;
+        // Killed, not left to see this process end: the orphan stands for a
+        // server whose supervisor died too, or one a build before it left.
+        drop(supervisor);
         drop(owner_lock);
         drop(connector);
         drop(stop_settings);
@@ -1160,8 +1202,8 @@ async fn launch_reporting(
 ) -> Result<EmbeddedDb, DbError> {
     let data_dir = settings.data_dir.clone();
 
-    match start_managed(root_dir, settings.clone(), report).await? {
-        Started::Ready(db) => Ok(*db),
+    let mut db = match start_managed(root_dir, settings.clone(), report).await? {
+        Started::Ready(db) => *db,
         Started::StaleLock { port, serving } => {
             // The lock file sent us to a stranger, so it is not describing
             // any live postmaster of ours. Ephemeral ports are recycled:
@@ -1178,18 +1220,22 @@ async fn launch_reporting(
             let locked = data_dir.clone();
             off_runtime(&data_dir, move || clear_lock(&locked)).await??;
             match start_managed(root_dir, settings, report).await? {
-                Started::Ready(db) => Ok(*db),
+                Started::Ready(db) => *db,
                 // Only reachable if something recreated the lock file in
                 // between; at that point it is genuinely ambiguous.
-                Started::StaleLock { port, serving } => Err(DbError::AlreadyRunning {
-                    data_dir,
-                    reason: format!(
-                        "postmaster.pid keeps naming port {port}, which is served by {serving}"
-                    ),
-                }),
+                Started::StaleLock { port, serving } => {
+                    return Err(DbError::AlreadyRunning {
+                        data_dir,
+                        reason: format!(
+                            "postmaster.pid keeps naming port {port}, which is served by {serving}"
+                        ),
+                    });
+                }
             }
         }
-    }
+    };
+    db.supervise().await;
+    Ok(db)
 }
 
 /// Name of the file whose OS lock marks "this process stops the server".
@@ -1538,6 +1584,8 @@ async fn start_managed(
         connector,
         postgresql: Some(postgresql),
         stop_settings: None,
+        // `launch_reporting` starts it, once the start is final.
+        supervisor: None,
         owner_lock: Some(owner_lock),
     })))
 }
@@ -1801,6 +1849,8 @@ async fn adopt(
         // `adopt_recorded_password` gave it the password `initdb` burned in,
         // so this is a handle over the server we are actually connected to.
         stop_settings,
+        // `launch_reporting` starts it, once the start is final.
+        supervisor: None,
         owner_lock: Some(owner_lock),
     })))
 }
