@@ -103,7 +103,7 @@
     type ViewAction,
     type ViewRow,
   } from "../../ipc/entity";
-  import { listSources } from "../../ipc/sources";
+  import { listSources, refreshEntity } from "../../ipc/sources";
   import { pendingComments as sharedPending, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
@@ -116,6 +116,7 @@
   import { drafts } from "../drafts.svelte";
   import { inlineEditor, sendKey } from "../inline-editor";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
   import { stateWord } from "../state-word";
   import type { EscTarget } from "../escape";
   import { initials } from "../tickets/tickets";
@@ -145,7 +146,7 @@
     type PrTab,
     type Verdict,
   } from "./pr";
-  import { dropPrMove, isStateMove, notePrMove, notePrSent, prMoveOf, prStateOver } from "./pr-state.svelte";
+  import { STATE_MOVES, dropPrMove, isStateMove, notePrMove, notePrSent, prMoveOf, prStateOver } from "./pr-state.svelte";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
@@ -303,6 +304,9 @@
   const PR_SURFACE = "pr";
   /** The newest read of the view asked: an older answer is dropped. */
   let viewAsked = 0;
+  /** When the view last answered (window clock): a return reads it again past `AGAIN_AFTER_MS` (the pr-state fix). */
+  let viewReadAt = 0;
+  const AGAIN_AFTER_MS = 5_000;
 
   /**
    * The live view (ADR-0020); each echo its answer shows landed goes (#1542,
@@ -334,6 +338,7 @@
       (answer) => {
         if (!live() || asked !== viewAsked) return;
         view = answer;
+        viewReadAt = Date.now();
         heldFailed = null;
         readMyCommits(answer, () => live() && asked === viewAsked);
         untrack(() => settleEchoes(id, (echo) => landedIn(answer, echo, sentBefore)));
@@ -631,6 +636,43 @@
   let reviewersPanel = $state<HTMLDivElement | null>(null);
   const pageShown = pageVisible();
 
+  // The page shown again, or the window back (Fable's ruling 3, 2026-11-24): a pull request merged or closed at the
+  // forge since the view was read is read now, not on the next run. A moment away reads nothing.
+  onFocusWhileShown(pageShown, () => {
+    const id = prId;
+    if (id !== null && view != null && Date.now() - viewReadAt >= AGAIN_AFTER_MS) readView(id, () => prId === id, true);
+  });
+
+  /**
+   * The live view says another state than the mirror's row (a merge or close at the forge since the last run): the row
+   * is read back from the forge (ADR-0031's refresh), once per pair, so the repository's list, Code and the rest catch
+   * up with what this page draws. Not while a merge, close or reopen queued here is on its way: its own read-back does it.
+   */
+  const refreshedPairs = new Set<string>();
+  $effect(() => {
+    const id = prId;
+    const said = header.state?.text.trim().toLowerCase() ?? null;
+    const held = detail?.row.state?.text.trim().toLowerCase() ?? null;
+    if (id === null || said === null || held === null || said === held || detail?.row.entity_id !== id) return;
+    if (STATE_MOVES.some((kind) => echoOn(id, kind) !== null)) return;
+    const pair = `${id}\u0000${held}\u0000${said}`;
+    if (refreshedPairs.has(pair)) return;
+    refreshedPairs.add(pair);
+    const ask = untrack(() => ports.refresh?.refreshEntity) ?? refreshEntity;
+    // Asked from a promise, so a bridge that throws as it is called is a failed refresh, never the effect's.
+    void Promise.resolve(id).then(ask).then(
+      (ended) => {
+        if (ended.outcome !== "refreshed" || prId !== id) return;
+        return ports.getEntity(id).then(
+          (found) => {
+            if (prId === id) detail = found;
+          },
+          () => {},
+        );
+      },
+      () => {},
+    );
+  });
 
   function closePick() {
     picking = false;
@@ -890,7 +932,11 @@
       <div>
         <h1>{name} {title}</h1>
         <div class="tf-sub">
-          {#if shownState !== null}<TfStateChip text={shownState.text} tone={shownState.tone ?? 'muted'} />{/if}
+          {#if shownState !== null}<!-- Its room fits the longest of the forge's state words, so Open becoming Merged moves nothing after it (Fable's ruling 3). --><TfStateChip
+              class="tf-prstate"
+              text={shownState.text}
+              tone={shownState.tone ?? 'muted'}
+            />{/if}
           {#each detail?.labels ?? [] as label (label)}
             {" "}<span class="tf-lab">{label}</span>
           {/each}

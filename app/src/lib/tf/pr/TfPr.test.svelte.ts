@@ -1393,6 +1393,46 @@ test("a merge the forge took without moving the state: once its read-back ended 
   expect(chips()).toEqual(["Open"]);
 });
 
+// -- A change made at the forge: the page reads it on its return, and the mirror catches up (the pr-state fix) --
+
+test("a live view that says merged where the mirror's row says open reads the row back from the forge, once", async () => {
+  const probe = refreshProbe();
+  let rows = 0;
+  await draw([PR], ports({ pr: prView([COMMENT], "merged"), refresh: probe.ports, getEntity: async () => (rows++, detail("mara")) }));
+  expect(chips()).toEqual(["Merged"]);
+  expect(probe.refreshed).toEqual([PR]);
+  expect(rows, "the row read again after the refresh").toBe(2);
+  await settle();
+  expect(probe.refreshed, "the same pair asks once").toEqual([PR]);
+});
+
+test("a view and a row that agree ask no refresh", async () => {
+  const probe = refreshProbe();
+  await draw([PR], ports({ refresh: probe.ports }));
+  expect(probe.refreshed).toEqual([]);
+});
+
+test("the window back reads the view again once its last read is 5 s old; a moment away reads nothing", async () => {
+  let asked = 0;
+  let read = prView([COMMENT, EDIT, CLOSE, mergeAction(null)]);
+  const now = vi.spyOn(Date, "now");
+  let clock = 1_000_000;
+  now.mockImplementation(() => clock);
+  await draw([PR], ports({ entityView: async () => (asked++, read) }));
+  const first = asked;
+  clock += 2_000;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(asked, "2 s away: nothing").toBe(first);
+  read = prView([COMMENT], "merged");
+  clock += 5_000;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(asked).toBe(first + 1);
+  expect(chips()).toEqual(["Merged"]);
+  now.mockRestore();
+});
+
 test("an edit says queued, then sent, and goes on the first live read asked once it is sent; a read before keeps it (#2103)", async () => {
   const read = prView([COMMENT, EDIT, mergeAction(null)]);
   const { sync, follower, sent, io } = lifecycle(() => read);

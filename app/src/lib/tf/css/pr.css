@@ -107,3 +107,12 @@
 .tf-prpick button:hover, .tf-prpick button:focus-visible { background: var(--sheet-2); }
 .tf-prnote.tf-prconflict { color: var(--err); }
 .tf-prbuilds > header .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
+
+/* The header's state chip holds the room of the longest of the forge's state words (merged, closed, open), so a state
+   that moves (an own merge drawn at once, a view read behind) moves nothing after it (the pr-state fix, 2026-11-24).
+   The two longer words stand under the chip's own, at no height and unseen, so no text is added to the page. */
+.tf-chip.tf-prstate { display: inline-flex; flex-direction: column; align-items: center; vertical-align: baseline; }
+.tf-chip.tf-prstate::before,
+.tf-chip.tf-prstate::after { order: 2; height: 0; overflow: hidden; visibility: hidden; }
+.tf-chip.tf-prstate::before { content: "Merged"; }
+.tf-chip.tf-prstate::after { content: "Closed"; }
