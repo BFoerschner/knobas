@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
   import { inTextField } from "../../shell/keys";
@@ -128,6 +128,33 @@
     });
     return () => {
       live = false;
+      cancelAnimationFrame(frame);
+      cancel();
+    };
+  });
+
+  /**
+   * The one-time code's type made once the page is idle (`.tf-pw-warm`): its first use at the display size, weight 800,
+   * made a new instance of the face in the layout of the first entry with a code, 26 ms of a 54 ms frame at 6x in
+   * knobas's WebView2 window while ↓ was held through the list (the ux30 end gate, 2026-11-24). A hidden sample in that
+   * type, laid out after the first frames, makes it before anyone gets there.
+   */
+  let warm = $state(false);
+  $effect(() => {
+    if (!m || !visible || untrack(() => warm)) return;
+    let cancel = () => {};
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (typeof requestIdleCallback === "function") {
+          const id = requestIdleCallback(() => (warm = true), { timeout: 1000 });
+          cancel = () => cancelIdleCallback(id);
+        } else {
+          const id = setTimeout(() => (warm = true), 16);
+          cancel = () => clearTimeout(id);
+        }
+      });
+    });
+    return () => {
       cancelAnimationFrame(frame);
       cancel();
     };
@@ -336,6 +363,11 @@
   }
 
   // ---- the entry ----
+  /**
+   * A key that acts on the open entry (C, S, U, O, A, E) pressed while that entry is still being read: it waits for it,
+   * and acts on it once its pane is drawn, never on the entry the pane still shows; another pick drops it.
+   */
+  let waiting: (() => void) | null = null;
   const records = new Map<string, PwEntry>();
   let record = $state<PwEntry | null>(null);
   let entryPane = $state<TfPwEntry | null>(null);
@@ -372,7 +404,11 @@
     }
     let live = true;
     void fetchEntry(id).then((read) => {
-      if (live) record = read;
+      if (!live) return;
+      record = read;
+      const run = waiting;
+      waiting = null;
+      if (run && read?.id === id) void tick().then(run);
     });
     return () => {
       live = false;
@@ -390,6 +426,7 @@
   });
 
   function pick(e: Entry): void {
+    waiting = null;
     picked = e.id;
     if (where.entry !== null) location.hash = node ? hashOf(node) : "#/passwords";
   }
@@ -481,6 +518,10 @@
     const run = act[key];
     if (!run) return;
     event.preventDefault();
+    if ("csuoae".includes(key) && openId !== null && record?.id !== openId) {
+      waiting = run;
+      return;
+    }
     run();
   }
 
@@ -731,6 +772,7 @@
               </div>
             </div>
             <div class="tf-pw-entrycol">
+              {#if warm}<div class="tf-pw-entry tf-pw-warm" aria-hidden="true"><span class="tf-pw-code">000<i>000</i></span></div>{/if}
               {#if record && source && openEntry}
                 {#key record.id}
                   <TfPwEntry bind:this={entryPane} entry={record} {source} {m} {word} {timedTicket} {visible} {ports} onretry={() => void retry()} {retrying} {copied} onchange={() => (writing = "change")} onedit={() => (writing = "edit")} {layers} ondown={() => void read()} />

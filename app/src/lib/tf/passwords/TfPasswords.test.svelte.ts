@@ -441,6 +441,39 @@ test("the first open sorts the folders whose rows it draws, not every folder; â†
   }
 });
 
+test("a key that acts on the entry, pressed while the entry just picked is read, waits and acts on that one", async () => {
+  let answer: (() => void) | null = null;
+  const p = ports({
+    entry: vi.fn((id: string) => (id === "pw:a1" ? new Promise<PwEntry>((done) => (answer = () => done(record(id)))) : Promise.resolve(record(id)))),
+  });
+  await open(p, ["in", "pw:pay"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "j" }));
+  await settle();
+  expect(target.querySelector(".tf-pw-entry h2")?.textContent).toBe("pw:a0");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "j" }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s" }));
+  await settle();
+  // pw:a1 is not read yet: the pane still draws pw:a0, and nothing of pw:a0 is shown.
+  expect(target.querySelector(".tf-pw-entry h2")?.textContent).toBe("pw:a0");
+  expect(p.show).not.toHaveBeenCalled();
+  answer!();
+  await settle();
+  expect(target.querySelector(".tf-pw-entry h2")?.textContent).toBe("pw:a1");
+  expect(vi.mocked(p.show).mock.calls.map((call) => call[0])).toEqual(["pw:a1"]);
+});
+
+test("the one-time code's type is made once the page is idle, in a hidden sample that takes no room", async () => {
+  await open(ports(), ["in", "pw:pay"]);
+  const frame = () => new Promise((done) => requestAnimationFrame(() => done(true)));
+  await frame();
+  await frame();
+  await new Promise((done) => setTimeout(done, 1100));
+  flushSync();
+  const sample = target.querySelector(".tf-pw-entrycol > .tf-pw-warm");
+  expect(sample?.getAttribute("aria-hidden")).toBe("true");
+  expect(sample?.querySelector(".tf-pw-code")?.textContent).toBe("000000");
+});
+
 test("leaving the page after the filter's index has had its first frame drops the second one too", async () => {
   // The index starts two frames after the page draws. Its teardown cancelled only the first frame's handle, so a page
   // left after that frame had run kept the second one asking: under jsdom an animation frame is a 16 ms interval, which
