@@ -10,7 +10,7 @@
  *   reference is not found in this one (`?elsewhere:<namespace>`).
  * - **A schema opened again** reads its files from the worker's kept trees (by text): only the compile runs again.
  */
-import type { Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
+import type { Checked, Opened, PageAnswer, Row, SchemaIndexWire, SetIndex, TreeRow, UseRow, XsdCall } from "./xsd-answer";
 import type { Elsewhere, Pointed } from "./xsd-locate";
 
 /** Runs one call of one session where the set is kept. */
@@ -207,6 +207,13 @@ export class XsdPort {
   /** The shortest way down the tree to an element: the rows to open, its own last. */
   way(key: string): Promise<string[]> {
     return this.#engine(this.#id, { kind: "way", key }).then((r) => (Array.isArray(r) ? (r as string[]) : []));
+  }
+
+  /** libxml2's verdict on a document against the set (section 24). */
+  check(xml: string): Promise<Checked> {
+    return this.#engine(this.#id, { kind: "check", xml }).then((r) =>
+      r !== null && typeof r === "object" && "state" in r ? (r as Checked) : { state: "not-checked", why: "not compiled", detail: ["The checker stopped."] },
+    );
   }
 
   /** Every value a type's enumeration allows: *Show the other 1,047*. */

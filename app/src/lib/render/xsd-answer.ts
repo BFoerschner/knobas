@@ -34,6 +34,7 @@ import {
   type SimpleShape,
 } from "./xsd";
 import { baseOf, isRemote, type Elsewhere, type How, type Pointed, type SchemaIndex } from "./xsd-locate";
+import { findingWords, type Finding, type Words } from "./xsd-findings";
 import { rx } from "./xsd-pattern";
 import { XS, localOf, nsOf } from "./xsd-xml";
 
@@ -234,6 +235,7 @@ export type XsdCall =
   | { kind: "uses"; key: string }
   | { kind: "values"; key: string; from: number }
   | { kind: "way"; key: string }
+  | { kind: "check"; xml: string }
   | { kind: "close" };
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
@@ -321,6 +323,8 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       return s.set === null ? [] : allValues(s.set, call.key).slice(call.from);
     case "way":
       return wayDown(s, call.key);
+    case "check":
+      return checkWith(s, call.xml, bundled);
     case "close":
       sessions.delete(session);
       return null;
@@ -331,6 +335,25 @@ function opened(set: SchemaSet): Opened {
   const entry = set.docs[0];
   if (entry !== undefined && entry.bad !== null) return { ok: false, error: entry.bad, line: entry.badLine };
   return { ok: true, index: indexOf(set), need: set.need };
+}
+
+// ---- The check (section 24) ----
+
+/** A finding as it crosses: libxml2's, and its words. */
+export interface Departure extends Finding {
+  readonly words: Words;
+}
+export type Checked =
+  | { readonly state: "checked"; readonly findings: readonly Departure[]; readonly total: number; readonly ms: number; readonly compileMs: number; readonly asked: readonly string[] }
+  | { readonly state: "not-checked"; readonly why: string; readonly detail: readonly string[] };
+
+async function checkWith(s: XsdSession, xml: string, bundled: Bundled): Promise<Checked> {
+  const set = s.set;
+  if (set === null) return { state: "not-checked", why: "reading", detail: [] };
+  const { check } = await import("./xsd-check");
+  const answer = await check(set, (p) => s.texts.get(p) ?? bundled.texts.get(p) ?? null, xml);
+  if (answer.state !== "checked") return answer;
+  return { ...answer, findings: answer.findings.map((f) => ({ ...f, words: findingWords(f, (ns, local) => label(set, ns, local)) })) };
 }
 
 // ---- Words ----

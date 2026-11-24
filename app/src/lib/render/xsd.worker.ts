@@ -8,11 +8,12 @@ import { BUNDLED } from "./xsd-known";
 
 const sessions: XsdSessions = new Map();
 
-self.onmessage = (event: MessageEvent<{ id: number; session: number; call: XsdCall }>) => {
+self.onmessage = async (event: MessageEvent<{ id: number; session: number; call: XsdCall }>) => {
   const { id, session, call } = event.data;
   let result: unknown;
   try {
-    result = answerXsd(sessions, session, call, BUNDLED);
+    // A check answers late (libxml2 loads with the first); every other call at once.
+    result = await answerXsd(sessions, session, call, BUNDLED);
   } catch (cause) {
     result = { ok: false, error: cause instanceof Error ? cause.message : String(cause), line: null };
   }
