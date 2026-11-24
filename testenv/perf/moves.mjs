@@ -214,7 +214,10 @@ const PLACES = [
   { name: "xsd-ubl", fixture: true, fake: "fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/files/ubl/xsd/maindoc/UBL-Invoice-2.1.xsd`, hash: `#/repo/${REPO}/files/ubl/`, away: "#/time" },
   // The example (S4): ORDER's page opened by its address, the example beside it from 1,480 px, made in the worker after
   // the page draws; its lines land in the box that holds their room.
-  { name: "xsd-example", fixture: true, fake: "fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/at/el%2FORDER/files/schemas/opentrans/opentrans_2_1.xsd`, hash: `#/repo/${REPO}/at/`, away: "#/time" },
+  { name: "xsd-example", fixture: true, fake: "fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/at/el%2FORDER/schemas/opentrans/opentrans_2_1.xsd`, hash: `#/repo/${REPO}/at/`, away: "#/time" },
+  // The example opened in the XML view (E1), by its address: the explorer lands ORDER underneath, makes the example and
+  // draws the whole view over it, checked; the header names the example in the room the schema's own name held.
+  { name: "xsd-example-open", fixture: true, fake: "fake-xsd", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/at/example%2FORDER/schemas/opentrans/opentrans_2_1.xsd`, hash: `#/repo/${REPO}/at/`, away: "#/time" },
   { name: "json-export", fixture: true, fake: "fake-xml", late: "entity_file_bytes:300", start: "#/time", go: `#/repo/${REPO}/files/exports/orders-2026-11.json`, hash: `#/repo/${REPO}/files/exports/`, away: "#/time" },
   // jq in the JSON view (J2): its answer 400 ms after the key, its marks and rows landing in the room they hold.
   { name: "json-jq-late", fixture: true, fake: "fake-xml", late: "json_query:400", start: `#/repo/${REPO}/files/exports/orders-2026-11.json`, fill: { into: ".tf-xv-qfield input", text: ".orders[] | select(.total > 2000) | .i" }, type: { into: ".tf-xv-qfield input", key: "d" }, hash: null, ready: `${shown} .tf-xv-rrow`, away: "clear" },

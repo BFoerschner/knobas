@@ -139,7 +139,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["L", "Job", "Connections"],
   ["A", "A ticket's page, Tickets", "Assign it: the people picker (ADR-0054)"],
   ["E", "A ticket's page", "Edit the summary (ADR-0054)"],
-  [ZEN_KEY_LABEL, "A file on the Code page: Markdown, PDF, JAR, an image, an API spec", "Zen mode: the file alone, the repository and its tree hidden; Esc leaves it"],
+  [ZEN_KEY_LABEL, "Any page in Code", "Zen mode: the page alone, its header, tabs and rail hidden; Esc leaves it"],
   ["J K", "A diff", "Next and previous file"],
   ["N P", "A diff", "Next and previous change"],
   ["V", "A diff", "Mark the file viewed"],

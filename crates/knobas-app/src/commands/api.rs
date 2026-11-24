@@ -176,6 +176,63 @@ pub async fn xsd_save_example(name: String, text: String) -> Result<String, IpcE
     Ok(path.display().to_string())
 }
 
+/// A file pipeline over a document knobas holds in memory and no repository
+/// has (an example made from a schema, opened in the XML view: step E1):
+/// `steps` over `text`'s bytes, the file `name`, as `entity_file_piped` runs
+/// them over a file's. A command step runs as saved.
+///
+/// # Errors
+/// The saved command steps cannot be read. A step that fails is an answer.
+#[tauri::command]
+pub async fn text_piped<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    text: String,
+    name: String,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    let commands = commands_for(&app, &steps).await?;
+    Ok(crate::file_pipeline::run_bytes_with(
+        &steps,
+        &commands,
+        text.into_bytes(),
+        &name,
+        crate::file_pipeline::Limits::default(),
+    )
+    .await)
+}
+
+/// [`text_piped`]'s answer saved to the Downloads folder as `save_as`, as the
+/// value viewer saves over a file; answers the path.
+///
+/// # Errors
+/// As [`text_piped`]; a failed run; the folder or the write.
+#[tauri::command]
+pub async fn text_piped_save<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    text: String,
+    name: String,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+    save_as: String,
+) -> Result<String, IpcError> {
+    let run = text_piped(app, text, name, steps).await?;
+    crate::commands::entity::save_run(run, &save_as).await
+}
+
+/// The saved command steps, read only where `steps` holds a command step.
+async fn commands_for<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    steps: &[crate::file_pipeline::PipeStep],
+) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {
+    if !steps
+        .iter()
+        .any(|step| matches!(step, crate::file_pipeline::PipeStep::Command { .. }))
+    {
+        return Ok(Vec::new());
+    }
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::file_pipeline::saved::command_steps(&pool).await
+}
+
 /// Opens a jq session over a JSON document (the XML view's design, section
 /// 26): the file's bytes as `entity_file_bytes` reads them, or `text` where
 /// the view draws something else than the file (a pipeline's answer).

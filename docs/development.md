@@ -287,10 +287,13 @@ the flow on.
 On macOS and Linux a `SIGTERM`, `SIGINT` or `SIGHUP` is a quit: a logout, a
 service or package manager stopping knobas, a plain `kill`, Ctrl-C under `just
 dev` or a closed terminal runs the same steps and stops the server. A second
-signal during that quit ends knobas at once. That, a `SIGKILL`, a crash or a
-power cut leaves the postmaster running. Start knobas again. The next start
-adopts the running server and takes ownership of it, so the next clean quit
-stops it.
+signal during that quit ends knobas at once. However knobas ends without its
+quit (that second signal, a `SIGKILL`, a crash, or on Linux the display going
+away at a logout), the server's supervisor stops it: a `/bin/sh` named
+`knobas-db-supervisor` beside each server (`knobas_db::supervisor`). Only a
+power cut, or a `SIGKILL` to the supervisor too, leaves the postmaster running.
+Start knobas again. The next start adopts the running server and takes
+ownership of it, so the next clean quit stops it.
 
 A second launch on the default profile focuses the running instance and exits
 before it touches the database. A second `--demo` launch is not caught that

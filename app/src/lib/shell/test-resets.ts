@@ -26,6 +26,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // on, the asks seen whole (and with them the departures' lines). Each test reads its own.
   "tf/render/doc/doc-check.svelte.ts#lastSettings": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
   "tf/render/doc/doc-check.svelte.ts#seenWhole": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
+  // An example's settings, held until knobas quits by schema (E1), and what the header says of an opened one.
+  "tf/render/xsd/example-held.svelte.ts#held": async () => (await import("../tf/render/xsd/example-held.svelte")).forgetHeld(),
   // The hosts a change was confirmed for, until knobas quits (ux31, ADR-0057): each test asks afresh.
   "tf/render/oas.svelte.ts#confirmedHosts": async () => (await import("../tf/render/oas.svelte")).confirmedHosts.clear(),
   // The Passwords page's one read, the folds opened and what the clipboard holds (ADR-0056): each test starts with none.

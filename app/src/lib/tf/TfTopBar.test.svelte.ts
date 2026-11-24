@@ -134,3 +134,37 @@ test("the cog carries the update's dot over its own box, and only while the upda
   }
   for (const box of boxes) expect(box).toEqual(boxes[0]);
 });
+
+test("Zen mode's one button stands after the nav only when the shell gives it, pressed while on (Z1)", () => {
+  expect(target.querySelector(".tf-zenbtn")).toBeNull();
+  unmount(view!);
+  const toggle = vi.fn();
+  const zen = $state({ on: false, toggle });
+  view = mount(TfTopBar, {
+    target,
+    props: {
+      current: "code",
+      job: null,
+      inbox: { count: 0 },
+      badges: { builds: null, monitors: null },
+      timer: { current: null, elapsed: null },
+      onsearch: () => {},
+      ontimer: undefined,
+      ontheme: () => {},
+      get zen() {
+        return zen;
+      },
+    } as never,
+  });
+  flushSync();
+  const button = target.querySelector<HTMLButtonElement>(".tf-top > .tf-zenbtn")!;
+  expect(button.previousElementSibling?.classList.contains("tf-nav")).toBe(true);
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+  expect(button.title).toBe("Zen mode: the page alone, its header, tabs and rail hidden (Z)");
+  button.click();
+  expect(toggle).toHaveBeenCalledTimes(1);
+  zen.on = true;
+  flushSync();
+  expect(button.getAttribute("aria-pressed")).toBe("true");
+  expect(button.title).toBe("Leave Zen mode (Z)");
+});

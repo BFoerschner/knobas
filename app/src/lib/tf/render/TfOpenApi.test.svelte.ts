@@ -222,7 +222,7 @@ test("a page is one worker call, and an operation visited again asks nothing", a
 
 test("a ref's name follows to the schema's page, which pushes the place; Back returns to the operation at its scroll", async () => {
   const places: string[] = [];
-  draw("api/openapi.yaml", PETS_30_YAML, { onplace: (p: string, how: string) => places.push(`${how} ${p}`) });
+  draw("api/openapi.yaml", PETS_30_YAML, { onplace: (p: string, how: string, label: string) => places.push(`${how} ${p}${how === "push" ? ` from ${label}` : ""}`) });
   await settle();
   row("GET /pets/{petId}").click();
   await settle();
@@ -230,7 +230,8 @@ test("a ref's name follows to the schema's page, which pushes the place; Back re
   button("Pet", page())!.click();
   await settle();
   expect(text(page().querySelector(".tf-oas-h"))).toBe("Pet");
-  expect(places.at(-1)).toBe("push schemas/Pet");
+  // The address names the place left: the crumb's Esc says Back to it.
+  expect(places.at(-1)).toBe("push schemas/Pet from GET /pets/{petId}");
   expect(text(page().querySelector(".tf-oas-back"))).toBe("Back to GET /pets/{petId}");
   // The schema's page: merged properties, an example made from it, and who uses it.
   expect(names().slice(0, 5)).toEqual(["id", "name", "status", "parent", "owner"]);

@@ -29,6 +29,8 @@
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
 /* A tab row whose counts come and go holds two figures' room for each (the nothing-moves pass, `TfRepo`). */
 .tf-countroom .tf-count { box-sizing: border-box; min-width: calc(2ch + 12px); text-align: center; vertical-align: baseline; }
+/* Zen mode's one button (Z1), in Code only: after the nav, where the spacer gives it room and nothing left of it moves. */
+.tf-top > .tf-zenbtn { flex: none; margin-left: 4px; }
 .tf-spacer { flex: 1; }
 .tf-search {
   display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--field);

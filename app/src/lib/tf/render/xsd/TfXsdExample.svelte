@@ -5,16 +5,19 @@
   - **The controls** are one grid, a label and its control a row, so nothing moves when a value changes: *Parts*
     (*Required only*, *Everything*), *Repeats* (1, 2, 3, of what may repeat), *Values* (the language, the seed,
     *Another*, which `A` presses too). A choice is picked on its own line of the reference.
-  - **Check** (libxml2, in the schema's worker), *Copy* and *Save to Downloads* stand under them with the line count,
+  - **Check** (libxml2, in the schema's worker), *Copy*, *Save to Downloads* and *Open in XML view* stand under them
+    with the line count,
     then the verdict's line, holding its room, then the notes, then the document, which takes the rest and scrolls by
     itself.
-  - **The document** is drawn as Source draws a file, windowed; a line pressed goes to its element's declaration.
+  - **The document** is a miniature XML view (step E1, Björn 2026-11-24): the XML view's own document without its
+    rail, in the column's width. Folds and their keys, *Levels*, value chips and `Space`, links, and the check's
+    departures at their lines' ends. A line pressed goes to its element's declaration.
   - **Labelled three times**: *Example*, *Made from the schema*; its second line's comment; the saved file's name.
 -->
 <script lang="ts">
-  import TfLines from "../../code/TfLines.svelte";
+  import TfDocView from "../doc/TfDocView.svelte";
   import TfXsdRuns from "./TfXsdRuns.svelte";
-  import { xsdSaveExample } from "../../../ipc/api";
+  import { textPiped, textPipedSave, xsdSaveExample } from "../../../ipc/api";
   import { ipcErrorMessage } from "../../../ipc";
   import { push } from "../../../shell/toasts.svelte";
   import type { RenderPort } from "../../../render/port";
@@ -24,11 +27,14 @@
     st,
     render,
     ongo,
+    onopen = null,
   }: {
     st: XsdState;
     render: RenderPort;
     /** A line pressed: its element's declaration. */
     ongo: (key: string, label: string) => void;
+    /** *Open in XML view*: the example as a place of its own (E1). */
+    onopen?: (() => void) | null;
   } = $props();
 
   /** The element the page shows, where an example can be made from it: a global element's page. */
@@ -69,6 +75,8 @@
     return d === undefined ? k.slice(k.indexOf("}") + 1) : `${d.prefix}${d.local}`;
   };
   function pressed(event: MouseEvent) {
+    // A caret, a fold's count, a value's chip or a link is the view's own.
+    if (event.target instanceof Element && event.target.closest("button, a, [data-xv-link]") !== null) return;
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>(".tf-l[data-n]") : null;
     const n = Number(row?.dataset["n"] ?? 0);
     const to = made?.example.lines[n - 1]?.key ?? null;
@@ -142,6 +150,7 @@
       <button type="button" class="tf-btn tf-sm tf-primary" disabled={made === null || st.verdict === "checking"} onclick={() => void st.checkExample()}>Check</button>
       <button type="button" class="tf-btn tf-sm" disabled={made === null} onclick={() => void copy()}>Copy</button>
       <button type="button" class="tf-btn tf-sm" disabled={made === null} onclick={() => void save()}>Save to Downloads</button>
+      {#if onopen !== null}<button type="button" class="tf-btn tf-sm" disabled={made === null} title="The example as a whole XML view, checked against this schema" onclick={() => onopen?.()}>Open in XML view</button>{/if}
       <span class="tf-dim tf-xsd-excount">{made === null ? "Making it…" : `${lineCount.toLocaleString("en")} lines`}</span>
     </div>
     <div class="tf-xsd-verdict" class:tf-ok={v !== null && v !== "checking" && v.state === "checked" && v.findings.length === 0} class:tf-err={v !== null && v !== "checking" && v.state === "checked" && v.findings.length > 0} class:tf-warn={v !== null && v !== "checking" && v.state !== "checked"} aria-live="polite">
@@ -158,7 +167,15 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="tf-xsd-xml" role="presentation" onclick={pressed}>
       {#if made !== null}
-        <TfLines text={made.example.xml} path="example.xml" {render} find="overlay" scrolls label="The example" wholeUpTo={64} />
+        {@const doc = made.example}
+        <TfDocView
+          inline
+          text={doc.xml}
+          path={doc.fileName}
+          {render}
+          verdict={st.verdict}
+          values={{ run: (steps) => textPiped(doc.xml, doc.fileName, steps), save: (steps, name) => textPipedSave(doc.xml, doc.fileName, steps, name) }}
+        />
       {/if}
     </div>
   {/if}

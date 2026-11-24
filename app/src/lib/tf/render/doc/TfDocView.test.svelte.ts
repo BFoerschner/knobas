@@ -599,3 +599,64 @@ test("jq: a JSON view without a session draws no field; jq's stop says why", asy
   await settle();
   expect(target.querySelector(".tf-xv-qfield")).toBeNull();
 });
+
+// ---- The miniature form (E1): the document alone, a verdict made elsewhere at its lines' ends ----
+
+import type { Checked } from "../../../render/xsd-answer";
+
+const PLAIN = ["<?xml version='1.0'?>", "<r>", "  <b>one</b>", "  <b>two</b>", "  <c>", "    <d/>", "  </c>", "</r>"].join("\n");
+const said = (line: number, xpath: string, text: string): Extract<Checked, { state: "checked" }>["findings"][number] => ({
+  message: text,
+  line,
+  xpath,
+  words: { at: "b", attr: null, kind: "other", text: [{ text }], raw: text, said: true, expected: [], value: null },
+});
+
+test("the miniature form draws the document with its Levels and no rail, query or side column; Q, N and P are its host's", async () => {
+  draw(PLAIN, { inline: true });
+  await settle();
+  expect(target.querySelector(".tf-xv-inline")).not.toBeNull();
+  expect(target.querySelector(".tf-xv-rail")).toBeNull();
+  expect(target.querySelector(".tf-xv-query, input")).toBeNull();
+  expect(target.querySelector(".tf-xv-sidecol")).toBeNull();
+  expect(stepper().length).toBe(3);
+  // Folding keys are the view's own: 1 folds to the root's children.
+  key("1");
+  expect(rows()).toEqual([1, 2, 3, 4, 5, 8]);
+  for (const k of ["q", "n", "p"]) {
+    const event = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+    row(2).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+});
+
+test("a verdict given is placed at its lines' ends once the outline lands, and a new one replaces it", async () => {
+  const one: Checked = { state: "checked", findings: [said(4, "/r/b[2]", "two is not allowed here")], total: 1, ms: 1, compileMs: 0, asked: [] };
+  const props = $state<{ verdict: Checked | "checking" | null }>({ verdict: null });
+  view = mount(TfDocView, {
+    target,
+    props: {
+      text: PLAIN,
+      path: "ORDER-example-4711.xml",
+      render: quiet,
+      engine: localDocEngine(),
+      inline: true,
+      get verdict() {
+        return props.verdict;
+      },
+    },
+  });
+  flushSync();
+  await settle();
+  expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
+  props.verdict = one;
+  await settle();
+  expect([...target.querySelectorAll<HTMLElement>(".tf-xv-bad")].map((r) => Number(r.dataset["n"]))).toEqual([4]);
+  expect(words(row(4).querySelector(".tf-xv-depend"))).toBe("two is not allowed here");
+  props.verdict = "checking";
+  await settle();
+  expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
+  props.verdict = { state: "checked", findings: [said(6, "/r/c/d", "d is missing a part")], total: 1, ms: 1, compileMs: 0, asked: [] };
+  await settle();
+  expect([...target.querySelectorAll<HTMLElement>(".tf-xv-bad")].map((r) => Number(r.dataset["n"]))).toEqual([6]);
+});

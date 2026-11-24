@@ -105,6 +105,9 @@ const FOUND: Record<string, string> = {
   bundled: "among the schemas that come with knobas",
 };
 
+/** How a set open elsewhere was found, in the rail's words after *found*: an example's own (E1). */
+const MADE_FROM = "where the example was made";
+
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1).replace(/^@(repo\/[^/]+|download|knobas)\//, "");
 const dirOf = (p: string) => (p.lastIndexOf("/") === -1 ? "" : p.slice(0, p.lastIndexOf("/") + 1));
@@ -236,6 +239,8 @@ export class DocCheck {
   schema = $state<string | null>(null);
   readonly #engine: XsdEngine;
   #port: XsdPort | null = null;
+  /** A set open elsewhere the document was checked against ({@link runOn}): read, never closed, here. */
+  #borrowed: XsdPort | null = null;
   #run = 0;
 
   constructor(key: string, engine: XsdEngine | null = null) {
@@ -256,6 +261,7 @@ export class DocCheck {
     const run = ++this.#run;
     this.#port?.close();
     this.#port = null;
+    this.#borrowed = null;
     this.found = [];
     this.schema = null;
     /** The outline stands well formed, and this run is still the one: what it found may be drawn. */
@@ -314,18 +320,68 @@ export class DocCheck {
     this.head = { k: "looking", found: against, how };
     const checked: Checked = await (early ?? port.check(text));
     if (run !== this.#run) return;
-    if (checked.state !== "checked") {
-      const quiet = checked.why === "larger than knobas checks";
-      this.head = { k: "not-checked", warn: !quiet, lines: checked.detail.length > 0 ? [...checked.detail] : [checked.why], against };
+    const placed = await this.#place(run, checked, doc, { against, how, readMs, files: index.files.length - 1 }, text, earlyLines);
+    if (hint !== null && placed) sawWhole(hint);
+  }
+
+  /**
+   * A verdict made elsewhere (the example column's *Check*, step E1): its departures placed on their lines by their
+   * paths, as {@link run} places its own. `"checking"` and `null` hold no marks. With `set`, the set it was made with:
+   * the head names it, and the declaration beside a line is read from it.
+   */
+  async take(said: Checked | "checking" | null, doc: DocSession, set: { port: XsdPort; name: string; path: string } | null = null): Promise<void> {
+    const run = ++this.#run;
+    this.#borrow(set);
+    const against = set?.name ?? "";
+    if (said === null || said === "checking") {
+      this.found = [];
+      this.head = said === null ? { k: "idle" } : { k: "looking", found: against === "" ? null : against, how: MADE_FROM };
       return;
     }
-    const lines = (await earlyLines) ?? (await placesOf(doc, text, checked.findings));
+    await this.#place(run, said, doc, { against, how: MADE_FROM, readMs: 0, files: (set?.port.index?.files.length ?? 1) - 1 });
+  }
+
+  /**
+   * The document checked against a set open elsewhere (an example opened from its schema): no schema is looked for,
+   * and the port stays its owner's.
+   */
+  async runOn(set: { port: XsdPort; name: string; path: string }, text: string, doc: DocSession): Promise<void> {
+    const run = ++this.#run;
+    this.#borrow(set);
+    this.found = [];
+    this.head = { k: "looking", found: set.name, how: MADE_FROM };
+    const checked = await set.port.check(text);
     if (run !== this.#run) return;
+    await this.#place(run, checked, doc, { against: set.name, how: MADE_FROM, readMs: 0, files: (set.port.index?.files.length ?? 1) - 1 });
+  }
+
+  #borrow(set: { port: XsdPort; path: string } | null): void {
+    if (set === null) return;
+    this.#port?.close();
+    this.#port = null;
+    this.#borrowed = set.port;
+    this.schema = set.path;
+  }
+
+  /**
+   * A verdict's departures put on their lines, and the head said. With `text`, the lines a document of the same text was
+   * given are taken without asking (`placesOf`); `early`, lines asked beside the outline. Whether it was checked and
+   * placed.
+   */
+  async #place(run: number, checked: Checked, doc: DocSession, head: { against: string; how: string; readMs: number; files: number }, text: string | null = null, early: Promise<readonly number[] | null> | null = null): Promise<boolean> {
+    if (checked.state !== "checked") {
+      const quiet = checked.why === "larger than knobas checks";
+      this.found = [];
+      this.head = { k: "not-checked", warn: !quiet, lines: checked.detail.length > 0 ? [...checked.detail] : [checked.why], against: head.against === "" ? null : head.against };
+      return false;
+    }
+    const lines = (await early) ?? (text !== null ? await placesOf(doc, text, checked.findings) : await doc.places(checked.findings.map((f) => f.xpath)));
+    if (run !== this.#run) return false;
     this.found = checked.findings
       .map((f: Departure, i) => ({ line: lines[i]! > 0 ? lines[i]! : f.line, words: f.words, raw: f.message.trim() }))
       .sort((a, b) => a.line - b.line);
-    this.head = { k: "checked", count: checked.findings.length, total: checked.total, against, how, ms: checked.ms + checked.compileMs, readMs, files: index.files.length - 1 };
-    if (hint !== null) sawWhole(hint);
+    this.head = { k: "checked", count: checked.findings.length, total: checked.total, against: head.against, how: head.how, ms: checked.ms + checked.compileMs, readMs: head.readMs, files: head.files };
+    return true;
   }
 
   /** The document is not well formed: nothing of a check stands, and the head is the outline's. */
@@ -352,7 +408,7 @@ export class DocCheck {
 
   /** The declaration of the element on a line, from the schema's set (section 26). */
   async declarationOf(line: number, doc: DocSession): Promise<(PageAnswer & { found: number }) | null> {
-    const port = this.#port;
+    const port = this.port;
     if (port === null || this.head.k !== "checked") return null;
     const names = await doc.names(line);
     if (names.length === 0) return null;
@@ -361,17 +417,18 @@ export class DocCheck {
 
   /** The session the schema's set is read in: the declaration beside the document opens its rows through it. */
   get port(): XsdPort | null {
-    return this.#port;
+    return this.#port ?? this.#borrowed;
   }
 
   /** The set's index, for *Open the schema*. */
   get index(): SetIndex | null {
-    return this.#port?.index ?? null;
+    return this.port?.index ?? null;
   }
 
   close(): void {
     this.#run += 1;
     this.#port?.close();
     this.#port = null;
+    this.#borrowed = null;
   }
 }
