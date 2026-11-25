@@ -124,7 +124,8 @@
   import { sideWidths } from "./side-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import { pipelineHash } from "./builds/builds";
-  import { isRecent } from "./builds/recent";
+  import { RECENT_HASH, isRecent } from "./builds/recent";
+  import { buildsView } from "./builds/builds-view.svelte";
   import { sessionValue } from "./filter/filter-state.svelte";
   import TfPage from "./TfPage.svelte";
   import { flipZen, isZenKey, zen } from "./zen.svelte";
@@ -422,6 +423,8 @@
     if (section === "builds" && route.view === "full" && route.rest[0] !== undefined) {
       // *Recent* (2026-11-25) is a place of Builds as a pipeline is.
       if (!onRun && isRecent(route.rest)) sectionTabs.builds = hash;
+      // A run's section page is the view its reader keeps: *Recent* once chosen, else the run's pipeline.
+      else if (onRun && buildsView.value === "recent") sectionTabs.builds = RECENT_HASH;
       else if (route.rest[0] === lastPipeline.value) sectionTabs.builds = onRun ? pipelineHash(route.rest[0]) : hash;
       return;
     }

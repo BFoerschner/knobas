@@ -4,6 +4,7 @@
  * mounted with stand-ins for every store and read.
  */
 import { createRawSnippet, flushSync, mount, tick, unmount, type Snippet } from "svelte";
+import { buildsView } from "./builds/builds-view.svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
@@ -972,6 +973,23 @@ test.each([
   navEntry(name).click();
   await settle();
   expect(location.hash, "pressed again, the section's own page").toBe(again);
+  last.value = null;
+});
+
+test("Builds' entry comes back to Recent, and from a run opened there, pressed again, goes to Recent while it is the kept view (2026-11-25)", async () => {
+  start({ nav: windowNav });
+  const last = sessionValue("builds-last-pipeline");
+  last.value = "pipe:a";
+  buildsView.choose("recent");
+  await at("#/builds/recent");
+  await at("#/inbox");
+  expect(navEntry("Builds").getAttribute("href"), "Recent is a place of Builds").toBe("#/builds/recent");
+  await at("#/builds/recent");
+  await at("#/build/pipe%3Aa/run-1");
+  expect(navEntry("Builds").getAttribute("href"), "on a run, the section's page is the kept view").toBe("#/builds/recent");
+  buildsView.choose("pipelines");
+  await at("#/build/pipe%3Aa/run-2");
+  expect(navEntry("Builds").getAttribute("href"), "with Pipelines kept, the run's pipeline").toBe("#/builds/pipe%3Aa");
   last.value = null;
 });
 
