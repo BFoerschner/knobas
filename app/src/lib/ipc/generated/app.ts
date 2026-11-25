@@ -202,7 +202,12 @@ running: FolderRunState | null,
 /**
  * The slot's lane (ux26): `""` for the Files tab and Settings, a side of a comparison otherwise.
  */
-lane: string, };
+lane: string, 
+/**
+ * What the slot showed was dropped (a command changed it, ADR-0060 amended 2026-11-25): a page showing it asks with
+ * `open`, so it is made again as on a first open.
+ */
+dropped: boolean, };
 
 /**
  * The answer to a page's ask.

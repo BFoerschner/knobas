@@ -5,7 +5,7 @@
  * It asks the backend (`folder_render`) and is answered at once: what is kept for the folder as it is now, else the
  * last drawing of it, and where the run is. It asks with `open` only while it is shown (`start`): a kept or hidden page
  * draws what is kept and starts nothing. Each `folder-render:moved` for this folder asks again with `look`, its
- * progress taken without an ask. `press` is *Run again* or *Stop*. Leaving drops a run still waiting for a place
+ * progress taken without an ask; one that says the folder was dropped asks with `open` while it is shown. `press` is *Run again* or *Stop*. Leaving drops a run still waiting for a place
  * (`folder_render_leave`).
  *
  * Built inside a component's script: its effects are the component's. `at` answering `null` asks nothing.
@@ -131,7 +131,9 @@ export class FolderRun {
             this.view = { ...this.view, running: moved.running };
             return;
           }
-          untrack(() => this.#answer("look"));
+          // What it showed was dropped (a command changed the generated folder, ADR-0060 amended 2026-11-25): made again
+          // where the page is shown, as on a first open.
+          untrack(() => this.#answer(moved.dropped === true && this.#at()?.start === true ? "open" : "look"));
         })
         .then((unlisten) => {
           if (live) off = unlisten;

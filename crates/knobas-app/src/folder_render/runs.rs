@@ -203,6 +203,10 @@ pub struct FolderRenderMoved {
     /// The slot's lane (ux26): `""` for the Files tab and Settings, a side of a comparison otherwise.
     #[serde(default)]
     pub lane: String,
+    /// What the slot showed was dropped (a command changed it, ADR-0060 amended 2026-11-25): a page showing it asks with
+    /// `open`, so it is made again as on a first open.
+    #[serde(default)]
+    pub dropped: bool,
 }
 
 /// What an ask may start.
@@ -484,6 +488,10 @@ impl Runs {
     }
 
     fn tell(&self, slot: &Slot, running: Option<FolderRunState>) {
+        self.tell_as(slot, running, false);
+    }
+
+    fn tell_as(&self, slot: &Slot, running: Option<FolderRunState>, dropped: bool) {
         let listener = self
             .listener
             .lock()
@@ -496,6 +504,7 @@ impl Runs {
                 folder: slot.folder.clone(),
                 running,
                 lane: slot.lane.clone(),
+                dropped,
             });
         }
     }
@@ -1222,7 +1231,7 @@ impl Runs {
             store::remove_leaf(source_dir, &leaf);
         }
         for slot in &slots {
-            self.tell(slot, None);
+            self.tell_as(slot, None, true);
         }
         true
     }
@@ -2143,10 +2152,11 @@ mod tests {
             made.dir.exists(),
             "a leaf a command runs in is not removed under it"
         );
-        assert_eq!(
-            told.lock().unwrap().len(),
-            1,
-            "the slot that showed it is told"
+        let heard = told.lock().unwrap().clone();
+        assert_eq!(heard.len(), 1, "the slot that showed it is told");
+        assert!(
+            heard[0].dropped,
+            "as dropped, so a page showing it makes it again"
         );
         drop(hold);
         assert!(

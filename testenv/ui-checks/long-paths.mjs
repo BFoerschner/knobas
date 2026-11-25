@@ -111,6 +111,10 @@ const SCREENS = [
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
   { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", press: "2 left out" },
   { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open .tf-openin:not(.tf-oo-runin) button" },
+  // *Run…* on a generated folder (ADR-0060 amended 2026-11-25): its commands filled with the kept folder's long path, and a
+  // run's dialog, its sub line naming the generated file and the renderer.
+  { id: "rerender-run-menu", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender&fake-oneoff", wait: 2600, press: ".tf-madebar .tf-oo-runin button", sizes: SMALLEST },
+  { id: "rerender-run-dialog", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender&fake-oneoff", wait: 2600, press: ".tf-madebar .tf-oo-runin button", then: [".tf-oo-menu [role=menuitem]"], whole: ".tf-modal .tf-oo-line, .tf-modal .tf-oo-bar, .tf-modal .tf-dsub", sizes: SMALLEST },
   // A folder renderer in a comparison (ux26): Compare with the working tree, *Rendered* on, `docs` grouped under its bar with
   // the 60-character renderer's name, the rail's band, the bar in each state, the generated files' paths (one of 140
   // characters), and the glyph's menu where two renderers take the folder.
