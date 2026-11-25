@@ -257,6 +257,18 @@ const assetsFind = (before) => `
   box.focus();
   box.setSelectionRange(box.value.length, box.value.length);
   return true;`;
+// Builds' *Recent* (2026-11-25): its filter's words narrow the runs it holds and read nothing; a letter into the empty box
+// over the scale database's newest 200 runs.
+const recentFilter = (before) => `
+  if (location.hash !== "#/builds/recent") location.hash = "#/builds/recent";
+  ${until(vis(".tf-recent tr.tf-row"))}
+  const box = document.querySelector(".tf-recentbar .tf-fsearch input");
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  if (box.value !== ${JSON.stringify(before)}) { set.call(box, ${JSON.stringify(before)}); box.dispatchEvent(new InputEvent("input", { bubbles: true })); }
+  ${sleepIn(800)}
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  return true;`;
 const CASES = [
   { name: "tickets-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
   { name: "tickets-not-project", presses: [["-project:PA", "Y"], ["-project:OP", "S"], ["-project:SCLDAT", "A"], ["-project:SCLMO", "B"], ["-project:SCLSE", "C"], ["-project:SCLWE", "B"], ["-project:SCLOP", "S"]], setup: ticketsBoard, root: ".tf-board-wrap", reads: BOARD },
@@ -284,6 +296,7 @@ const CASES = [
   // (2026-11-19) it asks `fuzzy_rank` to rank the spaces it holds, and its rows are the frame after that answer.
   // A letter into Monitors' empty filter, and a Backspace taking back the only letter, one no monitor of the scale
   // database's holds (q, x, z), so every row is drawn again.
+  { name: "recent-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: recentFilter, root: ".tf-recent", reads: [] },
   { name: "monitors-letter", presses: [["", "a"], ["", "e"], ["", "o"], ["", "i"], ["", "s"], ["", "r"], ["", "n"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
   { name: "monitors-erase", presses: [["q", "Backspace"], ["x", "Backspace"], ["z", "Backspace"]], setup: monitorsFilter, root: ".tf-kept:not([hidden]) .tf-mon-main", reads: [] },
   { name: "assets-letter", presses: [["", "s"], ["", "v"], ["", "h"], ["", "p"], ["", "c"], ["", "e"], ["", "a"]], setup: assetsFind, root: ".tf-kept:not([hidden]) .find", reads: [["search"]] },

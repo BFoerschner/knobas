@@ -45,11 +45,10 @@
 -->
 <script lang="ts">
   import { stateWord } from "../state-word";
-  import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { HeldOrder } from "../held-order.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
-  import { secondsLabel, timeLabel } from "../../time/format";
+  import { secondsLabel } from "../../time/format";
   import { onDestroy, onMount, tick, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -65,13 +64,12 @@
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import TfWindowedRows from "../TfWindowedRows.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
-  import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { echoOn, echoWrite, echoesOn, sentWrites, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { failedRun, newestFirst, testsWords, runHash, runTone, shortTime } from "./builds";
+  import { failedRun, newestFirst, runHash, runTone, shortTime } from "./builds";
   import { runsRead } from "./runs-read.svelte";
   import { counted } from "../counted";
   import { pageVisible } from "../kept-pages.svelte";
@@ -83,12 +81,12 @@
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import TfRunRow from "./TfRunRow.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import {
     BAR_STEP,
     BAR_WIDTH,
     CHART_HEIGHT,
-    DURBAR_WIDTH,
     RESULTS,
     TABS,
     appendOlder,
@@ -96,9 +94,7 @@
     barTip,
     branchesOf,
     byDay,
-    chipTone,
     defaultBranch,
-    durbarWidth,
     historyFacts,
     historyOf,
     isStartedHere,
@@ -124,7 +120,6 @@
     tabHash,
     tabOf,
     triggerDetail,
-    triggerLabel,
     triggersSentence,
   } from "./pipeline";
 
@@ -867,72 +862,20 @@
         <!-- A day's runs window too (the Windows pass, 2026-11-14): the scale estate's TeamCity ran its builds on one day, and seventy-six of them drawn whole were 1,500 elements of Builds' first open. 150 px of overscan: a scroll draws a few rows at a time, each move at 4x a 15 ms frame where 300 px made it 18 and 600 px 25. -->
         <TfWindowedRows rows={day.runs} key={(run) => run.entity_id} estimate={RUN_ROW_PX} colspan={7} overscan={150}>
           {#snippet row(run, attach)}
-            {@const tone = runTone(run)}
-            {@const failure = !isStartedHere(run) && failedRun(run)}
-            {@const unread = failure && runsRead.unread(run)}
-            <tr {@attach attach} data-run={run.entity_id} data-failed={failure ? "" : undefined} class:tf-row={!isStartedHere(run) || inQueue(run)} class:tf-run-new={arrived.has(run.entity_id)} onclick={(event) => openRow(event, run)}>
-              <td class="tf-nowrap tf-run-no">
-                <!-- Unread (ux18): hung in the cell's gutter, so marking it moves nothing. -->
-                {#if unread}<span class="tf-unread" title="Unread. M marks it read."><span class="tf-sr">Unread</span></span>{/if}
-                {#if isStartedHere(run)}
-                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
-                  <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
-                {:else}
-                  <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
-                {/if}
-                {#if run.state !== null && !isStartedHere(run)}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
-              </td>
-              <!-- A flex row, so the name takes the ellipsis: it is the chip that ties a run to the job, and an inline chip after the name is the first thing cut (F-357). -->
-              <td class="tf-mono tf-run-br"
-                ><span class="tf-run-brin"
-                  >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} typed={filter.text} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
-                ></td
-              >
-              <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
-              <td class="tf-nowrap tf-run-tests"
-                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{testsWords({ ...run.tests, failed: 0 })}{/if}</td
-              >
-              <td class="tf-nowrap tf-num tf-run-dur">
-                {#if run.duration_seconds !== null}
-                  <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
-                    ><rect width={durbarWidth(run.duration_seconds, max)} height="4" rx="2" /></svg
-                  >{secondsLabel(run.duration_seconds)}
-                {:else if tone === "run"}
-                  <progress class="tf-progress" aria-label="Running"></progress> running
-                {:else if isStartedHere(run)}
-                  <!-- Why it waits (F-352): in the queue, or sent and not yet read back. -->
-                  <span class="tf-dim">{inQueue(run) ? "in the write queue" : "until the next sync"}</span>
-                {:else}
-                  waiting
-                {/if}
-              </td>
-              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? timeLabel(run.started) : ""}</span></td>
-              <td class="tf-nowrap tf-run-acts">
-                {#if !isStartedHere(run)}
-                  <span class="tf-rowend"><span class="tf-rowacts">
-                    {#if failure}
-                      <!-- An icon, the words its name and tip: as words the group ran over the duration and cut it, and a
-                           press on the duration of a hovered row marked the run (ux18). A tick to read, the dot to unread. -->
-                      {@const said = unread ? "Mark as read" : "Mark as unread"}
-                      <button type="button" class="tf-iconbtn tf-sm" aria-label={said} title={`${said} (M)`} onclick={() => void runsRead.toggle(run)}
-                        ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-                          >{#if unread}<path d="M3 8.5l3 3 7-7.5" />{:else}<circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" />{/if}</svg
-                        ></button
-                      >
-                    {/if}
-                    <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
-                    {#if run.finished !== null}
-                      <button
-                        type="button"
-                        class="tf-btn tf-sm tf-ghost"
-                        {...refusedAttrs(cannotRun)}
-                        onclick={() => runDialog(run)}>Run again…</button
-                      >
-                    {/if}
-                  </span></span>
-                {/if}
-              </td>
-            </tr>
+            <TfRunRow
+              {run}
+              {attach}
+              href={runHash(id, run.entity_id)}
+              typed={filter.text}
+              {job}
+              {jobBranches}
+              {max}
+              arrived={arrived.has(run.entity_id)}
+              {cannotRun}
+              inQueue={inQueue(run)}
+              onopen={(event) => openRow(event, run)}
+              onagain={() => runDialog(run)}
+            />
           {/snippet}
         </TfWindowedRows>
       </table>

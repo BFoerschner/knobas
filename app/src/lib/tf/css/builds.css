@@ -389,3 +389,28 @@
   .tf-rbv { grid-template-columns: minmax(0, 1fr); }
   .tf-rbv > .tf-rbrail { position: static; max-height: 45vh; }
 }
+
+/* ---------- Builds' *Recent* (2026-11-25, `docs/decisions/2026-11-25-recent-runs.md`) ---------- */
+/* *Pipelines / Recent* is the rail top's first line, on its own, so the rows under it keep their order; in *Recent* the
+   same switch heads the filter bar, where the rail stood. */
+.tf-pl-top > .tf-bview { align-self: flex-start; }
+.tf-bv.tf-bv-recent { grid-template-columns: minmax(0, 1fr); }
+.tf-recentbar { display: flex; align-items: center; gap: var(--control-gap); }
+.tf-recentbar > .tf-fbar, .tf-recentbar > :not(.tf-seg):not(.tf-readall) { flex: 1 1 auto; min-width: 0; }
+.tf-recentbar > :is(.tf-seg, .tf-readall) { flex: none; }
+/* The run's state leads: the chip alone, the unread dot in its gutter. */
+.tf-runs.tf-recent .tf-run-no { width: 104px; }
+/* The pipeline's cell takes what the others leave, with the branch: the name in ink (never under 12 characters), the
+   number after it (never cut), then the folders, dim, cut at their start so the folder nearest the pipeline stays. */
+.tf-runs.tf-recent .tf-run-br { width: 22%; }
+.tf-run-pipe { white-space: nowrap; overflow: hidden; }
+.tf-run-pipein { display: flex; align-items: baseline; gap: 1ch; min-width: 0; }
+.tf-run-pname { flex: 0 1 auto; min-width: min(12ch, 100%); overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.tf-run-pno { flex: none; color: inherit; text-decoration: none; }
+.tf-run-place { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-run-place > bdi { direction: ltr; unicode-bidi: isolate; }
+/* With a pipeline's cell to hold, the tests go before who started a run (Fable's ruling 4). */
+@container (max-width: 1000px) { .tf-runs.tf-recent .tf-run-no { width: 104px; } }
+@container (max-width: 960px) { .tf-runs.tf-recent :is(col, td).tf-run-tests { display: none; } }
+@container (max-width: 860px) { .tf-runs.tf-recent td.tf-run-trig { display: table-cell; } .tf-runs.tf-recent col.tf-run-trig { display: table-column; } }
+@container (max-width: 760px) { .tf-runs.tf-recent :is(col, td).tf-run-trig { display: none; } }

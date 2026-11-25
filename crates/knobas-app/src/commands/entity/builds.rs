@@ -6,7 +6,8 @@ use super::*;
 
 use knobas_core::builds::RawRun;
 pub(super) use knobas_core::builds::{
-    BranchPull, CommitRepository, PipelineRow, RepoBuilds, RunRow,
+    BranchPull, CommitRepository, PipelineRow, RecentCursor, RecentFilter, RecentRuns, RepoBuilds,
+    RunRow,
 };
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
@@ -960,6 +961,62 @@ pub async fn download_run_file<R: tauri::Runtime>(
 pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
     let pool = lifecycle.pool()?;
     pipelines_inner(&pool, lifecycle.registry()).await
+}
+
+/// A page of Builds' *Recent* (2026-11-25): the newest runs across every
+/// pipeline the CI role's fillers draw, newest first by when each started
+/// or, not started, was queued ([`knobas_core::builds::recent_runs_page`]).
+/// The mirror alone, as [`pipelines_inner`]: no run's `commit_id`.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn recent_runs_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    filter: &RecentFilter,
+    before: Option<&RecentCursor>,
+    limit: Option<u32>,
+) -> Result<RecentRuns, IpcError> {
+    // As [`pipelines_inner`]: the stored rows follow the stored declarations.
+    crate::commands::search::declare(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
+    let identity = identity_of(pool).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
+    Ok(knobas_core::builds::recent_runs_page(
+        pool,
+        &declarations,
+        &identity,
+        &fillers,
+        filter,
+        before,
+        limit,
+    )
+    .await?)
+}
+
+/// Builds' *Recent* (2026-11-25), a page at a time.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`recent_runs_inner`] refuses with.
+#[tauri::command]
+pub async fn recent_runs(
+    lifecycle: State<'_, Lifecycle>,
+    filter: Option<RecentFilter>,
+    before: Option<RecentCursor>,
+    limit: Option<u32>,
+) -> Result<RecentRuns, IpcError> {
+    let pool = lifecycle.pool()?;
+    recent_runs_inner(
+        &pool,
+        lifecycle.registry(),
+        &filter.unwrap_or_default(),
+        before.as_ref(),
+        limit,
+    )
+    .await
 }
 
 /// The pipelines that build one repository (the repo-builds pass).

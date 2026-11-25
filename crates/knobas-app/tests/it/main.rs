@@ -89,6 +89,7 @@ mod project_census;
 mod protocol_ipc;
 mod pull_request_worktree;
 mod read_plans;
+mod recent_runs;
 mod refresh;
 mod refused_writes;
 mod registry_reads_ipc;

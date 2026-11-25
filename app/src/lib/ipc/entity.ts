@@ -77,6 +77,9 @@ import type {
   PipeRun,
   PipeStep,
   PipelineRow,
+  RecentCursor,
+  RecentFilter,
+  RecentRuns,
   PipelineSettings,
   Project,
   ProposalEvidence,
@@ -281,6 +284,11 @@ export type {
   PipelineReason,
   PipelineRepository,
   PipelineRow,
+  RecentCursor,
+  RecentFilter,
+  RecentPipeline,
+  RecentRun,
+  RecentRuns,
   PipelineSettings,
   PipelineTrigger,
   Project,
@@ -432,6 +440,15 @@ export function entityHead(entityId: string): Promise<EntityDetail> {
  */
 export function pipelines(): Promise<PipelineRow[]> {
   return invoke<PipelineRow[]>("pipelines");
+}
+
+/**
+ * A page of Builds' *Recent* (2026-11-25): the newest runs across every pipeline CI's fillers draw, newest first by when
+ * each started or, not started, was queued, narrowed by `filter`, after `before` (the last page's `next`), at most
+ * `limit` (200 when omitted). The mirror alone.
+ */
+export function recentRuns(filter: RecentFilter, before: RecentCursor | null = null, limit?: number): Promise<RecentRuns> {
+  return invoke<RecentRuns>("recent_runs", { filter, before, limit: limit ?? null });
 }
 
 /**

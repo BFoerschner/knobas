@@ -135,6 +135,9 @@ const SCREENS = [
   { id: "build-chain-pinned", route: PIPELINE, press: ".tf-chainsign .tf-signbtn", sizes: BUILD_SIZES },
   { id: "build-run", route: RUN, wait: 300, sizes: BUILD_SIZES },
   { id: "build-run-unfolded", route: RUN, wait: 300, press: ".tf-chainfold", sizes: BUILD_SIZES },
+  // Builds' *Recent* (2026-11-25): every pipeline's runs in one table, each naming its pipeline and folders; the bar's
+  // switch, filter and *Mark all as read* whole, and the header on one line.
+  { id: "build-recent", route: "builds/recent", wait: 400, whole: ".tf-recentbar, .tf-bhead", sizes: BUILD_SIZES },
   // A command, ten patterns and five fences, a folder renderer's long lists, a pipeline's long name and steps, defaults with a
   // deep pattern, and a Java deep under a profile (the renderers-columns pass).
   { id: "settings-folder-renderer-lists", route: "settings/renderers/folder/orchestra-flows" },

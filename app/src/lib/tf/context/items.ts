@@ -407,6 +407,8 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           ...(thing.pipelineId === null
             ? []
             : [
+                // Its pipeline's page (Builds' *Recent*, 2026-11-25): a row there names the pipeline without linking it.
+                { id: "pipeline", label: "Open pipeline", act: { do: "go", hash: tabHash(thing.pipelineId, "runs") } } satisfies Item,
                 { id: "log", label: "Log", act: { do: "go", hash: runTabHash(thing.pipelineId, thing.id, "log") } } satisfies Item,
                 { id: "tests", label: "Tests", act: { do: "go", hash: runTabHash(thing.pipelineId, thing.id, "tests") } } satisfies Item,
               ]),

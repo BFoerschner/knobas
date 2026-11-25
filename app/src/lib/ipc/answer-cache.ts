@@ -71,6 +71,7 @@ export const READS: ReadonlySet<string> = new Set([
   "depends_on_this",
   "pipelines",
   "pipeline_runs",
+  "recent_runs",
   "repo_pipelines",
   "repo_branch_pulls",
   "commit_repositories",
@@ -230,6 +231,7 @@ export const VISIT_BLIND: ReadonlySet<string> = new Set([
   "entity_briefs",
   "pipelines",
   "pipeline_runs",
+  "recent_runs",
   "repo_pipelines",
   "repo_branch_pulls",
   "commit_repositories",
@@ -267,6 +269,7 @@ const SCOPE: Readonly<Record<string, readonly string[]>> = {
   docs_page: ["wiki"],
   pipelines: ["ci"],
   pipeline_runs: ["ci"],
+  recent_runs: ["ci"],
   // A repository's pipelines are the runs of its commits: a run or a new commit changes them.
   repo_pipelines: ["ci", "code-host"],
   // A repository's branches and the pull requests open from them: the code host's alone.

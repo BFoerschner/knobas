@@ -98,6 +98,7 @@
   import TfRunChain from "./TfRunChain.svelte";
   import TfRunArtifacts from "./TfRunArtifacts.svelte";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import { takeRunAgain } from "./run-again";
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
   import TfRunTicket from "./TfRunTicket.svelte";
@@ -218,6 +219,8 @@
 
   function open(pipe: string, id: string) {
     const mine = ++token;
+    // *Run again…* pressed in Builds' *Recent* opens this page with its dialog (2026-11-25).
+    if (takeRunAgain(id)) dialog = true;
     held = null;
     runsFailed = null;
     view = null;

@@ -116,6 +116,78 @@ pub struct PipelineRow {
     pub recent: Vec<RunRow>,
 }
 
+/// One run in Builds' *Recent* (2026-11-25): the run as a pipeline's runs
+/// draw it, and the id of the pipeline it sits under, which
+/// [`RecentRuns::pipelines`] names.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentRun {
+    pub pipeline_id: String,
+    pub run: RunRow,
+}
+
+/// A pipeline as *Recent* names it beside its runs: its name, its chain of
+/// groups and its source, as the Builds list names it ([`PipelineRow`]).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentPipeline {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+    pub path: Vec<String>,
+}
+
+/// Where a page of *Recent* ends: its last run's stored instant, in the
+/// database's own spelling, and its id. Handed back as it came to read the
+/// next page; nothing else reads it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RecentCursor {
+    pub made: String,
+    pub entity_id: String,
+}
+
+/// What *Recent* asks for beyond its page: every field empty asks for every run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RecentFilter {
+    /// The sources, by id; empty for every CI source.
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// The results the Runs filter's chips name (`Failed`, `Running`,
+    /// `Queued`, `Passed`); empty for any.
+    #[serde(default)]
+    pub results: Vec<String>,
+    /// Only the runs the reader started (*Mine*).
+    #[serde(default)]
+    pub mine: bool,
+    /// Only the runs built on these branches (*This job*); `None` for any.
+    #[serde(default)]
+    pub branches: Option<Vec<String>>,
+}
+
+/// A page of *Recent*: its runs newest first, the pipelines they sit under,
+/// and where the next page starts, `None` once the mirror holds no more.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentRuns {
+    pub runs: Vec<RecentRun>,
+    pub pipelines: Vec<RecentPipeline>,
+    pub next: Option<RecentCursor>,
+}
+
+/// How many runs a page of *Recent* answers when the caller names no cap.
+pub const RECENT_PAGE: u32 = 200;
+
+/// The most a page of *Recent* answers, whatever the caller asks.
+const RECENT_PAGE_MAX: u32 = 1_000;
+
 /// The `knobas.setting` key holding the pinned pipelines (#849, R-9.3): a
 /// JSON array of entity ids. In `knobas.setting` rather than a table of its
 /// own, for the reason the clones root is (`0002`, comment 6): a short list
@@ -653,6 +725,95 @@ select t.pkey is not null as found, x.* from target t
 "
 );
 
+/// The newest runs across every drawn pipeline (Builds' *Recent*,
+/// 2026-11-25): the head of `run_made_idx` (migration `0103`), newest first
+/// by when each run started or, not started, was queued, as `runMade` orders
+/// every list of runs. `$1` the declarations, `$2` the limit, `$3` the CI
+/// fillers, `$4` the sources asked (empty: all), `$5`/`$6` the cursor (the
+/// last answered run's instant as text and its id; null: from the top), `$7`
+/// the results asked (`Failed`, `Running`, `Queued`, `Passed`; empty: all),
+/// `$8` who started it (empty: anyone), `$9` the branches (null: any).
+///
+/// A pipeline is drawn as [`PIPELINES`] draws it; a run sits under it by its
+/// stored `sync.item_pipeline` row, as a pipeline's own runs do, and only a
+/// run with a stored row has an instant here, so the filters read its row.
+const RECENT_RUNS: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
+    ",
+p as materialized (
+  select i.entity_id, i.source_id, c.kind as adapter_kind, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    crate::declared_string!("$1", "name"),
+    " as name
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline' and i.source_id = any($3::text[])
+     and (cardinality($4::text[]) = 0 or i.source_id = any($4::text[]))
+),
+dp as materialized (select * from p where p.pkey is not null and p.name is not null),
+k as materialized (
+  select m.entity_id, m.made, w.pipeline
+    from sync.run_made m
+    cross join lateral (
+      select dp.entity_id as pipeline from sync.item_pipeline ip
+        join dp on dp.source_id = ip.source_id and dp.pkey = ip.pkey and dp.adapter_kind = ip.adapter_kind
+       where ip.entity_id = m.entity_id
+       limit 1) w
+    join sync.item i on i.entity_id = m.entity_id",
+    crate::run_join!("ru", "i"),
+    "
+   where ($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
+     and exists (select 1 from knobas.entity e where e.id = m.entity_id and e.deleted_at is null)
+     and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
+     and ($9::text[] is null or ru.branch = any($9::text[]))
+     and (cardinality($7::text[]) = 0 or
+          (case when sync.run_instant(ru.finished) is null
+                then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
+                when ru.state->>'tone' = 'err' then 'Failed'
+                when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))
+   order by m.made desc, m.entity_id desc
+   limit $2
+)
+select k.pipeline, k.made::text as made_text, ",
+    stored_run_columns!(),
+    "
+  from k
+  join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
+ order by k.made desc, k.entity_id desc
+"
+);
+
+/// The drawn pipelines `$2` names, as *Recent* names them: `$1` the
+/// declarations.
+const RECENT_PIPELINES: &str = concat!(
+    "select i.entity_id, i.source_id, coalesce(c.display_name, i.source_id) as source_name, ",
+    crate::declared_string!("$1", "name"),
+    " as name, ",
+    crate::declared_string!("$1", "group"),
+    " as grp, ",
+    pipeline_path!(),
+    " as path
+    from sync.live_item i
+    left join knobas.source_config c on c.id = i.source_id
+   where i.entity_id = any($2::text[])
+   order by i.entity_id"
+);
+
+/// *Recent*'s statement, for the app's plan test. It binds what
+/// [`recent_runs_page`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_recent_runs() -> &'static str {
+    RECENT_RUNS
+}
+
 /// One pipeline's runs statement, for the app's plan test
 /// (`tests/it/read_plans.rs`, #2185). It binds what [`pipeline_runs`] binds.
 #[doc(hidden)]
@@ -1033,6 +1194,113 @@ pub async fn pipeline_runs(
             })
             .collect(),
     ))
+}
+
+/// A page of Builds' *Recent* ([`RECENT_RUNS`]): at most `limit` runs
+/// ([`RECENT_PAGE`] when `None`, never more than 1,000) of the sources in
+/// `fillers`, newest first by when each started or, not started, was queued,
+/// after `before` where given, narrowed by `filter`; `identity` the configured
+/// usernames, what *Mine* and *started by me* match. No run's `commit_id` is
+/// filled here, as in [`pipelines`].
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn recent_runs_page(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    identity: &[String],
+    fillers: &[String],
+    filter: &RecentFilter,
+    before: Option<&RecentCursor>,
+    limit: Option<u32>,
+) -> Result<RecentRuns, CoreError> {
+    let limit = limit.unwrap_or(RECENT_PAGE).clamp(1, RECENT_PAGE_MAX);
+    let who: &[String] = if filter.mine { identity } else { &[] };
+    // *Mine* with no configured username keeps nothing, as `started_by_me` does.
+    if filter.mine && identity.is_empty() {
+        return Ok(RecentRuns {
+            runs: Vec::new(),
+            pipelines: Vec::new(),
+            next: None,
+        });
+    }
+    let rows = sqlx::query(RECENT_RUNS)
+        .bind(declarations.as_param())
+        .bind(i64::from(limit))
+        .bind(fillers)
+        .bind(&filter.sources)
+        .bind(before.map(|c| c.made.as_str()))
+        .bind(before.map(|c| c.entity_id.as_str()))
+        .bind(&filter.results)
+        .bind(who)
+        .bind(filter.branches.as_deref())
+        .fetch_all(pool)
+        .await?;
+    let next = (rows.len() == limit as usize)
+        .then(|| rows.last())
+        .flatten()
+        .map(|row| RecentCursor {
+            made: row.get("made_text"),
+            entity_id: row.get("entity_id"),
+        });
+    let runs: Vec<RecentRun> = rows
+        .iter()
+        .map(|row| RecentRun {
+            pipeline_id: row.get("pipeline"),
+            run: RunRow::read(
+                RawRun {
+                    entity_id: row.get("entity_id"),
+                    number: row.get("number"),
+                    state: row
+                        .get::<Option<sqlx::types::Json<crate::payload::StateChip>>, _>("state")
+                        .map(|chip| chip.0),
+                    branch: row.get("branch"),
+                    started: row.get("started"),
+                    finished: row.get("finished"),
+                    updated_at: row.get("item_updated_at"),
+                    web_url: row.get("web_url"),
+                    trigger: row.get::<Option<String>, _>("trig").and_then(|word| {
+                        serde_json::from_value(serde_json::Value::String(word)).ok()
+                    }),
+                    started_by: row.get("started_by"),
+                    agent: row.get("agent"),
+                    current_step: row.get("current_step"),
+                    tests_failed: row.get("tests_failed"),
+                    tests_passed: row.get("tests_passed"),
+                    tests_ignored: row.get("tests_ignored"),
+                    revision: row.get("revision"),
+                },
+                identity,
+            ),
+        })
+        .collect();
+    let mut ids: Vec<&str> = runs.iter().map(|r| r.pipeline_id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let pipelines = sqlx::query(RECENT_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(&ids)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(|row| {
+            let path: sqlx::types::Json<Vec<String>> = row.get("path");
+            RecentPipeline {
+                entity_id: row.get("entity_id"),
+                source_id: row.get("source_id"),
+                source_name: row.get("source_name"),
+                name: row.get::<Option<String>, _>("name").unwrap_or_default(),
+                group: row.get("grp"),
+                path: path.0,
+            }
+        })
+        .collect();
+    Ok(RecentRuns {
+        runs,
+        pipelines,
+        next,
+    })
 }
 
 /// Every mirrored commit of every sha in `shas`, by sha ([`COMMITS_OF`]): one
