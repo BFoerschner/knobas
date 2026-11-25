@@ -301,6 +301,11 @@ const PLACES = [
   // The Decompiler's Java read, past the 500 ms hold, with a reason to say: the ux19 gate found its path row moving on
   // the real backend, where the look for a Java answers after the page draws (2026-11-19).
   { name: "settings-renderers-java-late", fixture: true, late: "java_runtime:900", fake: "fake-jar=oldjava", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
+  // Commands (ADR-0060): Settings › Commands and a command's page, and a run's dialog opened from a file's Run…, which
+  // streams lines and ends while it records; nothing in it moves but the rows it adds.
+  { name: "settings-commands", fixture: true, fake: "fake-oneoff", start: "#/settings", press: `${shown} a[href="#/settings/commands"]`, hash: "#/settings/commands", away: "#/settings" },
+  { name: "command-page", fixture: true, fake: "fake-oneoff", start: "#/settings/commands", go: "#/settings/commands/eslint", hash: "#/settings/commands/eslint", away: "#/settings/commands" },
+  { name: "run-dialog", fixture: true, fake: "fake-oneoff", start: `#/repo/${REPO}/files/src/main.rs`, before: [{ eval: `document.querySelector('.tf-fileview header .tf-oo-runin button').click()` }], beforeReturn: [{ eval: `document.querySelector('.tf-fileview header .tf-oo-runin button').click()` }], press: ".tf-oo-menu [role=menuitem]", text: "ESLint", starts: true, hash: null, ready: ".tf-oo-dialog .tf-oo-line", away: "Escape" },
   { name: "folder-renderer-new", start: "#/settings/renderers", press: `${shown} a`, text: "Add a folder renderer", hash: "#/settings/renderers/folder/add", away: "Escape" },
   { name: "launcher", start: "#/tickets", key: CMD_K, hash: null, ready: "[role=dialog] [role=option]", anywhere: true, away: "Escape" },
   // Everything's answer to words its rows' text holds (the everything-search decisions, D10): rows of one and two

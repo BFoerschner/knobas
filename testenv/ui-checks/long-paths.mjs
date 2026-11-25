@@ -156,6 +156,11 @@ const SCREENS = [
   // Zen mode everywhere in Code (Z1): its button in the top bar whole, and a file in Zen, its header's path whole.
   { id: "zen-code-file", route: `${REPO}/files/src/sepa/retry.rs`, press: ".tf-top > .tf-zenbtn", wait: 500, whole: ".tf-top, .tf-fileview header", sizes: SMALLEST },
   { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
+  // Commands (ADR-0060): Settings › Commands with a command whose program is deep under folders with spaces, its page, and
+  // a run's dialog in a long Windows checkout, its run line naming the program, the checkout and the file by their whole paths.
+  { id: "settings-commands", route: "settings/commands", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },
+  { id: "settings-command-page", route: "settings/commands/orchestra", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },
+  { id: "run-dialog", route: `${REPO}/files/src/sepa/retry.rs`, fake: "&fake-oneoff", press: ".tf-fileview header .tf-oo-runin button", then: ["~Orchestra lint"], wait: 900, whole: ".tf-modal .tf-oo-line, .tf-modal .tf-oo-bar", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
@@ -213,7 +218,7 @@ const CHECK = String.raw`(() => {
   const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-site-path"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
   const NAME = /payments team's/;
-  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks"), document.querySelector(".tf-launch")].filter(Boolean);
+  const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks"), document.querySelector(".tf-launch"), ...[...document.querySelectorAll(".tf-modal")].filter((m) => !m.closest(".tf-main, .tf-kept"))].filter(Boolean);
   const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
   const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
   const misses = [];
@@ -227,8 +232,9 @@ const CHECK = String.raw`(() => {
       if (rects.length === 0) continue;
       let hidden = false, cutOnPurpose = false;
       const name = NAME.test(node.textContent) && !MARK.test(node.textContent);
-      // A file's or a drawing's own text in the code view scrolls sideways as code does: it is not the app's.
-      if (node.parentElement.closest(".tf-code")) continue;
+      // A file's or a drawing's own text in the code view scrolls sideways as code does: it is not the app's. Nor is what a
+      // command printed (ADR-0060), which scrolls the same way until *Wrap* folds it.
+      if (node.parentElement.closest(".tf-code, .tf-oo-out")) continue;
       for (let e = node.parentElement; e; e = e.parentElement) {
         const s = getComputedStyle(e);
         if (s.clipPath !== "none" || s.visibility === "hidden" || s.display === "none") hidden = true;
@@ -264,7 +270,7 @@ const CHECK = String.raw`(() => {
   // A path an ellipsis cuts: Chrome reports such a run as only what shows, so the boxes above can't see it.
   for (const root of roots) for (const e of root.querySelectorAll("*")) {
     // Strict: an ellipsis shows for a shortfall under a pixel, which rounds away in a +1 margin.
-    if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent) || e.closest(".tf-code")) continue;
+    if (e.clientWidth === 0 || e.scrollWidth <= e.clientWidth || !MARK.test(e.textContent) || e.closest(".tf-code, .tf-oo-out")) continue;
     const s = getComputedStyle(e);
     if (s.textOverflow !== "ellipsis" || CUT.some((c) => e.classList.contains(c)) || e.closest(".tf-sr")) continue;
     misses.push({ kind: "cut", at: where(e), text: e.textContent.trim().slice(-48), over: e.scrollWidth - e.clientWidth });
@@ -275,7 +281,7 @@ const CHECK = String.raw`(() => {
     const s = getComputedStyle(e);
     // A clip is no scroll: the kept page clips what passes under the scroller's 8 px bar on purpose (chrome.css).
     // A visually hidden run (a list's rest, which a screen reader reads) is not drawn, so it scrolls nothing either.
-    if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis" || e.closest(".tf-code") || e.closest(".tf-sr")) continue;
+    if (s.overflowX === "visible" || s.overflowX === "clip" || s.textOverflow === "ellipsis" || e.closest(".tf-code, .tf-oo-out") || e.closest(".tf-sr")) continue;
     scrolls.push(where(e));
   }
   // A Builds header's line is one line, under the title and its actions, and the actions share the title's line.

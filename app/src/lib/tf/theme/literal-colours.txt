@@ -4,3 +4,5 @@
 lib/tf/css/code.css | .tf-pdf-page | A PDF page is paper: white, with its shadow, whatever the window wears
 lib/tf/css/docs.css | .tf-embed iframe | An embedded page is another document: white behind it, whatever the window wears
 lib/tf/css/settings.css | .tf-stg-sw i | The switch knob's shadow is a shadow, not a theme's colour, as `--shadow` is not
+lib/tf/css/oneoff.css | .tf-oo-page iframe | A page a command made is another document: white behind it, as an embedded page has, whatever the window wears
+lib/tf/css/oneoff.css | .tf-oo-image img | An image a command made is drawn for paper (a graph with no background of its own): white behind it, whatever the window wears

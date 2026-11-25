@@ -58,7 +58,7 @@
             <span class="tf-dim">{o.kind != null ? KIND_WORDS[o.kind] : "Cannot be read"}{o.copied != null ? (o.theirs != null ? ", changed since you added it" : ", added") : ""}</span>
           </label>
           <code class="tf-mono tf-oo-offerline">{o.command}</code>
-          {#if o.theirs != null}<code class="tf-mono tf-oo-offerline tf-dim">Yours: {o.theirs}</code>{/if}
+          {#if o.theirs != null}<code class="tf-mono tf-oo-offerline tf-oo-theirs">Yours: {o.theirs}</code>{/if}
           {#if o.refused != null}<small class="tf-stg-errt">{o.refused}</small>{/if}
         </li>
       {/each}

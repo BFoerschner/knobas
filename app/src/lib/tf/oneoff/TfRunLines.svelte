@@ -21,10 +21,13 @@
     run,
     onplace,
     onurl,
+    "data-arrive": arrive = false,
   }: {
     run: Run;
     onplace: (place: OneOffPlace, wide: boolean) => void;
     onurl: (href: string) => void;
+    /** The dialog arrives here (`TfDialog`'s arrival focus), not on the stream's select before it. */
+    "data-arrive"?: boolean;
   } = $props();
 
   const ROW = 20;
@@ -195,6 +198,7 @@
 <div
   class="tf-oo-out"
   tabindex="0"
+  data-arrive={arrive ? "" : undefined}
   role="log"
   aria-label="What {run.command.name} printed"
   bind:this={scroller}

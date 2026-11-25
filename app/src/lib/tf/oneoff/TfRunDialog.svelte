@@ -30,6 +30,7 @@
   import { clock, many, outputText, problems, problemsText, resultWord, shown, size, stateOf, took, type Problem } from "../../render/oneoff";
   import { oneoffs as sharedStore, type OneOffs, type Run } from "../../render/oneoff.svelte";
   import TfRunLines from "./TfRunLines.svelte";
+  import TfCommand from "../TfCommand.svelte";
   import TfRunProblems from "./TfRunProblems.svelte";
   import TfRunResult from "./TfRunResult.svelte";
   import TfRunFiles from "./TfRunFiles.svelte";
@@ -231,7 +232,11 @@
       class="tf-btn tf-oo-again"
       disabled={run.batch === null && run.refused === null && run.running && run.id === null}
       title={run.running ? keyHint("Stop it and everything it started (⌘.)") : "Run it again on the thing as it is now (R)"}
-      onclick={again}>{run.running ? "Stop" : "Run again"}</button
+      onclick={again}
+      ><!-- Both words in one cell (nothing-moves): the button is as wide as the wider, whichever it says. --><span
+        class:tf-oo-unsaid={!run.running}
+        aria-hidden={!run.running}>Stop</span
+      ><span class:tf-oo-unsaid={run.running} aria-hidden={run.running}>Run again</span></button
     >
     <button type="button" class="tf-btn" disabled={quiet || run.view === "result" || run.view === "files"} title={run.view === "result" || run.view === "files" ? "Download it instead" : "Copy what this view shows, as text"} onclick={() => void copy()}>
       <svg class="tf-vglyph" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" /></svg>
@@ -258,9 +263,8 @@
         ></span
       >
       <span class="tf-oo-took" title={run.ended !== null ? "How long it ran" : "Running for"}>{ran}</span>
-      <span class="tf-oo-argv" title="{shown(words)}{run.cwd !== '' ? `\nIn ${run.cwd}` : ''}"
-        ><b>{words[0]}</b>{#each words.slice(1) as word, i (i)}{" "}{shown([word])}{/each}</span
-      >
+      <!-- As a command line is drawn everywhere (TfCommand): the program's folders give way first, its file stays. -->
+      <TfCommand command={shown(words)} class="tf-oo-argv" />
       {#if history.length > 1}
         <span class="tf-oo-hist">
           <button type="button" class="tf-iconbtn tf-sm" aria-label="The run before" title="The run before" disabled={at >= history.length - 1} onclick={() => void store.reopen(history[at + 1]!.id)}
@@ -291,9 +295,8 @@
           </select>
         {/if}
         <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={run.wrap} onclick={() => (run.wrap = !run.wrap)}>Wrap</button>
-        {#if run.running}
-          <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={run.follow} title="Keep the newest line in view" onclick={() => (run.follow = !run.follow)}>Follow</button>
-        {/if}
+        <!-- Kept after the run ends, so nothing beside it moves (nothing-moves): there is no newest line to follow then. -->
+        <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={run.running && run.follow} disabled={!run.running} title={run.running ? "Keep the newest line in view" : "It ended: there is no newer line"} onclick={() => (run.follow = !run.follow)}>Follow</button>
       {/if}
     </div>
     <div class="tf-oo-stage" data-shows={run.view}>
@@ -324,7 +327,8 @@
       {:else if run.view === "problems"}
         <TfRunProblems {run} onproblem={(p) => openPlace(p, false)} />
       {:else}
-        <TfRunLines {run} onplace={openPlace} onurl={(href) => openWeb(href)} />
+        <!-- The dialog is for what the command printed: it arrives there, not on the stream's select before it (F-453). -->
+        <TfRunLines {run} onplace={openPlace} onurl={(href) => openWeb(href)} data-arrive />
       {/if}
     </div>
   {/snippet}

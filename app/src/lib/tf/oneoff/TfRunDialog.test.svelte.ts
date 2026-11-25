@@ -87,7 +87,7 @@ test("the press paints the dialog running at 0:00, before the backend answers", 
   expect(words(document.querySelector(".tf-oo-argv"))).toBe("eslint /c/p/src/a.ts");
   expect(words(document.querySelector(".tf-oo-stage"))).toBe("Nothing printed yet.");
   expect(document.querySelector(".tf-oo-line")!.hasAttribute("data-running")).toBe(true);
-  expect(words(document.querySelector(".tf-oo-again"))).toBe("Stop");
+  expect(words(document.querySelector(".tf-oo-again > span:not(.tf-oo-unsaid)"))).toBe("Stop");
   // Arrival focus is the stage, not a button: Enter presses nothing.
   expect(document.activeElement?.classList.contains("tf-oo-quiet")).toBe(true);
 });
@@ -110,7 +110,7 @@ test("lines land, places are links, and the run ends red with its exit code as a
   expect(document.querySelector(".tf-oo-state")!.classList.contains("tf-err")).toBe(true);
   expect(document.querySelector(".tf-oo-code")!.textContent).toBe("1");
   expect(words(document.querySelector(".tf-oo-took"))).toBe("after 2.4s");
-  expect(words(document.querySelector(".tf-oo-again"))).toBe("Run again");
+  expect(words(document.querySelector(".tf-oo-again > span:not(.tf-oo-unsaid)"))).toBe("Run again");
   expect(document.querySelector(".tf-oo-r")!.textContent).toBe("error");
   expect(segs()).toEqual(["Output", "Problems 1"]);
   const link = [...document.querySelectorAll<HTMLAnchorElement>(".tf-oo-link")].find((a) => a.textContent === "3:7")!;

@@ -16,7 +16,7 @@
   ladder on the same press. `Tab` stays inside it.
 
   **Arrival focus** (design system, Dialogs): the field it marks `data-arrive`, the one the
-  dialog is for, else its first field, else a control in
+  dialog is for (or a scroller it marks so, a run's output: ADR-0060), else its first field, else a control in
   its body that isn't a button or a link, else the ×. Never a button in the body:
   `Enter` on arrival must not send what the dialog is asking about. Focus returns
   to what opened it when it closes, and a control removed while it held focus
@@ -122,7 +122,7 @@
 
   /** Where focus goes on opening, and when what held it is removed. */
   function arrival(): HTMLElement | null {
-    return reachable(`.tf-body [data-arrive]:is(${FIELD})`)[0] ?? reachable(`.tf-body :is(${FIELD})`)[0] ?? reachable(`.tf-body :is(${NOT_A_BUTTON})`)[0] ?? reachable(".tf-dclose")[0] ?? dialog;
+    return reachable(`.tf-body [data-arrive]:is(${FIELD}, [tabindex="0"])`)[0] ?? reachable(`.tf-body :is(${FIELD})`)[0] ?? reachable(`.tf-body :is(${NOT_A_BUTTON})`)[0] ?? reachable(".tf-dclose")[0] ?? dialog;
   }
 
   /** This dialog's entry on the layer stack. */

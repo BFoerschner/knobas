@@ -2,7 +2,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { OneOff, OneOffDraft } from "../../ipc/oneoff";
+import type { OneOff, OneOffDraft, OneOffRepoCommands } from "../../ipc/oneoff";
 import { OneOffs, type OneOffPorts } from "../../render/oneoff.svelte";
 import TfCommandsSection from "./TfCommandsSection.svelte";
 import TfCommandPage from "./TfCommandPage.svelte";
@@ -152,4 +152,34 @@ test("a repository's own commands are copied after a look; one Save refuses cann
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Add to my commands")!.click();
   await settle();
   expect(copy).toHaveBeenCalledWith("gitea:a/b", ["ESLint"]);
+});
+
+test("a repository's Run… menu says what its file offers to add and what changed, never one Save refuses", async () => {
+  const base = { files: [], folders: [], has: [], repo_holds: [], stdin: "none" as const, shows: "auto" as const, start_in: "root" as const, timeout_secs: null, kind: "repository" as const };
+  const row = async (offered: OneOffRepoCommands["offered"]) => {
+    const p = ports([]);
+    p.repoCommands = () => Promise.resolve({ file: "/c/b/.knobas/commands.toml", offered, failed: null });
+    const { default: TfRunMenu } = await import("../oneoff/TfRunMenu.svelte");
+    const target = document.createElement("div");
+    document.body.append(target);
+    const menu = mount(TfRunMenu, { target, props: { entityId: "gitea:a/b", repo: "b", target: { kind: "repository" as const }, checkout: { path: "/c/b" } as never, store: new OneOffs(p) } });
+    await settle();
+    target.querySelector<HTMLButtonElement>(".tf-oo-runin button")!.click();
+    await settle();
+    const said = [...document.querySelectorAll("[role=menuitem]")].map(words).filter((w) => w.includes("this repository"));
+    unmount(menu);
+    target.remove();
+    return said;
+  };
+  const unsafe = { ...base, name: "Unsafe", command: "sh -c 'x {dir}'", refused: "{dir} stands inside a quoted script", copied: null, theirs: null };
+  expect(await row([unsafe])).toEqual([]);
+  expect(await row([{ ...base, name: "Tests", command: "npm test", refused: null, copied: null, theirs: null }, unsafe])).toEqual(["1 command from this repository…"]);
+  expect(await row([{ ...base, name: "Tests", command: "npm test", refused: null, copied: "tests", theirs: "npm run test" }, unsafe])).toEqual(["1 changed in this repository…"]);
+  expect(
+    await row([
+      { ...base, name: "Tests", command: "npm test", refused: null, copied: "tests", theirs: "npm run test" },
+      { ...base, name: "Build", command: "npm run build", refused: null, copied: null, theirs: null },
+      { ...base, name: "Lint", command: "npm run lint", refused: null, copied: null, theirs: null },
+    ]),
+  ).toEqual(["2 commands from this repository, 1 changed in this repository…"]);
 });

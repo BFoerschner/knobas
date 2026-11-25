@@ -68,8 +68,14 @@
     );
     return () => (live = false);
   });
-  const newFromRepo = $derived(fromRepo?.offered.filter((o) => o.copied == null).length ?? 0);
+  /** What the file offers that can be added: one Save would refuse is shown in the dialog, not counted here. */
+  const newFromRepo = $derived(fromRepo?.offered.filter((o) => o.copied == null && o.refused == null).length ?? 0);
   const changedFromRepo = $derived(fromRepo?.offered.filter((o) => o.copied != null && o.theirs != null).length ?? 0);
+  /** The menu's row for the repository's own file: what is new to add and what changed since it was added. */
+  function repoOffer(fresh: number, changed: number): string {
+    const said = [fresh > 0 ? `${fresh} ${fresh === 1 ? "command" : "commands"} from this repository` : "", changed > 0 ? `${changed} changed in this repository` : ""];
+    return `${said.filter((s) => s !== "").join(", ")}…`;
+  }
   let face = $state<HTMLButtonElement | null>(null);
 
   const facts = $derived({ repo: entityId, top });
@@ -195,7 +201,7 @@
     {#if newFromRepo > 0 || changedFromRepo > 0}
       <hr />
       <button role="menuitem" onclick={() => { open = false; showRepo = true; }}
-        ><span class="tf-dim">{newFromRepo > 0 ? `${newFromRepo} ${newFromRepo === 1 ? "command" : "commands"} from this repository…` : `${changedFromRepo} changed in this repository…`}</span></button
+        ><span class="tf-dim">{repoOffer(newFromRepo, changedFromRepo)}</span></button
       >
     {/if}
     <hr />
