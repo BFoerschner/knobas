@@ -338,3 +338,31 @@ test("a file no command takes offers Run a command…; not cloned greys both row
   // Before the commands were read, no Run group.
   expect(ids(menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx(), {}))).not.toContain("run-in");
 });
+
+test("a generated file: Open, Open in on the kept folder, Run, the copies; never the repository's file (Björn, 2026-11-25)", () => {
+  const made: Thing = { kind: "made", repoId: "gitea:t/pay", renderer: "site", folder: "docs", rel: "out/a.ts", dir: false, line: 7 };
+  const kept = { dir: "/store/abc/docs.site.12345678" };
+  // Not cloned here: nothing is greyed, the kept folder is on this disk.
+  const entries = menuFor(made, null, ctx({ commands: COMMANDS, made: () => kept }), { checkout: view(null) });
+  expect(ids(entries)).toEqual(["open", "|", "open-default", "open-in", "|", "run-first", "run-in", "|", "copy-path", "copy-full"]);
+  expect(item(entries, "open").act).toEqual({ do: "go", hash: "#/repo/gitea%3At%2Fpay/rendered/site/docs/line/7/out/a.ts" });
+  expect(item(entries, "open-default")).toMatchObject({ label: "Open in VS Code", disabled: null });
+  expect(item(entries, "open-default").act).toMatchObject({ do: "made-app", renderer: "site", folder: "docs", rel: "out/a.ts", dir: false, line: 7, app: "vscode" });
+  expect(item(entries, "run-first")).toMatchObject({ label: "Run ESLint", disabled: null });
+  expect(item(entries, "run-first").act).toEqual({ do: "oneoff", entityId: "gitea:t/pay", command: "eslint", at: { kind: "made", renderer: "site", folder: "docs", path: "out/a.ts", dir: false, line: 7 } });
+  expect(item(entries, "run-in").disabled).toBeNull();
+  expect(item(entries, "copy-path")).toMatchObject({ label: "Copy path and line", hint: "out/a.ts:7" });
+  expect(item(entries, "copy-full").act).toEqual({ do: "copy", text: "/store/abc/docs.site.12345678/out/a.ts", said: "Copied the full path" });
+  for (const gone of ["history", "forge", "clone", "copy-link"]) expect(ids(entries)).not.toContain(gone);
+});
+
+test("a generated folder: its folder's commands, no Open; one with a git name is not offered; Copy full path waits for a kept folder", () => {
+  const withGit = [...COMMANDS, { ...COMMANDS[1]!, id: "blame", name: "Blame", command: "lint {dir} --rev {branch}" }];
+  const folder: Thing = { kind: "made", repoId: "gitea:t/pay", renderer: "site", folder: "docs", rel: "out", dir: true, line: null };
+  const entries = menuFor(folder, null, ctx({ commands: withGit }), {});
+  expect(ids(entries)[0]).toBe("open-default");
+  expect(item(entries, "run-first").label).toBe("Run Ruff");
+  expect(ids(item(entries, "run-in").sub!)).toEqual(["run-ruff", "|", "add-command", "manage-commands"]);
+  expect(item(entries, "copy-full").disabled).toBe("Not kept now: open it to have it made again");
+  expect(item(entries, "open-default").act).toMatchObject({ do: "made-app", rel: "out", dir: true });
+});

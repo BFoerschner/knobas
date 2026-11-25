@@ -130,7 +130,7 @@ test("a run the page draws as failed says so, on its row or its heading (ux18); 
   expect(thingAt(root.querySelector('a[href="#/build/p/r2"]'), "#/builds", ORIGIN)?.thing).toEqual({ kind: "run", id: "r2", pipelineId: "p", hash: "#/build/p/r2" });
 });
 
-test("a row of a generated folder is no thing: nothing acts on the real file of its path (ADR-0046)", () => {
+test("a row of a generated folder is no thing of the repository: nothing acts on the real file of its path (ADR-0046)", () => {
   const root = page(
     `<button class="tf-fdir tf-made" data-path="apps/flow/docs" data-made="">docs</button>` +
       `<a class="tf-made" data-made="" data-path="apps/flow/README.md" href="#/repo/r/files/apps/flow/README.md"><span class="n">README.md</span></a>`,
@@ -138,4 +138,27 @@ test("a row of a generated folder is no thing: nothing acts on the real file of 
   const hash = "#/repo/r/rendered/site/apps%2Fflow";
   expect(thingAt(root.querySelector(".tf-fdir"), hash, ORIGIN)).toBeNull();
   expect(thingAt(root.querySelector(".n"), hash, ORIGIN)).toBeNull();
+});
+
+test("a generated file's row, a tagged generated folder and a line of a generated file are the generated thing (Björn, 2026-11-25)", () => {
+  const madeThing = { kind: "made", repoId: "r", renderer: "site", folder: "apps/flow" } as const;
+  const root = page(
+    `<button class="tf-fdir tf-made" data-path="apps/flow/out" data-made="">out</button>` +
+      `<a class="tf-made" data-made="" data-path="apps/flow/out/a.xml" href="#/repo/r/rendered/site/apps%2Fflow/files/out/a.xml"><span class="n">a.xml</span></a>` +
+      `<div class="tf-fileview"><span class="tf-l" data-n="7">line</span></div>`,
+  );
+  const dir = root.querySelector(".tf-fdir")!;
+  const off = menuThing(() => ({ ...madeThing, rel: "out", dir: true, line: null }))(dir);
+  const hash = "#/repo/r/rendered/site/apps%2Fflow/files/out/a.xml";
+  expect(thingAt(root.querySelector(".n"), hash, ORIGIN)?.thing).toEqual({ ...madeThing, rel: "out/a.xml", dir: false, line: null });
+  expect(thingAt(dir, hash, ORIGIN)?.thing).toEqual({ ...madeThing, rel: "out", dir: true, line: null });
+  expect(thingAt(root.querySelector(".tf-l"), hash, ORIGIN)?.thing).toEqual({ ...madeThing, rel: "out/a.xml", dir: false, line: 7 });
+  off?.();
+});
+
+test("a generated folder's addresses name its file, its line and its top; `.` is the repository's top", () => {
+  const made = { kind: "made", repoId: "r", renderer: "site" } as const;
+  expect(thingOfHash("#/repo/r/rendered/site/docs/files/a/b.md")).toEqual({ ...made, folder: "docs", rel: "a/b.md", dir: false, line: null });
+  expect(thingOfHash("#/repo/r/rendered/site/docs/line/12/a/b.md")).toEqual({ ...made, folder: "docs", rel: "a/b.md", dir: false, line: 12 });
+  expect(thingOfHash("#/repo/r/rendered/site/.")).toEqual({ ...made, folder: "", rel: "", dir: true, line: null });
 });

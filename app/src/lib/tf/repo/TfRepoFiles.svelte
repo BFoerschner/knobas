@@ -194,6 +194,7 @@
   import { WORKING_TREE } from "../diff/address";
   import type { WorkingMark } from "./repo";
   import { oneoffs } from "../../render/oneoff.svelte";
+  import { menuThing, type Thing } from "../context/thing";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -896,6 +897,15 @@
       if (graft.index === null || !underFolder(full, graft.folder) || full === graft.folder) continue;
       const rel = graft.folder === "" ? full : full.slice(graft.folder.length + 1);
       if (graft.index.has(rel)) return { graft, rel };
+    }
+    return null;
+  }
+  /** A generated folder's folder row as a right-click reads it (ADR-0060 amended 2026-11-25): a folder of the kept folder. */
+  function madeDirThing(full: string): Thing | null {
+    for (const graft of grafts.values()) {
+      if (graft.index === null || full === graft.folder || !underFolder(full, graft.folder)) continue;
+      const rel = graft.folder === "" ? full : full.slice(graft.folder.length + 1);
+      return { kind: "made", repoId, renderer: graft.renderer, folder: graft.folder, rel, dir: true, line: null };
     }
     return null;
   }
@@ -2197,6 +2207,7 @@
           class:tf-frmarked={folderRendererOf(full) !== undefined}
           aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
           onclick={() => toggle(full)}
+          {@attach row.made === undefined ? undefined : menuThing(() => madeDirThing(full))}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
         {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}

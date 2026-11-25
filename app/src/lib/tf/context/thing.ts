@@ -14,6 +14,10 @@
  * page that draws them needs no tag: a folder of the file tree (`.tf-fdir[data-path]`), a line of the file view
  * (`.tf-fileview .tf-l[data-n]`) and an image of a rendered file that is a file of the repository (`img[data-md-path]`).
  * And a page's heading is that page's thing (`own`: its menu has no *Open*, the reader is there).
+ *
+ * A file of a generated folder (ADR-0046) is no file of the repository: it is a `made` thing, read from its row's address
+ * (`#/repo/<id>/rendered/…/files/<path>`), a tag on a generated folder's row, or a line of a generated file's view, and
+ * nothing on it ever acts on the real file of its path (ADR-0060 amended 2026-11-25).
  */
 import { parseTfHash } from "../route";
 import { placeOf, spaceAt, spaceId, spaceTitle } from "../docs/docs";
@@ -38,6 +42,11 @@ export type Thing =
   | { kind: "file" | "folder"; repoId: string; path: string }
   /** A line of a file, from 1. */
   | { kind: "line"; repoId: string; path: string; line: number }
+  /**
+   * A file or a folder of a generated folder (ADR-0046): what `renderer` made of the repository's `folder`, `rel` from
+   * the generated folder's top (`""` the top), at `line` where one is pressed. Never a file of the repository.
+   */
+  | { kind: "made"; repoId: string; renderer: string; folder: string; rel: string; dir: boolean; line: number | null }
   /**
    * A line of a document view that holds a value (the XML view's design, 2026-11-23, sections 15 and 22): the line's own
    * rows, and the value's. `does` is the view's own: it opens the value viewer, and asks the query. `link` is false in a
@@ -150,6 +159,7 @@ export function thingOfHash(hash: string): Thing | null {
       return first === "at" && second ? { kind: "monitor", id: second, hash: `#/monitors/at/${encodeURIComponent(second)}` } : null;
     case "repo": {
       if (second === "files" && more.length > 0) return { kind: "file", repoId: first, path: more.join("/") };
+      if (second === "rendered" && more.length >= 2) return madeOfRoute(first, more);
       if (second === "line" && more.length > 1) {
         const line = Number(more[0]);
         const path = more.slice(1).join("/");
@@ -161,6 +171,25 @@ export function thingOfHash(hash: string): Thing | null {
     default:
       return null;
   }
+}
+
+/**
+ * A generated folder's address after `#/repo/<id>/rendered/`: `<renderer>/<folder>` (`.` the top), then `files/<path>`,
+ * `line/<n>/<path>` or `at/<place>/<path>`; the folder itself with nothing after it.
+ */
+function madeOfRoute(repoId: string, rest: readonly string[]): Thing | null {
+  const [renderer, folderSeg, how, ...tail] = rest;
+  if (renderer === undefined || folderSeg === undefined) return null;
+  const folder = folderSeg === "." ? "" : folderSeg;
+  const made = (rel: string, dir: boolean, line: number | null): Thing => ({ kind: "made", repoId, renderer, folder, rel, dir, line });
+  if (how === undefined) return made("", true, null);
+  if (how === "files" && tail.length > 0) return made(tail.join("/"), false, null);
+  if (how === "line" && tail.length > 1) {
+    const line = Number(tail[0]);
+    return made(tail.slice(1).join("/"), false, Number.isInteger(line) && line > 0 ? line : null);
+  }
+  if (how === "at" && tail.length > 1) return made(tail.slice(1).join("/"), false, null);
+  return null;
 }
 
 /** The repository the page's address stands in (`#/repo/<id>/…`), or `null`. */
@@ -203,8 +232,6 @@ export function thingAt(node: Element | null, hash: string = location.hash, orig
 }
 
 function thingAtOnly(node: Element | null, hash: string, origin: string): Found | null {
-  // A row of a generated folder (ADR-0046) is no file of the repository: nothing would act on the real one of its path.
-  if (node?.closest?.("[data-made]")) return null;
   for (let at: Element | null = node; at !== null; at = at.parentElement) {
     const tag = TAGS.get(at);
     if (tag?.claims) {
@@ -223,6 +250,8 @@ function thingAtOnly(node: Element | null, hash: string, origin: string): Found 
       if (href.startsWith("#")) {
         // A link to a place (a tab, a section) is no thing: the row around it may still be one.
         const thing = thingOfHash(href);
+        // A generated folder's row is its generated file, never the repository's file of its path.
+        if (thing && thing.kind !== "made" && at.closest("[data-made]")) return null;
         if (thing) return { thing, own: false, node: at };
         continue;
       }
@@ -231,6 +260,9 @@ function thingAtOnly(node: Element | null, hash: string, origin: string): Found 
       continue;
     }
     const repoId = repoOfPage(hash);
+    // A row of a generated folder (ADR-0046) is its address or its tag, read above; never the real file or folder of
+    // its path.
+    if ((at as HTMLElement).dataset?.["made"] !== undefined) return null;
     if (repoId !== null) {
       const path = (at as HTMLElement).dataset?.["path"];
       if (at.classList.contains("tf-fdir") && path) return { thing: { kind: "folder", repoId, path }, own: false, node: at };
@@ -241,6 +273,9 @@ function thingAtOnly(node: Element | null, hash: string, origin: string): Found 
       if (n && file !== null && at.classList.contains("tf-l") && at.closest(".tf-fileview")) {
         return { thing: { kind: "line", repoId, path: file, line: Number(n) }, own: false, node: at };
       }
+      // A line of a generated file's view: the generated file at that line.
+      const made = n && at.classList.contains("tf-l") && at.closest(".tf-fileview") ? thingOfHash(hash) : null;
+      if (made !== null && made.kind === "made" && !made.dir) return { thing: { ...made, line: Number(n) }, own: false, node: at };
     }
     // A table's row is the thing its first link names: its actions' cell holds no link to it.
     if (at.tagName === "TR") {
