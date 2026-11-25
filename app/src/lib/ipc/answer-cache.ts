@@ -13,8 +13,11 @@
  * - a sync run ends with something new (`sync:state` with `last_changed`):
  *   every answer a source filling one of that source's roles could change
  *   ({@link SCOPE}; a read with no scope is dropped by every such run);
- * - a refresh of one item ends (`item:refreshed`) or a held view moved
- *   (`view:fresh`): every answer;
+ * - a refresh of one item ends (`item:refreshed`): after a write, every
+ *   answer; with none behind it (a run started here read to its end, a
+ *   page's own refresh), what a run of the item's source drops, and nothing
+ *   for one that failed (the TeamCity run fix, 2026-11-25);
+ * - a held view moved (`view:fresh`): every answer;
  * - any command that is not a read of {@link READS} or {@link QUIET}: a write,
  *   or a read this file does not know. Every answer, except that a visit
  *   (`visit_entity`) keeps the reads that never read visits ({@link VISIT_BLIND}),
@@ -121,6 +124,10 @@ export const QUIET: ReadonlySet<string> = new Set([
   // The pane's files of one repository (D11): a read of the index, which no kept answer reads.
   "search_files",
   "refused_writes",
+  // A refresh of one item (the TeamCity run fix, 2026-11-25): what it moved drops answers by its own event
+  // (`item:refreshed`), and one that moved nothing tells nothing. Unknown here, each page's refresh of its runs in
+  // flight dropped every kept answer at the call.
+  "refresh_entity",
   "notification_kinds",
   "diff_pipelines",
   "command_steps",
@@ -551,8 +558,13 @@ function promoted(args: unknown, answer: Promise<unknown>): Promise<unknown> {
 export interface CacheEvents {
   /** `sync:state`: a run's transition; a finished one that changed something drops what its source could change. */
   syncState(payload: { source_id?: string; running?: boolean; last_changed?: boolean | null }): void;
-  /** `item:refreshed`, `view:fresh`, `checkout:fetched`: every answer. */
+  /** `view:fresh`, `checkout:fetched`, `db:state`: every answer. */
   moved(): void;
+  /**
+   * `item:refreshed`: after a write, every answer; with none behind it, what a run of the item's source drops; a failed
+   * one, nothing.
+   */
+  refreshed(payload: { entity_id?: string; write_id?: number | null; ended?: string }): void;
   /** `source:health`: the credential's health. */
   health(): void;
 }
@@ -570,6 +582,17 @@ export const cacheEvents: CacheEvents = {
   moved() {
     why = "an item or view moved";
     drop();
+  },
+  refreshed(payload) {
+    if (payload.ended === "failed") return;
+    const source = typeof payload.entity_id === "string" ? payload.entity_id.split(":")[0] : undefined;
+    if (payload.write_id != null || source === undefined || source === "") {
+      why = "an item moved";
+      drop();
+      return;
+    }
+    why = `an item of ${source} moved`;
+    runChanged(source);
   },
   health() {
     why = "a credential's health";
