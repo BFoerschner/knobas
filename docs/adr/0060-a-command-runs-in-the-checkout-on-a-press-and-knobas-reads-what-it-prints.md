@@ -17,6 +17,17 @@ Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md), 
 - **Nothing it printed rests.** A run's output is a live read in the app process (ADR-0032), bounded, dropped at quit: in no table, no index, no log and no backup. The list of runs, without output, is a file in the profile that no backup carries. A share export carries no command.
 - **A repository supplies no command that runs.** A list a repository holds may be shown and copied into the person's own list after they have read each line, from the checkout on disk and never from the mirror. It is theirs from then on, and a later change of the file changes nothing by itself.
 
+## Amended 2026-11-25: a generated folder
+
+Björn, on ux55: "The command run doesn't work on a rendered folder. I also can't right click those files inside". Decided by Fable (xhigh) under his standing instruction; `docs/decisions/2026-11-25-a-command-on-a-generated-folder-runs-in-the-folder-knobas-kept.md`. **On a file or a folder of a generated folder (ADR-0046) a command runs in the folder knobas kept, which stands in the checkout's place, as it does for *Open in*.**
+
+- **What reaches an argument there.** The kept folder's own paths, each one the manifest holds, with every folder on the way plain and nothing a link: `{file}`, `{dir}`, `{files}`, and `{root}` its top, `{name}` its name; `{relfile}` and `{reldir}` from its top. No git name: a command holding `{sha}`, `{base}`, `{head}` or `{branch}` is refused by name. *Add to PATH*'s `{root}` is the checkout where it is cloned, and is left out where it is not.
+- **Where it runs.** The kept folder's top, or the folder it runs on. Never the checkout, and no clone is needed.
+- **Places** are the kept folder's files only, opened as the generated file at its line.
+- **Writes.** A run that changed one of the kept files has the kept folder dropped once no run is in it, so it is rendered again; a file a program added is no change. The dialog says so.
+- **Identity.** The target names the renderer, the folder and the path; the kept folder's token is the run's own argument (`oneoff_run`'s `made_token`).
+- **Trust.** A program started in a kept folder reads what the renderer wrote there, which may be settings and code, from a repository that may not be cloned. The press is the consent, as above.
+
 ## Rejected
 
 - **A copy of the file or folder, as a renderer gets.** A linter reads its settings, its plugins and the project around the file. On a copy it checks nothing, and a copy on every press is a write of the folder.

@@ -43,6 +43,8 @@
 .tf-oo-bar .tf-seg button { display: inline-flex; align-items: center; gap: 6px; }
 .tf-oo-bar .tf-seg .tf-count { min-width: 0; }
 .tf-oo-counts { margin-left: auto; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A run on a generated folder that changed its files (ADR-0060 amended 2026-11-25): said in the counts' cell, warn tone. */
+.tf-oo-counts.tf-warn { color: var(--warn); }
 .tf-oo-bar .tf-btn[aria-pressed="true"] { background: var(--rule-2); border-color: var(--rule); }
 .tf-oo-bar .tf-select { max-width: 12em; }
 

@@ -27,7 +27,8 @@
   import { drawn } from "../../detail/relations";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
-  import { oneoffs, targetOf } from "../../render/oneoff.svelte";
+  import { notKept, oneoffs, targetOf } from "../../render/oneoff.svelte";
+  import { folderRenderOpen } from "../../ipc/app";
   import { repoName } from "../openin/openin";
   import { joinInside } from "../openin/openin";
   import TfMenu from "../TfMenu.svelte";
@@ -120,6 +121,7 @@
             moves: (id) => moveProvider()?.offer(id) ?? null,
             fields: (id) => fieldProvider()?.offer(id) ?? null,
             commands: oneoffs.loaded ? oneoffs.commands : null,
+            made: (repoId, renderer, folder) => oneoffs.madeOf(repoId, renderer, folder),
           },
           facts,
         ),
@@ -205,6 +207,8 @@
       case "web":
       case "inbox":
       case "space":
+      // A generated folder's file reads nothing: it is on this disk, kept by knobas (ADR-0060 amended 2026-11-25).
+      case "made":
         break;
       default:
         entity = thing.id;
@@ -483,6 +487,13 @@
         );
       case "app":
         return runApp(act.entityId, act.app, act.name, act.at);
+      case "made-app": {
+        // The generated folder the page keeps now (ADR-0060 amended 2026-11-25): never the repository's file of its path.
+        const kept = oneoffs.madeOf(act.repoId, act.renderer, act.folder);
+        const name = folderRenderers.list.find((r) => r.id === act.renderer)?.name ?? act.renderer;
+        if (kept === null) return void push({ text: notKept(name, act.folder), tone: "err" });
+        return void folderRenderOpen(act.app, kept.token, act.dir ? null : act.rel, act.line, act.dir ? act.rel : null).catch(failed(`Could not open ${act.name}`));
+      }
       case "oneoff": {
         const command = oneoffs.commands.find((c) => c.id === act.command);
         if (command === undefined) return;

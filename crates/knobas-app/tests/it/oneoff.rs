@@ -684,3 +684,242 @@ async fn a_result_that_is_not_lines_out_outdir_and_a_stdout_that_is_not_text() {
         "a run that failed keeps nothing of {{outdir}}"
     );
 }
+
+// -- a generated folder (ADR-0046; ADR-0060 amended 2026-11-25) --------------
+
+/// A repository the mirror holds and this machine has not cloned.
+async fn not_cloned(pool: &PgPool, token: &str) -> String {
+    let id = format!("gitea-oo:tidewater/made-{token}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'repo',$2)")
+        .bind(&id)
+        .bind(format!("tidewater/made-{token}"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, web_url)
+         values ($1,'gitea-oo','repo',$2,'','{}'::jsonb,null)",
+    )
+    .bind(&id)
+    .bind(format!("tidewater/made-{token}"))
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// A kept generated folder holding `files`, as `folder_render::keep` keeps one.
+fn kept(dir: &Path, files: &[(&str, &str)]) -> Arc<knobas_app::folder_render::keep::Made> {
+    use knobas_app::folder_render::keep::{Made, MadeFile, Manifest};
+    let mut list = Vec::new();
+    for (path, text) in files {
+        let at = dir.join(path);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, text).unwrap();
+        list.push(MadeFile {
+            path: (*path).to_owned(),
+            size: text.len() as u64,
+        });
+    }
+    list.sort_by(|a, b| a.path.cmp(&b.path));
+    Arc::new(Made::new(
+        dir.to_path_buf(),
+        Manifest {
+            files: list,
+            bytes: 0,
+            left_out: Vec::new(),
+            left_out_total: 0,
+        },
+    ))
+}
+
+fn made_file(path: &str) -> Target {
+    Target::Made {
+        renderer: "site".to_owned(),
+        folder: "docs".to_owned(),
+        path: path.to_owned(),
+        dir: false,
+        lines: None,
+    }
+}
+
+/// Runs `command` on `target` in the kept folder `made`; answers the batches
+/// and whether the folder was dropped (its change callback called).
+async fn run_made(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    id: &str,
+    command: &str,
+    target: Target,
+    made: &Arc<knobas_app::folder_render::keep::Made>,
+) -> (
+    Arc<Collect>,
+    knobas_app::oneoff::run::Started,
+    Arc<std::sync::atomic::AtomicBool>,
+) {
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let told = Arc::clone(&dropped);
+    let sink = Arc::new(Collect::default());
+    let started = knobas_app::oneoff::start_made(
+        runs,
+        pool,
+        id,
+        command,
+        target,
+        Some(knobas_app::oneoff::OnMade {
+            made: Arc::clone(made),
+            on_change: Box::new(move || told.store(true, std::sync::atomic::Ordering::SeqCst)),
+        }),
+        sink.clone(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("{command} must start: {}", e.message));
+    (sink, started, dropped)
+}
+
+#[tokio::test]
+async fn a_generated_file_is_run_in_the_folder_knobas_kept_with_no_clone() {
+    let pool = scratch("oneoff_made_paths").await;
+    let store = tempfile::tempdir().unwrap();
+    let made = kept(
+        store.path(),
+        &[("out/a.xml", "<a/>"), ("index.html", "<p/>")],
+    );
+    let id = not_cloned(&pool, "paths").await;
+    knobas_app::oneoff::save(
+        &pool,
+        &[
+            draft("where", "sh -c 'pwd; printf \"%s|%s|%s\\n\" \"$1\" \"$2\" \"$3\"' _ {file} {relfile} {root}"),
+            draft("inside", "pwd"),
+        ],
+    )
+    .await
+    .unwrap();
+    let runs = Arc::new(Runs::new());
+    let (sink, started, _) =
+        run_made(&runs, &pool, &id, "where", made_file("out/a.xml"), &made).await;
+    assert_eq!(
+        sink.wait(Duration::from_secs(10)).await,
+        Ended::Exit { code: 0 }
+    );
+    let real = std::fs::canonicalize(store.path()).unwrap();
+    let top = store.path().to_string_lossy().into_owned();
+    assert_eq!(
+        sink.texts(),
+        vec![
+            real.to_string_lossy().into_owned(),
+            format!("{top}/out/a.xml|out/a.xml|{top}"),
+        ],
+        "it starts in the kept folder's top and is handed its paths"
+    );
+    assert_eq!(started.cwd, top);
+    assert_eq!(started.branch, None, "a kept folder is on no branch");
+    // A git name is refused by name, before anything runs.
+    knobas_app::oneoff::save(&pool, &[draft("rev", "printf %s {file} {branch}")])
+        .await
+        .unwrap();
+    let Err(refused) = knobas_app::oneoff::start_made(
+        &runs,
+        &pool,
+        &id,
+        "rev",
+        made_file("out/a.xml"),
+        Some(knobas_app::oneoff::OnMade {
+            made: Arc::clone(&made),
+            on_change: Box::new(|| {}),
+        }),
+        Arc::new(Collect::default()),
+    )
+    .await
+    else {
+        panic!("a command with {{branch}} started on a generated folder");
+    };
+    assert!(
+        refused
+            .message
+            .contains("uses {branch}, and a generated folder is no git repository"),
+        "{}",
+        refused.message
+    );
+}
+
+#[tokio::test]
+async fn a_command_that_changes_a_generated_file_says_so_and_has_it_dropped() {
+    let pool = scratch("oneoff_made_writes").await;
+    let store = tempfile::tempdir().unwrap();
+    let made = kept(store.path(), &[("a.txt", "a\n"), ("b.txt", "b\n")]);
+    let id = not_cloned(&pool, "writes").await;
+    knobas_app::oneoff::save(
+        &pool,
+        &[
+            draft("append", "sh -c 'printf more >> \"$1\"' _ {file}"),
+            draft(
+                "cache",
+                "sh -c 'touch \"$1/.lintcache\"; echo a.txt:1:1: note' _ {dir}",
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+    let runs = Arc::new(Runs::new());
+    // A file added beside the generated ones is no change: nothing is dropped.
+    let folder = Target::Made {
+        renderer: "site".to_owned(),
+        folder: "docs".to_owned(),
+        path: String::new(),
+        dir: true,
+        lines: None,
+    };
+    let (sink, _, dropped) = run_made(&runs, &pool, &id, "cache", folder, &made).await;
+    assert_eq!(
+        sink.wait(Duration::from_secs(10)).await,
+        Ended::Exit { code: 0 }
+    );
+    let last = sink
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|b| b.ended.is_some())
+        .cloned()
+        .unwrap();
+    assert_eq!(last.made_changed, Some(Vec::new()));
+    // Its place is the generated file, and only a file the kept folder holds is one.
+    let placed = sink
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|b| b.lines.clone())
+        .flat_map(|l| l.places)
+        .map(|p| p.path)
+        .collect::<Vec<_>>();
+    assert_eq!(placed, vec!["a.txt".to_owned()]);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
+    // Appending to one of them changes it: the run names it, and the kept folder goes once no run holds it.
+    let (sink, _, dropped) = run_made(&runs, &pool, &id, "append", made_file("b.txt"), &made).await;
+    assert_eq!(
+        sink.wait(Duration::from_secs(10)).await,
+        Ended::Exit { code: 0 }
+    );
+    let last = sink
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|b| b.ended.is_some())
+        .cloned()
+        .unwrap();
+    assert_eq!(last.made_changed, Some(vec!["b.txt".to_owned()]));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !dropped.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(
+            Instant::now() < deadline,
+            "the changed kept folder was never dropped"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}

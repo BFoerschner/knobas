@@ -371,7 +371,7 @@ One of the person's own programs that takes a folder of a repository and makes a
 _Avoid_: folder preview, folder plugin, renderer alone (a file's)
 
 **Command** (*Run…*):
-One of the person's own programs, saved in Settings › Commands, that is run once on a press on a file, a folder, the repository, a commit or a comparison, and whose output opens in a dialog (ADR-0060, 2026-11-24). It runs in the [checkout](#checkout) with no shell, as an [application](#application-open-in) does, and knobas waits for it and reads what it prints. It never stands in a file's place: a program that should is a renderer. What it is offered on is read from its placeholders. In code `oneoff`, `OneOff`.
+One of the person's own programs, saved in Settings › Commands, that is run once on a press on a file, a folder, the repository, a commit or a comparison, and whose output opens in a dialog (ADR-0060, 2026-11-24). It runs in the [checkout](#checkout) with no shell, as an [application](#application-open-in) does, and knobas waits for it and reads what it prints. It never stands in a file's place: a program that should is a renderer. What it is offered on is read from its placeholders. On a [generated folder](#generated-folder) it runs in the folder knobas kept, with its paths, and never in the checkout (2026-11-25). What it runs on is its target: a file, a folder, the repository, a commit, a comparison, files, or a generated file or folder (`OneOffTarget`, `made` and `made_files`). In code `oneoff`, `OneOff`.
 _Avoid_: task, tool, action, script, linter (one use of it), renderer
 
 **Finding**:

@@ -403,3 +403,46 @@ const FIXTURES: &[(&str, &str, usize, usize)] = &[
     ("python-traceback.txt", "", 2, 0),
     ("rustc.txt", "crate", 1, 1),
 ];
+
+/// Björn, 2026-11-25: a generated folder kept under the profile on macOS is
+/// under `Application Support`, so every absolute path a tool printed there
+/// held a space and was no link. The run's own root reads as one word.
+#[test]
+fn a_root_whose_name_holds_a_space_or_brackets_is_one_path() {
+    let mut disk = files();
+    for root in [
+        "/Users/mara/Library/Application Support/dev.knobas.desktop/kept/orders.site.1",
+        "C:/Program Files (x86)/kept [1]/orders.site.1",
+    ] {
+        let mut ctx = Ctx {
+            root: root.to_owned(),
+            alias: None,
+            cwd: String::new(),
+            caseless: root.starts_with("C:"),
+            disk: &mut disk,
+        };
+        let printed = format!(
+            "{root}/scripts/deploy.sh:3:8: note: Double quote to prevent globbing. [SC2086]"
+        );
+        let places = find(&printed, &mut ctx, &mut State::default());
+        assert_eq!(places.len(), 1, "{printed}");
+        let place = &places[0];
+        assert_eq!(
+            (place.path.as_str(), place.line, place.col),
+            ("scripts/deploy.sh", Some(3), Some(8))
+        );
+        assert_eq!(place.from, 0);
+        // Backslashes, as a Windows tool prints the same root.
+        let back = printed.replace('/', "\\");
+        let places = find(&back, &mut ctx, &mut State::default());
+        assert_eq!(places.len(), 1, "{back}");
+        assert_eq!(places[0].path, "scripts/deploy.sh");
+        // Another folder with a space in it is still no path.
+        let other = "/Users/mara/Library/Application Support/other/scripts/deploy.sh:3:8: x";
+        assert!(
+            find(other, &mut ctx, &mut State::default())
+                .iter()
+                .all(|p| p.from > 0)
+        );
+    }
+}

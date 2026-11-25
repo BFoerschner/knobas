@@ -328,7 +328,8 @@
     <p class="tf-stg-p tf-stg-gap">
       A command runs in your checkout as you, and may change files there, as a program you start in a terminal does. A linter runs the
       repository's own settings and plugins, and a build tool its scripts: running a command runs what was pushed to that checkout. It runs only
-      when you press it, never on its own.
+      when you press it, never on its own. On a generated folder it runs in the folder knobas kept, not in your checkout: it reads any settings
+      the renderer wrote there and not your checkout's, and a generated file it changes has the folder rendered again.
     </p>
 
     <div class="tf-stg-acts tf-appacts">

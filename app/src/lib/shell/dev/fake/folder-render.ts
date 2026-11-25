@@ -434,6 +434,12 @@ export function handlers(): Handlers {
       const kept = made.get(String(args["token"])) ?? gone();
       const file = (args["file"] as string | null) ?? null;
       if (file !== null && !kept.files.has(file)) throw { code: "invalid", message: `the generated folder holds no file ${file}` };
+      // A folder inside it stands in the checkout's place (ADR-0060 amended 2026-11-25).
+      const folder = ((args["folder"] as string | null | undefined) ?? "").replace(/^\/+|\/+$/g, "");
+      if (file === null && folder !== "") {
+        if (![...kept.files.keys()].some((p) => p.startsWith(`${folder}/`))) throw { code: "invalid", message: `the generated folder holds no folder ${folder}` };
+        return ["code", `${kept.tree.dir}/${folder}`];
+      }
       return ["code", file === null ? kept.tree.dir : `${kept.tree.dir}/${file}`];
     },
     folder_render_store: () => storeView(),

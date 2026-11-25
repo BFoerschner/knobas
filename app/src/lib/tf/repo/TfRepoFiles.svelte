@@ -193,6 +193,8 @@
   import { thousands } from "../counted";
   import { WORKING_TREE } from "../diff/address";
   import type { WorkingMark } from "./repo";
+  import { oneoffs } from "../../render/oneoff.svelte";
+  import { menuThing, type Thing } from "../context/thing";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -898,6 +900,15 @@
     }
     return null;
   }
+  /** A generated folder's folder row as a right-click reads it (ADR-0060 amended 2026-11-25): a folder of the kept folder. */
+  function madeDirThing(full: string): Thing | null {
+    for (const graft of grafts.values()) {
+      if (graft.index === null || full === graft.folder || !underFolder(full, graft.folder)) continue;
+      const rel = graft.folder === "" ? full : full.slice(graft.folder.length + 1);
+      return { kind: "made", repoId, renderer: graft.renderer, folder: graft.folder, rel, dir: true, line: null };
+    }
+    return null;
+  }
   /** A file's address: the generated one where a graft holds it, else the repository's. */
   const hrefOf = (full: string) => {
     const made = grafts.size === 0 ? null : madeAt(full);
@@ -956,6 +967,17 @@
         : { ...readFrom, renderer: renderedNow.renderer, command: "", folder: renderedNow.folder, start: shownPage() },
     untrack(() => folderPorts),
   );
+  // The generated folders this tab keeps, for a command run on one (ADR-0060 amended 2026-11-25): *Run…*, *Run again*
+  // and the right-click menu's rows take the token from here. Left as known when the tab goes, without its `look`: the
+  // backend says when it no longer holds one.
+  $effect(() => {
+    const kept = [...grafts.values()].flatMap((g) => (g.index === null ? [] : [{ renderer: g.renderer, folder: g.folder, token: g.index.token, dir: g.index.dir }]));
+    for (const k of kept) oneoffs.keepMade(repoId, k.renderer, k.folder, { token: k.token, dir: k.dir, look: () => (renderedNow?.folder === k.folder && renderedNow.renderer === k.renderer ? lookOnce() : Promise.resolve()) });
+    return () => {
+      for (const k of kept) oneoffs.keepMade(repoId, k.renderer, k.folder, { token: k.token, dir: k.dir });
+    };
+  });
+
   /** The address's run asked again with `look`, once: a token the backend no longer held is read back from its store. */
   async function lookOnce(): Promise<void> {
     const now = renderedNow;
@@ -2185,6 +2207,7 @@
           class:tf-frmarked={folderRendererOf(full) !== undefined}
           aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
           onclick={() => toggle(full)}
+          {@attach row.made === undefined ? undefined : menuThing(() => madeDirThing(full))}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
         {#each [folderRendererOf(full)].filter((one) => one !== undefined) as by (by.id)}
@@ -2391,13 +2414,19 @@
         onreal={() => realFiles(graftFolder)}
       >
         {#snippet openIn()}
+          <!-- The generated folder's commands run on the folder knobas kept, never on the real one (Fable, 2026-11-25). -->
           <TfRunMenu
             entityId={repoId}
             repo={title || repoId}
-            target={{ kind: "folder", path: graftFolder }}
+            target={{ kind: "made", renderer: renderedNow.renderer, folder: graftFolder, path: "", dir: true, lines: null }}
             {checkout}
-            own={(listings[graftFolder] ?? []).filter((e) => e.kind === "file").map((e) => e.name)}
-            files={{ paths: (listings[graftFolder] ?? []).filter((e) => e.kind === "file").map((e) => (graftFolder === "" ? e.name : `${graftFolder}/${e.name}`)), changed: false }}
+            made={{
+              renderer: renderedNow.renderer,
+              folder: graftFolder,
+              dir: madeShown?.dir ?? null,
+              files: madeShown?.files.map((f) => f.path) ?? [],
+              shown: fileMade !== null && fileMade.token === madeShown?.token ? fileMade.rel : null,
+            }}
             priority={2}
           />
           <TfMadeOpenIn

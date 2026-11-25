@@ -95,7 +95,9 @@ function line(n: number, text: string, extra: Partial<OneOffLine> = {}): OneOffL
 
 /** What `command` prints on `target`, read as the backend reads it. */
 function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; ended: OneOffEnded; every: number; result?: { result: OneOffResult; bytes: Uint8Array | Map<string, Uint8Array> } } {
-  const file = target.kind === "file" ? target.path : "src/retry/window.ts";
+  const file = target.kind === "file" || (target.kind === "made" && !target.dir) ? target.path : "src/retry/window.ts";
+  const onFolder = target.kind === "folder" || (target.kind === "made" && target.dir);
+  const folderPath = target.kind === "folder" || target.kind === "made" ? target.path : "";
   if (command.command.includes("missing")) return { lines: [], ended: { how: "not_started", reason: `${command.command.split(" ")[0]} was not found: is it on the PATH the command sees?` }, every: 0 };
   if (command.command.includes("fail")) {
     return {
@@ -168,14 +170,14 @@ function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; e
     };
   }
   if (command.command.includes("sleep")) return { lines: [line(0, "waiting…")], ended: { how: "timed_out", seconds: command.timeout_secs }, every: 1e9 };
-  const shown = target.kind === "folder" ? target.path || "." : file;
+  const shown = onFolder ? folderPath || "." : file;
   const findings: [number, number, string, string, string][] = [
     [12, 7, "error", "'attempts' is never reassigned. Use 'const' instead", "prefer-const"],
     [27, 21, "warning", "Unexpected any. Specify a different type", "@typescript-eslint/no-explicit-any"],
     [48, 5, "error", "Promises must be awaited, end with a call to .catch, or be explicitly marked as ignored with the `void` operator", "@typescript-eslint/no-floating-promises"],
     [63, 11, "error", "'jitter' is assigned a value but never used", "@typescript-eslint/no-unused-vars"],
   ];
-  const head = target.kind === "folder" ? `${shown}/window.ts` : shown;
+  const head = onFolder ? `${shown}/window.ts` : shown;
   const lines: OneOffLine[] = [line(0, ""), line(1, head, { places: [{ from: 0, to: head.length, path: head, line: null, col: null }], runs: [{ from: 0, to: head.length, style: { underline: true } }] })];
   for (const [at, col, severity, said, rule] of findings) {
     const pos = `${at}:${col}`;
@@ -268,12 +270,19 @@ export function handlers(): Handlers {
       const target = args["target"] as OneOffTarget;
       const running = runs.filter((r) => r.row.ended === null || r.row.ended === undefined);
       if (running.length >= 4) throw { code: "invalid", message: `four commands are running (${running.map((r) => r.row.name).join(", ")}): stop one or wait for it to end`, source_id: null };
+      // A generated folder's target runs in the folder knobas kept, named by its token (ADR-0060 amended 2026-11-25).
+      const onMade = target.kind === "made" || target.kind === "made_files";
+      const token = args["madeToken"] === null || args["madeToken"] === undefined ? null : String(args["madeToken"]);
+      if (onMade && token === null) throw { code: "invalid", message: "a run on a generated folder names the folder knobas kept", source_id: null };
+      const base = onMade ? `/Users/mara/Library/Application Support/knobas/knobas-rendered/3f2a91c0d4e5/site.${(token ?? "").slice(0, 8)}` : root;
       const id = `fake-run-${++nextRun}`;
-      const sep = root.includes("\\") ? "\\" : "/";
-      const at = (path: string) => `${root}${sep}${sep === "/" ? path : path.replaceAll("/", sep)}`;
-      const argv = (command.command.match(/"[^"]*"|\S+/g) ?? []).map((w) => w.replace(/^"|"$/g, "").replace("{file}", at(target.kind === "file" ? target.path : "")).replace("{dir}", at(target.kind === "folder" ? target.path : "")));
+      const sep = base.includes("\\") ? "\\" : "/";
+      const at = (path: string) => (path === "" ? base : `${base}${sep}${sep === "/" ? path : path.replaceAll("/", sep)}`);
+      const fileOf = target.kind === "file" || (target.kind === "made" && !target.dir) ? target.path : "";
+      const dirOf = target.kind === "folder" || (target.kind === "made" && target.dir) ? target.path : "";
+      const argv = (command.command.match(/"[^"]*"|\S+/g) ?? []).map((w) => w.replace(/^"|"$/g, "").replace("{file}", at(fileOf)).replace("{dir}", at(dirOf)));
       const run: FakeRun = {
-        row: { id, command: command.id, name: command.name, entity_id: String(args["entityId"]), target, argv, cwd: root, branch: "feature/retry-window", head: "7d3f2a1c", started_at: Date.now(), duration_ms: null, ended: null, lines: 0, findings: 0, kept: true },
+        row: { id, command: command.id, name: command.name, entity_id: String(args["entityId"]), target, argv, cwd: base, branch: onMade ? null : "feature/retry-window", head: onMade ? null : "7d3f2a1c", started_at: Date.now(), duration_ms: null, ended: null, lines: 0, findings: 0, kept: true },
         lines: [],
         findings: 0,
         bytes: 0,

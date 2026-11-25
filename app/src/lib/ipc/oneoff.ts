@@ -82,9 +82,12 @@ export function batchChannel(onbatch: (batch: OneOffBatch) => void): { channel: 
   return { channel, stop: () => (channel.onmessage = () => {}) };
 }
 
-/** Runs saved command `command` on `target` of `entityId`'s checkout; its lines follow on `channel`. */
-export function oneoffRun(entityId: string, command: string, target: OneOffTarget, channel: Channel<OneOffBatch>): Promise<OneOffStarted> {
-  return invoke<OneOffStarted>("oneoff_run", { entityId, command, target, channel });
+/**
+ * Runs saved command `command` on `target` of `entityId`'s checkout; its lines follow on `channel`. A generated folder's
+ * target runs in the kept folder `madeToken` names.
+ */
+export function oneoffRun(entityId: string, command: string, target: OneOffTarget, madeToken: string | null, channel: Channel<OneOffBatch>): Promise<OneOffStarted> {
+  return invoke<OneOffStarted>("oneoff_run", { entityId, command, target, madeToken, channel });
 }
 
 /** Stops a run with everything it started. */

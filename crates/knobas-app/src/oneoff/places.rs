@@ -81,6 +81,9 @@ pub struct Disk {
     root: PathBuf,
     real_root: Option<PathBuf>,
     answers: HashMap<String, bool>,
+    /// A generated folder's files (ADR-0060, amended 2026-11-25): only these
+    /// are places, never a file a program added beside them.
+    only: Option<std::sync::Arc<std::collections::HashSet<String>>>,
 }
 
 impl Disk {
@@ -90,7 +93,15 @@ impl Disk {
             root: root.to_path_buf(),
             real_root: std::fs::canonicalize(root).ok(),
             answers: HashMap::new(),
+            only: None,
         }
+    }
+
+    /// Places only at these paths from the root, which must also exist.
+    #[must_use]
+    pub fn only(mut self, held: Option<std::sync::Arc<std::collections::HashSet<String>>>) -> Self {
+        self.only = held;
+        self
     }
 }
 
@@ -100,6 +111,14 @@ impl Exists for Disk {
             return *known;
         }
         if self.answers.len() >= CANDIDATES {
+            return false;
+        }
+        if self
+            .only
+            .as_ref()
+            .is_some_and(|held| !held.contains(relative))
+        {
+            self.answers.insert(relative.to_owned(), false);
             return false;
         }
         let answer = self.real_root.as_ref().is_some_and(|root| {
@@ -231,6 +250,61 @@ fn resolve(raw: &str, ctx: &mut Ctx<'_>) -> Option<String> {
     (!normal.is_empty() && ctx.disk.exists(&normal)).then_some(normal)
 }
 
+/// The bytes a path in [`PATH`] never holds, which a run's own root may
+/// (`Application Support`, `Program Files (x86)`).
+const NOT_IN_PATH: &[u8] = b" \t:\"'<>|()[]{}*?";
+
+/// `text` with the run's own root (and its WSL alias) made one word wherever
+/// it stands before a separator, so an absolute path under a root whose name
+/// holds a space or a bracket still reads as one path: a generated folder kept
+/// under the profile's `Application Support` on macOS, a checkout under
+/// `Program Files (x86)` (Björn, 2026-11-25). Only ASCII bytes change, one
+/// for one, so every offset is the text's own and the path is read from
+/// `text`. `None` where nothing changed.
+fn masked(text: &str, ctx: &Ctx<'_>) -> Option<String> {
+    let fold = |b: u8| {
+        if b == b'\\' {
+            b'/'
+        } else if ctx.caseless {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        }
+    };
+    let seen: Vec<u8> = text.bytes().map(fold).collect();
+    let mut bytes = text.as_bytes().to_vec();
+    let mut changed = false;
+    for root in std::iter::once(ctx.root.as_str()).chain(ctx.alias.as_deref()) {
+        let root = root.trim_end_matches('/');
+        if root.is_empty() || !root.bytes().any(|b| NOT_IN_PATH.contains(&b)) {
+            continue;
+        }
+        let want: Vec<u8> = root.bytes().map(fold).collect();
+        let mut from = 0;
+        while let Some(at) = seen
+            .get(from..)
+            .and_then(|rest| rest.windows(want.len()).position(|w| w == want.as_slice()))
+        {
+            let start = from + at;
+            let end = start + want.len();
+            if seen.get(end) == Some(&b'/') {
+                for b in &mut bytes[start..end] {
+                    if NOT_IN_PATH.contains(b) {
+                        *b = b'_';
+                        changed = true;
+                    }
+                }
+            }
+            from = start + 1;
+        }
+    }
+    if changed {
+        String::from_utf8(bytes).ok()
+    } else {
+        None
+    }
+}
+
 /// The places in one line, in order, each naming a file of the checkout.
 pub fn find(text: &str, ctx: &mut Ctx<'_>, state: &mut State) -> Vec<Place> {
     find_marked(text, ctx, state).0
@@ -242,8 +316,12 @@ fn find_marked(text: &str, ctx: &mut Ctx<'_>, state: &mut State) -> (Vec<Place>,
         return (Vec::new(), false);
     }
     let mut found: Vec<(usize, usize, Place, bool)> = Vec::new();
+    // The shapes are matched on `hay`, the paths read from `text`: the same
+    // bytes but for the root's (see [`masked`]).
+    let hay_owned = masked(text, ctx);
+    let hay = hay_owned.as_deref().unwrap_or(text);
     for (shape, re) in SHAPES.iter().enumerate() {
-        for caps in re.captures_iter(text) {
+        for caps in re.captures_iter(hay) {
             let (Some(whole), Some(path)) = (caps.get(0), caps.get(1)) else {
                 continue;
             };
@@ -256,7 +334,7 @@ fn find_marked(text: &str, ctx: &mut Ctx<'_>, state: &mut State) -> (Vec<Place>,
                 continue;
             }
             // `node:internal/…`: a word before the colon that is no file.
-            let Some(resolved) = resolve(path.as_str(), ctx) else {
+            let Some(resolved) = resolve(&text[path.range()], ctx) else {
                 continue;
             };
             let number = |i: usize| caps.get(i).and_then(|m| m.as_str().parse::<u32>().ok());

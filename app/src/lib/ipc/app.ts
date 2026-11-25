@@ -284,9 +284,12 @@ export function folderRenderArchiveOpen(token: string, path: string): Promise<Ar
   return invoke<ArchiveIndex>("folder_render_archive_open", { token, path });
 }
 
-/** Run an *Open in…* application on a generated folder, or a file in it; `null` the default. Answers the arguments run. */
-export function folderRenderOpen(application: string | null, token: string, file: string | null, line: number | null): Promise<string[]> {
-  return invoke<string[]>("folder_render_open", { application, token, file, line });
+/**
+ * Run an *Open in…* application on a generated folder, or a file in it, or `folder`, a folder in it; `null` the default.
+ * Answers the arguments run.
+ */
+export function folderRenderOpen(application: string | null, token: string, file: string | null, line: number | null, folder: string | null = null): Promise<string[]> {
+  return invoke<string[]>("folder_render_open", { application, token, file, line, folder });
 }
 
 /** Where generated folders are kept, and how much. */

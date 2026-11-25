@@ -45,6 +45,9 @@ pub struct RunHandle {
     /// The run's own folder, for `{out}` and `{outdir}`.
     pub scratch: PathBuf,
     result: Mutex<Option<super::result::RunResult>>,
+    /// The generated files the run changed, once it ended (a run on a
+    /// generated folder only).
+    made_changed: Mutex<Option<Vec<String>>>,
     /// The job holding what the run started (Windows).
     #[cfg(windows)]
     job: Mutex<Option<super::win::Job>>,
@@ -97,6 +100,11 @@ impl RunHandle {
 
     pub fn set_result(&self, result: Option<super::result::RunResult>) {
         *lock(&self.result) = result;
+    }
+
+    /// The generated files the run changed (ADR-0060, amended 2026-11-25).
+    pub fn set_made_changed(&self, changed: Vec<String>) {
+        *lock(&self.made_changed) = Some(changed);
     }
 
     pub fn keep_bytes(&self, bytes: Vec<u8>) {
@@ -188,6 +196,11 @@ impl RunHandle {
             elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             result: if ended.is_some() {
                 lock(&self.result).clone()
+            } else {
+                None
+            },
+            made_changed: if ended.is_some() {
+                lock(&self.made_changed).clone()
             } else {
                 None
             },
@@ -361,6 +374,7 @@ impl Runs {
             shown: Mutex::new(Instant::now()),
             scratch,
             result: Mutex::new(None),
+            made_changed: Mutex::new(None),
             #[cfg(windows)]
             job: Mutex::new(None),
             held: Mutex::new(Held::Nothing),
@@ -411,6 +425,7 @@ impl Runs {
             }),
             ended: row.ended.clone(),
             result: lock(&handle.result).clone(),
+            made_changed: lock(&handle.made_changed).clone(),
         })
     }
 

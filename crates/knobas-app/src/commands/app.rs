@@ -943,9 +943,25 @@ pub async fn folder_render_open<R: tauri::Runtime>(
     token: String,
     file: Option<String>,
     line: Option<u32>,
+    folder: Option<String>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     let made = crate::folder_render::made::made(&token)?;
+    // A folder inside it stands in the checkout's place, as a folder of the
+    // checkout does (2026-11-16; ADR-0060 amended 2026-11-25).
+    let made = match folder
+        .as_deref()
+        .map(|f| f.trim_matches('/'))
+        .filter(|f| !f.is_empty())
+    {
+        Some(folder) if file.is_none() => {
+            let at = crate::folder_render::keep::checked_folder(&made, folder).map_err(|_| {
+                IpcError::invalid(format!("the generated folder holds no folder {folder}"))
+            })?;
+            std::sync::Arc::new((*made).clone().moved_to(at))
+        }
+        _ => made,
+    };
     crate::checkout::open::open_made(&pool, application.as_deref(), &made, file.as_deref(), line)
         .await
 }

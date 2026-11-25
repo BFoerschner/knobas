@@ -21,13 +21,13 @@ import type { WriteOpPayload } from "../../ipc/sources";
 import { keyOf } from "../../time/format";
 import { diffHash, shaOfCommit, WORKING_TREE } from "../diff/address";
 import { appPageHash } from "../openin/app-page";
-import { menuOrder, objectMenu, repoName } from "../openin/openin";
+import { commandFor, joinInside, menuOrder, objectMenu, repoName } from "../openin/openin";
 import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
 import type { OneOff } from "../../ipc/oneoff";
-import { takesCommit, takesFile, takesFolder, takesRepository } from "../../render/oneoff";
+import { takesCommit, takesFile, takesFolder, takesMadeFile, takesMadeFolder, takesRepository } from "../../render/oneoff";
 import { commandPageHash } from "../settings/command-page";
 import { stateWord } from "../state-word";
 
@@ -50,7 +50,9 @@ export type CodeAt =
   | { kind: "repository" }
   | { kind: "folder"; path: string }
   | { kind: "file"; path: string; line: number | null }
-  | { kind: "commit"; sha: string };
+  | { kind: "commit"; sha: string }
+  /** A file or folder of a generated folder (ADR-0046), `path` from its top: a command runs on the folder knobas kept. */
+  | { kind: "made"; renderer: string; folder: string; path: string; dir: boolean; line: number | null };
 
 /** What choosing an item does. `TfContextMenu`'s `carry` is the one reader. */
 export type Act =
@@ -93,7 +95,12 @@ export type Act =
   /** A page's own deed for a thing it drew (a document view's value): run where the page handed it. */
   | { do: "run"; run: () => void }
   /** A command of Settings › Commands run on where the menu was opened (ADR-0060): the dialog opens with it. */
-  | { do: "oneoff"; entityId: string; command: string; at: CodeAt };
+  | { do: "oneoff"; entityId: string; command: string; at: CodeAt }
+  /**
+   * Run application `app` (by id, `null` the default) on a generated folder's file or folder (ADR-0046): the kept folder
+   * the page holds when it is chosen (ADR-0060 amended 2026-11-25).
+   */
+  | { do: "made-app"; repoId: string; renderer: string; folder: string; rel: string; dir: boolean; line: number | null; app: string | null; name: string };
 
 export interface Item {
   id: string;
@@ -147,6 +154,8 @@ export interface MenuContext {
   moves?: (entityId: string) => MoveOffer | null;
   /** Settings › Commands' commands, in the person's order (ADR-0060); absent or `null`, no Run group. */
   commands?: readonly OneOff[] | null;
+  /** The generated folder a page keeps now for a renderer and a folder (ADR-0046): where *Copy full path* points. */
+  made?: (repoId: string, renderer: string, folder: string) => { dir: string } | null;
   /** A ticket's fields a card edits (section 26, `card-fields.svelte.ts`): *Assign to…* and *Priority ▸*; absent or `null`, left out. */
   fields?: (entityId: string) => FieldOffer | null;
 }
@@ -532,6 +541,30 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         ],
       );
     }
+    case "made": {
+      // A generated folder's file, line or folder (Fable, 2026-11-25): what acts on the folder knobas kept, nothing that
+      // acts on the repository's file of its path (no History, Render with, page on the source, Clone or link).
+      const kept = ctx.made?.(thing.repoId, thing.renderer, thing.folder) ?? null;
+      const hash = thing.dir ? null : renderedHash(thing.repoId, thing.renderer, thing.folder, thing.rel, thing.line === null ? undefined : { line: thing.line });
+      const pathLine = thing.line === null ? thing.rel : `${thing.rel}:${thing.line}`;
+      const full = kept === null ? null : thing.rel === "" ? kept.dir : joinInside(kept.dir, thing.rel);
+      return grouped(
+        hash === null || ctx.own ? [] : [{ id: "open", label: "Open", act: { do: "go", hash } }],
+        madeOpenIn(thing, ctx),
+        runIn(thing.repoId, { kind: "made", renderer: thing.renderer, folder: thing.folder, path: thing.rel, dir: thing.dir, line: thing.line }, ctx, facts),
+        [
+          ...(thing.rel === ""
+            ? []
+            : [{ id: "copy-path", label: thing.line === null ? "Copy path" : "Copy path and line", hint: pathLine, act: { do: "copy", text: pathLine, said: `Copied ${pathLine}` } } satisfies Item]),
+          {
+            id: "copy-full",
+            label: "Copy full path",
+            act: { do: "copy", text: full ?? "", said: "Copied the full path" },
+            disabled: full === null ? "Not kept now: open it to have it made again" : null,
+          },
+        ],
+      );
+    }
     case "inbox": {
       // The Inbox page's buttons for the line, in its order (`rowActions`); *Snooze…* asks, so it stays on the row.
       const acts: Item[] = [];
@@ -597,6 +630,29 @@ function openIn(entityId: string, repoId: string | null, at: CodeAt, ctx: MenuCo
 }
 
 /**
+ * *Open in ⟨default⟩* and *Open in… ▸* on a generated folder's file or folder (ADR-0046): the person's applications on
+ * the folder knobas kept, as the generated folder's bar offers them, an application whose command needs `{url}` greyed.
+ * Never *Clone* and never greyed for a repository not cloned: the kept folder is on this disk.
+ */
+function madeOpenIn(thing: Extract<Thing, { kind: "made" }>, ctx: MenuContext): Item[] {
+  const apps = ctx.apps === null ? [] : menuOrder(ctx.apps);
+  const file = thing.dir ? null : thing.rel;
+  const run = (app: { id: string; name: string }): Act => ({ do: "made-app", repoId: thing.repoId, renderer: thing.renderer, folder: thing.folder, rel: thing.rel, dir: thing.dir, line: thing.line, app: app.id, name: app.name });
+  const needsPage = (app: (typeof apps)[number]["app"]) => (commandFor(app, file).includes("{url}") ? `${app.name}'s command needs a page on the source, and a generated folder has none` : null);
+  const first = apps[0];
+  const slot: Item = first
+    ? { id: "open-default", label: `Open in ${first.app.name}`, act: run(first.app), disabled: needsPage(first.app) }
+    : { id: "open-default", label: "Open in an application", act: { do: "go", hash: appPageHash({ repo: thing.repoId }) } };
+  const sub: Entry[] = [
+    ...apps.map(({ app, isDefault }) => ({ id: `app-${app.id}`, label: app.name, hint: isDefault ? "default" : null, act: run(app), disabled: needsPage(app) }) satisfies Item),
+    ...(apps.length > 0 ? [RULE] : []),
+    { id: "add-app", label: "Add an application", act: { do: "go", hash: appPageHash({ repo: thing.repoId }) } },
+    { id: "manage-apps", label: "Manage applications", act: { do: "go", hash: "#/settings/checkouts" } },
+  ];
+  return [slot, { id: "open-in", label: "Open in…", sub }];
+}
+
+/**
  * The Run group (ADR-0060, section 8), after the *Open in* group: *Run ⟨command⟩*, flat, the first command in the
  * person's order that takes the thing, and *Run… ▸* with every command that takes it, then *Add a command* and *Manage
  * commands*. With none that takes it, the flat row is *Run a command…* and goes to a new command's page. Two rows
@@ -608,13 +664,18 @@ function runIn(repoId: string, at: CodeAt, ctx: MenuContext, facts: MenuFacts): 
   const takes = ctx.commands.filter((c) =>
     at.kind === "commit"
       ? takesCommit(c, known)
-      : at.kind === "file"
-        ? takesFile(c, at.path, known)
-        : at.kind === "folder"
-          ? takesFolder(c, at.path, null, known) || (at.path === "" && takesRepository(c, known))
-          : takesRepository(c, known) || takesFolder(c, "", null, known),
+      : at.kind === "made"
+        ? at.dir
+          ? takesMadeFolder(c, at.path, null, known)
+          : takesMadeFile(c, at.path, known)
+        : at.kind === "file"
+          ? takesFile(c, at.path, known)
+          : at.kind === "folder"
+            ? takesFolder(c, at.path, null, known) || (at.path === "" && takesRepository(c, known))
+            : takesRepository(c, known) || takesFolder(c, "", null, known),
   );
-  const notCloned = facts.checkout !== undefined && (facts.checkout === null || facts.checkout.path === null);
+  // A generated folder is run where knobas kept it: never greyed for a repository not cloned (Fable, 2026-11-25).
+  const notCloned = at.kind !== "made" && facts.checkout !== undefined && (facts.checkout === null || facts.checkout.path === null);
   const off = notCloned ? "Not cloned on this machine" : null;
   const run = (c: OneOff): Act => ({ do: "oneoff", entityId: repoId, command: c.id, at: { ...at } });
   const add = commandPageHash({ repo: repoId, on: at.kind === "file" || at.kind === "folder" ? at.path : "" });
