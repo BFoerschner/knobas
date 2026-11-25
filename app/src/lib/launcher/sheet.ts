@@ -40,6 +40,8 @@ import { itemHash } from "../tf/job/job";
 import { ENTRY_KIND, isPasswordKind } from "../tf/passwords/kinds";
 import { keyOf } from "../time/format";
 import type { LauncherRow } from "./rows";
+import type { OneOff } from "../ipc/oneoff";
+import { takesFolder, takesRepository } from "../render/oneoff";
 
 /** What a sheet acts on: an entity, or one of knobas' own rows. */
 export type SheetSubject =
@@ -100,7 +102,9 @@ export type SheetEffect =
    * A password entry's copy (ADR-0056), through the Passwords page's own commands: the password (an entry that asks a
    * usage comment or an approval opens instead), the username, or the one-time code.
    */
-  | { kind: "pw-copy"; what: "password" | "username" | "code" };
+  | { kind: "pw-copy"; what: "password" | "username" | "code" }
+  /** A command of Settings › Commands run on the subject (ADR-0060): the run dialog opens. */
+  | { kind: "oneoff"; command: string };
 
 export interface SheetAction {
   /** Stable per kind: what an action key (#2429) is kept under. */
@@ -128,6 +132,8 @@ export interface SheetContext {
   merge?: ViewAction | null;
   /** A repository's branches, from its Branches view: *Create pull request…*'s choices; absent, no row. */
   branches?: (repoId: string) => Promise<readonly { name: string; isDefault: boolean }[]>;
+  /** Settings › Commands' commands (ADR-0060), in the person's order: a repository's *Run…* rows; absent, none. */
+  commands?: readonly OneOff[];
   /** The clock the snooze presets count from. */
   now?: Date;
   /** What is a favourite now, as {@link favouriteKeys} reads the board's block: *Unfavourite* on those. */
@@ -369,6 +375,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
     }
   }
   if (kind === "repo") {
+    actions.push(...runActions(id, ctx.commands ?? []));
     actions.push({ id: "clone", label: "Clone", detail: "Into a folder under the clones root", does: { kind: "clone" } });
   }
   actions.push(favouriteAction({ entity: id }, ctx));
@@ -378,6 +385,31 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
       : { id: "copy", label: "Copy title", detail: title, does: { kind: "copy", text: title, said: `Copied ${title}` } },
   );
   return actions;
+}
+
+/**
+ * A repository's commands (ADR-0060, section 11), after its *Open in* rows: *Run ⟨first⟩*, the first in the person's
+ * order that takes the repository, and the flow *Run…* over every one that does. A command is not a row of Search by
+ * itself: the thing comes first.
+ */
+function runActions(repoId: string, commands: readonly OneOff[]): SheetAction[] {
+  const facts = { repo: repoId, top: null };
+  const takes = commands.filter((c) => takesRepository(c, facts) || takesFolder(c, "", null, facts));
+  const first = takes[0];
+  if (first === undefined) return [];
+  return [
+    { id: `run-${first.id}`, label: `Run ${first.name}`, detail: first.command, does: { kind: "oneoff", command: first.id } },
+    {
+      id: "run",
+      label: "Run…",
+      detail: "One of your commands, in the checkout",
+      does: {
+        kind: "flow",
+        steps: [{ title: "Run", choices: async () => takes.map((c) => ({ id: c.id, label: c.name, detail: c.command })) }],
+        finish: ([command]) => ({ kind: "oneoff", command: command ?? first.id }),
+      },
+    },
+  ];
 }
 
 /** What a set can hold as a fixed member (R-7.7's five panels); a ticket is shown a set by a manual rule instead. */

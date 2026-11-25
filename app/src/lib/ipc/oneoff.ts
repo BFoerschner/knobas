@@ -99,6 +99,11 @@ export function oneoffWatch(run: string, channel: Channel<OneOffBatch>): Promise
   return invoke<boolean>("oneoff_watch", { run, channel });
 }
 
+/** *Download*: what run `run` printed, as text (with its colour codes where `colours`), saved to Downloads; answers the path. */
+export function oneoffSave(run: string, name: string, colours: boolean): Promise<string> {
+  return invoke<string>("oneoff_save", { run, name, colours });
+}
+
 /** Forgets one run, or every run that ended. */
 export function oneoffForget(run: string | null): Promise<void> {
   return invoke<void>("oneoff_forget", { run });

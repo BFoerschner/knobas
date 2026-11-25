@@ -113,6 +113,7 @@
   import TfPdf from "../render/TfPdf.svelte";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfRunMenu from "../oneoff/TfRunMenu.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import TfLines from "../code/TfLines.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
@@ -2379,6 +2380,7 @@
         onreal={() => realFiles(graftFolder)}
       >
         {#snippet openIn()}
+          <TfRunMenu entityId={repoId} repo={title || repoId} target={{ kind: "folder", path: graftFolder }} {checkout} priority={2} />
           <TfMadeOpenIn
             token={madeShown?.token ?? null}
             dir={madeShown?.dir ?? null}
@@ -2482,6 +2484,7 @@
             <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
           {#if fileMade === null}
+            <TfRunMenu entityId={repoId} repo={title || repoId} target={{ kind: "file", path: file.path, lines: null, at: null }} {checkout} priority={3} />
             <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} page={file.url} api={drawAs === "openapi" ? specOpener : null} />
             <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} />
           {/if}

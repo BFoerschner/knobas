@@ -259,3 +259,15 @@ fn a_stray_escape_does_not_swallow_the_output() {
     let kept = read(&[(Stream::Out, &data)]);
     assert!(kept.get(0).unwrap().text.ends_with('x'));
 }
+
+#[test]
+fn a_line_with_its_codes_reads_back_the_same() {
+    let kept = read(&[(
+        Stream::Out,
+        b"a \x1b[1;31merror\x1b[0m here \x1b[4mx\x1b[0m\n",
+    )]);
+    let line = kept.get(0).unwrap();
+    let again = read(&[(Stream::Out, format!("{}\n", with_codes(line)).as_bytes())]);
+    assert_eq!(again.get(0).unwrap().text, line.text);
+    assert_eq!(again.get(0).unwrap().runs, line.runs);
+}

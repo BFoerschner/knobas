@@ -214,6 +214,52 @@ impl Line {
     }
 }
 
+/// `line`'s text with its colour runs as SGR codes again: *Download with the
+/// colour codes*. Only what the reader kept: the eight names, bold, dim,
+/// italic and underline.
+#[must_use]
+pub fn with_codes(line: &Line) -> String {
+    let units: Vec<u16> = line.text.encode_utf16().collect();
+    let text = |a: u32, b: u32| {
+        String::from_utf16_lossy(
+            &units[(a as usize).min(units.len())..(b as usize).min(units.len())],
+        )
+    };
+    let mut out = String::new();
+    let mut at = 0;
+    for run in &line.runs {
+        out.push_str(&text(at, run.from));
+        let mut codes: Vec<String> = Vec::new();
+        let index = |c: Colour| NAMED.iter().position(|n| *n == c).unwrap_or(7);
+        if let Some(fg) = run.style.fg {
+            codes.push((30 + index(fg)).to_string());
+        }
+        if let Some(bg) = run.style.bg {
+            codes.push((40 + index(bg)).to_string());
+        }
+        for (on, code) in [
+            (run.style.bold, "1"),
+            (run.style.dim, "2"),
+            (run.style.italic, "3"),
+            (run.style.underline, "4"),
+        ] {
+            if on {
+                codes.push(code.to_owned());
+            }
+        }
+        out.push_str(&format!("\u{1b}[{}m", codes.join(";")));
+        out.push_str(&text(run.from, run.to));
+        out.push_str("\u{1b}[0m");
+        at = run.to;
+    }
+    out.push_str(&text(
+        at,
+        line.len16
+            .max(u32::try_from(units.len()).unwrap_or(u32::MAX)),
+    ));
+    out
+}
+
 /// The most characters a line keeps (64 KiB); the rest is counted in `cut`.
 pub const LINE_CAP: usize = 64 * 1024;
 

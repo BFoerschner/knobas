@@ -343,8 +343,12 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(acts[0]!)).toBe("New pull request");
   expect(acts[1]!.querySelector("select")).toBe(select);
   expect(text(acts[2]!)).toBe("New branch…");
+  // *Run…* (ADR-0060) stands before "Open in", a ghost at the same size.
+  const runIn = acts[3]!.matches("button") ? acts[3]! : acts[3]!.querySelector("button")!;
+  expect(text(runIn)).toBe("Run…");
+  expect(runIn.matches(".tf-btn.tf-ghost:not(.tf-sm):not(.tf-primary)")).toBe(true);
   // "Open in" is always a ghost, at the header's default size (#2238, #2296).
-  const openIn = acts[3]!.matches("button") ? acts[3]! : acts[3]!.querySelector("button")!;
+  const openIn = acts[4]!.matches("button") ? acts[4]! : acts[4]!.querySelector("button")!;
   expect(text(openIn)).toMatch(/^Open in/);
   expect(openIn.matches(".tf-btn.tf-ghost:not(.tf-sm):not(.tf-primary)")).toBe(true);
   expect(text(acts.at(-1)!)).toBe("Refresh");
@@ -621,11 +625,11 @@ test("the open file's actions wait unseen in their room for the checkout, so Clo
   const trail = () => target.querySelector(".tf-fileview header .tf-trail")!;
   expect(text(target.querySelector(".tf-fileview .tf-md")), "the README draws meanwhile").toBe("// README.md fn main() {}");
   expect(trail().classList.contains("tf-heldbelow"), "held while the checkout is read").toBe(true);
-  expect(trail().querySelector(".tf-openin")).toBeNull();
+  expect(trail().querySelector(".tf-openin:not(.tf-oo-runin)")).toBeNull();
   answer(checkout(null));
   await settle();
   expect(trail().classList.contains("tf-heldbelow")).toBe(false);
-  expect(text(trail().querySelector(".tf-openin"))).toBe("Clone");
+  expect(text(trail().querySelector(".tf-openin:not(.tf-oo-runin)"))).toBe("Clone");
   unmount(view!);
   view = null;
 
@@ -635,7 +639,7 @@ test("the open file's actions wait unseen in their room for the checkout, so Clo
   fail({ code: "internal", message: "no" });
   await settle();
   expect(trail().classList.contains("tf-heldbelow")).toBe(false);
-  expect(trail().querySelector(".tf-openin")).toBeNull();
+  expect(trail().querySelector(".tf-openin:not(.tf-oo-runin)")).toBeNull();
 });
 
 test("the landing draws the branch's last commit above the README; a file opened does not (#2257)", async () => {

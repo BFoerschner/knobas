@@ -247,3 +247,12 @@ test("a password entry: its three copies, Open, Favourite and Copy title; never 
   expect(ids(folder, { ...CTX, sets })).toEqual(["open", "fav", "copy"]);
   expect(sheetActions(folder, CTX)[0]?.does).toEqual({ kind: "go", hash: "#/passwords/in/pw%3Af1" });
 });
+
+test("a repository's commands follow its Open in rows: Run ⟨first⟩ and the Run… flow (ADR-0060)", () => {
+  const commands = [
+    { id: "tests", name: "Tests", command: "npm test" },
+    { id: "eslint", name: "ESLint", command: "eslint {file}" },
+  ].map((c) => ({ stdin: "none" as const, files: [], folders: [], has: [], repo_holds: [], repos: [], shows: "auto" as const, start_in: "root" as const, path: [], env: [], colours: true, timeout_secs: 120, wsl_paths: false, ...c }));
+  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, commands })).toEqual(["prs", "branches", "link", "open-code", "open-idea", "run-tests", "run", "clone", "fav", "copy"]);
+  expect(ids(entity("branch", "gitea:acme/svc@main"), { ...CTX, commands })).not.toContain("run");
+});

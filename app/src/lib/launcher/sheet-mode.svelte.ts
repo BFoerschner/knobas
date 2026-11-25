@@ -11,6 +11,8 @@
  */
 import { leftTheInbox } from "../inbox/inbox.svelte";
 import { tick } from "svelte";
+import { oneoffs, targetOf } from "../render/oneoff.svelte";
+
 
 import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { LinkSetRow, ViewAction } from "../ipc/entity";
@@ -131,6 +133,7 @@ export class SheetMode {
     job: this.#host.job ?? null,
     canTime: this.#host.ontimer !== undefined,
     apps: this.#applications,
+    commands: oneoffs.commands,
     favourites: this.#favourites,
     sets: this.#linkSets,
     merge: this.#mergeOf(this.current?.subject),
@@ -390,6 +393,12 @@ export class SheetMode {
       case "go":
         close();
         return navigate(does.hash);
+      case "oneoff": {
+        const command = oneoffs.commands.find((c) => c.id === does.command);
+        if (subject.kind !== "entity" || command === undefined) return;
+        close();
+        return void oneoffs.openRun(command, subject.entityId, subject.title, targetOf({ kind: "repository" }, command));
+      }
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
       case "pw-copy": {

@@ -329,6 +329,33 @@ impl Runs {
         })
     }
 
+    /// What a run printed and keeps, as text a line each: the gap said where
+    /// lines were not kept, and with `colours` its colour runs written back as
+    /// SGR codes.
+    #[must_use]
+    pub fn text(&self, id: &str, colours: bool) -> Option<String> {
+        let handle = self.get(id)?;
+        let kept = lock(&handle.kept);
+        let mut out = String::new();
+        let mut last: Option<u32> = None;
+        for line in kept.all() {
+            if let Some(last) = last
+                && line.n > last + 1
+            {
+                use std::fmt::Write as _;
+                let _ = writeln!(out, "[{} lines here were not kept]", line.n - last - 1);
+            }
+            last = Some(line.n);
+            if colours {
+                out.push_str(&super::lines::with_codes(line));
+            } else {
+                out.push_str(&line.text);
+            }
+            out.push('\n');
+        }
+        Some(out)
+    }
+
     /// Adds a sink to a run that was just reserved.
     pub fn attach(&self, handle: &RunHandle, sink: Arc<dyn Sink>) {
         lock(&handle.sinks).push(sink);

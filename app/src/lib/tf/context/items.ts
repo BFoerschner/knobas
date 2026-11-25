@@ -26,6 +26,8 @@ import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHa
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
+import type { OneOff } from "../../ipc/oneoff";
+import { takesFile, takesFolder, takesRepository } from "../../render/oneoff";
 import { stateWord } from "../state-word";
 
 /** A value an item copies or opens: given, or read when the menu opened. */
@@ -88,7 +90,9 @@ export type Act =
   /** *Priority ▸ ⟨name⟩* on a ticket: the page offering field edits queues it. */
   | { do: "priority"; entityId: string; value: string; label: string }
   /** A page's own deed for a thing it drew (a document view's value): run where the page handed it. */
-  | { do: "run"; run: () => void };
+  | { do: "run"; run: () => void }
+  /** A command of Settings › Commands run on where the menu was opened (ADR-0060): the dialog opens with it. */
+  | { do: "oneoff"; entityId: string; command: string; at: CodeAt };
 
 export interface Item {
   id: string;
@@ -140,6 +144,8 @@ export interface MenuContext {
    * Absent, or `null` for a ticket the page does not hold, the item is left out, so every other ticket menu is as it was.
    */
   moves?: (entityId: string) => MoveOffer | null;
+  /** Settings › Commands' commands, in the person's order (ADR-0060); absent or `null`, no Run group. */
+  commands?: readonly OneOff[] | null;
   /** A ticket's fields a card edits (section 26, `card-fields.svelte.ts`): *Assign to…* and *Priority ▸*; absent or `null`, left out. */
   fields?: (entityId: string) => FieldOffer | null;
 }
@@ -344,6 +350,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       return grouped(
         [...open(thing.hash, ctx), ...fromSheet("repo", thing.id, title, ctx, [{ id: "commits", label: "Commits", act: { do: "go", hash: repoHash(thing.id, "commits") } }])],
         [...openIn(thing.id, thing.id, { kind: "repository" }, ctx, facts), ...inSource(thing.id, ctx)],
+        runIn(thing.id, { kind: "repository" }, ctx, facts),
         [
           { id: "copy-name", label: "Copy name", hint: name, act: { do: "copy", text: name, said: `Copied ${name}` } },
           fullPath("", facts),
@@ -506,6 +513,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
           ...openIn(thing.repoId, thing.repoId, at, ctx, facts),
           ...inForge(thing.repoId, ctx),
         ],
+        runIn(thing.repoId, at, ctx, facts),
         [
           {
             id: "copy-path",
@@ -584,6 +592,33 @@ function openIn(entityId: string, repoId: string | null, at: CodeAt, ctx: MenuCo
     { id: "manage-apps", label: "Manage applications", act: { do: "go", hash: "#/settings/checkouts" } },
   ];
   return [slot, { id: "open-in", label: "Open in…", sub, disabled: notCloned ? "Not cloned on this machine" : null }];
+}
+
+/**
+ * The Run group (ADR-0060, section 8), after the *Open in* group: *Run ⟨command⟩*, flat, the first command in the
+ * person's order that takes the thing, and *Run… ▸* with every command that takes it, then *Add a command* and *Manage
+ * commands*. With none that takes it, the flat row is *Run a command…* and goes to a new command's page. Two rows
+ * whatever the read, greyed where the repository is not cloned here. No Run group until the commands were read.
+ */
+function runIn(repoId: string, at: CodeAt, ctx: MenuContext, facts: MenuFacts): Item[] {
+  if (ctx.commands === null || ctx.commands === undefined || at.kind === "commit") return [];
+  const known = { repo: repoId, top: null };
+  const takes = ctx.commands.filter((c) =>
+    at.kind === "file" ? takesFile(c, at.path, known) : at.kind === "folder" ? takesFolder(c, at.path, null, known) || (at.path === "" && takesRepository(c, known)) : takesRepository(c, known) || takesFolder(c, "", null, known),
+  );
+  const notCloned = facts.checkout !== undefined && (facts.checkout === null || facts.checkout.path === null);
+  const off = notCloned ? "Not cloned on this machine" : null;
+  const run = (c: OneOff): Act => ({ do: "oneoff", entityId: repoId, command: c.id, at: { ...at } });
+  const add = `#/settings/commands/new?repo=${encodeURIComponent(repoId)}${at.kind === "file" || at.kind === "folder" ? `&on=${encodeURIComponent(at.path)}` : ""}`;
+  const first = takes[0];
+  const slot: Item = first ? { id: "run-first", label: `Run ${first.name}`, act: run(first), disabled: off } : { id: "run-first", label: "Run a command…", act: { do: "go", hash: add } };
+  const sub: Entry[] = [
+    ...takes.map((c) => ({ id: `run-${c.id}`, label: c.name, hint: c.command, act: run(c) }) satisfies Item),
+    ...(takes.length > 0 ? [RULE] : []),
+    { id: "add-command", label: "Add a command", act: { do: "go", hash: add } },
+    { id: "manage-commands", label: "Manage commands", act: { do: "go", hash: "#/settings/commands" } },
+  ];
+  return [slot, { id: "run-in", label: "Run…", hint: "X", sub, disabled: off }];
 }
 
 /** What the application page tries a new application on, from where the menu was opened. */

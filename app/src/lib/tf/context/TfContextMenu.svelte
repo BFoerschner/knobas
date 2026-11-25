@@ -27,6 +27,8 @@
   import { drawn } from "../../detail/relations";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
+  import { oneoffs, targetOf } from "../../render/oneoff.svelte";
+  import { repoName } from "../openin/openin";
   import { joinInside } from "../openin/openin";
   import TfMenu from "../TfMenu.svelte";
   import { menuFor, type Act, type CodeAt, type Entry, type Item, type MenuFacts, type Text } from "./items";
@@ -117,6 +119,7 @@
             checkout: clonedHere,
             moves: (id) => moveProvider()?.offer(id) ?? null,
             fields: (id) => fieldProvider()?.offer(id) ?? null,
+            commands: oneoffs.loaded ? oneoffs.commands : null,
           },
           facts,
         ),
@@ -480,6 +483,11 @@
         );
       case "app":
         return runApp(act.entityId, act.app, act.name, act.at);
+      case "oneoff": {
+        const command = oneoffs.commands.find((c) => c.id === act.command);
+        if (command === undefined) return;
+        return void oneoffs.openRun(command, act.entityId, repoName(keyOf(act.entityId)), targetOf(act.at, command));
+      }
       case "docs-home": {
         if (act.id === null) return void docsChoices.setHome(null);
         const home = (title: string | null | undefined) => void docsChoices.setHome({ kind: act.kind, id: act.id!, title: title ?? act.id! });

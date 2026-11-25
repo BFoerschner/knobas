@@ -305,3 +305,36 @@ test("a ticket's Assign to… and Priority after Move to; the current priority n
   expect(ids(menuFor(TICKET, null, ctx()))).not.toContain("assign");
   expect(ids(menuFor(TICKET, null, ctx({ fields: () => null })))).not.toContain("assign");
 });
+
+const COMMANDS = [
+  { id: "eslint", name: "ESLint", command: "eslint {file}", files: ["*.ts"] },
+  { id: "ruff", name: "Ruff", command: "ruff check {dir}" },
+  { id: "tests", name: "Tests", command: "npm test" },
+].map((c) => ({ stdin: "none" as const, files: [], folders: [], has: [], repo_holds: [], repos: [], shows: "auto" as const, start_in: "root" as const, path: [], env: [], colours: true, timeout_secs: 120, wsl_paths: false, ...c }));
+
+test("the Run group follows Open in: the first command that takes the thing flat, every one in Run… (ADR-0060)", () => {
+  const file = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx({ commands: COMMANDS }), { checkout: view("/c/pay") });
+  const at = ids(file);
+  expect(at.slice(at.indexOf("open-in"), at.indexOf("copy-path"))).toEqual(["open-in", "forge", "|", "run-first", "run-in", "|"]);
+  expect(item(file, "run-first").label).toBe("Run ESLint");
+  expect(item(file, "run-first").act).toEqual({ do: "oneoff", entityId: "gitea:t/pay", command: "eslint", at: { kind: "file", path: "src/a.ts", line: null } });
+  expect(ids(item(file, "run-in").sub!)).toEqual(["run-eslint", "|", "add-command", "manage-commands"]);
+  // A folder gets the folder's commands; the repository its own and its top folder's.
+  const folder = menuFor({ kind: "folder", repoId: "gitea:t/pay", path: "scripts" }, null, ctx({ commands: COMMANDS }), {});
+  expect(item(folder, "run-first").label).toBe("Run Ruff");
+  const repo = menuFor({ kind: "repo", id: "gitea:t/pay", hash: "#/repo/x" }, null, ctx({ commands: COMMANDS }), {});
+  expect(ids(item(repo, "run-in").sub!)).toEqual(["run-ruff", "run-tests", "|", "add-command", "manage-commands"]);
+});
+
+test("a file no command takes offers Run a command…; not cloned greys both rows; the rows are the same before the read lands", () => {
+  const before = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "a.rs" }, null, ctx({ commands: COMMANDS }), {});
+  expect(item(before, "run-first").label).toBe("Run a command…");
+  expect(item(before, "run-first").act).toEqual({ do: "go", hash: "#/settings/commands/new?repo=gitea%3At%2Fpay&on=a.rs" });
+  const after = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx({ commands: COMMANDS }), { checkout: view(null) });
+  expect(item(after, "run-first").disabled).toBe("Not cloned on this machine");
+  expect(item(after, "run-in").disabled).toBe("Not cloned on this machine");
+  const read = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx({ commands: COMMANDS }), {});
+  expect(ids(read).length).toBe(ids(after).length);
+  // Before the commands were read, no Run group.
+  expect(ids(menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx(), {}))).not.toContain("run-in");
+});

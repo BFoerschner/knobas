@@ -23,6 +23,7 @@
   import { clip as clipNow } from "./passwords/clip.svelte";
   import { clipboardClear } from "../ipc/passwords";
   import TfPwComb from "./passwords/TfPwComb.svelte";
+  import TfRunChip from "./oneoff/TfRunChip.svelte";
   import type { ClipState } from "../ipc/passwords";
 
   let {
@@ -78,6 +79,7 @@
       <button type="button" class="tf-linkish" onclick={onclearclip}>Clear now</button>
     </span>
   {/if}
+  <TfRunChip />
   <span class="tf-queue">
 
     {#if pending > 0 || decisions > 0}

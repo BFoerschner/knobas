@@ -111,6 +111,7 @@ export const QUIET: ReadonlySet<string> = new Set([
   "oneoff_lines",
   "oneoff_watch",
   "oneoff_forget",
+  "oneoff_save",
   "oneoff_shell_path",
   // A list a page holds, ranked (the fuzzy-search pass): reads nothing, changes nothing.
   "fuzzy_rank",

@@ -315,6 +315,7 @@
   import TfRepoLocal from "./TfRepoLocal.svelte";
   import TfCloneSign from "./TfCloneSign.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfRunMenu from "../oneoff/TfRunMenu.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
@@ -1542,6 +1543,7 @@
           onclick={() => {
             if (branchRefused === null) newBranch = { from: null };
           }}>New branch…</button>
+        <TfRunMenu entityId={repoId} repo={repo?.title ?? repoId} target={{ kind: "repository" }} {checkout} priority={1} small={false} />
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" variant="ghost" />
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page name={shortName} />{/if}
       </div>

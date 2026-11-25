@@ -1,0 +1,172 @@
+/*
+  Commands (ADR-0060): the run dialog, its output, Problems, a result that is not lines, where a run starts, and
+  Settings › Commands. The app's tokens only (`tokens.css`, ADR-0055): no colour of its own, so a theme colours a
+  run as it colours the rest of the window. Lifted from the design's clickdummy (`tf-oo-`).
+*/
+/* ---------- the run dialog (`TfRunDialog`): a viewer, so no footer, and a body that is the stage ---------- */
+.tf-dialog.tf-viewer.tf-oo-dialog { width: min(1100px, calc(100vw - 32px)); }
+/* The title line's *Run again* and *Stop* are one button, as wide as the longer word, so the cluster never shifts. */
+.tf-oo-again { min-width: calc(86px * var(--size-ui, 1)); justify-content: center; }
+
+/* The run line: how it stands, for how long, and the command as it was run. One row of 36 px that never wraps and
+   never changes height: a run's states change its words and its tone in place. The state and the time keep fixed
+   rooms, so the command line beside them stays where it was drawn when a run ends. */
+.tf-oo-line {
+  position: relative; display: flex; align-items: center; gap: 12px; height: 36px; flex: none; padding: 0 18px;
+  background: var(--sheet); border-bottom: 1px solid var(--rule); font-size: calc(var(--t-sm) * var(--fs)); white-space: nowrap;
+}
+.tf-oo-state { flex: none; display: inline-flex; align-items: center; gap: 8px; min-width: 12.5em; font-weight: 600; }
+.tf-oo-state.tf-ok { color: var(--ok); } .tf-oo-state.tf-err { color: var(--err); }
+.tf-oo-state.tf-warn { color: var(--warn); } .tf-oo-state.tf-info { color: var(--info); } .tf-oo-state.tf-muted { color: var(--muted); }
+/* The exit code is a figure: the code face at 700, tabular, the one thing in the line that is heavier than its words. */
+.tf-oo-code { --fs: var(--size-code); font: 700 calc(var(--t-md) * var(--fs)) var(--mono); font-variant-numeric: tabular-nums; }
+.tf-oo-took { flex: none; width: 7em; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-oo-argv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+.tf-oo-argv b { color: var(--ink); font-weight: 600; }
+/* The runs of this command on this thing, newest first: a stepper with fixed room, hidden where there is one run. */
+.tf-oo-hist { flex: none; display: inline-flex; align-items: center; gap: 2px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-oo-hist .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tf-oo-hist > span { min-width: 9.5em; text-align: center; }
+/* While it runs, a 2 px stripe slides along the line's foot: the one motion the dialog makes by itself. */
+.tf-oo-line[data-running]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent 0, var(--info) 35%, var(--info) 65%, transparent 100%) 0 0 / 40% 100% no-repeat;
+  animation: tf-oo-slide 1.3s linear infinite;
+}
+@keyframes tf-oo-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) { .tf-oo-line[data-running]::after { animation: none; background: var(--info); opacity: .5; } }
+
+/* The view bar: what the run gave, as views, and on the right what is counted and how the lines are drawn. */
+.tf-oo-bar { display: flex; align-items: center; gap: 12px; height: 37px; flex: none; padding: 0 18px; background: var(--sheet); border-bottom: 1px solid var(--rule); font-size: calc(var(--t-sm) * var(--fs)); white-space: nowrap; }
+.tf-oo-bar .tf-seg button { display: inline-flex; align-items: center; gap: 6px; }
+.tf-oo-bar .tf-seg .tf-count { min-width: 0; }
+.tf-oo-counts { margin-left: auto; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-oo-bar .tf-btn[aria-pressed="true"] { background: var(--rule-2); border-color: var(--rule); }
+.tf-oo-bar .tf-select { max-width: 12em; }
+
+/* The stage: its height comes from the window, never from what a program printed, so a run that prints one line and
+   one that prints a hundred thousand open the same box. */
+.tf-oo-stage { position: relative; height: clamp(320px, 58vh, 760px); flex: none; overflow: hidden; background: var(--sheet); --under: var(--sheet); }
+.tf-oo-stage > * { position: absolute; inset: 0; }
+.tf-oo-quiet { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px 18px; text-align: center; color: var(--ink-2); }
+.tf-oo-quiet p { max-width: 62ch; }
+.tf-oo-quiet b { color: var(--ink); font-weight: 600; }
+.tf-oo-quiet.tf-err b { color: var(--err); }
+
+/* Output: a program's lines in the code face, every row 20 px, drawn only where the scroller is (`shell/windowed`),
+   so a hundred thousand lines cost what forty do. A row never wraps unless *Wrap* is on, and then it is cut at the
+   column the box holds, as a terminal cuts it: every row keeps one height and the window stays exact. */
+.tf-oo-out { overflow: auto; background: var(--under); --oo-row: 20px; --oo-gut: calc(58px * var(--size-code, 1)); outline: none; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-sm) * var(--fs))/var(--oo-row) var(--mono); font-variant-ligatures: none; tab-size: 8; }
+.tf-oo-out:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+/* The box every row stands in: as tall as all the rows and as wide as the longest line, in the code face's own
+   advance, so neither scrollbar changes as the window of drawn rows moves. */
+.tf-oo-tall { position: relative; min-width: 100%; box-sizing: border-box; }
+.tf-oo-win { position: absolute; left: 0; top: 6px; min-width: 100%; padding: 0; margin: 0; font: inherit; }
+.tf-oo-fbody .tf-oo-win { position: static; }
+.tf-oo-l { display: grid; grid-template-columns: var(--oo-gut) minmax(0, 1fr); height: var(--oo-row); white-space: pre; }
+.tf-oo-l > span:first-child { position: sticky; left: 0; background: var(--under); color: var(--muted); text-align: right; padding-right: 12px; user-select: none; font-variant-numeric: tabular-nums; }
+.tf-oo-l:hover, .tf-oo-l:hover > span:first-child { background: var(--sheet-2); }
+.tf-oo-l.tf-at, .tf-oo-l.tf-at > span:first-child { background: var(--warn-bg); }
+.tf-oo-l > span:last-child { padding-right: 18px; }
+/* What was not kept stands as one row among the lines, in the muted ink. */
+.tf-oo-l.tf-oo-gap > span:last-child { color: var(--ink-2); font-style: italic; }
+.tf-oo-more { color: var(--ink-2); font-style: italic; }
+
+/* A program's colours are names, and a theme colours names: red is the theme's failed, green its passed, yellow its
+   attention, blue its running; magenta and cyan take the code colours' keyword and a mix of running and passed, each
+   already held to 4.5:1 on the sheet. Bright black and dim are the secondary ink. No program picks a colour here. */
+.tf-oo-dim { color: var(--ink-2); }
+.tf-oo-k { color: var(--muted); } .tf-oo-w { color: var(--ink); }
+.tf-oo-r { color: var(--err); } .tf-oo-g { color: var(--ok); } .tf-oo-y { color: var(--warn); } .tf-oo-b { color: var(--info); }
+.tf-oo-m { color: var(--hl-kw); } .tf-oo-c { color: color-mix(in oklab, var(--info) 50%, var(--ok)); }
+.tf-oo-on-r { background: var(--err-bg); } .tf-oo-on-g { background: var(--ok-bg); } .tf-oo-on-y { background: var(--warn-bg); }
+.tf-oo-on-b { background: var(--info-bg); } .tf-oo-on-m, .tf-oo-on-c, .tf-oo-on-k, .tf-oo-on-w { background: var(--muted-bg); }
+.tf-oo-bold { font-weight: 700; } .tf-oo-it { font-style: italic; } .tf-oo-ul { text-decoration: underline; text-underline-offset: 2px; }
+
+/* A place in a file of the checkout: the program's own colour stays, and the link is its underline. */
+.tf-oo-link { color: inherit; text-decoration: underline; text-decoration-color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; border-radius: 2px; }
+.tf-oo-link:hover, .tf-oo-link:focus-visible { background: var(--info-bg); color: var(--link); outline: none; }
+
+/* Problems: what the lines name, a file a group. A row is a link to its line; the rule a program named is on the
+   right in the code face. Rows wrap what was said, once, when they are drawn. */
+.tf-oo-probs { overflow: auto; background: var(--under); padding: 6px 0 18px; outline: none; }
+.tf-oo-pf { display: flex; align-items: baseline; gap: 10px; padding: 10px 18px 4px; }
+.tf-oo-pf b { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); }
+.tf-oo-pf b .tf-pdir { color: var(--ink-2); font-weight: var(--wt-ui, 400); }
+.tf-oo-pf span { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-oo-p { display: grid; grid-template-columns: 7.5ch 8.5ch minmax(0, 1fr) fit-content(30ch); gap: 0 18px; align-items: baseline; width: 100%; padding: 5px 18px; border: 0; background: none; text-align: left; color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); cursor: pointer; }
+.tf-oo-p:hover, .tf-oo-p:focus-visible, .tf-oo-p[aria-current="true"] { background: var(--sheet-2); outline: none; }
+.tf-oo-p[aria-current="true"] { box-shadow: inset 2px 0 0 var(--ink); }
+.tf-oo-p > :first-child { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-sm) * var(--fs)) var(--mono); color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.tf-oo-sev { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.tf-oo-sev.tf-err { color: var(--err); } .tf-oo-sev.tf-warn { color: var(--warn); } .tf-oo-sev.tf-muted { color: var(--ink-2); font-weight: var(--wt-ui, 400); }
+.tf-oo-said { overflow-wrap: anywhere; }
+.tf-oo-rule { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); color: var(--ink-2); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A result that is not lines: a page in a frame that runs nothing, an image whole, a file list with the one picked. */
+.tf-oo-page { background: var(--sheet-2); }
+.tf-oo-page iframe { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
+.tf-oo-image { display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--sheet-2); overflow: auto; }
+.tf-oo-image img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 3px; box-shadow: var(--shadow); background: #fff; }
+.tf-oo-files { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); background: var(--under); }
+.tf-oo-flist { overflow: auto; background: var(--under); border-right: 1px solid var(--rule); padding: 4px 6px; outline: none; }
+.tf-oo-flist button { display: grid; grid-template-columns: 3.9em minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--ink); text-align: left; font: inherit; font-size: calc(var(--t-sm) * var(--fs)); cursor: pointer; }
+.tf-oo-flist button:hover { background: var(--sheet-2); }
+.tf-oo-flist button[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
+.tf-oo-flist button[aria-current="true"] :is(.tf-lab, .tf-oo-fsize) { color: inherit; border-color: currentColor; opacity: .8; }
+.tf-oo-flist .tf-lab { justify-self: start; }
+.tf-oo-fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; --fs: var(--size-code); font-family: var(--mono); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oo-fsize { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-oo-fone { position: relative; min-width: 0; display: flex; flex-direction: column; }
+.tf-oo-fhead { display: flex; align-items: center; gap: 10px; height: 33px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oo-fhead b { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); }
+.tf-oo-fbody { position: relative; flex: 1; min-height: 0; }
+.tf-oo-fbody > * { position: absolute; inset: 0; }
+.tf-oo-fnote { flex: none; padding: 6px 12px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+
+/* Many files, one run each: a row a file, how it ended, and the picked file's output beside it. */
+.tf-oo-batch { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); background: var(--under); }
+.tf-oo-brow { display: grid; grid-template-columns: minmax(0, 1fr) 5.5em 4.5em; gap: 10px; align-items: center; width: 100%; height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: none; color: var(--ink); text-align: left; font: inherit; font-size: calc(var(--t-sm) * var(--fs)); cursor: pointer; }
+.tf-oo-brow:hover { background: var(--sheet-2); }
+.tf-oo-brow[aria-current="true"] { background: var(--sel-row); color: var(--on-sel-row); }
+.tf-oo-brow[aria-current="true"] * { color: inherit; }
+.tf-oo-bend { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.tf-oo-bend.tf-err { color: var(--err); font-weight: 600; } .tf-oo-bend.tf-ok { color: var(--ok); }
+
+/* ---------- where a run starts ---------- */
+/* *Run…* in a file's header and a folder's bar: *Open in…*'s menu, a command a row, its line as it will be run under
+   its name, and on the right how its last run on this thing ended. */
+.tf-menu.tf-appmenu.tf-oo-menu { min-width: 380px; }
+.tf-oo-menu button[role="menuitem"] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 16px; align-items: baseline; }
+.tf-oo-menu button[role="menuitem"] > .tf-mono { grid-column: 1; }
+.tf-oo-last { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: inline-flex; align-items: center; gap: 6px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
+.tf-oo-menu kbd { margin-left: 6px; }
+.tf-oo-menu .tf-oo-none { display: block; padding: 6px 12px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); max-width: 44ch; }
+/* A run still going after its dialog was closed: a button in the status bar that opens it again. */
+.tf-status .tf-oo-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--info); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---------- Settings › Commands ---------- */
+.tf-tbl.tf-rnd-tbl.tf-oo-tbl th:nth-child(1) { width: 24%; }
+.tf-oo-tbl th:nth-child(3) { width: 20%; }
+.tf-oo-tbl th:nth-child(4) { width: 15%; }
+.tf-rnd-tbl.tf-oo-tbl th:last-child { width: calc(126px * var(--size-ui, 1)); }
+.tf-rnd-tbl.tf-oo-runs th:last-child { width: calc(148px * var(--size-ui, 1)); }
+.tf-oo-tbl td kbd { margin-left: 6px; }
+.tf-oo-tbl td:not(:last-child), .tf-oo-runs td:not(:last-child) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-oo-tbl td:last-child, .tf-oo-runs td:last-child { white-space: nowrap; text-align: right; }
+.tf-oo-tbl td .tf-mono, .tf-oo-runs td.tf-mono { --fs: var(--size-code); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oo-tbl td .tf-oo-args { color: var(--ink-2); }
+.tf-oo-tbl tr[aria-current="true"] td { background: var(--sheet-2); }
+.tf-oo-runs th:nth-child(1) { width: 15%; } .tf-oo-runs th:nth-child(2) { width: 24%; } .tf-oo-runs th:nth-child(4) { width: 11%; } .tf-oo-runs th:nth-child(5) { width: 9%; }
+/* What a command is offered on, read from its placeholders as they are typed: one line that holds its room. */
+.tf-oo-offered { display: flex; align-items: baseline; gap: 8px; min-height: 1.5em; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-oo-offered b { color: var(--ink); font-weight: 600; }
+.tf-oo-examples { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.tf-oo-ex { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.tf-oo-ex:hover { border-color: var(--ink-2); }
+.tf-oo-ex b { font-weight: 600; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-oo-ex span { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The code face's advance, read once for *Wrap*: never seen. */
+.tf-oo-probe { position: absolute; visibility: hidden; white-space: pre; }
+/* *Run…* stands where *Open in…* does, with its menu beside it. */
+.tf-oo-runin { display: inline-flex; }

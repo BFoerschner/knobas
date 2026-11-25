@@ -15,12 +15,54 @@ use crate::oneoff::runs::{Runs, Sink};
 use crate::oneoff::shell_path::{self, ShellPath};
 use crate::{IpcError, Lifecycle};
 
-/// A run's batches on the window's channel.
-struct ChannelSink(Channel<Batch>);
+/// A run's batches on the window's channel, **sent from the main thread** as
+/// every event and the sync's progress are (`sources::progress::ChannelSink`,
+/// #747): with Tauri's `tracing` feature a send is a script the webview runs
+/// synchronously, and a run's thread waiting on the main thread while a quit
+/// waits on the run held both for good. The last drop goes there too.
+struct ChannelSink {
+    channel: Option<Channel<Batch>>,
+    on_main: OnMain,
+}
+
+/// What runs a task on the main thread: `AppHandle::run_on_main_thread`.
+type OnMain = Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
+
+impl ChannelSink {
+    fn new<R: tauri::Runtime>(app: &tauri::AppHandle<R>, channel: Channel<Batch>) -> Self {
+        let app = app.clone();
+        Self {
+            channel: Some(channel),
+            on_main: Box::new(move |task| {
+                if let Err(error) = app.run_on_main_thread(task) {
+                    tracing::debug!(%error, "the main thread is gone: a run's batch not sent");
+                }
+            }),
+        }
+    }
+}
 
 impl Sink for ChannelSink {
     fn send(&self, batch: &Batch) -> bool {
-        self.0.send(batch.clone()).is_ok()
+        let Some(channel) = self.channel.clone() else {
+            return false;
+        };
+        let batch = batch.clone();
+        (self.on_main)(Box::new(move || {
+            // A closed channel is a dialog that closed: the run goes on.
+            if let Err(error) = channel.send(batch) {
+                tracing::debug!(%error, "a run's channel is closed");
+            }
+        }));
+        true
+    }
+}
+
+impl Drop for ChannelSink {
+    fn drop(&mut self) {
+        if let Some(channel) = self.channel.take() {
+            (self.on_main)(Box::new(move || drop(channel)));
+        }
     }
 }
 
@@ -54,7 +96,8 @@ pub async fn set_oneoff_commands(
 /// # Errors
 /// As [`crate::oneoff::start`].
 #[tauri::command]
-pub async fn oneoff_run(
+pub async fn oneoff_run<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: tauri::State<'_, Lifecycle>,
     entity_id: String,
     command: String,
@@ -67,7 +110,7 @@ pub async fn oneoff_run(
         &entity_id,
         &command,
         target,
-        Arc::new(ChannelSink(channel)),
+        Arc::new(ChannelSink::new(&app, channel)),
     )
     .await
 }
@@ -95,8 +138,42 @@ pub fn oneoff_lines(run: String, from: u32, count: u32) -> Option<Batch> {
 /// A running run's next batches on `channel` too. `false` for a run no
 /// longer known.
 #[tauri::command]
-pub fn oneoff_watch(run: String, channel: Channel<Batch>) -> bool {
-    Runs::global().watch(&run, Arc::new(ChannelSink(channel)))
+pub fn oneoff_watch<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run: String,
+    channel: Channel<Batch>,
+) -> bool {
+    Runs::global().watch(&run, Arc::new(ChannelSink::new(&app, channel)))
+}
+
+/// *Download*: what run `run` printed, as text (with its colour codes where
+/// `colours`), saved to the Downloads folder under `name` (a free name beside
+/// any file there). Answers the path; knobas keeps no copy.
+///
+/// # Errors
+/// `not_found` once the run is no longer known; the folder or the write fails.
+#[tauri::command]
+pub async fn oneoff_save(run: String, name: String, colours: bool) -> Result<String, IpcError> {
+    use tokio::io::AsyncWriteExt as _;
+    let text = Runs::global().text(&run, colours).ok_or_else(|| {
+        IpcError::new(
+            crate::IpcErrorCode::NotFound,
+            "What it printed is no longer kept.",
+        )
+    })?;
+    let dir = dirs::download_dir().ok_or_else(|| {
+        IpcError::new(
+            crate::IpcErrorCode::Internal,
+            "This computer has no Downloads folder.",
+        )
+    })?;
+    let (path, mut file) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
+        .await
+        .map_err(|(path, error)| IpcError::internal(format!("{}: {error}", path.display())))?;
+    file.write_all(text.as_bytes())
+        .await
+        .map_err(|error| IpcError::internal(format!("{}: {error}", path.display())))?;
+    Ok(path.display().to_string())
 }
 
 /// Forgets one run, or every run that ended.
@@ -152,7 +229,7 @@ mod tests {
 
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 9);
+        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 10);
     }
 
     #[test]
@@ -166,6 +243,7 @@ mod tests {
             ("oneoff_lines", &["run", "from", "count"]),
             ("oneoff_watch", &["run", "channel"]),
             ("oneoff_forget", &["run"]),
+            ("oneoff_save", &["run", "name", "colours"]),
             ("oneoff_shell_path", &["again", "on"]),
         ] {
             assert_eq!(keys(invocation(MIRROR, command)), args, "{command}");

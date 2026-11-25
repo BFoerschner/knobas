@@ -129,6 +129,8 @@
   import { flipZen, isZenKey, zen } from "./zen.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
+  import TfRunHost from "./oneoff/TfRunHost.svelte";
+  import { oneoffs } from "../render/oneoff.svelte";
   import TfAck from "./TfAck.svelte";
   import TfToasts from "./TfToasts.svelte";
   import TfThemeKeep from "./TfThemeKeep.svelte";
@@ -845,6 +847,12 @@
       toggleZen();
       return;
     }
+    // `X` and `Shift X` on any Code page, outside a field, with no dialog, menu or launcher over it (ADR-0060): the
+    // most specific *Run…* menu standing, and the last command run again.
+    if (zen.here && event.key.toLowerCase() === "x" && !mod && !event.altKey && !event.defaultPrevented && focusedField() === null && !inTextField(event.target) && !layers.open.some((layer) => layer.kind !== "panel")) {
+      if (event.shiftKey ? oneoffs.runLast() : oneoffs.openMenu()) event.preventDefault();
+      return;
+    }
     // `/` outside a field, and ⌘/ anywhere, are the section's search (#2425):
     // the launcher with the section's filter, the pages having no field of
     // their own. Read by the key, not the code: on a German board `/` is ⇧7.
@@ -1157,6 +1165,7 @@
   {#if secretPrompt.source !== null}
     <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />
   {/if}
+  <TfRunHost />
   <TfToasts />
   <TfThemeKeep />
   <TfAck />

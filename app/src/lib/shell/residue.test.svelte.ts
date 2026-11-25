@@ -81,6 +81,26 @@ function lateRender() {
   return { highlight: () => ({ focus() {}, cancel() {} }) };
 }
 
+/** A command (ADR-0060) and ports that answer late, hearing through a real listener so its removal is seen. */
+const ONEOFF = { id: "x", name: "X", command: "x {file}", stdin: "none" as const, files: [], folders: [], has: [], repo_holds: [], repos: [], shows: "auto" as const, start_in: "root" as const, path: [], env: [], colours: true, timeout_secs: 120, wsl_paths: false };
+function oneoffPorts() {
+  return {
+    commands: () => deferred([]),
+    run: () => deferred({ started: { run: "r", argv: ["x"], cwd: "/c", branch: null, head: null, started_at: Date.now(), already: false }, stop: () => {} }),
+    stop: () => deferred(undefined),
+    runs: () => deferred([]),
+    lines: () => deferred(null),
+    watch: () => deferred({ known: true, stop: () => {} }),
+    save: () => deferred(""),
+    copy: () => deferred(undefined),
+    moved: () => {
+      const heard = () => {};
+      window.addEventListener("tauri:oneoff:moved", heard);
+      return () => window.removeEventListener("tauri:oneoff:moved", heard);
+    },
+  };
+}
+
 function deferred<T>(value: T): Promise<T> {
   return new Promise<T>((resolve) => {
     pending.push({ resolve: resolve as (v: unknown) => void, value });
@@ -471,6 +491,12 @@ const TfCreateTicket = (await import("../tf/TfCreateTicket.svelte")).default;
 const { echoWrite } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
+const TfRunDialog = (await import("../tf/oneoff/TfRunDialog.svelte")).default;
+const TfRunLines = (await import("../tf/oneoff/TfRunLines.svelte")).default;
+const TfRunChip = (await import("../tf/oneoff/TfRunChip.svelte")).default;
+const TfRunHost = (await import("../tf/oneoff/TfRunHost.svelte")).default;
+const TfRunMenu = (await import("../tf/oneoff/TfRunMenu.svelte")).default;
+const { OneOffs } = await import("../render/oneoff.svelte");
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfMadeOpenIn = (await import("../tf/openin/TfMadeOpenIn.svelte")).default;
@@ -1395,6 +1421,50 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** A command's run dialog (ADR-0060): the run going, its start answering late, its clock ticking. */
+    name: "TfRunDialog",
+    source: "lib/tf/oneoff/TfRunDialog.svelte",
+    open: (target) => {
+      const store = new OneOffs(oneoffPorts());
+      store.openRun(ONEOFF, "gitea:t/p", "p", { kind: "file", path: "a.ts", lines: null, at: null });
+      return { app: mount(TfRunDialog, { target, props: { run: store.open!, store } }) };
+    },
+  },
+  {
+    /** A run's rows (ADR-0060): following a run that prints. */
+    name: "TfRunLines",
+    source: "lib/tf/oneoff/TfRunLines.svelte",
+    open: (target) => {
+      const store = new OneOffs(oneoffPorts());
+      const run = store.openRun(ONEOFF, "gitea:t/p", "p", { kind: "file", path: "a.ts", lines: null, at: null });
+      run.take({ run: "r", lines: [{ n: 0, stream: "out", text: "a.ts:1:1: x" }], changed: [], total: 1, dropped: 0, tail_from: 1, bytes: 12, findings: 0, elapsed_ms: 1, ended: null });
+      return { app: mount(TfRunLines, { target, props: { run, onplace: () => {}, onurl: () => {} } }) };
+    },
+  },
+  {
+    /** A run left running (ADR-0060): the status bar's clock ticking. */
+    name: "TfRunChip",
+    source: "lib/tf/oneoff/TfRunChip.svelte",
+    open: (target) => {
+      const store = new OneOffs(oneoffPorts());
+      store.rows = [{ id: "r", command: "x", name: "X", entity_id: "gitea:t/p", target: { kind: "repository" }, argv: [], cwd: "", started_at: Date.now(), lines: 0, findings: 0, kept: true, ended: null, duration_ms: null }];
+      return { app: mount(TfRunChip, { target, props: { store } }) };
+    },
+  },
+  {
+    /** *Run…* (ADR-0060): it stands for `X` while it is there, its menu open. */
+    name: "TfRunMenu",
+    source: "lib/tf/oneoff/TfRunMenu.svelte",
+    open: (target) => ({ app: mount(TfRunMenu, { target, props: { entityId: "gitea:t/p", repo: "p", target: { kind: "repository" as const }, checkout: undefined, store: new OneOffs(oneoffPorts()) } }) }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button")?.click(),
+  },
+  {
+    /** Where the run dialog stands (ADR-0060): it hears runs move while it is there. */
+    name: "TfRunHost",
+    source: "lib/tf/oneoff/TfRunHost.svelte",
+    open: (target) => ({ app: mount(TfRunHost, { target, props: { store: new OneOffs(oneoffPorts()) } }) }),
   },
   {
     /** The run's Artifacts tab (#856): the folders, a preview and downloads answering late. */

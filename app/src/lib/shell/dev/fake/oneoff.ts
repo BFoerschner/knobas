@@ -1,9 +1,9 @@
 /**
  * `?fake-ipc`: commands, run on a press and read in a dialog (ADR-0060). Answers `oneoff_commands`,
- * `set_oneoff_commands`, `oneoff_run`, `oneoff_stop`, `oneoff_runs`, `oneoff_lines`, `oneoff_watch`, `oneoff_forget` and
+ * `set_oneoff_commands`, `oneoff_run`, `oneoff_stop`, `oneoff_runs`, `oneoff_lines`, `oneoff_watch`, `oneoff_forget`, `oneoff_save` and
  * `oneoff_shell_path`.
  *
- * None is saved until one is, as in the app. `?fake-oneoff` saves four: *ESLint* on a file (`*.ts`), *ESLint* on a
+ * None is saved until one is, as in the app. `?fake-oneoff` saves four: *ESLint* on any file, *ESLint* on a
  * folder, *xmllint* on an order (`*.xml`) and *Tests* on the repository. The fake runs no program: a run plays lines
  * back as the backend sends them, read already (colour runs, places, findings), in batches every 33 ms, the last one
  * carrying how it ended. A command holding `fail` exits 2 with stderr, one holding `missing` does not start, one holding
@@ -53,7 +53,7 @@ const base = (id: string, name: string, command: string, files: string[] = []): 
 });
 
 const SEEDED: OneOff[] = [
-  base("eslint", "ESLint", "npx eslint --max-warnings 0 {file}", ["*.ts", "*.tsx", "*.js"]),
+  base("eslint", "ESLint", "npx eslint --max-warnings 0 {file}"),
   base("eslint-dir", "ESLint on a folder", "npx eslint {dir}"),
   base("xmllint", "xmllint, against openTRANS", "xmllint --noout --schema schemas/opentrans_2_1.xsd {file}", ["*.xml"]),
   base("tests", "Tests", "npm test"),
@@ -99,7 +99,14 @@ function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; e
     return { lines: out, ended: { how: "exit", code: 3 }, every: 120 };
   }
   if (command.id === "tests" && flood) {
-    const lines = Array.from({ length: floodLines }, (_, n) => line(n, `  ✓ src/retry/window.test.ts > case ${n} keeps the payout held (${(n % 7) + 1} ms)`, { runs: [{ from: 2, to: 3, style: { fg: "g" } }] }));
+    // Made as they are sent, as a backend reads them: the page never holds the whole run before it is printed.
+    const lines = new Proxy([] as OneOffLine[], {
+      get: (target, key) => {
+        if (key === "length") return floodLines;
+        if (key === "slice") return (a: number, b: number) => Array.from({ length: Math.max(0, Math.min(b, floodLines) - a) }, (_, i) => floodLine(a + i));
+        return Reflect.get(target, key);
+      },
+    });
     return { lines, ended: { how: "exit", code: 0 }, every: 0 };
   }
   if (command.id === "tests") {
@@ -125,6 +132,11 @@ function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; e
   }
   lines.push(line(lines.length, ""), line(lines.length + 1, "✖ 4 problems (3 errors, 1 warning)", { runs: [{ from: 0, to: 34, style: { fg: "r", bold: true } }] }));
   return { lines, ended: { how: "exit", code: 1 }, every: 90 };
+}
+
+/** The flood's line `n`. */
+function floodLine(n: number): OneOffLine {
+  return line(n, `  ✓ src/retry/window.test.ts > case ${n} keeps the payout held (${(n % 7) + 1} ms)`, { runs: [{ from: 2, to: 3, style: { fg: "g" } }] });
 }
 
 function batch(run: FakeRun, lines: OneOffLine[], ended: OneOffEnded | null): OneOffBatch {
@@ -251,6 +263,7 @@ export function handlers(): Handlers {
       const keep = runs.filter((r) => r.row.ended === null || r.row.ended === undefined || (id !== null && r.row.id !== id));
       runs.splice(0, runs.length, ...keep);
     },
+    oneoff_save: (args) => `/Users/mara/Downloads/${String(args["name"])}`,
     oneoff_shell_path: (args) => ({
       on: typeof args["on"] === "boolean" ? (args["on"] as boolean) : true,
       offered: true,
