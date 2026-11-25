@@ -376,6 +376,7 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (kept !== undefined && kept.base.set !== null) {
         // The set kept whole: served at once, or once what moves under the pin has answered as it did.
         const s = attach(store, kept);
+        // Only the document that came with this open is checked: a kept set holds none (`keepIfWhole`).
         if (call.xml !== undefined) s.xml = call.xml;
         sessions.set(session, s);
         const answer = opened(kept.base.set, s.lean === true, s.index);

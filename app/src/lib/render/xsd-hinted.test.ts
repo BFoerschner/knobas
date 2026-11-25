@@ -118,6 +118,24 @@ describe("the document crosses once, and the round that leaves the set whole ans
     expect(bare.last.ok && bare.last.checked).toBeUndefined();
   });
 
+  test("a set kept whole answers each document its own verdict, never the one it was kept with", async () => {
+    const sessions: XsdSessions = new Map();
+    const call = (id: number, c: XsdCall) => answerXsd(sessions, id, c, BUNDLED) as Opened | Promise<Opened>;
+    const other = fixture("order-4710.xml");
+    const open = { kind: "open" as const, entry: ENTRY.path, text: ENTRY.text, paths: null, pointed: [], home: OT, lean: true, keep: PIN, xml: ORDER };
+    let a = await call(1, open);
+    for (let i = 0; a.ok && a.need.length > 0 && i < 10; i += 1) a = await call(1, { kind: "addFiles", files: a.need.map((p) => ({ path: p, text: FILES.get(p) ?? null })) });
+    expect(a.ok && verdict(a.checked)).toHaveLength(5);
+    // The other order, on the set the first kept: its own verdict, valid.
+    const second = await call(2, { ...open, xml: other });
+    expect(second.ok && second.need).toEqual([]);
+    expect(second.ok && verdict(second.checked)).toEqual([]);
+    // Opened without a document, nothing is checked: not the first order again.
+    const bare = await call(3, { ...open, xml: undefined });
+    expect(bare.ok && bare.checked).toBeUndefined();
+    expect(keptOf(sessions).get([...keptOf(sessions).keys()][0]!)!.base.xml).toBeUndefined();
+  });
+
   test("a set kept whole answers the verdict with its open", async () => {
     const sessions: XsdSessions = new Map();
     const call = (id: number, c: XsdCall) => answerXsd(sessions, id, c, BUNDLED) as Opened | Promise<Opened>;
