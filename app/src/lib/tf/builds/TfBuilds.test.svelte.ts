@@ -901,6 +901,7 @@ test("Recent draws no rail, the switch heads its bar, and the list is read only 
 
 test("a bare #/builds with Recent kept takes Recent's address; Pipelines takes it back to the last pipeline", async () => {
   buildsView.choose("recent");
+  location.hash = "#/builds";
   draw([], "builds", [], { recent: RECENT_PORTS({ asked: 0 }) } as Partial<BuildsPorts>);
   await settle();
   expect(location.hash).toBe("#/builds/recent");
