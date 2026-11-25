@@ -182,6 +182,21 @@ describe("a site's page (ADR-0050, decisions §9)", () => {
     expect(escStep({ layers: [{ kind: "dialog" }], field: null, route: site, opener })).toEqual({ do: "close", index: 0 });
   });
 
+  // Björn, 2026-11-25: "exit to the current page of the web version if I browsed inside knobas then go back with double esc".
+  test("browsed to another page knobas holds, the second Esc lands on it, in place of the site's entry", () => {
+    const landing = { hash: "#/page/confluence%3A9", name: "Retry budget" };
+    expect(escStep({ layers: [], field: null, route: site, opener, landing })).toEqual({ do: "arm" });
+    expect(escStep({ layers: [], field: null, route: site, opener, armed: true, landing })).toEqual({ do: "go", hash: landing.hash, opened: false });
+    expect(escTarget(site, opener, false, null, landing)).toEqual({ ...landing, opened: false, lands: true });
+  });
+
+  test("a landing on the opener's own page is the opener's step back, and with no opener the landing is still where Esc goes", () => {
+    const page = { hash: "#/page/confluence%3A2", name: "On-call handbook" };
+    expect(escTarget(site, page, false, null, { hash: "#/page/confluence%3A2/3", name: "On-call handbook" })).toEqual({ ...page, opened: true });
+    expect(escTarget(site, null, false, null, page)).toEqual({ ...page, opened: false, lands: true });
+    expect(escTarget(site, opener, false, null, null)).toEqual({ ...opener, opened: true });
+  });
+
   test("a site's page has no parent and lights no nav entry", () => {
     expect(escTarget(site, null)).toBeNull();
     expect(parseTfHash("#/site/wiki")).toEqual(site);

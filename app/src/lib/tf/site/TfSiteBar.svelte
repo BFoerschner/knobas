@@ -220,7 +220,8 @@
       </span>
     {/if}
     <span class="tf-site-acts">
-      {#if match !== null}
+      <!-- Where *Back to* lands on the same page, it is the one way there (Fable's ruling, 2026-11-25). -->
+      {#if match !== null && !(back?.lands === true && back.hash === entityAddress(match.kind, match.entity_id))}
         <a class="tf-btn tf-sm tf-ghost" href={entityAddress(match.kind, match.entity_id)}>Open in knobas</a>
       {/if}
       {#if status?.fill || filling}

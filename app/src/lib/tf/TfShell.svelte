@@ -87,7 +87,8 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { runsRead } from "./builds/runs-read.svelte";
-  import { goBackTo, goWithoutOpener, leftName, noteArrival, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
+  import { readDocsPageAhead } from "./docs/press-reads";
+  import { goBackTo, goWithoutOpener, landFromSite, leftName, noteArrival, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { onOpenKey } from "./page-open.svelte";
@@ -143,7 +144,7 @@
   import { noteScrolls } from "./scrolled";
   import { readLandingAtAddress } from "./repo/hover-reads";
   import { siteAllow, siteDo, siteRevealDownload, siteSettings, sitesKept, siteZoom, type SiteDownload, type SiteKey, type SiteRouted, type SiteStatus } from "../ipc/site";
-  import { siteStore } from "./site/site.svelte";
+  import { SITE_SETTLE_MS, siteStore } from "./site/site.svelte";
   import { closeSite, reloadSite, siteBack, siteForward } from "./site/actions";
   import TfSiteQuit from "./site/TfSiteQuit.svelte";
   import { ackBand } from "../shell/ack.svelte";
@@ -354,7 +355,10 @@
     const reopen = how === null && had === null ? reopening(now) : null;
     const nav = navTo === now || reopen !== null;
     navTo = null;
-    if (how !== "replace") notePlace(hash, now);
+    // A site's landing (`landFromSite`) takes the site's entry in place, as a replaced address does, and keeps its stamp;
+    // unlike one it is an opening, so the page it lands on settles as a new place.
+    const inPlace = how === "replace" || how === "land";
+    if (!inPlace) notePlace(hash, now);
     // In place of the row's address, on the entry the press made, so one press is one step back.
     if (reopen !== null) {
       history.replaceState(history.state, "", reopen);
@@ -363,14 +367,14 @@
     const arrived = parseTfHash(now);
     if (itemOf(arrived) !== null) delete leftItems[sectionOf(arrived)!];
     // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
-    const returning = how !== "replace" && (stepping || had !== null);
-    const opening = how !== "replace" && !returning && !samePage(hash, now);
+    const returning = !inPlace && (stepping || had !== null);
+    const opening = how === "land" || (how !== "replace" && !returning && !samePage(hash, now));
     noteArrival({ hash: now, how, returning });
     stepping = false;
-    if (how !== "replace" && had !== null) {
+    if (!inPlace && had !== null) {
       here = had;
     } else {
-      if (how !== "replace") here = stampFor(how, now);
+      if (!inPlace) here = stampFor(how as Exclude<Told, "replace" | "land"> | null, now);
       history.replaceState(stamped(history.state, here), "");
     }
     if (how !== "replace") scopedTicket.hold(here.trip);
@@ -391,7 +395,7 @@
    * step that couldn't step back; the page's own opener on a tab switch; otherwise the page it left. A press keeps
    * what a card row narrowed, or takes what the row just narrowed, since a row says so before its address moves.
    */
-  function stampFor(how: Exclude<Told, "replace"> | null, now: string): Opened {
+  function stampFor(how: Exclude<Told, "replace" | "land"> | null, now: string): Opened {
     if (how === "unopened") return { ...NOT_OPENED, prev: hash };
     if (how === "back") return { ...(here.opener?.from ?? NOT_OPENED), prev: hash };
     if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, visit: isTopPage(parseTfHash(now)), prev: hash };
@@ -574,7 +578,12 @@
    * the ladder's own rungs, so the hint names what the key does.
    */
   const visiting = $derived(here.visit || (scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job"));
-  const back = $derived(escTarget(route, here.opener, visiting, shownPage.parent));
+  /**
+   * On a site's page, the page knobas holds for where the site stands, when it is not the one it was opened at
+   * (`TfSite.svelte`, Fable's ruling, 2026-11-25): `Esc` twice and *Back to* land there.
+   */
+  const siteLanding = $derived(route.view === "site" ? (siteStore.landing.get(route.source) ?? null) : null);
+  const back = $derived(escTarget(route, here.opener, visiting, shownPage.parent, siteLanding));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -905,11 +914,12 @@
       visiting,
       parent: shownPage.parent,
       armed: route.view === "site" && siteStore.armed.has(route.source),
+      landing: siteLanding,
     });
     if (step.do === "nothing") return;
     if (step.do === "arm") {
       event.preventDefault();
-      if (route.view === "site") siteStore.arm(route.source, siteStore.status.get(route.source)?.esc_again_ms ?? 500);
+      if (route.view === "site") armSite(route.source);
       return;
     }
     event.preventDefault();
@@ -924,8 +934,8 @@
       holder?.focus({ preventScroll: true });
     }
     else if (step.do === "go") {
-      if (route.view === "site") siteStore.disarm(route.source);
-      leave(step.hash, step.opened);
+      if (route.view === "site") leaveSite(route.source);
+      else leave(step.hash, step.opened);
     }
   }
 
@@ -973,12 +983,32 @@
         document.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-site-at")?.focus({ preventScroll: true });
         return;
       case "esc-armed":
-        return siteStore.arm(source, siteStore.status.get(source)?.esc_again_ms ?? 500);
+        return armSite(source);
       case "esc-leave":
-        siteStore.disarm(source);
-        if (route.view === "site" && route.source === source && back !== null) leave(back.hash, back.opened);
-        return;
+        return leaveSite(source);
     }
+  }
+
+  /** A site's first `Esc`: its cap down, and the reads of the page the second lands on started (Fable's ruling, 2026-11-25). */
+  function armSite(source: string) {
+    siteStore.arm(source, siteStore.status.get(source)?.esc_again_ms ?? 500);
+    const landing = siteStore.landing.get(source);
+    if (landing?.kind === "page") readDocsPageAhead(landing.entityId);
+  }
+
+  /**
+   * A site's second `Esc`: where `Esc` goes now. While the mirror is still asked what the site's address names (a read
+   * of the local mirror, a few ms), it waits for that answer, at most {@link SITE_SETTLE_MS}, the first cap held down.
+   */
+  function leaveSite(source: string) {
+    const go = () => {
+      siteStore.disarm(source);
+      const to = back;
+      if (route.view === "site" && route.source === source && to !== null) leave(to.hash, to.opened);
+    };
+    const settling = siteStore.pending.get(source);
+    if (settling === undefined) return go();
+    void Promise.race([settling.catch(() => {}), new Promise((resolve) => setTimeout(resolve, SITE_SETTLE_MS))]).then(go);
   }
 
   /** Where a link a site may not show went (decisions §6): the bar says so for six seconds. */
@@ -1034,6 +1064,11 @@
 
   /** `Esc`'s step to `hash` (rungs 5 to 8), `opened` when it is the entry's opener. */
   function leave(hash: string, opened: boolean) {
+    // A site's landing takes the site's entry in place (Fable's ruling, 2026-11-25).
+    if (route.view === "site" && back?.lands === true && hash === back.hash) {
+      landFromSite(hash);
+      return;
+    }
     // Back on the Tickets that opened this ticket page, that ticket is selected again (spec #2227).
     if (opened && route.view === "ticket" && parseTfHash(hash).view === "tickets") selectTicket(route.id);
     stepping = true;

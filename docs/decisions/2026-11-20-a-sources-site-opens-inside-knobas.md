@@ -26,6 +26,9 @@ Designed by Fable, built by Opus. The architecture is ADR-0050. This note is the
   page's own `beforeunload`, and ask him only when the page objects.
 - **Esc is the site's. A second Esc within 500 ms goes back.** The bar shows two key caps beside *Back to ⟨name⟩* and
   holds the first down while the second still counts.
+  *Amended 2026-11-25* (`2026-11-25-a-docs-page-opens-at-once-and-a-site-leaves-where-it-is.md`): where the site now
+  stands on another item knobas holds than the one it was opened at, the second Esc and *Back to* land on that item's
+  page, in place of the site's history entry.
 - **While a knobas layer is open the site is hidden**, and its rectangle says what is still there. A native view lies
   above the page, and nothing knobas draws can stand over it.
 - **Coming back refreshes what he stood on.** The last five mirrored items whose pages the site showed are read again

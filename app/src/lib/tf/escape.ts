@@ -37,6 +37,10 @@
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.
  *
+ * On a source's site (ADR-0050) a rung comes before 7: where the site stands now is a page knobas holds, other than the
+ * one the site was opened at and the opener's own → go to that page, in place of the site's entry (the site's
+ * *landing*, Björn and Fable's ruling, 2026-11-25). He browsed in the site, and `Esc` twice lands where he is.
+ *
  * Rungs 6 to 9 are {@link escTarget}, which the breadcrumb's *Back to <name>*
  * reads too, so the hint and the key cannot disagree. No page answers `Esc` for
  * itself on those rungs: the asset tree's `←` walks up its columns, and its `Esc`
@@ -52,6 +56,7 @@ import type { Attachment } from "svelte/attachments";
 
 import { pageHeading } from "./focus-keep";
 import { segmentKey } from "./job/job";
+import { samePage } from "./opener";
 import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
 /** What `Esc` can see when it is pressed. */
@@ -69,6 +74,8 @@ export interface EscState {
   parent?: EscTarget | null;
   /** On a site's page: a first `Esc` is down and the second still counts (ADR-0050, decisions §9). */
   armed?: boolean;
+  /** On a site's page: the page knobas holds for where the site stands, when it is not the one it was opened at. */
+  landing?: EscTarget | null;
 }
 
 /** What one press does. */
@@ -88,8 +95,11 @@ export interface EscTarget {
   name: string;
 }
 
-/** An {@link EscTarget}, and whether it is the entry's opener (rung 7) rather than a structural parent. */
-export type EscTargetOf = EscTarget & { opened: boolean };
+/**
+ * An {@link EscTarget}, and whether it is the entry's opener (rung 7) rather than a structural parent; `lands`: a site's
+ * landing, which takes the site's entry in place.
+ */
+export type EscTargetOf = EscTarget & { opened: boolean; lands?: boolean };
 
 export function escStep(state: EscState): EscStep {
   for (const kind of ["dialog", "drawer"] as const) {
@@ -102,7 +112,7 @@ export function escStep(state: EscState): EscStep {
   }
   const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
   if (panel !== -1) return { do: "close", index: panel };
-  const target = escTarget(state.route, state.opener, state.visiting, state.parent);
+  const target = escTarget(state.route, state.opener, state.visiting, state.parent, state.landing ?? null);
   // A site's page goes back on the second `Esc` only, one rule wherever the keyboard is (decisions §9).
   if (state.route.view === "site" && target !== null && state.armed !== true) return { do: "arm" };
   if (target !== null) return { do: "go", hash: target.hash, opened: target.opened };
@@ -183,7 +193,15 @@ export function escHolder(field: HTMLElement): HTMLElement | null {
  * returned from, on every one of its sections alike. Assets has its entry again
  * (2026-11-19), so its own page is a top page like Monitors'.
  */
-export function escTarget(route: TfRoute, opener: EscTarget | null, visiting = false, parent: EscTarget | null = null): EscTargetOf | null {
+export function escTarget(
+  route: TfRoute,
+  opener: EscTarget | null,
+  visiting = false,
+  parent: EscTarget | null = null,
+  landing: EscTarget | null = null,
+): EscTargetOf | null {
+  // A site's landing, unless it is the page that opened the site: that is the opener's own step back.
+  if (route.view === "site" && landing !== null && (opener === null || !samePage(landing.hash, opener.hash))) return { ...landing, opened: false, lands: true };
   const visited = route.view === "full" && route.section === "settings";
   if (isTopPage(route) && !(opener !== null && (visiting || visited))) return null;
   if (opener !== null) return { hash: opener.hash, name: opener.name, opened: true };

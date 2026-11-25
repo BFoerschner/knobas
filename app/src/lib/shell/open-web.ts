@@ -112,9 +112,16 @@ export interface WebPorts {
 /** Go to `source`'s site page and point its view at `url` (decisions §14, *Opening*). */
 export async function openSiteAt(source: string, url: string, item: string | null = null, store: SiteStore = siteStore): Promise<void> {
   const hash = siteHash(source);
+  // The item at `url` is the one the site was opened at: browsing away from it is what `Esc` twice lands from.
+  const before = store.opened.get(source) ?? null;
+  store.openedAt(source, url);
   if (location.hash !== hash) location.hash = hash;
   const asked = await siteOpen(source, url, siteInsetsGuess(), false);
-  if (!asked.done && asked.asks === "unsaved") store.ask(source, { kind: "address", url, name: item });
+  // The page holds changes and stays: it is still at what it was opened at, until *Open here anyway*.
+  if (!asked.done && asked.asks === "unsaved") {
+    store.openedAt(source, before);
+    store.ask(source, { kind: "address", url, name: item });
+  }
 }
 
 /** Hand `url` to the browser: the chip where the press was, and a toast when it refuses. */

@@ -70,7 +70,10 @@ export async function answerAnyway(source: string, ports: SiteActionPorts = BRID
   store.ask(source, null);
   if (question.kind === "close") await ports.close(source, true);
   else if (question.kind === "reload") await ports.act(source, "reload", true);
-  else await ports.open(source, question.url, true);
+  else {
+    store.openedAt(source, question.url);
+    await ports.open(source, question.url, true);
+  }
 }
 
 /** The answer that keeps the page: the keyboard goes back to the site. */

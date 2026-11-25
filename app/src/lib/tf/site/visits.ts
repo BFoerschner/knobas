@@ -22,8 +22,11 @@ export interface Visits {
   answer(url: string): UrlMatch | null | undefined;
   /** The site of `source` stands at `url` while shown: ask the mirror, once per address, and note what it names. */
   see(source: string, url: string): Promise<UrlMatch | null>;
-  /** The site of `source` stopped being shown: refresh the last items it stood on, in the order visited. */
-  leave(source: string): Promise<void>;
+  /**
+   * The site of `source` stopped being shown: refresh the last items it stood on, in the order visited, and `first`, the
+   * page `Esc` twice landed on, before them (Fable's ruling, 2026-11-25), so the page drawn now is the one read first.
+   */
+  leave(source: string, first?: string | null): Promise<void>;
   /** Tests only. */
   reset(): void;
 }
@@ -62,10 +65,12 @@ export function createVisits(ports: VisitPorts, changed: () => void = () => {}):
       if (match !== null) note(source, match.entity_id);
       return match;
     },
-    async leave(source) {
+    async leave(source, first = null) {
       const list = visited.get(source) ?? [];
       visited.delete(source);
-      for (const id of list.slice(-REFRESH_LAST)) {
+      const last = list.slice(-REFRESH_LAST);
+      const ordered = first !== null && last.includes(first) ? [first, ...last.filter((id) => id !== first)] : last;
+      for (const id of ordered) {
         try {
           await Promise.resolve().then(() => ports.refresh(id));
         } catch {

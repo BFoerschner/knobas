@@ -9,7 +9,11 @@
  * - **names**: each source's display name, from the source list the status bar reads;
  * - **asking**: the question the bar asks in its row (decisions §10), per source;
  * - **said**: the bar's line about what happened to a link, for 6 seconds (decisions §16);
- * - **armed**: until when the first Esc's cap is drawn down.
+ * - **armed**: until when the first Esc's cap is drawn down;
+ * - **opened**: the address knobas last pointed the site at (`openSiteAt`), whose item is the one it was opened at;
+ * - **landing**: the page knobas holds for where the site stands now, when that is another item than the one it was
+ *   opened at, which `Esc` twice and *Back to* land on (Björn and Fable's ruling, 2026-11-25), and **pending** while the
+ *   mirror is still asked what the address names.
  *
  * Every text here came from a remote system or a person, and the page draws it as text.
  */
@@ -32,6 +36,17 @@ export interface SiteSaid {
   until: number;
 }
 
+/** A site's landing: where `Esc` twice goes, the item's page, and what the bar calls it. */
+export interface SiteLanding {
+  hash: string;
+  name: string;
+  entityId: string;
+  kind: string;
+}
+
+/** The longest a second `Esc` waits for the mirror to say what the site's address names. */
+export const SITE_SETTLE_MS = 200;
+
 /** How long a said line stands. */
 export const SAID_MS = 6000;
 
@@ -43,8 +58,15 @@ export interface SiteStore {
   readonly said: ReadonlyMap<string, SiteSaid>;
   /** Per source, until when the first Esc's cap is down, on the `performance.now()` clock. */
   readonly armed: ReadonlyMap<string, number>;
+  readonly opened: ReadonlyMap<string, string>;
+  readonly landing: ReadonlyMap<string, SiteLanding>;
+  readonly pending: ReadonlyMap<string, Promise<unknown>>;
   /** Whether the settings have been read. */
   readonly loaded: boolean;
+  /** knobas pointed the site of `source` at `url`, or opened it at its own first page (`null`). */
+  openedAt(source: string, url: string | null): void;
+  land(source: string, landing: SiteLanding | null): void;
+  settling(source: string, read: Promise<unknown> | null): void;
   hold(settings: readonly SiteSetting[]): void;
   holdOne(setting: SiteSetting): void;
   /**
@@ -72,6 +94,9 @@ export function createSiteStore(): SiteStore {
   let asking = $state.raw(new Map<string, SiteQuestion>());
   let said = $state.raw(new Map<string, SiteSaid>());
   let armed = $state.raw(new Map<string, number>());
+  let opened = $state.raw(new Map<string, string>());
+  let landing = $state.raw(new Map<string, SiteLanding>());
+  let pending = $state.raw(new Map<string, Promise<unknown>>());
   let loaded = $state(false);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const armTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -102,8 +127,31 @@ export function createSiteStore(): SiteStore {
     get armed() {
       return armed;
     },
+    get opened() {
+      return opened;
+    },
+    get landing() {
+      return landing;
+    },
+    get pending() {
+      return pending;
+    },
     get loaded() {
       return loaded;
+    },
+    openedAt(source, url) {
+      if (opened.get(source) === (url ?? undefined)) return;
+      opened = set(opened, source, url);
+    },
+    land(source, next) {
+      const was = landing.get(source);
+      if (was === next || (was !== undefined && next !== null && JSON.stringify(was) === JSON.stringify(next))) return;
+      if (was === undefined && next === null) return;
+      landing = set(landing, source, next);
+    },
+    settling(source, read) {
+      if (read === null && !pending.has(source)) return;
+      pending = set(pending, source, read);
     },
     hold(list) {
       settings = new Map(list.map((one) => [one.source, one]));
@@ -139,6 +187,9 @@ export function createSiteStore(): SiteStore {
       status = set(status, source, null);
       asking = set(asking, source, null);
       armed = set(armed, source, null);
+      opened = set(opened, source, null);
+      landing = set(landing, source, null);
+      pending = set(pending, source, null);
     },
     ask(source, question) {
       asking = set(asking, source, question);
@@ -185,6 +236,9 @@ export function createSiteStore(): SiteStore {
       asking = new Map();
       said = new Map();
       armed = new Map();
+      opened = new Map();
+      landing = new Map();
+      pending = new Map();
       loaded = false;
     },
   };

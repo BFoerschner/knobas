@@ -441,6 +441,27 @@ test("a job's row opens a run by its bare id; the address the run page puts in i
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
+// Björn, 2026-11-25: "exit to the current page of the web version if I browsed inside knobas then go back with double esc".
+test("a site browsed to another page knobas holds: Esc twice lands on that page in the site's place, and its Esc goes to what opened the site", async () => {
+  start({ nav: windowNav });
+  await at("#/ticket/jira%3APAY-231");
+  await at("#/site/wiki");
+  const depth = history.length;
+  siteStore.land("wiki", { hash: "#/page/confluence%3A9", name: "Retry budget", entityId: "confluence:9", kind: "page" });
+  flushSync();
+  press("Escape");
+  await settle();
+  expect(location.hash, "the first Esc only arms").toBe("#/site/wiki");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/page/confluence%3A9");
+  expect(history.length, "the page took the site's entry").toBe(depth);
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  siteStore.reset();
+});
+
 test("a run opened from the Builds list: Esc returns to the Builds list", async () => {
   start({ nav: windowNav });
   await at("#/builds/pipe-1");

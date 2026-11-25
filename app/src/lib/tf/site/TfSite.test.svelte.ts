@@ -63,8 +63,9 @@ const ports: SitePagePorts = {
   measure: () => insets,
 };
 
-let visits: { answer: (url: string) => undefined | null | { entity_id: string; kind: string }; see: (source: string, url: string) => Promise<{ entity_id: string; kind: string } | null>; leave: (source: string) => Promise<void> };
+let visits: { answer: (url: string) => undefined | null | { entity_id: string; kind: string }; see: (source: string, url: string) => Promise<{ entity_id: string; kind: string } | null>; leave: (source: string, first?: string | null) => Promise<void> };
 let named: Record<string, string>;
+let titles: Record<string, string> = {};
 let seen: string[];
 
 beforeEach(() => {
@@ -77,8 +78,8 @@ beforeEach(() => {
       const id = named[url];
       return Promise.resolve(id === undefined ? null : { entity_id: id, kind: "page" });
     },
-    leave: (source) => {
-      seen.push(`leave ${source}`);
+    leave: (source, first) => {
+      seen.push(first ? `leave ${source} ${first} first` : `leave ${source}`);
       return Promise.resolve();
     },
   };
@@ -107,6 +108,7 @@ function draw(over: { visible?: boolean; back?: { hash: string; name: string; op
     ports,
     store,
     visits,
+    head: (id: string) => Promise.resolve(titles[id] ?? null),
   });
   view = mount(TfSite, { target, props });
   flushSync();
@@ -330,4 +332,54 @@ test("leaving the site's page refreshes what it stood on; showing it again does 
   props.visible = true;
   flushSync();
   expect(seen.filter((one) => one.startsWith("leave"))).toEqual(["leave wiki"]);
+});
+
+/** The mirror's answers and the reads after them. */
+async function answered(): Promise<void> {
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  flushSync();
+}
+
+// Björn, 2026-11-25: "exit to the current page of the web version if I browsed inside knobas then go back with double esc".
+test("browsed from the page it was opened at to another knobas holds, the site's landing is that page, by its title", async () => {
+  const at = "https://wiki.example/display/PAY/Retry";
+  const next = "https://wiki.example/pages/viewpage.action?pageId=9";
+  named[at] = "confluence:2";
+  named[next] = "confluence:9";
+  titles = { "confluence:9": "Retry budget" };
+  store.openedAt("wiki", at);
+  store.update(status({ url: at }));
+  draw();
+  await answered();
+  expect(store.landing.get("wiki"), "still on the page it was opened at").toBeUndefined();
+
+  store.update(status({ url: next }));
+  flushSync();
+  expect(store.pending.has("wiki"), "the mirror is asked what the address names").toBe(true);
+  await answered();
+  expect(store.pending.has("wiki")).toBe(false);
+  expect(store.landing.get("wiki")).toEqual({ hash: "#/page/confluence%3A9", name: "Retry budget", entityId: "confluence:9", kind: "page" });
+
+  // Back in the site to the page it was opened at, by another address of it: no landing.
+  store.update(status({ url: "https://wiki.example/pages/viewpage.action?pageId=2" }));
+  named["https://wiki.example/pages/viewpage.action?pageId=2"] = "confluence:2";
+  await answered();
+  expect(store.landing.get("wiki")).toBeUndefined();
+});
+
+test("an address the mirror does not hold leaves no landing, and leaving refreshes the landed page first", async () => {
+  const at = "https://wiki.example/display/PAY/Retry";
+  named[at] = "confluence:2";
+  named["https://wiki.example/x/9"] = "confluence:9";
+  store.openedAt("wiki", at);
+  store.update(status({ url: "https://wiki.example/dosearchsite.action?q=retry" }));
+  const { props } = draw();
+  await answered();
+  expect(store.landing.get("wiki")).toBeUndefined();
+  store.update(status({ url: "https://wiki.example/x/9" }));
+  await answered();
+  expect(store.landing.get("wiki")?.entityId).toBe("confluence:9");
+  props.visible = false;
+  flushSync();
+  expect(seen.filter((one) => one.startsWith("leave"))).toEqual(["leave wiki confluence:9 first"]);
 });

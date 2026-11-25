@@ -83,7 +83,7 @@ export function openerOf(hash: string, name: string, came: Came): Opener {
 const KEY = "knobasOpened";
 
 /** How an address change was made, when it is not a plain in-app link's. */
-export type Told = "unopened" | "replace" | "back" | "across" | "visit" | "launched";
+export type Told = "unopened" | "replace" | "back" | "across" | "visit" | "launched" | "land";
 
 /** The next address change the shell is told about, and what to call the place it left where the page's own name is not it. */
 let told: { hash: string; how: Told; left?: string | undefined } | null = null;
@@ -150,6 +150,16 @@ export function goLaunched(hash: string): void {
 export function replaceAddress(hash: string): void {
   location.replace(hash);
   told = { hash: location.hash, how: "replace" };
+}
+
+/**
+ * A site's `Esc` twice to the page knobas holds for where the site stands (its landing, Fable's ruling, 2026-11-25):
+ * that page takes the site's entry in place and keeps its stamp, so its own `Esc` and `⌘[` go to what opened the site,
+ * and `⌘]` from there comes back to it. Unlike {@link replaceAddress} it arrives as an opening, from outside the page.
+ */
+export function landFromSite(hash: string): void {
+  location.replace(hash);
+  told = { hash: location.hash, how: "land" };
 }
 
 /** How the address change to `hash` was made, if it was told, and the name given for the place left; forgotten once asked. */
