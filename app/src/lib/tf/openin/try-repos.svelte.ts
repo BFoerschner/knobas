@@ -44,7 +44,9 @@ export class TryRepos {
       this.list = [];
       return;
     }
-    const wanted = preferred.filter((id): id is string => id !== null);
+    // The address's repository is often the last one tried too: named twice, it was listed twice, and the select's
+    // keyed rows threw on the second, leaving *Try it on* with no repository at all.
+    const wanted = [...new Set(preferred.filter((id): id is string => id !== null))];
     const order = [...wanted.filter((id) => rows.some((row) => row.entity_id === id)), ...rows.map((row) => row.entity_id).filter((id) => !wanted.includes(id))];
     const byId = new Map(rows.map((row) => [row.entity_id, row]));
     const found: TryRepo[] = [];
