@@ -421,11 +421,16 @@ fn a_root_whose_name_holds_a_space_or_brackets_is_one_path() {
             caseless: root.starts_with("C:"),
             disk: &mut disk,
         };
-        let printed = format!("{root}/scripts/deploy.sh:3:8: note: Double quote to prevent globbing. [SC2086]");
+        let printed = format!(
+            "{root}/scripts/deploy.sh:3:8: note: Double quote to prevent globbing. [SC2086]"
+        );
         let places = find(&printed, &mut ctx, &mut State::default());
         assert_eq!(places.len(), 1, "{printed}");
         let place = &places[0];
-        assert_eq!((place.path.as_str(), place.line, place.col), ("scripts/deploy.sh", Some(3), Some(8)));
+        assert_eq!(
+            (place.path.as_str(), place.line, place.col),
+            ("scripts/deploy.sh", Some(3), Some(8))
+        );
         assert_eq!(place.from, 0);
         // Backslashes, as a Windows tool prints the same root.
         let back = printed.replace('/', "\\");
@@ -434,6 +439,10 @@ fn a_root_whose_name_holds_a_space_or_brackets_is_one_path() {
         assert_eq!(places[0].path, "scripts/deploy.sh");
         // Another folder with a space in it is still no path.
         let other = "/Users/mara/Library/Application Support/other/scripts/deploy.sh:3:8: x";
-        assert!(find(other, &mut ctx, &mut State::default()).iter().all(|p| p.from > 0));
+        assert!(
+            find(other, &mut ctx, &mut State::default())
+                .iter()
+                .all(|p| p.from > 0)
+        );
     }
 }
