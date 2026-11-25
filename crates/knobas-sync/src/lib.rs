@@ -1053,6 +1053,11 @@ struct PgSink<'t, 'c> {
     roles: Option<knobas_source::role::data::DataCheck>,
     upserted: u64,
     deleted: u64,
+    /// How many rows the two upserts actually rewrote, `knobas.entity`'s and
+    /// `sync.item`'s together: 0 when every row arrived as it is stored and
+    /// was only stamped (#2189). A refresh of one item reads it to tell an
+    /// unchanged item from a changed one (the TeamCity run fix, 2026-11-25).
+    rewritten: u64,
     /// The last line the adapter said it left out (`Sink::left_out`, #2374).
     left_out: Option<String>,
     /// The kinds whose items get an empty title in `knobas.entity`
@@ -1081,6 +1086,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             roles,
             upserted: 0,
             deleted: 0,
+            rewritten: 0,
             left_out: None,
             private_titles: HashSet::new(),
             otp_keys: Vec::new(),
@@ -1208,7 +1214,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         }
 
         // The entity first: `sync.item.entity_id` references it.
-        sqlx::query(ENTITY_UPSERT)
+        let entities = sqlx::query(ENTITY_UPSERT)
             .bind(&ids)
             .bind(&kinds)
             .bind(&entity_titles)
@@ -1216,7 +1222,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .bind(&deleted)
             .execute(&mut **self.tx)
             .await?;
-        sqlx::query(ITEM_UPSERT)
+        let items = sqlx::query(ITEM_UPSERT)
             .bind(&ids)
             .bind(&kinds)
             .bind(&titles)
@@ -1228,6 +1234,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .bind(&self.source_id)
             .execute(&mut **self.tx)
             .await?;
+        self.rewritten += entities.rows_affected() + items.rows_affected();
         sqlx::query(ITEM_STAMP)
             .bind(&ids)
             .execute(&mut **self.tx)

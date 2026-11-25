@@ -254,7 +254,7 @@
         }
         for (const [event, hear] of [
           [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
-          [EVENTS.itemRefreshed, () => cacheEvents.moved()],
+          [EVENTS.itemRefreshed, (payload: unknown) => cacheEvents.refreshed(payload as Parameters<typeof cacheEvents.refreshed>[0])],
           [EVENTS.viewFresh, () => cacheEvents.moved()],
           [EVENTS.checkoutFetched, () => cacheEvents.moved()],
           [EVENTS.dbState, () => cacheEvents.moved()],

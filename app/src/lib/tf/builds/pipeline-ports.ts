@@ -46,6 +46,7 @@ import type {
 import {
   listAdapters,
   listSources,
+  refreshEntity,
   syncStatus,
   type QueuedWrite,
   type SourceDescriptor,
@@ -97,6 +98,11 @@ export interface PipelinePorts {
   getEntity: (entityId: string) => Promise<EntityDetail>;
   /** The header's *Refresh* or *Sync now* (#2107, #2137); the bridge's when left out. */
   refresh?: DetailRefreshPorts;
+  /**
+   * A run in flight the page draws, refreshed by id in the background lane when the page is shown (`refresh_entity`
+   * behind, the TeamCity run fix); none is refreshed when left out.
+   */
+  follow?: (runId: string) => Promise<unknown>;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -166,6 +172,7 @@ export const BRIDGE: PipelinePorts = {
   follower: () => writeFollower(),
   refusedWrites: (asks) => refusedWrites(asks),
   getEntity: (entityId) => getEntity(entityId),
+  follow: (runId) => refreshEntity(runId, true),
 };
 
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */

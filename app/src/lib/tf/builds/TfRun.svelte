@@ -32,6 +32,10 @@
     the Log tab; a run in flight is read again when the Log tab opens. No
     log, or a log without steps, draws no bar.
 
+  - **In flight** (the TeamCity run fix, 2026-11-25, `runs-in-flight.ts`): a refresh with no write that moved the run
+    reads its row and item again, and the whole page when it went from queued to running or to finished; the run is
+    refreshed at the source once it drew, when shown again and when the window comes back, at most once in 5 s.
+
   - **Refresh** (#2137, after #2107): the run as `get_entity` reads it draws
     *Refresh* or *Sync now* at the end of the header's actions
     (`TfDetailRefresh`), and the withdrawn and turned-off banners under the
@@ -69,6 +73,8 @@
   import { failedRun, pipelineHash, runTone, stateWord } from "./builds";
   import { runsRead } from "./runs-read.svelte";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
+  import { IN_FLIGHT_AFTER_MS, InFlightReads, hearRuns, inFlight as runInFlight, phase } from "./runs-in-flight";
   import { inTextField } from "../../shell/keys";
   import {
     chipTone,
@@ -224,7 +230,16 @@
     detail = null;
     detailRead = false;
     refresh.reset();
-    void findRun(pipe, id, mine);
+    clearTimeout(inFlightSoon);
+    inFlightReads.reset();
+    void findRun(pipe, id, mine).then(() => {
+      // Once the run has drawn, one in flight is read at the source: started or finished since the last run of the
+      // source, it says so now (the TeamCity run fix, 2026-11-25). A page left meanwhile sets nothing.
+      if (mine !== token) return;
+      inFlightSoon = setTimeout(() => {
+        if (mine === token) readInFlight();
+      }, IN_FLIGHT_AFTER_MS);
+    });
     void readLog(id, mine);
     void readView(id, mine);
     void readDetail(id, mine);
@@ -404,15 +419,48 @@
 
   onDestroy(() => {
     token += 1;
+    clearTimeout(inFlightSoon);
   });
 
   const run = $derived(held?.find((r) => r.entity_id === runId) ?? null);
+
+  /** The run, refreshed by id when the page is shown while it is in flight (the TeamCity run fix). */
+  const inFlightReads = new InFlightReads(untrack(() => ports.follow));
+  let inFlightSoon: ReturnType<typeof setTimeout> | undefined;
+  function readInFlight() {
+    const now = held?.find((r) => r.entity_id === runId) ?? null;
+    if (now !== null && runInFlight(now)) inFlightReads.read([now.entity_id]);
+  }
+
+  // The run moved at the source (a run started in knobas is read to its end, or this page read it): its row and item
+  // again from the mirror, and, where it went from queued to running or to finished, the whole page as a sync's end
+  // reads it (its view, log and open tab).
+  $effect(() => {
+    const wanted = { pipelineId, runId };
+    return untrack(() =>
+      hearRuns(
+        ports.listen,
+        (entity) => entity === wanted.runId,
+        () => {
+          const mine = token;
+          const was = phase(held?.find((r) => r.entity_id === wanted.runId) ?? null);
+          void Promise.all([findRun(wanted.pipelineId, wanted.runId, mine), readDetail(wanted.runId, mine)]).then(() => {
+            if (mine !== token) return;
+            const is = phase(held?.find((r) => r.entity_id === wanted.runId) ?? null);
+            if (is !== was) void reread(wanted.pipelineId, wanted.runId);
+          });
+        },
+      ),
+    );
+  });
 
   /**
    * `m` on the run page (ux18): *Mark as read* or *Mark as unread* on this run, when it finished failed. Opening it
    * reads nothing: only a mark does. Not in a field, a dialog, or a page a keep-alive holds hidden.
    */
   const runShown = pageVisible();
+  // Shown again or the window back: a run in flight read at the source, at most once in 5 s.
+  onFocusWhileShown(runShown, readInFlight);
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
       if (event.key !== "m" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.defaultPrevented) return;

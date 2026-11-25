@@ -239,6 +239,30 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(2);
   });
 
+  it("drops on a refresh with no write what its source could change, everything after a write, and nothing on a failed one or at the call", async () => {
+    await ask("list_sources");
+    await ask("docs_outline");
+    await ask("monitor_roster");
+    // A page's refresh of its runs in flight drops nothing as it is asked: its end says what moved.
+    await ask("refresh_entity", { entityId: "kuma:monitor:1", behind: true });
+    await ask("docs_outline");
+    await ask("monitor_roster");
+    expect([asked("docs_outline"), asked("monitor_roster")]).toEqual([1, 1]);
+    // A followed run moved (the TeamCity run fix): what a run of its source drops.
+    cacheEvents.refreshed({ entity_id: "kuma:monitor:1", write_id: null, ended: "refreshed" });
+    await ask("docs_outline");
+    await ask("monitor_roster");
+    expect([asked("docs_outline"), asked("monitor_roster")]).toEqual([1, 2]);
+    // One that failed moved nothing.
+    cacheEvents.refreshed({ entity_id: "conf:page:1", write_id: null, ended: "failed" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(1);
+    // A write's read-back: every answer, as before.
+    cacheEvents.refreshed({ entity_id: "kuma:monitor:1", write_id: 7, ended: "refreshed" });
+    await ask("docs_outline");
+    expect(asked("docs_outline")).toBe(2);
+  });
+
   it("keeps the sources' status until a run starts or ends, whatever it changed", async () => {
     await ask("sync_status");
     await ask("credential_health");

@@ -1491,3 +1491,46 @@ test("a failed run's header offers Mark as read and m toggles it; opening it rea
   expect(passed.defaultPrevented, "a passed run leaves m alone").toBe(false);
   expect(asked).toHaveLength(2);
 });
+
+// -- a run in flight moves on (the TeamCity run fix, 2026-11-25) ------------------
+
+test("a running run's refresh landing draws its result with no run of the source, and reads the whole page once it finished", async () => {
+  const events = echoEvents(settle);
+  const views: string[] = [];
+  const drawn = draw("teamcity:build:1188", undefined, {
+    listen: events.listen,
+    view: (_id, section) => (views.push(section ?? ""), Promise.resolve(viewOf(views.length === 1))),
+  });
+  await settle();
+  expect(button("Stop")).toBeDefined();
+  // The write queue's follow read it, still running: the row again, nothing more.
+  await events.refreshed("teamcity:build:1188", null);
+  expect(drawn.reads).toBe(2);
+  expect(views).toEqual([""]);
+  // Then finished: the row, and the page as a sync's end reads it.
+  drawn.next = LANDED;
+  await events.refreshed("teamcity:build:1188", null);
+  expect(drawn.reads).toBeGreaterThanOrEqual(3);
+  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("Passed");
+  expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
+  expect(button("Re-run")).toBeDefined();
+  // Another run's refresh reads nothing.
+  const reads = drawn.reads;
+  await events.refreshed("teamcity:build:1187", null);
+  expect(drawn.reads).toBe(reads);
+});
+
+test("a run in flight is refreshed at the source once the page has drawn; a finished one is not", async () => {
+  const asked: string[] = [];
+  draw("teamcity:build:1188", undefined, { follow: (id) => (asked.push(id), Promise.resolve({ outcome: "refreshed" })) });
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(asked).toEqual(["teamcity:build:1188"]);
+  if (page) unmount(page);
+  page = null;
+  const done: string[] = [];
+  draw("teamcity:build:1187", undefined, { follow: (id) => (done.push(id), Promise.resolve({ outcome: "refreshed" })) });
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(done).toEqual([]);
+});

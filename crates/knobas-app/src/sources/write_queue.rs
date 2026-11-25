@@ -884,7 +884,9 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// offer the read is not refreshed. Then a run of the write's source that
 /// **began after the write**, waited for ([`Scheduler::sync_after_write`]),
 /// for what the write changed elsewhere (story 15); a run already in flight,
-/// which began before the write, does not stand in for it.
+/// which began before the write, does not stand in for it. Where the item
+/// read back is a run in flight (a build the write queued), it is read on to
+/// its end beside that run ([`super::follow_run`], the TeamCity run fix).
 ///
 /// A failure of either is logged and dropped: the write **landed**, and
 /// reporting the follow-up read's failure as the write's would tell the user
@@ -918,6 +920,11 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             "a write landed but its item could not be refreshed"
         );
     }
+    // A run it started (or any run in flight it was read back by) is read on
+    // to its end, beside the run that follows the write (the TeamCity run
+    // fix, 2026-11-25): that run catches the build where it stands then, and
+    // the next scheduled one is minutes away.
+    super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -1002,6 +1009,10 @@ pub(crate) struct FollowLandings {
     /// The landed writes whose [`after_landing`] has not ended, counted per
     /// source: what [`sync_after_write`] waits out (#2115).
     following: Following,
+    /// The runs started in knobas being read to their end
+    /// ([`super::follow_run`], the TeamCity run fix). Not counted in
+    /// `following`: a run that follows a write does not wait out a build.
+    runs: super::follow_run::RunFollows,
 }
 
 /// How many landed writes of each source are still being followed: counted up
@@ -1095,9 +1106,17 @@ impl FollowLandings {
                 inner,
                 scheduler_slot,
                 following: Following::default(),
+                runs: super::follow_run::RunFollows::default(),
             },
             slot,
         )
+    }
+}
+
+impl FollowLandings {
+    /// The runs being followed ([`super::follow_run`]).
+    pub(crate) fn runs(&self) -> super::follow_run::RunFollows {
+        self.runs.clone()
     }
 }
 

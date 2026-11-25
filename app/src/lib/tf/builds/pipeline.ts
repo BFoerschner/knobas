@@ -130,6 +130,19 @@ export function queuedRunRows(echoes: readonly Echo[], fallback: string | null):
 }
 
 /**
+ * A rail row with the newest run queued here that its own read does not hold yet on top (the TeamCity run fix,
+ * 2026-11-25): its glyph and time say *queued* from the queue's answer, not from the run after the write. Drawn only;
+ * the pipeline page settles the echo, so its row never goes before its read holds the run.
+ */
+export function withQueued<P extends Pick<PipelineRow, "recent">>(pipeline: P, echoes: readonly Echo[]): P {
+  if (echoes.length === 0) return pipeline;
+  const held = runLanded(pipeline.recent);
+  const waiting = echoes.filter((echo) => !held(echo));
+  if (waiting.length === 0) return pipeline;
+  return { ...pipeline, recent: [...queuedRunRows(waiting, null).slice(0, 1), ...pipeline.recent] };
+}
+
+/**
  * Which queued runs a read holds (#1449), for `settleEchoes`: a run newer
  * than the newest the page held as it was queued, on its branch (any, for
  * one queued on the default), that no change or schedule started. Each such
