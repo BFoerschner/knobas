@@ -8,6 +8,7 @@
 pub mod crud;
 pub mod demo;
 pub mod files_on_sync;
+pub mod follow_run;
 pub mod held;
 pub mod install;
 pub mod installed;

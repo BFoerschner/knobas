@@ -20,6 +20,14 @@ The pr-state fix (`docs/decisions/2026-11-24-a-pull-requests-state-shows-at-once
 - **Ends as a quit-cancelled run does**: its row closed with `stood aside: a landed write's read-back went first, write N`, its watchers told once, no verdict on the credential, the backoff untouched, not counted as a failure.
 - **Never stopped**, and the read-back waits as before: a run a person pressed or joined, a first sync or a backfill, a source with no stored position (its run owes a full sync and its sweep), a source with no run that ended `ok` within max(10 min, twice its interval), and a read-back that never waits on the lock (nothing in flight, a kind the adapter does not read).
 
+## Amended 2026-11-25: a run a landed write started is read on to its end
+
+The TeamCity run fix (`docs/decisions/2026-11-25-a-started-run-moves-on-at-once.md`, Fable's ruling). A landed *Run* is read back as TeamCity queued it, and nothing read it again until the source's next scheduled run, 300 s on the live sources: every page said *queued* while the agent ran it.
+
+- **The read-back goes on while the item is a run in flight.** Where the item a landed write was read back by is a run (its kind's frame) with no `finished` instant, it is refreshed by id again under `Lock::Try`: every 2 s for 30 s, every 5 s up to 5 min, every 15 s after, as a person's read for the first 30 s and then in the background lane. A run of the source holding its lock skips the tick. It ends when the run finished or is gone, after 2 h, after 5 failed reads in a row, when the source is turned off or removed, or at the quit; at most 5 runs of a source at once. Not polling for somebody else's change: the press started the process, and reading it to its end is that write's read-back.
+- **A refresh that finds the item as the mirror holds it is `Unchanged`** (only stamped, as a run leaves an unchanged row), and tells nothing unless a write is being read back, as a walk with no news. So a build waiting an hour for an agent costs the window nothing.
+- **A refresh's event with no write behind it drops what a run of its source drops** in the window's answers, not every answer; a failed one drops nothing.
+
 ## Rejected
 
 - Keep the run after a write and fix the paths that skip it. A run of a whole Jira is not instant, and *Refresh* on a detail has no run-shaped answer. The run stays as the follow-up.

@@ -37,6 +37,10 @@ const SOURCE: &str = "refreshing";
 const TICKET: &str = "refreshing:PAY-1";
 const BUILD: &str = "refreshing:BUILD-1";
 const FILED: &str = "refreshing:PAY-9";
+/// A run a `TriggerBuild` puts on the queue, whose state the test moves.
+const RUN: &str = "refreshing:BUILD-2";
+/// The pipeline it runs.
+const PIPELINE: &str = "refreshing:CONF-1";
 /// A parent its source reads with what stands under it (ADR-0047).
 const REPO: &str = "refreshing:REPO-1";
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -73,6 +77,9 @@ struct Remote {
     /// The keys a walk under REPO-1 answers as deleted: an item under the
     /// parent the source dropped, or the parent itself.
     walk_deleted: Mutex<Vec<&'static str>>,
+    /// BUILD-2 as the source holds it: `None` until a trigger queues it, then
+    /// `queued`, `running` or `finished`.
+    run_state: Mutex<Option<&'static str>>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -89,6 +96,26 @@ fn ticket(key: &str, title: &str) -> SyncItem {
     }
 }
 
+/// BUILD-2 in `state`: a finished one carries its `finishDate`, which the
+/// build kind declares as its `finished` instant.
+fn run_build(state: &str) -> SyncItem {
+    let mut payload = json!({ "state": state });
+    if state == "finished" {
+        payload["finishDate"] = json!("20261125T100000+0000");
+    }
+    SyncItem {
+        entity: EntityRef::new(SOURCE, "BUILD-2"),
+        kind: "build".to_owned(),
+        title: "Build #2".to_owned(),
+        body_text: String::new(),
+        author: None,
+        updated_at: None,
+        payload,
+        web_url: None,
+        deleted: false,
+    }
+}
+
 fn build() -> SyncItem {
     SyncItem {
         entity: EntityRef::new(SOURCE, "BUILD-1"),
@@ -97,7 +124,7 @@ fn build() -> SyncItem {
         body_text: String::new(),
         author: None,
         updated_at: None,
-        payload: json!({ "status": "FAILURE" }),
+        payload: json!({ "status": "FAILURE", "finishDate": "20261124T100000+0000" }),
         web_url: None,
         deleted: false,
     }
@@ -144,6 +171,10 @@ impl Source for Fake {
                 *self.0.filed.lock().unwrap() = true;
                 Ok(WriteReceipt::id("PAY-9"))
             }
+            WriteOp::TriggerBuild { .. } => {
+                *self.0.run_state.lock().unwrap() = Some("queued");
+                Ok(WriteReceipt::id("BUILD-2"))
+            }
             _ => {
                 *self.0.title.lock().unwrap() = "after".to_owned();
                 Ok(WriteReceipt::none())
@@ -160,6 +191,10 @@ impl Source for Fake {
             Reads::Answers => Ok(match entity {
                 TICKET => RefreshAnswer::Item(ticket("PAY-1", &self.0.title.lock().unwrap())),
                 BUILD => RefreshAnswer::Item(build()),
+                RUN => match *self.0.run_state.lock().unwrap() {
+                    Some(state) => RefreshAnswer::Item(run_build(state)),
+                    None => RefreshAnswer::Gone,
+                },
                 REPO => RefreshAnswer::NotOffered,
                 FILED if *self.0.filed.lock().unwrap() => {
                     RefreshAnswer::Item(ticket("PAY-9", "Build #1 failed"))
@@ -249,10 +284,26 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         code_pages: None,
         by_hand_by_default: false,
         passwords: None,
-        write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
-        entity_kinds: vec![kind("ticket"), kind("build"), kind("repo")],
+        write_ops: vec![
+            "comment".to_owned(),
+            "create_ticket".to_owned(),
+            "trigger_build".to_owned(),
+        ],
+        entity_kinds: vec![
+            kind("ticket"),
+            kind("build"),
+            kind("repo"),
+            kind("build_config"),
+        ],
         config_schema: json!({"type": "object", "properties": {}}),
-        payload_paths: Vec::new(),
+        // A build is a run, finished once its `finishDate` is there: what
+        // the follow of a started run reads (the TeamCity run fix).
+        payload_paths: vec![knobas_source::KindPaths {
+            kind: "build".to_owned(),
+            frame: Some(knobas_source::Frame::Run),
+            finished: vec![knobas_source::PayloadPath::of(["finishDate"])],
+            ..knobas_source::KindPaths::default()
+        }],
     }
 }
 
@@ -359,6 +410,7 @@ async fn fixture(name: &str) -> Fixture {
         walks: Mutex::new(Vec::new()),
         walk_finds: Mutex::new(true),
         walk_deleted: Mutex::new(Vec::new()),
+        run_state: Mutex::new(None),
     });
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(Arc::clone(&remote)));
     let heard = Heard::default();
@@ -1402,5 +1454,142 @@ async fn a_walk_is_not_asked_while_a_run_holds_the_source() {
     );
     assert!(f.remote.walks.lock().unwrap().is_empty(), "nothing walked");
     run.rollback().await.unwrap();
+    f.state.scheduler.shutdown().await;
+}
+
+/// The refreshes heard for `entity` with no write behind them.
+fn heard_after(f: &Fixture, entity: &str) -> Vec<RefreshEnd> {
+    f.heard()
+        .into_iter()
+        .filter(|ended| ended.entity_id == entity && ended.write_id.is_none())
+        .map(|ended| ended.ended)
+        .collect()
+}
+
+/// The state the mirror holds BUILD-2 in.
+async fn mirrored_state(pool: &sqlx::PgPool) -> Option<String> {
+    sqlx::query_scalar("select payload->>'state' from sync.live_item where entity_id = $1")
+        .bind(RUN)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+/// **A run started in knobas moves on in the mirror as it moves at the
+/// source** (the TeamCity run fix, 2026-11-25): queued at the read-back, then
+/// running and finished within a read of each, with no run of the source;
+/// then nothing reads it again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_started_here_is_read_on_until_it_finishes() {
+    let f = fixture("refresh_follow_run").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let id = write_queue::submit_in_background(
+        &f.state,
+        json!({ "TriggerBuild": { "entity": PIPELINE } }),
+    )
+    .await
+    .expect("queued")
+    .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the read-back holds the queued run", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("queued")
+    })
+    .await;
+    until("the run is followed", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE) == [RUN]
+    })
+    .await;
+
+    // The agent takes it: the next read, 2 s on, says running.
+    *f.remote.run_state.lock().unwrap() = Some("running");
+    let moved = std::time::Instant::now();
+    until("the mirror says running", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("running")
+    })
+    .await;
+    assert!(
+        moved.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        moved.elapsed()
+    );
+    assert_eq!(heard_after(&f, RUN), [RefreshEnd::Refreshed]);
+
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the mirror says finished", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("finished")
+    })
+    .await;
+    until("the follow ends", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE).is_empty()
+    })
+    .await;
+    let reads = f.remote.refreshes.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        f.remote.refreshes.load(Ordering::SeqCst),
+        reads,
+        "a finished run is read no more"
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// **A followed run that has not moved tells nothing**: each read finds it
+/// as the mirror holds it (`Unchanged`), so the window keeps its answers and
+/// no page reads again while a build waits for an agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_followed_run_that_has_not_moved_tells_nothing() {
+    let f = fixture("refresh_follow_quiet").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let id = write_queue::submit_in_background(
+        &f.state,
+        json!({ "TriggerBuild": { "entity": PIPELINE } }),
+    )
+    .await
+    .expect("queued")
+    .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the run is followed", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE) == [RUN]
+    })
+    .await;
+    let reads = f.remote.refreshes.load(Ordering::SeqCst);
+    until("two more reads of the queued run", || async {
+        f.remote.refreshes.load(Ordering::SeqCst) >= reads + 2
+    })
+    .await;
+    assert_eq!(heard_after(&f, RUN), [], "an unchanged read tells nothing");
+    assert_eq!(
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE),
+        [RUN],
+        "still followed while it waits"
+    );
+
+    // Gone at the source (deleted from the queue): the follow ends.
+    *f.remote.run_state.lock().unwrap() = None;
+    until("the follow ends", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE).is_empty()
+    })
+    .await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// **A one-item refresh that finds the item as the mirror holds it is
+/// `Unchanged`** and tells nothing; one that finds it moved is `Refreshed`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refresh_of_an_unmoved_item_is_unchanged_and_tells_nothing() {
+    let f = fixture("refresh_unchanged").await;
+    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait);
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Unchanged)));
+    *f.remote.title.lock().unwrap() = "after".to_owned();
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
+    assert_eq!(
+        f.heard().len(),
+        2,
+        "the unchanged read told nothing: {:?}",
+        f.heard()
+    );
     f.state.scheduler.shutdown().await;
 }

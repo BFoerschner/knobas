@@ -48,7 +48,9 @@ pub enum RefreshOutcome {
     /// holds the parent and what stands under it as the source does. Nothing
     /// was written, so nothing a page drew is out of date (the pr-state fix,
     /// 2026-11-24: a page that walks its repository each time it is shown
-    /// must not drop every answer the window holds when nothing moved).
+    /// must not drop every answer the window holds when nothing moved). Also
+    /// one item read by id that arrived as the mirror holds it, which was
+    /// only stamped (the TeamCity run fix, 2026-11-25).
     Unchanged,
 }
 
@@ -290,12 +292,8 @@ async fn refresh_locked(
                     item.entity
                 ))));
             }
-            let outcome = if item.deleted {
-                RefreshOutcome::Gone
-            } else {
-                RefreshOutcome::Refreshed
-            };
-            write_items(
+            let deleted = item.deleted;
+            let rewritten = write_items(
                 tx,
                 source_id,
                 kinds,
@@ -304,7 +302,16 @@ async fn refresh_locked(
                 vec![item],
             )
             .await?;
-            outcome
+            if deleted {
+                RefreshOutcome::Gone
+            } else if rewritten == 0 {
+                // The item arrived as the mirror holds it (the TeamCity run
+                // fix, 2026-11-25): a run in flight read again while it waits
+                // for an agent tells nothing, as a walk with no news does.
+                RefreshOutcome::Unchanged
+            } else {
+                RefreshOutcome::Refreshed
+            }
         }
     };
 
@@ -399,7 +406,8 @@ pub async fn write_direct(
 
 /// Write what a refresh read through the run's item write, judged as a run
 /// judges: the same role rule an incremental run's handful of records is
-/// held to.
+/// held to. Answers how many rows the write rewrote: 0 when every item
+/// arrived as the mirror holds it and was only stamped.
 async fn write_items(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
@@ -407,21 +415,21 @@ async fn write_items(
     private_titles: &std::collections::HashSet<String>,
     role_check: knobas_source::role::data::DataCheck,
     items: Vec<knobas_source::SyncItem>,
-) -> Result<(), SyncError> {
+) -> Result<u64, SyncError> {
     let kept_roles = role_check::load(tx, source_id).await?;
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
-    let roles = {
+    let (roles, rewritten) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check)
             .with_private_titles(private_titles.clone());
         for item in items {
             sink.item(item).await?;
         }
         sink.flush().await?;
-        sink.roles
+        (sink.roles, sink.rewritten)
     };
     if let Some(check) = roles {
         role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
     }
-    Ok(())
+    Ok(rewritten)
 }
