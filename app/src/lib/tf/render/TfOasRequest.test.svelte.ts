@@ -76,7 +76,8 @@ function input(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
 
 async function openRequest(at: string) {
   view = mount(TfOpenApi, { target, props: { path: "shop.json", text: SPEC, engine: localEngine(), at, repo: "repo" } });
-  await settle();
+  // Under a loaded suite the page draws later than a fixed number of rounds: wait for its Request (light CI, 2026-11-25).
+  await vi.waitFor(() => expect(button("Request")).toBeDefined(), { timeout: 10_000, interval: 20 });
   button("Request")!.click();
   await settle();
 }

@@ -36,7 +36,7 @@ await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
 const home = async () => {
-  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd#/inbox` });
+  await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd&fake-xsd-diff#/inbox` });
   await sleep(4000);
 };
 await home();
@@ -73,6 +73,9 @@ const place = (path, at) => `${REPO}/at/${encodeURIComponent(at)}/${path}`;
 const settle = () => sleep(700);
 
 const OT = "schemas/opentrans/opentrans_2_1.xsd";
+/** The newest commit, whose diff `?fake-xsd-diff` gives openTRANS's change; its schema's card. */
+const COMMIT = `${REPO}/commits/${REPO.slice("#/repo/".length)}%40c90d11e4a7b2`;
+const XSD_CARD = `.tf-diff[data-file="${OT}"]`;
 const UBL = "ubl/xsd/maindoc/UBL-Invoice-2.1.xsd";
 const RAIL_ROWS = ".tf-xsd .tf-oas-row";
 /** The example's lines (S4), and a prep that puts the example in view: under 1,480 px the page's switch shows it. */
@@ -105,6 +108,10 @@ const CASES = [
   { name: "example-fold", label: "1 on ORDER's example, folded to its first level", kind: "press", before: go(place(OT, "el/ORDER")), prep: `async () => { await (${showExample})(); for (let i = 0; i < 100 && !document.querySelector('.tf-xsd-xml .tf-xv-caret'); i++) await new Promise((r) => setTimeout(r, 30)); const row = document.querySelector('.tf-xsd-xml .tf-l[data-n="3"]'); row.click(); row.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true })); await new Promise((r) => setTimeout(r, 300)); }`, act: `() => document.querySelector('.tf-xsd-xml .tf-l[data-n="3"]').dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }))`, sel: ".tf-xsd-xml .tf-xv-fold" },
   { name: "example-open", label: "Open in XML view on ORDER's example, to its lines and its head", kind: "page", before: go(place(OT, "el/ORDER")), prep: showExample, act: click(".tf-xsd-acts button", "Open in XML view"), sel: ".tf-xsd-opened .tf-xv-head", text: "Against opentrans_2_1.xsd" },
   { name: "example-back", label: "Back from the opened example, to ORDER's page", kind: "press", before: go(place(OT, "el/ORDER")), prep: `async () => { await (${showExample})(); (${click(".tf-xsd-acts button", "Open in XML view")})(); for (let i = 0; i < 100 && !document.querySelector('.tf-xsd-opened .tf-l'); i++) await new Promise((r) => setTimeout(r, 30)); }`, act: `() => history.back()`, sel: ".tf-xsd-hname", text: "ORDER" },
+  // A schema in a comparison (S7): the newest commit edits openTRANS's main schema (`?fake-xsd-diff`); Rendered reads
+  // both sides' sets (4 files each) in the worker and compares them, to the first rows; n opens the next.
+  { name: "compare", label: "Rendered on openTRANS's change, to its declarations that differ", kind: "page", before: go(COMMIT), prep: `async () => { for (let i = 0; i < 200 && !document.querySelector(${JSON.stringify(XSD_CARD)}); i++) await new Promise((r) => setTimeout(r, 30)); (${click(`${XSD_CARD} .tf-fh .tf-seg button`, "Lines")})(); await new Promise((r) => setTimeout(r, 300)); }`, act: click(`${XSD_CARD} .tf-fh .tf-seg button`, "Rendered"), sel: ".tf-xsd-crow .tf-xsd-cname" },
+  { name: "compare-n", label: "n on the schema's comparison, to the next row opened", kind: "press", before: go(COMMIT), prep: `async () => { for (let i = 0; i < 200 && !document.querySelector(${JSON.stringify(XSD_CARD)}); i++) await new Promise((r) => setTimeout(r, 30)); (${click(`${XSD_CARD} .tf-fh .tf-seg button`, "Rendered")})(); for (let i = 0; i < 300 && !document.querySelector('.tf-xsd-crow'); i++) await new Promise((r) => setTimeout(r, 30)); }`, act: `() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }))`, sel: ".tf-xsd-crow.tf-xsd-cur .tf-xsd-cfacts" },
   { name: "pick", label: "ORDER's page from the rail", kind: "press", before: go(file(OT)), prep: `() => {}`, act: pickRow("ORDER"), sel: ".tf-xsd-hname", text: "ORDER" },
   { name: "pick-ubl", label: "UBL's Invoice page from the rail (53 documented rows)", kind: "press", before: go(file(UBL)), act: pickRow("Invoice"), sel: ".tf-xsd-hname", text: "Invoice" },
   { name: "follow", label: "a name followed into BMEcat, bmecat:dtSTRING from ORDER", kind: "press", before: go(place(OT, "el/ORDER")), act: `() => [...document.querySelectorAll('.tf-xsd .tf-oas-page button.tf-oas-ref')].find((b) => b.textContent === 'bmecat:dtSTRING').click()`, sel: ".tf-xsd-hname", text: "dtSTRING" },

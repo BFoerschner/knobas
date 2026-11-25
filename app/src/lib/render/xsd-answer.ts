@@ -36,8 +36,10 @@ import {
   type SimpleShape,
 } from "./xsd";
 import { baseOf, isRemote, type Elsewhere, type How, type Pointed, type SchemaIndex } from "./xsd-locate";
+import { attach, detach, dropMoved, forget, keepIfWhole, keptOf, keyOf, release, sameAnswers, type Kept, type KeepAt } from "./xsd-kept";
 import { findingWords, type Finding, type Words } from "./xsd-findings";
 import { rx } from "./xsd-pattern";
+import { changes, runsOf, KIND as KIND_WORDS, type Dir } from "./xsd-changes";
 import { XS, localOf, nsOf } from "./xsd-xml";
 
 // ---- What crosses to the page ----
@@ -236,7 +238,7 @@ export interface TreeRow {
 }
 
 export type XsdCall =
-  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean }
+  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean; keep?: KeepAt }
   | { kind: "addFiles"; files: { path: string; text: string | null }[]; paths?: string[]; index?: SchemaIndexWire; elsewhere?: { namespace: string; list: Elsewhere[] } }
   | { kind: "pointed"; pointed: Pointed[] }
   | { kind: "page"; place: string }
@@ -248,7 +250,41 @@ export type XsdCall =
   | { kind: "check"; xml: string }
   | { kind: "example"; key: string; options: ExampleOptions }
   | { kind: "declOf"; names: { ns: string; local: string }[] }
-  | { kind: "close" };
+  /** Two versions of a schema compared by what they declare (S7): the sessions of each side, `null` for no schema there. */
+  | { kind: "changes"; old: number | null; new: number | null; before: string; after: string }
+  | { kind: "close" }
+  /** Every kept set dropped (`xsd-kept.ts`): a pick, a download, a Settings change. Asks no session. */
+  | { kind: "forget" };
+
+/** A row of a schema's comparison (S7): a declaration that changed, came, went, or changed through one it names. */
+export interface ChangeRow {
+  readonly key: string;
+  readonly mark: "changed" | "added" | "removed" | "through";
+  /** What it is, in words: *element*, *complex type*. */
+  readonly kind: string;
+  readonly label: string;
+  /** Its place on its side (`el/ORDER`): the removed one's on the side before. */
+  readonly place: string;
+  /** A row changed through another: that one's name. */
+  readonly via: string | null;
+  readonly facts: readonly { readonly place: string; readonly text: readonly Run[]; readonly dir: Dir | null }[];
+  /** What changed, in one line. */
+  readonly say: string;
+  readonly dirs: Readonly<Partial<Record<Dir, number>>>;
+}
+
+export interface ChangesAnswer {
+  readonly rows: readonly ChangeRow[];
+  readonly changed: number;
+  readonly added: number;
+  readonly removed: number;
+  readonly through: number;
+  readonly same: number;
+  readonly counts: Readonly<Record<Dir, number>>;
+  /** Each side is a schema. */
+  readonly sides: { readonly old: boolean; readonly new: boolean };
+  readonly ms: number;
+}
 
 /** The repository's index as it crosses: a map does not survive JSON in every engine. */
 export interface SchemaIndexWire {
@@ -276,6 +312,12 @@ export interface XsdSession {
   /** What each row id stands for, for the set's life: an element and the declarations on its way down. */
   rows: Map<string, { el: ElementDecl; trail: readonly object[] }>;
   tree: Map<string, { el: ElementDecl; trail: readonly object[] }>;
+  /** What the set is kept by once whole, where the page's reads are pinned (`xsd-kept.ts`). */
+  keep?: KeepAt & { readonly key: string };
+  /** The kept set this session reads, shared until it changes it. */
+  kept?: Kept;
+  /** A kept set served once what moves under its pin has answered as it did. */
+  verifying?: boolean;
 }
 export type XsdSessions = Map<number, XsdSession>;
 
@@ -305,22 +347,60 @@ function load(s: XsdSession, bundled: Bundled): SchemaSet {
 
 /** Answers one call of one session. */
 export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall, bundled: Bundled): unknown {
+  if (call.kind === "changes") return changesOf(call.old === null ? null : (sessions.get(call.old)?.set ?? null), call.new === null ? null : (sessions.get(call.new)?.set ?? null), call.before, call.after);
+  const store = keptOf(sessions);
+  if (call.kind === "forget") {
+    forget(store);
+    return null;
+  }
   if (call.kind === "open") {
-    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map() };
+    const was = sessions.get(session);
+    if (was !== undefined) release(store, was);
+    const keep = call.keep === undefined ? undefined : { ...call.keep, key: keyOf(call.keep, call, bundled) };
+    if (keep !== undefined) {
+      dropMoved(store, keep);
+      const kept = store.get(keep.key);
+      if (kept !== undefined && kept.base.set !== null) {
+        // The set kept whole: served at once, or once what moves under the pin has answered as it did.
+        const s = attach(store, kept);
+        sessions.set(session, s);
+        const answer = opened(kept.base.set, s.lean === true, s.index);
+        if (kept.verify.length === 0 || !answer.ok) return answer;
+        s.verifying = true;
+        return { ...answer, need: [...kept.verify] };
+      }
+    }
+    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map(), ...(keep !== undefined ? { keep } : {}) };
     sessions.set(session, s);
-    return opened(load(s, bundled), s.lean === true, s.index);
+    const answer = opened(load(s, bundled), s.lean === true, s.index);
+    keepIfWhole(store, s);
+    return answer;
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
   switch (call.kind) {
     case "addFiles": {
+      if (s.verifying === true) {
+        if (s.kept !== undefined && sameAnswers(s, s.kept.verify, call.files, call.elsewhere)) {
+          delete s.verifying;
+          return opened(s.set!, s.lean === true, s.index);
+        }
+        // Something under the pin moved: the kept set is stale, and this session reads the set again.
+        if (s.kept !== undefined) store.delete(s.kept.key);
+      }
+      detach(store, s);
       for (const f of call.files) s.texts.set(f.path, f.text);
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      return opened(load(s, bundled), s.lean === true, s.index);
+      const answer = opened(load(s, bundled), s.lean === true, s.index);
+      keepIfWhole(store, s);
+      return answer;
     }
     case "pointed":
+      // Pointed elsewhere, the set is no longer the one its key names: it is read again and not kept.
+      detach(store, s);
+      delete s.keep;
       s.pointed = call.pointed;
       return opened(load(s, bundled), s.lean === true, s.index);
     case "page":
@@ -355,6 +435,7 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
     case "declOf":
       return declarationOf(s, call.names);
     case "close":
+      release(store, s);
       sessions.delete(session);
       return null;
   }
@@ -953,3 +1034,49 @@ export function indexOf(set: SchemaSet, lean = false, repo: { total: number; rea
 }
 
 export { isBuiltin };
+
+// ---- Two versions compared (S7, the XSD design's section 27) ----
+
+/** The comparison as rows: what changed itself, came and went in the file's order, then what changed through them. */
+export function changesOf(a: SchemaSet | null, b: SchemaSet | null, before: string, after: string): ChangesAnswer {
+  const t0 = performance.now();
+  const ch = changes(a, b, before, after);
+  const sideOf = (_key: string, mark: ChangeRow["mark"]) => (mark === "removed" ? a : b) ?? a ?? b!;
+  const lineOf = (key: string, mark: ChangeRow["mark"]) => sideOf(key, mark).comps.get(key)?.line ?? 0;
+  const plain = (text: string) => text.replace(/[\u0001\u0002]/g, "");
+  const row = (key: string, mark: ChangeRow["mark"], facts: readonly { place: string; text: string; dir: Dir | null }[], via: string | null): ChangeRow => {
+    const set = sideOf(key, mark);
+    const comp = set.comps.get(key);
+    const dirs: Partial<Record<Dir, number>> = {};
+    for (const f of facts) if (f.dir !== null) dirs[f.dir] = (dirs[f.dir] ?? 0) + 1;
+    return {
+      key,
+      mark,
+      kind: comp === undefined ? "" : KIND_WORDS[comp.kind],
+      label: labelOfKey(set, key),
+      place: placeOf(set, key),
+      via: via === null ? null : labelOfKey(b ?? set, via),
+      facts: facts.map((f) => ({ place: f.place, text: runsOf(f.text), dir: f.dir })),
+      say: facts.slice(0, 3).map((f) => `${f.place === "" ? "" : `${f.place}: `}${plain(f.text)}`).join(" · "),
+      dirs,
+    };
+  };
+  const own = [
+    ...ch.changed.map((c) => ({ key: c.key, mark: "changed" as const, facts: c.facts })),
+    ...ch.added.map((key) => ({ key, mark: "added" as const, facts: [] })),
+    ...ch.removed.map((key) => ({ key, mark: "removed" as const, facts: [] })),
+  ].sort((x, y) => lineOf(x.key, x.mark) - lineOf(y.key, y.mark));
+  const through = [...ch.through].sort(([x], [y]) => lineOf(x, "through") - lineOf(y, "through"));
+  const rows = [...own.map((r) => row(r.key, r.mark, r.facts, null)), ...through.map(([key, via]) => row(key, "through", [], via))];
+  return {
+    rows,
+    changed: ch.changed.length,
+    added: ch.added.length,
+    removed: ch.removed.length,
+    through: ch.through.size,
+    same: ch.same,
+    counts: { stricter: ch.counts.stricter, looser: ch.counts.looser, different: ch.counts.different },
+    sides: { old: a !== null, new: b !== null },
+    ms: performance.now() - t0,
+  };
+}

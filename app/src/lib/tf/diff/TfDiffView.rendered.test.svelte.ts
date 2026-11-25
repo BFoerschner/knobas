@@ -12,6 +12,7 @@ import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createDiffLayout } from "./diff-layout.svelte";
 import { createDiffRendered, type DiffRenderedChoice } from "./diff-rendered.svelte";
 import TfDiffView from "./TfDiffView.svelte";
+import { XS } from "../../render/xsd-xml";
 
 const del = (old: number, text: string): DiffLine => ({ kind: "del", old, new: null, text });
 const add = (nu: number, text: string): DiffLine => ({ kind: "add", old: null, new: nu, text });
@@ -146,4 +147,64 @@ test("c on a rendered card says to open it as lines: it has none to comment on (
   key("c");
   flushSync();
   expect(toasts.items.at(-1)?.text).toBe("No open file takes a comment here. Open one as lines, then press c.");
+});
+
+test("a schema opens as lines and offers Rendered, which compares it by declaration, the set's other file read at each side (S7)", async () => {
+  const xs = XS;
+  const main = `<xs:schema xmlns:xs="${xs}" targetNamespace="urn:t" xmlns="urn:t"><xs:include schemaLocation="types.xsd"/><xs:element name="Item" type="Code"/><xs:element name="Qty" type="xs:int"/></xs:schema>`;
+  const types = (len: number) => `<xs:schema xmlns:xs="${xs}" targetNamespace="urn:t"><xs:simpleType name="Code"><xs:restriction base="xs:string"><xs:maxLength value="${len}"/></xs:restriction></xs:simpleType></xs:schema>`;
+  const read: string[] = [];
+  const xsdContext = {
+    text: () => Promise.resolve(null),
+    bytes: (f: DiffFile, side: "old" | "new") => {
+      read.push(`${side} ${f.path}`);
+      if (f.path === "schemas/types.xsd") return Promise.resolve(enc(types(side === "old" ? 5 : 9)));
+      return Promise.resolve(enc(side === "old" ? main : main.replace(`type="xs:int"`, `type="xs:decimal"`)));
+    },
+  };
+  draw([file("schemas/order.xsd")], { context: xsdContext });
+  expect(shows("schemas/order.xsd")).toBe("lines");
+  const opened = async () => {
+    for (let n = 0; n < 300 && card("schemas/order.xsd").querySelectorAll(".tf-xsd-crow").length === 0; n += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      flushSync();
+    }
+    return [...card("schemas/order.xsd").querySelectorAll<HTMLElement>(".tf-xsd-crow")].map((r) => `${r.dataset["mark"]} ${r.querySelector(".tf-xsd-cname")?.textContent?.replace(/\s+/g, " ").trim()}`);
+  };
+  press("schemas/order.xsd", "Rendered");
+  flushSync();
+  // The file the change does not touch is read once, at the side after, for both sides: Code is the same on both.
+  expect(await opened()).toEqual(["changed Qty"]);
+  expect(read.filter((r) => r.endsWith("types.xsd"))).toEqual(["new schemas/types.xsd"]);
+  unmount(view!);
+  view = null;
+  read.length = 0;
+  // Where the change touches it too, it is read at each side, and Item changed through Code.
+  draw([file("schemas/order.xsd"), file("schemas/types.xsd")], { context: xsdContext });
+  press("schemas/order.xsd", "Rendered");
+  flushSync();
+  expect(await opened()).toEqual(["changed Qty", "through Item Code"]);
+  expect(read.filter((r) => r.endsWith("types.xsd")).sort()).toEqual(["new schemas/types.xsd", "old schemas/types.xsd"]);
+});
+
+test("an XML and a JSON file offer Rendered by their names, compared by element (C1)", async () => {
+  const ctx = {
+    text: () => Promise.resolve(null),
+    bytes: (f: DiffFile, side: "old" | "new") =>
+      Promise.resolve(enc(f.path.endsWith(".xml") ? (side === "old" ? "<p><v>1</v></p>" : "<p>\n  <v>2</v>\n</p>") : side === "old" ? `{"a":1}` : `{"a": 1}`)),
+  };
+  draw([file("build/pom.xml"), file("data/export.json")], { context: ctx });
+  press("build/pom.xml", "Rendered");
+  press("data/export.json", "Rendered");
+  flushSync();
+  for (let n = 0; n < 200 && card("data/export.json").querySelector(".tf-xsd-csum") === null; n += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    flushSync();
+  }
+  for (let n = 0; n < 200 && card("build/pom.xml").querySelectorAll(".tf-xsd-crow").length === 0; n += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    flushSync();
+  }
+  expect([...card("build/pom.xml").querySelectorAll(".tf-xsd-crow .tf-xsd-cname")].map((e) => e.textContent)).toEqual(["/p/v"]);
+  expect(card("data/export.json").querySelector(".tf-xsd-csum")?.textContent?.replace(/\s+/g, " ").trim()).toMatch(/^The same document on both sides\./);
 });

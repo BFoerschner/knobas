@@ -26,6 +26,7 @@
   import { needsWords, secondsWhy } from "./form-words";
   import { imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdFetch, xsdForget, xsdLocations, xsdSetLocations, type PointedSchema } from "../../ipc/api";
   import { stillUsed, withDownload } from "../render/xsd/xsd-point";
+  import { forgetKeptSets } from "../../render/xsd-port";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
 
@@ -91,6 +92,7 @@
     const gone = pointed[at];
     try {
       pointed = (await xsdSetLocations({ pointed: pointed.filter((_, i) => i !== at) })).pointed;
+      forgetKeptSets();
       // A downloaded file goes with the last entry it answers.
       if (gone !== undefined && "url" in gone.to && !stillUsed(pointed, gone.to.sha256, -1)) await xsdForget(gone.to.sha256);
     } catch (cause) {
@@ -108,6 +110,7 @@
     try {
       const d = await xsdFetch(p.to.url);
       pointed = (await xsdSetLocations({ pointed: withDownload(pointed, p.namespace, p.location, d) })).pointed;
+      forgetKeptSets();
       if (d.sha256 !== before && !stillUsed(pointed, before, -1)) await xsdForget(before);
       push({ text: d.sha256 === before ? `${p.to.url} is as it was.` : `${p.to.url} changed; the new file answers from now on.` });
     } catch (cause) {

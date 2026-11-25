@@ -36,6 +36,13 @@
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfPdf from "./TfPdf.svelte";
+  import { isXmlFile } from "../../render/xml-sniff";
+  import { isJsonFile } from "../../render/json-sniff";
+  import { renderPort } from "../../render/port";
+  import { docViewModule } from "./doc/doc-module";
+
+  /** Text that is XML or JSON is drawn by the XML view's inline form (D1): it folds; anything else as numbered lines. */
+  const docKind = (text: string, at: string): "xml" | "json" | null => (isXmlFile(text, at) ? "xml" : isJsonFile(text, at) ? "json" : null);
 
   let {
     name,
@@ -84,6 +91,14 @@
         <img src={content.src} alt={name} />
       {:else if content.kind === "pdf"}
         <TfPdf read={content.read} size={content.size} />
+      {:else if content.kind === "text" && docKind(content.text, name) !== null}
+        {@const as = docKind(content.text, name)!}
+        <div class="tf-vdoc">
+          {#await docViewModule() then { default: TfDocView }}
+            {#key content.text}<TfDocView inline text={content.text} path={name} kind={as} render={renderPort()} />{/key}
+          {/await}
+        </div>
+        {#if content.truncated}<p class="tf-vnote">The first 256 KB. Download it for the rest.</p>{/if}
       {:else if content.kind === "text"}
         <pre class="tf-code">{#each content.text.replace(/\r?\n$/, "").split("\n") as text, i (i)}<div class="tf-l"><span>{i + 1}</span><span>{text || " "}</span></div>{/each}</pre>
         {#if content.truncated}<p class="tf-vnote">The first 256 KB. Download it for the rest.</p>{/if}

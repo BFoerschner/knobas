@@ -4,6 +4,7 @@
  */
 import { xsdDownloaded, xsdFetch, xsdLocations, xsdSetLocations, type DeclaringFile, type DownloadedSchema, type PointedSchema } from "../../../ipc/api";
 import { heldIndex } from "../../../render/xsd-index";
+import { forgetKeptSets } from "../../../render/xsd-port";
 import { keyOf } from "../../../time/format";
 import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
 
@@ -89,6 +90,7 @@ export async function gatherCandidates(repo: string, from: string, namespace: st
 /** Keeps `c` as the answer for `namespace` and `location` (`xsd.locations`); the list as kept, as the set reads it. */
 export async function keepPick(namespace: string | null, location: string | null, c: Candidate): Promise<Pointed[]> {
   const kept = await xsdSetLocations({ pointed: withPointed((await xsdLocations()).pointed, namespace, location, c) });
+  forgetKeptSets();
   return asPointed(kept.pointed);
 }
 
@@ -115,6 +117,7 @@ export function withDownload(list: readonly PointedSchema[], namespace: string |
 export async function keepDownload(namespace: string | null, location: string | null, address: string): Promise<Pointed[]> {
   const d = await xsdFetch(address);
   const kept = await xsdSetLocations({ pointed: withDownload((await xsdLocations()).pointed, namespace, location, d) });
+  forgetKeptSets();
   return asPointed(kept.pointed);
 }
 

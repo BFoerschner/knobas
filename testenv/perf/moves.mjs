@@ -230,6 +230,11 @@ const PLACES = [
   // the stage, so nothing outside it moves (before, a late side's `Reading…` gave way to the document and pushed every
   // card under it down).
   { name: "diff-rendered-late", fixture: true, fake: "fake-rendered-diff", late: "entity_file_bytes:400", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="README.md"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="README.md"] .tf-rstage`, away: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2` },
+  // XML and JSON compared by element (C1): the order's list lands in the stage, which holds its height.
+  { name: "diff-doc-rendered", fixture: true, fake: "fake-xml&fake-doc-diff", late: "entity_file_bytes:300", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, setup: `${shown} .tf-flist button[title="orders/order-4711.xml"]`, press: `${shown} .tf-diff[data-file="orders/order-4711.xml"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-diff[data-file="orders/order-4711.xml"] .tf-xsd-crow`, away: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2` },
+  // A schema compared by declaration (S7): Rendered on openTRANS's change reads both sets in the worker; the list lands
+  // in the stage, which holds its height from the press's frame, so nothing outside it moves.
+  { name: "diff-xsd-rendered", fixture: true, fake: "fake-xsd&fake-xsd-diff", late: "entity_file_bytes:300", start: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2`, press: `${shown} .tf-diff[data-file="schemas/opentrans/opentrans_2_1.xsd"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-xsd-crow`, away: `#/repo/${REPO}/commits/${REPO}%40c90d11e4a7b2` },
   // Compare with the working tree as *From* (ux26): the form's short shape from the address, the names first (60 ms
   // late, the PC's 63 ms for 300 changed files) and the counts behind (300 ms late), filling the rows in place.
   { name: "repo-compare-working", fixture: true, late: "entity_range_names:60,entity_range_files:300", start: `#/repo/${REPO}`, go: `#/repo/${REPO}/compare/~working-tree`, hash: `#/repo/${REPO}/compare/`, away: `#/repo/${REPO}` },

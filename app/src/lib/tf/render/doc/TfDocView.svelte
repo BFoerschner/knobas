@@ -54,7 +54,7 @@
   import { push } from "../../../shell/toasts.svelte";
   import { jsonQuery, jsonQueryClose } from "../../../ipc/api";
   import { DOC_KEYS, isKey } from "./doc-keys";
-  import { DocCheck, rootSays, type RootSays } from "./doc-check.svelte";
+  import { DocCheck, heldSettings, likelyKept, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
   import TfXsdPage from "../xsd/TfXsdPage.svelte";
   import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
   import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
@@ -134,6 +134,8 @@
       readOther?: (repo: string, path: string) => Promise<string | null>;
       /** The other synced repositories' `.xsd` files that declare a namespace (the order's step 6). */
       elsewhere?: (namespace: string) => Promise<Elsewhere[]>;
+      /** What `read` stands on where it does not move: the check's set is kept whole by it (`xsd-kept.ts`). */
+      keep?: import("../../../render/xsd-kept").KeepAt | null;
     } | null;
     /** How a value pipeline runs and saves over this file; `null` where no pipeline can run (no value is looked at). */
     values?: { run: (steps: PipeStep[]) => Promise<PipeRun>; save: (steps: PipeStep[], name: string) => Promise<string> } | null;
@@ -177,6 +179,9 @@
     const lines = laying ? 1 : countLines(source);
     const session = new DocSession(untrack(() => engine) ?? docEngine());
     const state = new DocState(session, `${untrack(() => repo)}\n${at}${laying ? "\nlaid" : ""}`, contentOf(source, untrack(() => sha)), lines);
+    // The outline's landing, for the check that starts beside it: true where the document is well formed.
+    let landed: (ok: boolean) => void = () => {};
+    if (!laying) outlines.set(state, new Promise<boolean>((done) => (landed = done)));
     st = state;
     let live = true;
     // jq, for a JSON document: its session opened with the first filter, closed with the view.
@@ -189,9 +194,10 @@
       };
     void session.open(source, untrack(() => kind)).then(async (answer) => {
       // A worker that failed answers no table: the lines stay as drawn, unfolding nothing.
-      if (!live || answer === null || typeof answer !== "object" || !("folds" in answer)) return;
+      if (!live || answer === null || typeof answer !== "object" || !("folds" in answer)) return landed(false);
       if (!laying) {
         state.take(answer);
+        landed(state.opened?.error == null);
         return;
       }
       const made = await session.layout();
@@ -201,6 +207,7 @@
     });
     return () => {
       live = false;
+      landed(false);
       state.close();
       if (jqSession !== null) void jqSession.then((id) => jsonQueryClose(id), () => {});
     };
@@ -221,15 +228,36 @@
     check = c;
     return () => c.close();
   });
-  // The check starts once the outline has landed: started beside it, its reads and copies to the worker slowed the
-  // outline's own paint by a fifth at 6x on 2560 x 1440 at 1.25 (269 to 317 ms to the carets), and the verdict, which
-  // needs the outline to place its findings, came no sooner. What the root says is read from its first tag.
+  // The check is handed the view's start, what the root says read from its first tag, and the outline's landing. A check
+  // likely answered by a set the worker kept whole (`xsd-kept.ts`) reads nothing, so it runs beside the outline and its
+  // verdict lands with it; any other waits for the outline (`runCheck`): started beside it, its reads and their copies
+  // to the worker slowed the outline's own paint by a fifth at 6x on 2560 x 1440 at 1.25 (269 to 317 ms to the
+  // carets). A laid-out document is checked once its layout has landed.
+  /** Each document's outline landing (not a laid-out one's): true where it is well formed. */
+  const outlines = new WeakMap<DocState, Promise<boolean>>();
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const port = schema;
+    const outline = state === null ? undefined : outlines.get(state);
+    // A verdict or a set given from elsewhere (an example, E1) is checked by its own effects below.
+    if (c === null || state === null || port === null || against !== null || verdict !== undefined || outline === undefined) return;
+    untrack(() => {
+      const root = rootSays(text);
+      void runCheck(c, state, root, port, outline);
+      // The outline reads the root whole; where it reads it otherwise than the first tag did, the check starts again.
+      void outline.then((ok) => {
+        const said = state.opened?.root ?? null;
+        if (ok && check === c && said !== null && !sameAsk(path, said, root)) void runCheck(c, state, said, port);
+      });
+    });
+  });
   $effect(() => {
     const c = check;
     const state = st;
     const port = schema;
     const landed = state?.opened ?? null;
-    if (c === null || state === null || port === null || against !== null || verdict !== undefined || landed === null || landed.error !== null) return;
+    if (c === null || state === null || port === null || against !== null || verdict !== undefined || landed === null || landed.error !== null || outlines.has(state)) return;
     untrack(() => void runCheck(c, state, landed.root ?? rootSays(text), port));
   });
   // A verdict made elsewhere: placed on its lines once the outline has landed, and again with each new one.
@@ -255,10 +283,9 @@
     const c = check;
     if (c !== null && (st?.opened?.error ?? null) !== null) untrack(() => c.clear());
   });
-  async function runCheck(c: DocCheck, state: DocState, root: RootSays | null, port: NonNullable<typeof schema>) {
-    const [pointed, on] = await Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]);
-    if (check !== c) return;
-    await c.run(path, root, untrack(() => shownText) ?? text, state.session, {
+  async function runCheck(c: DocCheck, state: DocState, root: RootSays | null, port: NonNullable<typeof schema>, landed: Promise<boolean> = Promise.resolve(true)) {
+    const go = ({ pointed, on }: CheckSettings, shown: Promise<boolean>) =>
+      c.run(path, root, untrack(() => shownText) ?? text, state.session, {
         read: port.read,
         paths: port.paths,
         pointed,
@@ -269,8 +296,27 @@
           return away.repo === repo ? port.read(away.path) : (port.readOther?.(away.repo, away.path) ?? Promise.resolve(null));
         },
         ...(port.elsewhere !== undefined ? { elsewhere: port.elsewhere } : {}),
-      }, on);
+        keep: port.keep ?? null,
+      }, on, shown);
+    const read = () => Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]).then(([pointed, on]) => ({ pointed, on }));
+    // A check not likely kept whole starts once the outline has landed, as it always did: its Settings, its open and its
+    // reads would slow the outline's paint (a first open's carets, 523 to 569 ms at 6x on 2560 x 1440 at 1.25).
+    const last = heldSettings();
+    if (last === null || !last.on || !likelyKept(path, root, port.keep, last.pointed)) {
+      if (!(await landed) || check !== c) return;
+      const fresh = await settingsFor(read).fresh;
+      if (check === c) await go(fresh, landed);
+      return;
+    }
+    // One likely kept starts now, on the Settings the last check read: drawn only where they read the same again, else
+    // started again on them.
+    const settings = settingsFor(read);
+    void settings.same.then((same) => {
+      if (!same && check === c) void settings.fresh.then((fresh) => (check === c ? go(fresh, landed) : undefined));
+    });
+    await go(last, Promise.all([landed, settings.same]).then(([a, b]) => a && b));
   }
+
   // ---- *Point to a file…* (the XSD design, section 17): the document's schema answered by a file the person picks ----
   let pointing = $state.raw<{ namespace: string; location: string | null } | null>(null);
   let candidates = $state.raw<readonly Candidate[] | null>(null);

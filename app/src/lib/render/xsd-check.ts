@@ -11,7 +11,8 @@
  *   {@link CHECK_CAP}, a schema libxml2 does not compile.
  * - **Its findings are libxml2's**, `{ message, line, xpath }`. The line is 16 bits; a finding is put on its line by
  *   its path, over the document's outline (`nodeAtPath`), by the view.
- * - The compiled schema is kept for the set's life (by the set's texts), and disposed when another set is checked.
+ * - The compiled schema is kept for the set's life (by the set's files: each path and its text, so a file changed to
+ *   the same length is compiled again), and disposed when another set is checked.
  * - libxml2-wasm loads with the first check, never before.
  */
 import type { SchemaSet } from "./xsd";
@@ -42,7 +43,11 @@ let registered = false;
 const urlOf = (path: string) => ROOT + encodeURI(path);
 
 /** The compiled schema kept for the set last checked. */
-let held: { key: string; validator: { validate: (doc: unknown) => void; dispose: () => void }; schema: { dispose: () => void }; asked: string[] } | null = null;
+let held: { files: readonly (readonly [string, string | null])[]; validator: { validate: (doc: unknown) => void; dispose: () => void }; schema: { dispose: () => void }; asked: string[] } | null = null;
+
+/** Whether the schema held was compiled from these files: each path and its text (the same text is one string, so a kept set compares at once). */
+const sameFiles = (a: readonly (readonly [string, string | null])[], b: readonly (readonly [string, string | null])[]) =>
+  a.length === b.length && a.every(([p, t], i) => p === b[i]![0] && t === b[i]![1]);
 
 /** Where libxml2 looks for `location` named in a file it knows by `base`. */
 function resolved(base: string, location: string): string {
@@ -104,14 +109,12 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
   const L = await loadLib();
   const enc = new TextEncoder();
   // The set's texts, and where each reference was found, as libxml2 will ask for them.
-  const key = set.docs.map((d) => `${d.path}\n${d.bytes}`).join("\n");
-  if (held === null || held.key !== key) {
+  const files = set.docs.map((d) => [d.path, text(d.path)] as const);
+  const fresh = held === null || !sameFiles(held.files, files);
+  if (fresh) {
     provided.buffers.clear();
     provided.alias.clear();
-    for (const d of set.docs) {
-      const t = text(d.path);
-      if (t !== null) provided.buffers.set(urlOf(d.path), enc.encode(t));
-    }
+    for (const [path, t] of files) if (t !== null) provided.buffers.set(urlOf(path), enc.encode(t));
     aliasAll(set);
   }
   provided.asked = [];
@@ -143,7 +146,7 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
     } as Parameters<Lib["xmlRegisterInputProvider"]>[0]);
   }
   const t0 = performance.now();
-  if (held === null || held.key !== key) {
+  if (held === null || fresh) {
     if (held !== null) {
       held.validator.dispose();
       held.schema.dispose();
@@ -155,7 +158,7 @@ export async function check(set: SchemaSet, text: (path: string) => string | nul
     try {
       schema = L.XmlDocument.fromBuffer(entry, { url: urlOf(set.entry) });
       const validator = L.XsdValidator.fromDoc(schema);
-      held = { key, validator: validator as unknown as { validate: (doc: unknown) => void; dispose: () => void }, schema, asked: [...provided.asked] };
+      held = { files, validator: validator as unknown as { validate: (doc: unknown) => void; dispose: () => void }, schema, asked: [...provided.asked] };
     } catch (e) {
       schema?.dispose();
       const details = ((e as { details?: { message: string }[] }).details ?? []).map((d) => d.message.trim());

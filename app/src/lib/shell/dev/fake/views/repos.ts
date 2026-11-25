@@ -356,6 +356,67 @@ const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fa
 const pdfDiffFiles = (): DiffFile[] =>
   Object.keys(PDF_DIFF).map((path) => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }));
 
+/**
+ * `?fake-xsd-diff` (S7, with `?fake-xsd`): the newest commit also edits openTRANS's main schema: a length narrowed and
+ * one widened, an optional element made required, two elements swapped, a value added, and an element written again
+ * with other spacing, which is no change. The set's other files read the same at both commits.
+ */
+const XSD_DIFF_PATH = "schemas/opentrans/opentrans_2_1.xsd";
+const XSD_EDITS: readonly [string, string][] = [
+  ['<xsd:simpleType name="typePAYMENT_TERM">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="250"/>', '<xsd:simpleType name="typePAYMENT_TERM">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="100"/>'],
+  ['<xsd:simpleType name="typePHONE">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="50"/>', '<xsd:simpleType name="typePHONE">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="64"/>'],
+  ['<xsd:enumeration value="2.1"/>', '<xsd:enumeration value="2.1"/>\n\t\t\t<xsd:enumeration value="2.2"/>'],
+  ['<xsd:element ref="BANK_CODE" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_NAME" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_COUNTRY" minOccurs="0"/>', '<xsd:element ref="BANK_CODE"/>\n\t\t\t\t<xsd:element ref="BANK_COUNTRY" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_NAME" minOccurs="0"/>'],
+  ['<xsd:element name="ACCOUNT">', '<xsd:element   name="ACCOUNT" >'],
+];
+const xsdDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xsd-diff");
+/** The schema before and after the edits; `null` until `?fake-xsd`'s texts are read. */
+function xsdDiffSides(): [string, string] | null {
+  const before = xsdFiles()[XSD_DIFF_PATH];
+  if (before === undefined) return null;
+  return [before, XSD_EDITS.reduce((text, [from, to]) => text.replace(from, to), before)];
+}
+/** A `?fake-xsd-diff` file at the newest commit (`at` 0) or its parent (`at` 1): the schema's side, else the set's file. */
+function xsdDiffSide(at: number, path: string): string | undefined {
+  if (!xsdDiffOn() || (at !== 0 && at !== 1)) return undefined;
+  if (path === XSD_DIFF_PATH) return xsdDiffSides()?.[at === 0 ? 1 : 0];
+  return xsdFiles()[path];
+}
+function xsdDiffFiles(): DiffFile[] {
+  const sides = xsdDiffSides();
+  return sides === null ? [] : [lineDiff(XSD_DIFF_PATH, sides[0], sides[1]) as DiffFile];
+}
+
+/**
+ * `?fake-doc-diff` (C1, with `?fake-xml`): the newest commit also changes an order (a quantity, an item's text), lays
+ * the POM out again with deeper indentation (no change by element), and in the export changes a total and moves an
+ * order to the front.
+ */
+const DOC_DIFF: Record<string, (text: string) => string> = {
+  "orders/order-4711.xml": (t) => t.replace("<QUANTITY>8</QUANTITY>", "<QUANTITY>10</QUANTITY>").replace("<QUANTITY>16</QUANTITY>", "<QUANTITY>20</QUANTITY>"),
+  "build/pom.xml": (t) => t.replace(/\n( +)</g, "\n$1$1<"),
+  "exports/orders-2026-11.json": (t) => {
+    const doc = JSON.parse(t) as { orders: { total: number }[] };
+    doc.orders[0]!.total += 1;
+    doc.orders.unshift(doc.orders.splice(3, 1)[0]!);
+    return `${JSON.stringify(doc, null, 2)}\n`;
+  },
+};
+const docDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-doc-diff");
+/** A `?fake-doc-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before). */
+function docDiffSide(at: number, path: string): string | undefined {
+  const edit = DOC_DIFF[path];
+  if (!docDiffOn() || edit === undefined || (at !== 0 && at !== 1)) return undefined;
+  const before = xmlFiles()[path];
+  return before === undefined ? undefined : at === 0 ? edit(before) : before;
+}
+function docDiffFiles(): DiffFile[] {
+  return Object.keys(DOC_DIFF).flatMap((path) => {
+    const [a, b] = [docDiffSide(1, path), docDiffSide(0, path)];
+    return a === undefined || b === undefined ? [] : [lineDiff(path, a, b) as DiffFile];
+  });
+}
+
 /** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
 function renderedDiffSide(at: number, path: string): string | null | undefined {
   if (!renderedDiffOn() || (at !== 0 && at !== 1)) return undefined;
@@ -824,6 +885,10 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
   const pdf = PDF_DIFF[path];
   if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
+  if (commitAt !== -1) {
+    const schema = xsdDiffSide(commitAt, path) ?? docDiffSide(commitAt, path);
+    if (schema !== undefined) return new TextEncoder().encode(schema);
+  }
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
     // A text side as bytes, as the app reads every rendered side (the stage pass, 2026-11-20).
@@ -894,7 +959,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [...(at === 0 && xsdDiffOn() ? xsdDiffFiles() : []), ...(at === 0 && docDiffOn() ? docDiffFiles() : []), diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =

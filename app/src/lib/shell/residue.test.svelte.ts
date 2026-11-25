@@ -529,6 +529,10 @@ const TfXsd = (await import("../tf/render/xsd/TfXsd.svelte")).default;
 const TfXsdPage = (await import("../tf/render/xsd/TfXsdPage.svelte")).default;
 const TfXsdRail = (await import("../tf/render/xsd/TfXsdRail.svelte")).default;
 const TfXsdExample = (await import("../tf/render/xsd/TfXsdExample.svelte")).default;
+const TfXsdDiff = (await import("../tf/render/xsd/TfXsdDiff.svelte")).default;
+const TfDocDiff = (await import("../tf/render/doc/TfDocDiff.svelte")).default;
+const TfXsdInline = (await import("../tf/render/xsd/TfXsdInline.svelte")).default;
+const { XS: XS_NS } = await import("../render/xsd-xml");
 const { XsdState } = await import("../tf/render/xsd/xsd.svelte");
 const { XsdPort } = await import("../render/xsd-port");
 const TfDocResults = (await import("../tf/render/doc/TfDocResults.svelte")).default;
@@ -1953,6 +1957,24 @@ const CASES: Case[] = [
     name: "TfXsdPage",
     source: "lib/tf/render/xsd/TfXsdPage.svelte",
     open: (target) => ({ app: mount(TfXsdPage, { target, props: { st: new XsdState(new XsdPort(() => deferred(null))), ongo: () => {}, onback: () => {}, onfile: () => {} } }) }),
+  },
+  {
+    /** A schema on a Docs page (D1): the block's set is read in the worker, which answers late. */
+    name: "TfXsdInline",
+    source: "lib/tf/render/xsd/TfXsdInline.svelte",
+    open: (target) => ({ app: mount(TfXsdInline, { target, props: { text: `<xs:schema xmlns:xs="${XS_NS}"/>`, engine: () => deferred(null) } }) }),
+  },
+  {
+    /** XML or JSON in a comparison (C1): compared in the document worker, which answers late. */
+    name: "TfDocDiff",
+    source: "lib/tf/render/doc/TfDocDiff.svelte",
+    open: (target) => ({ app: mount(TfDocDiff, { target, props: { before: "<a/>", after: "<b/>", kind: "xml", engine: () => deferred(null) } }) }),
+  },
+  {
+    /** A schema in a comparison (S7): both sides' sets are read and compared in the worker, which answers late. */
+    name: "TfXsdDiff",
+    source: "lib/tf/render/xsd/TfXsdDiff.svelte",
+    open: (target) => ({ app: mount(TfXsdDiff, { target, props: { before: `<xs:schema xmlns:xs="${XS_NS}"/>`, after: `<xs:schema xmlns:xs="${XS_NS}"/>`, path: "a.xsd", read: () => deferred(null), engine: () => deferred(null) } }) }),
   },
   {
     /** An example: made in the schema's worker, which answers late; a setting changed meanwhile asks again. */

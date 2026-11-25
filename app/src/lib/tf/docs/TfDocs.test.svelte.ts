@@ -9,6 +9,7 @@ import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, 
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { XS } from "../../render/xsd-xml";
 import { acks } from "../../shell/ack.svelte";
 import { installFindKey } from "../filter-keys";
 import { sessionFilter } from "../filter/filter-state.svelte";
@@ -3753,4 +3754,45 @@ test("a search before any page is read says you from the sources' settings, so o
   await settle();
   await vi.waitFor(() => expect(target.querySelector(".tf-dl-hit .tf-n")?.textContent).toContain(", you,"));
   expect(io.docsPage, "a search still opens no page").not.toHaveBeenCalled();
+});
+
+// ---- A schema, an XML and a JSON block (D1, the XML view's design section 28; the XSD design section 28) ----
+
+test("a schema block offers Schema; an XML or JSON block of 40 lines and more offers its view; a short one, a bash one nothing", async () => {
+  const xs = XS;
+  const schema = `<xs:schema xmlns:xs="${xs}" targetNamespace="urn:t" xmlns="urn:t">\n  <xs:element name="Note" type="xs:string"/>\n  <xs:complexType name="Party"><xs:sequence><xs:element name="ID" type="xs:string"/></xs:sequence></xs:complexType>\n</xs:schema>`;
+  const xml = (n: number) => `<order>\n${Array.from({ length: n }, (_, i) => `  <item n="${i}"><q>${i}</q></item>`).join("\n")}\n</order>`;
+  const json = `{\n${Array.from({ length: 45 }, (_, i) => `  "k${i}": ${i}`).join(",\n")}\n}`;
+  const blocks: DocPage["blocks"] = [
+    { type: "code", code: schema, language: "xml" },
+    { type: "code", code: xml(60), language: null },
+    { type: "code", code: xml(10), language: "xml" },
+    { type: "code", code: json, language: "json" },
+    { type: "code", code: xml(60), language: "bash" },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const bars = [...target.querySelectorAll(".tf-doc .tf-pre-bar")];
+  expect(bars.map((bar) => [...bar.querySelectorAll("button")].map((b) => b.textContent))).toEqual([["Schema", "Copy"], ["XML view", "Copy"], ["Copy"], ["JSON view", "Copy"], ["Copy"]]);
+  // The code is the default.
+  expect(target.querySelectorAll(".tf-doc pre")).toHaveLength(5);
+
+  // Schema: the block's own declarations, a row opening what it holds in place.
+  const asSchema = bars[0]!.querySelector("button")!;
+  asSchema.click();
+  await vi.waitFor(() => expect(target.querySelectorAll(".tf-xsd-inline .tf-xsd-ibtn")).toHaveLength(2));
+  expect(asSchema.textContent).toBe("Source");
+  expect([...target.querySelectorAll(".tf-xsd-inline .tf-xsd-ibtn")].map((b) => b.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Note element", "Party complex type"]);
+  target.querySelectorAll<HTMLButtonElement>(".tf-xsd-inline .tf-xsd-ibtn")[1]!.click();
+  await vi.waitFor(() => expect(target.querySelector(".tf-xsd-inline .tf-xsd-iopen .tf-xsd-hname")?.textContent).toBe("Party"));
+
+  // XML view: the document's own lines with their carets, in a box no taller than 420 px; no rail and no query.
+  const asXml = bars[1]!.querySelector("button")!;
+  asXml.click();
+  await vi.waitFor(() => expect(bars[1]!.parentElement!.querySelector(".tf-doc-xv .tf-xv-inline .tf-l")).not.toBeNull());
+  const box = bars[1]!.parentElement!.querySelector<HTMLElement>(".tf-doc-xv")!;
+  expect(Number.parseInt(box.style.height)).toBeLessThanOrEqual(420);
+  expect(box.querySelector(".tf-xv-rail, .tf-xv-qfield")).toBeNull();
+  asXml.click();
+  flushSync();
+  expect(bars[1]!.parentElement!.querySelector(".tf-doc-xv")).toBeNull();
 });

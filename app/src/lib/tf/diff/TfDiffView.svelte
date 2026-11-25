@@ -105,7 +105,7 @@
   import { MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, type Opened, type RendererDefault } from "../../render/defaults";
   import { rendererDefaults } from "../../render/defaults.svelte";
   import { allRenderers, type Renderer } from "../../render/registry";
-  import { hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
+  import { docHint, hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
   import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
@@ -952,7 +952,9 @@
       const name = byName === null || text !== undefined ? null : `${gen ? "m" : ""}${binary ? "b" : "t"}${file.path.slice(file.path.lastIndexOf("/") + 1)}`;
       const had = name === null ? undefined : byName!.get(name);
       if (had !== undefined) return had;
-      const opened = openWith(text === undefined ? { path: file.path, binary } : { path: file.path, binary, text }, all, gen ? madeList : list);
+      // An XML or JSON file by its name (C1), unless its side is read to know it for a spec first.
+      const hint = text ?? (sniffable(file) ? undefined : docHint(file));
+      const opened = openWith(hint === undefined ? { path: file.path, binary } : { path: file.path, binary, text: hint }, all, gen ? madeList : list);
       const made = { opened, choices: renderedChoices(file, opened, gen ? MADE_CAN : can) };
       if (name !== null) byName!.set(name, made);
       return made;
@@ -1069,6 +1071,26 @@
     }
     if (context?.archive === undefined) throw new Error("nothing reads this diff's archives");
     return context.archive(file, side);
+  }
+
+  /**
+   * Another file of a schema's set at a side (S7), through the diff's own reader: a file the change touches is read at
+   * the side asked for, one it does not touch once, at the side after, for both sides (the XSD design, section 27).
+   */
+  const setTexts = new Map<string, Promise<string | null>>();
+  function setRead(side: Side, path: string): Promise<string | null> {
+    const reader = context;
+    if (reader === null) return Promise.resolve(null);
+    const touched = files.some((f) => f.path === path || f.old_path === path);
+    const at: Side = touched ? side : "new";
+    const key = `${at}\n${path}`;
+    let held = setTexts.get(key);
+    if (held === undefined) {
+      const file = { path, old_path: null, change: "modified", additions: 0, deletions: 0, hunks: [], truncated: false } as unknown as DrawnFile;
+      held = (reader.bytes !== undefined ? reader.bytes(file, at).then((b) => (b === null ? null : new TextDecoder().decode(b))) : reader.text(file, at)).catch(() => null);
+      setTexts.set(key, held);
+    }
+    return held;
   }
 
   /** Each side's read while it is out, so a second asker waits for the same one. */
@@ -1968,6 +1990,7 @@
         {commands}
         {archives}
         reopen={(side) => listingAt(file, side)}
+        setRead={context === null ? null : setRead}
         expandable={context !== null && piped === null && file.made === undefined}
         expanded={piped ? undefined : expandedOf(key)}
         onexpand={(hunk, how) => void expand(lineOf(file), hunk, how)}

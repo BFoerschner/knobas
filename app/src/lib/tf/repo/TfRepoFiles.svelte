@@ -1998,6 +1998,17 @@
   function declaringElsewhere(namespace: string): Promise<Elsewhere[]> {
     return filesDeclaring(namespace).then((list) => elsewhereOf(repoId, list), () => []);
   }
+  /**
+   * What `textRead` stands on, where it does not move: the commit the file was read at, or on the working tree its head
+   * and git's list's stamp. The XML view's check keeps its schema's set whole by it (`xsd-kept.ts`); `null` where the
+   * reads move (no commit) or are a generated file's.
+   */
+  const schemaKeep = $derived.by(() => {
+    const commit = file?.commit ?? null;
+    const onDisk = disk;
+    if (fileMade !== null || (commit === null && onDisk === null)) return null;
+    return { scope: JSON.stringify([repoId, at, onDisk === null ? null : "disk"]), at: JSON.stringify([commit, onDisk?.head ?? null, onDisk?.stamp ?? null]) };
+  });
   /** A file of the repository as text, at the commit shown: a schema's other files. */
   const textRead = $derived.by(() => {
     const read = imageRead;
@@ -2682,6 +2693,7 @@
               on: () => xmlCheck().then((c) => c.on, () => true),
               readOther: otherText,
               elsewhere: declaringElsewhere,
+              keep: schemaKeep,
               open: (file, at) => goAcross(at === null ? hrefOf(file) : placeHrefOf(file, at), file.slice(file.lastIndexOf("/") + 1)),
             }}
             values={piped === undefined || doc !== shownFile
