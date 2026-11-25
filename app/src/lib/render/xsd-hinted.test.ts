@@ -131,7 +131,8 @@ describe("the document crosses once, and the round that leaves the set whole ans
     expect(second.ok && second.need).toEqual([]);
     expect(second.ok && verdict(second.checked)).toEqual([]);
     // Opened without a document, nothing is checked: not the first order again.
-    const bare = await call(3, { ...open, xml: undefined });
+    const { xml: _, ...without } = open;
+    const bare = await call(3, without);
     expect(bare.ok && bare.checked).toBeUndefined();
     expect(keptOf(sessions).get([...keptOf(sessions).keys()][0]!)!.base.xml).toBeUndefined();
   });
