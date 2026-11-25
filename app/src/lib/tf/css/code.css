@@ -713,7 +713,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-ftree .tf-frmark > a.tf-on { background: var(--info-bg); color: var(--info); }
 /* The made bar (ADR-0046): one row from the first frame at a `rendered` address; its colour changes, its box does not. */
 .tf-madebar {
-  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 8px 4px 12px; flex-wrap: nowrap;
+  display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 8px 4px 12px; flex-wrap: nowrap; container: madebar / inline-size;
   border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: calc(var(--t-sm) * var(--fs));
 }
 .tf-madebar.tf-warn { background: var(--warn-bg); color: var(--warn); }
@@ -722,11 +722,20 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-madebar [role="status"] { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tf-madebar .tf-trail { flex: none; }
 /* *Render with* gives way first when the pane is narrow: its words, then its select down to 6rem. */
-.tf-madebar .tf-madebar-as { display: flex; align-items: center; gap: 6px; color: var(--ink-2); flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.tf-madebar .tf-madebar-as > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* It keeps its select's 6rem: past that the path gives way, then *Run…* is its glyph (Fable, 2026-11-25). */
+.tf-madebar .tf-madebar-as { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; color: var(--ink-2); flex: 0 1 auto; min-width: calc(6rem + 6px); overflow: hidden; }
+/* One row, as the bar is (`.tf-trail` wraps): its words give way all the way before the select does. */
+.tf-madebar .tf-madebar-as > span { min-width: 0; flex-shrink: 1000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-madebar .tf-madebar-as .tf-select { flex: 0 1 14rem; min-width: 6rem; max-width: 14rem; text-overflow: ellipsis; }
 .tf-madebar .tf-madebar-open { display: flex; min-width: 92px; }
 .tf-madebar .tf-madebar-run { min-width: 84px; justify-content: center; }
+/* A narrow bar: *Run…* is a play glyph with its caret, by the bar's width and never the run's state; its name and title
+   stay. The width is where, with the word, the select is at 6rem and the path at 12rem with *What it said* standing:
+   938 px at the bar's 13 px, measured on 2026-11-25 with a 60-character renderer and *2 left out*. */
+@container madebar (max-width: 72.5em) {
+  .tf-madebar .tf-oo-runin .tf-oo-runword { display: none; }
+  .tf-madebar .tf-oo-runin .tf-oo-runglyph { display: block; }
+}
 /* A folder renderer in a comparison (ux26, the decision list's sections 8 and 9; design system, Generated folders): the
    made bar as a grouped folder's row in the cards column, its generated files inset under it with the info rail. The
    rail is a background image, as in the Files tree: nothing positioned lies in the cards column or the rail. The rows

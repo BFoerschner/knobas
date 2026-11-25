@@ -110,7 +110,7 @@ const SCREENS = [
   // 140-character path, what was left out, and *Open in…* on the kept folder.
   { id: "rerender-graft", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600 },
   { id: "rerender-left-out", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", press: "2 left out" },
-  { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open button" },
+  { id: "rerender-open-in", route: `${REPO}/rendered/site/docs`, fake: "&fake-rerender", wait: 2600, press: ".tf-madebar-open .tf-openin:not(.tf-oo-runin) button" },
   // A folder renderer in a comparison (ux26): Compare with the working tree, *Rendered* on, `docs` grouped under its bar with
   // the 60-character renderer's name, the rail's band, the bar in each state, the generated files' paths (one of 140
   // characters), and the glyph's menu where two renderers take the folder.

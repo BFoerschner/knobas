@@ -161,12 +161,18 @@
     class:tf-sm={small}
     aria-haspopup="menu"
     aria-expanded={open}
+    aria-label="Run…"
     disabled={notCloned}
     title={notCloned ? "Not cloned on this machine" : "Run one of your commands on this (X)"}
     onclick={(event) => {
       event.stopPropagation();
       open = !open;
-    }}>Run…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
+    }}
+    ><!-- A narrow generated folder's bar draws the glyph instead of the word (code.css, Fable 2026-11-25). --><svg
+      class="tf-oo-runglyph"
+      viewBox="0 0 16 16"
+      aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z" /></svg
+    ><span class="tf-oo-runword">Run…</span><svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
   >
   <TfMenu bind:open opener={face} label="Run" className="tf-appmenu tf-oo-menu" {layers}>
     {#each takes as command (command.id)}
