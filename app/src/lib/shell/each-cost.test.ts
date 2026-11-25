@@ -347,6 +347,8 @@ const SMALL: Record<string, string> = {
   "tf/oneoff/TfRunDialog.svelte  views": "a handful by what it is: a run's views, its result, Output and Problems",
   "tf/oneoff/TfRunMenu.svelte  takes": "named small: the commands a person saved in Settings › Commands that take one thing (a handful)",
   "tf/oneoff/TfRunMenu.svelte  many": "named small: the commands a person saved that take two or more of the files (a handful)",
+  "tf/oneoff/TfRunMenu.svelte  madeFile": "named small: the commands a person saved that take the generated file shown (a handful)",
+  "tf/oneoff/TfRunMenu.svelte  madeFolder": "named small: the commands a person saved that take the generated folder (a handful)",
   "tf/oneoff/TfRunLines.svelte  drawn": "windowed by arithmetic: a run's rows are one height, so only the rows in view and twelve each side are drawn (ADR-0060, section 25)",
   "tf/oneoff/TfRunLines.svelte  pieces(row.line, row.from, row.to)": "named small: the colour runs, places and addresses of one drawn row",
   "tf/render/TfFolderPickMenu.svelte  taking": "named small: the folder renderers that take one folder, in the glyph's menu, which the person saves by hand in Settings (a handful)",

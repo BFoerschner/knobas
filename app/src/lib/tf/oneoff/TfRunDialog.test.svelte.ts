@@ -272,7 +272,7 @@ test("a run on a generated file runs in the kept folder, its places open the gen
   expect(words(document.querySelector(".tf-dsub"))).toContain("out/a.ts in docs/ as site made it, in payout: knobas's kept copy");
   p.answer();
   await settle();
-  p.sinks[0]!(batch("r1", [{ n: 0, stream: "out", text: "out/a.ts:3:7: error: no semi", places: [{ from: 0, to: 12, path: "out/a.ts", line: 3, col: 7 }], finding: { severity: "error", said: "no semi", rule: null } }], { findings: 1 }));
+  p.sinks[0]!(batch("r1", [{ n: 0, stream: "out", text: "out/a.ts:3:7: error: no semi", places: [{ from: 0, to: 12, path: "out/a.ts", line: 3, col: 7 }], finding: { severity: "error", said: "no semi", rule: "" } }], { findings: 1 }));
   p.sinks[0]!(batch("r1", [], { total: 1, findings: 1, ended: { how: "exit", code: 1 }, made_changed: ["out/a.ts"] }));
   flushSync();
   const said = document.querySelector(".tf-oo-counts.tf-warn");
