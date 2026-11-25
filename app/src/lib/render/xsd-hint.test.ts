@@ -42,7 +42,7 @@ test("what the store holds is read back with care: garbage, a bad path or a bad 
     expect(hintedPaths(store, "k", NOW)).toEqual([]);
     expect(checkedLately(store, NOW)).toBe(false);
   }
-  s.held.set(HINT_KEY, JSON.stringify([{ k: "bad", p: ["a.xsd", "https://x/y.xsd"], t: NOW }, { k: "good", p: ["a.xsd"], t: NOW }]));
+  s.held.set(HINT_KEY, JSON.stringify([{ k: "bad", p: ["a.xsd", "https://example.invalid/y.xsd"], t: NOW }, { k: "good", p: ["a.xsd"], t: NOW }]));
   expect(hintedPaths(store, "bad", NOW)).toEqual([]);
   expect(hintedPaths(store, "good", NOW)).toEqual(["a.xsd"]);
   // A store that throws reads as nothing kept.

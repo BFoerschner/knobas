@@ -28,6 +28,7 @@ import { renderPort, type RenderPort } from "../../../render/port";
 import { XsdPort, xsdEngine, type XsdEngine } from "../../../render/xsd-port";
 import { checkedLately, hintStore } from "../../../render/xsd-hint";
 import { xmlCheck, xsdLocations } from "../../../ipc/api";
+import { XS } from "../../../render/xsd-xml";
 
 /** The made-up order: 30 items, 123 lines, one value its schema does not allow. */
 export function warmOrder(): string {
@@ -37,7 +38,7 @@ export function warmOrder(): string {
 
 /** The made-up schema the order is checked against, held in memory. */
 export const WARM_SCHEMA =
-  '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:knobas:warm" xmlns="urn:knobas:warm" elementFormDefault="qualified">' +
+  `<xs:schema xmlns:xs="${XS}" targetNamespace="urn:knobas:warm" xmlns="urn:knobas:warm" elementFormDefault="qualified">` +
   '<xs:element name="order"><xs:complexType><xs:sequence><xs:element name="item" maxOccurs="unbounded"><xs:complexType><xs:sequence>' +
   '<xs:element name="name" type="xs:string"/><xs:element name="qty" type="xs:nonNegativeInteger"/></xs:sequence>' +
   '<xs:attribute name="n" type="xs:int"/></xs:complexType></xs:element></xs:sequence></xs:complexType></xs:element></xs:schema>';

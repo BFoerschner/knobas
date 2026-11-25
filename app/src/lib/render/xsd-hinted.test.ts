@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import { answerXsd, type Checked, type Opened, type SetIndex, type XsdCall, type XsdSessions } from "./xsd-answer";
 import { fixture } from "./doc-fixture";
 import { keptOf, type KeepAt } from "./xsd-kept";
+import { XS } from "./xsd-xml";
 import { XsdPort, type XsdEngine, type XsdReads } from "./xsd-port";
 import { bundledFiles, familyFiles } from "./xsd-fixture";
 import { plain } from "./xsd-findings";
@@ -68,7 +69,7 @@ describe("a hint fetches bytes sooner, and changes nothing else", () => {
     const none = await walk(null);
     const wanted = none.read.map((p) => ({ path: p, text: FILES.get(p) ?? null }));
     const hints: Record<string, File[]> = {
-      wide: [...wanted, { path: "schemas/opentrans/other.xsd", text: '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:other"><xs:element name="X"/></xs:schema>' }, { path: "@repo/x/y.xsd", text: "<y/>" }],
+      wide: [...wanted, { path: "schemas/opentrans/other.xsd", text: `<xs:schema xmlns:xs="${XS}" targetNamespace="urn:other"><xs:element name="X"/></xs:schema>` }, { path: "@repo/x/y.xsd", text: "<y/>" }],
       garbage: [{ path: "nowhere.xsd", text: null }, { path: "schemas/opentrans/broken.xsd", text: "<not a schema" }],
       short: wanted.slice(0, 1),
       empty: [],
@@ -98,7 +99,7 @@ describe("a hint fetches bytes sooner, and changes nothing else", () => {
   test("hints alone leave a set already whole as it was", async () => {
     const sessions: XsdSessions = new Map();
     // A set with nothing to read: the schema is its own entry.
-    const own = '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:a"><xs:element name="a"/></xs:schema>';
+    const own = `<xs:schema xmlns:xs="${XS}" targetNamespace="urn:a"><xs:element name="a"/></xs:schema>`;
     const open = answerXsd(sessions, 1, { kind: "open", entry: "a.xsd", text: own, paths: null, pointed: [], lean: true, keep: PIN }, BUNDLED) as Opened;
     expect(open.ok && open.need).toEqual([]);
     const after = answerXsd(sessions, 1, { kind: "addFiles", files: [], hinted: [{ path: "b.xsd", text: own }] }, BUNDLED) as Opened;
