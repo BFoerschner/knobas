@@ -33,7 +33,8 @@ function harness(start: boolean, lane?: string) {
     run = new FolderRun(() => at, ports);
   });
   flushSync();
-  const tell = (running: unknown, folder = "flows", lane?: string) => heard?.({ payload: { entity_id: "r", renderer: "site", folder, running, lane: lane ?? "" } });
+  const tell = (running: unknown, folder = "flows", lane?: string, more: Record<string, unknown> = {}) =>
+    heard?.({ payload: { entity_id: "r", renderer: "site", folder, running, lane: lane ?? "", ...more } });
   return { asked, at, run: () => run, stop, tell };
 }
 
@@ -127,4 +128,20 @@ test("a new state of the same folder (the working tree's stamp, ux29) asks again
   await settle();
   expect(run.view).toBeNull();
   stop();
+});
+
+
+test("a folder the backend dropped (a command changed it) is made again where it is shown, looked at where not (2026-11-25)", async () => {
+  for (const [start, want] of [
+    [true, "open"],
+    [false, "look"],
+  ] as const) {
+    const h = harness(start);
+    await settle();
+    const before = h.asked.length;
+    h.tell(null, "flows", undefined, { dropped: true });
+    await settle();
+    expect(h.asked.slice(before).map((a) => a.ask)).toEqual([want]);
+    h.stop();
+  }
 });
