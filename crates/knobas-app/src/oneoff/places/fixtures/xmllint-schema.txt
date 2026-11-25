@@ -1,0 +1,3 @@
+orders/order-4711.xml:3: Schemas validity error : Element 'ORDER_UNIT': [facet 'enumeration'] The value 'PCE' is not an element of the set {'C62'}.
+orders/order-4711.xml:4: Schemas validity error : Element 'QUANTITY': 'two' is not a valid value of the atomic type 'xs:decimal'.
+orders/order-4711.xml fails to validate

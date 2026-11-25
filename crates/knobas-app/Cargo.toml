@@ -87,6 +87,8 @@ serde.workspace = true
 # `EntityDetail::payload` is the source record verbatim (§3a), which is a
 # `serde_json::Value` all the way to the webview.
 serde_json.workspace = true
+# The place finder's shapes (ADR-0060); already in the tree through other crates.
+regex = "1"
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true

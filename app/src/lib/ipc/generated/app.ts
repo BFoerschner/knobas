@@ -473,6 +473,255 @@ fields?: Array<KeptField>, };
 export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, fields?: Array<KeptField>, };
 
 /**
+ * One saved command, a row of Settings › Commands.
+ */
+export type OneOff = { 
+/**
+ * Stable: what a run, a key and the last runs name it by.
+ */
+id: string, name: string, command: string, stdin: OneOffStdin, 
+/**
+ * A file's command: the files it takes, globs, empty for any.
+ */
+files: Array<string>, 
+/**
+ * A folder's command: the folders it takes by name or path.
+ */
+folders: Array<string>, 
+/**
+ * A folder's command: one of the folder's own files must match.
+ */
+has: Array<string>, 
+/**
+ * Every kind: a file at the repository's top must match.
+ */
+repo_holds: Array<string>, 
+/**
+ * Only in these repositories (step 10), by entity id; empty for every one.
+ */
+repos: Array<string>, shows: OneOffShows, start_in: OneOffStartIn, 
+/**
+ * Folders put in front of `PATH`; `{root}` may stand in one.
+ */
+path: Array<string>, env: Array<OneOffEnv>, 
+/**
+ * Ask the program for colours (`FORCE_COLOR` and friends), else `NO_COLOR`.
+ */
+colours: boolean, timeout_secs: number, 
+/**
+ * On Windows: hand every path as WSL sees it (step 9).
+ */
+wsl_paths: boolean, };
+
+/**
+ * What crosses on the run's channel: the new lines, the lines that changed,
+ * and the counts, the last one carrying how it ended.
+ */
+export type OneOffBatch = { run: string, lines: Array<OneOffLine>, changed: Array<OneOffLine>, 
+/**
+ * Lines printed, kept or not.
+ */
+total: number, 
+/**
+ * Lines in the middle no longer kept, and the first line after them.
+ */
+dropped: number, tail_from: number, 
+/**
+ * Bytes printed.
+ */
+bytes: number, findings: number, elapsed_ms: number, ended?: OneOffEnded | null, };
+
+/**
+ * One of the eight colours a program can name.
+ */
+export type OneOffColour = "k" | "r" | "g" | "y" | "b" | "m" | "c" | "w";
+
+/**
+ * A command as the page sends it: a new one has no id yet.
+ */
+export type OneOffDraft = { id?: string | null, name: string, command: string, stdin: OneOffStdin, files: Array<string>, folders: Array<string>, has: Array<string>, repo_holds: Array<string>, repos: Array<string>, shows: OneOffShows, start_in: OneOffStartIn, path: Array<string>, env: Array<OneOffEnv>, colours?: boolean | null, 
+/**
+ * Blank or 0 is the default, 120 s.
+ */
+timeout_secs?: number | null, wsl_paths: boolean, };
+
+/**
+ * How a run ended.
+ */
+export type OneOffEnded = { "how": "exit", code: number, } | { "how": "signal", signal: number, } | { "how": "timed_out", seconds: number, } | { "how": "stopped" } | { "how": "not_started", reason: string, };
+
+/**
+ * One `NAME=value` line of a command's environment.
+ */
+export type OneOffEnv = { name: string, value: string, };
+
+/**
+ * What a program said about a place: a linter's error, a compiler's warning.
+ */
+export type OneOffFinding = { 
+/**
+ * `error`, `warning`, `note`, or empty where the program wrote none.
+ */
+severity: string, said: string, rule: string, };
+
+/**
+ * What a command is offered on, read from its placeholders.
+ */
+export type OneOffKind = "file" | "folder" | "repository" | "commit" | "range";
+
+/**
+ * One line of a run's output.
+ */
+export type OneOffLine = { 
+/**
+ * In the order the lines began, from 0.
+ */
+n: number, stream: OneOffStream, text: string, runs?: Array<OneOffRun>, places?: Array<OneOffPlace>, 
+/**
+ * Web addresses, opened in the browser.
+ */
+urls?: Array<OneOffUrl>, 
+/**
+ * The place the line is about, with what was said there.
+ */
+finding?: OneOffFinding, 
+/**
+ * Bytes past the line's cap, not kept.
+ */
+cut?: number, 
+/**
+ * Still being written: no newline yet.
+ */
+open?: boolean, };
+
+/**
+ * A file of the checkout a line names, with a line and maybe a column.
+ */
+export type OneOffPlace = { from: number, to: number, 
+/**
+ * From the repository's top, with `/`.
+ */
+path: string, line: number | null, col: number | null, };
+
+/**
+ * A run of one style in a line, `from` to `to` in UTF-16 units.
+ */
+export type OneOffRun = { from: number, to: number, style: OneOffStyle, };
+
+/**
+ * One run, as the list keeps it.
+ */
+export type OneOffRunRow = { id: string, command: string, name: string, entity_id: string, target: OneOffTarget, 
+/**
+ * The words it was run with.
+ */
+argv: Array<string>, 
+/**
+ * The folder it started in.
+ */
+cwd: string, 
+/**
+ * The checkout's branch and commit when it started.
+ */
+branch?: string | null, head?: string | null, 
+/**
+ * Unix milliseconds.
+ */
+started_at: number, 
+/**
+ * `None` while it runs.
+ */
+duration_ms?: number | null, ended?: OneOffEnded | null, lines: number, findings: number, 
+/**
+ * Whether what it printed is still in memory.
+ */
+kept: boolean, };
+
+/**
+ * *Where programs are found* in Settings › Commands.
+ */
+export type OneOffShell = { 
+/**
+ * *Use my shell's PATH*.
+ */
+on: boolean, 
+/**
+ * Whether the row is drawn: not on Windows.
+ */
+offered: boolean, read?: OneOffShellPath | null, };
+
+/**
+ * What the login shell answered.
+ */
+export type OneOffShellPath = { 
+/**
+ * The shell asked, `$SHELL`.
+ */
+shell: string, 
+/**
+ * Its `PATH`, or `None` where it gave none.
+ */
+path?: string | null, 
+/**
+ * How many folders that `PATH` holds.
+ */
+folders: number, 
+/**
+ * Unix milliseconds.
+ */
+read_at: number, 
+/**
+ * Why there is no `PATH`: the shell failed, printed nothing or took too
+ * long.
+ */
+failed?: string | null, };
+
+/**
+ * How a run's result is drawn (section 16): as its bytes say, or as named.
+ */
+export type OneOffShows = "auto" | "text" | "problems" | "code" | "diff" | "json" | "markdown" | "page" | "image" | "pdf";
+
+/**
+ * Where a run starts: the repository's top, or the folder it runs on.
+ */
+export type OneOffStartIn = "root" | "target";
+
+/**
+ * What a start answers.
+ */
+export type OneOffStarted = { run: string, argv: Array<string>, cwd: string, branch?: string | null, head?: string | null, started_at: number, 
+/**
+ * The same command on the same thing was running: this is that run.
+ */
+already: boolean, };
+
+/**
+ * What a command reads on stdin (step 8): nothing, the file as the page shows
+ * it, or the selected lines.
+ */
+export type OneOffStdin = "none" | "file" | "selection";
+
+/**
+ * Which pipe a line came from.
+ */
+export type OneOffStream = "out" | "err";
+
+/**
+ * How a run of characters is drawn.
+ */
+export type OneOffStyle = { fg?: OneOffColour, bg?: OneOffColour, bold?: boolean, dim?: boolean, italic?: boolean, underline?: boolean, };
+
+/**
+ * What a command is run on.
+ */
+export type OneOffTarget = { "kind": "file", path: string, lines?: [number, number] | null, at?: string | null, } | { "kind": "folder", path: string, } | { "kind": "repository" } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, path?: string | null, } | { "kind": "files", paths: Array<string>, };
+
+/**
+ * A web address in a line: opened in the browser, nothing else.
+ */
+export type OneOffUrl = { from: number, to: number, href: string, };
+
+/**
  * Where the copy was written from.
  */
 export type ReadFrom = "clone" | "forge" | "working_tree";

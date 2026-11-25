@@ -25,6 +25,7 @@ export * from "./sources";
 export * from "./time";
 export * from "./assets";
 export * from "./api";
+export * from "./oneoff";
 
 // `IpcError.code`'s type: `knobas_app::IpcErrorCode`, generated, and exported by
 // the sources barrel because `ConnectionReport.code` reaches it (#1372).
@@ -82,6 +83,8 @@ export const EVENTS = {
    * (ADR-0044): the page showing that folder asks again.
    */
   folderRender: "folder-render:moved",
+  /** A command's run started or ended (ADR-0060): `OneOffRunRow`. */
+  oneoffMoved: "oneoff:moved",
   /**
    * `FilesProgress` — the files pass's progress, at each repository's end (the everything-search decisions, D7):
    * Settings › Search reads its status again.

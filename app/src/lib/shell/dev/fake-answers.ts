@@ -11,6 +11,7 @@ import type { acceptSuggestion, actionItemTicket, cardReads, entityBriefs, artif
 import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, rereadFiles, search, searchFiles, searchSettings, setSearchEverything, setSearchFilesKept, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
 import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, clearToneOverrides, setToneOverride, stateColours, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { setSiteOpenInside, setSitesKept, siteAllow, siteAnswer, siteClose, siteDisallow, siteDo, siteFill, siteForget, siteHide, siteOpen, siteQuit, siteRevealDownload, siteSettings, siteShow, siteSignInOwn, siteSignInRemove, siteSignInSave, siteSuggest, siteZoom, sites, sitesKept, sitesUnsaved } from "../../ipc/site";
+import type { oneoffCommands, oneoffForget, oneoffLines, oneoffRun, oneoffRuns, oneoffShellPath, oneoffStop, oneoffWatch, setOneoffCommands } from "../../ipc/oneoff";
 import type { updateCancel, updateCheck, updateDownload, updateInstall, updateLater, updateNotes, updateSet, updateState } from "../../ipc/update";
 import type { setThemesKept, themesKept, windowLookSet } from "../../ipc/window";
 import type { clipboardClear, clipboardCopySecret, clipboardForget, clipboardState, otpCode, otpCopy, passwordCopy, passwordHide, passwordShow, passwordsEntry, passwordsHeld, passwordAttachment, passwordAttachmentSave, passwordSourceFacts, passwordWebLink, passwordsWrite } from "../../ipc/passwords";
@@ -326,6 +327,15 @@ export interface Answers {
   set_folder_render_pick: Answer<typeof setFolderRenderPick>;
   folder_render: Answer<typeof folderRender>;
   folder_render_stop: Answer<typeof folderRenderStop>;
+  oneoff_commands: Answer<typeof oneoffCommands>;
+  set_oneoff_commands: Answer<typeof setOneoffCommands>;
+  oneoff_run: Answer<typeof oneoffRun>;
+  oneoff_stop: Answer<typeof oneoffStop>;
+  oneoff_runs: Answer<typeof oneoffRuns>;
+  oneoff_lines: Answer<typeof oneoffLines>;
+  oneoff_watch: Answer<typeof oneoffWatch>;
+  oneoff_forget: Answer<typeof oneoffForget>;
+  oneoff_shell_path: Answer<typeof oneoffShellPath>;
   folder_render_leave: Answer<typeof folderRenderLeave>;
   folder_render_output: Answer<typeof folderRenderOutput>;
   folder_render_frame: Answer<typeof folderRenderFrame>;

@@ -53,6 +53,7 @@ pub mod live_sources;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
+pub mod oneoff;
 pub mod passwords;
 mod postgres;
 mod profile;
@@ -147,6 +148,10 @@ pub mod events {
     /// renderer's run on a folder moved (queued, copying, running) or ended
     /// (ADR-0044): the page showing that folder asks again. Broadcast.
     pub const FOLDER_RENDER: &str = "folder-render:moved";
+    /// Payload: `oneoff::history::RunRow` -- a command's run started or
+    /// ended (ADR-0060): the status bar's chip, the menus' last-run words and
+    /// a closed dialog's toast. Broadcast.
+    pub const ONEOFF_MOVED: &str = "oneoff:moved";
     /// Payload: `SiteStatus` -- a live site's state changed (ADR-0050). To
     /// the main window by label, as every site event.
     pub const SITE_STATUS: &str = "site:status";
@@ -491,6 +496,27 @@ pub fn manage_app_state<R: tauri::Runtime>(
     });
     if let Some(profile) = handle.try_state::<Profile>() {
         runs.keep_on_disk(profile.dir.join("folder-renders"));
+    }
+    // A command's run started or ended (ADR-0060); its files and the list of
+    // runs are in a folder of the profile no backup carries.
+    let oneoff_to = handle.clone();
+    let oneoffs = oneoff::runs::Runs::global();
+    oneoffs.hear(std::sync::Arc::new(OneOffEvents(
+        move |row: &oneoff::history::RunRow| {
+            events::emit(&oneoff_to, None, events::ONEOFF_MOVED, row);
+        },
+    )));
+    if let Some(profile) = handle.try_state::<Profile>() {
+        oneoffs.place(oneoff::runs_dir(&profile.dir));
+    }
+}
+
+/// A closure as the commands' events.
+struct OneOffEvents<F>(F);
+
+impl<F: Fn(&oneoff::history::RunRow) + Send + Sync> oneoff::runs::Events for OneOffEvents<F> {
+    fn moved(&self, row: &oneoff::history::RunRow) {
+        (self.0)(row);
     }
 }
 
@@ -1049,6 +1075,17 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // (§10.8).
         commands::site::site_sign_in_own,
         commands::passwords::password_web_link,
+        // Commands, run on a press and read in a dialog (ADR-0060), appended
+        // at the foot (§10.8).
+        commands::oneoff::oneoff_commands,
+        commands::oneoff::set_oneoff_commands,
+        commands::oneoff::oneoff_run,
+        commands::oneoff::oneoff_stop,
+        commands::oneoff::oneoff_runs,
+        commands::oneoff::oneoff_lines,
+        commands::oneoff::oneoff_watch,
+        commands::oneoff::oneoff_forget,
+        commands::oneoff::oneoff_shell_path,
     ]
 }
 
@@ -1076,6 +1113,8 @@ fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // A folder renderer still running dies with everything it started
     // (ADR-0044).
     folder_render::runs::kill_all();
+    // A command still running dies with everything it started (ADR-0060).
+    oneoff::runs::Runs::global().kill_all();
     if let Some(clones) = app.try_state::<std::sync::Arc<checkout::clone::Clones>>() {
         tauri::async_runtime::block_on(checkout::clone::stop_all(&clones));
     }
@@ -2063,6 +2102,7 @@ mod tests {
             super::events::CHECKOUT_FETCHED,
             super::events::CLONE_ALL,
             super::events::FOLDER_RENDER,
+            super::events::ONEOFF_MOVED,
             super::events::CODE_FILES,
             super::events::SITE_STATUS,
             super::events::SITE_KEY,

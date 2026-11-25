@@ -37,6 +37,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod clone;
+pub mod oneoff;
 pub mod open;
 pub mod worktree;
 

@@ -1,0 +1,348 @@
+//! Commands (*Run…*, ADR-0060): a person's own program, run once on a press
+//! in the repository's checkout, whose stdout and stderr knobas reads into
+//! lines and shows in a dialog.
+//!
+//! The pure half (the saved shape, what a command is offered on, what Save
+//! refuses, the argument vector) is [`knobas_core::checkout::oneoff`]. Here:
+//!
+//! - this file: the list's settings row, `oneoff.commands`, and the
+//!   `oneoff.shell_path` switch;
+//! - [`run`]: the spawn at the checkout, its environment, pipes, timeout,
+//!   stop and kill;
+//! - [`lines`] and [`places`]: the reader and the place finder;
+//! - [`kept`] and [`runs`]: a run's lines and the registry of runs, four at
+//!   once, the batches and the memory cap;
+//! - [`history`]: `runs.json`, the last 200 runs without their output;
+//! - [`shell_path`]: the login shell's `PATH`, read once a session.
+//!
+//! # Nothing it printed rests
+//!
+//! A run's output is a live read in the app process (ADR-0032), bounded and
+//! dropped at quit: in no table, no index, no log and no backup. The list of
+//! runs is a file in the profile (`command-runs/runs.json`) that no backup
+//! carries, and a share export carries no command.
+
+pub mod history;
+pub mod kept;
+pub mod lines;
+pub mod places;
+pub mod run;
+pub mod runs;
+pub mod shell_path;
+
+use std::path::{Path, PathBuf};
+
+use knobas_core::checkout::oneoff::{self as rules, Draft, OneOff};
+use sqlx::PgPool;
+
+use crate::IpcError;
+use crate::settings::{read_value, write_value};
+
+/// The `knobas.setting` key holding the commands, a JSON array in the
+/// person's order.
+pub const COMMANDS_KEY: &str = "oneoff.commands";
+/// The `knobas.setting` key of *Use my shell's PATH* (on unless `false`).
+pub const SHELL_PATH_KEY: &str = "oneoff.shell_path";
+
+/// The folder of knobas's own under the profile where runs keep their files
+/// and their list.
+#[must_use]
+pub fn runs_dir(profile: &Path) -> PathBuf {
+    profile.join("command-runs")
+}
+
+/// The saved commands, in the person's order. A row that does not parse
+/// reads as none: Settings is where a person fixes it.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn list(pool: &PgPool) -> Result<Vec<OneOff>, IpcError> {
+    Ok(read_value(pool, COMMANDS_KEY)
+        .await?
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default())
+}
+
+/// Saves the whole list, checked, and answers it as stored.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) naming the first entry that
+/// cannot be saved; [`Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+pub async fn save(pool: &PgPool, drafts: &[Draft]) -> Result<Vec<OneOff>, IpcError> {
+    let commands = rules::settle(drafts, std::env::consts::OS)
+        .map_err(|error| IpcError::invalid(error.to_string()))?;
+    let value = serde_json::to_value(&commands).map_err(IpcError::internal)?;
+    write_value(pool, COMMANDS_KEY, &value).await?;
+    Ok(commands)
+}
+
+/// Whether *Use my shell's PATH* is on: the default on macOS and Linux,
+/// never on Windows, where the app has the user's `PATH` already.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn shell_path_on(pool: &PgPool) -> Result<bool, IpcError> {
+    if cfg!(windows) {
+        return Ok(false);
+    }
+    Ok(read_value(pool, SHELL_PATH_KEY)
+        .await?
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true))
+}
+
+/// Turns *Use my shell's PATH* on or off.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_shell_path(pool: &PgPool, on: bool) -> Result<(), IpcError> {
+    write_value(pool, SHELL_PATH_KEY, &serde_json::Value::Bool(on)).await
+}
+
+// -- a start -----------------------------------------------------------------
+
+use std::sync::Arc;
+
+use knobas_core::checkout::oneoff::Kind;
+
+use self::history::RunRow;
+use self::run::{Placed, Spawn, Started, Target};
+use self::runs::{Runs, Sink};
+
+/// Whether `command` is run on `target`: its kind, read from its
+/// placeholders, against what the target is.
+fn fits(command: &OneOff, target: &Target) -> bool {
+    match (command.kind(), target) {
+        (Kind::File, Target::File { .. }) | (Kind::Folder, Target::Folder { .. }) => true,
+        (Kind::File, Target::Files { .. }) => command.command.contains("{files}"),
+        (Kind::Repository, Target::Repository)
+        | (Kind::Commit, Target::Commit { .. })
+        | (Kind::Range, Target::Range { .. }) => true,
+        _ => false,
+    }
+}
+
+/// A path the page named, as the run names it: from the top, with `/`.
+fn rel(path: &str) -> String {
+    path.trim_start_matches("./").trim_matches('/').to_owned()
+}
+
+/// The target found on disk inside the checkout at `root`.
+async fn placed(
+    root: PathBuf,
+    target: &Target,
+    branch: Option<String>,
+    commit: Option<String>,
+) -> Result<Placed, IpcError> {
+    use crate::checkout::open::{file_inside, folder_inside};
+    let mut placed = Placed {
+        root: root.clone(),
+        file: None,
+        files: Vec::new(),
+        dir: None,
+        lines: None,
+        sha: None,
+        base: None,
+        head: None,
+        branch,
+        commit,
+    };
+    match target {
+        Target::File { path, lines, .. } => {
+            let path = rel(path);
+            file_inside(&root, &path).await.map_err(|_| {
+                IpcError::invalid(format!(
+                    "{path} is not in your working tree at {}",
+                    root.display()
+                ))
+            })?;
+            placed.dir = Some(path.rsplit_once('/').map_or("", |(d, _)| d).to_owned());
+            placed.file = Some(path);
+            placed.lines = lines.map(|(a, b)| (a.max(1), b.max(a).max(1)));
+        }
+        Target::Folder { path } => {
+            let path = rel(path);
+            if !path.is_empty() {
+                folder_inside(&root, &path).await?;
+            }
+            placed.dir = Some(path);
+        }
+        Target::Repository => placed.dir = Some(String::new()),
+        Target::Commit { sha } => placed.sha = Some(sha.clone()),
+        Target::Range { base, head, path } => {
+            placed.base = Some(base.clone());
+            placed.head = Some(head.clone());
+            if let Some(path) = path {
+                let path = rel(path);
+                file_inside(&root, &path).await?;
+                placed.file = Some(path);
+            }
+        }
+        Target::Files { paths } => {
+            for path in paths {
+                let path = rel(path);
+                file_inside(&root, &path).await?;
+                placed.files.push(path);
+            }
+        }
+    }
+    Ok(placed)
+}
+
+/// Runs saved command `command_id` on `target` of `entity_id`'s checkout,
+/// its batches to `sink`. Answers once the run has its words; the program
+/// runs on in threads of its own. The same command on the same thing already
+/// running answers that run, with `sink` added to it.
+///
+/// A refusal that needs the run's own folder (a value refused at the fill)
+/// ends the run as *Did not start*, told on `sink`; a refusal before that is
+/// an error and starts nothing.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a command that is not one of
+/// the person's, a target it does not take, a path not inside the checkout,
+/// or a fifth run; [`NotFound`](crate::IpcErrorCode::NotFound) for a
+/// repository with no checkout here.
+pub async fn start(
+    pool: &PgPool,
+    entity_id: &str,
+    command_id: &str,
+    target: Target,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    start_in(&Runs::global(), pool, entity_id, command_id, target, sink).await
+}
+
+/// [`start`] in a registry of the caller's: a test's own.
+///
+/// # Errors
+///
+/// As [`start`].
+pub async fn start_in(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    entity_id: &str,
+    command_id: &str,
+    target: Target,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    let runs = Arc::clone(runs);
+    let command = list(pool)
+        .await?
+        .into_iter()
+        .find(|c| c.id == command_id)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "'{command_id}' is not one of your commands: see Settings › Commands"
+            ))
+        })?;
+    if let Some(running) = runs.running_of(&command.id, entity_id, &target) {
+        runs.attach(&running, sink);
+        let row = running.row();
+        return Ok(Started {
+            run: row.id,
+            argv: row.argv,
+            cwd: row.cwd,
+            branch: row.branch,
+            head: row.head,
+            started_at: row.started_at,
+            already: true,
+        });
+    }
+    if !fits(&command, &target) {
+        return Err(IpcError::invalid(format!(
+            "{} is not run on {}",
+            command.name,
+            target.label()
+        )));
+    }
+    let checkout = crate::checkout::resolve(pool, entity_id).await?;
+    let root = PathBuf::from(checkout.path.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{entity_id} is not cloned on this machine, so there is nothing to run {} in",
+            command.name
+        ))
+    })?);
+    let (branch, commit) = match crate::checkout::working_tree::read_known(&root).await {
+        crate::checkout::working_tree::TreeRead::Read(state) => (state.branch, state.head),
+        _ => (None, None),
+    };
+    let placed = placed(root.clone(), &target, branch.clone(), commit.clone()).await?;
+    let shell = if shell_path_on(pool).await? {
+        shell_path::get(false).await.path
+    } else {
+        None
+    };
+    let started_at = chrono::Utc::now().timestamp_millis();
+    let handle = runs
+        .reserve(
+            RunRow {
+                id: String::new(),
+                command: command.id.clone(),
+                name: command.name.clone(),
+                entity_id: entity_id.to_owned(),
+                target: target.clone(),
+                argv: Vec::new(),
+                cwd: root.to_string_lossy().into_owned(),
+                branch: branch.clone(),
+                head: commit.clone(),
+                started_at,
+                duration_ms: None,
+                ended: None,
+                lines: 0,
+                findings: 0,
+                kept: true,
+            },
+            kept::Limits::default(),
+        )
+        .map_err(|why| IpcError::invalid(why.to_string()))?;
+    runs.attach(&handle, sink);
+    let answer = |argv: Vec<String>, cwd: String| Started {
+        run: handle.id.clone(),
+        argv,
+        cwd,
+        branch: branch.clone(),
+        head: commit.clone(),
+        started_at,
+        already: false,
+    };
+    let (argv, cwd) = match run::words_at(&command, &placed, &handle.scratch) {
+        Ok(words) => words,
+        Err(reason) => {
+            let cwd = root.to_string_lossy().into_owned();
+            runs.end(&handle, run::Ended::NotStarted { reason });
+            return Ok(answer(Vec::new(), cwd));
+        }
+    };
+    handle.set_words(&argv, &cwd.to_string_lossy());
+    if command.command.contains("{out") {
+        let _ = std::fs::create_dir_all(handle.scratch.join("out"));
+    }
+    let cwd_rel = cwd
+        .strip_prefix(&root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let env = run::environment(&command, &root, std::env::vars_os(), shell.as_deref());
+    let spawn = Spawn {
+        argv: argv.clone(),
+        cwd: cwd.clone(),
+        env,
+        timeout: std::time::Duration::from_secs(u64::from(
+            command.timeout_secs.clamp(1, rules::MAX_TIMEOUT),
+        )),
+        stdin: run::stdin_of(command.stdin),
+        root,
+        cwd_rel,
+    };
+    let to_run = Arc::clone(&handle);
+    tokio::task::spawn_blocking(move || run::launch(&runs, &to_run, spawn))
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(answer(argv, cwd.to_string_lossy().into_owned()))
+}

@@ -1,0 +1,5 @@
+scripts/deploy.sh:2:10: error: Iterating over ls output is fragile. Use globs. [SC2045]
+scripts/deploy.sh:2:15: note: Use ./*glob* or -- *glob* so names with dashes won't become options. [SC2035]
+scripts/deploy.sh:3:8: note: Double quote to prevent globbing and word splitting. [SC2086]
+scripts/deploy.sh:5:1: warning: Use 'cd ... || exit' or 'cd ... || return' in case cd fails. [SC2164]
+scripts/deploy.sh:5:4: note: Double quote to prevent globbing and word splitting. [SC2086]

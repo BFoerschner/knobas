@@ -676,13 +676,13 @@ pub async fn page(
 }
 
 /// `relative` inside `checkout`, as a file that is there.
-async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+pub(crate) async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
     inside_on_disk(checkout, relative, Entry::File).await
 }
 
 /// [`file_inside`] for a folder: a folder inside the checkout on disk, by its
 /// words and by where it really is, never the checkout's `.git`.
-async fn folder_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+pub(crate) async fn folder_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
     inside_on_disk(checkout, relative, Entry::Folder).await
 }
 

@@ -103,6 +103,15 @@ export const READS: ReadonlySet<string> = new Set([
  */
 export const QUIET: ReadonlySet<string> = new Set([
   "app_status",
+  // Commands (ADR-0060): a run reads the checkout on disk and writes nothing knobas mirrors, so no kept answer moves.
+  "oneoff_commands",
+  "oneoff_run",
+  "oneoff_stop",
+  "oneoff_runs",
+  "oneoff_lines",
+  "oneoff_watch",
+  "oneoff_forget",
+  "oneoff_shell_path",
   // A list a page holds, ranked (the fuzzy-search pass): reads nothing, changes nothing.
   "fuzzy_rank",
   // The same over a list held once (ux31, the API explorer's filter).

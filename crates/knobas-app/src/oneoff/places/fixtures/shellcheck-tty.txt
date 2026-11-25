@@ -1,0 +1,27 @@
+
+In scripts/deploy.sh line 2:
+for f in $(ls *.txt); do
+         ^---------^ SC2045 (error): Iterating over ls output is fragile. Use globs.
+              ^-- SC2035 (info): Use ./*glob* or -- *glob* so names with dashes won't become options.
+
+
+In scripts/deploy.sh line 3:
+  echo $f
+       ^-- SC2086 (info): Double quote to prevent globbing and word splitting.
+
+Did you mean: 
+  echo "$f"
+
+
+In scripts/deploy.sh line 5:
+cd $1
+^---^ SC2164 (warning): Use 'cd ... || exit' or 'cd ... || return' in case cd fails.
+   ^-- SC2086 (info): Double quote to prevent globbing and word splitting.
+
+Did you mean: 
+cd "$1" || exit
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2045 -- Iterating over ls output is fragi...
+  https://www.shellcheck.net/wiki/SC2164 -- Use 'cd ... || exit' or 'cd ... |...
+  https://www.shellcheck.net/wiki/SC2035 -- Use ./*glob* or -- *glob* so name...

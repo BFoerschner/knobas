@@ -79,6 +79,7 @@ mod live_sources;
 mod monitor_on_its_way_ipc;
 mod notes_export_ipc;
 mod notes_search_ipc;
+mod oneoff;
 mod pages_kept_open;
 mod passwords;
 mod pipeline_logs_ipc;

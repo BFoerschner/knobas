@@ -50,6 +50,13 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::folder_render::FolderPick::export_all(cfg)?;
     crate::folder_render::made::MadeCompare::export_all(cfg)?;
     crate::folder_render::FolderRendererDraft::export_all(cfg)?;
+    knobas_core::checkout::oneoff::OneOff::export_all(cfg)?;
+    knobas_core::checkout::oneoff::Draft::export_all(cfg)?;
+    knobas_core::checkout::oneoff::Kind::export_all(cfg)?;
+    crate::oneoff::run::Batch::export_all(cfg)?;
+    crate::oneoff::run::Started::export_all(cfg)?;
+    crate::oneoff::history::RunRow::export_all(cfg)?;
+    crate::commands::oneoff::OneOffShell::export_all(cfg)?;
     crate::folder_render::FolderMarks::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderView::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderMoved::export_all(cfg)?;
