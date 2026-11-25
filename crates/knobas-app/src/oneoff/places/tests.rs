@@ -137,6 +137,9 @@ fn what_is_not_a_file_inside_the_checkout_is_no_link() {
         "/etc/passwd:1:1: x",
         "../../etc/passwd:1: x",
         "src/../../x/src/main.rs:1: x",
+        // A climb past the top names a file beside the checkout, never the checkout's own of that name.
+        "../src/main.rs:1: x",
+        "src/../../src/main.rs:1: x",
         "src/nope.ts:1:1: x",
         "    at Module._resolveFilename (node:internal/modules/cjs/loader:1249:15)",
         "C:/src/payout-service-other/src/main.rs:3:1",

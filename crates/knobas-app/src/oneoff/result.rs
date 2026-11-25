@@ -367,6 +367,18 @@ mod tests {
         assert!(
             matches!(of_out(dir.path(), Shows::Auto).0, RunResult::Refused { why } if why.contains("2 files"))
         );
+        // One past the cap is said, not drawn (a sparse file: nothing is written).
+        let big = tempfile::tempdir().unwrap();
+        std::fs::File::create(big.path().join("huge.bin"))
+            .unwrap()
+            .set_len(RESULT_CAP + 1)
+            .unwrap();
+        let (result, path) = of_out(big.path(), Shows::Auto);
+        assert!(
+            matches!(&result, RunResult::Refused { why } if why.contains("past the 64 MiB")),
+            "{result:?}"
+        );
+        assert!(path.is_none());
     }
 
     #[cfg(unix)]
