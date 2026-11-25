@@ -500,7 +500,7 @@
 {@render crumbs()}
 <header class="tf-fhead tf-bhead">
   <!-- The count holds its room from the first frame, unseen until read: it arriving grows nothing (nothing-moves). -->
-  <div><h1>Recent runs <span class="tf-count tf-recent-count" style:visibility={held === null ? "hidden" : null}>{held?.length ?? 0}</span></h1></div>
+  <div><h1>Recent runs <span class="tf-count tf-recent-count" class:tf-unseen={held === null}>{held?.length ?? 0}</span></h1></div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
 

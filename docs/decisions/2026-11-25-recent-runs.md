@@ -78,17 +78,22 @@ server capped at 2 GB and the agent at 1 GB, removed afterwards), with four conf
 
 ## Tested
 
-- Rust: `knobas-app`'s `tests/it/recent_runs.rs` (5): the order held to `runMade` (a long build that finished last
+- Rust: `knobas-app`'s `tests/it/recent_runs.rs` (6): the order held to `runMade` (a long build that finished last
   sorts by its start, a queued one by its queue time), pages that follow their cursor, the filters (results,
   branches, sources, *Mine* with no username), the stored instant following a queued run that starts, a time that
-  moves and a delete, and `sync.run_instant` reading exactly what `parse_instant` reads. 13 mutants of the statement,
-  the read and the migration, each killed.
+  moves and a delete, `sync.run_instant` reading exactly what `parse_instant` reads, and the statement staying
+  unnamed (`the_read_is_planned_with_its_values_each_time`). 14 mutants of the statement, the read and the
+  migration, each killed.
 - Vitest: `recent.test.ts` (the rules), `TfRecent.test.svelte.ts` (12: the rows, a pipeline's place with two
   sources, a chip asked of the backend and words narrowing what is held, *Mine* and *This job*, *Show 1 new run* under
   the pointer, an older page, the way back, the keys, the minute's ask and who it never asks, a source's run ending),
   `TfBuilds` (the switch, no rail, the list read behind the first page, the kept view), the launcher's `#b` row and
   `>recent`, the run menu's *Open pipeline*. 25 mutants of the rules and the view, each killed (one survived first:
   its test started on an address the test before it had left).
+- UI checks (`long-paths.mjs` and `trips.mjs --only builds --strict`, headless Chrome on the Mac): `long-paths` had
+  zero misses across `build-recent`, `build-pipeline`, `build-run` and `build-run-unfolded` at `1100x600@1`,
+  `1440x868@1`, `2048x1152@1.25` and `5120x1440@1`; all 24 Builds trips passed, including `builds-recent-rows-still`
+  (first, return, sync, shown with *Show N new runs*, and launcher) and `builds-recent-open-key`.
 
 ## Timing
 
@@ -98,9 +103,10 @@ probes build it. ms to the first useful frame / drawn, each on its first visit (
 
 | Case | 1440x868@1, 1x | 1440x868@1, 6x | 2560x1440@1.25, 6x | Line (1x / 6x) |
 |---|---|---|---|---|
-| *Recent*, first open | 63 / 80 | 5 / 172 | 125 / 242 | 100 / 300 |
-| *Recent*, return | 14 / 30 | 16 / 66 | 1 / 84 | 100 / 300 |
-| A run opened from *Recent* | 52 / 69 | 210 / 226 | 192 / 226 | 100 / 300 |
+| *Recent*, first open | 48 / 64 | 11 / 211 | 170 / 287 | 100 / 300 |
+| *Recent*, return | 13 / 29 | 12 / 78 | 10 / 110 | 100 / 300 |
+| A run opened from *Recent*, first | 42 / 59 | 236 / 269 (alone; 283 / 299 beside the other cases) | 215 / 249 | 100 / 300 |
+| A run opened from *Recent*, return | 45 / 61 | 194 / 210 | 192 / 209 | 100 / 300 |
 | A letter in *Recent*'s filter (median of 5) | 18 | 34 | 38 | 100 / 150 |
 
 Nothing moved after its first useful frame in any of them. The backend answered `recent_runs` (a page of 200,
@@ -110,6 +116,12 @@ cannot read its `$n is null or …` filters. The statement is unnamed now (`.per
 suggestions are), and `the_read_is_planned_with_its_values_each_time` holds it. **Found too:** from a run opened in
 *Recent*, a second press of the Builds entry went to the run's pipeline; while *Recent* is the kept view it goes to
 *Recent* (`TfShell.svelte`).
+
+**Nothing moves** (`moves.sh`, the fixture and the scale database, 1x and 6x, 2560x1440@1.25) found two, both fixed:
+*Recent*'s header grew 5 px when its count arrived (the count now holds its room from the first frame, unseen until
+read), and a run opened from *Recent* mounted the rail at its top and scrolled it to the pipeline a frame later, 43
+rows moving 339 px (a rail mounted after *Recent* holds its rows unseen in their room until that scroll lands, the
+probe's rule for a held room). After: nothing moved on *Recent*, a run opened from it, Builds, a pipeline or a run.
 
 **Owed on Windows** (WSL and the PC are off): WebView2's first open of *Recent* at 6x, its keys, and its scroll.
 

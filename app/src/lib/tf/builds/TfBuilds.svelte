@@ -780,7 +780,7 @@
           <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
         </p>
       {/if}
-      <div class="tf-pl-rows" style:visibility={railUnseen ? "hidden" : null} {@attach win.list}>
+      <div class="tf-pl-rows" class:tf-unseen={railUnseen} {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
