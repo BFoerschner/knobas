@@ -640,21 +640,28 @@ fmt:
 # pin. Release, because wasmtime compiles the component again on every load
 # and a smaller one compiles faster; `test` runs this first.
 #
-# Three times: first against the frozen 1.0.0 world (`--features v1_0`, kept
-# beside as `knobas_wasm_fixture_v1_0.wasm`, #1205), for the host's hold on
-# 1.0.0 components; then against the frozen 1.3.0 world (`--features v1_3`,
-# kept as `knobas_wasm_fixture_v1_3.wasm`, #2101), the minor before
-# `refresh`; then the current one.
+# Once against each frozen older world, kept beside the current one under its
+# feature's name (`knobas_wasm_fixture_v1_0.wasm`, #1205; `_v1_3`, #2101;
+# `_v1_5`, ADR-0054; `_v1_6`, ADR-0050), then the current one, with its
+# dep-info. What `build_fixture` in `knobas-wasm-host` does when a test finds
+# the fixture missing or stale, in the same order (its `FIXTURE_VARIANTS`) and
+# in the same target folder of its own, `target/wasm-fixture`, so the two share
+# a build. Never in `CARGO_TARGET_DIR`: the copies read from where the builds
+# land, and a build that went to another folder left them copying whatever was
+# there, the current component as `_v1_0` and the rest (2026-11-25).
 wasm-fixture:
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_0
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_0.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_3
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_3.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_5
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_5.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_6
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_6.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet
+    #!/usr/bin/env bash
+    set -euo pipefail
+    own=target/wasm-fixture
+    built=$own/wasm32-wasip2/release/knobas_wasm_fixture
+    out=target/wasm32-wasip2/release
+    mkdir -p "$out"
+    for feature in v1_0 v1_3 v1_5 v1_6 ""; do
+        env -u RUSTUP_TOOLCHAIN CARGO_TARGET_DIR="$own" cargo build -p knobas-wasm-fixture \
+            --target wasm32-wasip2 --release --quiet ${feature:+--features "$feature"}
+        cp "$built.wasm" "$out/knobas_wasm_fixture${feature:+_$feature}.wasm"
+    done
+    cp "$built.d" "$out/knobas_wasm_fixture.d"
 
 # The gate's lint pass. PKGS narrows it to the given cargo package selection
 # (`just clippy -p knobas-core`; `pre-gate` passes the crates a branch changed,
