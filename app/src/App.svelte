@@ -23,6 +23,7 @@
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { cacheEvents, enableAnswerCache, warm } from "./lib/ipc/answer-cache";
   import { installHoverReads } from "./lib/tf/repo/hover-reads";
+  import { installDocsPressReads } from "./lib/tf/docs/press-reads";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { getEntity, recordCaptureContext } from "./lib/ipc/entity";
   import { chosenJob } from "./lib/tf/job/chosen.svelte";
@@ -249,6 +250,8 @@
         // Guarded as the cache is: nothing here may stop the lifecycle below from starting.
         try {
           stops.push(installHoverReads());
+          // A Docs page's text and row, asked at the press on its link (2026-11-25).
+          stops.push(installDocsPressReads());
         } catch (error) {
           console.error("knobas: reads ahead of a press did not start; each page reads on its press", error);
         }

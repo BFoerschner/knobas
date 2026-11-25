@@ -463,6 +463,8 @@ div.tf-wgap { flex: none; }
 .tf-waiting { min-width: 0; }
 .tf-wait-dim { opacity: 0.5; pointer-events: none; transition: opacity 120ms ease-out; }
 .tf-skel .tf-skel-bar { display: block; height: 10px; border-radius: 3px; background: var(--rule-2); animation: tf-skel-pulse 1.2s ease-in-out infinite alternate; }
+/* Reduced motion: the bars hold still (2026-11-25, the Docs frame's design pass). */
+@media (prefers-reduced-motion: reduce) { .tf-skel .tf-skel-bar { animation: none; } }
 .tf-skel td { padding: 12px 10px; }
 .tf-skel tr td:first-child .tf-skel-bar { width: 70%; }
 .tf-skel tr:nth-child(3n + 2) td:nth-child(2) .tf-skel-bar { width: 55%; }

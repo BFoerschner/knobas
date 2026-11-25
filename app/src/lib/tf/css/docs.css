@@ -78,6 +78,12 @@
 .tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
+/* A page's frame while its read is out (2026-11-25): a title the tree does not hold yet is a bar one title line high, the
+   meta line keeps its room without its rule, which comes with the meta, and the body is bars. */
+.tf-rd-title .tf-rd-tbar { display: inline-block; vertical-align: middle; width: min(60%, 420px); }
+.tf-rd-title .tf-rd-tbar .tf-skel-bar { height: 0.6em; }
+.tf-rd-head + .tf-rd-meta.tf-rd-held { border-bottom-color: transparent; }
+.tf-doc > .tf-rd-wait { padding-top: 12px; }
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136), set apart from what follows like the page's other blocks. */
 .tf-rd-page > .tf-banner { margin: 10px 0 12px; border-bottom: 0; border-radius: 4px; }
 .tf-rd-more { display: inline-flex; }

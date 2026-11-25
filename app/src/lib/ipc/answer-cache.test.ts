@@ -2,7 +2,7 @@
 // answer the backend gave.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cacheEvents, disableAnswerCache, enableAnswerCache, warm } from "./answer-cache";
+import { cacheEvents, disableAnswerCache, enableAnswerCache, keptAnswer, warm } from "./answer-cache";
 import { invoke } from "./invoke";
 
 type Bridge = { invoke: (cmd: string, args?: unknown) => Promise<unknown> };
@@ -108,6 +108,25 @@ describe("the answer cache", () => {
     for (const cmd of ["entity_range_files", "entity_range_file", "entity_source_range_files", "entity_source_range_diff", "cancel_read", "entity_range_names", "entity_range_file_pages"]) await ask(cmd, { read: "r" });
     await ask("docs_outline");
     expect(asked("docs_outline")).toBe(1);
+  });
+
+  it("hands a kept answer over in the asker's own task, a copy, and asks nothing for one it does not keep", async () => {
+    answers["docs_page"] = () => ({ entity_id: "confluence:2", title: "On-call handbook" });
+    expect(keptAnswer("docs_page", { entityId: "confluence:2" })).toBeUndefined();
+    const read = await ask("docs_page", { entityId: "confluence:2" });
+    const held = keptAnswer("docs_page", { entityId: "confluence:2" });
+    expect(held).toEqual(read);
+    expect(held).not.toBe(read);
+    expect(keptAnswer("site_show", {})).toBeUndefined();
+    expect(asked("docs_page")).toBe(1);
+  });
+
+  it("drops nothing on a visit to a source's site: its view shown, pointed, hidden and closed, and its address asked of the mirror", async () => {
+    // Fable's ruling (2026-11-25): each of these dropped every kept answer, so every page opened after a site read again.
+    await ask("docs_page", { entityId: "confluence:2" });
+    for (const cmd of ["site_open", "site_show", "resolve_url", "site_do", "site_hide", "site_answer", "site_close"]) await ask(cmd, { source: "confluence" });
+    await ask("docs_page", { entityId: "confluence:2" });
+    expect(asked("docs_page")).toBe(1);
   });
 
   it("drops nothing on the estate's reads, and keeps them over a visit", async () => {

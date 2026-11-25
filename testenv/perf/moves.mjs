@@ -261,6 +261,9 @@ const PLACES = [
   // another page, then each block's view pressed, drawn in the box the press's frame gave it; the return presses
   // *Source* first. A declaration opens in place in the schema's box, which holds its 420 px.
   { name: "docs-blocks", fixture: true, start: OTHER_PAGE, go: EDI_PAGE, hash: EDI_PAGE, away: OTHER_PAGE },
+  // A page opened from another with its read late (Björn, 2026-11-25): the new page's frame is drawn at once, and its crumb
+  // and title hold their boxes as the read lands under them.
+  { name: "docs-page-next", fixture: true, late: "docs_page:400", start: OTHER_PAGE, go: EDI_PAGE, hash: EDI_PAGE, away: OTHER_PAGE },
   ...[
     ["schema", "Schema", `${shown} .tf-xsd-irow .tf-xsd-cname`],
     ["xml", "XML view", `${shown} .tf-doc-xv .tf-xv-caret`],

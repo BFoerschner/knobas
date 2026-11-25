@@ -95,6 +95,7 @@
   import { sourceRoles, WIKI } from "../roles.svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
+  import { keptAnswer } from "../../ipc/answer-cache";
   import {
     docsCreatePage as realDocsCreatePage,
     docsEditSection as realDocsEditSection,
@@ -145,6 +146,7 @@
   import TfDocsSpace from "./TfDocsSpace.svelte";
   import { heldTree, pageCount, readHeld, readParts, spaceWhole, type TreeReads } from "./tree-store";
   import { knownPageMakers, pageMakers } from "./page-makers";
+  import { docsPageOf } from "./press-reads";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
@@ -232,6 +234,11 @@
     docsOutline?: typeof realDocsOutline;
     docsNodes?: typeof realDocsNodes;
     docsPage: typeof realDocsPage;
+    /**
+     * The page as the answer cache keeps it, asking nothing (`keptAnswer`): drawn in the press's own task, so a page read
+     * before never shows its frame. Left out, every page opened from another shows its frame until its read lands.
+     */
+    docsPageKept?: (entityId: string) => DocPage | undefined;
     docsSearch: typeof realDocsSearch;
     docsExportMarkdown: typeof realDocsExportMarkdown;
     docsEditSection: typeof realDocsEditSection;
@@ -301,6 +308,7 @@
       docsOutline: realDocsOutline,
       docsNodes: realDocsNodes,
       docsPage: realDocsPage,
+      docsPageKept: (entityId) => keptAnswer<DocPage>("docs_page", { entityId }),
       docsSearch: realDocsSearch,
       docsExportMarkdown: realDocsExportMarkdown,
       docsEditSection: realDocsEditSection,
@@ -335,7 +343,7 @@
   provideEmbeds(() => page?.run_embeds ?? true);
   // What *Back to <name>* calls Docs once it is left: the page's title, the space's name or the search, as the crumb
   // says (spec #2227). One name, here, because a read answering after the crumb drew would otherwise clear the crumb's.
-  namePage(() => page?.title ?? spaceHere?.name ?? spaceHere?.key ?? (place.kind === "search" ? "Search" : null));
+  namePage(() => page?.title ?? frame?.title ?? spaceHere?.name ?? spaceHere?.key ?? (place.kind === "search" ? "Search" : null));
   let pageError = $state<string | null>(null);
   /** The reader's own accounts, as the last page read names them; until a page is read, as the sources' settings do, so a hit's line says *you* from the start (F-428). */
   let me = $state<string[]>([]);
@@ -616,6 +624,27 @@
   /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`): settles once its read is drawn or has failed. */
   const needFold = (id: string) => needParts({ folds: [id] });
 
+  // A press on a page's link in Docs asks for the way to it too, where the tree does not hold it yet, so its frame's crumb
+  // and title come with the press (Fable's ruling, 2026-11-25). The page's own reads go with the press app-wide
+  // (`press-reads.ts`).
+  $effect(() => {
+    if (!ready || !lazy || typeof document === "undefined") return;
+    const pressed = (event: Event) => {
+      if (event.type === "keydown" && (event as KeyboardEvent).key !== "Enter") return;
+      if (event.type === "pointerdown" && (event as PointerEvent).button !== 0) return;
+      if (!shown()) return;
+      const link = (event.target as Element | null)?.closest?.("a[href^='#/page/']") ?? null;
+      const id = link === null ? null : docsPageOf(link.getAttribute("href") ?? "");
+      if (id !== null && tree !== null && spaceOfPage(tree, id) === undefined) void needParts({ pages: [id] });
+    };
+    const offDown = on(document, "pointerdown", pressed, { capture: true, passive: true });
+    const offKey = on(document, "keydown", pressed, { capture: true, passive: true });
+    return () => {
+      offDown();
+      offKey();
+    };
+  });
+
   $effect(() => {
     const id = target;
     if (!ready) return;
@@ -632,6 +661,11 @@
       refresh.reset();
       void readPage(id, false);
       void readDetail(id, false);
+    });
+    // In this task the new page as the answer cache keeps it, else its frame (`frame`): the page before never stands
+    // under the new address (Björn, 2026-11-25), and a page read before never shows a frame.
+    untrack(() => {
+      if (page?.entity_id !== id) page = io.docsPageKept?.(id) ?? null;
     });
     // Another page, or none: the reads asked for this one are dropped.
     return () => {
@@ -728,6 +762,19 @@
   });
   const parent = $derived(page?.ancestors.at(-1));
   const current = $derived(page?.entity_id ?? target);
+  /**
+   * The page being opened, as the tree knows it, while its read is out (Björn, 2026-11-25; Fable's ruling,
+   * `docs/decisions/2026-11-25-a-docs-page-opens-at-once-and-a-site-leaves-where-it-is.md`): its frame is drawn at once
+   * from this, its crumb and title in their places and the rest held, so the page it was opened from does not stand
+   * under the new address until the read lands. `title` is `null` while the tree does not hold the page.
+   */
+  const frame = $derived.by(() => {
+    if (target === null || page !== null || tree === null) return null;
+    const space = spaceOfPage(tree, target);
+    const node = space?.pages.find((one) => one.entity_id === target);
+    const up = node?.parent == null ? undefined : space?.pages.find((one) => one.entity_id === node.parent);
+    return { space: node === undefined ? undefined : space, title: node?.title ?? null, parent: up ?? null };
+  });
   const searching = $derived(query.trim() !== "");
   const forYou = $derived(forYouIn(tree?.for_you ?? [], shownSpace));
 
@@ -1288,7 +1335,8 @@
 
   /** Set by typing in the box: emptied by hand, the bar stays, because the next word is on its way. */
   let findTyped = $state(false);
-  const findOpen = $derived((find !== "" || findTyped) && page !== null);
+  // The bar stays over a page's frame (`frame`), so the title under it does not step up and back as the next page opens.
+  const findOpen = $derived((find !== "" || findTyped) && (page !== null || frame !== null));
 
   /** What the find bar marks, from anything but the bar's own box. */
   function setFind(words: string): void {
@@ -2092,38 +2140,54 @@
       {:else}
         <TfNothingHere message="This page could not be opened: {pageError}" onretry={target === null ? undefined : () => void readPage(target, false)} />
       {/if}
-    {:else if page === null}
-      <div class="tf-skel tf-skel-lines tf-dh-wait" aria-label="Reading the page" role="status">
-        {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
-      </div>
     {:else}
+      <!-- The page, or while its read is out its frame (`frame`): one set of nodes, so the crumb, the title and the
+           actions' room stand where the read draws them, and focus on the title stays on it. -->
       {@const p = page}
-      {@const created = createdBy(p)}
+      {@const f = p === null ? frame : null}
+      {@const created = p === null ? null : createdBy(p)}
     <nav class="tf-crumbs tf-rd-crumbrow" aria-label="Breadcrumb">
       <div class="tf-rd-crumb">
         <a href="#/docs">Docs</a>
-        {#if p.space}
+        {#if p?.space}
           {@const ownSpace = treeSpace(tree.spaces, p.source_id, p.space.key)}
           › <a href={crumbSpace ?? undefined}>{ownSpace ? spaceTitle(ownSpace, tree.spaces) : spaceName(p.space)}</a>
+        {:else if f?.space}
+          › <a href={spaceHash(tree.spaces, f.space)}>{spaceTitle(f.space, tree.spaces)}</a>
         {/if}
-        {#if parent}
+        {#if p !== null && parent}
           › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
+        {:else if f?.parent}
+          › <a href={pageHash(f.parent.entity_id)}>{f.parent.title}</a>
         {/if}
-        › <strong><TfMarked text={p.title} {stems} /></strong>
+        {#if p !== null}
+          › <strong><TfMarked text={p.title} {stems} /></strong>
+        {:else if f?.title != null}
+          › <strong>{f.title}</strong>
+        {/if}
       </div>
       <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
       {#if back !== null}<TfBackHint {back} />{/if}
     </nav>
       <div class="tf-rd-sheet" class:tf-rd-solo={outlineFolds} bind:this={sheet} {@attach sideWidth("docs-outline")}>
         {#if !outlineFolds}<TfSideEdge side="docs-outline" />{/if}
-        <article class="tf-rd-page" bind:this={article}>
+        <article class="tf-rd-page" bind:this={article} aria-busy={p === null ? "true" : undefined}>
           <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
                Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->
           <div class="tf-fhead tf-rd-head">
             <h1 class="tf-rd-title" tabindex="-1">
-              <TfMarked text={p.title} {stems} />
+              {#if p !== null}<TfMarked text={p.title} {stems} />{:else if f?.title != null}{f.title}{:else}<span class="tf-skel tf-rd-tbar" aria-label="Reading the page" role="status"><span class="tf-skel-bar"></span></span>{/if}
             </h1>
-            <div class="tf-acts" class:tf-hidden={!actsHeld.shown} bind:this={headActs}>
+            {#if p !== null || f?.title != null}
+            <!-- In a frame the actions are the page's as far as known, unseen and inert, holding their room (Fable's ruling). -->
+            <div class="tf-acts" class:tf-hidden={!actsHeld.shown || p === null} inert={p === null} bind:this={headActs}>
+              {#if p === null}
+                {@const source = f?.space?.source_id ?? null}
+                {#if job !== null && linkPorts}<button type="button" class="tf-btn">Link to <TfKey value={job} /></button>{/if}
+                {#if source !== null && makers?.has(source)}<button type="button" class="tf-btn">New page…</button>{/if}
+                <TfDocMore onlink={linkPorts ? () => {} : undefined} oncopy={() => {}} onexport={() => {}} sync={syncForMore} />
+                {#if f?.space}<button type="button" class="tf-btn tf-ghost"><span class="tf-cut">Open in {f.space.source_name}</span></button>{/if}
+              {:else}
               {#if job !== null && linkPorts}
                 {@const key = job}
                 {@const ref = jobAt ?? job}
@@ -2154,13 +2218,19 @@
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" title="Open in {p.source_name}" onclick={() => open(url, p.source_id)}><span class="tf-cut">Open in {p.source_name}</span></button>
               {/if}
+              {/if}
               {#if !syncInMore && !beside}
                 <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
               {:else if detail !== null}
                 <TfDetailRefresh {detail} {refresh} {reread} page noun="page" />
               {/if}
             </div>
+            {/if}
           </div>
+          {#if p === null}
+            <!-- The meta line's room, one line high and without its rule, which comes with the meta (labels can wrap it). -->
+            <div class="tf-rd-meta tf-rd-held" aria-hidden="true"><span>&nbsp;</span></div>
+          {:else}
           <div class="tf-rd-meta">
             {#if p.editor !== null || p.updated_at !== null}
               <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
@@ -2180,13 +2250,19 @@
               </span>
             {/if}
           </div>
-          {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
-          {#if outlineFolds}
+          {/if}
+          {#if detail !== null && p !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
+          {#if outlineFolds && p !== null}
             {#key p.entity_id}
               <TfDocOutline page={p} {stems} active={marked} folded onpick={pickSection} />
             {/key}
           {/if}
           <div class="tf-doc">
+            {#if p === null}
+              <div class="tf-skel tf-skel-lines tf-rd-wait" aria-hidden="true">
+                {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
+              </div>
+            {:else}
             {#if p.readable}
               <TfDocBody
                 bind:this={body}
@@ -2269,10 +2345,16 @@
                 </div>
               {/if}
             </div>
+            {/if}
           </div>
         </article>
         {#if !outlineFolds}
-          <TfDocOutline page={p} {stems} active={marked} folded={false} onpick={pickSection} />
+          {#if p === null}
+            <!-- The outline's room, held empty: the page beside it keeps its width as the read lands. -->
+            <aside class="tf-rd-outline" aria-hidden="true"></aside>
+          {:else}
+            <TfDocOutline page={p} {stems} active={marked} folded={false} onpick={pickSection} />
+          {/if}
         {/if}
       </div>
     {/if}

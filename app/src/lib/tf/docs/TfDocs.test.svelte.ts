@@ -237,6 +237,85 @@ test("back on the home, Continue reading is read after the visit is in, so it na
   expect(row?.getAttribute("href")).toBe("#/page/confluence%3A1");
 });
 
+/** The frame after the one drawn now, and what it set off. */
+async function nextFrame(): Promise<void> {
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  await settle();
+}
+
+const crumbs = () => target.querySelector(".tf-rd-crumb")?.textContent?.replace(/\s+/g, " ").trim();
+
+test("a page opened from another draws its frame before the next paint, never the page before under its address (Björn, 2026-11-25)", async () => {
+  let land: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn((id: string) => (id === "confluence:1" ? new Promise<DocPage>((resolve) => (land = resolve)) : Promise.resolve(PAGE)));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(target.querySelector("h1")?.textContent?.trim()).toBe("On-call handbook");
+  const title = target.querySelector("h1.tf-rd-title")!;
+
+  props.rest = ["confluence:1"];
+  flushSync();
+  expect(target.textContent, "the page before goes in the press's own task").not.toContain("Rewriting it.");
+  await nextFrame();
+  // The tree holds the page: its crumb and title stand where the read draws them, the rest is held.
+  expect(target.querySelector("h1.tf-rd-title"), "the title is the same node").toBe(title);
+  expect(title.textContent?.trim()).toBe("Ops home");
+  expect(crumbs()).toBe("Docs › Operations › Ops home");
+  expect(target.querySelector(".tf-rd-page")?.getAttribute("aria-busy")).toBe("true");
+  expect(target.querySelector(".tf-rd-meta.tf-rd-held")).not.toBeNull();
+  expect(target.querySelector(".tf-doc .tf-skel")).not.toBeNull();
+  expect(target.textContent, "nothing of the page before").not.toContain("Rewriting it.");
+  expect(target.querySelector<HTMLElement>(".tf-rd-head .tf-acts")?.inert === true).toBe(true);
+  expect(target.querySelector(".tf-rd-head .tf-acts")?.classList.contains("tf-hidden")).toBe(true);
+
+  land({ ...OTHER, comments: [] });
+  await settle();
+  expect(target.querySelector("h1.tf-rd-title"), "the read lands in the same title").toBe(title);
+  expect(title.textContent?.trim()).toBe("Ops home");
+  expect(target.querySelector(".tf-rd-page")?.hasAttribute("aria-busy")).toBe(false);
+  expect(target.querySelector(".tf-rd-held")).toBeNull();
+  expect(target.querySelector(".tf-doc .tf-skel")).toBeNull();
+  expect(target.querySelector<HTMLElement>(".tf-rd-head .tf-acts")?.inert === true).toBe(false);
+});
+
+test("a kept answer draws the next page in the press's own task: its frame is never drawn (Fable's ruling, 2026-11-25)", async () => {
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : PAGE));
+  const docsPageKept = (id: string) => (id === "confluence:1" ? OTHER : undefined);
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, docsPageKept }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  const held: Element[] = [];
+  const seen = new MutationObserver((records) => {
+    for (const record of records) for (const node of record.addedNodes) if (node instanceof Element && (node.matches(".tf-skel, .tf-rd-held") || node.querySelector(".tf-skel, .tf-rd-held"))) held.push(node);
+  });
+  seen.observe(target, { childList: true, subtree: true });
+  props.rest = ["confluence:1"];
+  flushSync();
+  expect(target.querySelector("h1")?.textContent?.trim(), "drawn in the press's own task").toBe("Ops home");
+  await nextFrame();
+  seen.disconnect();
+  expect(target.querySelector("h1")?.textContent?.trim()).toBe("Ops home");
+  expect(held).toEqual([]);
+});
+
+test("a page the tree does not hold yet is framed with a bar for its title and no actions, and the read fills it", async () => {
+  let land: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn((id: string) => (id === "confluence:77" ? new Promise<DocPage>((resolve) => (land = resolve)) : Promise.resolve(PAGE)));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  props.rest = ["confluence:77"];
+  await nextFrame();
+  expect(target.querySelector("h1.tf-rd-title .tf-skel")).not.toBeNull();
+  expect(crumbs()).toBe("Docs");
+  expect(target.querySelector(".tf-rd-head .tf-acts")).toBeNull();
+  land({ ...OTHER, entity_id: "confluence:77", title: "Far page" });
+  await settle();
+  expect(target.querySelector("h1")?.textContent?.trim()).toBe("Far page");
+  expect(target.querySelector(".tf-skel")).toBeNull();
+});
+
 test("the home follows from a page: what was open goes, and coming back to the page reads it again", async () => {
   const io = ports();
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: io });

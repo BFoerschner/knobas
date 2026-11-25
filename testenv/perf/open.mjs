@@ -100,6 +100,9 @@ const PLACES = [
   { name: "docs", start: "#/time", press: nav("docs"), hash: "#/docs", useful: ".tf-dh-row", min: 5, away: "time" },
   { name: "docs-space", parent: "docs", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/SCLENG"]`, hash: "#/docs/space/", useful: ".tf-dh-row", min: 10, back: "Escape" },
   { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main h1", min: 1, titled: true, back: "Escape" },
+  // A page opened from another page (Björn, 2026-11-25: the old page stayed until the new one was read), SCLENG's *API
+  // reference* to its *Architecture*: useful once the new page is drawn, not its frame, which waits (`aria-busy`, bars).
+  { name: "docs-page-next", start: "#/page/live-confluence%3A360519", go: "#/page/live-confluence%3A360508", hash: "#/page/live-confluence%3A360508", useful: ".tf-rd-main .tf-rd-page:not([aria-busy]) h1", min: 1, rounds: ["first"], away: "time" },
   // A page come back to by Docs' entry from another section (2026-11-13): `before` opens it once, and it has no first visit.
   { name: "docs-page-back", start: "#/docs/space/SCLENG", before: `${shown} a.tf-dh-rowt[href^="#/page/"]`, returnsOnly: true, press: nav("docs"), hash: "#/page/", useful: ".tf-rd-main h1", min: 1, marks: { held: [[".tf-rd-head .tf-acts", 1]] }, away: "time" },
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },

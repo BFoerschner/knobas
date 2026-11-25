@@ -181,6 +181,21 @@
     "moved": 0
    }
   },
+  "docs-page-next": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
   "docs-page-back": {
    "1": {
     "usefulMs": 100,

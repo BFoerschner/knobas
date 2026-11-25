@@ -210,6 +210,16 @@ export const QUIET: ReadonlySet<string> = new Set([
   "launcher_home",
   // The asset types: a table compiled into the app (ux30 Windows pass), never the mirror.
   "asset_types",
+  // A source's site inside knobas (ADR-0050): showing, hiding, pointing and closing its view, and asking the mirror what
+  // the address names, move nothing the mirror answers. Unknown here, each one dropped every kept answer, so every page
+  // opened after a visit to a site read the backend again (Fable's ruling, 2026-11-25).
+  "site_open",
+  "site_show",
+  "site_hide",
+  "site_do",
+  "site_answer",
+  "site_close",
+  "resolve_url",
 ]);
 
 /** The reads a visit (`visit_entity`) cannot move: none of them reads the activity log. */
@@ -473,6 +483,17 @@ export function heldRow(entityId: string): { entity_id: string; source_id: strin
     }
   }
   return null;
+}
+
+/**
+ * The kept answer to `cmd` with `args`, a copy, or `undefined` when none is kept: for a page that draws in the press's
+ * own task what a read would answer a moment later, so it never draws a wait for it (a Docs page opened from another,
+ * Fable's ruling, 2026-11-25). Asks nothing.
+ */
+export function keptAnswer<T>(cmd: string, args: unknown): T | undefined {
+  if (!enabled || !READS.has(cmd)) return undefined;
+  const held = kept.get(keyOf(cmd, args));
+  return held === undefined ? undefined : (copy(held.value) as T);
 }
 
 /**
