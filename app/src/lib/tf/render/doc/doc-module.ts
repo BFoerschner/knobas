@@ -1,6 +1,7 @@
 /**
- * The XML view's component, held once loaded: it loads with the first document opened, never at start-up; after that a
- * document opened is drawn in the press's own task, as the API explorer's is (`oas-module.ts`).
+ * The XML view's component, held once loaded: never in the start's chunks. It loads at idle after the start, where the
+ * view is warmed (`doc-warm.ts`), or with the first document opened before that; after that a document opened is drawn
+ * in the press's own task, as the API explorer's is (`oas-module.ts`).
  */
 import { quietAndIdle } from "../../ahead";
 
@@ -29,4 +30,30 @@ export function loadAhead(key: string, load: () => unknown, later: () => Promise
   void later()
     .then(load)
     .catch(() => ahead.delete(key));
+}
+
+/** A document was opened for real this session (any XML view but the warm one). */
+let real = false;
+let onReal: (() => void) | null = null;
+
+/** A document opened for real: what is still to warm is left, and a hidden view standing comes down (`doc-warm.ts`). */
+export function documentOpened(): void {
+  real = true;
+  onReal?.();
+}
+
+/** Whether a document was opened for real this session. */
+export function openedForReal(): boolean {
+  return real;
+}
+
+/** What a document opened for real calls: the warm-up's take-down while its view stands, else `null`. */
+export function onOpenedForReal(go: (() => void) | null): void {
+  onReal = go;
+}
+
+/** Tests only: a new session. */
+export function forgetOpened(): void {
+  real = false;
+  onReal = null;
 }

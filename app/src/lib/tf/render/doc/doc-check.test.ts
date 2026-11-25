@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
-import { DocCheck, entryFor, likelyKept, rootSays, sameAsk, settingsFor } from "./doc-check.svelte";
+import { DocCheck, entryFor, forgetHeld, likelyKept, rootSays, sameAsk, settingsFor } from "./doc-check.svelte";
+import { hintKey, hintStore, hintedPaths } from "../../../render/xsd-hint";
 import type { DocSession } from "../../../render/doc-port";
 import type { XsdEngine } from "../../../render/xsd-port";
 import { ns } from "../../../render/xml-names";
@@ -211,4 +212,69 @@ test("a document checked again places its departures as its worker did, without 
   // Another text is read to another outline: asked.
   await two.run("a.xml", ROOT, "<a>two</a>", counting, reads, true);
   expect(asked).toBe(2);
+});
+
+// ---- The first open (2026-11-25, Fable's ruling) ----
+
+/** A hint store held in memory. */
+function memoryHints() {
+  const held = new Map<string, string>();
+  return hintStore(() => ({ getItem: (k) => held.get(k) ?? null, setItem: (k, v) => void held.set(k, v), removeItem: (k) => void held.delete(k) }));
+}
+/** A worker whose set needs one file, then is whole; it answers the verdict with the round where the document came with the open. */
+function roundsEngine(calls: { kind: string; xml?: boolean; hinted?: string[] }[]): XsdEngine {
+  let xml = false;
+  return async (s, call) => {
+    calls.push({ kind: call.kind, ...(call.kind === "open" ? { xml: call.xml !== undefined } : {}), ...(call.kind === "addFiles" && call.hinted !== undefined ? { hinted: call.hinted.map((f) => f.path) } : {}) });
+    if (call.kind === "open") {
+      xml = call.xml !== undefined;
+      return { ok: true, index: INDEX, need: ["schemas/s.xsd"] };
+    }
+    if (call.kind === "addFiles") return { ok: true, index: INDEX, need: [], ...(xml ? { checked: await engine(s, { kind: "check", xml: "" }) } : {}) };
+    return engine(s, call);
+  };
+}
+
+test("the document crosses once, with the open: the round that leaves the set whole answers its verdict, and no check is asked", async () => {
+  const calls: { kind: string; xml?: boolean }[] = [];
+  const c = new DocCheck("r\na.xml", roundsEngine(calls), { hints: null });
+  await c.run("a.xml", ROOT, "<a/>", placed, reads, true);
+  expect(calls.map((x) => x.kind)).toEqual(["open", "addFiles"]);
+  expect(calls[0]).toMatchObject({ xml: true });
+  expect(c.head).toMatchObject({ k: "checked", count: 1 });
+  expect(c.found.map((f) => f.line)).toEqual([3]);
+});
+
+test("a check read at a pin and checked whole keeps its set's paths; the next first open reads them in its first round", async () => {
+  const hints = memoryHints();
+  const keep = { scope: "r", at: "c1" };
+  const index = { ...INDEX, files: [...INDEX.files, { ...FILE, depth: 2, path: "schemas/t.xsd" }, { ...FILE, depth: 2, path: "@knobas/xml.xsd", found: "bundled" }] };
+  const first = new DocCheck("r\na.xml", async (s, call) => (call.kind === "open" ? { ok: true, index, need: [] } : engine(s, call)), { hints });
+  await first.run("a.xml", ROOT, "<a/>", placed, { ...reads, keep }, true);
+  expect(first.head).toMatchObject({ k: "checked" });
+  const key = hintKey("r", entryFor("a.xml", ROOT)!.path, entryFor("a.xml", ROOT)!.text);
+  // The bundled schema is never read through the port: not hinted.
+  expect(hintedPaths(hints, key)).toEqual(["schemas/s.xsd", "schemas/t.xsd"]);
+  forgetHeld();
+  const calls: { kind: string; hinted?: string[] }[] = [];
+  const read: string[] = [];
+  const next = new DocCheck("r\nb.xml", roundsEngine(calls), { hints });
+  await next.run("b.xml", ROOT, "<a/>", placed, { ...reads, keep, read: async (p: string) => (read.push(p), "<x/>") }, true);
+  expect(read.sort()).toEqual(["schemas/s.xsd", "schemas/t.xsd"]);
+  expect(calls.find((x) => x.kind === "addFiles")).toMatchObject({ hinted: ["schemas/t.xsd"] });
+  expect(next.head).toMatchObject({ k: "checked" });
+});
+
+test("no hint is kept where the reads are not pinned, nor where the set was not checked", async () => {
+  const hints = memoryHints();
+  const key = hintKey("r", entryFor("a.xml", ROOT)!.path, entryFor("a.xml", ROOT)!.text);
+  const loose = new DocCheck("r\na.xml", engine, { hints });
+  await loose.run("a.xml", ROOT, "<a/>", placed, { ...reads, keep: null }, true);
+  expect(loose.head).toMatchObject({ k: "checked" });
+  expect(hintedPaths(hints, key)).toEqual([]);
+  const notChecked: XsdEngine = async (s, call) => (call.kind === "check" ? { state: "not-checked", why: "not compiled", detail: ["x"] } : engine(s, call));
+  const bad = new DocCheck("r\na.xml", notChecked, { hints });
+  await bad.run("a.xml", ROOT, "<a/>", placed, { ...reads, keep: { scope: "r", at: "c1" } }, true);
+  expect(bad.head).toMatchObject({ k: "not-checked" });
+  expect(hintedPaths(hints, key)).toEqual([]);
 });

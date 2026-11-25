@@ -31,6 +31,7 @@
   import TfDocResults from "./TfDocResults.svelte";
   import TfMenu from "../../TfMenu.svelte";
   import { DocState, contentOf, remember } from "./doc.svelte";
+  import { documentOpened } from "./doc-module";
   import { UNITS, countInside } from "../../../render/doc-folds";
   import type { CopyWhat, ValueAt } from "../../../render/doc-model";
   import TfValueViewer, { type LookedAt } from "../TfValueViewer.svelte";
@@ -54,7 +55,7 @@
   import { push } from "../../../shell/toasts.svelte";
   import { jsonQuery, jsonQueryClose } from "../../../ipc/api";
   import { DOC_KEYS, isKey } from "./doc-keys";
-  import { DocCheck, heldSettings, likelyKept, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
+  import { DocCheck, heldSettings, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
   import TfXsdPage from "../xsd/TfXsdPage.svelte";
   import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
   import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
@@ -84,6 +85,7 @@
     inline = false,
     verdict = undefined,
     against = null,
+    warming = false,
   }: {
     text: string;
     /** The file's path from the repository's top. */
@@ -137,6 +139,8 @@
       /** What `read` stands on where it does not move: the check's set is kept whole by it (`xsd-kept.ts`). */
       keep?: import("../../../render/xsd-kept").KeepAt | null;
     } | null;
+    /** The view drawn hidden at idle to warm its code (`doc-warm.ts`): not a document opened. */
+    warming?: boolean;
     /** How a value pipeline runs and saves over this file; `null` where no pipeline can run (no value is looked at). */
     values?: { run: (steps: PipeStep[]) => Promise<PipeRun>; save: (steps: PipeStep[], name: string) => Promise<string> } | null;
     /**
@@ -151,6 +155,8 @@
   } = $props();
 
   const kept = $derived(pipelines ?? namedPipelines);
+  // A document opened for real: what is still to warm is left (`doc-warm.ts`).
+  if (!untrack(() => warming)) documentOpened();
 
   /**
    * The lines of a document a row is, at code's size of 100 %: one height for every row, so a windowed list of 800,000
@@ -299,17 +305,18 @@
         keep: port.keep ?? null,
       }, on, shown);
     const read = () => Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]).then(([pointed, on]) => ({ pointed, on }));
-    // A check not likely kept whole starts once the outline has landed, as it always did: its Settings, its open and its
-    // reads would slow the outline's paint (a first open's carets, 523 to 569 ms at 6x on 2560 x 1440 at 1.25).
+    // With no Settings held, a check starts once the outline has landed, on the Settings it reads then: their reads would
+    // slow the outline's paint (a first open's carets, 523 to 569 ms at 6x on 2560 x 1440 at 1.25).
     const last = heldSettings();
-    if (last === null || !last.on || !likelyKept(path, root, port.keep, last.pointed)) {
+    if (last === null || !last.on) {
       if (!(await landed) || check !== c) return;
       const fresh = await settingsFor(read).fresh;
       if (check === c) await go(fresh, landed);
       return;
     }
-    // One likely kept starts now, on the Settings the last check read: drawn only where they read the same again, else
-    // started again on them.
+    // With Settings held (the last check's, or those read at idle by the warm-up, `doc-warm.ts`), it starts now on them:
+    // drawn only where they read the same again, else started again on them. It reads no file before the outline has
+    // landed (`DocCheck.run`).
     const settings = settingsFor(read);
     void settings.same.then((same) => {
       if (!same && check === c) void settings.fresh.then((fresh) => (check === c ? go(fresh, landed) : undefined));

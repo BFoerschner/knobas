@@ -110,6 +110,20 @@ export interface XsdReads {
 
 let nextSession = 0;
 
+/** Reads `paths` through the port's reads, {@link AT_ONCE} at a time, each at most {@link FILE_CAP}; in their order. */
+async function readAll(reads: XsdReads, paths: readonly string[]): Promise<{ path: string; text: string | null }[]> {
+  const out = new Map<string, string | null>();
+  const queue = [...paths];
+  const work = async () => {
+    for (let p = queue.shift(); p !== undefined; p = queue.shift()) {
+      const text = await (p.startsWith("@") ? (reads.readAway?.(p) ?? Promise.resolve(null)) : reads.read(p)).catch(() => null);
+      out.set(p, text !== null && text.length > FILE_CAP ? null : text);
+    }
+  };
+  await Promise.all(Array.from({ length: AT_ONCE }, work));
+  return paths.map((path) => ({ path, text: out.get(path) ?? null }));
+}
+
 /** An answer to an open, or what a worker that answered nothing usable means. */
 function opened(result: unknown): Opened {
   if (result !== null && typeof result === "object" && "ok" in result) return result as Opened;
@@ -129,6 +143,8 @@ export class XsdPort {
   index: SetIndex | null = null;
   /** Settles once every file the set needs has been read (or found not to be). */
   whole: Promise<void> = Promise.resolve();
+  /** The verdict on the document that crossed with the open, from the round that left the set whole. */
+  checked: Checked | null = null;
 
   constructor(engine: XsdEngine) {
     this.#engine = engine;
@@ -147,39 +163,44 @@ export class XsdPort {
   /**
    * Reads the opened file alone and answers at once; the files it names are read after (`onindex`), once `after`
    * settles true (the XML view's outline: its reads never slow the outline's paint). A set kept whole needs none.
+   *
+   * - `xml`: the document a check reads, crossed once: the round that leaves the set whole answers its verdict too
+   *   ({@link checked}), with no trip of its own.
+   * - `hint`: the paths the set read last time (`xsd-hint.ts`), read once `after` settles, six at a time, beside the
+   *   first round; the worker takes each only when its own walk asks for it.
    */
-  async open(entry: string, text: string, reads: XsdReads, home?: string, lean = false, after: Promise<boolean> | null = null): Promise<Opened> {
+  async open(entry: string, text: string, reads: XsdReads, home?: string, lean = false, after: Promise<boolean> | null = null, more: { xml?: string; hint?: readonly string[] } = {}): Promise<Opened> {
     this.#reads = reads;
     this.#entry = entry;
     const keep = reads.keep ?? null;
-    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed], ...(home !== undefined ? { home } : {}), ...(lean ? { lean } : {}), ...(keep !== null ? { keep } : {}) }));
+    const hint = more.hint ?? [];
+    const go = after ?? Promise.resolve(true);
+    // Read from the hint as soon as reads may start, beside the open's answer.
+    const hinted = hint.length === 0 ? null : go.then((yes) => (yes && !this.#closed ? readAll(reads, hint) : []));
+    const answer = opened(await this.#engine(this.#id, { kind: "open", entry, text, paths: null, pointed: [...reads.pointed], ...(home !== undefined ? { home } : {}), ...(lean ? { lean } : {}), ...(keep !== null ? { keep } : {}), ...(more.xml !== undefined ? { xml: more.xml } : {}) }));
     if (answer.ok) {
       this.index = answer.index;
+      if (answer.checked !== undefined) this.checked = answer.checked;
       const need = answer.need;
-      if (need.length > 0) this.whole = after === null ? this.#follow(need) : after.then((go) => (go ? this.#follow(need) : undefined));
+      if (need.length > 0) this.whole = after === null ? this.#follow(need, hinted) : after.then((yes) => (yes ? this.#follow(need, hinted) : undefined));
     }
     return answer;
   }
 
-  /** Reads what the set needs, round after round, until it needs nothing. */
-  async #follow(need: readonly string[]): Promise<void> {
+  /** Reads what the set needs, round after round, until it needs nothing; the first round brings what the hint read. */
+  async #follow(need: readonly string[], hinted: Promise<{ path: string; text: string | null }[]> | null = null): Promise<void> {
     let ask = need;
     const asked = new Set<string>();
     for (let round = 0; round < 64 && ask.length > 0 && !this.#closed; round += 1) {
       const reads = this.#reads!;
-      const files: { path: string; text: string | null }[] = [];
       let index: SchemaIndexWire | undefined;
       let elsewhere: { namespace: string; list: Elsewhere[] } | undefined;
       const wanted = ask.filter((p) => !p.startsWith("?") && !asked.has(p));
       for (const p of ask) asked.add(p);
-      const queue = [...wanted];
-      const work = async () => {
-        for (let p = queue.shift(); p !== undefined; p = queue.shift()) {
-          const text = await (p.startsWith("@") ? (reads.readAway?.(p) ?? Promise.resolve(null)) : reads.read(p)).catch(() => null);
-          files.push({ path: p, text: text !== null && text.length > FILE_CAP ? null : text });
-        }
-      };
-      await Promise.all(Array.from({ length: AT_ONCE }, work));
+      const byHint = round === 0 && hinted !== null ? await hinted : [];
+      const had = new Map(byHint.map((f) => [f.path, f]));
+      const files = [...wanted.flatMap((p) => had.get(p) ?? []), ...(await readAll(reads, wanted.filter((p) => !had.has(p))))];
+      const aside = byHint.filter((f) => !wanted.includes(f.path));
       let paths: string[] | undefined;
       if (ask.includes("?index")) {
         paths = [...(await reads.paths().catch(() => []))];
@@ -192,11 +213,13 @@ export class XsdPort {
       }
       if (this.#closed) return;
       const call: XsdCall = { kind: "addFiles", files };
+      if (aside.length > 0) call.hinted = aside;
       if (index !== undefined) call.index = index;
       if (paths !== undefined) call.paths = paths;
       if (elsewhere !== undefined) call.elsewhere = elsewhere;
       const answer = opened(await this.#engine(this.#id, call));
       if (!answer.ok || this.#closed) return;
+      if (answer.checked !== undefined) this.checked = answer.checked;
       this.index = answer.index;
       this.onindex?.(answer.index);
       // Ask each path once: a file that answered nothing is not asked again.

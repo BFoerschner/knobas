@@ -124,6 +124,9 @@ export function keepIfWhole(store: KeptSets, s: XsdSession): void {
   const base: XsdSession = { ...s, rows: new Map(), tree: new Map() };
   delete base.kept;
   delete base.verifying;
+  // The set, never a document checked against it nor a hint held aside: each session brings its own.
+  delete base.xml;
+  delete base.hinted;
   const kept: Kept = { key: keep.key, scope: keep.scope, at: keep.at, base, refs: 1, bytes, verify: movingOf(s) };
   store.set(keep.key, kept);
   s.kept = kept;

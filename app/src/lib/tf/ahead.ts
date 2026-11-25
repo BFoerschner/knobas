@@ -66,6 +66,12 @@ function twoFrames(): Promise<void> {
 }
 
 let started = false;
+let built: () => void = () => {};
+/**
+ * Settles once the sections opened ahead are built, or left (a shell taken down): what warms after them waits for it
+ * (`doc-warm.ts`), so it never goes ahead of a section. Never where no section is opened ahead this session.
+ */
+export const aheadBuilt: Promise<void> = new Promise((resolve) => (built = resolve));
 
 /**
  * Opens {@link AHEAD}'s sections hidden, one at a time, each once the window is `ready()` and `wait` has passed (the
@@ -93,14 +99,16 @@ export function openAhead(
         await new Promise((resolve) => setTimeout(resolve, 250));
         await wait();
       }
-      if (stopped) return;
+      if (stopped) return built();
       if (current() === section) continue;
       holdAhead(hrefOf(section));
       if (wait === quietAndIdle) await twoFrames();
     }
+    built();
   })();
   return () => {
     stopped = true;
+    built();
   };
 }
 

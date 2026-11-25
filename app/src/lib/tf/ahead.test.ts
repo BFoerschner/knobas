@@ -2,7 +2,7 @@
  * The sections opened ahead of their press (the ux13-overs pass, 2026-11-15): the shell asks the page host to hold
  * each hidden, one at a time, once the window is ready and quiet, never the section the reader is in.
  */
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { AHEAD, AHEAD_QUIET_MS, forgetAhead, openAhead, quietAndIdle } from "./ahead";
 import { takeAhead } from "./kept-pages.svelte";
@@ -96,3 +96,22 @@ test("a field's input is the reader's too: a colour picker's drag, which the pag
     field.remove();
   }
 }, 10_000);
+
+test("what warms after the sections waits for them: aheadBuilt settles once the last is built, or the shell stops", async () => {
+  for (const stop of [false, true]) {
+    vi.resetModules();
+    const fresh = await import("./ahead");
+    let settled = false;
+    void fresh.aheadBuilt.then(() => (settled = true));
+    const { wait, pass } = gate();
+    const stopIt = fresh.openAhead(() => true, () => null, undefined, wait, ["tickets", "builds"]);
+    await pass();
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(settled, "one section still to build").toBe(false);
+    if (stop) stopIt();
+    else await pass();
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(settled).toBe(true);
+    fresh.forgetAhead();
+  }
+});
