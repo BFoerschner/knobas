@@ -176,9 +176,18 @@ export function problemsText(groups: readonly { path: string; list: Problem[] }[
     .join("\n");
 }
 
-/** What a target reads as in the dialog's sub line and a menu. */
-export function targetLabel(target: OneOffTarget, repo: string): string {
+/**
+ * What a target reads as in the dialog's sub line and a menu. `rendererName` names a folder renderer by its id, for a
+ * generated folder's target (its id where it is not given).
+ */
+export function targetLabel(target: OneOffTarget, repo: string, rendererName: (id: string) => string = (id) => id): string {
   switch (target.kind) {
+    case "made":
+    case "made_files": {
+      const what = target.kind === "made_files" ? many(target.paths.length, "generated file", "generated files") : target.path === "" ? null : target.dir ? `${target.path}/` : target.path;
+      const folder = target.folder === "" ? repo : `${target.folder}/`;
+      return `${what === null ? folder : `${what} in ${folder}`} as ${rendererName(target.renderer)} made it, in ${repo}: knobas's kept copy`;
+    }
     case "file":
       return `${target.path} in ${repo}`;
     case "folder":
@@ -416,6 +425,21 @@ export function takesFolder(c: OneOff, path: string, own: readonly string[] | nu
     (c.has.length === 0 || own === null || c.has.some((p) => own.some((name) => glob(p, name)))) &&
     inRepository(c, facts)
   );
+}
+
+/** The git placeholder a command holds, which a generated folder has no value for (ADR-0060 amended 2026-11-25). */
+export function gitName(c: OneOff): string | null {
+  return ["{sha}", "{base}", "{head}", "{branch}"].find((name) => c.command.includes(name)) ?? null;
+}
+
+/** Whether `c` takes a generated folder's file at `path` (from the generated folder's top): a file's command with no git name. */
+export function takesMadeFile(c: OneOff, path: string, facts: Facts): boolean {
+  return gitName(c) === null && takesFile(c, path, facts);
+}
+
+/** Whether `c` takes a generated folder's folder at `path` (`""` its top), whose own files are `own`. */
+export function takesMadeFolder(c: OneOff, path: string, own: readonly string[] | null, facts: Facts): boolean {
+  return gitName(c) === null && takesFolder(c, path, own, facts);
 }
 
 /** Whether `c` takes the repository itself. */

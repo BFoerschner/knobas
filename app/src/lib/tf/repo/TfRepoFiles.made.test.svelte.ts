@@ -628,3 +628,33 @@ test("the first rows keep the view when the band is scrolled above it", async ()
     Element.prototype.getBoundingClientRect = rect;
   }
 });
+
+test("the bar's Run… runs on the generated folder knobas kept, its files and its token, never the real folder (Björn, 2026-11-25)", async () => {
+  const { oneoffs } = await import("../../render/oneoff.svelte");
+  const base = { stdin: "none" as const, folders: [], has: [], repo_holds: [], repos: [], shows: "auto" as const, start_in: "root" as const, path: [], env: [], colours: true, timeout_secs: 120, wsl_paths: false };
+  const had = oneoffs.commands;
+  oneoffs.commands = [
+    { ...base, id: "mdlint", name: "Markdown lint", command: "mdlint {file}", files: ["*.md"] },
+    { ...base, id: "tree", name: "Tree", command: "tree {dir}", files: [] },
+    { ...base, id: "blame", name: "Blame", command: "blame {dir} {branch}", files: [] },
+  ];
+  try {
+    draw({ rendered: RENDERED });
+    await settle();
+    expect(oneoffs.madeOf(REPO, "site", "flows/orders")).toMatchObject({ token: "A", dir: "/s/knobas-rendered/x/orders.site.A" });
+    const face = target.querySelector<HTMLButtonElement>(".tf-madebar .tf-oo-runin button")!;
+    expect(face.disabled).toBe(false);
+    face.click();
+    flushSync();
+    const rows = [...document.querySelectorAll(".tf-oo-menu [role=menuitem]")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+    // The generated file shown's command first, then the folder's on the kept folder, then the file command on the
+    // generated files; no command with a git name.
+    expect(rows[0]).toBe("Markdown lintmdlint /s/knobas-rendered/x/orders.site.A/README.md");
+    expect(rows[1]).toBe("Treetree /s/knobas-rendered/x/orders.site.A");
+    expect(rows).toContain("Markdown lint on 3 generated filesOne run a file, four at a time");
+    expect(rows.join(" ")).not.toContain("Blame");
+    expect(rows.join(" ")).not.toContain("main.flow");
+  } finally {
+    oneoffs.commands = had;
+  }
+});

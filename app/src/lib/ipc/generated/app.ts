@@ -533,7 +533,13 @@ bytes: number, findings: number, elapsed_ms: number, ended?: OneOffEnded | null,
 /**
  * What it made that is not its lines, once it ended.
  */
-result?: OneOffResult | null, };
+result?: OneOffResult | null, 
+/**
+ * The generated files a run on a generated folder changed, from its
+ * top, once it ended (at most [`super::made::CHANGED_SHOWN`]): the kept
+ * folder is then rendered again.
+ */
+made_changed?: Array<string> | null, };
 
 /**
  * One of the eight colours a program can name.
@@ -767,7 +773,7 @@ export type OneOffStyle = { fg?: OneOffColour, bg?: OneOffColour, bold?: boolean
 /**
  * What a command is run on.
  */
-export type OneOffTarget = { "kind": "file", path: string, lines?: [number, number] | null, at?: string | null, } | { "kind": "folder", path: string, } | { "kind": "repository" } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, path?: string | null, } | { "kind": "files", paths: Array<string>, };
+export type OneOffTarget = { "kind": "file", path: string, lines?: [number, number] | null, at?: string | null, } | { "kind": "folder", path: string, } | { "kind": "repository" } | { "kind": "commit", sha: string, } | { "kind": "range", base: string, head: string, path?: string | null, } | { "kind": "files", paths: Array<string>, } | { "kind": "made", renderer: string, folder: string, path: string, dir: boolean, lines?: [number, number] | null, } | { "kind": "made_files", renderer: string, folder: string, paths: Array<string>, };
 
 /**
  * A web address in a line: opened in the browser, nothing else.

@@ -47,7 +47,7 @@ import { endedShort, fill, kindOf, shown, stateOf, targetLabel } from "./oneoff"
 /** What the store asks of the backend: the real commands, or a test's. */
 export interface OneOffPorts {
   commands(): Promise<OneOff[]>;
-  run(entityId: string, command: string, target: OneOffTarget, onbatch: (batch: OneOffBatch) => void): Promise<{ started: OneOffStarted; stop: () => void }>;
+  run(entityId: string, command: string, target: OneOffTarget, madeToken: string | null, onbatch: (batch: OneOffBatch) => void): Promise<{ started: OneOffStarted; stop: () => void }>;
   stop(run: string): Promise<void>;
   runs(entityId: string | null): Promise<OneOffRunRow[]>;
   lines(run: string, from: number, count: number): Promise<OneOffBatch | null>;
@@ -74,7 +74,7 @@ const channelled = <T>(start: (channel: Channel<OneOffBatch>) => Promise<T>, onb
 
 export const realOneOffPorts: OneOffPorts = {
   commands: () => oneoffCommands(),
-  run: (entityId, command, target, onbatch) => channelled((ch) => oneoffRun(entityId, command, target, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
+  run: (entityId, command, target, madeToken, onbatch) => channelled((ch) => oneoffRun(entityId, command, target, madeToken, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
   stop: (run) => oneoffStop(run),
   runs: (entityId) => oneoffRuns(entityId),
   lines: (run, from, count) => oneoffLines(run, from, count),
@@ -94,8 +94,18 @@ export const realOneOffPorts: OneOffPorts = {
 };
 
 /** Where a menu was opened, as what `command` runs on: a folder's command on the repository runs on its top folder. */
-export function targetOf(at: { kind: "repository" } | { kind: "folder"; path: string } | { kind: "file"; path: string; line: number | null } | { kind: "commit"; sha: string }, command: OneOff | null = null): OneOffTarget {
+export function targetOf(
+  at:
+    | { kind: "repository" }
+    | { kind: "folder"; path: string }
+    | { kind: "file"; path: string; line: number | null }
+    | { kind: "commit"; sha: string }
+    | { kind: "made"; renderer: string; folder: string; path: string; dir: boolean; line: number | null },
+  command: OneOff | null = null,
+): OneOffTarget {
   switch (at.kind) {
+    case "made":
+      return { kind: "made", renderer: at.renderer, folder: at.folder, path: at.path, dir: at.dir, lines: at.line === null ? null : [at.line, at.line] };
     case "repository":
       return command !== null && kindOf(command.command, command.stdin) === "folder" ? { kind: "folder", path: "" } : { kind: "repository" };
     case "folder":
@@ -106,6 +116,24 @@ export function targetOf(at: { kind: "repository" } | { kind: "folder"; path: st
       return { kind: "commit", sha: at.sha };
   }
 }
+
+/**
+ * A generated folder a page keeps (ADR-0046; ADR-0060 amended 2026-11-25): the token and the folder on disk a run on it
+ * runs in, and how the page reads it back when the backend no longer holds the token (one `look`).
+ */
+export interface MadeKept {
+  token: string;
+  dir: string;
+  look?: () => Promise<void>;
+}
+
+/** Whether `target` is a generated folder's. */
+export const isMade = (target: OneOffTarget): target is Extract<OneOffTarget, { kind: "made" | "made_files" }> => target.kind === "made" || target.kind === "made_files";
+
+const madeKey = (entityId: string, renderer: string, folder: string) => `${entityId}\u0000${renderer}\u0000${folder}`;
+
+/** What a run on a generated folder says when none is kept for it (Fable, 2026-11-25). */
+export const notKept = (renderer: string, folder: string) => `${folder === "" ? "The repository" : folder} as ${renderer} makes it is not kept now. Open it, then run again.`;
 
 /** The views a run gives: its result first where it made one. */
 export type RunView = "output" | "problems" | "result" | "files";
@@ -162,6 +190,10 @@ export class Run {
   picked = false;
   /** The output line a place press or `N`/`P` stands at. */
   at = $state<number | null>(null);
+  /** The generated files a run on a generated folder changed, once it ended; a batch's, all its files'. */
+  madeChanged = $state<string[] | null>(null);
+  /** The kept folder a run on a generated folder ran in. */
+  made: MadeKept | null = null;
   /** The lines, in order, as the window holds them: plain, so a flood costs no proxy. */
   lines: OneOffLine[] = [];
   /** The longest line, in characters: the scroller's width. */
@@ -200,11 +232,19 @@ export class Run {
       this.result = batch.result;
       if (!this.picked && batch.result.from !== "refused") this.view = batch.result.from === "files" ? "files" : "result";
     }
+    if (batch.made_changed !== null && batch.made_changed !== undefined) this.changedMade(batch.made_changed);
     if (batch.ended !== null && batch.ended !== undefined) {
       this.ended = batch.ended;
       this.let();
     }
     this.version += 1;
+  }
+
+  /** Adds generated files a run changed, each once. */
+  changedMade(paths: readonly string[]): void {
+    const had = this.madeChanged ?? [];
+    const more = paths.filter((p) => !had.includes(p));
+    if (this.madeChanged === null || more.length > 0) this.madeChanged = [...had, ...more];
   }
 
   private put(line: OneOffLine): void {
@@ -262,6 +302,8 @@ export class OneOffs {
   private ports: OneOffPorts;
   /** The runs started from this window, whose ending a toast says when their dialog is closed. */
   private mine = new Set<string>();
+  /** The generated folders the pages keep now, by repository, renderer and folder. */
+  private kept = new Map<string, MadeKept>();
 
   constructor(ports: OneOffPorts = realOneOffPorts) {
     this.ports = ports;
@@ -270,6 +312,20 @@ export class OneOffs {
   /** The runs still going. */
   get running(): OneOffRunRow[] {
     return this.rows.filter((r) => r.ended === null || r.ended === undefined);
+  }
+
+  /**
+   * A page keeps the generated folder `renderer` made of `folder` (`null`: no longer): what a run on it, *Run again* and
+   * the right-click menu's rows take.
+   */
+  keepMade(entityId: string, renderer: string, folder: string, kept: MadeKept | null): void {
+    if (kept === null) this.kept.delete(madeKey(entityId, renderer, folder));
+    else this.kept.set(madeKey(entityId, renderer, folder), kept);
+  }
+
+  /** The generated folder kept now for `renderer` and `folder`, if a page keeps one. */
+  madeOf(entityId: string, renderer: string, folder: string): MadeKept | null {
+    return this.kept.get(madeKey(entityId, renderer, folder)) ?? null;
   }
 
   /** Hears runs start and end until the answer is called: the window's host holds it. */
@@ -339,21 +395,15 @@ export class OneOffs {
    */
   openRun(command: OneOff, entityId: string, repo: string, target: OneOffTarget, root: string | null = null): Run {
     this.close();
-    const filled = fill(command.command, {
-      root: root ?? repo,
-      file: target.kind === "file" ? target.path : null,
-      dir: target.kind === "folder" ? target.path : target.kind === "file" ? target.path.slice(0, Math.max(0, target.path.lastIndexOf("/"))) : target.kind === "repository" ? "" : null,
-      files: target.kind === "files" ? target.paths : [],
-      line: target.kind === "file" ? (target.lines?.[0] ?? null) : null,
-      endline: target.kind === "file" ? (target.lines?.[1] ?? null) : null,
-      sha: target.kind === "commit" ? target.sha : null,
-      base: target.kind === "range" ? target.base : null,
-      head: target.kind === "range" ? target.head : null,
-    });
-    const run = new Run(command, entityId, repo, target, "argv" in filled ? filled.argv : [command.command]);
+    const made = isMade(target) ? this.madeOf(entityId, target.renderer, target.folder) : null;
+    const run = new Run(command, entityId, repo, target, filledArgv(command, target, made?.dir ?? root ?? repo));
+    run.made = made;
     this.open = run;
-    void this.ports
-      .run(entityId, command.id, target, (batch) => run.take(batch))
+    if (isMade(target) && made === null) {
+      run.refused = notKept(target.renderer, target.folder);
+      return run;
+    }
+    void this.start(run, entityId, command, target, made)
       .then(({ started, stop }) => {
         run.id = started.run;
         run.argv = started.argv.length > 0 ? started.argv : run.argv;
@@ -368,6 +418,23 @@ export class OneOffs {
         run.refused = (error as { message?: string } | null)?.message ?? String(error);
       });
     return run;
+  }
+
+  /**
+   * Starts `command` on `target`, in the kept folder `made` names for a generated folder's. A token the backend no longer
+   * holds is read back by the page's one `look`, then asked once more (Fable, 2026-11-25).
+   */
+  private start(run: Run, entityId: string, command: OneOff, target: OneOffTarget, made: MadeKept | null) {
+    const ask = (kept: MadeKept | null) => this.ports.run(entityId, command.id, target, kept?.token ?? null, (batch) => run.take(batch));
+    if (made === null || made.look === undefined) return ask(made);
+    const look = made.look;
+    return ask(made).catch(async (error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== "not_found" || !isMade(target)) throw error;
+      await look();
+      const again = this.madeOf(entityId, target.renderer, target.folder) ?? made;
+      run.made = again;
+      return ask(again);
+    });
   }
 
   /** Opens the dialog on a kept run: its newest lines first, and its next batches while it runs. */
@@ -431,13 +498,21 @@ export class OneOffs {
    * A file's command on many files (section 12): one run a file, four at a time, at most 200, in a dialog that lists
    * them with how each ended and draws the picked one's output.
    */
-  openBatch(command: OneOff, entityId: string, repo: string, paths: readonly string[], root: string | null = null): Run {
+  openBatch(command: OneOff, entityId: string, repo: string, paths: readonly string[], root: string | null = null, of: { renderer: string; folder: string } | null = null): Run {
     this.close();
     const files = paths.slice(0, BATCH_MAX);
-    const run = new Run(command, entityId, repo, { kind: "files", paths: [...files] }, [command.command]);
+    const whole: OneOffTarget = of === null ? { kind: "files", paths: [...files] } : { kind: "made_files", renderer: of.renderer, folder: of.folder, paths: [...files] };
+    const one = (path: string): OneOffTarget => (of === null ? { kind: "file", path, lines: null, at: null } : { kind: "made", renderer: of.renderer, folder: of.folder, path, dir: false, lines: null });
+    const made = of === null ? null : this.madeOf(entityId, of.renderer, of.folder);
+    const run = new Run(command, entityId, repo, whole, [command.command]);
     void root;
+    run.made = made;
     run.batch = files.map((path) => ({ path, run: null, ended: null }));
     this.open = run;
+    if (of !== null && made === null) {
+      run.refused = notKept(of.renderer, of.folder);
+      return run;
+    }
     let next = 0;
     let going = 0;
     const settle = () => {
@@ -454,7 +529,8 @@ export class OneOffs {
         const item = (run.batch as BatchItem[])[next]!;
         next += 1;
         going += 1;
-        const sub = new Run(command, entityId, repo, { kind: "file", path: item.path, lines: null, at: null }, []);
+        const sub = new Run(command, entityId, repo, one(item.path), []);
+        sub.made = made;
         item.run = sub;
         const done = (ended: OneOffEnded) => {
           if (item.ended !== null) return;
@@ -464,8 +540,9 @@ export class OneOffs {
           settle();
         };
         void this.ports
-          .run(entityId, command.id, { kind: "file", path: item.path, lines: null, at: null }, (batch) => {
+          .run(entityId, command.id, one(item.path), made?.token ?? null, (batch) => {
             sub.take(batch);
+            if (batch.made_changed) run.changedMade(batch.made_changed);
             if (batch.ended !== null && batch.ended !== undefined) done(batch.ended);
             else run.version += 1;
           })
@@ -489,7 +566,8 @@ export class OneOffs {
   /** Runs the dialog's command again on the same thing, as saved now. */
   again(run: Run, root: string | null = null): Run {
     const command = this.commands.find((c) => c.id === run.command.id) ?? run.command;
-    if (run.batch !== null) return this.openBatch(command, run.entityId, run.repo, run.batch.map((item) => item.path), root);
+    const of = run.target.kind === "made_files" ? { renderer: run.target.renderer, folder: run.target.folder } : null;
+    if (run.batch !== null) return this.openBatch(command, run.entityId, run.repo, run.batch.map((item) => item.path), root, of);
     return this.openRun(command, run.entityId, run.repo, run.target, root);
   }
 
@@ -546,7 +624,12 @@ export class OneOffs {
 
   saveRun(run: Run, colours: boolean): Promise<string> {
     if (run.id === null) return Promise.reject(new Error("The run has not started."));
-    const thing = run.target.kind === "file" ? (run.target.path.split("/").pop() ?? "file") : run.target.kind === "folder" ? run.target.path.split("/").pop() || run.repo : run.repo;
+    const thing =
+      run.target.kind === "file" || (run.target.kind === "made" && !run.target.dir)
+        ? (run.target.path.split("/").pop() ?? "file")
+        : run.target.kind === "folder" || run.target.kind === "made"
+          ? run.target.path.split("/").pop() || (run.target.kind === "made" ? run.target.folder.split("/").pop() : "") || run.repo
+          : run.repo;
     return this.ports.save(run.id, `${run.command.id}-${thing}.txt`, colours);
   }
 }
@@ -577,3 +660,22 @@ const EMPTY: Omit<OneOff, "id" | "name" | "command"> = {
 
 /** The window's one store. */
 export const oneoffs = new OneOffs();
+
+/** The words `command` becomes on `target`, as the page knows it, `root` the checkout (or the kept folder for a generated folder's). */
+export function filledArgv(command: OneOff, target: OneOffTarget, root: string): string[] {
+  const file = target.kind === "file" || (target.kind === "made" && !target.dir) ? target.path : null;
+  const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+  const lines = target.kind === "file" || target.kind === "made" ? (target.lines ?? null) : null;
+  const filled = fill(command.command, {
+    root,
+    file,
+    dir: target.kind === "folder" || (target.kind === "made" && target.dir) ? target.path : file !== null ? parent(file) : target.kind === "repository" ? "" : null,
+    files: target.kind === "files" || target.kind === "made_files" ? target.paths : [],
+    line: lines?.[0] ?? null,
+    endline: lines?.[1] ?? null,
+    sha: target.kind === "commit" ? target.sha : null,
+    base: target.kind === "range" ? target.base : null,
+    head: target.kind === "range" ? target.head : null,
+  });
+  return "argv" in filled ? filled.argv : [command.command];
+}

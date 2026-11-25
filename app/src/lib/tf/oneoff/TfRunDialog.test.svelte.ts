@@ -22,7 +22,7 @@ function ports() {
     emit: (row) => moved(row),
     answer: () => answer?.({ started: { run: `r${next}`, argv: ["eslint", "/c/p/src/a.ts"], cwd: "/c/p", branch: "main", head: null, started_at: Date.now(), already: false }, stop: () => {} }),
     commands: () => Promise.resolve([command]),
-    run: vi.fn((_e: string, _c: string, _t: OneOffTarget, onbatch: (b: OneOffBatch) => void) => {
+    run: vi.fn((_e: string, _c: string, _t: OneOffTarget, _m: string | null, onbatch: (b: OneOffBatch) => void) => {
       next += 1;
       sinks.push(onbatch);
       return new Promise<{ started: OneOffStarted; stop: () => void }>((resolve) => (answer = resolve));
@@ -256,4 +256,55 @@ test("Stop on a batch stops what runs and starts no more", async () => {
   await settle();
   expect(p.run).toHaveBeenCalledTimes(4);
   expect(run.ended).toEqual({ how: "stopped" });
+});
+
+const MADE = { kind: "made", renderer: "site", folder: "docs", path: "out/a.ts", dir: false, lines: null } as const;
+
+test("a run on a generated file runs in the kept folder, its places open the generated file, and a change is said (Björn, 2026-11-25)", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  store.keepMade("gitea:t/payout", "site", "docs", { token: "tok1", dir: "/store/s1/docs.site.tok1" });
+  const run = store.openRun(command, "gitea:t/payout", "payout", MADE, "/c/p");
+  const navigate = draw(store);
+  // The kept folder, not the checkout, names the file; the backend is handed the folder's token.
+  expect(run.argv).toEqual(["eslint", "/store/s1/docs.site.tok1/out/a.ts"]);
+  expect(p.run).toHaveBeenCalledWith("gitea:t/payout", command.id, MADE, "tok1", expect.any(Function));
+  expect(words(document.querySelector(".tf-dsub"))).toContain("out/a.ts in docs/ as site made it, in payout: knobas's kept copy");
+  p.answer();
+  await settle();
+  p.sinks[0]!(batch("r1", [{ n: 0, stream: "out", text: "out/a.ts:3:7: error: no semi", places: [{ from: 0, to: 12, path: "out/a.ts", line: 3, col: 7 }], finding: { severity: "error", said: "no semi", rule: null } }], { findings: 1 }));
+  p.sinks[0]!(batch("r1", [], { total: 1, findings: 1, ended: { how: "exit", code: 1 }, made_changed: ["out/a.ts"] }));
+  flushSync();
+  const said = document.querySelector(".tf-oo-counts.tf-warn");
+  expect(words(said)).toBe("It changed 1 generated file. They are knobas's copy of what site made, so docs is rendered again.");
+  document.querySelector<HTMLAnchorElement>(".tf-oo-link")!.click();
+  flushSync();
+  expect(navigate).toHaveBeenCalledWith("#/repo/gitea%3At%2Fpayout/rendered/site/docs/line/3/out/a.ts");
+});
+
+test("a generated folder no page keeps starts nothing and says how to have it again", () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  store.openRun(command, "gitea:t/payout", "payout", MADE);
+  draw(store);
+  expect(p.run).not.toHaveBeenCalled();
+  expect(words(document.querySelector(".tf-oo-stage"))).toContain("docs as site makes it is not kept now. Open it, then run again.");
+});
+
+test("a token the backend no longer holds is looked for once, then asked again", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  const look = vi.fn(() => {
+    store.keepMade("gitea:t/payout", "site", "docs", { token: "tok2", dir: "/store/s1/docs.site.tok2" });
+    return Promise.resolve();
+  });
+  store.keepMade("gitea:t/payout", "site", "docs", { token: "tok1", dir: "/store/s1/docs.site.tok1", look });
+  const first = p.run;
+  p.run = vi.fn((e: string, c: string, t: OneOffTarget, m: string | null, onbatch: (b: OneOffBatch) => void) =>
+    m === "tok1" ? Promise.reject({ code: "not_found", message: "gone" }) : first(e, c, t, m, onbatch),
+  );
+  store.openRun(command, "gitea:t/payout", "payout", MADE);
+  await settle();
+  expect(look).toHaveBeenCalledTimes(1);
+  expect(p.run).toHaveBeenLastCalledWith("gitea:t/payout", command.id, MADE, "tok2", expect.any(Function));
 });

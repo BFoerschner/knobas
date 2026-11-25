@@ -26,8 +26,10 @@
   import { keyHint } from "../../shell/platform";
   import { push } from "../../shell/toasts.svelte";
   import { openWeb } from "../../shell/open-web";
-  import { lineHash } from "../repo/repo";
-  import { clock, many, outputText, problems, problemsText, resultWord, shown, size, stateOf, took, type Problem } from "../../render/oneoff";
+  import { lineHash, renderedHash } from "../repo/repo";
+  import { folderRenderOpen } from "../../ipc/app";
+  import { folderRenderers } from "../../render/folders.svelte";
+  import { clock, many, outputText, problems, problemsText, resultWord, shown, size, stateOf, targetLabel, took, type Problem } from "../../render/oneoff";
   import { oneoffs as sharedStore, type OneOffs, type Run } from "../../render/oneoff.svelte";
   import TfRunLines from "./TfRunLines.svelte";
   import TfCommand from "../TfCommand.svelte";
@@ -66,8 +68,24 @@
     const n = run.batch.length;
     return batchFailed > 0 ? { tone: "err" as const, words: `${batchFailed} of ${n} exited with an error`, code: null } : { tone: "ok" as const, words: `All ${n} exited with 0`, code: null };
   });
+  /** A folder renderer's name, for a generated folder's run. */
+  const rendererName = (id: string) => folderRenderers.list.find((r) => r.id === id)?.name ?? id;
+  /** A generated folder's run: which renderer made which folder (ADR-0060 amended 2026-11-25). */
+  const madeOf = $derived(run.target.kind === "made" || run.target.kind === "made_files" ? { renderer: run.target.renderer, folder: run.target.folder } : null);
   const sub = $derived(
-    run.batch !== null ? `${run.batch.length} files in ${run.repo}, one run a file, ${4} at a time` : `${run.target.kind === "file" ? `${run.target.path} in ${run.repo}` : run.target.kind === "folder" && run.target.path !== "" ? `${run.target.path}/ in ${run.repo}` : run.repo}, your working tree${run.branch !== null ? ` on ${run.branch}` : ""}`,
+    madeOf !== null
+      ? run.batch !== null
+        ? `${targetLabel(run.target, run.repo, rendererName)}, one run a file, ${4} at a time`
+        : targetLabel(run.target, run.repo, rendererName)
+      : run.batch !== null
+        ? `${run.batch.length} files in ${run.repo}, one run a file, ${4} at a time`
+        : `${run.target.kind === "file" ? `${run.target.path} in ${run.repo}` : run.target.kind === "folder" && run.target.path !== "" ? `${run.target.path}/ in ${run.repo}` : run.repo}, your working tree${run.branch !== null ? ` on ${run.branch}` : ""}`,
+  );
+  /** What a run on a generated folder changed there, in the warn tone where the counts stand (Fable, 2026-11-25). */
+  const changedSaid = $derived(
+    madeOf === null || run.madeChanged === null || run.madeChanged.length === 0
+      ? null
+      : `It changed ${many(run.madeChanged.length, "generated file", "generated files")}. They are knobas's copy of what ${rendererName(madeOf.renderer)} made, so ${madeOf.folder === "" ? run.repo : madeOf.folder} is rendered again.`,
   );
   const ran = $derived(run.ended !== null ? `after ${took(run.elapsed)}` : run.refused !== null ? "" : clock(Math.max(run.elapsed, now - run.startedAt)));
   const findings = $derived.by(() => {
@@ -151,16 +169,35 @@
   /** A place pressed: the file at its line behind the dialog, and the run one press away. */
   function openPlace(place: OneOffPlace | Problem, wide: boolean) {
     const line = place.line ?? 1;
+    // A run on a generated folder: its places are the generated files, opened as the folder's own (Fable, 2026-11-25).
+    if (madeOf !== null) {
+      if (wide) {
+        const token = run.made?.token ?? null;
+        if (token !== null)
+          void folderRenderOpen(null, token, place.path, line).catch((error: unknown) =>
+            push({ text: `Could not open ${place.path}: ${(error as { message?: string } | null)?.message ?? String(error)}`, tone: "err" }),
+          );
+        return;
+      }
+      leaveFor(renderedHash(run.entityId, madeOf.renderer, madeOf.folder, place.path, { line }), place.path, line);
+      return;
+    }
     if (wide) {
       void openObject(run.entityId, null, { kind: "file", path: place.path, line, at: null }).catch((error: unknown) =>
         push({ text: `Could not open ${place.path}: ${(error as { message?: string } | null)?.message ?? String(error)}`, tone: "err" }),
       );
       return;
     }
+    leaveFor(lineHash(run.entityId, place.path, line), place.path, line);
+  }
+
+  /** Closes the dialog for the page at `hash`, the run one press away. */
+  function leaveFor(hash: string, path: string, line: number) {
+    const place = { path };
     const id = run.id;
     const view = run.view;
     store.close();
-    navigate(lineHash(run.entityId, place.path, line));
+    navigate(hash);
     if (id !== null) {
       push({
         text: `${place.path} at line ${line}, from ${run.command.name}`,
@@ -285,7 +322,12 @@
           >
         {/each}
       </div>
-      <span class="tf-oo-counts">{counts}</span>
+      {#if changedSaid !== null}
+        <!-- In the counts' own cell, so the bar keeps its height when a run ends (nothing-moves). -->
+        <span class="tf-oo-counts tf-warn" role="status" title={`${changedSaid} ${counts}`}>{changedSaid}</span>
+      {:else}
+        <span class="tf-oo-counts">{counts}</span>
+      {/if}
       {#if run.view === "output" && !quiet}
         {#if both}
           <select class="tf-select" aria-label="Which stream" bind:value={run.stream}>

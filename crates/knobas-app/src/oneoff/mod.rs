@@ -25,6 +25,7 @@
 pub mod history;
 pub mod kept;
 pub mod lines;
+pub mod made;
 pub mod places;
 pub mod repo;
 pub mod result;
@@ -123,7 +124,11 @@ use self::runs::{Runs, Sink};
 fn fits(command: &OneOff, target: &Target) -> bool {
     match (command.kind(), target) {
         (Kind::File, Target::File { .. }) | (Kind::Folder, Target::Folder { .. }) => true,
-        (Kind::File, Target::Files { .. }) => command.command.contains("{files}"),
+        (Kind::File, Target::Files { .. } | Target::MadeFiles { .. }) => {
+            command.command.contains("{files}")
+        }
+        (Kind::File, Target::Made { dir: false, .. })
+        | (Kind::Folder, Target::Made { dir: true, .. }) => true,
         (Kind::Repository, Target::Repository)
         | (Kind::Commit, Target::Commit { .. })
         | (Kind::Range, Target::Range { .. }) => true,
@@ -194,8 +199,60 @@ async fn placed(
                 placed.files.push(path);
             }
         }
+        Target::Made { .. } | Target::MadeFiles { .. } => {
+            return Err(IpcError::invalid(
+                "a generated folder's file is run in the folder knobas kept".to_owned(),
+            ));
+        }
     }
     Ok(placed)
+}
+
+/// The kept folder a run on a generated folder runs in, and what is done
+/// when the run changed it (ADR-0060, amended 2026-11-25).
+pub struct OnMade {
+    pub made: Arc<crate::folder_render::keep::Made>,
+    pub on_change: Box<dyn FnOnce() + Send>,
+}
+
+impl OnMade {
+    /// The generated folder `token` names in the app, dropped from the app's
+    /// store when a run changes it.
+    ///
+    /// # Errors
+    ///
+    /// [`NotFound`](crate::IpcErrorCode::NotFound) once it is no longer kept,
+    /// saying how to have it again.
+    pub fn of_token(token: &str, target: &Target) -> Result<Self, IpcError> {
+        let made = crate::folder_render::runs::Runs::global()
+            .made(token)
+            .ok_or_else(|| {
+                let (renderer, folder) = match target {
+                    Target::Made {
+                        renderer, folder, ..
+                    }
+                    | Target::MadeFiles {
+                        renderer, folder, ..
+                    } => (renderer.as_str(), folder.as_str()),
+                    _ => ("its renderer", ""),
+                };
+                IpcError::not_found(format!(
+                    "{} as {renderer} makes it is not kept now. Open it, then run again",
+                    if folder.is_empty() {
+                        "The repository"
+                    } else {
+                        folder
+                    }
+                ))
+            })?;
+        let token = token.to_owned();
+        Ok(Self {
+            made,
+            on_change: Box::new(move || {
+                crate::folder_render::runs::Runs::global().drop_made(&token);
+            }),
+        })
+    }
 }
 
 /// Runs saved command `command_id` on `target` of `entity_id`'s checkout,
@@ -218,9 +275,27 @@ pub async fn start(
     entity_id: &str,
     command_id: &str,
     target: Target,
+    made_token: Option<&str>,
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
-    start_in(&Runs::global(), pool, entity_id, command_id, target, sink).await
+    let made = if made::is_made(&target) {
+        let token = made_token.ok_or_else(|| {
+            IpcError::invalid("a run on a generated folder names the folder knobas kept".to_owned())
+        })?;
+        Some(OnMade::of_token(token, &target)?)
+    } else {
+        None
+    };
+    start_made(
+        &Runs::global(),
+        pool,
+        entity_id,
+        command_id,
+        target,
+        made,
+        sink,
+    )
+    .await
 }
 
 /// [`start`] in a registry of the caller's: a test's own.
@@ -234,6 +309,25 @@ pub async fn start_in(
     entity_id: &str,
     command_id: &str,
     target: Target,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    start_made(runs, pool, entity_id, command_id, target, None, sink).await
+}
+
+/// [`start_in`], with the kept folder a run on a generated folder runs in.
+///
+/// # Errors
+///
+/// As [`start_in`]; a generated target with no kept folder, or a command
+/// that names a git value there, is [`Invalid`](crate::IpcErrorCode::Invalid).
+#[allow(clippy::too_many_lines)]
+pub async fn start_made(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    entity_id: &str,
+    command_id: &str,
+    target: Target,
+    on_made: Option<OnMade>,
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
     let runs = Arc::clone(runs);
@@ -266,18 +360,45 @@ pub async fn start_in(
             target.label()
         )));
     }
-    let checkout = crate::checkout::resolve(pool, entity_id).await?;
-    let root = PathBuf::from(checkout.path.ok_or_else(|| {
-        IpcError::not_found(format!(
-            "{entity_id} is not cloned on this machine, so there is nothing to run {} in",
-            command.name
-        ))
-    })?);
-    let (branch, commit) = match crate::checkout::working_tree::read_known(&root).await {
-        crate::checkout::working_tree::TreeRead::Read(state) => (state.branch, state.head),
-        _ => (None, None),
+    let made_on = if made::is_made(&target) {
+        if let Some(name) = made::git_name(&command) {
+            return Err(IpcError::invalid(format!(
+                "{} uses {name}, and a generated folder is no git repository",
+                command.name
+            )));
+        }
+        Some(on_made.ok_or_else(|| {
+            IpcError::invalid("a run on a generated folder names the folder knobas kept".to_owned())
+        })?)
+    } else {
+        None
     };
-    let placed = placed(root.clone(), &target, branch.clone(), commit.clone()).await?;
+    let checkout = crate::checkout::resolve(pool, entity_id).await?;
+    // A generated folder is run in where knobas kept it, cloned or not: the
+    // checkout only gives *Add to PATH*'s `{root}`.
+    let (root, path_root, placed, branch, commit) = if let Some(on) = &made_on {
+        let placed = made::placed(&on.made, &target)?;
+        (
+            on.made.dir.clone(),
+            checkout.path.map(PathBuf::from),
+            placed,
+            None,
+            None,
+        )
+    } else {
+        let root = PathBuf::from(checkout.path.ok_or_else(|| {
+            IpcError::not_found(format!(
+                "{entity_id} is not cloned on this machine, so there is nothing to run {} in",
+                command.name
+            ))
+        })?);
+        let (branch, commit) = match crate::checkout::working_tree::read_known(&root).await {
+            crate::checkout::working_tree::TreeRead::Read(state) => (state.branch, state.head),
+            _ => (None, None),
+        };
+        let placed = placed(root.clone(), &target, branch.clone(), commit.clone()).await?;
+        (root.clone(), Some(root), placed, branch, commit)
+    };
     let shell = if shell_path_on(pool).await? {
         shell_path::get(false).await.path
     } else {
@@ -344,7 +465,12 @@ pub async fn start_in(
     } else {
         None
     };
-    let env = run::environment(&command, &root, std::env::vars_os(), shell.as_deref());
+    let env = run::environment(
+        &command,
+        path_root.as_deref(),
+        std::env::vars_os(),
+        shell.as_deref(),
+    );
     let spawn = Spawn {
         argv: argv.clone(),
         cwd: cwd.clone(),
@@ -359,9 +485,13 @@ pub async fn start_in(
         shows: command.shows,
         alias,
         ext: match &target {
-            Target::File { path, .. } => path.rsplit_once('.').map(|(_, e)| e.to_owned()),
+            Target::File { path, .. }
+            | Target::Made {
+                path, dir: false, ..
+            } => path.rsplit_once('.').map(|(_, e)| e.to_owned()),
             _ => None,
         },
+        made: made_on.map(|on| made::Watch::new(on.made, on.on_change)),
     };
     let to_run = Arc::clone(&handle);
     tokio::task::spawn_blocking(move || run::launch(&runs, &to_run, spawn))

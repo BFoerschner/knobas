@@ -81,6 +81,9 @@ pub struct Disk {
     root: PathBuf,
     real_root: Option<PathBuf>,
     answers: HashMap<String, bool>,
+    /// A generated folder's files (ADR-0060, amended 2026-11-25): only these
+    /// are places, never a file a program added beside them.
+    only: Option<std::sync::Arc<std::collections::HashSet<String>>>,
 }
 
 impl Disk {
@@ -90,7 +93,15 @@ impl Disk {
             root: root.to_path_buf(),
             real_root: std::fs::canonicalize(root).ok(),
             answers: HashMap::new(),
+            only: None,
         }
+    }
+
+    /// Places only at these paths from the root, which must also exist.
+    #[must_use]
+    pub fn only(mut self, held: Option<std::sync::Arc<std::collections::HashSet<String>>>) -> Self {
+        self.only = held;
+        self
     }
 }
 
@@ -100,6 +111,14 @@ impl Exists for Disk {
             return *known;
         }
         if self.answers.len() >= CANDIDATES {
+            return false;
+        }
+        if self
+            .only
+            .as_ref()
+            .is_some_and(|held| !held.contains(relative))
+        {
+            self.answers.insert(relative.to_owned(), false);
             return false;
         }
         let answer = self.real_root.as_ref().is_some_and(|root| {

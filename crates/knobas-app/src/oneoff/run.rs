@@ -66,6 +66,27 @@ pub enum Target {
     Files {
         paths: Vec<String>,
     },
+    /// A file or a folder of a generated folder (ADR-0046; ADR-0060 amended
+    /// 2026-11-25): `path` from the generated folder's top, `""` the top
+    /// itself, as `renderer` made the repository's `folder`. Which kept
+    /// folder is the run's own argument (`made_token`), so a new rendering is
+    /// the same thing to run on.
+    Made {
+        renderer: String,
+        folder: String,
+        path: String,
+        #[serde(default)]
+        dir: bool,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        lines: Option<(u32, u32)>,
+    },
+    /// Files of a generated folder, every one an argument (`{files}`).
+    MadeFiles {
+        renderer: String,
+        folder: String,
+        paths: Vec<String>,
+    },
 }
 
 impl Target {
@@ -79,6 +100,18 @@ impl Target {
             Self::Commit { sha } => format!("commit {}", &sha[..sha.len().min(7)]),
             Self::Range { base, head, .. } => format!("{base}..{head}"),
             Self::Files { paths } => format!("{} files", paths.len()),
+            Self::Made { path, folder, .. } if path.is_empty() => {
+                format!(
+                    "{} as it was made",
+                    if folder.is_empty() {
+                        "the repository"
+                    } else {
+                        folder
+                    }
+                )
+            }
+            Self::Made { path, .. } => path.clone(),
+            Self::MadeFiles { paths, .. } => format!("{} generated files", paths.len()),
         }
     }
 }
@@ -118,6 +151,12 @@ pub struct Batch {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub result: Option<super::result::RunResult>,
+    /// The generated files a run on a generated folder changed, from its
+    /// top, once it ended (at most [`super::made::CHANGED_SHOWN`]): the kept
+    /// folder is then rendered again.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub made_changed: Option<Vec<String>>,
 }
 
 /// What a start answers.
@@ -158,11 +197,13 @@ pub struct Placed {
     pub commit: Option<String>,
 }
 
-/// The environment a command runs in, over `parent`.
+/// The environment a command runs in, over `parent`. `root` is the checkout
+/// *Add to PATH*'s `{root}` names; `None` (a generated folder of a repository
+/// not cloned here) leaves the folders that hold `{root}` out.
 #[must_use]
 pub fn environment(
     command: &OneOff,
-    root: &Path,
+    root: Option<&Path>,
     parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
     shell_path: Option<&str>,
 ) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
@@ -193,11 +234,14 @@ pub fn environment(
             })
             .map(|(_, v)| v.clone())
     });
-    let root_text = root.to_string_lossy();
+    let root_text = root.map(|root| root.to_string_lossy());
     let mut folders: Vec<PathBuf> = command
         .path
         .iter()
-        .map(|f| PathBuf::from(f.replace("{root}", &root_text)))
+        .filter_map(|f| match &root_text {
+            Some(root) => Some(PathBuf::from(f.replace("{root}", root))),
+            None => (!f.contains("{root}")).then(|| PathBuf::from(f)),
+        })
         .collect();
     if let Some(base) = &base {
         folders.extend(std::env::split_paths(base));
@@ -302,6 +346,9 @@ pub struct Spawn {
     pub alias: Option<String>,
     /// The extension of the file it ran on, for *Code, as the file it ran on*.
     pub ext: Option<String>,
+    /// A run on a generated folder: its files, the only places, and the
+    /// watch that says which of them the run changed.
+    pub made: Option<super::made::Watch>,
 }
 
 enum Chunk {
@@ -398,12 +445,13 @@ pub fn launch(runs: &Arc<Runs>, handle: &Arc<RunHandle>, spawn: Spawn) {
     let handle = Arc::clone(handle);
     std::thread::spawn(move || {
         let raw = Raw::new(spawn.wants, spawn.shows);
+        let held = spawn.made.as_ref().map(super::made::Watch::held);
         let ended = consume(
             &handle,
             &mut child,
             &rx,
             spawn.timeout,
-            (&spawn.root, &spawn.cwd_rel, spawn.alias.as_deref()),
+            (&spawn.root, &spawn.cwd_rel, spawn.alias.as_deref(), held),
             &raw,
         );
         handle.kill(Some(pid));
@@ -420,6 +468,9 @@ pub fn launch(runs: &Arc<Runs>, handle: &Arc<RunHandle>, spawn: Spawn) {
             raw,
         );
         handle.set_result(result);
+        if let Some(watch) = spawn.made {
+            handle.set_made_changed(watch.finish());
+        }
         runs.end(&handle, ended);
     });
 }
@@ -545,13 +596,18 @@ fn consume(
     child: &mut std::process::Child,
     rx: &mpsc::Receiver<Chunk>,
     timeout: Duration,
-    (root, cwd_rel, alias): (&Path, &str, Option<&str>),
+    (root, cwd_rel, alias, held): (
+        &Path,
+        &str,
+        Option<&str>,
+        Option<Arc<std::collections::HashSet<String>>>,
+    ),
     raw: &Raw,
 ) -> Ended {
     let started = Instant::now();
     let deadline = started + timeout;
     let mut reader = Reader::default();
-    let mut disk = Disk::new(root);
+    let mut disk = Disk::new(root).only(held);
     let mut state = State::default();
     let at = Where {
         root: root.to_string_lossy().replace('\\', "/"),

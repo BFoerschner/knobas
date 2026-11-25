@@ -15,6 +15,10 @@ Amends [ADR-0044](0044-a-folder-renderer-is-given-a-copy-of-the-folder-knobas-wr
 - **Drawn as files.** A generated file is drawn by the file renderers under their own rules: HTML sanitized in a frame with `sandbox=""` under the policy with no script and no request, an SVG as an image, a PDF with scripting off. Nothing in a generated folder is run.
 - **Open in.** An *Open in…* application may be run on a kept folder or a file in it. Its arguments are paths knobas made, absolute, which ADR-0016 allows.
 
+## Amended 2026-11-25: commands on a generated folder
+
+A command of Settings › Commands (ADR-0060, as amended the same day) may be run on a generated folder or a file in it, in the kept folder itself, as an *Open in* application is. Its arguments are paths knobas made, as here. *Open in* also takes a folder inside a kept folder (`folder_render_open`'s `folder`). A command may write there: a run that changed a kept file has its kept folder dropped (`folder_render::runs::Runs::drop_made`: memory, the key's pointer, the leaf), so the folder is rendered again and a comparison (ADR-0049) still compares what the renderer made. A leaf a command runs in is not removed under it (`store::hold`); `store::bound` takes it later. "Nothing in a generated folder is run" stays true of knobas's own drawing.
+
 ## Rejected
 
 - **The output inside the repository's working tree,** ignored through `.git/info/exclude`. It writes into a working tree and into `.git`, which ADR-0016 keeps to its named amendments; every watcher, indexer and `git clean` of the person's would see or delete it; a repository with no clone has no such place.

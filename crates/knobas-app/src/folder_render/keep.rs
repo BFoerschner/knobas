@@ -558,6 +558,106 @@ pub fn read(made: &Made, path: &str, cap: u64) -> Result<Vec<u8>, ReadError> {
     Ok(bytes)
 }
 
+/// Whether every folder of `segments` under `made`'s top is a plain folder:
+/// no link, no reparse point (what [`read`] walks before its file).
+fn plain_folders(made: &Made, segments: &[&str]) -> bool {
+    let mut at = made.dir.clone();
+    for segment in segments {
+        at.push(segment);
+        if !std::fs::symlink_metadata(&at).is_ok_and(|m| m.is_dir() && !is_link(&m)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The kept file at `path` (from the generated folder's top) on disk, checked
+/// as [`read`] checks it: the manifest holds it, every folder on the way is a
+/// plain folder, and it is a plain file itself. What a command is handed for
+/// a generated file (ADR-0060, amended 2026-11-25).
+///
+/// # Errors
+///
+/// [`ReadError::NotFound`] for anything else.
+pub fn checked_file(made: &Made, path: &str) -> Result<PathBuf, ReadError> {
+    if made.file(path).is_none() {
+        return Err(ReadError::NotFound);
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    let (_, folders) = segments.split_last().ok_or(ReadError::NotFound)?;
+    if !plain_folders(made, folders) {
+        return Err(ReadError::NotFound);
+    }
+    let at = segments.iter().fold(made.dir.clone(), |at, s| at.join(s));
+    match std::fs::symlink_metadata(&at) {
+        Ok(meta) if meta.is_file() && !is_link(&meta) => Ok(at),
+        _ => Err(ReadError::NotFound),
+    }
+}
+
+/// The kept folder at `path` (`""` the top) on disk: one the manifest holds a
+/// file under, every folder on the way plain.
+///
+/// # Errors
+///
+/// [`ReadError::NotFound`] for a folder it holds no file in, or a link.
+pub fn checked_folder(made: &Made, path: &str) -> Result<PathBuf, ReadError> {
+    if path.is_empty() {
+        return Ok(made.dir.clone());
+    }
+    let under = format!("{path}/");
+    if !made
+        .manifest
+        .files
+        .iter()
+        .any(|f| f.path.starts_with(&under))
+    {
+        return Err(ReadError::NotFound);
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    if !plain_folders(made, &segments) {
+        return Err(ReadError::NotFound);
+    }
+    Ok(segments.iter().fold(made.dir.clone(), |at, s| at.join(s)))
+}
+
+/// What one kept file is on disk now: its size and modified time, `None`
+/// where it is gone or no longer a plain file.
+pub type Stamp = Vec<Option<(u64, std::time::SystemTime)>>;
+
+/// The manifest's files as they are on disk now, in the manifest's order.
+#[must_use]
+pub fn stamp(made: &Made) -> Stamp {
+    made.manifest
+        .files
+        .iter()
+        .map(|file| {
+            let at = file
+                .path
+                .split('/')
+                .fold(made.dir.clone(), |at, s| at.join(s));
+            std::fs::symlink_metadata(&at)
+                .ok()
+                .filter(|m| m.is_file() && !is_link(m))
+                .map(|m| (m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)))
+        })
+        .collect()
+}
+
+/// The manifest's files whose stamp moved since `before`: changed, gone, or
+/// swapped for something that is no plain file. A file a program added beside
+/// them is no change: it is never drawn (Fable, 2026-11-25).
+#[must_use]
+pub fn changed_since(made: &Made, before: &Stamp) -> Vec<String> {
+    stamp(made)
+        .iter()
+        .zip(before)
+        .zip(&made.manifest.files)
+        .filter(|((now, was), _)| now != was)
+        .map(|(_, file)| file.path.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

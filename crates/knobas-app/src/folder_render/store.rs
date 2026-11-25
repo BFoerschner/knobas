@@ -17,7 +17,9 @@
 //! Windows blocks no later run. knobas deletes only inside the store, a
 //! folder whose name it chose.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -233,10 +235,54 @@ pub fn read_meta(source_dir: &Path, key: &str) -> Option<(Meta, Made)> {
         .then(|| (meta, Made::new(dir, manifest)))
 }
 
+/// The kept folders a command runs in now, and how many runs each (ADR-0060,
+/// amended 2026-11-25): [`remove_leaf`] and [`bound`] leave them be, and
+/// [`bound`] tries again later, as for a file open on Windows.
+static HELD: LazyLock<Mutex<HashMap<PathBuf, usize>>> = LazyLock::new(Mutex::default);
+
+/// A command runs in a kept folder while this lives.
+#[derive(Debug)]
+pub struct Hold(PathBuf);
+
+/// Holds the kept folder at `dir` for a command's run.
+#[must_use]
+pub fn hold(dir: &Path) -> Hold {
+    *HELD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(dir.to_path_buf())
+        .or_insert(0) += 1;
+    Hold(dir.to_path_buf())
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = held.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                held.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// Whether a command runs in the kept folder at `dir` now.
+#[must_use]
+pub fn is_held(dir: &Path) -> bool {
+    HELD.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains_key(dir)
+}
+
 /// Remove a leaf: its description first, so nothing reads it, then the
 /// folder, then the manifest. A folder that cannot be removed (a file open
-/// on Windows) stays and is tried again by [`bound`].
+/// on Windows, a command running in it) stays and is tried again by
+/// [`bound`].
 pub fn remove_leaf(source_dir: &Path, leaf: &str) {
+    if is_held(&source_dir.join(leaf)) {
+        return;
+    }
     let _ = std::fs::remove_file(source_dir.join(format!("{leaf}.json")));
     if std::fs::remove_dir_all(source_dir.join(leaf)).is_ok() {
         let _ = std::fs::remove_file(source_dir.join(format!("{leaf}.files.json")));
@@ -320,7 +366,7 @@ pub fn bound(root: &Path, cap: u64, keep: Option<&str>) {
         if total <= cap {
             break;
         }
-        if Some(found.leaf.as_str()) == keep {
+        if Some(found.leaf.as_str()) == keep || is_held(&found.source.join(&found.leaf)) {
             continue;
         }
         remove_leaf(&found.source, &found.leaf);

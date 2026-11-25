@@ -92,6 +92,8 @@ pub async fn set_oneoff_commands(
 
 /// Runs saved command `command` on `target` of `entity_id`'s checkout. Its
 /// lines follow on `channel` in batches, the last one carrying how it ended.
+/// A generated folder's target runs in the folder `made_token` names, where
+/// knobas kept it (ADR-0060, amended 2026-11-25).
 ///
 /// # Errors
 /// As [`crate::oneoff::start`].
@@ -102,6 +104,7 @@ pub async fn oneoff_run<R: tauri::Runtime>(
     entity_id: String,
     command: String,
     target: Target,
+    made_token: Option<String>,
     channel: Channel<Batch>,
 ) -> Result<Started, IpcError> {
     let pool = lifecycle.pool()?;
@@ -110,6 +113,7 @@ pub async fn oneoff_run<R: tauri::Runtime>(
         &entity_id,
         &command,
         target,
+        made_token.as_deref(),
         Arc::new(ChannelSink::new(&app, channel)),
     )
     .await
@@ -299,7 +303,10 @@ mod tests {
         use crate::commands::mirror::{invocation, keys};
         for (command, args) in [
             ("set_oneoff_commands", &["drafts"][..]),
-            ("oneoff_run", &["entityId", "command", "target", "channel"]),
+            (
+                "oneoff_run",
+                &["entityId", "command", "target", "madeToken", "channel"],
+            ),
             ("oneoff_stop", &["run"]),
             ("oneoff_runs", &["entityId"]),
             ("oneoff_lines", &["run", "from", "count"]),

@@ -1178,6 +1178,55 @@ impl Runs {
         }
     }
 
+    /// A command changed generated folder `token` (ADR-0060, amended
+    /// 2026-11-25): it is no longer what its renderer made, so memory forgets
+    /// it, its key's pointer and its leaf go, and each slot that showed it is
+    /// told, so its page renders it again as on a first open. Answers whether
+    /// memory held it. A leaf a command still runs in stays on disk until
+    /// [`store::bound`] removes it; nothing names it any more.
+    pub fn drop_made(&self, token: &str) -> bool {
+        let (made, slots) = {
+            let mut state = self.lock();
+            let Some(key) = state.tokens.remove(token) else {
+                return false;
+            };
+            let made = state.memory.remove(&key).and_then(|kept| {
+                state.memory_bytes -= kept.bytes_held();
+                match &kept.body {
+                    Body::Folder(made) => {
+                        state.memory_folders -= 1;
+                        Some(made.clone())
+                    }
+                    Body::Bytes(_) => None,
+                }
+            });
+            state.used.retain(|k| k != &key);
+            state.touched.remove(&key);
+            let slots: Vec<Slot> = state
+                .latest
+                .iter()
+                .filter(|(_, k)| **k == key)
+                .map(|(slot, _)| slot.clone())
+                .collect();
+            state.latest.retain(|_, k| *k != key);
+            (made.map(|made| (made, key)), slots)
+        };
+        if let Some((made, key)) = made
+            && let (Some(source_dir), Some(leaf)) = (made.dir.parent(), made.dir.file_name())
+        {
+            let leaf = leaf.to_string_lossy();
+            let pointer = source_dir.join("keys").join(&key);
+            if std::fs::read_to_string(&pointer).is_ok_and(|named| named.trim() == leaf) {
+                let _ = std::fs::remove_file(&pointer);
+            }
+            store::remove_leaf(source_dir, &leaf);
+        }
+        for slot in &slots {
+            self.tell(slot, None);
+        }
+        true
+    }
+
     /// Keep a sanitized HTML document for the frame and answer the token it
     /// is served by (`knobas-render://localhost/folder.<token>`). The last
     /// eight are kept.
@@ -2066,6 +2115,50 @@ mod tests {
         assert!(!place.store().exists());
         let again = runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
         assert!(again.drawn.is_none());
+    }
+
+    /// A generated folder a command changed is dropped (ADR-0060, amended
+    /// 2026-11-25): memory and disk forget it, its slot is told, and the next
+    /// open runs the renderer again; a leaf a command runs in stays on disk.
+    #[tokio::test]
+    async fn a_generated_folder_a_command_changed_is_dropped_and_made_again() {
+        let place = Place::new("folder-drop");
+        let script = place.script("site.sh", "printf x > \"$2/a.md\"\n");
+        let r = folder_kind(format!("sh {script} {{path}} {{outdir}}"));
+        let runs = place.runs();
+        let files = [("a.txt", "A")];
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let view = settled(&runs, &r, &files).await;
+        let token = view.drawn.unwrap().token;
+        let made = runs.made(&token).expect("kept");
+        // Heard from here on (`settled` hears with a listener of its own).
+        let told = Arc::new(Mutex::new(Vec::<FolderRenderMoved>::new()));
+        let heard = Arc::clone(&told);
+        runs.on_moved(move |moved| heard.lock().unwrap().push(moved));
+        // A command still runs in it: memory forgets it, the leaf stays on disk.
+        let hold = store::hold(&made.dir);
+        assert!(runs.drop_made(&token));
+        assert!(runs.made(&token).is_none());
+        assert!(
+            made.dir.exists(),
+            "a leaf a command runs in is not removed under it"
+        );
+        assert_eq!(
+            told.lock().unwrap().len(),
+            1,
+            "the slot that showed it is told"
+        );
+        drop(hold);
+        assert!(
+            !runs.drop_made(&token),
+            "a token dropped once names nothing"
+        );
+        // Nothing names it now: a look draws nothing, an open makes it again.
+        let look = runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
+        assert!(look.drawn.is_none());
+        runs.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Open);
+        let again = settled(&runs, &r, &files).await;
+        assert_ne!(again.drawn.unwrap().token, token);
     }
 
     /// A run waiting for a place is dropped when its page leaves; at most
