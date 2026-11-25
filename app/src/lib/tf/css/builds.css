@@ -395,9 +395,14 @@
    same switch heads the filter bar, where the rail stood. */
 .tf-pl-top > .tf-bview { align-self: flex-start; }
 .tf-bv.tf-bv-recent { grid-template-columns: minmax(0, 1fr); }
-.tf-recentbar { display: flex; align-items: center; gap: var(--control-gap); }
-.tf-recentbar > .tf-fbar, .tf-recentbar > :not(.tf-seg):not(.tf-readall) { flex: 1 1 auto; min-width: 0; }
-.tf-recentbar > :is(.tf-seg, .tf-readall) { flex: none; }
+/* One band, as a pipeline's runs bar is (`.tf-rbar.tf-rpickbar`'s shape): the switch leads, the filter bar holds the rest
+   with *Mark all as read* after its count. */
+.tf-recentbar {
+  display: flex; align-items: center; gap: var(--control-gap); padding: 0 22px;
+  background: var(--sheet); border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 5;
+}
+.tf-recentbar > .tf-seg { flex: none; }
+.tf-recentbar > .tf-fbar { position: static; border-bottom: 0; background: none; padding: 10px 0; flex: 1 1 auto; min-width: 0; }
 /* The run's state leads: the chip alone, the unread dot in its gutter. */
 .tf-runs.tf-recent .tf-run-no { width: 104px; }
 /* The pipeline's cell takes what the others leave, with the branch: the name in ink (never under 12 characters), the

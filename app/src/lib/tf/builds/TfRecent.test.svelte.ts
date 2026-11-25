@@ -278,3 +278,27 @@ test("a failed read says so", async () => {
   await settle();
   expect(target.textContent).toContain("Runs could not be read");
 });
+
+test("a CI source's run that changed something reads the head again; one that changed nothing, or another source's, does not", async () => {
+  const heard: Record<string, (event: { payload: unknown }) => void> = {};
+  const drawn = draw({
+    listen: (event, handler) => {
+      heard[event] = handler;
+      return Promise.resolve(() => {});
+    },
+  });
+  await settle();
+  const reads = drawn.asked.length;
+  const ended = (source_id: string, last_changed: boolean) =>
+    heard["sync:state"]!({ payload: { source_id, running: false, last_changed, run_id: 2, started_at: null, last_finished_at: null, last_outcome: null, next_run_at: null, backoff_until: null } });
+  ended("tc", false);
+  ended("jira", true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(drawn.asked.length).toBe(reads);
+  drawn.next = { ...PAGE, runs: [at(LINT, run(13, "ok", today(0, 50))), ...PAGE.runs] };
+  ended("tc", true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settle();
+  expect(drawn.asked.length).toBe(reads + 1);
+  expect(numbers()[0]).toBe("#13");
+});

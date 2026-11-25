@@ -57,6 +57,8 @@
 
   /** How long after a source's last run ended *Recent* asks it for another while shown (Fable's ruling 7). */
   export const ASK_AFTER_MS = 60_000;
+  /** How often *Recent* looks whether a source is due: a source is asked within a quarter minute of being due. */
+  export const ASK_TICK_MS = 15_000;
 </script>
 
 <script lang="ts">
@@ -184,11 +186,11 @@
       lay(page);
       const fresh = heldFor !== wanted || held === null;
       const whole = page.next === null;
-      const after = fresh ? page.runs.slice(0, RECENT_HOLD) : withHead(held!, page.runs, whole);
+      const laid = fresh ? page.runs.slice(0, RECENT_HOLD) : withHead(held!, page.runs, whole);
       // What is held past the head keeps its cursor; a head that is all of it has none.
-      const keptOlder = !fresh && !whole && after.length > page.runs.length;
+      const keptOlder = !fresh && !whole && laid.length > page.runs.length;
       next = whole ? null : keptOlder ? next : page.next;
-      held = after;
+      held = laid;
       heldFor = wanted;
       failed = null;
       inFlightSoon();
@@ -255,6 +257,17 @@
     const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
     let dead = false;
     let off: (() => void) | null = null;
+    let offSync: (() => void) | null = null;
+    // A CI source's run that changed something ended (a scheduled one, the minute's ask, *Sync now*): the head again.
+    void listen(EVENTS.syncState, ({ payload }) => {
+      const row = payload as SourceSyncStatus;
+      if (dead || row.running || row.last_changed !== true) return;
+      if (seenSources.size > 0 && !seenSources.has(row.source_id)) return;
+      cacheEvents.syncState(row);
+      readHeadSoon();
+    })
+      .then((stop) => (dead ? stop() : (offSync = stop)))
+      .catch(() => {});
     void listen(EVENTS.itemRefreshed, ({ payload }) => {
       const ended = payload as RefreshEnded;
       if (dead || ended.ended === "failed") return;
@@ -268,6 +281,7 @@
     return () => {
       dead = true;
       off?.();
+      offSync?.();
     };
   });
 
@@ -307,7 +321,7 @@
       // Nothing asked: the next minute asks again.
     }
   }
-  everyWhileShown(() => ready && shown(), ASK_AFTER_MS, () => void askSources());
+  everyWhileShown(() => ready && shown(), ASK_TICK_MS, () => void askSources());
   onFocusWhileShown(shown, () => void askSources());
 
   // -- what is drawn -----------------------------------------------------------
@@ -474,6 +488,15 @@
   });
 </script>
 
+<!-- ux18's mark, at the bar's end after the count: every failed run of every pipeline unfiltered, the runs listed filtered. -->
+{#snippet after()}
+  <button type="button" class="tf-iconbtn tf-sm tf-readall" aria-label="Mark all as read" title={markSaid} onclick={markAllRead}
+    ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+      ><path d="M1.5 8.5l3 3 6-7M7.5 11.5l1 0.5 6-7.5" /></svg
+    ></button
+  >
+{/snippet}
+
 {@render crumbs()}
 <header class="tf-fhead tf-bhead">
   <div><h1>Recent runs{#if held !== null}{" "}<span class="tf-count">{held.length}</span>{/if}</h1></div>
@@ -482,13 +505,7 @@
 
 <div class="tf-runbar tf-recentbar">
   {@render switcher()}
-  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} />
-  <!-- ux18's mark, at the bar's end: every failed run of every pipeline unfiltered, the runs listed filtered. -->
-  <button type="button" class="tf-iconbtn tf-sm tf-readall" aria-label="Mark all as read" title={markSaid} onclick={markAllRead}
-    ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-      ><path d="M1.5 8.5l3 3 6-7M7.5 11.5l1 0.5 6-7.5" /></svg
-    ></button
-  >
+  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} {after} />
 </div>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
