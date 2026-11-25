@@ -1013,7 +1013,12 @@ async fn a_query_the_narrow_table_cannot_answer_reads_the_mirror() {
 /// source, the planner rightly starts from that source's rows instead.
 #[tokio::test]
 async fn a_search_with_words_reads_through_the_narrow_tables_indexes() {
-    let pool = pool().await;
+    // A database of its own, as a restore's is: the plan is the planner's answer to every row the mirror holds, and
+    // this file's shared database holds what the tests beside it seed and write while this one runs. With two other
+    // seeds in it (992 mirror rows, 606 of them matching), walking the mirror whole and probing each copy by its key
+    // is the right plan, and the check failed one run in six (just test, 2026-11-25).
+    let connector = knobas_db::test_util::scratch_database("narrow-plan").await;
+    let pool = connector.pool(4).await.unwrap();
     seed_scale_words(&pool, 300).await;
     // The planner's statistics, as the migration leaves them for the narrow
     // table and a sync's analyze pass leaves them for the rest.
