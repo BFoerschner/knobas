@@ -50,7 +50,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, tick, untrack, type Snippet } from "svelte";
+  import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
@@ -126,6 +126,7 @@
   import { pipelineHash } from "./builds/builds";
   import { sessionValue } from "./filter/filter-state.svelte";
   import TfPage from "./TfPage.svelte";
+  import { flipZen, isZenKey, zen } from "./zen.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfAck from "./TfAck.svelte";
@@ -777,6 +778,21 @@
     return layers.open.some((layer) => layer.kind === "dialog");
   }
 
+  // ---- Zen mode, everywhere in Code (Z1, `zen.svelte.ts`): the shell owns its key, its button and its `Esc` rung ----
+  // It holds while the reader moves between Code's pages, and ends on leaving Code.
+  $effect(() => {
+    const inCode = sectionOf(route) === "code";
+    zen.here = inCode;
+    if (!inCode) zen.on = false;
+  });
+  /** Turns Zen mode on or off with the topmost row the reader sees kept where it stands. */
+  const toggleZen = () => flipZen(mainEl ?? null, flushSync);
+  // While it shows, `Esc` leaves it before it leaves the page: an inline panel's rung.
+  $effect(() => {
+    if (!zen.shown) return;
+    return untrack(() => layers.add({ kind: "panel", close: toggleZen }));
+  });
+
   function onkeydown(event: KeyboardEvent) {
     // On a site's page a key between two `Esc`s is a new start (decisions §9).
     if (route.view === "site" && event.key !== "Escape") siteStore.disarm(route.source);
@@ -821,6 +837,12 @@
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
       onsearch("");
+      return;
+    }
+    // `Z` on any Code page, outside a field, with no dialog, menu or launcher over it.
+    if (zen.here && isZenKey(event) && focusedField() === null && !inTextField(event.target) && !layers.open.some((layer) => layer.kind !== "panel")) {
+      event.preventDefault();
+      toggleZen();
       return;
     }
     // `/` outside a field, and ⌘/ anywhere, are the section's search (#2425):
@@ -1096,9 +1118,10 @@
     ontheme={() => theme.toggle(prefersDark())}
     {navHref}
     {onnav}
+    zen={zen.here ? { on: zen.on, toggle: toggleZen } : null}
   />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions: not a control, it notes what a press on a page was on -->
-  <main class="tf-main" tabindex="-1" bind:this={mainEl} onclickcapture={(event) => (pressed = event.target instanceof Element ? event.target : null)}>
+  <main class="tf-main" class:tf-zen={zen.shown} tabindex="-1" bind:this={mainEl} onclickcapture={(event) => (pressed = event.target instanceof Element ? event.target : null)}>
     <TfPage
       {kept}
       stale={recoloured}

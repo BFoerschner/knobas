@@ -792,11 +792,16 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-madebar-left > li { display: contents; }
 .tf-madebar-left > li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-madebar-left > li > :last-child { color: var(--ink-2); }
-/* Zen mode (ux31, `../zen.svelte.ts`): the file alone. The repository's crumbs, header and tabs and the tree go; the file
-   view takes the page's width, its own header (the path, Render as, Open in, the Zen button) stays. */
-.tf-full.tf-zen > .tf-crumbs, .tf-full.tf-zen > .tf-repohead, .tf-full.tf-zen > .tf-tabs { display: none; }
-.tf-repo.tf-zen { grid-template-columns: minmax(0, 1fr); }
-.tf-repo.tf-zen > .tf-sedge, .tf-repo.tf-zen > .tf-ftreebox { display: none; }
+/* Zen mode (ux31; everywhere in Code, Z1, `../zen.svelte.ts`, which keeps the same list as `ZEN_HIDES`): on every Code
+   page the page's crumbs, header and tabs go, and the rail on its left with its side edge (the Files tree, a diff's file
+   list, the Builds tab's branches); the content takes the rail's place and the page's width. What the page works with
+   stays: a file's own header, a diff's toolbar, the compare form, filters. Set on `main`, so a page drawn while Zen is
+   on draws without them from its first frame. */
+.tf-main.tf-zen :is(.tf-full > .tf-crumbs, .tf-full > .tf-fhead, .tf-full > .tf-tabs) { display: none; }
+.tf-main.tf-zen :is(.tf-repo > .tf-ftreebox, .tf-repo > .tf-sedge) { display: none; }
+.tf-main.tf-zen :is(.tf-dgrid > .tf-dnav, .tf-dgrid > .tf-sedge, .tf-dgrid > .tf-railbar) { display: none; }
+.tf-main.tf-zen :is(.tf-rbv > .tf-rbrail, .tf-rbv > .tf-sedge) { display: none; }
+.tf-main.tf-zen :is(.tf-repo, .tf-dgrid, .tf-rbv) { grid-template-columns: minmax(0, 1fr); }
 /* An API spec in a comparison (ux31, `TfOasDiff`): each side's inline form scrolls on its own inside the stage's
    height, so the stage itself does not scroll; *Show all of it* gives it a tall fixed box, not its content's height. */
 .tf-rstage[data-renderer="openapi"] { overflow: hidden; }

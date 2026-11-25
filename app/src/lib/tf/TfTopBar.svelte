@@ -16,6 +16,7 @@
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
   import { updates as sharedUpdates, type Updates } from "./update.svelte";
   import { cogTitle, marked } from "./settings/updates";
+  import { ZEN_KEY_LABEL } from "./zen.svelte";
 
   type NavSection = Exclude<Section, "job">;
 
@@ -31,6 +32,7 @@
     navHref = sectionHash,
     onnav,
     update = sharedUpdates,
+    zen = null,
   }: {
     /** The section the address lights, or `null`. */
     current: Section | null;
@@ -49,6 +51,8 @@
     onnav?: (section: NavSection, href: string, person: boolean) => void;
     /** The updater's state: an update waiting puts a dot on the cog (ADR-0052). */
     update?: Pick<Updates, "state">;
+    /** Zen mode's one button (Z1), drawn only in Code: whether it is on, and the flip. */
+    zen?: { on: boolean; toggle: () => void } | null;
   } = $props();
 
   function press(event: MouseEvent, section: NavSection) {
@@ -111,6 +115,16 @@
       </a>
     {/each}
   </nav>
+  {#if zen !== null}
+    <!-- After the section it serves, where it never moves: a header it hid would have taken a button with it. -->
+    <button
+      type="button"
+      class="tf-btn tf-sm tf-ghost tf-zenbtn"
+      aria-pressed={zen.on}
+      title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the page alone, its header, tabs and rail hidden'} ({ZEN_KEY_LABEL})"
+      onclick={() => zen?.toggle()}>Zen</button
+    >
+  {/if}
   <span class="tf-spacer"></span>
   <button class="tf-search" aria-label="Search this section" onclick={onsearch}>
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">

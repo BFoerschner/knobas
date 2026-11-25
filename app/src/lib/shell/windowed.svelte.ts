@@ -880,6 +880,16 @@ export function landOn(el: HTMLElement, box: Element, px: number) {
   shared.anchor = { el, y: el.getBoundingClientRect().top, box, scroll: box.scrollTop };
 }
 
+/**
+ * Lets go of the row the lists hold (Zen mode's flip, Z1): what moves the rows is a header hidden or shown above them,
+ * which is the flip's own move, and the flip holds the reader's row itself. Held, a list scrolled the page by the
+ * header's height to undo it, so leaving Zen at a page's top scrolled the header it brought back out of sight.
+ */
+export function releaseAnchor(): void {
+  shared.anchor = null;
+  shared.pinnedAt = null;
+}
+
 /** Each attached list's read of the view, for {@link landOn}. */
 const viewReads = new Set<() => void>();
 

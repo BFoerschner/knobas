@@ -89,7 +89,7 @@
   import { exampleFileName, exampleOfPlace, heldOptions, shown as exampleShown } from "../render/xsd/example-held.svelte";
   import { contentOf } from "../../render/content-key";
   import { xsdSaveExample } from "../../ipc/api";
-  import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
+  import { flushSync, onMount, tick, untrack } from "svelte";
   import { folderPicks } from "../../render/folder-picks.svelte";
   import { heldWrite } from "../../shell/held-write";
   import TfFolderPickMenu from "../render/TfFolderPickMenu.svelte";
@@ -158,7 +158,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
-  import { zen, zenApplies, isZenKey, ZEN_KEY_LABEL } from "../zen.svelte";
+  import { flipZen, zen } from "../zen.svelte";
   import { layers } from "../layers.svelte";
   import {
     BAND,
@@ -2129,46 +2129,19 @@
     }
   }
 
-  // ---- Zen mode (ux31, `../zen.svelte.ts`) ----
-  /** Whether the shown file is one Zen mode applies to: drawn by a renderer that wants the room, on the shown page. */
-  const zenHere = $derived(shownPage() && file !== null && fileMade === null && zenApplies(drawAs));
-  $effect(() => {
-    const here = zenHere;
-    zen.here = here;
-    return () => {
-      if (zen.here === here) zen.here = false;
-    };
-  });
-  // Leaving the file view (another tab, another page kept alive behind) ends it.
-  $effect(() => {
-    if (!shownPage()) zen.on = false;
-  });
-  // So does closing it, when it was the one shown; a kept page dropped behind the shown one leaves Zen mode alone.
-  onDestroy(() => {
-    if (untrack(() => zenHere)) zen.on = false;
-  });
-  // While it shows, `Esc` leaves it before it leaves the page: an inline panel's rung.
-  $effect(() => {
-    if (!zen.shown) return;
-    return untrack(() => layers.add({ kind: "panel", close: () => (zen.on = false) }));
-  });
-
   // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
   $effect(() => {
     const onkey = (event: KeyboardEvent) => {
       // A page or tab keep-alive holds hidden (#2247) takes no keys.
       if (!shownPage()) return;
-      if (isZenKey(event) && (zenHere || zen.on) && !inTextField(event.target) && !inTextField(document.activeElement) && !layers.open.some((layer) => layer.kind !== "panel")) {
-        event.preventDefault();
-        zen.toggle();
-        return;
-      }
       if (event.key !== "t" && event.key !== "T") return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
       // A dialog or the launcher over the page keeps its keys and its focus.
       if (layers.open.some((layer) => layer.kind !== "panel") || goField === null) return;
       event.preventDefault();
+      // In Zen mode the tree is hidden: `T` leaves it first, so the key never goes dead (Z1).
+      if (zen.shown) flipZen(document.querySelector<HTMLElement>("main.tf-main"), flushSync);
       goField.focus();
     };
     window.addEventListener("keydown", onkey);
@@ -2265,7 +2238,7 @@
   </div>
 {/snippet}
 
-<div class="tf-repo" class:tf-zen={zen.shown} {@attach sideWidth("repo-tree")}>
+<div class="tf-repo" {@attach sideWidth("repo-tree")}>
   <TfSideEdge side="repo-tree" />
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
@@ -2480,15 +2453,6 @@
         <span class="tf-p"><span class="tf-pdir">{file.path}{" › "}</span>{ex.name}</span>
         <span class="tf-dim tf-small tf-fmeta">{ex.meta}</span>
         <span class="tf-trail">
-          {#if zenHere}
-            <button
-              type="button"
-              class="tf-btn tf-sm tf-ghost tf-zenbtn"
-              aria-pressed={zen.on}
-              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
-              onclick={() => zen.toggle()}>Zen</button
-            >
-          {/if}
           <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void copyExample(ex.xml)}>Copy</button>
           <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void saveExample(ex.name, ex.xml)}>Save to Downloads</button>
         </span>
@@ -2503,17 +2467,6 @@
           <span class="tf-dim tf-small tf-fmeta">{fileMeta(file, linesSaid)}</span>
         {/if}
         <span class="tf-trail" class:tf-heldbelow={!checkoutRead}>
-          <!-- Zen first: the trail stands from its right, so the one button that comes and goes as the reader moves
-               between files moves nothing beside it; *Render as* then takes the next file's name keeping its right edge. -->
-          {#if zenHere}
-            <button
-              type="button"
-              class="tf-btn tf-sm tf-ghost tf-zenbtn"
-              aria-pressed={zen.on}
-              title="{zen.on ? 'Leave Zen mode' : 'Zen mode: the file alone, the repository and its tree hidden'} ({ZEN_KEY_LABEL})"
-              onclick={() => zen.toggle()}>Zen</button
-            >
-          {/if}
           {#if opened !== null && renderer !== null}
             {@const at = drawn?.path ?? file.path}
             <TfRendererSwitch

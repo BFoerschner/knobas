@@ -2663,3 +2663,59 @@ test("the named pipelines are held once the database answers, and every diff rea
   namedPipelines.hold([{ id: "b64", name: "Base64 JSON", steps: [{ step: "base64_decode" }, { step: "pretty", format: "json" }] }]);
   expect(defaultPipelines.of("x.json.b64")?.steps).toHaveLength(2);
 });
+
+// ---- Zen mode, everywhere in Code (Z1): the shell owns its key, its one button and its Esc rung ----
+
+import { zen } from "./zen.svelte";
+
+test("Zen mode: Z and the top bar's button on any Code page, held from page to page, Esc leaves it, and leaving Code ends it", async () => {
+  start();
+  await at("#/code");
+  const main = seen("main.tf-main")[0]!;
+  const button = () => seen<HTMLButtonElement>(".tf-top > .tf-zenbtn")[0];
+  expect(button()).toBeDefined();
+  expect(main.classList.contains("tf-zen")).toBe(false);
+  press("z");
+  expect(zen.shown).toBe(true);
+  expect(main.classList.contains("tf-zen")).toBe(true);
+  expect(button()!.getAttribute("aria-pressed")).toBe("true");
+  // It holds while the reader moves inside Code.
+  await at("#/code/prs");
+  expect(main.classList.contains("tf-zen")).toBe(true);
+  // Esc leaves it before it leaves the page.
+  press("Escape");
+  await settle();
+  expect(zen.on).toBe(false);
+  expect(location.hash).toBe("#/code/prs");
+  button()!.click();
+  flushSync();
+  expect(zen.shown).toBe(true);
+  // Another section ends it, and draws no button there; Z does nothing outside Code.
+  await at("#/tickets");
+  expect(zen.on).toBe(false);
+  expect(button()).toBeUndefined();
+  const z = press("z");
+  expect(z.defaultPrevented).toBe(false);
+  expect(main.classList.contains("tf-zen")).toBe(false);
+  // Coming back into Code starts with it off.
+  await at("#/code");
+  expect(zen.on).toBe(false);
+});
+
+test("Zen mode: Z typed in a field is a letter, and a dialog over the page keeps its keys", async () => {
+  const layers = createLayers();
+  start({ layers });
+  await at("#/code");
+  const field = seen<HTMLInputElement>("input")[0]!;
+  field.focus();
+  press("z");
+  expect(zen.on).toBe(false);
+  field.blur();
+  const off = layers.add({ kind: "dialog", close: () => off() });
+  press("z");
+  expect(zen.on).toBe(false);
+  off();
+  press("z");
+  expect(zen.on).toBe(true);
+  zen.on = false;
+});
