@@ -27,6 +27,10 @@
   *Run…* and *Run again…* open the Run… dialog (#852, `TfRunDialog`). *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
   *queued* at once, never as started (R-9.8).
 
+  **A run in flight moves on** (the TeamCity run fix, 2026-11-25, `runs-in-flight.ts`): the runs again when a
+  refresh with no write moved one the page holds, and its runs in flight refreshed at the source once they drew, when
+  shown again and when the window comes back, at most once in 5 s.
+
   A run or a parameter change the source's credential cannot make
   (`refused_writes`, #2040) is drawn disabled with the reason, and a press on
   it opens nothing.
@@ -71,6 +75,8 @@
   import { runsRead } from "./runs-read.svelte";
   import { counted } from "../counted";
   import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
+  import { IN_FLIGHT_AFTER_MS, InFlightReads, hearRuns, runsInFlight } from "./runs-in-flight";
   import { RunHold } from "./run-hold.svelte";
   import { repositoryShortName } from "./chain";
   import TfChainSign from "./TfChainSign.svelte";
@@ -200,8 +206,14 @@
   const cannotChange = $derived(parameterOp === null ? null : refusalOf(refused, id, parameterOp));
   const fieldRefusals = $derived(runFieldRefusals(refused, id));
 
+  /** The runs in flight drawn here, refreshed by id when the page is shown (the TeamCity run fix). */
+  const inFlightReads = new InFlightReads(untrack(() => ports.follow));
+  let inFlightSoon: ReturnType<typeof setTimeout> | undefined;
+
   function open(wanted: string) {
     const mine = ++token;
+    clearTimeout(inFlightSoon);
+    inFlightReads.reset();
     held = null;
     failed = null;
     settings = null;
@@ -217,6 +229,11 @@
         if (mine !== token) return;
         settleEchoes(wanted, runLanded(rows));
         held = rows;
+        // Once the runs have drawn, those in flight are read at the source: one TeamCity started since the last run
+        // of the source says so now, not at the next (the TeamCity run fix, 2026-11-25).
+        inFlightSoon = setTimeout(() => {
+          if (mine === token) inFlightReads.read(runsInFlight(held));
+        }, IN_FLIGHT_AFTER_MS);
       },
       (cause: unknown) => {
         if (mine === token) failed = ipcErrorMessage(cause);
@@ -301,6 +318,19 @@
   $effect(() => {
     const wanted = id;
     return untrack(() => watchEchoes(PIPELINE_SURFACE, () => reread(wanted), { listen: ports.listen, runEnds: false }));
+  });
+
+  // A run drawn here moved at the source (a run started in knobas is read to its end, or this page read it): the runs
+  // again. Not a write's read-back, which `watchEchoes` hears.
+  $effect(() => {
+    const wanted = id;
+    return untrack(() =>
+      hearRuns(
+        ports.listen,
+        (entity) => held?.some((run) => run.entity_id === entity) ?? false,
+        () => void reread(wanted),
+      ),
+    );
   });
 
   $effect(() => {
@@ -677,8 +707,12 @@
     }
   }
 
+  // Shown again or the window back: the runs in flight read at the source, at most once in 5 s.
+  onFocusWhileShown(shown, () => inFlightReads.read(runsInFlight(held)));
+
   onDestroy(() => {
     token += 1;
+    clearTimeout(inFlightSoon);
   });
 </script>
 

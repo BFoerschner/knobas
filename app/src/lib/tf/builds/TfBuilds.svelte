@@ -34,6 +34,10 @@
   fold counts every failing pipeline and tones the count err, and opens by itself, only for one that asks. *Mark all as
   read* in the tools marks every failed run of the pipelines listed, with *Undo*.
 
+  **A run started here** (the TeamCity run fix, 2026-11-25): its pipeline's row says *queued* from the queue's answer
+  (`withQueued`), and a row whose run moved at the source (the write queue reads a run it started to its end) reads
+  that pipeline's runs again, at most once in 5 s.
+
   `#/builds` selects the first failing pipeline that asks, else the first failing, else the first;
   `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
   run page (#853, `TfRun.svelte`) with its pipeline selected on the left;
@@ -59,6 +63,8 @@
     view?: (runId: string) => Promise<SourceView | null>;
     /** The repositories of the list's commits, for *By repository* (the repo-builds pass); the bridge's when omitted. */
     commitRepositories?: (commitIds: string[]) => Promise<CommitRepository[]>;
+    /** The shell's events: `item:refreshed` reads the list again when a run it draws moved; the window's when omitted. */
+    listen?: EchoListen;
   }
 
   /** The folds the reader opened or closed this session, by key (R-9.3). */
@@ -103,6 +109,11 @@
   import { pipelineOfRun } from "./run";
   import { runsRead } from "./runs-read.svelte";
   import { RUN_BRIDGE } from "./pipeline-ports";
+  import { QUEUED_RUN, withQueued } from "./pipeline";
+  import { echoesOn, type EchoListen } from "../queued.svelte";
+  import { windowListen } from "../../ipc/shared-listen";
+  import { EVENTS } from "../../ipc";
+  import type { RefreshEnded } from "../../ipc/sources";
   import {
     CHIPS,
     foldHolds,
@@ -198,6 +209,68 @@
       if (at === listReads) failed = message(error);
     }
   }
+
+  /**
+   * A pipeline's row read again when a run it draws moved, or a run queued on it here was read back (the TeamCity run
+   * fix, 2026-11-25): its runs alone, laid into its row, not the whole list (571 KB at Björn's scale). At once on the
+   * first, then at most once in `RAIL_AGAIN_MS`, the last always read.
+   */
+  const RAIL_AGAIN_MS = 5_000;
+  let railReadAt = 0;
+  let railSoon: ReturnType<typeof setTimeout> | undefined;
+  const railOwed = new Set<string>();
+  function rereadSoon(pipelineId: string): void {
+    railOwed.add(pipelineId);
+    if (railSoon !== undefined) return;
+    const wait = Math.max(0, railReadAt + RAIL_AGAIN_MS - Date.now());
+    railSoon = setTimeout(() => {
+      railSoon = undefined;
+      railReadAt = Date.now();
+      const owed = [...railOwed];
+      railOwed.clear();
+      for (const id of owed) void rereadRuns(id);
+    }, wait);
+  }
+  /** One pipeline's runs read again and laid into its row; the list's next read replaces it whole as before. */
+  async function rereadRuns(pipelineId: string): Promise<void> {
+    const at = listReads;
+    let rows: RunRow[];
+    try {
+      rows = await ports.runs(pipelineId);
+    } catch {
+      return;
+    }
+    // A read of the whole list since answers for this row too.
+    if (at !== listReads || all === null) return;
+    all = all.map((p) => (p.entity_id === pipelineId ? recentNewestFirst({ ...p, recent: rows.slice(0, Math.max(p.recent.length, 1)) }) : p));
+  }
+  /** The listed pipeline whose run the refresh that ended moved, or on which it read back a run queued here; `null` for none. */
+  function movedPipeline(ended: RefreshEnded): string | null {
+    if (ended.ended === "failed" || all === null) return null;
+    const moved =
+      ended.write_id !== null
+        ? all.find((p) => echoesOn(p.entity_id, QUEUED_RUN).some((echo) => echo.write === ended.write_id))
+        : all.find((p) => p.recent.some((run) => run.entity_id === ended.entity_id));
+    return moved?.entity_id ?? null;
+  }
+  $effect(() => {
+    if (!ready) return;
+    const listen = untrack(() => ports.listen) ?? ((event, handler) => windowListen(event, handler));
+    let dead = false;
+    let off: (() => void) | null = null;
+    void listen(EVENTS.itemRefreshed, ({ payload }) => {
+      const moved = dead ? null : movedPipeline(payload as RefreshEnded);
+      if (moved !== null) rereadSoon(moved);
+    })
+      .then((stop) => (dead ? stop() : (off = stop)))
+      .catch(() => {});
+    return () => {
+      dead = true;
+      off?.();
+      clearTimeout(railSoon);
+      railSoon = undefined;
+    };
+  });
 
   let pipelinesAt = untrack(() => syncRevision);
   $effect(() => {
@@ -528,8 +601,9 @@
 {/snippet}
 
 {#snippet item(pipeline: PipelineRow, depth: number, key: string, pre: string, tag: string | null)}
-  {@const glyph = railGlyph(pipeline)}
-  {@const time = railTime(pipeline, undefined, read)}
+  {@const drawn = withQueued(pipeline, echoesOn(pipeline.entity_id, QUEUED_RUN))}
+  {@const glyph = railGlyph(drawn)}
+  {@const time = railTime(drawn, undefined, read)}
   {@const latest = latestTime(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a

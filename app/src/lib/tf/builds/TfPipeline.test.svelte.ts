@@ -1621,3 +1621,44 @@ test("a new failure a read brings is unread, beside a read one", async () => {
   expect(dotOf(1188)?.textContent).toBe("Unread");
   expect(dotOf(1187)).toBeNull();
 });
+
+// -- a run in flight moves on where it is drawn (the TeamCity run fix, 2026-11-25) --
+
+/** Each run row's first cell: its number and the chip its state says. */
+const runLabels = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.textContent?.replace(/\s+/g, " ").trim());
+
+test("a run in flight moves on as its refreshes land, with no run of the source", async () => {
+  const events = echoEvents(settle);
+  const queued = run(1188, "ok", today(0, 30), { state: { text: "queued", tone: "info" }, started: null, finished: null, duration_seconds: null, trigger: "person" });
+  const drawn = draw(undefined, "PAY-231", { listen: events.listen });
+  await settle();
+  // The run after the write ended with the run queued.
+  drawn.next = [queued, ...RUNS];
+  await events.ended("teamcity");
+  expect(runLabels()[0]).toBe("#1188 Queued");
+  const reads = drawn.reads;
+  // The write queue reads the run on (`follow_run.rs`): TeamCity's agent took it.
+  drawn.next = [{ ...queued, state: { text: "running", tone: "info" }, started: today(0, 31) }, ...RUNS];
+  await events.refreshed("teamcity:build:1188", null);
+  expect(drawn.reads).toBe(reads + 1);
+  expect(runLabels()[0]).toBe("#1188 Running");
+  // A refresh of a run this page does not draw, or one that failed, reads nothing.
+  await events.refreshed("teamcity:build:9999", null);
+  expect(drawn.reads).toBe(reads + 1);
+});
+
+test("the runs in flight are refreshed at the source once the page has drawn, the newest five, not again within 5 s", async () => {
+  const asked: string[] = [];
+  const flying = (no: number) => run(no, "ok", today(0, no % 60), { started: null, finished: null, duration_seconds: null });
+  const drawn = draw(undefined, "PAY-231", { follow: (id) => (asked.push(id), Promise.resolve({ outcome: "refreshed" })) });
+  drawn.next = [flying(1195), flying(1194), flying(1193), flying(1192), flying(1191), flying(1190), ...RUNS];
+  drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Deploy" });
+  await settle();
+  expect(asked).toEqual([]);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(asked).toEqual(["teamcity:build:1195", "teamcity:build:1194", "teamcity:build:1193", "teamcity:build:1192", "teamcity:build:1191"]);
+  // The window back a moment later reads nothing again.
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(asked).toHaveLength(5);
+});

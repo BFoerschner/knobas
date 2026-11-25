@@ -13,6 +13,9 @@ import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 import { runsRead } from "./runs-read.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { echoEvents } from "../echo-events.fixture";
+import { echoWrite, forgetEchoes } from "../queued.svelte";
+import { QUEUED_RUN } from "./pipeline";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
 vi.mock("../../ipc/sources", async (original) => ({
@@ -793,4 +796,57 @@ test("the rail's Mark all as read acts on the pipelines it lists: their unread f
   expect(runs).toEqual(["teamcity:build:1187", "teamcity:build:1185", "teamcity:build:1183", "teamcity:build:1181", "teamcity:build:1179", "teamcity:build:1177", "teamcity:build:1175"]);
   expect(pipelines).toEqual(LIST.map((p) => p.entity_id));
   expect(toasts.items.some((t) => t.text === "Marked 7 runs as read")).toBe(true);
+});
+
+// -- a run started here, and one in flight, move on the rail (the TeamCity run fix, 2026-11-25) --
+
+test("a run queued here says queued on the rail at once; its row is read again when its read-back or a drawn run's refresh lands", async () => {
+  const events = echoEvents(settle);
+  /** The rail's own `item:refreshed` handler, which the test calls straight while the clock is faked. */
+  const heard: ((event: { payload: unknown }) => void)[] = [];
+  let list = LIST;
+  let reads = 0;
+  const ports: BuildsPorts = {
+    pipelines: () => Promise.resolve(list),
+    // Payout_Lint's runs are read only for its rail row: the page on the right is Payout_IntegrationTests'.
+    runs: (id) => (id === "teamcity:buildType:Payout_Lint" && reads++, Promise.resolve(list.find((p) => p.entity_id === id)?.recent ?? [])),
+    listen: (event, handler) => {
+      if (event === "item:refreshed") heard.push(handler);
+      return events.listen(event, handler);
+    },
+  };
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [], job: null, ports } });
+  await settle();
+  const lint = () => rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === "Payout_Lint")!;
+  expect(lint().querySelector(".tf-rg")?.getAttribute("aria-label")).toBe("Passed");
+  // *Run* on Payout_Lint (its page, or a run page): the queue's answer draws it queued on the rail.
+  echoWrite("teamcity:buildType:Payout_Lint", QUEUED_RUN, "", { write: { id: 51 }, base: "teamcity:build:904", many: true });
+  flushSync();
+  expect(lint().querySelector(".tf-rg")?.getAttribute("aria-label")).toBe("Queued");
+  expect(lint().querySelector(".tf-pi-when")?.textContent).toBe("queued");
+  // Its read-back names the write: its row's runs again, at once (not the whole list).
+  const queued = run("teamcity:build:905", "ok", { started: null, finished: null, duration_seconds: null, trigger: "person", state: { text: "queued", tone: "info" } });
+  list = LIST.map((p) => (p.name === "Payout_Lint" ? { ...p, recent: [queued, ...p.recent] } : p));
+  await events.refreshed("teamcity:build:905", 51);
+  expect(reads).toBe(1);
+  expect(lint().querySelector(".tf-rg")?.getAttribute("aria-label")).toBe("Queued");
+  // The follow reads it running: within 5 s of the last read, the list waits, then reads once.
+  list = LIST.map((p) => (p.name === "Payout_Lint" ? { ...p, recent: [{ ...queued, started: "2026-08-22T10:06:00Z", state: { text: "running", tone: "info" } }, ...p.recent] } : p));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: Date.now() });
+  try {
+    heard.forEach((handler) => handler({ payload: { entity_id: "teamcity:build:905", write_id: null, ended: "refreshed" } }));
+    heard.forEach((handler) => handler({ payload: { entity_id: "teamcity:build:905", write_id: null, ended: "refreshed" } }));
+    vi.advanceTimersByTime(4_000);
+    expect(reads, "within 5 s of the last read, nothing yet").toBe(1);
+    vi.advanceTimersByTime(1_000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await settle();
+  expect(reads, "the two refreshes, one read").toBe(2);
+  expect(lint().querySelector(".tf-rg")?.getAttribute("aria-label")).toBe("Running");
+  // A refresh of a run the rail does not draw reads nothing.
+  await events.refreshed("teamcity:build:1", null);
+  expect(reads).toBe(2);
+  forgetEchoes();
 });
