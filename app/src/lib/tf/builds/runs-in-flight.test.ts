@@ -70,3 +70,30 @@ test("a rail row draws a run queued here on top until its own read holds it", ()
   const held = { recent: [run(905, null, null), run(904, "a", "b")] };
   expect(withQueued(held, [echo])).toBe(held);
 });
+
+test("a page's read again on a run's refresh gets what the refresh wrote, not the window's kept answer", async () => {
+  const { enableAnswerCache, disableAnswerCache } = await import("../../ipc/answer-cache");
+  const { invoke } = await import("../../ipc/invoke");
+  const { hearRuns } = await import("./runs-in-flight");
+  let state = "running";
+  const internals = {};
+  Object.defineProperty(internals, "invoke", { value: async (cmd: string) => (cmd === "pipeline_runs" ? [{ entity_id: "tc:build:5", state }] : null) });
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals, configurable: true });
+  enableAnswerCache();
+  try {
+    const read = () => invoke("pipeline_runs", { pipelineId: "tc:buildType:P" }) as Promise<{ state: string }[]>;
+    expect((await read())[0]!.state).toBe("running");
+    state = "finished";
+    // The page's listener heard the event before the cache's own listener did (the real app, 2026-11-25).
+    let raise: (payload: unknown) => void = () => {};
+    const listen = async (_event: string, handler: (event: { payload: unknown }) => void) => ((raise = (payload) => handler({ payload })), () => {});
+    let reread: Promise<{ state: string }[]> | null = null;
+    hearRuns(listen, () => true, () => void (reread = read()));
+    await Promise.resolve();
+    raise({ entity_id: "tc:build:5", write_id: null, ended: "refreshed" });
+    expect((await reread!)[0]!.state).toBe("finished");
+  } finally {
+    disableAnswerCache();
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
+});

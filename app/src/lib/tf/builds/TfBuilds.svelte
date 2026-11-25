@@ -114,6 +114,7 @@
   import { windowListen } from "../../ipc/shared-listen";
   import { EVENTS } from "../../ipc";
   import type { RefreshEnded } from "../../ipc/sources";
+  import { cacheEvents } from "../../ipc/answer-cache";
   import {
     CHIPS,
     foldHolds,
@@ -260,7 +261,10 @@
     let off: (() => void) | null = null;
     void listen(EVENTS.itemRefreshed, ({ payload }) => {
       const moved = dead ? null : movedPipeline(payload as RefreshEnded);
-      if (moved !== null) rereadSoon(moved);
+      if (moved === null) return;
+      // What it moved goes from the window's answers before this row's read (`hearRuns`' reason).
+      cacheEvents.refreshed(payload as RefreshEnded);
+      rereadSoon(moved);
     })
       .then((stop) => (dead ? stop() : (off = stop)))
       .catch(() => {});

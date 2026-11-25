@@ -45,6 +45,7 @@ import type { QueuedWrite } from "../ipc/sources";
 import { windowListen } from "../ipc/shared-listen";
 
 import { EVENTS } from "../ipc";
+import { cacheEvents } from "../ipc/answer-cache";
 import type { RefreshEnded, SourceSyncStatus } from "../ipc/sources";
 import { onWithdrawn } from "../shell/write-queue.svelte";
 import { followWrite, writeFollower, type Following, type WriteFollower } from "../shell/follow-write";
@@ -199,7 +200,12 @@ export function watchEchoes(surface: string, reread: () => void, how: EchoWatch 
     const ended = payload as RefreshEnded;
     // A refresh that followed a write follows it landed (ADR-0031): its echo is *sent*, whatever the follow has heard yet.
     if (ended.write_id !== null) for (const all of Object.values(echoes)) for (const echo of all) if (echo.write === ended.write_id) echo.state = "sent";
-    if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) reread();
+    if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) {
+      // What the refresh moved goes from the window's answers before the read again: the cache hears the event on a
+      // listener of its own, in no set order with this one (the TeamCity run fix, 2026-11-25).
+      cacheEvents.refreshed(ended);
+      reread();
+    }
   });
   if (how.runEnds !== false)
     hear(EVENTS.syncState, (payload) => {

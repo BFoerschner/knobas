@@ -9,6 +9,7 @@
  * elsewhere or before a restart moves too. Neither discovers a new run: the source's runs do.
  */
 import { EVENTS } from "../../ipc";
+import { cacheEvents } from "../../ipc/answer-cache";
 import type { RunRow } from "../../ipc/entity";
 import type { RefreshEnded } from "../../ipc/sources";
 import type { EchoListen } from "../queued.svelte";
@@ -48,6 +49,10 @@ export function hearRuns(listen: EchoListen, mine: (entity: string) => boolean, 
   void listen(EVENTS.itemRefreshed, ({ payload }) => {
     const ended = payload as RefreshEnded;
     if (dead || ended.write_id !== null || ended.ended === "failed" || !mine(ended.entity_id)) return;
+    // The answers the refresh moved go before the read again: the window's cache hears the event on a listener of its
+    // own, in no set order with this one, and a read asked first was answered the kept *running* (the real app on a
+    // real TeamCity, 2026-11-25). Dropping twice is dropping once.
+    cacheEvents.refreshed(ended);
     heard(ended.entity_id);
   })
     .then((stop) => (dead ? stop() : (off = stop)))
