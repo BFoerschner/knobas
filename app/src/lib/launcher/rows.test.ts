@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import type { ResultGroup, SearchResponse } from "../ipc";
-import { ticketsFirst, twinItems } from "./rows";
+import { flatten, ticketsFirst, twinItems } from "./rows";
+import { navigationActions } from "./actions";
 
 const group = (kind: string): ResultGroup => ({ kind, label: kind, plural: kind, monogram: "", total: 0, hits: [] });
 const answer = (text: string): SearchResponse =>
@@ -49,4 +50,12 @@ test("a pull request or repository two forges serve is a twin too, and names its
     "live-gitea:tidewater/payout-service",
     "live-gitea:tidewater/payout-service#142",
   ]);
+});
+
+test("#b with no words offers Recent runs first; words or another filter do not (Builds' Recent, 2026-11-25)", () => {
+  const rows = (raw: string, words: string) =>
+    flatten({ mode: "results", response: { interpreted: { text: words, filters: { kinds: [] } }, groups: [] } as unknown as SearchResponse, home: null, actions: [], syntax: [], extras: { inbox: null, places: navigationActions() }, raw }).map((row) => row.id);
+  expect(rows("#b ", "")[0]).toBe("action:builds-recent");
+  expect(rows("#t ", "")).not.toContain("action:builds-recent");
+  expect(rows("#b pay", "pay")).not.toContain("action:builds-recent");
 });

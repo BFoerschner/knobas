@@ -15,6 +15,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Inbox",
     "Code",
     "Builds",
+    "Builds › Recent runs",
     "Docs",
     "Passwords",
     "Monitors",
@@ -65,6 +66,7 @@ test("every row's address parses back to the section it names", () => {
     ["Inbox", "inbox"],
     ["Code", "code"],
     ["Builds", "builds"],
+    ["Builds › Recent runs", "builds"],
     ["Docs", "docs"],
     ["Passwords", "passwords"],
     ["Monitors", "monitors"],
@@ -132,6 +134,7 @@ test("typing after > narrows the menu", () => {
 test("a name ranks above what a place holds, so > and a plain word agree (F-058)", () => {
   const labels = (text: string) => filterActions(navigationActions(), text).map((action) => action.label);
   expect(labels("builds")[0]).toBe("Builds");
+  expect(labels("recent")).toEqual(["Builds › Recent runs"]);
   expect(labels("builds")).toContain("Inbox");
   expect(labels("time").slice(0, 2)).toEqual(["Time", "Settings › Time"]);
   expect(labels("time")).toContain("Monitors");

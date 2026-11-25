@@ -47,6 +47,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
+  import type { RecentPorts } from "./TfRecent.svelte";
   import { replaceAddress } from "../opener";
 
   import type { CommitRepository, JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
@@ -65,6 +66,8 @@
     commitRepositories?: (commitIds: string[]) => Promise<CommitRepository[]>;
     /** The shell's events: `item:refreshed` reads the list again when a run it draws moved; the window's when omitted. */
     listen?: EchoListen;
+    /** *Recent*'s reads (2026-11-25); the bridge's when omitted. */
+    recent?: RecentPorts;
   }
 
   /** The folds the reader opened or closed this session, by key (R-9.3). */
@@ -106,6 +109,9 @@
   import TfPipeline from "./TfPipeline.svelte";
   import TfRun from "./TfRun.svelte";
   import TfRunGlyph from "./TfRunGlyph.svelte";
+  import TfRecent from "./TfRecent.svelte";
+  import { RECENT_HASH, isRecent } from "./recent";
+  import { buildsView } from "./builds-view.svelte";
   import { pipelineOfRun } from "./run";
   import { runsRead } from "./runs-read.svelte";
   import { RUN_BRIDGE } from "./pipeline-ports";
@@ -183,8 +189,19 @@
   let all = $state.raw<PipelineRow[] | null>(null);
   let failed = $state<string | null>(null);
 
+  /**
+   * *Recent* (2026-11-25): `#/builds/recent`, and a bare `#/builds` once the reader chose it (Fable's ruling 2), which
+   * takes that address. It draws from its own read, with no rail.
+   */
+  const recent = $derived(head === "builds" && (isRecent(rest) || (rest.length === 0 && buildsView.value === "recent")));
   $effect(() => {
-    if (!ready || all !== null) return;
+    if (head === "builds" && rest.length === 0 && buildsView.value === "recent") replaceAddress(RECENT_HASH);
+  });
+  /** *Recent*'s first page has drawn: the list is read behind it, not beside it. */
+  let recentDrawn = $state(false);
+
+  $effect(() => {
+    if (!ready || all !== null || (recent && !recentDrawn)) return;
     ports.pipelines().then(
       (rows) => (all = rows.map(recentNewestFirst)),
       (error: unknown) => (failed = message(error)),
@@ -333,7 +350,7 @@
     all !== null && head === "builds" && rest.length === 0 && job !== null && reasons === null &&
       !(lastPipeline.value !== null && all.some((p) => p.entity_id === lastPipeline.value)),
   );
-  const selected = $derived(all === null || deciding ? null : selectedOf(all));
+  const selected = $derived(all === null || deciding || recent ? null : selectedOf(all));
   $effect(() => {
     if (selected !== null && (rest.length > 0 || head !== "builds")) lastPipeline.value = selected.entity_id;
     if (selected !== null && rest.length === 0 && head === "builds" && bareDrew !== selected.entity_id) bareDrew = selected.entity_id;
@@ -562,8 +579,23 @@
   // The selected pipeline stays in view as the list scrolls on its own (R-9.4a). Once the frame has laid the rail out
   // (`afterLayout`), not in the task that mounts the page: there its reads laid out the whole new page, a run's with it,
   // and the run's own reads waited behind them (the ux30 end gate, Windows). The frame still paints the rail scrolled.
+  /**
+   * A rail that mounts with a pipeline selected, a run opened from *Recent* (2026-11-25), holds its rows unseen in their
+   * room until the scroll below has put that pipeline in view: drawn, they stood at the rail's top for a frame and then
+   * moved (the nothing-moves check).
+   */
+  let railUnseen = $state(false);
+  let wasRecent = untrack(() => recent);
+  $effect.pre(() => {
+    const now = recent;
+    if (wasRecent && !now) railUnseen = true;
+    wasRecent = now;
+  });
   $effect(() => {
-    if (selected === null || list === undefined) return;
+    if (selected === null || list === undefined) {
+      if (list !== undefined) railUnseen = false;
+      return;
+    }
     const id = selected.entity_id;
     const rail = list;
     let gone = false;
@@ -575,6 +607,7 @@
         win.reveal(rows.findIndex((row) => row.kind === "pipeline" && row.pipeline.entity_id === id));
         flushSync();
         rail.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+        railUnseen = false;
       });
     });
     return () => {
@@ -584,6 +617,17 @@
   });
 
 
+  /** *Pipelines / Recent*: a press is the reader's choice, kept (Fable's ruling 2). *Pipelines* goes to the last pipeline. */
+  function toRecent() {
+    buildsView.choose("recent");
+    if (!(head === "builds" && isRecent(rest))) location.hash = RECENT_HASH;
+  }
+  function toPipelines() {
+    const was = recent;
+    buildsView.choose("pipelines");
+    if (was) location.hash = lastPipeline.value !== null ? pipelineHash(lastPipeline.value) : "#/builds";
+  }
+
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
 </script>
@@ -591,6 +635,17 @@
 <!-- The header while no pipeline or run is drawn: the view's name and its *Sync now* (#2287). -->
 {#snippet bare()}
   <TfBareHeader title="Builds" {sync} />
+{/snippet}
+
+{#snippet viewSwitch()}
+  <div class="tf-seg tf-bview" role="group" aria-label="Builds view">
+    <button type="button" aria-pressed={!recent} onclick={toPipelines}>Pipelines</button>
+    <button type="button" aria-pressed={recent} onclick={toRecent}>Recent</button>
+  </div>
+{/snippet}
+
+{#snippet recentCrumbs()}
+  <TfCrumbs parts={[{ name: "Builds" }, { name: "Recent" }]} {back} />
 {/snippet}
 
 {#snippet crumbs(parts: Crumb[])}
@@ -638,7 +693,8 @@
   </details>
 {/snippet}
 
-<div class="tf-bv" class:tf-rail-shut={!railOpen} {@attach sideWidth("builds")}>
+<div class="tf-bv" class:tf-rail-shut={!railOpen} class:tf-bv-recent={recent} {@attach sideWidth("builds")}>
+  {#if !recent}
   <TfSideEdge side="builds" />
   <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -652,6 +708,7 @@
     onkeydown={railKeys}
   >
     <div class="tf-pl-top">
+      {@render viewSwitch()}
       <div class="tf-pl-group">
         {#if job !== null}
           <TfScope
@@ -723,7 +780,7 @@
           <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
         </p>
       {/if}
-      <div class="tf-pl-rows" {@attach win.list}>
+      <div class="tf-pl-rows" class:tf-unseen={railUnseen} {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
@@ -736,8 +793,21 @@
       </div>
     </div>
   </nav>
+  {/if}
   <TfScroller class="tf-bmain">
-    {#if head === "build" && selected !== null && rest.length >= 2}
+    {#if recent}
+      <TfRecent
+        {ready}
+        ports={ports.recent}
+        {job}
+        crumbs={recentCrumbs}
+        {sync}
+        switcher={viewSwitch}
+        {syncRevision}
+        everyPipeline={all?.map((p) => p.entity_id) ?? []}
+        ondrawn={() => (recentDrawn = true)}
+      />
+    {:else if head === "build" && selected !== null && rest.length >= 2}
       <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} {sync} />
     {:else if head === "build"}
       {@render crumbs([{ name: "Builds", href: "#/builds" }, { name: "Run" }])}

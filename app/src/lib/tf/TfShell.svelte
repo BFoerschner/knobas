@@ -125,6 +125,8 @@
   import { sideWidths } from "./side-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import { pipelineHash } from "./builds/builds";
+  import { RECENT_HASH, isRecent } from "./builds/recent";
+  import { buildsView } from "./builds/builds-view.svelte";
   import { sessionValue } from "./filter/filter-state.svelte";
   import TfPage from "./TfPage.svelte";
   import { flipZen, isZenKey, zen } from "./zen.svelte";
@@ -423,7 +425,11 @@
     if (section === null || untrack(() => scopedTicket.section) === section) return;
     // Builds remembers only a pipeline it holds, so an address it doesn't is nothing to come back to, and a run leads back to its own.
     if (section === "builds" && route.view === "full" && route.rest[0] !== undefined) {
-      if (route.rest[0] === lastPipeline.value) sectionTabs.builds = onRun ? pipelineHash(route.rest[0]) : hash;
+      // *Recent* (2026-11-25) is a place of Builds as a pipeline is.
+      if (!onRun && isRecent(route.rest)) sectionTabs.builds = hash;
+      // A run's section page is the view its reader keeps: *Recent* once chosen, else the run's pipeline.
+      else if (onRun && buildsView.value === "recent") sectionTabs.builds = RECENT_HASH;
+      else if (route.rest[0] === lastPipeline.value) sectionTabs.builds = onRun ? pipelineHash(route.rest[0]) : hash;
       return;
     }
     // A tab the page does not have is said so, and is nothing to come back to.
@@ -442,7 +448,7 @@
     const section = sectionOf(route);
     if (section === null || route.view === "job" || untrack(() => scopedTicket.section) === section) return;
     if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
-    if (route.view === "full" && route.head === "builds" && route.rest[0] !== undefined && route.rest[0] !== lastPipeline.value) return;
+    if (route.view === "full" && route.head === "builds" && route.rest[0] !== undefined && route.rest[0] !== lastPipeline.value && !isRecent(route.rest)) return;
     sectionPlaces[section] = hash;
   });
   /**

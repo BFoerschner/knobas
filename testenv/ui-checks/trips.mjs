@@ -545,6 +545,12 @@ const PAGES = [
     // runs, behind the pill over their top; a first draw, a return and a sync away draw it on top.
     { id: "builds-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "builds", rows: ".tf-main tr.tf-row, .tf-main .tf-rail a", held: true, rest: ".tf-runs tr.tf-row", pill: ".tf-newruns button", query: STILL_Q, grow: "window.__fake.runNew(), 1" },
   ] },
+  // Builds' *Recent* (2026-11-25): every pipeline's runs newest first; a run a sync brings waits behind the pill while the
+  // pointer rests on the runs, a first draw, a return and a sync away draw it on top; Enter on a run's number opens it once.
+  { page: "Builds, Recent", route: "builds/recent", trips: [
+    { id: "builds-recent-rows-still", kind: "rows-still", strict: true, finding: "2026-11-25-recent-runs", via: "inbox", words: "recent runs", rows: ".tf-main tr.tf-row", held: true, rest: ".tf-runs tr.tf-row", pill: ".tf-newruns button", query: STILL_Q, grow: "window.__fake.runNew(), 1" },
+    { id: "builds-recent-open-key", kind: "enter-twice", strict: true, finding: "2026-11-25-recent-runs", prep: [{ wait: 800 }], press: { sel: ".tf-recent a.tf-run-pno" }, leaves: true },
+  ] },
   // The seeded roster, not the scale's bulk one: `monitorDown` takes a seeded monitor down.
   { page: "Monitors", route: "monitors", trips: [
     { id: "monitors-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", words: "monitors", rows: ".tf-mon-row", query: STILL_Q.replace("&fake-scale", ""), grow: "window.__fake.monitorDown(), 1", tail: 3000 },

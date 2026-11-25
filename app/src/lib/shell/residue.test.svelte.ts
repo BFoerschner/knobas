@@ -497,6 +497,7 @@ const TfCreateTicket = (await import("../tf/TfCreateTicket.svelte")).default;
 const { echoWrite } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
+const TfRecent = (await import("../tf/builds/TfRecent.svelte")).default;
 const TfRunDialog = (await import("../tf/oneoff/TfRunDialog.svelte")).default;
 const TfRunLines = (await import("../tf/oneoff/TfRunLines.svelte")).default;
 const TfRunChip = (await import("../tf/oneoff/TfRunChip.svelte")).default;
@@ -1410,6 +1411,32 @@ const CASES: Case[] = [
           inFlight: false,
           failed: true,
           ports: { log: () => deferred(null), download: () => deferred(null) },
+        },
+      }),
+    }),
+  },
+  {
+    /** Builds' *Recent* (2026-11-25): its page, the job's branches and the sources answering late. */
+    name: "TfRecent",
+    source: "lib/tf/builds/TfRecent.svelte",
+    open: (target) => ({
+      app: mount(TfRecent, {
+        target,
+        props: {
+          ready: true,
+          job: "PAY-231",
+          crumbs: createRawSnippet(() => ({ render: () => "<nav></nav>" })),
+          switcher: createRawSnippet(() => ({ render: () => "<div></div>" })),
+          ports: {
+            recent: () => deferred({ runs: [], pipelines: [], next: null }),
+            jobBranches: () => deferred([]),
+            sources: () => deferred([]),
+            status: () => deferred([]),
+            syncNow: () => deferred(1),
+            follow: () => deferred(null),
+            listen: () => deferred(() => {}),
+            focused: () => true,
+          },
         },
       }),
     }),

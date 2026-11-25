@@ -108,6 +108,11 @@ const PLACES = [
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
+  // Builds' *Recent* (2026-11-25): every pipeline's runs newest first, by its address from Time, and a run opened from it.
+  // The probe reaches *Recent* by its address and never presses the switch, so *Recent* is not the kept view: the late
+  // and synced rounds' second press of Builds lands on the run's pipeline (the shell's rule), and opens a run there.
+  { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
+  { name: "recent-run", parent: "builds", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno, ${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   // A run pressed on a repository's Builds tab (Björn, 2026-11-16: "click on the run … and open the build itself immediately"):
   // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.
   { name: "repo-builds-run", parent: "code", start: "#/repo/live-gitea%3Ascale-data%2Fbi-dashboards/builds", press: `${shown} .tf-rbt a.tf-rbt-cell`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },

@@ -11,6 +11,7 @@ import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
 import { SETTINGS_SECTIONS, type SettingsSection, settingsHash, settingsName, settingsParent } from "../tf/settings/settings";
 import { docsChoices } from "../tf/docs/docs-choices.svelte";
 import { putKnobasBack } from "../tf/theme-reset";
+import { RECENT_HASH } from "../tf/builds/recent";
 import { themes } from "../tf/themes.svelte";
 
 /** One row of the `>` palette. */
@@ -25,6 +26,9 @@ export interface LauncherAction {
   /** An action that does something where it is instead of going anywhere: *Put knobas's themes back*. */
   run?: () => void;
 }
+
+/** *Recent runs*' row id: the place `#b` offers first. */
+export const RECENT_PLACE = "builds-recent";
 
 /** What each section holds, in one line: the row's second line. */
 const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
@@ -86,13 +90,19 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
  */
 export function navigationActions(): LauncherAction[] {
   return [
-    ...[...NAV, "settings" as const].map((section) => ({
-      id: section,
-      label: SECTION_NAME[section],
-      detail: SECTION_DETAIL[section],
-      // Docs opens where its home is, when one is chosen (PR #2479, 2026-11-17).
-      hash: section === "docs" ? docsChoices.start : sectionHash(section),
-    })),
+    ...[...NAV, "settings" as const].flatMap((section) => [
+      {
+        id: section,
+        label: SECTION_NAME[section],
+        detail: SECTION_DETAIL[section],
+        // Docs opens where its home is, when one is chosen (PR #2479, 2026-11-17).
+        hash: section === "docs" ? docsChoices.start : sectionHash(section),
+      },
+      // Builds' *Recent* (2026-11-25): the newest runs of every pipeline, a place of its own, which `#b` offers first.
+      ...(section === "builds"
+        ? [{ id: RECENT_PLACE, label: `${SECTION_NAME.builds} › Recent runs`, detail: "The newest runs of every pipeline, with no folders", hash: RECENT_HASH }]
+        : []),
+    ]),
     ...SETTINGS_SECTIONS.map(([section, name]) => ({
       id: `settings-${section}`,
       // A child carries its path: *Settings › Appearance › Fonts* (the subtrees ruling, 2026-11-21).

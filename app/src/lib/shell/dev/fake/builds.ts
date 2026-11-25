@@ -26,6 +26,8 @@ import type {
   PipelineReason,
   PipelineRow,
   PipelineSettings,
+  RecentCursor,
+  RecentFilter,
   RunPreset,
   RunRow,
   Setting,
@@ -40,6 +42,7 @@ import { keepSeed, onFakeReset } from "../fake-seed";
 import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
+import { recentOrder } from "../../../tf/builds/recent";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -897,6 +900,40 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         const repo = /^mock:(tidewater\/[^@]+)@/.exec(commitId)?.[1];
         return repo === undefined ? [] : [{ commit_id: commitId, repo_id: `mock:${repo}`, repo_title: repo }];
       }),
+    // Builds' *Recent* (2026-11-25): every drawn pipeline's runs, newest first by when each started or was queued, as
+    // `run_made_idx` orders them, narrowed as the server narrows them, a page after `before`.
+    recent_runs: (args) => {
+      const filter = (args["filter"] ?? {}) as Partial<RecentFilter>;
+      const before = (args["before"] ?? null) as RecentCursor | null;
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 200;
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      const all = history(new Date());
+      const drawn = [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk].filter(
+        (pipeline) => (filter.sources ?? []).length === 0 || filter.sources!.includes(pipeline.source_id),
+      );
+      const byId = new Map(drawn.map((pipeline) => [pipeline.entity_id, pipeline]));
+      const runs = drawn
+        .flatMap((pipeline) => (bulkById.get(pipeline.entity_id)?.recent ?? all.get(configOf(pipeline.entity_id)) ?? []).map((run) => ({ pipeline_id: pipeline.entity_id, run })))
+        .filter(({ run }) => {
+          const result = run.finished === null ? (run.started === null ? "Queued" : "Running") : run.state?.tone === "err" ? "Failed" : run.state?.tone === "ok" ? "Passed" : null;
+          if ((filter.results ?? []).length > 0 && (result === null || !filter.results!.includes(result))) return false;
+          if (filter.mine === true && !run.started_by_me) return false;
+          return filter.branches == null || (run.branch !== null && filter.branches.includes(run.branch));
+        })
+        .sort((a, b) => recentOrder(a.run, b.run));
+      const from = before === null ? 0 : runs.findIndex(({ run }) => run.entity_id === before.entity_id) + 1;
+      const page = runs.slice(from, from + limit);
+      const last = page.at(-1);
+      const pipelines = [...new Set(page.map((one) => one.pipeline_id))].map((id) => {
+        const { recent: _recent, pinned: _pinned, web_url: _web, ...named } = byId.get(id)!;
+        return named;
+      });
+      return {
+        runs: page,
+        pipelines,
+        next: page.length === limit && last !== undefined ? { made: last.run.started ?? last.run.updated_at ?? "-infinity", entity_id: last.run.entity_id } : null,
+      };
+    },
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const bulkRow = bulkById.get(id);

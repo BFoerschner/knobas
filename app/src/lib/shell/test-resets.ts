@@ -209,6 +209,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/sets/hints.svelte.ts#putAway": async () => (await import("../tf/sets/hints.svelte")).forgetHints(),
   // A page's session memory, held in its component's `<script module>` (#1983).
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
+  "tf/builds/TfRecent.svelte#kept": async () => (await import("../tf/builds/TfRecent.svelte")).forgetRecent(),
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
   // Which repositories' headers have looked for a branch to propose (the inner-pages pass).
   "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderSearches(),

@@ -130,9 +130,11 @@ test("a branch name offers Compare with working tree, the branch as Into (ux26)"
   expect(item(entries, "compare-working").act).toEqual({ do: "go", hash: "#/repo/gitea%3At%2Fpay/compare/main...~working-tree" });
 });
 
-test("a run: its log and tests, Re-run queued, its page on TeamCity", () => {
+test("a run: its pipeline, its log and tests, Re-run queued, its page on TeamCity", () => {
   const entries = menuFor({ kind: "run", id: "tc:9", pipelineId: "tc:Pay", hash: "#/build/tc%3APay/tc%3A9" }, null, ctx());
-  expect(ids(entries)).toEqual(["open", "log", "tests", "rerun", "|", "web", "|", "copy-link"]);
+  expect(ids(entries)).toEqual(["open", "pipeline", "log", "tests", "rerun", "|", "web", "|", "copy-link"]);
+  // Builds' *Recent* names a run's pipeline without linking it: the menu opens it (2026-11-25).
+  expect(item(entries, "pipeline")).toMatchObject({ label: "Open pipeline", act: { do: "go", hash: "#/builds/tc%3APay" } });
   expect(item(entries, "rerun").act).toMatchObject({ do: "write", payload: { RerunBuild: { entity: "tc:9" } }, sourceId: "tc" });
   expect(item(entries, "web").label).toBe("Open in TeamCity");
 });
@@ -235,7 +237,7 @@ test("a hidden space offers Unhide, and a space that is Docs' home offers to sto
 test("a failed run offers Mark as read, or Mark as unread once read; a run the page does not draw as failed offers neither (ux18)", () => {
   const failed: Thing = { kind: "run", id: "tc:9", pipelineId: "tc:Pay", hash: "#/build/tc%3APay/tc%3A9", failed: true };
   const unread = menuFor(failed, null, ctx({ runs: { isRead: () => false } }));
-  expect(ids(unread)).toEqual(["open", "log", "tests", "rerun", "read", "|", "web", "|", "copy-link"]);
+  expect(ids(unread)).toEqual(["open", "pipeline", "log", "tests", "rerun", "read", "|", "web", "|", "copy-link"]);
   expect(item(unread, "read")).toMatchObject({ label: "Mark as read", act: { do: "run-read", id: "tc:9", read: true } });
   const read = menuFor(failed, null, ctx({ runs: { isRead: (id) => id === "tc:9" } }));
   expect(item(read, "unread")).toMatchObject({ label: "Mark as unread", act: { do: "run-read", id: "tc:9", read: false } });

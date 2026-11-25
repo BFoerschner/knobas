@@ -4306,6 +4306,58 @@ kind: string,
 step: string, origin: ReachOrigin, };
 
 /**
+ * Where a page of *Recent* ends: its last run's stored instant, in the
+ * database's own spelling, and its id. Handed back as it came to read the
+ * next page; nothing else reads it.
+ */
+export type RecentCursor = { made: string, entity_id: string, };
+
+/**
+ * What *Recent* asks for beyond its page: every field empty asks for every run.
+ */
+export type RecentFilter = { 
+/**
+ * The sources, by id; empty for every CI source.
+ */
+sources: Array<string>, 
+/**
+ * The results the Runs filter's chips name (`Failed`, `Running`,
+ * `Queued`, `Passed`); empty for any.
+ */
+results: Array<string>, 
+/**
+ * Only the runs the reader started (*Mine*).
+ */
+mine: boolean, 
+/**
+ * Only the runs built on these branches (*This job*); `None` for any.
+ */
+branches: Array<string> | null, };
+
+/**
+ * A pipeline as *Recent* names it beside its runs: its name, its chain of
+ * groups and its source, as the Builds list names it ([`PipelineRow`]).
+ */
+export type RecentPipeline = { entity_id: string, source_id: string, source_name: string, name: string, group: string | null, 
+/**
+ * The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+ */
+path: Array<string>, };
+
+/**
+ * One run in Builds' *Recent* (2026-11-25): the run as a pipeline's runs
+ * draw it, and the id of the pipeline it sits under, which
+ * [`RecentRuns::pipelines`] names.
+ */
+export type RecentRun = { pipeline_id: string, run: RunRow, };
+
+/**
+ * A page of *Recent*: its runs newest first, the pipelines they sit under,
+ * and where the next page starts, `None` once the mirror holds no more.
+ */
+export type RecentRuns = { runs: Array<RecentRun>, pipelines: Array<RecentPipeline>, next: RecentCursor | null, };
+
+/**
  * A write the source's credential cannot make, or one field of it the write
  * cannot carry, and why, in words a person can act on: *This TeamCity user cannot run builds in Payout: it lacks the
  * Run build permission*.

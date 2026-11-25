@@ -12,6 +12,7 @@ import * as entityIpc from "../../ipc/entity";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 import { runsRead } from "./runs-read.svelte";
+import { buildsView } from "./builds-view.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
 import { echoWrite, forgetEchoes } from "../queued.svelte";
@@ -46,6 +47,7 @@ afterEach(() => {
   page = null;
   target.remove();
   runsRead.forget();
+  buildsView.choose("pipelines");
 });
 
 async function settle() {
@@ -108,7 +110,7 @@ const syncNow = createRawSnippet(() => ({ render: () => '<button type="button" c
 function draw(rest: string[], head = "builds", asked: string[] = [], extra: Partial<BuildsPorts> = {}, sync = false) {
   const ports: BuildsPorts = {
     ...extra,
-    pipelines: () => Promise.resolve(LIST),
+    pipelines: extra.pipelines ?? (() => Promise.resolve(LIST)),
     runs: (id) => {
       asked.push(id);
       return Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []);
@@ -849,4 +851,63 @@ test("a run queued here says queued on the rail at once; its row is read again w
   await events.refreshed("teamcity:build:1", null);
   expect(reads).toBe(2);
   forgetEchoes();
+});
+
+// ---------------------------------------------------------------------------
+// *Recent* (2026-11-25): the newest runs of every pipeline, no folds
+// ---------------------------------------------------------------------------
+
+const RECENT_PORTS = (drawn: { asked: number }) => ({
+  recent: () => {
+    drawn.asked += 1;
+    return Promise.resolve({ runs: [{ pipeline_id: LIST[0]!.entity_id, run: LIST[0]!.recent[0]! }], pipelines: [{ ...LIST[0]!, recent: undefined }], next: null } as never);
+  },
+  listen: () => Promise.resolve(() => {}),
+  focused: () => false,
+});
+
+test("Pipelines / Recent is the rail top's first control; Recent goes to its address and is kept", async () => {
+  buildsView.choose("pipelines");
+  draw([]);
+  await settle();
+  const top = target.querySelector(".tf-pl-top")!;
+  const view = top.firstElementChild!;
+  expect(view.getAttribute("aria-label")).toBe("Builds view");
+  expect([...view.querySelectorAll("button")].map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
+    ["Pipelines", "true"],
+    ["Recent", "false"],
+  ]);
+  [...view.querySelectorAll("button")][1]!.click();
+  expect(location.hash).toBe("#/builds/recent");
+  expect(buildsView.value).toBe("recent");
+});
+
+test("Recent draws no rail, the switch heads its bar, and the list is read only once its first page drew", async () => {
+  const drawn = { asked: 0 };
+  let listed = 0;
+  draw(["recent"], "builds", [], { recent: RECENT_PORTS(drawn), pipelines: () => ((listed += 1), Promise.resolve(LIST)) } as Partial<BuildsPorts>);
+  flushSync();
+  expect(target.querySelector("nav.tf-pl")).toBeNull();
+  expect(target.querySelector(".tf-bv")?.classList.contains("tf-bv-recent")).toBe(true);
+  expect(listed).toBe(0);
+  await settle();
+  expect(drawn.asked).toBe(1);
+  expect(listed).toBe(1);
+  expect(target.querySelector("h1")?.textContent).toContain("Recent runs");
+  const bar = target.querySelector(".tf-recentbar")!;
+  expect(bar.firstElementChild?.querySelector('[aria-pressed="true"]')?.textContent).toBe("Recent");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toContain("Recent");
+});
+
+test("a bare #/builds with Recent kept takes Recent's address; Pipelines takes it back to the last pipeline", async () => {
+  buildsView.choose("recent");
+  location.hash = "#/builds";
+  draw([], "builds", [], { recent: RECENT_PORTS({ asked: 0 }) } as Partial<BuildsPorts>);
+  await settle();
+  expect(location.hash).toBe("#/builds/recent");
+  expect(target.querySelector("nav.tf-pl")).toBeNull();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-recentbar .tf-seg button")].find((b) => b.textContent === "Pipelines")!.click();
+  expect(buildsView.value).toBe("pipelines");
+  expect(location.hash.startsWith("#/builds")).toBe(true);
+  expect(location.hash).not.toBe("#/builds/recent");
 });

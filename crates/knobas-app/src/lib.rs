@@ -1090,6 +1090,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::oneoff::oneoff_result,
         commands::oneoff::oneoff_repo_commands,
         commands::oneoff::oneoff_copy_repo_commands,
+        // Builds' *Recent* (2026-11-25), appended at the foot: the list is
+        // append-only (§10.8).
+        commands::entity::recent_runs,
     ]
 }
 
