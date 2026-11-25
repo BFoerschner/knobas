@@ -579,8 +579,23 @@
   // The selected pipeline stays in view as the list scrolls on its own (R-9.4a). Once the frame has laid the rail out
   // (`afterLayout`), not in the task that mounts the page: there its reads laid out the whole new page, a run's with it,
   // and the run's own reads waited behind them (the ux30 end gate, Windows). The frame still paints the rail scrolled.
+  /**
+   * A rail that mounts with a pipeline selected, a run opened from *Recent* (2026-11-25), holds its rows unseen in their
+   * room until the scroll below has put that pipeline in view: drawn, they stood at the rail's top for a frame and then
+   * moved (the nothing-moves check).
+   */
+  let railUnseen = $state(false);
+  let wasRecent = untrack(() => recent);
+  $effect.pre(() => {
+    const now = recent;
+    if (wasRecent && !now) railUnseen = true;
+    wasRecent = now;
+  });
   $effect(() => {
-    if (selected === null || list === undefined) return;
+    if (selected === null || list === undefined) {
+      if (list !== undefined) railUnseen = false;
+      return;
+    }
     const id = selected.entity_id;
     const rail = list;
     let gone = false;
@@ -592,6 +607,7 @@
         win.reveal(rows.findIndex((row) => row.kind === "pipeline" && row.pipeline.entity_id === id));
         flushSync();
         rail.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+        railUnseen = false;
       });
     });
     return () => {
@@ -764,7 +780,7 @@
           <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
         </p>
       {/if}
-      <div class="tf-pl-rows" {@attach win.list}>
+      <div class="tf-pl-rows" style:visibility={railUnseen ? "hidden" : null} {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>

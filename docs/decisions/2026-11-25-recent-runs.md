@@ -90,6 +90,29 @@ server capped at 2 GB and the agent at 1 GB, removed afterwards), with four conf
   `>recent`, the run menu's *Open pipeline*. 25 mutants of the rules and the view, each killed (one survived first:
   its test started on an address the test before it had left).
 
+## Timing
+
+Headless Chrome on the Mac (WSL is down), the release windowless backend over a fresh copy of the saved scale database
+(2,620 runs, 91 pipelines; migration `0103` filled `sync.run_made` at its first start), the front end built as the
+probes build it. ms to the first useful frame / drawn, each on its first visit (`open.mjs`, `keys.mjs`):
+
+| Case | 1440x868@1, 1x | 1440x868@1, 6x | 2560x1440@1.25, 6x | Line (1x / 6x) |
+|---|---|---|---|---|
+| *Recent*, first open | 63 / 80 | 5 / 172 | 125 / 242 | 100 / 300 |
+| *Recent*, return | 14 / 30 | 16 / 66 | 1 / 84 | 100 / 300 |
+| A run opened from *Recent* | 52 / 69 | 210 / 226 | 192 / 226 | 100 / 300 |
+| A letter in *Recent*'s filter (median of 5) | 18 | 34 | 38 | 100 / 150 |
+
+Nothing moved after its first useful frame in any of them. The backend answered `recent_runs` (a page of 200,
+129 KB) in 23 to 42 ms, median 27, over fifteen reads. **Found:** two of the first fifteen reads took 3.2 s each,
+the rest 23 to 38 ms: from a connection's sixth run PostgreSQL kept a generic plan for the named statement, which
+cannot read its `$n is null or …` filters. The statement is unnamed now (`.persistent(false)`, as `knobas-search`'s
+suggestions are), and `the_read_is_planned_with_its_values_each_time` holds it. **Found too:** from a run opened in
+*Recent*, a second press of the Builds entry went to the run's pipeline; while *Recent* is the kept view it goes to
+*Recent* (`TfShell.svelte`).
+
+**Owed on Windows** (WSL and the PC are off): WebView2's first open of *Recent* at 6x, its keys, and its scroll.
+
 ## Reversing it
 
 Migration `0103` stays (released migrations are frozen); drop its reads: `recent_runs` (`knobas-core::builds`

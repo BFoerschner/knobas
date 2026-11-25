@@ -402,6 +402,8 @@
   background: var(--sheet); border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 5;
 }
 .tf-recentbar > .tf-seg { flex: none; }
+/* Room for four digits from the first frame: the most *Recent* holds is 2,000. */
+.tf-recent-count { display: inline-block; min-width: 4ch; text-align: center; box-sizing: content-box; }
 .tf-recentbar > .tf-fbar { position: static; border-bottom: 0; background: none; padding: 10px 0; flex: 1 1 auto; min-width: 0; }
 /* The run's state leads: the chip alone, the unread dot in its gutter. */
 .tf-runs.tf-recent .tf-run-no { width: 104px; }
