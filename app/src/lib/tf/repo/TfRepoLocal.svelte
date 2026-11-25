@@ -24,6 +24,7 @@
   import { treeStanding } from "../code/code";
   import { repoName } from "../openin/openin";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfRunMenu from "../oneoff/TfRunMenu.svelte";
   import TfPath from "../TfPath.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { compareHash, localFiles } from "./repo";
@@ -71,6 +72,8 @@
   /** "3 ahead, 1 changed" without the branch, which the line names on its own. */
   const where = $derived(tree !== null ? treeStanding(tree) : null);
   const files = $derived(localFiles(read));
+  /** The changed files on disk, once each: what a file's command may run on one at a time (ADR-0060, section 12). */
+  const changedPaths = $derived([...new Set(files.filter((f) => f.change !== "deleted").map((f) => f.path))]);
   const untracked = $derived(read?.status === "read" ? read.untracked : []);
   const name = $derived(repoName(title));
   const head = $derived(tree?.head ?? null);
@@ -118,7 +121,14 @@
     {#if tree !== null}<span>on <span class="tf-mono">{tree.branch ?? "a detached head"}</span></span>{/if}
     {#if where !== null}<span>{where}</span>{/if}
     <span class="tf-trail"
-      ><a class="tf-btn tf-sm tf-ghost" href={compareHash(repoId, WORKING_TREE)}>Compare with a branch</a><TfOpenIn entityId={repoId} {title} {checkout} /></span
+      ><a class="tf-btn tf-sm tf-ghost" href={compareHash(repoId, WORKING_TREE)}>Compare with a branch</a><TfRunMenu
+        entityId={repoId}
+        repo={title || repoId}
+        target={{ kind: "repository" }}
+        {checkout}
+        files={{ paths: changedPaths, changed: true }}
+        priority={2}
+      /><TfOpenIn entityId={repoId} {title} {checkout} /></span
     >
   </div>
   <p class="tf-dim tf-local-note">

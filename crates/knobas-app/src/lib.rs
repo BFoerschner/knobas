@@ -1087,6 +1087,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::oneoff::oneoff_forget,
         commands::oneoff::oneoff_shell_path,
         commands::oneoff::oneoff_save,
+        commands::oneoff::oneoff_result,
     ]
 }
 

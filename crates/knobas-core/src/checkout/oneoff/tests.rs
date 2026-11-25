@@ -607,3 +607,40 @@ fn a_saved_command_reads_back_with_its_defaults() {
     assert_eq!(read.stdin, Stdin::None);
     assert_eq!(read.kind(), Kind::File);
 }
+
+/// The window's twin (`app/src/lib/render/oneoff.ts`) reads the same cases:
+/// what a command is offered on, and the words of what Save refuses.
+#[test]
+fn the_twin_fixture_holds() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../app/src/lib/render/oneoff-twin.json"
+    ))
+    .unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(cases.len() >= 20);
+    for case in cases {
+        let command = case["command"].as_str().unwrap();
+        let stdin = match case["stdin"].as_str().unwrap() {
+            "file" => Stdin::File,
+            "selection" => Stdin::Selection,
+            _ => Stdin::None,
+        };
+        let kind = kind_of(command, stdin).ok().map(|k| {
+            serde_json::to_value(k)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        });
+        assert_eq!(kind.as_deref(), case["kind"].as_str(), "{command}");
+        match case["refused"].as_str() {
+            None => assert_eq!(check(command, stdin, "linux"), Ok(()), "{command}"),
+            Some(words) => {
+                let said = check(command, stdin, "linux")
+                    .expect_err(command)
+                    .to_string();
+                assert!(said.contains(words), "{command}: {said}");
+            }
+        }
+    }
+}

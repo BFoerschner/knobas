@@ -15,8 +15,10 @@
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
   import TfPath from "../TfPath.svelte";
-  import { ago, endedShort, fill, shown, stateOf, takesFile, takesFolder, takesRepository } from "../../render/oneoff";
+  import { ago, endedShort, fill, shown, stateOf, takesCommit, takesFile, takesFolder, takesRange, takesRepository } from "../../render/oneoff";
+  import { BATCH_MAX } from "../../render/oneoff.svelte";
   import { oneoffs as sharedStore, type OneOffs } from "../../render/oneoff.svelte";
+  import { commandPageHash } from "../settings/command-page";
 
   let {
     entityId,
@@ -25,6 +27,7 @@
     checkout,
     top = null,
     own = null,
+    files = null,
     priority = 1,
     small = true,
     store = sharedStore,
@@ -41,6 +44,8 @@
     top?: readonly string[] | null;
     /** A folder's own files, where read. */
     own?: readonly string[] | null;
+    /** Files a file's command may run on one at a time (section 12): a folder's files, or a diff's changed files. */
+    files?: { paths: readonly string[]; changed: boolean } | null;
     /** Which `X` opens where several stand: the file's over the folder's over the repository's. */
     priority?: number;
     small?: boolean;
@@ -54,8 +59,24 @@
   const facts = $derived({ repo: entityId, top });
   const takes = $derived(
     store.commands.filter((c) =>
-      target.kind === "file" ? takesFile(c, target.path, facts) : target.kind === "folder" ? takesFolder(c, target.path, own, facts) || (target.path === "" && takesRepository(c, facts)) : takesRepository(c, facts) || takesFolder(c, "", own, facts),
+      target.kind === "range"
+        ? takesRange(c, facts)
+        : target.kind === "commit"
+          ? takesCommit(c, facts)
+          : target.kind === "file"
+            ? takesFile(c, target.path, facts)
+            : target.kind === "folder"
+              ? takesFolder(c, target.path, own, facts) || (target.path === "" && takesRepository(c, facts))
+              : takesRepository(c, facts) || takesFolder(c, "", own, facts),
     ),
+  );
+  /** The file commands that take two or more of `files`, each with the files it takes. */
+  const many = $derived(
+    files === null
+      ? []
+      : store.commands
+          .map((c) => ({ c, paths: files.paths.filter((p) => takesFile(c, p, facts)) }))
+          .filter((one) => one.paths.length >= 2),
   );
   const root = $derived(checkout?.path ?? null);
   const notCloned = $derived(checkout !== undefined && root === null);
@@ -74,6 +95,9 @@
       file: t.kind === "file" ? t.path : null,
       dir: t.kind === "folder" ? t.path : t.kind === "file" ? t.path.slice(0, Math.max(0, t.path.lastIndexOf("/"))) : null,
       line: t.kind === "file" ? (t.lines?.[0] ?? null) : null,
+      sha: t.kind === "commit" ? t.sha : null,
+      base: t.kind === "range" ? t.base : null,
+      head: t.kind === "range" ? t.head : null,
     });
     return "argv" in filled ? shown(filled.argv) : command.command;
   }
@@ -89,7 +113,7 @@
     store.openRun(command, entityId, repo, targetFor(command), root);
   }
 
-  const addHash = $derived(`#/settings/commands/new?repo=${encodeURIComponent(entityId)}${target.kind === "file" || target.kind === "folder" ? `&on=${encodeURIComponent(target.path)}` : ""}`);
+  const addHash = $derived(commandPageHash({ repo: entityId, on: target.kind === "file" || target.kind === "folder" ? target.path : "" }));
 
   // `X` opens the most specific menu standing.
   $effect(() => {
@@ -131,6 +155,23 @@
     {:else}
       <span class="tf-oo-none">No command of yours runs on this. A command is a program of yours, such as a linter, run here on a press.</span>
     {/each}
+    {#if many.length > 0}
+      <hr />
+      {#each many as { c, paths } (c.id)}
+        {@const together = c.command.includes("{files}")}
+        <button
+          role="menuitem"
+          disabled={!together && paths.length > BATCH_MAX}
+          title={!together && paths.length > BATCH_MAX ? `More than ${BATCH_MAX} files: a command that takes the folder runs once instead` : undefined}
+          onclick={() => {
+            open = false;
+            if (together) store.openRun(c, entityId, repo, { kind: "files", paths: [...paths] }, root);
+            else store.openBatch(c, entityId, repo, paths, root);
+          }}
+          ><b>{c.name} on {paths.length} {files?.changed ? "changed files" : `files${c.files.length > 0 ? ` that match ${c.files.join(" ")}` : ""}`}</b><span class="tf-dim">{together ? "One run, every file an argument" : "One run a file, four at a time"}</span></button
+        >
+      {/each}
+    {/if}
     {#if lastOfThing !== undefined}
       <hr />
       <button role="menuitem" onclick={() => { open = false; void store.reopen(lastOfThing.id); }}><b>Show the last run</b><span class="tf-dim">{lastOfThing.name}, {endedShort(lastOfThing.ended)}</span></button>

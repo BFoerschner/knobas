@@ -16,15 +16,22 @@ import {
   batchChannel,
   oneoffCommands,
   oneoffLines,
+  oneoffResult,
   oneoffRun,
   oneoffRuns,
   oneoffSave,
   oneoffStop,
   oneoffWatch,
+  oneoffForget,
+  oneoffShellPath,
+  setOneoffCommands,
   type OneOff,
+  type OneOffDraft,
+  type OneOffShell,
   type OneOffBatch,
   type OneOffEnded,
   type OneOffLine,
+  type OneOffResult,
   type OneOffRunRow,
   type OneOffStarted,
   type OneOffTarget,
@@ -42,8 +49,12 @@ export interface OneOffPorts {
   runs(entityId: string | null): Promise<OneOffRunRow[]>;
   lines(run: string, from: number, count: number): Promise<OneOffBatch | null>;
   watch(run: string, onbatch: (batch: OneOffBatch) => void): Promise<{ known: boolean; stop: () => void }>;
-  save(run: string, name: string, colours: boolean): Promise<string>;
+  save(run: string, name: string, colours: boolean, result?: boolean, file?: string | null): Promise<string>;
+  result(run: string, file: string | null): Promise<Uint8Array>;
   copy(text: string): Promise<void>;
+  setCommands(drafts: OneOffDraft[]): Promise<OneOff[]>;
+  forget(run: string | null): Promise<void>;
+  shell(again: boolean, on: boolean | null): Promise<OneOffShell>;
   /** Hears `oneoff:moved` until the answer is called. */
   moved(handler: (row: OneOffRunRow) => void): () => void;
 }
@@ -63,8 +74,12 @@ export const realOneOffPorts: OneOffPorts = {
   runs: (entityId) => oneoffRuns(entityId),
   lines: (run, from, count) => oneoffLines(run, from, count),
   watch: (run, onbatch) => channelled((ch) => oneoffWatch(run, ch), onbatch).then(({ answer, stop }) => ({ known: answer, stop })),
-  save: (run, name, colours) => oneoffSave(run, name, colours),
+  save: (run, name, colours, result, file) => oneoffSave(run, name, colours, result ?? false, file ?? null),
+  result: (run, file) => oneoffResult(run, file),
   copy: (text) => navigator.clipboard.writeText(text),
+  setCommands: (drafts) => setOneoffCommands(drafts),
+  forget: (run) => oneoffForget(run),
+  shell: (again, on) => oneoffShellPath(again, on),
   moved: (handler) => {
     const heard = listen<OneOffRunRow>(EVENTS.oneoffMoved, (event) => handler(event.payload));
     return () => void heard.then((off) => off(), () => {});
@@ -85,8 +100,20 @@ export function targetOf(at: { kind: "repository" } | { kind: "folder"; path: st
   }
 }
 
-/** The views a run gives. */
-export type RunView = "output" | "problems";
+/** The views a run gives: its result first where it made one. */
+export type RunView = "output" | "problems" | "result" | "files";
+
+/** One file of a batch (section 12): its own run, once started, and how it ended. */
+export interface BatchItem {
+  path: string;
+  run: Run | null;
+  ended: OneOffEnded | null;
+}
+
+/** The most files a batch runs, one run a file. */
+export const BATCH_MAX = 200;
+/** How many of a batch's runs go at once: the app's own limit. */
+export const BATCH_AT_ONCE = 4;
 
 /** A run as a dialog shows it. */
 export class Run {
@@ -116,6 +143,16 @@ export class Run {
   wrap = $state(false);
   follow = $state(true);
   stream = $state<"both" | "out" | "err">("both");
+  /** What it made that is not its lines, once it ended. */
+  result = $state<OneOffResult | null>(null);
+  /** A batch's files (one run a file), `null` for one run. */
+  batch = $state<BatchItem[] | null>(null);
+  /** The batch's picked file. */
+  batchAt = $state(0);
+  /** *Stop* on a batch: what runs is stopped and nothing more starts. */
+  batchStopped = false;
+  /** The person picked a view: a result arriving does not take it away. */
+  picked = false;
   /** The output line a place press or `N`/`P` stands at. */
   at = $state<number | null>(null);
   /** The lines, in order, as the window holds them: plain, so a flood costs no proxy. */
@@ -152,6 +189,10 @@ export class Run {
     this.findings = batch.findings;
     this.elapsed = batch.elapsed_ms;
     if (batch.dropped > 0) this.forgetMiddle(batch.tail_from);
+    if (batch.result !== null && batch.result !== undefined && this.result === null) {
+      this.result = batch.result;
+      if (!this.picked && batch.result.from !== "refused") this.view = batch.result.from === "files" ? "files" : "result";
+    }
     if (batch.ended !== null && batch.ended !== undefined) {
       this.ended = batch.ended;
       this.let();
@@ -237,9 +278,23 @@ export class OneOffs {
     this.loaded = true;
   }
 
-  /** The saved list changed (Settings): the menus read the new one. */
-  saved(commands: OneOff[]): void {
-    this.commands = commands;
+  /** Saves the whole list (Settings); the menus read it as stored. Rejects naming the entry that cannot be saved. */
+  async save(drafts: OneOffDraft[]): Promise<OneOff[]> {
+    const stored = await this.ports.setCommands(drafts);
+    this.commands = stored;
+    this.loaded = true;
+    return stored;
+  }
+
+  /** Forgets one run, or every run that ended; the list reads again. */
+  async forget(run: string | null): Promise<void> {
+    await this.ports.forget(run);
+    this.rows = await this.ports.runs(null).catch(() => this.rows);
+  }
+
+  /** *Where programs are found*: the login shell's `PATH`, read again with `again`, the switch set with `on`. */
+  shell(again: boolean, on: boolean | null = null): Promise<OneOffShell> {
+    return this.ports.shell(again, on);
   }
 
   private moved(row: OneOffRunRow): void {
@@ -339,14 +394,83 @@ export class OneOffs {
     this.open = null;
   }
 
-  /** Stops the dialog's run with everything it started. */
+  /** Stops the dialog's run with everything it started; a batch's runs, and it starts no more. */
   stop(run: Run): void {
+    if (run.batch !== null) {
+      run.batchStopped = true;
+      for (const item of run.batch) {
+        if (item.ended === null && item.run === null) item.ended = { how: "stopped" };
+        if (item.ended === null && item.run?.id) void this.ports.stop(item.run.id);
+      }
+      run.version += 1;
+      return;
+    }
     if (run.id !== null) void this.ports.stop(run.id);
+  }
+
+  /**
+   * A file's command on many files (section 12): one run a file, four at a time, at most 200, in a dialog that lists
+   * them with how each ended and draws the picked one's output.
+   */
+  openBatch(command: OneOff, entityId: string, repo: string, paths: readonly string[], root: string | null = null): Run {
+    this.close();
+    const files = paths.slice(0, BATCH_MAX);
+    const run = new Run(command, entityId, repo, { kind: "files", paths: [...files] }, [command.command]);
+    void root;
+    run.batch = files.map((path) => ({ path, run: null, ended: null }));
+    this.open = run;
+    let next = 0;
+    let going = 0;
+    const settle = () => {
+      const items = run.batch ?? [];
+      if (items.every((item) => item.ended !== null)) {
+        const failed = items.filter((item) => !(item.ended?.how === "exit" && item.ended.code === 0)).length;
+        run.ended = run.batchStopped ? { how: "stopped" } : { how: "exit", code: failed > 0 ? 1 : 0 };
+        run.elapsed = Date.now() - run.startedAt;
+      }
+      run.version += 1;
+    };
+    const start = () => {
+      while (going < BATCH_AT_ONCE && next < files.length && !run.batchStopped) {
+        const item = (run.batch as BatchItem[])[next]!;
+        next += 1;
+        going += 1;
+        const sub = new Run(command, entityId, repo, { kind: "file", path: item.path, lines: null, at: null }, []);
+        item.run = sub;
+        const done = (ended: OneOffEnded) => {
+          if (item.ended !== null) return;
+          item.ended = ended;
+          going -= 1;
+          start();
+          settle();
+        };
+        void this.ports
+          .run(entityId, command.id, { kind: "file", path: item.path, lines: null, at: null }, (batch) => {
+            sub.take(batch);
+            if (batch.ended !== null && batch.ended !== undefined) done(batch.ended);
+            else run.version += 1;
+          })
+          .then(({ started }) => {
+            sub.id = started.run;
+            sub.argv = started.argv;
+          })
+          .catch((error: unknown) => {
+            const reason = (error as { message?: string } | null)?.message ?? String(error);
+            sub.refused = reason;
+            done({ how: "not_started", reason });
+          });
+      }
+      if (run.batchStopped) for (const item of (run.batch as BatchItem[]).slice(next)) if (item.ended === null && item.run === null) item.ended = { how: "stopped" };
+      settle();
+    };
+    start();
+    return run;
   }
 
   /** Runs the dialog's command again on the same thing, as saved now. */
   again(run: Run, root: string | null = null): Run {
     const command = this.commands.find((c) => c.id === run.command.id) ?? run.command;
+    if (run.batch !== null) return this.openBatch(command, run.entityId, run.repo, run.batch.map((item) => item.path), root);
     return this.openRun(command, run.entityId, run.repo, run.target, root);
   }
 
@@ -388,11 +512,32 @@ export class OneOffs {
     return this.ports.copy(text);
   }
 
-  save(run: Run, colours: boolean): Promise<string> {
+  /** The bytes of a run's result, or of one file it wrote to `{outdir}`. */
+  resultBytes(run: Run, file: string | null = null): Promise<Uint8Array> {
+    if (run.id === null) return Promise.reject(new Error("The run has not started."));
+    return this.ports.result(run.id, file);
+  }
+
+  /** *Download* of the result, or of the file picked in *Files*. */
+  saveResult(run: Run, file: string | null): Promise<string> {
+    if (run.id === null) return Promise.reject(new Error("The run has not started."));
+    const name = file !== null ? (file.split("/").pop() ?? file) : run.result?.from === "one" && run.result.name !== "stdout" ? run.result.name : `${run.command.id}-result${extOf(run.result)}`;
+    return this.ports.save(run.id, `${run.command.id}-${name}`, false, true, file);
+  }
+
+  saveRun(run: Run, colours: boolean): Promise<string> {
     if (run.id === null) return Promise.reject(new Error("The run has not started."));
     const thing = run.target.kind === "file" ? (run.target.path.split("/").pop() ?? "file") : run.target.kind === "folder" ? run.target.path.split("/").pop() || run.repo : run.repo;
     return this.ports.save(run.id, `${run.command.id}-${thing}.txt`, colours);
   }
+}
+
+/** A result's file extension for its download name. */
+function extOf(result: OneOffResult | null): string {
+  if (result?.from !== "one") return "";
+  const k = result.kind;
+  if (k.kind === "image") return k.mime === "image/svg+xml" ? ".svg" : `.${k.mime.split("/")[1] ?? "img"}`;
+  return { pdf: ".pdf", page: ".html", json: ".json", markdown: ".md", diff: ".diff", text: ".txt", bytes: ".bin", code: k.kind === "code" ? `.${k.ext}` : "" }[k.kind] ?? "";
 }
 
 const EMPTY: Omit<OneOff, "id" | "name" | "command"> = {

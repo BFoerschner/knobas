@@ -46,6 +46,7 @@ const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
 const SETTINGS_DETAIL: Record<SettingsSection, string> = {
   sources: "Add, edit and sync the systems knobas reads",
   checkouts: "Where your clones live and which editor opens them",
+  commands: "Your own programs, such as a linter, run on a file, a folder or the repository when you press it",
   time: "How knobas helps you account for your day",
   notifications: "What knobas tells you about, and how",
   standup: "Where the standup protocol is published",

@@ -27,10 +27,13 @@
   import { push } from "../../shell/toasts.svelte";
   import { openWeb } from "../../shell/open-web";
   import { lineHash } from "../repo/repo";
-  import { clock, many, outputText, problems, problemsText, shown, size, stateOf, took, type Problem } from "../../render/oneoff";
+  import { clock, many, outputText, problems, problemsText, resultWord, shown, size, stateOf, took, type Problem } from "../../render/oneoff";
   import { oneoffs as sharedStore, type OneOffs, type Run } from "../../render/oneoff.svelte";
   import TfRunLines from "./TfRunLines.svelte";
   import TfRunProblems from "./TfRunProblems.svelte";
+  import TfRunResult from "./TfRunResult.svelte";
+  import TfRunFiles from "./TfRunFiles.svelte";
+  import TfRunBatch from "./TfRunBatch.svelte";
 
   let {
     run,
@@ -52,9 +55,18 @@
     return () => clearInterval(tick);
   });
 
-  const st = $derived(stateOf(run.refused !== null ? { how: "not_started", reason: run.refused } : run.ended));
+  const batchFailed = $derived.by(() => {
+    void run.version;
+    return (run.batch ?? []).filter((item) => item.ended !== null && !(item.ended.how === "exit" && item.ended.code === 0)).length;
+  });
+  const st = $derived.by(() => {
+    const base = stateOf(run.refused !== null ? { how: "not_started", reason: run.refused } : run.ended);
+    if (run.batch === null || run.ended === null || run.ended.how !== "exit") return base;
+    const n = run.batch.length;
+    return batchFailed > 0 ? { tone: "err" as const, words: `${batchFailed} of ${n} exited with an error`, code: null } : { tone: "ok" as const, words: `All ${n} exited with 0`, code: null };
+  });
   const sub = $derived(
-    `${run.target.kind === "file" ? `${run.target.path} in ${run.repo}` : run.target.kind === "folder" && run.target.path !== "" ? `${run.target.path}/ in ${run.repo}` : run.repo}, your working tree${run.branch !== null ? ` on ${run.branch}` : ""}`,
+    run.batch !== null ? `${run.batch.length} files in ${run.repo}, one run a file, ${4} at a time` : `${run.target.kind === "file" ? `${run.target.path} in ${run.repo}` : run.target.kind === "folder" && run.target.path !== "" ? `${run.target.path}/ in ${run.repo}` : run.repo}, your working tree${run.branch !== null ? ` on ${run.branch}` : ""}`,
   );
   const ran = $derived(run.ended !== null ? `after ${took(run.elapsed)}` : run.refused !== null ? "" : clock(Math.max(run.elapsed, now - run.startedAt)));
   const findings = $derived.by(() => {
@@ -66,11 +78,25 @@
     void run.version;
     return run.wrote.out && run.wrote.err;
   });
+  const result = $derived(run.result);
+  let filePicked = $state(0);
   const counts = $derived.by(() => {
     const out: string[] = [];
+    if (run.batch !== null) {
+      void run.version;
+      const ended = run.batch.filter((item) => item.ended !== null).length;
+      return `${ended} of ${many(run.batch.length, "run", "runs")} ended${batchFailed > 0 ? `, ${batchFailed} with an error` : ""}.`;
+    }
+    if (run.view === "result" && result?.from === "one") {
+      return `${result.name === "stdout" ? "Its stdout" : result.name}, ${size(result.size)}${result.kind.kind === "page" ? ", drawn without its scripts" : ""}${result.overruled ? `. Said to be ${result.overruled}, it is not.` : "."}`;
+    }
+    if (run.view === "files" && result?.from === "files") {
+      return `${many(result.files.length, "file", "files")}, ${size(result.bytes)}${result.left_out_total > 0 ? `. ${result.left_out_total} left out` : ""}.`;
+    }
     if (run.total > 0) out.push(`${many(run.total, "line", "lines")}, ${size(run.bytes)}`);
     if (findingCount > 0) out.push(`${many(findingCount, "problem", "problems")} in ${many(findings.length, "file", "files")}`);
     if (run.dropped > 0) out.push(`${run.dropped.toLocaleString("en")} lines not kept`);
+    if (result?.from === "refused") out.push(`Nothing it made is kept: ${result.why}`);
     return out.length > 0 ? `${out.join(". ")}.` : "";
   });
   const history = $derived(store.history(run));
@@ -80,6 +106,20 @@
     void run.version;
     return run.lines.length === 0;
   });
+
+  /** The views the bar offers, in order: the result first, then Output, then Problems. */
+  const views = $derived.by(() => {
+    const list: { id: "output" | "problems" | "result" | "files"; label: string; count: number | null }[] = [];
+    if (result?.from === "one") list.push({ id: "result", label: resultWord(result.kind), count: null });
+    if (result?.from === "files") list.push({ id: "files", label: "Files", count: result.files.length });
+    list.push({ id: "output", label: "Output", count: null });
+    if (findingCount > 0) list.push({ id: "problems", label: "Problems", count: findingCount });
+    return list;
+  });
+  function pick(view: "output" | "problems" | "result" | "files") {
+    run.view = view;
+    run.picked = true;
+  }
 
   let moreOpen = $state(false);
   let moreFace = $state<HTMLButtonElement | null>(null);
@@ -99,7 +139,9 @@
 
   function download(colours: boolean) {
     moreOpen = false;
-    store.save(run, colours).then(
+    const resultShown = (run.view === "result" && result?.from === "one") || (run.view === "files" && result?.from === "files");
+    const file = run.view === "files" && result?.from === "files" ? (result.files[filePicked]?.path ?? null) : null;
+    (resultShown ? store.saveResult(run, file) : store.saveRun(run, colours)).then(
       (path) => push({ text: `Saved to ${path}` }),
       (error: unknown) => push({ text: `Could not save it: ${(error as { message?: string } | null)?.message ?? String(error)}`, tone: "err" }),
     );
@@ -173,10 +215,9 @@
     } else if (event.key === "Enter" && run.at !== null && !on?.closest("button, a")) {
       event.preventDefault();
       openAt();
-    } else if (event.key === "1") {
-      run.view = "output";
-    } else if (event.key === "2" && findingCount > 0) {
-      run.view = "problems";
+    } else if (/^[1-4]$/.test(event.key)) {
+      const view = views[Number(event.key) - 1];
+      if (view !== undefined) pick(view.id);
     }
   }
 </script>
@@ -188,15 +229,15 @@
     <button
       type="button"
       class="tf-btn tf-oo-again"
-      disabled={run.refused === null && run.running && run.id === null}
+      disabled={run.batch === null && run.refused === null && run.running && run.id === null}
       title={run.running ? keyHint("Stop it and everything it started (⌘.)") : "Run it again on the thing as it is now (R)"}
       onclick={again}>{run.running ? "Stop" : "Run again"}</button
     >
-    <button type="button" class="tf-btn" disabled={quiet} title="Copy what this view shows, as text" onclick={() => void copy()}>
+    <button type="button" class="tf-btn" disabled={quiet || run.view === "result" || run.view === "files"} title={run.view === "result" || run.view === "files" ? "Download it instead" : "Copy what this view shows, as text"} onclick={() => void copy()}>
       <svg class="tf-vglyph" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" /></svg>
       Copy
     </button>
-    <button type="button" class="tf-btn" disabled={quiet || run.id === null} title="Save what it printed to Downloads" onclick={() => download(false)}>
+    <button type="button" class="tf-btn" disabled={(quiet && result === null) || run.id === null} title={run.view === "result" || run.view === "files" ? "Save what it made to Downloads" : "Save what it printed to Downloads"} onclick={() => download(false)}>
       <svg class="tf-vglyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.75 6.75 8 10l3.25-3.25M3 13.5h10" /></svg>
       Download
     </button>
@@ -234,12 +275,11 @@
     </div>
     <div class="tf-oo-bar">
       <div class="tf-seg" role="group" aria-label="What to show">
-        <button type="button" aria-pressed={run.view === "output"} title="1" onclick={() => (run.view = "output")}>Output</button>
-        {#if findingCount > 0}
-          <button type="button" aria-pressed={run.view === "problems"} title="2" onclick={() => (run.view = "problems")}
-            >Problems <span class="tf-count">{findingCount}</span></button
+        {#each views as view, i (view.id)}
+          <button type="button" aria-pressed={run.view === view.id} title={String(i + 1)} onclick={() => pick(view.id)}
+            >{view.label}{#if view.count !== null}{" "}<span class="tf-count">{view.count}</span>{/if}</button
           >
-        {/if}
+        {/each}
       </div>
       <span class="tf-oo-counts">{counts}</span>
       {#if run.view === "output" && !quiet}
@@ -266,6 +306,16 @@
             <a class="tf-btn tf-sm" href="#/settings/commands/{encodeURIComponent(run.command.id)}" onclick={() => store.close()}>Edit this command</a>
           </div>
         </div>
+      {:else if run.batch !== null}
+        <TfRunBatch {run} onplace={openPlace} onurl={(href) => openWeb(href)} />
+      {:else if run.view === "result" && result?.from === "one"}
+        {#key run.id}
+          <TfRunResult kind={result.kind} bytes={() => store.resultBytes(run)} name={result.name} bytesSize={result.size} />
+        {/key}
+      {:else if run.view === "files" && result?.from === "files"}
+        {#key run.id}
+          <TfRunFiles {result} bytes={(file) => store.resultBytes(run, file)} bind:picked={filePicked} />
+        {/key}
       {:else if quiet}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex: a scroller takes focus so the arrows scroll it (arrival focus, design system Dialogs) -->
         <div class="tf-oo-quiet" tabindex="0" role="status">

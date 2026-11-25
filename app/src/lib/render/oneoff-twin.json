@@ -1,0 +1,29 @@
+{
+  "about": "Commands (ADR-0060): what a command is offered on and whether Save refuses it, read by knobas_core::checkout::oneoff's tests and render/oneoff.test.ts alike, so the window's twin says what the backend does.",
+  "cases": [
+    { "command": "eslint {file}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "eslint {dir}", "stdin": "none", "kind": "folder", "refused": null },
+    { "command": "cargo clippy --all-targets", "stdin": "none", "kind": "repository", "refused": null },
+    { "command": "git show --stat {sha}", "stdin": "none", "kind": "commit", "refused": null },
+    { "command": "git diff --stat {base} {head}", "stdin": "none", "kind": "range", "refused": null },
+    { "command": "git blame {sha} -- {relfile}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "jq .", "stdin": "selection", "kind": "file", "refused": null },
+    { "command": "git log {base}..{sha}", "stdin": "none", "kind": "range", "refused": null },
+    { "command": "sh -c 'eslint \"$1\" | head -40' _ {file}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "eslint --config={root}/eslint.config.js {file}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "eslint -c {root}/x.js {file}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "wsl -e ruff check {file}", "stdin": "none", "kind": "file", "refused": null },
+    { "command": "madge --image {out}.png {dir}", "stdin": "none", "kind": "folder", "refused": null },
+    { "command": "eslint {path}", "stdin": "none", "kind": "repository", "refused": "{root}" },
+    { "command": "eslint {title}", "stdin": "none", "kind": "repository", "refused": "{title} is not something knobas fills in" },
+    { "command": "sh -c \"eslint {file} | head\"", "stdin": "none", "kind": "file", "refused": "quoted script" },
+    { "command": "sh -c {file}", "stdin": "none", "kind": "file", "refused": "script of sh -c" },
+    { "command": "env FOO=1 bash -c {dir}", "stdin": "none", "kind": "folder", "refused": "script of env -c" },
+    { "command": "cmd /c {file}", "stdin": "none", "kind": "file", "refused": "script of cmd /c" },
+    { "command": "wsl ruff check {file}", "stdin": "none", "kind": "file", "refused": "-e stands" },
+    { "command": "x {out}.png {outdir}", "stdin": "none", "kind": "repository", "refused": "one of them" },
+    { "command": "x --in={files}", "stdin": "none", "kind": "file", "refused": "stands alone" },
+    { "command": "sh", "stdin": "file", "kind": "file", "refused": "would run" },
+    { "command": "x 'a", "stdin": "none", "kind": null, "refused": "never closed" }
+  ]
+}

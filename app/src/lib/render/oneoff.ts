@@ -4,7 +4,7 @@
  * `kind_of`, `check` and `fill` that the menus and *It will run* read (held to the Rust by `oneoff-twin.json`).
  */
 import { secondsLabel } from "../time/format";
-import type { OneOff, OneOffEnded, OneOffFinding, OneOffKind, OneOffLine, OneOffPlace, OneOffStdin, OneOffStyle, OneOffTarget, OneOffUrl } from "../ipc/oneoff";
+import type { OneOff, OneOffEnded, OneOffFinding, OneOffKind, OneOffLine, OneOffPlace, OneOffResultKind, OneOffStdin, OneOffStyle, OneOffTarget, OneOffUrl } from "../ipc/oneoff";
 
 /** One piece of a line: its text, its classes, and the place or address it is a link to. */
 export interface Piece {
@@ -421,4 +421,83 @@ export function takesFolder(c: OneOff, path: string, own: readonly string[] | nu
 /** Whether `c` takes the repository itself. */
 export function takesRepository(c: OneOff, facts: Facts): boolean {
   return kindOf(c.command, c.stdin) === "repository" && inRepository(c, facts);
+}
+
+/** What a result's first bytes say (the twin of `knobas_app::oneoff::result::sniff`), for a file a run wrote to `{outdir}`. */
+export function sniff(bytes: Uint8Array): OneOffResultKind {
+  const starts = (...b: number[]) => b.every((v, i) => bytes[i] === v);
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return { kind: "image", mime: "image/png" };
+  if (starts(0xff, 0xd8, 0xff)) return { kind: "image", mime: "image/jpeg" };
+  const ascii = new TextDecoder("latin1").decode(bytes.subarray(0, 16));
+  if (ascii.startsWith("GIF87a") || ascii.startsWith("GIF89a")) return { kind: "image", mime: "image/gif" };
+  if (ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WEBP") return { kind: "image", mime: "image/webp" };
+  if (ascii.startsWith("%PDF-")) return { kind: "pdf" };
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { kind: "bytes" };
+  }
+  if (text.includes("\0")) return { kind: "bytes" };
+  const head = text.replace(/^﻿/, "").trimStart();
+  const lower = head.slice(0, 256).toLowerCase();
+  if (lower.startsWith("<svg") || (lower.startsWith("<?xml") && lower.includes("<svg"))) return { kind: "image", mime: "image/svg+xml" };
+  if (lower.startsWith("<!doctype html") || lower.startsWith("<html")) return { kind: "page" };
+  if (bytes.length <= 2 * 1024 * 1024 && (head.startsWith("{") || head.startsWith("["))) {
+    try {
+      JSON.parse(text);
+      return { kind: "json" };
+    } catch {
+      /* text */
+    }
+  }
+  return { kind: "text" };
+}
+
+/** A result's view's word on the bar: *Page*, *Image*, *PDF*. */
+export function resultWord(kind: OneOffResultKind): string {
+  switch (kind.kind) {
+    case "image":
+      return "Image";
+    case "pdf":
+      return "PDF";
+    case "page":
+      return "Page";
+    case "json":
+      return "JSON";
+    case "markdown":
+      return "Markdown";
+    case "code":
+      return "Code";
+    case "diff":
+      return "Diff";
+    case "text":
+      return "Result";
+    case "bytes":
+      return "Bytes";
+    default:
+      return "Result";
+  }
+}
+
+/** The first 64 KiB of bytes as a hex dump, sixteen a row with their characters. */
+export function hexDump(bytes: Uint8Array, cap = 64 * 1024): string {
+  const rows: string[] = [];
+  for (let at = 0; at < Math.min(bytes.length, cap); at += 16) {
+    const row = bytes.subarray(at, Math.min(at + 16, bytes.length));
+    const hex = [...row].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    const chars = [...row].map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
+    rows.push(`${at.toString(16).padStart(8, "0")}  ${hex.padEnd(47)}  ${chars}`);
+  }
+  return rows.join("\n");
+}
+
+/** Whether `c` takes a commit (`{sha}` and no file). */
+export function takesCommit(c: OneOff, facts: Facts): boolean {
+  return kindOf(c.command, c.stdin) === "commit" && inRepository(c, facts);
+}
+
+/** Whether `c` takes a comparison (`{base}` or `{head}`). */
+export function takesRange(c: OneOff, facts: Facts): boolean {
+  return kindOf(c.command, c.stdin) === "range" && inRepository(c, facts);
 }

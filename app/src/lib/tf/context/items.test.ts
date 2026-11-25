@@ -329,7 +329,7 @@ test("the Run group follows Open in: the first command that takes the thing flat
 test("a file no command takes offers Run a command…; not cloned greys both rows; the rows are the same before the read lands", () => {
   const before = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "a.rs" }, null, ctx({ commands: COMMANDS }), {});
   expect(item(before, "run-first").label).toBe("Run a command…");
-  expect(item(before, "run-first").act).toEqual({ do: "go", hash: "#/settings/commands/new?repo=gitea%3At%2Fpay&on=a.rs" });
+  expect(item(before, "run-first").act).toEqual({ do: "go", hash: "#/settings/commands/new/gitea%3At%2Fpay/a.rs" });
   const after = menuFor({ kind: "file", repoId: "gitea:t/pay", path: "src/a.ts" }, null, ctx({ commands: COMMANDS }), { checkout: view(null) });
   expect(item(after, "run-first").disabled).toBe("Not cloned on this machine");
   expect(item(after, "run-in").disabled).toBe("Not cloned on this machine");

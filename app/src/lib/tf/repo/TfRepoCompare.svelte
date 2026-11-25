@@ -83,6 +83,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
+  import TfRunMenu from "../oneoff/TfRunMenu.svelte";
   import { compareSection, diffHash, rangeDiffVia, WORKING_TREE } from "../diff/address";
   import { endWords } from "../diff/rendered";
   import { rangeContext } from "../diff/context";
@@ -1000,7 +1001,14 @@
       What it changes
       {#if section !== null && head !== null}
         <span class="tf-trail"
-          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfOpenObject
+          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfRunMenu
+            entityId={repoId}
+            repo={repoId.split("/").pop() ?? repoId}
+            target={{ kind: "range", base: ends.base, head: ends.head }}
+            checkout={undefined}
+            files={{ paths: (files ?? []).filter((f) => f.change !== "deleted").map((f) => f.path), changed: true }}
+            priority={2}
+          /><TfOpenObject
             entityId={repoId}
             object={{ kind: "range", base: ends.base, head: ends.head }}
           /></span

@@ -1,6 +1,6 @@
 /**
  * `?fake-ipc`: commands, run on a press and read in a dialog (ADR-0060). Answers `oneoff_commands`,
- * `set_oneoff_commands`, `oneoff_run`, `oneoff_stop`, `oneoff_runs`, `oneoff_lines`, `oneoff_watch`, `oneoff_forget`, `oneoff_save` and
+ * `set_oneoff_commands`, `oneoff_run`, `oneoff_stop`, `oneoff_runs`, `oneoff_lines`, `oneoff_watch`, `oneoff_forget`, `oneoff_save`, `oneoff_result` and
  * `oneoff_shell_path`.
  *
  * None is saved until one is, as in the app. `?fake-oneoff` saves four: *ESLint* on any file, *ESLint* on a
@@ -10,7 +10,7 @@
  * `sleep` runs until stopped or its timeout. `?fake-oneoff=flood` makes *Tests* print 120,000 lines at 20,000 a second
  * (the probes' flood); `?fake-oneoff-lines=<n>` sets how many.
  */
-import type { OneOff, OneOffBatch, OneOffDraft, OneOffEnded, OneOffLine, OneOffRunRow, OneOffTarget } from "../../../ipc/oneoff";
+import type { OneOff, OneOffBatch, OneOffDraft, OneOffEnded, OneOffLine, OneOffResult, OneOffRunRow, OneOffTarget } from "../../../ipc/oneoff";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 
@@ -29,6 +29,7 @@ interface FakeRun {
   stop: boolean;
   sinks: { onmessage: (batch: OneOffBatch) => void }[];
   started: number;
+  result?: OneOffResult;
 }
 const runs: FakeRun[] = [];
 keepSeed(runs);
@@ -57,7 +58,17 @@ const SEEDED: OneOff[] = [
   base("eslint-dir", "ESLint on a folder", "npx eslint {dir}"),
   base("xmllint", "xmllint, against openTRANS", "xmllint --noout --schema schemas/opentrans_2_1.xsd {file}", ["*.xml"]),
   base("tests", "Tests", "npm test"),
+  base("report", "Coverage report", "python3 scripts/coverage-report.py --html {out}.html"),
+  base("graph", "Dependency graph", "madge --image {out}.png {dir}"),
+  base("schemas", "Order schemas", "xsd2json {dir} --out {outdir}"),
 ];
+
+/** A 1 x 1 PNG. */
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+const enc = (text: string) => new TextEncoder().encode(text);
+/** What each run made, by its id: one file's bytes, or files by path. */
+const made = new Map<string, Uint8Array | Map<string, Uint8Array>>();
+keepSeed(made);
 
 export function seed(params: URLSearchParams): void {
   saved = params.has("fake-oneoff") ? SEEDED.map((c) => ({ ...c })) : [];
@@ -75,7 +86,7 @@ function line(n: number, text: string, extra: Partial<OneOffLine> = {}): OneOffL
 }
 
 /** What `command` prints on `target`, read as the backend reads it. */
-function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; ended: OneOffEnded; every: number } {
+function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; ended: OneOffEnded; every: number; result?: { result: OneOffResult; bytes: Uint8Array | Map<string, Uint8Array> } } {
   const file = target.kind === "file" ? target.path : "src/retry/window.ts";
   if (command.command.includes("missing")) return { lines: [], ended: { how: "not_started", reason: `${command.command.split(" ")[0]} was not found: is it on the PATH the command sees?` }, every: 0 };
   if (command.command.includes("fail")) {
@@ -115,6 +126,26 @@ function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; e
     lines.push(line(lines.length, ""), line(lines.length + 1, " Test Files  6 passed (6)", { runs: [{ from: 13, to: 19, style: { fg: "g", bold: true } }] }));
     return { lines, ended: { how: "exit", code: 0 }, every: 160 };
   }
+  if (command.id === "report") {
+    const page = enc(`<!doctype html><html><head><style>body{font:14px sans-serif;margin:24px}td{padding:4px 12px}</style></head><body><h1>Coverage</h1><table><tr><td>src/retry/window.ts</td><td>82%</td></tr><tr><td>src/payout/ledger.ts</td><td>67%</td></tr></table><script>document.body.style.background="red"</script></body></html>`);
+    return { lines: [line(0, "Reading coverage/lcov.info", { stream: "err" }), line(1, "Wrote the report", { stream: "err" })], ended: { how: "exit", code: 0 }, every: 120, result: { result: { from: "one", kind: { kind: "page" }, size: page.length, name: "output.html", overruled: null }, bytes: page } };
+  }
+  if (command.id === "graph") {
+    return { lines: [line(0, "Processed 14 files (412ms)", { stream: "err" })], ended: { how: "exit", code: 0 }, every: 150, result: { result: { from: "one", kind: { kind: "image", mime: "image/png" }, size: PNG.length, name: "output.png", overruled: null }, bytes: PNG } };
+  }
+  if (command.id === "schemas") {
+    const files = new Map<string, Uint8Array>();
+    for (let i = 0; i < 48; i++) files.set(`order-${4700 + i}.json`, enc(JSON.stringify({ order: 4700 + i, lines: i % 7, unit: "C62" }, null, 2)));
+    files.set("index.html", enc("<!doctype html><h1>Orders</h1>"));
+    files.set("graph.png", PNG);
+    const list = [...files].map(([path, b]) => ({ path, size: b.length })).sort((a, b) => a.path.localeCompare(b.path));
+    return {
+      lines: [line(0, `Wrote ${list.length} files`, { stream: "err" })],
+      ended: { how: "exit", code: 0 },
+      every: 100,
+      result: { result: { from: "files", files: list, bytes: list.reduce((n, f) => n + f.size, 0), left_out: [{ path: "latest", why: "link" }], left_out_total: 1 }, bytes: files },
+    };
+  }
   if (command.command.includes("sleep")) return { lines: [line(0, "waiting…")], ended: { how: "timed_out", seconds: command.timeout_secs }, every: 1e9 };
   const shown = target.kind === "folder" ? target.path || "." : file;
   const findings: [number, number, string, string, string][] = [
@@ -139,7 +170,7 @@ function floodLine(n: number): OneOffLine {
   return line(n, `  ✓ src/retry/window.test.ts > case ${n} keeps the payout held (${(n % 7) + 1} ms)`, { runs: [{ from: 2, to: 3, style: { fg: "g" } }] });
 }
 
-function batch(run: FakeRun, lines: OneOffLine[], ended: OneOffEnded | null): OneOffBatch {
+function batch(run: FakeRun, lines: OneOffLine[], ended: OneOffEnded | null, result: OneOffResult | null = null): OneOffBatch {
   return {
     run: run.row.id,
     lines,
@@ -151,6 +182,7 @@ function batch(run: FakeRun, lines: OneOffLine[], ended: OneOffEnded | null): On
     findings: run.findings,
     elapsed_ms: Date.now() - run.started,
     ended,
+    result,
   };
 }
 
@@ -160,11 +192,12 @@ function send(run: FakeRun, b: OneOffBatch) {
 
 function end(run: FakeRun, ended: OneOffEnded) {
   if (run.row.ended) return;
+  const result = run.result ?? null;
   run.row.ended = ended;
   run.row.duration_ms = Date.now() - run.started;
   run.row.lines = run.lines.length;
   run.row.findings = run.findings;
-  send(run, batch(run, [], ended));
+  send(run, batch(run, [], ended, result));
   run.sinks = [];
   bridge?.emit("oneoff:moved", run.row);
 }
@@ -229,7 +262,11 @@ export function handlers(): Handlers {
       if (channel && typeof channel.onmessage === "function") run.sinks.push(channel as { onmessage: (b: OneOffBatch) => void });
       runs.push(run);
       bridge?.emit("oneoff:moved", run.row);
-      const { lines, ended, every } = script(command, target);
+      const { lines, ended, every, result } = script(command, target);
+      if (result) {
+        run.result = result.result;
+        made.set(id, result.bytes);
+      }
       play(run, lines, ended, every);
       return { run: id, argv, cwd: run.row.cwd, branch: run.row.branch ?? null, head: run.row.head ?? null, started_at: run.started, already: false };
     },
@@ -249,7 +286,7 @@ export function handlers(): Handlers {
       if (!run) return null;
       const from = Number(args["from"]);
       const count = Math.min(Number(args["count"]), 20_000);
-      return batch(run, run.lines.slice(from, from + count), run.row.ended ?? null);
+      return batch(run, run.lines.slice(from, from + count), run.row.ended ?? null, run.row.ended ? (run.result ?? null) : null);
     },
     oneoff_watch: (args) => {
       const run = runs.find((r) => r.row.id === args["run"]);
@@ -264,6 +301,13 @@ export function handlers(): Handlers {
       runs.splice(0, runs.length, ...keep);
     },
     oneoff_save: (args) => `/Users/mara/Downloads/${String(args["name"])}`,
+    oneoff_result: (args) => {
+      const held = made.get(String(args["run"]));
+      const file = (args["file"] as string | null) ?? null;
+      const bytes = held instanceof Map ? (file === null ? undefined : held.get(file)) : held;
+      if (bytes === undefined) throw { code: "not_found", message: "it made no result that is kept", source_id: null };
+      return bytes;
+    },
     oneoff_shell_path: (args) => ({
       on: typeof args["on"] === "boolean" ? (args["on"] as boolean) : true,
       offered: true,

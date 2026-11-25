@@ -529,7 +529,11 @@ dropped: number, tail_from: number,
 /**
  * Bytes printed.
  */
-bytes: number, findings: number, elapsed_ms: number, ended?: OneOffEnded | null, };
+bytes: number, findings: number, elapsed_ms: number, ended?: OneOffEnded | null, 
+/**
+ * What it made that is not its lines, once it ended.
+ */
+result?: OneOffResult | null, };
 
 /**
  * One of the eight colours a program can name.
@@ -602,6 +606,24 @@ export type OneOffPlace = { from: number, to: number,
  * From the repository's top, with `/`.
  */
 path: string, line: number | null, col: number | null, };
+
+/**
+ * A run's result, as the dialog is told it.
+ */
+export type OneOffResult = { "from": "one", kind: OneOffResultKind, size: number, 
+/**
+ * Its name: the file's under `{out}`, `stdout` for the stdout.
+ */
+name: string, 
+/**
+ * The label overruled by the bytes, where it was.
+ */
+overruled?: string | null, } | { "from": "files", files: Array<MadeFile>, bytes: number, left_out: Array<MadeLeftOut>, left_out_total: number, } | { "from": "refused", why: string, };
+
+/**
+ * What a result is drawn as.
+ */
+export type OneOffResultKind = { "kind": "image", mime: string, } | { "kind": "pdf" } | { "kind": "page" } | { "kind": "json" } | { "kind": "markdown" } | { "kind": "code", ext: string, } | { "kind": "diff" } | { "kind": "text" } | { "kind": "bytes" };
 
 /**
  * A run of one style in a line, `from` to `to` in UTF-16 units.

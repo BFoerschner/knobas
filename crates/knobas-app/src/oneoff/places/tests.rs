@@ -307,6 +307,9 @@ fn a_web_address_is_a_url_and_nothing_else_is() {
         ]
     );
     assert!(urls("file:///etc/passwd javascript:alert(1)").is_empty());
+    // A namespace in xmllint's braces ends at the brace.
+    let ns = urls("Element '{http://www.opentrans.org/XMLSchema/2.1}ORDER_UNIT': bad");
+    assert_eq!(ns[0].href, "http://www.opentrans.org/XMLSchema/2.1");
 }
 
 #[test]

@@ -25,7 +25,7 @@ _Avoid_: clone (as a noun for the record: the clone is the directory, the checko
 
 **Application** (*Open in…*):
 A program the reader named for *Open in…*, by a command per object: the repository's (required), and optionally a file's, a commit's, a range's and a pull request's. An application is offered on every *Open in…* for the objects it has a command for, and runs at the [checkout](#checkout) with no shell (ADR-0016, ADR-0034). Added and edited on its page in Settings › Checkouts and Open in, where *It will run* shows each command filled from a repository on this disk and *Try it* runs a saved copy (2026-11-13, `docs/decisions/2026-11-13-open-in-applications-get-a-page.md`). Knobas-owned settings, never synced.
-_Avoid_: editor (an application may be a terminal, a file manager or a git client), tool (the *Diff tool* is git's own, not one of these), action
+_Avoid_: editor (an application may be a terminal, a file manager or a git client), tool (the *Diff tool* is git's own, not one of these), action, command (a program run and read, Settings › Commands)
 
 **Working tree state**:
 Where a [checkout](#checkout)'s working tree stands right now: its branch or detached head, its upstream and how far ahead and behind, and how many paths are changed, untracked or conflicted. Read by read-only `git status` when the checkout panel opens and when the window regains focus; never stored, never polled, and not run again where nothing git reads changed since its last answer (ADR-0021 as amended 2026-11-10; on Windows too since 2026-11-16). It stays git's own answer where a clone's commits are read in knobas's process (ADR-0043): what is changed in a working tree depends on the person's filters and settings. The branch name the mirror holds is compared to it, never passed to git (ADR-0021).
@@ -370,6 +370,14 @@ _Avoid_: pipeline alone in code or docs (a CI [pipeline](#pipeline)), filter (jq
 One of the person's own programs that takes a folder of a repository and makes a picture, text, Markdown, a page or a folder of files out of it, saved in Settings › Renderers and drawn on the Code page in the file's place (ADR-0044, 2026-11-16). It is given `{path}`, a copy of the folder knobas wrote at the commit shown (from the clone's objects, else the forge), and may write `{out}`; it never runs in the checkout. Which folders it takes is two glob lists: a file the folder holds, and the folder's name or path. What it drew is kept by the folder's content, so a revisit draws at once. In code `folder_render`, `FolderRenderer`.
 _Avoid_: folder preview, folder plugin, renderer alone (a file's)
 
+**Command** (*Run…*):
+One of the person's own programs, saved in Settings › Commands, that is run once on a press on a file, a folder, the repository, a commit or a comparison, and whose output opens in a dialog (ADR-0060, 2026-11-24). It runs in the [checkout](#checkout) with no shell, as an [application](#application-open-in) does, and knobas waits for it and reads what it prints. It never stands in a file's place: a program that should is a renderer. What it is offered on is read from its placeholders. In code `oneoff`, `OneOff`.
+_Avoid_: task, tool, action, script, linter (one use of it), renderer
+
+**Finding**:
+A place in a file of the checkout that a [command](#command-run)'s output said something about, with a severity and a rule where the program wrote them. Read from the lines, never from a report format. *Problems* lists them.
+_Avoid_: diagnostic, issue (a forge's), error (one severity)
+
 **Pick** (a folder's):
 The [folder renderer](#folder-renderer) a person chose for one folder of one repository, kept for it (`render.folder_picks`, ux26): every place a folder's renderer is chosen writes it, and the folder gets it wherever it is drawn while that renderer is still saved and still takes the folder; else the first saved one that takes it. While several take a folder and none is picked, the Files tree's glyph asks which.
 _Avoid_: default (a file pattern's renderer, Settings › Renderers), preference
@@ -419,7 +427,7 @@ What a CI source runs: TeamCity's build configuration, a GitLab pipeline, a Jenk
 _Avoid_: build configuration (TeamCity's word), job (a [job](#job))
 
 **Run**:
-One execution of a [pipeline](#pipeline): TeamCity's build, a GitLab pipeline run, a Jenkins build. It has a number, a state, a branch and commit, steps, a log, tests and artifacts (ADR-0022).
+One execution of a [pipeline](#pipeline): TeamCity's build, a GitLab pipeline run, a Jenkins build. It has a number, a state, a branch and commit, steps, a log, tests and artifacts (ADR-0022). A [command](#command-run)'s run is one start of it on one thing; in prose that holds both, *a command's run* and *a build's run*.
 _Avoid_: build (TeamCity's word; also the Builds view), execution
 
 **Checks**:
@@ -528,7 +536,7 @@ _Avoid_: incident, notification (bare), problem (the rolled-up count on a closed
 Everything knobas owns, notes included; the mirror is excluded, since it re-syncs.
 
 **Share export**:
-A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite) and [keys](#key), ticket views, link sets and [state colours](#state-colours) on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written.
+A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite) and [keys](#key), ticket views, link sets and [state colours](#state-colours) on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written. It never carries a [command](#command-run).
 
 ## Surfaces
 

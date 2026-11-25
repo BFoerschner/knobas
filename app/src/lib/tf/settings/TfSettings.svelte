@@ -54,6 +54,9 @@
   import { apps as sharedApps } from "../openin/apps.svelte";
   import TfAppPage from "../openin/TfAppPage.svelte";
   import TfFolderRendererPage from "./TfFolderRendererPage.svelte";
+  import TfCommandsSection from "./TfCommandsSection.svelte";
+  import TfCommandPage from "./TfCommandPage.svelte";
+  import { commandPagePlace } from "./command-page";
   import { folderPagePlace } from "./folder-page";
   import TfApiServersSection from "./TfApiServersSection.svelte";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
@@ -111,6 +114,8 @@
   const sourceId = $derived("source" in place ? place.source : null);
   /** Checkouts' application page (PR #2479, 2026-11-13), `null` anywhere else. */
   const appAt = $derived(appPagePlace(rest));
+  /** A command's page (ADR-0060), `null` anywhere else. */
+  const commandAt = $derived(commandPagePlace(rest));
   /** Renderers' folder renderer page (ADR-0044), `null` anywhere else. */
   const folderAt = $derived(folderPagePlace(rest));
   const appName = $derived(
@@ -336,6 +341,12 @@
         <TfLogsSection ports={sectionPorts} />
       {:else if place.section === "updates"}
         <TfUpdatesSection {layers} />
+      {:else if place.section === "commands" && commandAt !== null}
+        {#key rest.join("/")}
+          <TfCommandPage at={commandAt} {back} />
+        {/key}
+      {:else if place.section === "commands"}
+        <TfCommandsSection />
       {:else if place.section === "checkouts" && appAt !== null}
         {#key rest.join("/")}
           <TfAppPage at={appAt} {back} />

@@ -70,6 +70,7 @@ test("the rows are the sections in their order, Theme, Code colours and Fonts un
   expect(rowNames()).toEqual([
     "Sources",
     "Checkouts and Open in",
+    "Commands",
     "Time",
     "Desktop notifications",
     "Standup",

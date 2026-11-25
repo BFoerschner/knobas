@@ -26,9 +26,12 @@ pub mod history;
 pub mod kept;
 pub mod lines;
 pub mod places;
+pub mod result;
 pub mod run;
 pub mod runs;
 pub mod shell_path;
+#[cfg(windows)]
+pub mod win;
 
 use std::path::{Path, PathBuf};
 
@@ -321,13 +324,25 @@ pub async fn start_in(
         }
     };
     handle.set_words(&argv, &cwd.to_string_lossy());
-    if command.command.contains("{out") {
+    let wants = if command.command.contains("{outdir}") {
+        run::Wants::Outdir
+    } else if command.command.contains("{out}") {
+        run::Wants::Out
+    } else {
+        run::Wants::Stdout
+    };
+    if wants != run::Wants::Stdout {
         let _ = std::fs::create_dir_all(handle.scratch.join("out"));
     }
     let cwd_rel = cwd
         .strip_prefix(&root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default();
+    let alias = if command.wsl_paths && cfg!(windows) {
+        rules::wsl_path(&root.to_string_lossy())
+    } else {
+        None
+    };
     let env = run::environment(&command, &root, std::env::vars_os(), shell.as_deref());
     let spawn = Spawn {
         argv: argv.clone(),
@@ -336,9 +351,16 @@ pub async fn start_in(
         timeout: std::time::Duration::from_secs(u64::from(
             command.timeout_secs.clamp(1, rules::MAX_TIMEOUT),
         )),
-        stdin: run::stdin_of(command.stdin),
+        stdin: run::stdin_of(command.stdin, &placed),
         root,
         cwd_rel,
+        wants,
+        shows: command.shows,
+        alias,
+        ext: match &target {
+            Target::File { path, .. } => path.rsplit_once('.').map(|(_, e)| e.to_owned()),
+            _ => None,
+        },
     };
     let to_run = Arc::clone(&handle);
     tokio::task::spawn_blocking(move || run::launch(&runs, &to_run, spawn))

@@ -36,7 +36,11 @@ function ports() {
     }),
     watch: vi.fn(() => Promise.resolve({ known: true, stop: () => {} })),
     save: vi.fn(() => Promise.resolve("/Downloads/eslint-a.ts.txt")),
+    result: vi.fn((_run: string, file: string | null) => Promise.resolve(new TextEncoder().encode(file === null ? '{"a": 1}' : `file ${file}`))),
     copy: vi.fn(() => Promise.resolve()),
+    setCommands: vi.fn(() => Promise.resolve([command])),
+    forget: vi.fn(() => Promise.resolve()),
+    shell: vi.fn(() => Promise.resolve({ on: true, offered: true, read: null })),
     moved: (handler) => {
       moved = handler;
       return () => {};
@@ -47,6 +51,7 @@ function ports() {
 
 const batch = (run: string, lines: OneOffLine[], extra: Partial<OneOffBatch> = {}): OneOffBatch => ({ run, lines, changed: [], total: lines.length, dropped: 0, tail_from: lines.length, bytes: 40, findings: 0, elapsed_ms: 1200, ended: null, ...extra });
 const words = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const segs = () => [...document.querySelectorAll(".tf-oo-bar .tf-seg button")].map((b) => words(b));
 async function settle() {
   for (let i = 0; i < 4; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -105,7 +110,7 @@ test("lines land, places are links, and the run ends red with its exit code as a
   expect(words(document.querySelector(".tf-oo-took"))).toBe("after 2.4s");
   expect(words(document.querySelector(".tf-oo-again"))).toBe("Run again");
   expect(document.querySelector(".tf-oo-r")!.textContent).toBe("error");
-  expect(words(document.querySelector(".tf-oo-bar .tf-seg"))).toBe("Output Problems 1");
+  expect(segs()).toEqual(["Output", "Problems 1"]);
   const link = [...document.querySelectorAll<HTMLAnchorElement>(".tf-oo-link")].find((a) => a.textContent === "3:7")!;
   link.click();
   flushSync();
@@ -186,4 +191,67 @@ test("a flood keeps every line in order, and a changed line is put in its place"
   expect(run.lines.length).toBe(19_800);
   expect(run.lines[5]!.text).toBe("line five again");
   expect(run.lines.every((l, i) => l.n === i)).toBe(true);
+});
+
+test("a result that is not lines opens first, and the bytes overrule a label", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  const run = store.openRun(command, "gitea:t/payout", "payout", target);
+  draw(store);
+  p.answer();
+  await settle();
+  p.sinks[0]!(batch("r1", [], { ended: { how: "exit", code: 0 }, result: { from: "one", kind: { kind: "json" }, size: 8, name: "stdout", overruled: "image" } }));
+  await settle();
+  expect(run.view).toBe("result");
+  expect(segs()).toEqual(["JSON", "Output"]);
+  expect(words(document.querySelector(".tf-oo-counts"))).toBe("Its stdout, 8 B. Said to be image, it is not.");
+  expect(p.result).toHaveBeenCalledWith("r1", null);
+});
+
+test("Files lists what it wrote with the first picked, and what was left out", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  store.openRun(command, "gitea:t/payout", "payout", target);
+  draw(store);
+  p.answer();
+  await settle();
+  p.sinks[0]!(batch("r1", [], { ended: { how: "exit", code: 0 }, result: { from: "files", files: [{ path: "a.txt", size: 1 }, { path: "sub/b.json", size: 2 }], bytes: 3, left_out: [{ path: "link", why: "link" }], left_out_total: 1 } }));
+  await settle();
+  expect(segs()).toEqual(["Files 2", "Output"]);
+  expect([...document.querySelectorAll(".tf-oo-flist button")].map((b) => words(b.querySelector(".tf-oo-fname")))).toEqual(["a.txt", "sub/b.json"]);
+  expect(words(document.querySelector(".tf-oo-fnote"))).toContain("link (a link)");
+  expect(p.result).toHaveBeenCalledWith("r1", "a.txt");
+});
+
+test("a batch runs one run a file, four at a time, and says how many failed", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  const files = Array.from({ length: 6 }, (_, i) => `src/f${i}.ts`);
+  const run = store.openBatch(command, "gitea:t/payout", "payout", files);
+  draw(store);
+  expect(p.run).toHaveBeenCalledTimes(4);
+  p.sinks[0]!(batch("x", [{ n: 0, stream: "out", text: "bad" }], { ended: { how: "exit", code: 1 } }));
+  await settle();
+  expect(p.run).toHaveBeenCalledTimes(5);
+  for (const i of [1, 2, 3, 4]) p.sinks[i]!(batch("x", [], { ended: { how: "exit", code: 0 } }));
+  await settle();
+  expect(p.run).toHaveBeenCalledTimes(6);
+  p.sinks[5]!(batch("x", [], { ended: { how: "exit", code: 0 } }));
+  await settle();
+  expect(run.ended).toEqual({ how: "exit", code: 1 });
+  expect(words(document.querySelector(".tf-oo-state"))).toBe("1 of 6 exited with an error");
+  // Failures first.
+  expect(words(document.querySelector(".tf-oo-brow .tf-oo-fname"))).toBe("f0.ts");
+});
+
+test("Stop on a batch stops what runs and starts no more", async () => {
+  const p = ports();
+  const store = new OneOffs(p);
+  const run = store.openBatch(command, "gitea:t/payout", "payout", Array.from({ length: 9 }, (_, i) => `f${i}.ts`));
+  draw(store);
+  store.stop(run);
+  for (const i of [0, 1, 2, 3]) p.sinks[i]!(batch("x", [], { ended: { how: "stopped" } }));
+  await settle();
+  expect(p.run).toHaveBeenCalledTimes(4);
+  expect(run.ended).toEqual({ how: "stopped" });
 });

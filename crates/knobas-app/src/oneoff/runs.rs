@@ -44,6 +44,23 @@ pub struct RunHandle {
     shown: Mutex<Instant>,
     /// The run's own folder, for `{out}` and `{outdir}`.
     pub scratch: PathBuf,
+    result: Mutex<Option<super::result::RunResult>>,
+    /// The job holding what the run started (Windows).
+    #[cfg(windows)]
+    job: Mutex<Option<super::win::Job>>,
+    /// The result's bytes: the stdout, the file under `{out}`, or the kept
+    /// `{outdir}`.
+    held: Mutex<Held>,
+}
+
+/// Where a run's result's bytes are.
+#[derive(Default)]
+enum Held {
+    #[default]
+    Nothing,
+    Bytes(Vec<u8>),
+    File(PathBuf),
+    Made(crate::folder_render::keep::Made),
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -60,6 +77,64 @@ impl RunHandle {
         row.lines = kept.total();
         row.kept = kept.kept() > 0 || kept.total() == 0;
         row
+    }
+
+    /// The job its program was put in (Windows).
+    #[cfg(windows)]
+    pub fn set_job(&self, job: Option<super::win::Job>) {
+        *lock(&self.job) = job;
+    }
+
+    /// Kills what the run started: its job on Windows, then its tree or its
+    /// process group.
+    pub fn kill(&self, pid: Option<u32>) {
+        #[cfg(windows)]
+        if let Some(job) = lock(&self.job).as_ref() {
+            job.kill();
+        }
+        super::run::kill_group(pid);
+    }
+
+    pub fn set_result(&self, result: Option<super::result::RunResult>) {
+        *lock(&self.result) = result;
+    }
+
+    pub fn keep_bytes(&self, bytes: Vec<u8>) {
+        *lock(&self.held) = Held::Bytes(bytes);
+    }
+
+    pub fn keep_file(&self, path: Option<PathBuf>) {
+        if let Some(path) = path {
+            *lock(&self.held) = Held::File(path);
+        }
+    }
+
+    pub fn keep_made(&self, made: Option<crate::folder_render::keep::Made>) {
+        if let Some(made) = made {
+            *lock(&self.held) = Held::Made(made);
+        }
+    }
+
+    /// The bytes the result holds in memory.
+    fn held_bytes(&self) -> usize {
+        match &*lock(&self.held) {
+            Held::Bytes(bytes) => bytes.len(),
+            _ => 0,
+        }
+    }
+
+    /// The result's bytes, or one kept file's of `{outdir}`.
+    pub fn result_bytes(&self, path: Option<&str>) -> Result<Vec<u8>, String> {
+        match (&*lock(&self.held), path) {
+            (Held::Bytes(bytes), _) => Ok(bytes.clone()),
+            (Held::File(file), _) => std::fs::read(file).map_err(|e| e.to_string()),
+            (Held::Made(made), Some(path)) => {
+                crate::folder_render::keep::read(made, path, super::result::RESULT_CAP)
+                    .map_err(|e| format!("{e:?}"))
+            }
+            (Held::Made(_), None) => Err("name one of the files it wrote".to_owned()),
+            (Held::Nothing, _) => Err("it made no result that is kept".to_owned()),
+        }
     }
 
     /// The words it starts with and the folder it starts in.
@@ -111,6 +186,11 @@ impl RunHandle {
             bytes: self.bytes.load(Ordering::Relaxed),
             findings: self.findings.load(Ordering::Relaxed),
             elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            result: if ended.is_some() {
+                lock(&self.result).clone()
+            } else {
+                None
+            },
             ended,
         }
     }
@@ -280,6 +360,10 @@ impl Runs {
             started: Instant::now(),
             shown: Mutex::new(Instant::now()),
             scratch,
+            result: Mutex::new(None),
+            #[cfg(windows)]
+            job: Mutex::new(None),
+            held: Mutex::new(Held::Nothing),
         });
         runs.push(Arc::clone(&handle));
         drop(runs);
@@ -326,6 +410,7 @@ impl Runs {
                 u64::try_from(handle.started.elapsed().as_millis()).unwrap_or(u64::MAX)
             }),
             ended: row.ended.clone(),
+            result: lock(&handle.result).clone(),
         })
     }
 
@@ -395,19 +480,24 @@ impl Runs {
     pub fn cap(&self, runs: usize, bytes: usize) {
         let mut ended: Vec<Arc<RunHandle>> = lock(&self.runs)
             .iter()
-            .filter(|r| !r.running() && lock(&r.kept).kept() > 0)
+            .filter(|r| !r.running() && (lock(&r.kept).kept() > 0 || r.held_bytes() > 0))
             .cloned()
             .collect();
         ended.sort_by_key(|r| *lock(&r.shown));
-        let mut total: usize = ended.iter().map(|r| lock(&r.kept).bytes()).sum();
+        let mut total: usize = ended
+            .iter()
+            .map(|r| lock(&r.kept).bytes() + r.held_bytes())
+            .sum();
         let mut count = ended.len();
         for run in ended {
             if count <= runs && total <= bytes {
                 break;
             }
             let mut kept = lock(&run.kept);
-            total = total.saturating_sub(kept.bytes());
+            total = total.saturating_sub(kept.bytes() + run.held_bytes());
             kept.forget();
+            *lock(&run.held) = Held::Nothing;
+            *lock(&run.result) = None;
             count -= 1;
             let _ = std::fs::remove_dir_all(&run.scratch);
         }
@@ -469,7 +559,7 @@ impl Runs {
         for run in &runs {
             run.stop.store(true, Ordering::Relaxed);
             let pid = *lock(&run.pid);
-            super::run::kill_group(pid);
+            run.kill(pid);
             let _ = std::fs::remove_dir_all(&run.scratch);
         }
     }

@@ -69,7 +69,7 @@ static CARET: LazyLock<Regex> = LazyLock::new(|| {
 static ELEMENT_SAID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^Element '([^']+)':\s*(.*)$").expect("element said"));
 static URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"https?://[^\s"'<>`]+[^\s"'<>`.,;:!?)\]}]"#).expect("url"));
+    LazyLock::new(|| Regex::new(r#"https?://[^\s"'<>`{}]+[^\s"'<>`{}.,;:!?)\]]"#).expect("url"));
 
 /// Whether a file exists inside the checkout, asked of the disk once a path.
 pub trait Exists {

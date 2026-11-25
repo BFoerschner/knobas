@@ -2297,7 +2297,7 @@ test("> with nothing after it lists every section, then Settings and its section
   await settle();
   await search(">");
   const labels = paletteLabels();
-  expect(labels).toHaveLength(32);
+  expect(labels).toHaveLength(33);
   expect(labels.slice(0, 11)).toEqual([
     "Tickets",
     "Inbox",

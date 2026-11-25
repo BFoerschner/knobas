@@ -8,6 +8,7 @@
  */
 import { appPagePlace } from "../openin/app-page";
 import { folderPagePlace } from "./folder-page";
+import { commandPagePlace } from "./command-page";
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
@@ -20,6 +21,7 @@ import type { Walk } from "../../sources/walk";
 export type SettingsSection =
   | "sources"
   | "checkouts"
+  | "commands"
   | "time"
   | "notifications"
   | "standup"
@@ -55,6 +57,8 @@ export interface SettingsNode {
 export const SETTINGS_TREE: readonly SettingsNode[] = [
   { key: "sources", name: "Sources" },
   { key: "checkouts", name: "Checkouts and Open in" },
+  // A person's own programs, run on a press and read in a dialog (ADR-0060).
+  { key: "commands", name: "Commands" },
   { key: "time", name: "Time" },
   { key: "notifications", name: "Desktop notifications" },
   { key: "standup", name: "Standup" },
@@ -157,6 +161,8 @@ export function settingsKnows(rest: readonly string[]): boolean {
   if (addsSource(rest)) return true;
   // Checkouts' application page (PR #2479, 2026-11-13); anything else under it names nothing.
   if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
+  // A command's page (ADR-0060); anything else under Commands names nothing.
+  if (head === "commands" && rest.length > 1) return commandPagePlace(rest) !== null;
   // A folder renderer's page (ADR-0044); anything else under Renderers names nothing.
   if (head === "renderers" && rest.length > 1) return folderPagePlace(rest) !== null;
   if (head === undefined) return true;

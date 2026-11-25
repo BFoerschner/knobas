@@ -147,33 +147,68 @@ pub fn oneoff_watch<R: tauri::Runtime>(
 }
 
 /// *Download*: what run `run` printed, as text (with its colour codes where
-/// `colours`), saved to the Downloads folder under `name` (a free name beside
-/// any file there). Answers the path; knobas keeps no copy.
+/// `colours`), or with `result` what it made (`file`, one of the files it
+/// wrote to `{outdir}`), saved to the Downloads folder under `name` (a free
+/// name beside any file there). Answers the path; knobas keeps no copy.
 ///
 /// # Errors
 /// `not_found` once the run is no longer known; the folder or the write fails.
 #[tauri::command]
-pub async fn oneoff_save(run: String, name: String, colours: bool) -> Result<String, IpcError> {
+pub async fn oneoff_save(
+    run: String,
+    name: String,
+    colours: bool,
+    result: bool,
+    file: Option<String>,
+) -> Result<String, IpcError> {
     use tokio::io::AsyncWriteExt as _;
-    let text = Runs::global().text(&run, colours).ok_or_else(|| {
+    let gone = || {
         IpcError::new(
             crate::IpcErrorCode::NotFound,
             "What it printed is no longer kept.",
         )
-    })?;
+    };
+    let bytes = if result {
+        let handle = Runs::global().get(&run).ok_or_else(gone)?;
+        handle
+            .result_bytes(file.as_deref())
+            .map_err(|why| IpcError::new(crate::IpcErrorCode::NotFound, why))?
+    } else {
+        Runs::global()
+            .text(&run, colours)
+            .ok_or_else(gone)?
+            .into_bytes()
+    };
     let dir = dirs::download_dir().ok_or_else(|| {
         IpcError::new(
             crate::IpcErrorCode::Internal,
             "This computer has no Downloads folder.",
         )
     })?;
-    let (path, mut file) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
+    let (path, mut out) = crate::downloads::create_free(&dir, &crate::downloads::safe_name(&name))
         .await
         .map_err(|(path, error)| IpcError::internal(format!("{}: {error}", path.display())))?;
-    file.write_all(text.as_bytes())
+    out.write_all(&bytes)
         .await
         .map_err(|error| IpcError::internal(format!("{}: {error}", path.display())))?;
     Ok(path.display().to_string())
+}
+
+/// The bytes of run `run`'s result: its stdout that was not text, the file it
+/// wrote to `{out}`, or `file`, one it wrote to `{outdir}`. Served as raw
+/// bytes, as a generated folder's file is.
+///
+/// # Errors
+/// `not_found` for a run no longer known or a result not kept.
+#[tauri::command]
+pub fn oneoff_result(run: String, file: Option<String>) -> Result<tauri::ipc::Response, IpcError> {
+    let handle = Runs::global().get(&run).ok_or_else(|| {
+        IpcError::new(crate::IpcErrorCode::NotFound, "The run is no longer kept.")
+    })?;
+    handle
+        .result_bytes(file.as_deref())
+        .map(tauri::ipc::Response::new)
+        .map_err(|why| IpcError::new(crate::IpcErrorCode::NotFound, why))
 }
 
 /// Forgets one run, or every run that ended.
@@ -229,7 +264,7 @@ mod tests {
 
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 10);
+        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 11);
     }
 
     #[test]
@@ -243,7 +278,8 @@ mod tests {
             ("oneoff_lines", &["run", "from", "count"]),
             ("oneoff_watch", &["run", "channel"]),
             ("oneoff_forget", &["run"]),
-            ("oneoff_save", &["run", "name", "colours"]),
+            ("oneoff_save", &["run", "name", "colours", "result", "file"]),
+            ("oneoff_result", &["run", "file"]),
             ("oneoff_shell_path", &["again", "on"]),
         ] {
             assert_eq!(keys(invocation(MIRROR, command)), args, "{command}");

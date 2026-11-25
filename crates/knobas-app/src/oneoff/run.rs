@@ -114,6 +114,10 @@ pub struct Batch {
     pub elapsed_ms: u64,
     #[ts(optional = nullable)]
     pub ended: Option<Ended>,
+    /// What it made that is not its lines, once it ended.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub result: Option<super::result::RunResult>,
 }
 
 /// What a start answers.
@@ -272,6 +276,15 @@ pub fn words_at(
     Ok((argv, cwd))
 }
 
+/// Where a run's result is: its stdout, or what it wrote to `{out}` or
+/// `{outdir}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wants {
+    Stdout,
+    Out,
+    Outdir,
+}
+
 /// What the run's thread is handed.
 pub struct Spawn {
     pub argv: Vec<String>,
@@ -282,6 +295,13 @@ pub struct Spawn {
     /// For the place finder: the checkout, and the working directory from it.
     pub root: PathBuf,
     pub cwd_rel: String,
+    pub wants: Wants,
+    pub shows: knobas_core::checkout::oneoff::Shows,
+    /// The checkout as WSL sees it, where the command was handed WSL's paths:
+    /// the paths it prints map back to the checkout.
+    pub alias: Option<String>,
+    /// The extension of the file it ran on, for *Code, as the file it ran on*.
+    pub ext: Option<String>,
 }
 
 enum Chunk {
@@ -330,6 +350,8 @@ pub fn launch(runs: &Arc<Runs>, handle: &Arc<RunHandle>, spawn: Spawn) {
     };
     let pid = child.id();
     handle.started(pid);
+    #[cfg(windows)]
+    handle.set_job(super::win::Job::for_child(&child));
     let (tx, rx) = mpsc::sync_channel::<Chunk>(64);
     let mut readers = Vec::new();
     for (stream, pipe) in [
@@ -375,21 +397,145 @@ pub fn launch(runs: &Arc<Runs>, handle: &Arc<RunHandle>, spawn: Spawn) {
     let runs = Arc::clone(runs);
     let handle = Arc::clone(handle);
     std::thread::spawn(move || {
+        let raw = Raw::new(spawn.wants, spawn.shows);
         let ended = consume(
             &handle,
             &mut child,
             &rx,
             spawn.timeout,
-            &spawn.root,
-            &spawn.cwd_rel,
+            (&spawn.root, &spawn.cwd_rel, spawn.alias.as_deref()),
+            &raw,
         );
-        kill_group(Some(pid));
+        handle.kill(Some(pid));
         let _ = child.wait();
         for reader in readers {
             let _ = reader.join();
         }
+        let result = result_of(
+            &handle,
+            &ended,
+            spawn.wants,
+            spawn.shows,
+            spawn.ext.as_deref(),
+            raw,
+        );
+        handle.set_result(result);
         runs.end(&handle, ended);
     });
+}
+
+/// A stdout that is the run's result and not its lines: kept as bytes.
+pub struct Raw {
+    /// `None` until the first chunk of stdout says which it is.
+    is_raw: std::cell::Cell<Option<bool>>,
+    wants: Wants,
+    shows: knobas_core::checkout::oneoff::Shows,
+    bytes: std::cell::RefCell<Vec<u8>>,
+    over: std::cell::Cell<u64>,
+}
+
+impl Raw {
+    fn new(wants: Wants, shows: knobas_core::checkout::oneoff::Shows) -> Self {
+        Self {
+            is_raw: std::cell::Cell::new(None),
+            wants,
+            shows,
+            bytes: std::cell::RefCell::new(Vec::new()),
+            over: std::cell::Cell::new(0),
+        }
+    }
+
+    /// Whether `first`, the first stdout chunk, makes stdout the result: a
+    /// command that writes no file and is set to draw a result, or whose
+    /// stdout is not text.
+    fn decide(&self, first: &[u8]) -> bool {
+        use knobas_core::checkout::oneoff::Shows;
+        if let Some(known) = self.is_raw.get() {
+            return known;
+        }
+        let raw = self.wants == Wants::Stdout
+            && (matches!(
+                self.shows,
+                Shows::Image
+                    | Shows::Pdf
+                    | Shows::Page
+                    | Shows::Json
+                    | Shows::Markdown
+                    | Shows::Code
+                    | Shows::Diff
+            ) || matches!(
+                super::result::sniff(&first[..first.len().min(8192)]),
+                super::result::Kind::Image { .. }
+                    | super::result::Kind::Pdf
+                    | super::result::Kind::Bytes
+            ));
+        self.is_raw.set(Some(raw));
+        raw
+    }
+
+    fn take(&self, chunk: &[u8]) {
+        let mut bytes = self.bytes.borrow_mut();
+        let room = usize::try_from(super::result::RESULT_CAP)
+            .unwrap_or(usize::MAX)
+            .saturating_sub(bytes.len());
+        if chunk.len() > room {
+            bytes.extend_from_slice(&chunk[..room]);
+            self.over.set(self.over.get() + (chunk.len() - room) as u64);
+        } else {
+            bytes.extend_from_slice(chunk);
+        }
+    }
+}
+
+/// What a run made that is not its lines, once it ended.
+fn result_of(
+    handle: &RunHandle,
+    ended: &Ended,
+    wants: Wants,
+    shows: knobas_core::checkout::oneoff::Shows,
+    ext: Option<&str>,
+    raw: Raw,
+) -> Option<super::result::RunResult> {
+    use super::result::{self as r, RunResult};
+    let ok = matches!(ended, Ended::Exit { code: 0 });
+    match wants {
+        Wants::Out if ok => {
+            let (result, path) = r::of_out(&handle.scratch.join("out"), shows);
+            handle.keep_file(path);
+            Some(result)
+        }
+        Wants::Outdir if ok => {
+            let (result, made) =
+                r::of_outdir(&handle.scratch.join("out"), &handle.scratch.join("kept"));
+            let _ = std::fs::remove_dir_all(handle.scratch.join("out"));
+            handle.keep_made(made);
+            Some(result)
+        }
+        Wants::Out | Wants::Outdir => None,
+        Wants::Stdout => {
+            if raw.is_raw.get() != Some(true) {
+                return None;
+            }
+            if raw.over.get() > 0 {
+                return Some(RunResult::Refused {
+                    why: format!(
+                        "it printed more than the {} MiB a result may have",
+                        r::RESULT_CAP / 1024 / 1024
+                    ),
+                });
+            }
+            let bytes = raw.bytes.into_inner();
+            let (kind, overruled) = r::detect(&bytes, shows, ext);
+            let result = RunResult::One {
+                kind,
+                size: bytes.len() as u64,
+                name: "stdout".to_owned(),
+                overruled,
+            };
+            handle.keep_bytes(bytes);
+            Some(result)
+        }
+    }
 }
 
 /// Reads the run's chunks until it ends, stopped, timed out or exited with
@@ -399,15 +545,19 @@ fn consume(
     child: &mut std::process::Child,
     rx: &mpsc::Receiver<Chunk>,
     timeout: Duration,
-    root: &Path,
-    cwd_rel: &str,
+    (root, cwd_rel, alias): (&Path, &str, Option<&str>),
+    raw: &Raw,
 ) -> Ended {
     let started = Instant::now();
     let deadline = started + timeout;
     let mut reader = Reader::default();
     let mut disk = Disk::new(root);
     let mut state = State::default();
-    let root_text = root.to_string_lossy().replace('\\', "/");
+    let at = Where {
+        root: root.to_string_lossy().replace('\\', "/"),
+        alias: alias.map(str::to_owned),
+        cwd: cwd_rel.to_owned(),
+    };
     let mut eofs = 0;
     let mut exited: Option<(std::process::ExitStatus, Instant)> = None;
     let mut next_batch = started + BATCH_EVERY;
@@ -415,12 +565,13 @@ fn consume(
         let wait = next_batch.saturating_duration_since(Instant::now());
         match rx.recv_timeout(wait) {
             Ok(Chunk::Bytes(stream, bytes)) => {
-                let ended = handle.with_kept(|kept| {
-                    let wrote = reader.write(kept, stream, &bytes);
-                    wrote.ended
-                });
                 handle.add_bytes(bytes.len());
-                place(handle, &ended, &mut disk, &mut state, &root_text, cwd_rel);
+                if stream == Stream::Out && raw.decide(&bytes) {
+                    raw.take(&bytes);
+                } else {
+                    let ended = handle.with_kept(|kept| reader.write(kept, stream, &bytes).ended);
+                    place(handle, &ended, &mut disk, &mut state, &at);
+                }
             }
             Ok(Chunk::Eof) => eofs += 1,
             Err(RecvTimeoutError::Timeout) => {}
@@ -432,27 +583,25 @@ fn consume(
             next_batch = now + BATCH_EVERY;
         }
         if handle.stop_asked() {
-            kill_group(Some(child.id()));
+            handle.kill(Some(child.id()));
             return finish(
                 handle,
                 &mut reader,
                 &mut disk,
                 &mut state,
-                &root_text,
-                cwd_rel,
+                &at,
                 Ended::Stopped,
             );
         }
         if now >= deadline {
-            kill_group(Some(child.id()));
+            handle.kill(Some(child.id()));
             let seconds = u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX);
             return finish(
                 handle,
                 &mut reader,
                 &mut disk,
                 &mut state,
-                &root_text,
-                cwd_rel,
+                &at,
                 Ended::TimedOut { seconds },
             );
         }
@@ -461,28 +610,32 @@ fn consume(
         {
             exited = Some((status, now));
         }
-        if let Some((status, at)) = exited {
+        if let Some((status, when)) = exited {
             // Both pipes closed, or a child it left holds them: half a second,
             // then what it started is killed and the run is over.
-            if eofs >= 2 || now.duration_since(at) > Duration::from_millis(500) {
+            if eofs >= 2 || now.duration_since(when) > Duration::from_millis(500) {
                 while let Ok(Chunk::Bytes(stream, bytes)) = rx.try_recv() {
-                    let ended = handle.with_kept(|kept| reader.write(kept, stream, &bytes).ended);
                     handle.add_bytes(bytes.len());
-                    place(handle, &ended, &mut disk, &mut state, &root_text, cwd_rel);
+                    if stream == Stream::Out && raw.decide(&bytes) {
+                        raw.take(&bytes);
+                    } else {
+                        let ended =
+                            handle.with_kept(|kept| reader.write(kept, stream, &bytes).ended);
+                        place(handle, &ended, &mut disk, &mut state, &at);
+                    }
                 }
                 let ended = ended_of(status);
-                return finish(
-                    handle,
-                    &mut reader,
-                    &mut disk,
-                    &mut state,
-                    &root_text,
-                    cwd_rel,
-                    ended,
-                );
+                return finish(handle, &mut reader, &mut disk, &mut state, &at, ended);
             }
         }
     }
+}
+
+/// Where a run's printed paths are read against.
+struct Where {
+    root: String,
+    alias: Option<String>,
+    cwd: String,
 }
 
 fn finish(
@@ -490,24 +643,16 @@ fn finish(
     reader: &mut Reader,
     disk: &mut Disk,
     state: &mut State,
-    root: &str,
-    cwd_rel: &str,
+    at: &Where,
     ended: Ended,
 ) -> Ended {
     let last = handle.with_kept(|kept| reader.finish(kept).ended);
-    place(handle, &last, disk, state, root, cwd_rel);
+    place(handle, &last, disk, state, at);
     ended
 }
 
 /// The places, finding and addresses of each line that ended.
-fn place(
-    handle: &RunHandle,
-    ended: &[u32],
-    disk: &mut Disk,
-    state: &mut State,
-    root: &str,
-    cwd_rel: &str,
-) {
+fn place(handle: &RunHandle, ended: &[u32], disk: &mut Disk, state: &mut State, at: &Where) {
     if ended.is_empty() {
         return;
     }
@@ -520,9 +665,9 @@ fn place(
     let mut found = Vec::with_capacity(texts.len());
     for (n, text) in texts {
         let mut ctx = Ctx {
-            root: root.to_owned(),
-            alias: None,
-            cwd: cwd_rel.to_owned(),
+            root: at.root.clone(),
+            alias: at.alias.clone(),
+            cwd: at.cwd.clone(),
             caseless: cfg!(windows),
             disk,
         };
@@ -584,10 +729,27 @@ pub fn kill_group(pid: Option<u32>) {
     }
 }
 
-/// The stdin a command reads (step 8): nothing yet.
+/// The stdin a command reads (section 7, step 8): nothing, the file as it is
+/// in the working tree, or its selected lines. `None` closes stdin.
 #[must_use]
-pub const fn stdin_of(stdin: Stdin) -> Option<Vec<u8>> {
+pub fn stdin_of(stdin: Stdin, placed: &Placed) -> Option<Vec<u8>> {
+    let file = placed.file.as_deref()?;
+    let path = file
+        .split('/')
+        .fold(placed.root.clone(), |path, part| path.join(part));
     match stdin {
-        Stdin::None | Stdin::File | Stdin::Selection => None,
+        Stdin::None => None,
+        Stdin::File => std::fs::read(path).ok(),
+        Stdin::Selection => {
+            let text = std::fs::read(path).ok()?;
+            let text = String::from_utf8_lossy(&text);
+            let (first, last) = placed.lines.unwrap_or((1, u32::MAX));
+            let picked: Vec<&str> = text
+                .split_inclusive('\n')
+                .skip(first.saturating_sub(1) as usize)
+                .take((last.saturating_sub(first) as usize).saturating_add(1))
+                .collect();
+            Some(picked.concat().into_bytes())
+        }
     }
 }

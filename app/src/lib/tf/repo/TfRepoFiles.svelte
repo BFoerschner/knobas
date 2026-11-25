@@ -2380,7 +2380,15 @@
         onreal={() => realFiles(graftFolder)}
       >
         {#snippet openIn()}
-          <TfRunMenu entityId={repoId} repo={title || repoId} target={{ kind: "folder", path: graftFolder }} {checkout} priority={2} />
+          <TfRunMenu
+            entityId={repoId}
+            repo={title || repoId}
+            target={{ kind: "folder", path: graftFolder }}
+            {checkout}
+            own={(listings[graftFolder] ?? []).filter((e) => e.kind === "file").map((e) => e.name)}
+            files={{ paths: (listings[graftFolder] ?? []).filter((e) => e.kind === "file").map((e) => (graftFolder === "" ? e.name : `${graftFolder}/${e.name}`)), changed: false }}
+            priority={2}
+          />
           <TfMadeOpenIn
             token={madeShown?.token ?? null}
             dir={madeShown?.dir ?? null}

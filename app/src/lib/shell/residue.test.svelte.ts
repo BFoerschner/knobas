@@ -92,7 +92,11 @@ function oneoffPorts() {
     lines: () => deferred(null),
     watch: () => deferred({ known: true, stop: () => {} }),
     save: () => deferred(""),
+    result: () => deferred(new Uint8Array()),
     copy: () => deferred(undefined),
+    setCommands: () => deferred([]),
+    forget: () => deferred(undefined),
+    shell: () => deferred({ on: true, offered: true, read: null }),
     moved: () => {
       const heard = () => {};
       window.addEventListener("tauri:oneoff:moved", heard);
@@ -496,6 +500,8 @@ const TfRunLines = (await import("../tf/oneoff/TfRunLines.svelte")).default;
 const TfRunChip = (await import("../tf/oneoff/TfRunChip.svelte")).default;
 const TfRunHost = (await import("../tf/oneoff/TfRunHost.svelte")).default;
 const TfRunMenu = (await import("../tf/oneoff/TfRunMenu.svelte")).default;
+const TfRunResult = (await import("../tf/oneoff/TfRunResult.svelte")).default;
+const TfRunFiles = (await import("../tf/oneoff/TfRunFiles.svelte")).default;
 const { OneOffs } = await import("../render/oneoff.svelte");
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
@@ -508,6 +514,8 @@ const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
 const TfFolderRender = (await import("../tf/render/TfFolderRender.svelte")).default;
 const TfFolderRendererPage = (await import("../tf/settings/TfFolderRendererPage.svelte")).default;
+const TfCommandsSection = (await import("../tf/settings/TfCommandsSection.svelte")).default;
+const TfCommandPage = (await import("../tf/settings/TfCommandPage.svelte")).default;
 const TfFolderRenderersTable = (await import("../tf/settings/TfFolderRenderersTable.svelte")).default;
 const { createFolderRenderers } = await import("../render/folders.svelte");
 const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
@@ -1454,6 +1462,23 @@ const CASES: Case[] = [
     },
   },
   {
+    /** A command's result (ADR-0060): its bytes answering late, an image's blob address. */
+    name: "TfRunResult",
+    source: "lib/tf/oneoff/TfRunResult.svelte",
+    open: (target) => ({ app: mount(TfRunResult, { target, props: { kind: { kind: "image" as const, mime: "image/png" }, bytes: () => deferred(new Uint8Array([0x89, 0x50])), name: "out.png", bytesSize: 2, frame: () => deferred("") } }) }),
+  },
+  {
+    /** A command's files (ADR-0060): the picked file's bytes answering late. */
+    name: "TfRunFiles",
+    source: "lib/tf/oneoff/TfRunFiles.svelte",
+    open: (target) => ({
+      app: mount(TfRunFiles, {
+        target,
+        props: { result: { from: "files" as const, files: [{ path: "a.txt", size: 1 }], bytes: 1, left_out: [], left_out_total: 0 }, bytes: () => deferred(new TextEncoder().encode("a")) },
+      }),
+    }),
+  },
+  {
     /** *Run…* (ADR-0060): it stands for `X` while it is there, its menu open. */
     name: "TfRunMenu",
     source: "lib/tf/oneoff/TfRunMenu.svelte",
@@ -1816,6 +1841,27 @@ const CASES: Case[] = [
           folders: createFolderRenderers({ read: () => deferred([]), save: (list) => deferred(list as never) }),
           reads: { repos: () => deferred([]), checkouts: () => deferred([]), files: () => deferred(null) },
           leave: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** Settings › Commands (ADR-0060): its reads of the list, the runs and the shell's PATH. */
+    name: "TfCommandsSection",
+    source: "lib/tf/settings/TfCommandsSection.svelte",
+    open: (target) => ({ app: mount(TfCommandsSection, { target, props: { store: new OneOffs(oneoffPorts()) } }) }),
+  },
+  {
+    /** A command's page (ADR-0060): it reads the list, the repositories and their files. */
+    name: "TfCommandPage",
+    source: "lib/tf/settings/TfCommandPage.svelte",
+    open: (target) => ({
+      app: mount(TfCommandPage, {
+        target,
+        props: {
+          at: { command: null, repo: "mock:tidewater/payout-service", on: "src" },
+          store: new OneOffs(oneoffPorts()),
+          reads: { repos: () => deferred([]), checkouts: () => deferred([]), files: () => deferred(null) },
         },
       }),
     }),

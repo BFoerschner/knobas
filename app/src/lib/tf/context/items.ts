@@ -27,7 +27,8 @@ import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
 import type { Thing } from "./thing";
 import type { OneOff } from "../../ipc/oneoff";
-import { takesFile, takesFolder, takesRepository } from "../../render/oneoff";
+import { takesCommit, takesFile, takesFolder, takesRepository } from "../../render/oneoff";
+import { commandPageHash } from "../settings/command-page";
 import { stateWord } from "../state-word";
 
 /** A value an item copies or opens: given, or read when the menu opened. */
@@ -387,7 +388,8 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         thing.repoId !== null && sha !== null && ctx.checkout?.(thing.repoId) === true
           ? [{ id: "compare-working", label: "Compare with working tree", act: { do: "go", hash: diffHash(thing.repoId, sha, WORKING_TREE) } }]
           : [];
-      return grouped([...open(thing.hash, ctx), ...working], [...code, ...inSource(thing.id, ctx)], [...copies, copyLink()]);
+      const runs = thing.repoId !== null && sha !== null ? runIn(thing.repoId, { kind: "commit", sha }, ctx, facts) : [];
+      return grouped([...open(thing.hash, ctx), ...working], [...code, ...inSource(thing.id, ctx)], runs, [...copies, copyLink()]);
     }
     case "run":
       return grouped(
@@ -601,15 +603,22 @@ function openIn(entityId: string, repoId: string | null, at: CodeAt, ctx: MenuCo
  * whatever the read, greyed where the repository is not cloned here. No Run group until the commands were read.
  */
 function runIn(repoId: string, at: CodeAt, ctx: MenuContext, facts: MenuFacts): Item[] {
-  if (ctx.commands === null || ctx.commands === undefined || at.kind === "commit") return [];
+  if (ctx.commands === null || ctx.commands === undefined) return [];
   const known = { repo: repoId, top: null };
   const takes = ctx.commands.filter((c) =>
-    at.kind === "file" ? takesFile(c, at.path, known) : at.kind === "folder" ? takesFolder(c, at.path, null, known) || (at.path === "" && takesRepository(c, known)) : takesRepository(c, known) || takesFolder(c, "", null, known),
+    at.kind === "commit"
+      ? takesCommit(c, known)
+      : at.kind === "file"
+        ? takesFile(c, at.path, known)
+        : at.kind === "folder"
+          ? takesFolder(c, at.path, null, known) || (at.path === "" && takesRepository(c, known))
+          : takesRepository(c, known) || takesFolder(c, "", null, known),
   );
   const notCloned = facts.checkout !== undefined && (facts.checkout === null || facts.checkout.path === null);
   const off = notCloned ? "Not cloned on this machine" : null;
   const run = (c: OneOff): Act => ({ do: "oneoff", entityId: repoId, command: c.id, at: { ...at } });
-  const add = `#/settings/commands/new?repo=${encodeURIComponent(repoId)}${at.kind === "file" || at.kind === "folder" ? `&on=${encodeURIComponent(at.path)}` : ""}`;
+  const add = commandPageHash({ repo: repoId, on: at.kind === "file" || at.kind === "folder" ? at.path : "" });
+  if (at.kind === "commit" && takes.length === 0) return [];
   const first = takes[0];
   const slot: Item = first ? { id: "run-first", label: `Run ${first.name}`, act: run(first), disabled: off } : { id: "run-first", label: "Run a command…", act: { do: "go", hash: add } };
   const sub: Entry[] = [

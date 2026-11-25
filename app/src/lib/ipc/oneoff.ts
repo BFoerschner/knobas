@@ -17,6 +17,8 @@ import type {
   OneOffKind,
   OneOffLine,
   OneOffPlace,
+  OneOffResult,
+  OneOffResultKind,
   OneOffRun,
   OneOffRunRow,
   OneOffShell,
@@ -42,6 +44,8 @@ export type {
   OneOffKind,
   OneOffLine,
   OneOffPlace,
+  OneOffResult,
+  OneOffResultKind,
   OneOffRun,
   OneOffRunRow,
   OneOffShell,
@@ -99,9 +103,18 @@ export function oneoffWatch(run: string, channel: Channel<OneOffBatch>): Promise
   return invoke<boolean>("oneoff_watch", { run, channel });
 }
 
-/** *Download*: what run `run` printed, as text (with its colour codes where `colours`), saved to Downloads; answers the path. */
-export function oneoffSave(run: string, name: string, colours: boolean): Promise<string> {
-  return invoke<string>("oneoff_save", { run, name, colours });
+/** *Download*: what run `run` printed, as text (with its colour codes where `colours`), or with `result` what it made (`file`, one it wrote to `{outdir}`), saved to Downloads; answers the path. */
+export function oneoffSave(run: string, name: string, colours: boolean, result = false, file: string | null = null): Promise<string> {
+  return invoke<string>("oneoff_save", { run, name, colours, result, file });
+}
+
+/** What `oneoff_result` answers: an `ArrayBuffer` from the bridge, bytes from the dev fake. */
+type RawBytes = ArrayBuffer | ArrayLike<number>;
+
+/** The bytes of a run's result, or of `file`, one it wrote to `{outdir}`. */
+export async function oneoffResult(run: string, file: string | null): Promise<Uint8Array> {
+  const answer = await invoke<RawBytes>("oneoff_result", { run, file });
+  return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
 }
 
 /** Forgets one run, or every run that ended. */

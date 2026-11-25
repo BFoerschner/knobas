@@ -1,6 +1,8 @@
 /** Commands' pure half (ADR-0060): pieces, endings, findings, copies and the twins of the Rust rules. */
 import { expect, test } from "vitest";
 
+import twin from "./oneoff-twin.json";
+
 import type { OneOff, OneOffLine } from "../ipc/oneoff";
 import { ago, check, classOf, clock, endedShort, fill, kindOf, outputText, pieces, problems, problemsText, shown, stateOf, takesFile, takesFolder, takesRepository, took } from "./oneoff";
 
@@ -110,4 +112,13 @@ test("a menu offers only what applies", () => {
   expect(takesFolder(folder, "scripts", ["a.ts"], facts)).toBe(false);
   expect(takesRepository(command("cargo clippy"), facts)).toBe(true);
   expect(takesRepository(command("cargo clippy", { repos: ["gitea:other"] }), facts)).toBe(false);
+});
+
+test("the twin holds to the Rust: the shared cases of oneoff-twin.json", () => {
+  for (const c of twin.cases) {
+    expect(kindOf(c.command, c.stdin as "none" | "file" | "selection"), c.command).toBe(c.kind);
+    const said = check(c.command, c.stdin as "none" | "file" | "selection");
+    if (c.refused === null) expect(said, c.command).toBeNull();
+    else expect(said, c.command).toContain(c.refused);
+  }
 });

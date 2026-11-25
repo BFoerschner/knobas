@@ -514,3 +514,168 @@ async fn nothing_of_a_run_is_left_under_the_profile_after_the_quit() {
     let list = std::fs::read_to_string(profile.path().join("command-runs/runs.json")).unwrap();
     assert!(!list.contains("SECRET-OUTPUT"), "the list holds no output");
 }
+
+#[tokio::test]
+async fn stdin_holds_the_file_or_its_selected_lines_and_a_commit_its_sha() {
+    let pool = scratch("oneoff_stdin").await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+    let id = repo(&pool, dir.path(), "stdin").await;
+    knobas_app::oneoff::save(
+        &pool,
+        &[
+            Draft {
+                stdin: knobas_core::checkout::oneoff::Stdin::File,
+                ..draft("all", "cat")
+            },
+            Draft {
+                stdin: knobas_core::checkout::oneoff::Stdin::Selection,
+                ..draft("some", "cat")
+            },
+            draft("show", "printf %s {sha}"),
+        ],
+    )
+    .await
+    .unwrap();
+    let runs = Arc::new(Runs::new());
+    let file = |lines| Target::File {
+        path: "a.txt".to_owned(),
+        lines,
+        at: None,
+    };
+    let (sink, _) = run(&runs, &pool, &id, "all", file(None)).await;
+    sink.wait(Duration::from_secs(10)).await;
+    assert_eq!(sink.texts(), ["one", "two", "three", "four"]);
+    let (sink, _) = run(&runs, &pool, &id, "some", file(Some((2, 3)))).await;
+    sink.wait(Duration::from_secs(10)).await;
+    assert_eq!(sink.texts(), ["two", "three"]);
+    let (sink, _) = run(
+        &runs,
+        &pool,
+        &id,
+        "show",
+        Target::Commit {
+            sha: "abc1234".to_owned(),
+        },
+    )
+    .await;
+    sink.wait(Duration::from_secs(10)).await;
+    assert_eq!(sink.texts(), ["abc1234"]);
+    // A git name the grammar refuses starts nothing and says which value.
+    let (sink, _) = run(
+        &runs,
+        &pool,
+        &id,
+        "show",
+        Target::Commit {
+            sha: "--upload-pack=x".to_owned(),
+        },
+    )
+    .await;
+    match sink.wait(Duration::from_secs(10)).await {
+        Ended::NotStarted { reason } => {
+            assert!(reason.contains("not a name knobas passes"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_result_that_is_not_lines_out_outdir_and_a_stdout_that_is_not_text() {
+    use knobas_app::oneoff::result::{Kind, RunResult};
+    let pool = scratch("oneoff_result").await;
+    let dir = tempfile::tempdir().unwrap();
+    let profile = tempfile::tempdir().unwrap();
+    let id = repo(&pool, dir.path(), "result").await;
+    knobas_app::oneoff::save(
+        &pool,
+        &[
+            draft("page", "sh -c 'echo making >&2; printf \"<!doctype html><p>hi\" > \"$1\"' _ {out}.html"),
+            draft("png", "printf \\211PNG\\r\\n\\032\\n0000"),
+            draft("many", "sh -c 'printf a > \"$1/a.txt\"; mkdir \"$1/sub\"; printf \"[]\" > \"$1/sub/b.json\"; ln -s /etc/passwd \"$1/link\"' _ {outdir}"),
+            draft("fails", "sh -c 'printf a > \"$1/a.txt\"; exit 3' _ {outdir}"),
+        ],
+    )
+    .await
+    .unwrap();
+    let runs = Arc::new(Runs::new());
+    runs.place(profile.path().join("command-runs"));
+    let last = |sink: &Collect| sink.0.lock().unwrap().last().unwrap().result.clone();
+
+    let (sink, started) = run(&runs, &pool, &id, "page", Target::Repository).await;
+    assert_eq!(
+        sink.wait(Duration::from_secs(10)).await,
+        Ended::Exit { code: 0 }
+    );
+    assert_eq!(
+        last(&sink),
+        Some(RunResult::One {
+            kind: Kind::Page,
+            size: 20,
+            name: "output.html".to_owned(),
+            overruled: None
+        })
+    );
+    assert_eq!(sink.texts(), ["making"]);
+    let handle = runs.get(&started.run).unwrap();
+    assert_eq!(handle.result_bytes(None).unwrap(), b"<!doctype html><p>hi");
+
+    let (sink, started) = run(&runs, &pool, &id, "png", Target::Repository).await;
+    sink.wait(Duration::from_secs(10)).await;
+    assert!(
+        matches!(
+            last(&sink),
+            Some(RunResult::One {
+                kind: Kind::Image { .. },
+                ..
+            })
+        ),
+        "{:?}",
+        last(&sink)
+    );
+    assert!(
+        sink.texts().is_empty(),
+        "a stdout that is the result is no lines"
+    );
+    assert!(
+        runs.get(&started.run)
+            .unwrap()
+            .result_bytes(None)
+            .unwrap()
+            .starts_with(b"\x89PNG")
+    );
+
+    let (sink, started) = run(&runs, &pool, &id, "many", Target::Repository).await;
+    sink.wait(Duration::from_secs(10)).await;
+    let Some(RunResult::Files {
+        files,
+        left_out_total,
+        ..
+    }) = last(&sink)
+    else {
+        panic!("{:?}", last(&sink))
+    };
+    assert_eq!(
+        files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        ["a.txt", "sub/b.json"]
+    );
+    assert_eq!(left_out_total, 1);
+    assert_eq!(
+        runs.get(&started.run)
+            .unwrap()
+            .result_bytes(Some("sub/b.json"))
+            .unwrap(),
+        b"[]"
+    );
+
+    let (sink, _) = run(&runs, &pool, &id, "fails", Target::Repository).await;
+    assert_eq!(
+        sink.wait(Duration::from_secs(10)).await,
+        Ended::Exit { code: 3 }
+    );
+    assert_eq!(
+        last(&sink),
+        None,
+        "a run that failed keeps nothing of {{outdir}}"
+    );
+}

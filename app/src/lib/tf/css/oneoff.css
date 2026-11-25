@@ -149,7 +149,7 @@
 .tf-tbl.tf-rnd-tbl.tf-oo-tbl th:nth-child(1) { width: 24%; }
 .tf-oo-tbl th:nth-child(3) { width: 20%; }
 .tf-oo-tbl th:nth-child(4) { width: 15%; }
-.tf-rnd-tbl.tf-oo-tbl th:last-child { width: calc(126px * var(--size-ui, 1)); }
+.tf-rnd-tbl.tf-oo-tbl th:last-child { width: calc(212px * var(--size-ui, 1)); }
 .tf-rnd-tbl.tf-oo-runs th:last-child { width: calc(148px * var(--size-ui, 1)); }
 .tf-oo-tbl td kbd { margin-left: 6px; }
 .tf-oo-tbl td:not(:last-child), .tf-oo-runs td:not(:last-child) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -170,3 +170,6 @@
 .tf-oo-probe { position: absolute; visibility: hidden; white-space: pre; }
 /* *Run…* stands where *Open in…* does, with its menu beside it. */
 .tf-oo-runin { display: inline-flex; }
+/* A result drawn as lines (JSON, code, a diff, text, bytes) or a PDF, filling the stage as the output does. */
+.tf-oo-lines { overflow: auto; background: var(--under); }
+.tf-oo-pdf { overflow: auto; background: var(--sheet-2); }

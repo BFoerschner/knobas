@@ -166,6 +166,12 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["W", "Passwords", "Open the entry or folder in the password manager's web interface"],
   ["Shift W", "Passwords", "Open it in the browser"],
   ["Esc", "Passwords", "Clear the filter, else up one folder"],
+  ["X", "Any page in Code", "Run…: your commands for the file, folder or repository shown; Enter runs the first"],
+  ["Shift X", "Any page in Code", "Run the last command again on what it ran on"],
+  ["R", "A command's run", "Run it again"],
+  ["⌘.", "A command's run", "Stop it and everything it started"],
+  ["N, P", "A command's run", "The next and the previous place it named"],
+  ["1, 2", "A command's run", "Output, Problems"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];
 
