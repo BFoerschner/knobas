@@ -499,6 +499,10 @@
         ? walked.path
         : emptyPath(),
   );
+  /** `path` is that empty path only because the selected asset's read is still out: no layout of its own yet. */
+  const awaitsPath = $derived(
+    selectedId !== null && failure === null && detail?.asset.id !== selectedId && walked?.of !== selectedId,
+  );
 
   /**
    * What breaks if the selected asset goes down (#505), or `null` while the
@@ -718,6 +722,12 @@
     // where `path` was going to change anyway -- a move, a delete -- and
     // `latestRead` is what keeps the loser of those two from landing.
     void revision;
+    // The address names an asset whose read is still out, and no walk holds a path for it: `path` is the top column
+    // then, which is no asset's layout, so the columns on screen stand until the answer gives the real one. Read, it
+    // used to lose to the asset's read and never land; kept by the answer cache (480df5f7) it landed at once, the strip
+    // drew one column for a moment, and `→` onto a holder put focus on an ancestor in it (trip `strip-walk-gitea`,
+    // F-556). Nothing drawn yet (an address opened cold) still reads it, so the top column can draw first.
+    if (awaitsPath && untrack(() => loaded)) return;
     void columnsRead(() => Promise.all(parents.map((parent) => io.assetTree(parent))), {
       ok: (lists) => {
         columns = lists;
