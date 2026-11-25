@@ -17,8 +17,20 @@ read its list only when a run of a source ended, and drew no echo.
 | Run page header | as the row | as the row; the whole page (view, log, open tab) read again when it goes from queued to running or to finished |
 | Builds rail | nothing until the run after the write ended; then stuck as the row | *Queued* at the queue's answer; then as the row, its own row read at most once in 5 s |
 
-Times above are the mechanism's, from the tests (`a_run_started_here_is_read_on_until_it_finishes`: *running* in the
-mirror under 4 s after the source moved it). The real app against a live TeamCity is owed (WSL down, 2026-11-25).
+**Measured in the real app** (2026-11-25, the debug app on the Mac against a real TeamCity 2026.1.3 with one agent,
+under OrbStack, a 25 s build; times from the press, TeamCity's dates to the second):
+
+| Case | Queued | Running | Finished |
+|---|---|---|---|
+| Agent free: the row | 12 ms (*Sent* 42 ms) | 93 ms (the read-back caught it started) | 31.4 s (TeamCity: 30.2 to 31.2 s) |
+| Queued behind another build: the row | 10 ms; the read-back's row 83 ms | 26.9 s (TeamCity started it 26.0 to 27.0 s in) | 61.5 s (finished 57.0 to 58.0 s in) |
+| The same, on the run page's header | as the page opened (2.1 s) | 28.9 s (started 26.8 to 27.8 s in) | 61.5 s (finished 56.8 to 57.8 s in) |
+| The rail | 9 to 12 ms | within 5 s of the row | within 0.4 to 3.7 s of the row |
+
+Before, *running* and *finished* waited for the source's next scheduled run (300 s on the live sources). The first
+real run found one more cause: the pipeline page's row stayed *running* after the build finished, because the answer
+cache drops on its own listener of `item:refreshed`, in no set order with the window's shared one the pages hear, so a
+page's read again could be answered the kept row. Whoever reads again on the event now drops what it moved first.
 
 **Ruled (Fable, xhigh, while Björn is away): the write queue follows a run it started, and pages read what they draw
 when shown.**
