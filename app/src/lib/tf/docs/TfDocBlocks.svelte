@@ -24,7 +24,7 @@
   import type { DocBlock, TableCell } from "../../ipc/entity";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { docBlock, specBlock } from "./doc-spec";
-  import { docViewModule } from "../render/doc/doc-module";
+  import { docViewModule, loadAhead } from "../render/doc/doc-module";
   import { renderPort } from "../../render/port";
   import { DOC_BLOCKS_FIRST, TABLE_ROWS_FIRST, headed, headerColumn, includeMiss, pageHash, panelLabel, panelTone } from "./docs";
 
@@ -79,6 +79,17 @@
     const pre = (event.currentTarget as HTMLElement).closest(".tf-pre")?.querySelector("pre");
     asView.set(block, Math.min(420, Math.max(120, Math.round(pre?.getBoundingClientRect().height ?? 420))));
   }
+
+  // The views' code loads ahead of the first press, once the reader is still: the first *XML view* of a session is
+  // otherwise its chunk, its worker and its colours at once.
+  $effect(() => {
+    for (const block of blocks) {
+      if (block.type !== "code" || specBlock(block.language ?? null, block.code)) continue;
+      const view = docBlock(block.language ?? null, block.code);
+      if (view === "xsd") loadAhead("xsd-inline", xsdInline);
+      else if (view !== null) loadAhead("doc-view", docViewModule);
+    }
+  });
 
   /** A table's rows drawn at first, and how many more each task after. */
   const ROWS_FIRST = TABLE_ROWS_FIRST;

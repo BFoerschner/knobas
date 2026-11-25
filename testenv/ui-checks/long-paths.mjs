@@ -156,6 +156,11 @@ const SCREENS = [
   // Zen mode everywhere in Code (Z1): its button in the top bar whole, and a file in Zen, its header's path whole.
   { id: "zen-code-file", route: `${REPO}/files/src/sepa/retry.rs`, press: ".tf-top > .tf-zenbtn", wait: 500, whole: ".tf-top, .tf-fileview header", sizes: SMALLEST },
   { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
+  // A Docs page's XML, JSON and schema blocks (D1): each block's bar, the views' Levels bars and the schema's rows whole in the
+  // window's smallest, the three views open at once; a declaration opened in place; a ticket's junit.xml in the file viewer.
+  { id: "docs-blocks", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["XML view", "JSON view"], wait: 1500, whole: ".tf-pre-bar, .tf-doc-xv .tf-xv-bar, .tf-xsd-inline .tf-xsd-irow", sizes: SMALLEST },
+  { id: "docs-blocks-decl", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["~AmountType"], wait: 1500, whole: ".tf-pre-bar, .tf-xsd-iopen .tf-xsd-h, .tf-xsd-iopen .tf-oas-meta", sizes: SMALLEST },
+  { id: "viewer-junit", route: "ticket/mock%3APAY-228", press: '[aria-labelledby="tf-tkatt"] summary', then: ["~junit.xml"], wait: 1500, whole: ".tf-viewer, .tf-vdoc .tf-xv-bar", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];

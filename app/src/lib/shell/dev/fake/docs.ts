@@ -70,6 +70,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { ASCII_AFTER, asciiArt } from "../fake-ascii";
+import { JSON_BLOCK, SCHEMA_BLOCK, SHORT_XML_BLOCK, XML_BLOCK } from "../fake-doc-blocks";
 import { CORPUS, fakeEmpty, fakeRoleScope } from "./corpus";
 import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
@@ -151,6 +152,7 @@ const META: Record<string, [string, string]> = {
   "On-call handbook": ["TW", "2026-07-02 09:00"],
   "Payments architecture overview": ["PN", "2026-08-11 09:00"],
   "Ledger reconciliation runbook": ["TW", "2026-08-19 09:00"],
+  "EDI message formats": ["JB", "2026-08-20 09:00"],
 };
 
 /**
@@ -352,6 +354,28 @@ const BODIES: Record<string, Body> = {
     excerpt: [{ p: "On-call rotates weekly on Tuesdays at 10:00. The current person is in the #oncall channel topic." }],
     comments: [["TW", "2026-08-19 09:00", "Rewriting the Ledger section this week."]],
   },
+  // D1 (the XML view's design, section 28): a schema block offers *Schema*, the export declaration and its status hook
+  // (61 lines each) *XML view* and *JSON view*, and the acknowledgement, 14 lines, stays plain code.
+  "EDI message formats": {
+    labels: ["customs", "edi", "reference"],
+    version: 7,
+    blocks: [
+      { p: "The messages the customs gateway exchanges with ATLAS and the carriers, with a sample of each. The gateway's own code is in customs-gateway; ask @Jonas before changing a format." },
+      { h: "Data types" },
+      { p: "Amounts, codes, identifiers and dates use UN/CEFACT's unqualified data types, D16B, as published:" },
+      { code: SCHEMA_BLOCK, lang: "xml" },
+      { h: "Export declaration" },
+      { p: "What the gateway lodges for each consignment that leaves the EU. One item a line of the commercial invoice." },
+      { code: XML_BLOCK, lang: "xml" },
+      { h: "Status hook" },
+      { p: "What the gateway posts back once ATLAS has answered, keyed by the declaration's id." },
+      { code: JSON_BLOCK, lang: "json" },
+      { h: "Acknowledgement" },
+      { p: "The gateway's receipt for a lodged declaration." },
+      { code: SHORT_XML_BLOCK, lang: "xml" },
+    ],
+    comments: [["JB", "2026-08-20 09:00", "Added the status hook's history array; the gateway sends it since 3.2."]],
+  },
   "Ledger reconciliation runbook": {
     labels: ["ops", "ledger", "runbook"],
     version: 12,
@@ -388,6 +412,8 @@ const NAMED: Record<string, string> = {
   "PSP error codes": "confluence:psp-codes",
   // Its embed is the one the shots and `scripts/embed-witness.mjs` open (#2440).
   "Payments architecture overview": "confluence:architecture",
+  // Its XML, JSON and schema blocks are the ones `testenv/perf/docs-blocks.mjs` and the moves place `docs-blocks` press (D1).
+  "EDI message formats": "confluence:edi-formats",
 };
 
 const PAGES: FakePage[] = [];
