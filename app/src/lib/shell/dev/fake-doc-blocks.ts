@@ -130,8 +130,8 @@ export const JSON_BLOCK = `{
     "confirmed": null
   },
   "links": {
-    "self": "https://customs-gateway.tidewater.internal/declarations/EXD-2026-08-0419",
-    "pdf": "https://customs-gateway.tidewater.internal/declarations/EXD-2026-08-0419.pdf"
+    "self": "https://customs-gateway.tidewater.test/declarations/EXD-2026-08-0419",
+    "pdf": "https://customs-gateway.tidewater.test/declarations/EXD-2026-08-0419.pdf"
   },
   "warnings": [],
   "retries": 0,
@@ -168,8 +168,8 @@ export const JUNIT_XML = `<?xml version="1.0" encoding="UTF-8"?>
     <testcase name="sendsRateLimitedToReview" classname="io.tidewater.payout.RetrySchedulerTest" time="0.297"/>
     <testcase name="keepsIdempotencyKeyAcrossRetries" classname="io.tidewater.payout.RetrySchedulerTest" time="1.204">
       <failure message="expected one payout for PO-130102, found 2" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected one payout for PO-130102, found 2
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
 	at io.tidewater.payout.RetrySchedulerTest.keepsIdempotencyKeyAcrossRetries(RetrySchedulerTest.java:142)
-	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
 	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:728)
 	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
 	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)

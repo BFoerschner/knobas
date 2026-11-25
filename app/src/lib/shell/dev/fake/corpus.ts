@@ -166,7 +166,7 @@ export const CORPUS: {
     // D1: a run's test report and the PSP's answer, which the file viewer
     // folds as XML and JSON (`fake-doc-blocks.ts`'s texts).
     attachments: attachmentRows([
-      ["50004", "junit.xml", "application/xml", 3_538, "Jonas Becker", "2026-08-21T15:40:00Z"],
+      ["50004", "junit.xml", "application/xml", 3_573, "Jonas Becker", "2026-08-21T15:40:00Z"],
       ["50005", "psp-409-response.json", "application/json", 1_423, "Jonas Becker", "2026-08-21T15:42:00Z"],
     ]),
   }),
