@@ -36,8 +36,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 1420,
     strictPort: true,
-    // The browser's fake reads the fixture repositories' files (`fake/launcher.ts`), which live beside `app/`.
-    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files", "../fixtures/doc"] },
+    // The browser's fake reads the fixture repositories' files (`fake/launcher.ts`), which live beside `app/`, and the
+    // published schemas (`?fake-xsd`, and the Docs page whose code block is one, `fake/doc-blocks.ts`).
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files", "../fixtures/doc", "../fixtures/xsd"] },
   },
   build: {
     // **Three documents, not one** (#503, #2381). `index.html` is the shell; the second

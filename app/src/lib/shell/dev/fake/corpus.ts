@@ -142,21 +142,12 @@ export const CORPUS: {
     // the four files the Tidewater fixture gives PAY-231, at the addresses
     // mockd serves them from. Only Jira declares attachments; the fake draws
     // them on the mock ticket so the page has them under `?fake-ipc`.
-    attachments: [
+    attachments: attachmentRows([
       ["50000", "psp-409-trace.png", "image/png", 186_368, "Lena Hoffmann", "2026-08-12T09:14:00Z"],
       ["50001", "retry-timeline.png", "image/png", 98_304, "Mara Lindqvist", "2026-08-19T15:02:00Z"],
       ["50002", "sepa-error-codes.pdf", "application/pdf", 1_258_291, "Priya Nair", "2026-08-12T11:30:00Z"],
       ["50003", "batch-13-failures.csv", "text/csv", 49_152, "Lena Hoffmann", "2026-08-14T08:45:00Z"],
-    ].map(([id, name, mime, size, author, created]) => ({
-      id,
-      name,
-      mime,
-      size,
-      author,
-      created,
-      content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
-      thumbnail_url: String(mime).startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
-    })),
+    ]),
   }),
   // Deliberately in **no** project, key prefix notwithstanding: the miss
   // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It
@@ -172,6 +163,12 @@ export const CORPUS: {
     reporter: "mara",
     time_spent_seconds: 13200,
     worklogs: [{ who: "mara", seconds: 13200 }],
+    // D1: a run's test report and the PSP's answer, which the file viewer
+    // folds as XML and JSON (`fake-doc-blocks.ts`'s texts).
+    attachments: attachmentRows([
+      ["50004", "junit.xml", "application/xml", 3_573, "Jonas Becker", "2026-08-21T15:40:00Z"],
+      ["50005", "psp-409-response.json", "application/json", 1_423, "Jonas Becker", "2026-08-21T15:42:00Z"],
+    ]),
   }),
   row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
     key: "OPS-77",
@@ -431,6 +428,20 @@ function row(
     deleted_at: null as string | null,
     payload,
   };
+}
+
+/** A ticket's attachments as `get_entity` answers them (#2404): id, name, type, size, who and when, at mockd's addresses. */
+function attachmentRows(files: [id: string, name: string, mime: string, size: number, author: string, created: string][]) {
+  return files.map(([id, name, mime, size, author, created]) => ({
+    id,
+    name,
+    mime,
+    size,
+    author,
+    created,
+    content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
+    thumbnail_url: mime.startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
+  }));
 }
 
 /** The stored contexts the fixture session holds. Starts with one unarchived

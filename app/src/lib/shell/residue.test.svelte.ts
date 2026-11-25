@@ -630,6 +630,7 @@ const TfSetPattern = (await import("../tf/sets/TfSetPattern.svelte")).default;
 const TfApplySet = (await import("../tf/job/TfApplySet.svelte")).default;
 const TfSaveSet = (await import("../tf/job/TfSaveSet.svelte")).default;
 const TfAttachmentPreview = (await import("../tf/job/TfAttachmentPreview.svelte")).default;
+const TfFileViewer = (await import("../tf/render/TfFileViewer.svelte")).default;
 const { createAttachmentPreviews } = await import("../tf/job/attachment-previews.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
@@ -2262,6 +2263,12 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** The file viewer (#2415, D1): a file named as XML loads the XML view's code with the press that opened it. */
+    name: "TfFileViewer",
+    source: "lib/tf/render/TfFileViewer.svelte",
+    open: (target) => ({ app: mount(TfFileViewer, { target, props: { name: "junit.xml", kind: "XML", content: { kind: "reading" }, download: () => {}, onclose: () => {} } }) }),
   },
   {
     /** The attachment preview (#2415): its dialog's layer, and the PDF's bytes asked and answered late. */

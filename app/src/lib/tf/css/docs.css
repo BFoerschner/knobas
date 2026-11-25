@@ -85,7 +85,7 @@
 .tf-rd-moresync { display: contents; }
 .tf-doc { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); font-size: calc(17.5px * var(--fs)); line-height: var(--lh-read, 1.65); font-weight: var(--wt-read, 400); color: var(--ink); }
 /* 24 px under the scroller's padding, so a heading clears a crumb row that took two lines. */
-.tf-doc h2 { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); font-size: calc(25px * var(--fs)); line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 24px; }
+.tf-doc h2:where(:not(.tf-dview *)) { --fs: var(--size-read); letter-spacing: var(--ls-read); font-family: var(--serif); font-size: calc(25px * var(--fs)); line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 24px; }
 .tf-doc h2 .tf-tools {
   --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); font-weight: var(--wt-ui, 400); opacity: 0; margin-left: 10px;
   vertical-align: 4px; display: inline-flex; gap: 4px;
@@ -96,15 +96,15 @@
   color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;
 }
 .tf-doc h2 .tf-tools button:disabled, .tf-doc h2 .tf-tools button[aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
-.tf-doc p { margin: 0 0 15px; }
+.tf-doc p:where(:not(.tf-dview *)) { margin: 0 0 15px; }
 /* Bold in a Docs page is Inter's 600, not the browser's 700 (2026-11-20): from 17 px up, Inter at 700 and heavier
    keeps Chrome from starting a selection on a drag across "t_I" (a build's `Payout_IntegrationTests`), and 600 never
    does. The headings take 600 for the same reason; the 800 figures hold keys and numbers, never that run. */
-.tf-doc :where(strong, b) { font-weight: 600; }
-.tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
-.tf-doc li { margin: 4px 0; }
+.tf-doc :where(strong, b):where(:not(.tf-dview *)) { font-weight: 600; }
+.tf-doc :is(ul, ol):where(:not(.tf-dview *)) { margin: 0 0 15px; padding-left: 24px; }
+.tf-doc li:where(:not(.tf-dview *)) { margin: 4px 0; }
 .tf-doc li > p:last-child, .tf-doc li.tf-task > div > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
-.tf-doc code { --fs: var(--size-code); font: calc(.82em * var(--size-code) / var(--size-read)) var(--mono); font-size: round(calc(.82em * var(--size-code) / var(--size-read)), 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+.tf-doc code:where(:not(.tf-dview *)) { --fs: var(--size-code); font: calc(.82em * var(--size-code) / var(--size-read)) var(--mono); font-size: round(calc(.82em * var(--size-code) / var(--size-read)), 1px); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
 /* A code block: its language and Copy in a strip above the code, so neither covers a long line (#2083). */
 .tf-pre { margin: 0 0 18px; }
 .tf-doc li > p:has(+ .tf-pre) { margin-bottom: 8px; }
@@ -116,8 +116,13 @@
 .tf-pre-bar .tf-btn { margin-left: auto; }
 /* *API* beside *Copy* (ux31): the pair keeps to the strip's end. */
 .tf-pre-bar .tf-btn + .tf-btn { margin-left: 4px; }
+/* A view drawn in a page's body (D1's *Schema*, *XML view* and *JSON view*; *API*'s inline form, `.tf-dview`): the app's own
+   face at its own size, as the view draws on Code's pages, not the reading face. The body's rules for its own headings,
+   paragraphs, lists, code and tables stop at the view (`:where(:not(.tf-dview *))`, no weight added): a declaration's
+   heading is not a page heading, nor the lines' `pre` a code block (D1's checks, 2026-11-25). */
+.tf-doc .tf-dview { --fs: var(--size-ui); letter-spacing: var(--ls-ui, normal); word-spacing: normal; font: var(--wt-ui, 400) calc(var(--t-sm) * var(--fs))/1.45 var(--sans); }
 .tf-oas-inline-wait { height: 420px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; color: var(--ink-2); }
-.tf-doc pre {
+.tf-doc pre:where(:not(.tf-dview *)) {
   --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-md) * var(--fs))/var(--code-lh, 1.55) var(--mono); font-variant-ligatures: var(--mono-ligatures); background: var(--sheet-2); border: 1px solid var(--rule);
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
 }
@@ -129,12 +134,12 @@
    collapsed table out again whenever a border's colour changes, so a theme switch cost layout. Every column keeps the
    collapsed one's extra pixel, so a full-width table shares its width out as before, pixel for pixel at 1x and 1.25x;
    a row with fewer cells than the table's is closed by the table's own edge (2026-11-23, `testenv/perf/theme-switch.mjs`). */
-.tf-doc table { border-collapse: separate; border-spacing: 0; border: solid var(--rule); border-width: 0 1px 1px 0; width: 100%; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-md) * var(--fs)); line-height: 1.45; }
-.tf-doc th, .tf-doc td { border: solid var(--rule); border-width: 1px 0 0 1px; padding: 7px 10px; text-align: left; vertical-align: top; }
-.tf-doc th { background: var(--sheet-2); font-weight: 600; }
+.tf-doc table:where(:not(.tf-dview *)) { border-collapse: separate; border-spacing: 0; border: solid var(--rule); border-width: 0 1px 1px 0; width: 100%; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-md) * var(--fs)); line-height: 1.45; }
+.tf-doc :is(th, td):where(:not(.tf-dview *)) { border: solid var(--rule); border-width: 1px 0 0 1px; padding: 7px 10px; text-align: left; vertical-align: top; }
+.tf-doc th:where(:not(.tf-dview *)) { background: var(--sheet-2); font-weight: 600; }
 /* A cell holds blocks (#2436): they keep their gaps between them, none after the last. */
-.tf-doc :is(th, td) > :last-child { margin-bottom: 0; }
-.tf-doc :is(th, td) :is(p, ul, ol) { margin-bottom: 8px; }
+.tf-doc :is(th, td):where(:not(.tf-dview *)) > :last-child { margin-bottom: 0; }
+.tf-doc :is(th, td):where(:not(.tf-dview *)) :is(p, ul, ol) { margin-bottom: 8px; }
 .tf-callout {
   display: flex; gap: 10px; border-radius: 6px; padding: 11px 14px; margin: 0 0 18px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans);
   font-size: calc(var(--t-lg) * var(--fs)); line-height: 1.5; border-left: 4px solid;
@@ -170,7 +175,7 @@
 .tf-ment { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-sm) * var(--fs)); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }
 /* A callout, the comments, a table and what the page belongs to are the interface's in the reading page: they take its spacing back. */
-.tf-doc :is(.tf-callout, .tf-cmts, td, th) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(h3, p, li, dd, dt), .tf-doc > .tf-dl-note, .tf-doc h2 .tf-tools { letter-spacing: calc(.006em + var(--ls-ui, 0em)); word-spacing: .06em; }
+.tf-doc :is(.tf-callout, .tf-cmts, td, th) :is(p, li, h2, h3):where(:not(.tf-dview *)), .tf-doc :is(td, th):where(:not(.tf-dview *)), .tf-rd-foot :is(h3, p, li, dd, dt), .tf-doc > .tf-dl-note, .tf-doc h2 .tf-tools { letter-spacing: calc(.006em + var(--ls-ui, 0em)); word-spacing: .06em; }
 /* A match on the row you are on keeps the normal mark's pair, in both themes. */
 .tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }
 .tf-cmts { font-size: calc(var(--t-md) * var(--fs)); }

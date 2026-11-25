@@ -161,6 +161,11 @@ const SCREENS = [
   { id: "settings-commands", route: "settings/commands", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },
   { id: "settings-command-page", route: "settings/commands/orchestra", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },
   { id: "run-dialog", route: `${REPO}/files/src/sepa/retry.rs`, fake: "&fake-oneoff", press: ".tf-fileview header .tf-oo-runin button", then: ["~Orchestra lint"], wait: 900, whole: ".tf-modal .tf-oo-line, .tf-modal .tf-oo-bar", sizes: SMALLEST },
+  // A Docs page's XML, JSON and schema blocks (D1): each block's bar, the views' Levels bars and the schema's rows whole in the
+  // window's smallest, the three views open at once; a declaration opened in place; a ticket's junit.xml in the file viewer.
+  { id: "docs-blocks", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["XML view", "JSON view"], wait: 1500, whole: ".tf-pre-bar, .tf-doc-xv .tf-xv-bar, .tf-xsd-inline .tf-xsd-irow", sizes: SMALLEST },
+  { id: "docs-blocks-decl", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["~AmountType"], wait: 1500, whole: ".tf-pre-bar, .tf-xsd-iopen .tf-xsd-h, .tf-xsd-iopen .tf-oas-meta", sizes: SMALLEST },
+  { id: "viewer-junit", route: "ticket/mock%3APAY-228", press: '[aria-labelledby="tf-tkatt"] summary', then: ["~junit.xml"], wait: 1500, whole: ".tf-viewer, .tf-vdoc .tf-xv-bar", sizes: SMALLEST },
   { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
   { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];

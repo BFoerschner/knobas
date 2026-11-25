@@ -68,6 +68,11 @@
     layers?: Layers;
     onclose: () => void;
   } = $props();
+
+  // A file named as XML or JSON: the XML view's code loads with the press that opened it, beside the read of its bytes.
+  $effect(() => {
+    if (/\.(xml|xsd|xsl|xslt|wsdl|json|jsonc)$/i.test(name)) void Promise.resolve(docViewModule()).catch(() => {});
+  });
 </script>
 
 {#snippet downloadButton()}

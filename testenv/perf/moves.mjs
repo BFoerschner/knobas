@@ -139,6 +139,12 @@ const HL_PLACES = [
   })),
 ];
 
+/** D1's Docs page of XML, JSON and schema blocks, another page to open it from, and *Source* pressed on its block. */
+const EDI_PAGE = "#/page/confluence%3Aedi-formats";
+const OTHER_PAGE = "#/page/confluence%3Asepa";
+const SOURCE = { press: `${shown} .tf-pre-bar button`, text: "Source" };
+/** D1's ticket whose attachments are XML and JSON (`fake/corpus.ts`). */
+const ATTACHED = "#/ticket/mock%3APAY-228";
 /** The fixture's Jira-like ticket whose fields the dev fake answers (`fake/ticket-fields.ts`). */
 const TICKET = "#/ticket/mock%3APAY-231";
 const PLACES = [
@@ -251,6 +257,22 @@ const PLACES = [
   { name: "docs-page", start: `#/docs/space/${SPACE}`, press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", away: "Escape" },
   // A row of the rail's tree (2026-11-19): the page opens, and the rail it was pressed in holds its space.
   { name: "docs-tree", start: `#/docs/space/${SPACE}`, press: `${shown} .tf-rd-tree .tf-dl-tree a[href^="#/page/"]`, hash: "#/page/", away: "Escape" },
+  // D1, a Docs page's XML, JSON and schema blocks (`fake-doc-blocks.ts`'s *EDI message formats*): the page opened from
+  // another page, then each block's view pressed, drawn in the box the press's frame gave it; the return presses
+  // *Source* first. A declaration opens in place in the schema's box, which holds its 420 px.
+  { name: "docs-blocks", fixture: true, start: OTHER_PAGE, go: EDI_PAGE, hash: EDI_PAGE, away: OTHER_PAGE },
+  ...[
+    ["schema", "Schema", `${shown} .tf-xsd-irow .tf-xsd-cname`],
+    ["xml", "XML view", `${shown} .tf-doc-xv .tf-xv-caret`],
+    ["json", "JSON view", `${shown} .tf-doc-xv .tf-xv-caret`],
+  ].map(([which, word, ready]) => ({ name: `docs-blocks-${which}`, fixture: true, start: EDI_PAGE, press: `${shown} .tf-pre-bar button`, text: word, hash: null, ready, away: EDI_PAGE, beforeReturn: [SOURCE] })),
+  { name: "docs-blocks-decl", fixture: true, start: EDI_PAGE, setup: `${shown} .tf-pre-bar button`, setupOnce: true, press: `${shown} .tf-xsd-ibtn`, hash: null, ready: `${shown} .tf-xsd-iopen .tf-xsd-h`, away: EDI_PAGE, beforeReturn: [{ press: `${shown} .tf-xsd-ibtn[aria-expanded="true"]` }] },
+  // D1, the file viewer: PAY-228's junit.xml and JSON answer opened from their rows, their bytes read late, drawn by the
+  // XML view's inline form in the stage's height.
+  ...[
+    ["junit", "junit.xml"],
+    ["json", "psp-409-response.json"],
+  ].map(([which, name]) => ({ name: `viewer-${which}`, fixture: true, late: "attachment_bytes:300", start: ATTACHED, setup: `${shown} section[aria-labelledby="tf-tkatt"] summary`, setupOnce: true, press: `${shown} .tf-tkatt .tf-r .tf-t`, text: name, starts: true, hash: null, ready: ".tf-vdoc .tf-xv-caret", away: "Escape" })),
   { name: "monitors", start: "#/time", nav: "monitors", hash: "#/monitors", away: "time", tabs: true },
   // A row opens its monitor beside the roster on the page, with no address of its own (the monitors-page pass, 2026-11-19).
   { name: "monitor", start: "#/monitors", press: `${shown} .tf-mon-row .tf-mon-state`, hash: null, ready: ".tf-mon-panel h2", away: "Escape" },

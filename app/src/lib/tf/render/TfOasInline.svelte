@@ -147,7 +147,7 @@
   const markWords = (m: InlineMark) => (m.mark === "added" ? "Added" : m.mark === "removed" ? "Removed" : m.via !== undefined ? `Changed through ${m.via}` : "Changed");
 </script>
 
-<div class="tf-oas-inline" class:tf-oas-ifill={fill} role="region" aria-label={label}>
+<div class="tf-oas-inline tf-dview" class:tf-oas-ifill={fill} role="region" aria-label={label}>
   {#if failed !== null}
     <p class="tf-oas-fnote">{failed}</p>
   {:else if st === null || index === null}
