@@ -97,6 +97,8 @@ function oneoffPorts() {
     setCommands: () => deferred([]),
     forget: () => deferred(undefined),
     shell: () => deferred({ on: true, offered: true, read: null }),
+    repoCommands: () => deferred({ file: null, offered: [], failed: null }),
+    copyRepoCommands: () => deferred([]),
     moved: () => {
       const heard = () => {};
       window.addEventListener("tauri:oneoff:moved", heard);

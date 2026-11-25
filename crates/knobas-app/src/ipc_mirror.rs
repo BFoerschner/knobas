@@ -55,6 +55,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::checkout::oneoff::Kind::export_all(cfg)?;
     crate::oneoff::run::Batch::export_all(cfg)?;
     crate::oneoff::result::RunResult::export_all(cfg)?;
+    crate::oneoff::RepoCommands::export_all(cfg)?;
     crate::oneoff::run::Started::export_all(cfg)?;
     crate::oneoff::history::RunRow::export_all(cfg)?;
     crate::commands::oneoff::OneOffShell::export_all(cfg)?;

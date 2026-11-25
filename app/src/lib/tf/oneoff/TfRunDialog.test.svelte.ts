@@ -41,6 +41,8 @@ function ports() {
     setCommands: vi.fn(() => Promise.resolve([command])),
     forget: vi.fn(() => Promise.resolve()),
     shell: vi.fn(() => Promise.resolve({ on: true, offered: true, read: null })),
+    repoCommands: vi.fn(() => Promise.resolve({ file: null, offered: [], failed: null })),
+    copyRepoCommands: vi.fn(() => Promise.resolve([command])),
     moved: (handler) => {
       moved = handler;
       return () => {};

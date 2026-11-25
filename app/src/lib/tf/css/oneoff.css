@@ -173,3 +173,7 @@
 /* A result drawn as lines (JSON, code, a diff, text, bytes) or a PDF, filling the stage as the output does. */
 .tf-oo-lines { overflow: auto; background: var(--under); }
 .tf-oo-pdf { overflow: auto; background: var(--sheet-2); }
+/* A repository's own commands, offered to copy: a name and a tick, its whole line under it in the code face. */
+.tf-oo-offer { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 50vh; overflow: auto; background: var(--sheet); }
+.tf-oo-offer li { display: grid; gap: 2px; }
+.tf-oo-offerline { --fs: var(--size-code); font-size: calc(var(--t-xs) * var(--fs)); overflow-wrap: anywhere; white-space: pre-wrap; }

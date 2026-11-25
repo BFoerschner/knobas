@@ -24,10 +24,13 @@ import {
   oneoffWatch,
   oneoffForget,
   oneoffShellPath,
+  oneoffRepoCommands,
+  oneoffCopyRepoCommands,
   setOneoffCommands,
   type OneOff,
   type OneOffDraft,
   type OneOffShell,
+  type OneOffRepoCommands,
   type OneOffBatch,
   type OneOffEnded,
   type OneOffLine,
@@ -55,6 +58,8 @@ export interface OneOffPorts {
   setCommands(drafts: OneOffDraft[]): Promise<OneOff[]>;
   forget(run: string | null): Promise<void>;
   shell(again: boolean, on: boolean | null): Promise<OneOffShell>;
+  repoCommands(entityId: string): Promise<OneOffRepoCommands>;
+  copyRepoCommands(entityId: string, names: string[]): Promise<OneOff[]>;
   /** Hears `oneoff:moved` until the answer is called. */
   moved(handler: (row: OneOffRunRow) => void): () => void;
 }
@@ -80,6 +85,8 @@ export const realOneOffPorts: OneOffPorts = {
   setCommands: (drafts) => setOneoffCommands(drafts),
   forget: (run) => oneoffForget(run),
   shell: (again, on) => oneoffShellPath(again, on),
+  repoCommands: (entityId) => oneoffRepoCommands(entityId),
+  copyRepoCommands: (entityId, names) => oneoffCopyRepoCommands(entityId, names),
   moved: (handler) => {
     const heard = listen<OneOffRunRow>(EVENTS.oneoffMoved, (event) => handler(event.payload));
     return () => void heard.then((off) => off(), () => {});
@@ -290,6 +297,18 @@ export class OneOffs {
   async forget(run: string | null): Promise<void> {
     await this.ports.forget(run);
     this.rows = await this.ports.runs(null).catch(() => this.rows);
+  }
+
+  /** What a repository's `.knobas/commands.toml` offers, read from its checkout now. */
+  repoCommands(entityId: string): Promise<OneOffRepoCommands> {
+    return this.ports.repoCommands(entityId);
+  }
+
+  /** Copies the named commands of a repository's file into the list, scoped to it. */
+  async copyRepoCommands(entityId: string, names: string[]): Promise<OneOff[]> {
+    const stored = await this.ports.copyRepoCommands(entityId, names);
+    this.commands = stored;
+    return stored;
   }
 
   /** *Where programs are found*: the login shell's `PATH`, read again with `again`, the switch set with `on`. */
@@ -537,7 +556,7 @@ function extOf(result: OneOffResult | null): string {
   if (result?.from !== "one") return "";
   const k = result.kind;
   if (k.kind === "image") return k.mime === "image/svg+xml" ? ".svg" : `.${k.mime.split("/")[1] ?? "img"}`;
-  return { pdf: ".pdf", page: ".html", json: ".json", markdown: ".md", diff: ".diff", text: ".txt", bytes: ".bin", code: k.kind === "code" ? `.${k.ext}` : "" }[k.kind] ?? "";
+  return { pdf: ".pdf", page: ".html", json: ".json", markdown: ".md", diff: ".diff", text: ".txt", bytes: ".bin", code: k.kind === "code" ? `.${k.ext}` : "" }[k.kind];
 }
 
 const EMPTY: Omit<OneOff, "id" | "name" | "command"> = {

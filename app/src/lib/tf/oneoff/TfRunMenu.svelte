@@ -19,6 +19,8 @@
   import { BATCH_MAX } from "../../render/oneoff.svelte";
   import { oneoffs as sharedStore, type OneOffs } from "../../render/oneoff.svelte";
   import { commandPageHash } from "../settings/command-page";
+  import TfRepoCommands from "./TfRepoCommands.svelte";
+  import type { OneOffRepoCommands } from "../../ipc/oneoff";
 
   let {
     entityId,
@@ -54,6 +56,20 @@
   } = $props();
 
   let open = $state(false);
+  /** The repository's own file, read when the menu opens (section 22); its dialog when shown. */
+  let fromRepo = $state<OneOffRepoCommands | null>(null);
+  let showRepo = $state(false);
+  $effect(() => {
+    if (!open || checkout?.path == null) return;
+    let live = true;
+    store.repoCommands(entityId).then(
+      (read) => live && (fromRepo = read),
+      () => {},
+    );
+    return () => (live = false);
+  });
+  const newFromRepo = $derived(fromRepo?.offered.filter((o) => o.copied == null).length ?? 0);
+  const changedFromRepo = $derived(fromRepo?.offered.filter((o) => o.copied != null && o.theirs != null).length ?? 0);
   let face = $state<HTMLButtonElement | null>(null);
 
   const facts = $derived({ repo: entityId, top });
@@ -176,8 +192,17 @@
       <hr />
       <button role="menuitem" onclick={() => { open = false; void store.reopen(lastOfThing.id); }}><b>Show the last run</b><span class="tf-dim">{lastOfThing.name}, {endedShort(lastOfThing.ended)}</span></button>
     {/if}
+    {#if newFromRepo > 0 || changedFromRepo > 0}
+      <hr />
+      <button role="menuitem" onclick={() => { open = false; showRepo = true; }}
+        ><span class="tf-dim">{newFromRepo > 0 ? `${newFromRepo} ${newFromRepo === 1 ? "command" : "commands"} from this repository…` : `${changedFromRepo} changed in this repository…`}</span></button
+      >
+    {/if}
     <hr />
     <a role="menuitem" href={addHash} onclick={() => (open = false)}>Add a command</a>
     <a role="menuitem" href="#/settings/commands" onclick={() => (open = false)}>Manage commands</a>
   </TfMenu>
 </span>
+{#if showRepo && fromRepo !== null}
+  <TfRepoCommands {entityId} {repo} read={fromRepo} {store} {layers} onclose={() => (showRepo = false)} />
+{/if}

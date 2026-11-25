@@ -391,7 +391,12 @@ async fn a_linter_s_places_and_findings_and_a_program_that_is_not_there() {
         .flat_map(|b| b.lines.iter().chain(b.changed.iter()))
         .cloned()
         .collect();
-    let first = lines.iter().rev().find(|l| l.n == 0).unwrap();
+    // Two streams read on two threads: which line is first is the race's, so the linter's is found by its text.
+    let first = lines
+        .iter()
+        .rev()
+        .find(|l| l.text.starts_with("src/a.ts"))
+        .unwrap();
     assert_eq!(first.places[0].path, "src/a.ts");
     assert_eq!(first.places[0].line, Some(3));
     assert_eq!(first.finding.as_ref().unwrap().rule, "semi");
@@ -399,7 +404,7 @@ async fn a_linter_s_places_and_findings_and_a_program_that_is_not_there() {
     assert!(
         lines
             .iter()
-            .filter(|l| l.n != 0)
+            .filter(|l| l.n != first.n)
             .all(|l| l.places.is_empty())
     );
     let rows: Vec<RunRow> = runs.rows(Some(&id));

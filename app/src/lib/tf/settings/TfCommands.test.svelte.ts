@@ -28,6 +28,8 @@ function ports(saved: OneOff[]): OneOffPorts & { setCommands: ReturnType<typeof 
     }),
     forget: () => Promise.resolve(),
     shell: () => Promise.resolve({ on: true, offered: true, read: null }),
+    repoCommands: () => Promise.resolve({ file: null, offered: [], failed: null }),
+    copyRepoCommands: () => Promise.resolve([]),
     moved: () => () => {},
   };
 }
@@ -115,4 +117,39 @@ test("an example's page comes filled in and saves nothing until saved", async ()
   expect(document.querySelector<HTMLInputElement>("#tf-ocp-name")!.value).toBe("Ruff");
   expect(document.querySelector<HTMLInputElement>("#tf-ocp-files")!.value).toBe("*.py");
   expect(p.setCommands).not.toHaveBeenCalled();
+});
+
+test("a repository's own commands are copied after a look; one Save refuses cannot be ticked", async () => {
+  const p = ports([]);
+  const copy = vi.fn(() => Promise.resolve([ESLINT]));
+  p.copyRepoCommands = copy;
+  const store = new OneOffs(p);
+  const { default: TfRepoCommands } = await import("../oneoff/TfRepoCommands.svelte");
+  const base = { files: [], folders: [], has: [], repo_holds: [], stdin: "none" as const, shows: "auto" as const, start_in: "root" as const, timeout_secs: null, copied: null, theirs: null };
+  view = mount(TfRepoCommands, {
+    target: document.body,
+    props: {
+      entityId: "gitea:a/b",
+      repo: "b",
+      read: {
+        file: "/c/b/.knobas/commands.toml",
+        offered: [
+          { ...base, name: "ESLint", command: "npx eslint {file}", kind: "file" as const, refused: null },
+          { ...base, name: "Unsafe", command: "sh -c 'x {file}'", kind: "file" as const, refused: "{file} stands inside a quoted script" },
+        ],
+        failed: null,
+      },
+      store,
+      onclose: () => {},
+    },
+  });
+  flushSync();
+  const ticks = [...document.querySelectorAll<HTMLInputElement>(".tf-oo-offer input[type=checkbox]")];
+  expect(ticks.map((t) => t.disabled)).toEqual([false, true]);
+  expect(words(document.querySelector(".tf-oo-offer"))).toContain("npx eslint {file}");
+  ticks[0]!.click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Add to my commands")!.click();
+  await settle();
+  expect(copy).toHaveBeenCalledWith("gitea:a/b", ["ESLint"]);
 });

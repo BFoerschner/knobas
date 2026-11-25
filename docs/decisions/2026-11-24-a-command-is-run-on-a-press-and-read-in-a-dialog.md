@@ -24,7 +24,7 @@ Three ways to run a program of your own. An *Open in* application is started at 
 12. **Closing the dialog leaves a run running**, shown in the status bar. *Stop*, the timeout and the quit end it, with everything it started.
 13. **A run keeps** 200,000 lines and 16 MiB, its first 2,000 lines and its newest. What it printed is in memory until quit and nowhere else. The list of the last 200 runs, without output, is a file in the profile that no backup carries.
 14. **Nothing runs by itself, and a share export carries no command.**
-15. **A repository's own commands are never run from the repository.** They can be copied into the person's list after a look. ⟨The build says whether step 10 shipped.⟩
+15. **A repository's own commands are never run from the repository.** They can be copied into the person's list after a look: a repository's *Run…* menu says when its checkout's `.knobas/commands.toml` offers some, and a dialog shows each whole line, what it takes and why Save would refuse one. A copy is scoped to that repository and is the person's from then on; when the file later changes a line, the menu says so and the dialog shows both lines, and copying again keeps the PATH folders, variables and colours they set.
 16. **On Windows** the kill is a job object, a path for `cmd` may not hold `%`, `!`, `^` or `"`, and `wsl` with a path needs `-e`. A tick gives a command its paths as WSL sees them.
 
 ## Not in this pass
@@ -37,4 +37,4 @@ On the clickdummy, drawn on the app's stylesheets, in headless Chrome on the WSL
 
 ## Reversing it
 
-Take *Commands* out of Settings' nav, `runIn` out of `context/items.ts` and the three *Run…* buttons out of their headers: nothing then starts a run, and the row `oneoff.commands` stays unread. The backend's `oneoff` module and its ten commands can stay or go with no other code leaning on them. `<profile>/command-runs/` is knobas's own folder to delete.
+Take *Commands* out of Settings' nav, `runIn` out of `context/items.ts` and the three *Run…* buttons out of their headers: nothing then starts a run, and the row `oneoff.commands` stays unread. The backend's `oneoff` module and its thirteen commands can stay or go with no other code leaning on them. `<profile>/command-runs/` is knobas's own folder to delete.

@@ -26,6 +26,7 @@ pub mod history;
 pub mod kept;
 pub mod lines;
 pub mod places;
+pub mod repo;
 pub mod result;
 pub mod run;
 pub mod runs;
@@ -367,4 +368,130 @@ pub async fn start_in(
         .await
         .map_err(IpcError::internal)?;
     Ok(answer(argv, cwd.to_string_lossy().into_owned()))
+}
+
+// -- a repository's own commands (section 22) --------------------------------
+
+/// What a repository's `.knobas/commands.toml` offers, as its copy dialog
+/// shows it.
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "app.ts", rename = "OneOffRepoCommands")]
+pub struct RepoCommands {
+    /// The file's path on disk, where the checkout holds one.
+    #[ts(optional = nullable)]
+    pub file: Option<String>,
+    pub offered: Vec<repo::Offered>,
+    /// Why the file could not be read.
+    #[ts(optional = nullable)]
+    pub failed: Option<String>,
+}
+
+/// The commands a repository's checkout offers, read from the disk now.
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a repository with no
+/// checkout here; [`Internal`](crate::IpcErrorCode::Internal) for a read of
+/// the list.
+pub async fn repo_commands(pool: &PgPool, entity_id: &str) -> Result<RepoCommands, IpcError> {
+    let checkout = crate::checkout::resolve(pool, entity_id).await?;
+    let Some(root) = checkout.path.map(PathBuf::from) else {
+        return Ok(RepoCommands {
+            file: None,
+            offered: Vec::new(),
+            failed: None,
+        });
+    };
+    let saved = list(pool).await?;
+    let at = root.clone();
+    let text = tokio::task::spawn_blocking(move || repo::read(&at))
+        .await
+        .map_err(IpcError::internal)?;
+    let Some(text) = text else {
+        return Ok(RepoCommands {
+            file: None,
+            offered: Vec::new(),
+            failed: None,
+        });
+    };
+    let file = Some(
+        root.join(".knobas")
+            .join("commands.toml")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    Ok(
+        match repo::offered(&text, entity_id, &saved, std::env::consts::OS) {
+            Ok(offered) => RepoCommands {
+                file,
+                offered,
+                failed: None,
+            },
+            Err(why) => RepoCommands {
+                file,
+                offered: Vec::new(),
+                failed: Some(why),
+            },
+        },
+    )
+}
+
+/// Copies the commands named `names` from the repository's file, as it is on
+/// disk now, into the person's list, scoped to the repository: a new one at
+/// the list's end, one already copied changed in place. Answers the list as
+/// stored.
+///
+/// # Errors
+///
+/// As [`repo_commands`]; [`Invalid`](crate::IpcErrorCode::Invalid) for a
+/// command Save refuses.
+pub async fn copy_repo_commands(
+    pool: &PgPool,
+    entity_id: &str,
+    names: &[String],
+) -> Result<Vec<OneOff>, IpcError> {
+    let read = repo_commands(pool, entity_id).await?;
+    let saved = list(pool).await?;
+    let mut drafts: Vec<Draft> = saved.iter().map(draft_of).collect();
+    for offered in read.offered.iter().filter(|o| names.contains(&o.name)) {
+        if let Some(id) = &offered.copied {
+            if let Some(slot) = drafts.iter_mut().find(|d| d.id.as_deref() == Some(id)) {
+                // The file's line and scope; what the person set around it
+                // (PATH folders, variables, colours) stays theirs.
+                let theirs = std::mem::take(slot);
+                *slot = Draft {
+                    path: theirs.path,
+                    env: theirs.env,
+                    colours: theirs.colours,
+                    wsl_paths: theirs.wsl_paths,
+                    ..repo::draft(offered, entity_id, Some(id.clone()))
+                };
+            }
+        } else {
+            drafts.push(repo::draft(offered, entity_id, None));
+        }
+    }
+    save(pool, &drafts).await
+}
+
+/// A saved command as the draft that saves it unchanged.
+fn draft_of(c: &OneOff) -> Draft {
+    Draft {
+        id: Some(c.id.clone()),
+        name: c.name.clone(),
+        command: c.command.clone(),
+        stdin: c.stdin,
+        files: c.files.clone(),
+        folders: c.folders.clone(),
+        has: c.has.clone(),
+        repo_holds: c.repo_holds.clone(),
+        repos: c.repos.clone(),
+        shows: c.shows,
+        start_in: c.start_in,
+        path: c.path.clone(),
+        env: c.env.clone(),
+        colours: Some(c.colours),
+        timeout_secs: Some(c.timeout_secs),
+        wsl_paths: c.wsl_paths,
+    }
 }

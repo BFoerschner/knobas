@@ -14,10 +14,16 @@ import type { OneOff, OneOffBatch, OneOffDraft, OneOffEnded, OneOffLine, OneOffR
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 
-const atLoad = () => ({ bridge: null as FakeBridge | null, saved: [] as OneOff[], flood: false, floodLines: 120_000, nextRun: 0 });
-let { bridge, saved, flood, floodLines, nextRun } = atLoad();
+/** Where the fake runs a command: the checkout, or `?fake-long-paths`' long Windows one with spaces. */
+const SHORT_ROOT = "/Users/mara/code/payout-service";
+const LONG_ROOT = String.raw`C:\Users\someone with a long name\source\repos\very\deep\nested\folders with spaces in them\and still more folders\payout-service-the-repository-name-that-is-long`;
+/** `?fake-long-paths`' command: its program deep under folders with spaces, quoted as a person writes it. */
+const LONG_COMMAND = String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-lint.exe" --config "C:\Users\someone with a long name\AppData\Roaming\Orchestra Renderer\profiles\payments team default.json" {file}`;
+
+const atLoad = () => ({ bridge: null as FakeBridge | null, saved: [] as OneOff[], flood: false, floodLines: 120_000, nextRun: 0, root: SHORT_ROOT });
+let { bridge, saved, flood, floodLines, nextRun, root } = atLoad();
 onFakeReset(() => {
-  ({ bridge, saved, flood, floodLines, nextRun } = atLoad());
+  ({ bridge, saved, flood, floodLines, nextRun, root } = atLoad());
 });
 
 /** One run of the session. */
@@ -72,6 +78,8 @@ keepSeed(made);
 
 export function seed(params: URLSearchParams): void {
   saved = params.has("fake-oneoff") ? SEEDED.map((c) => ({ ...c })) : [];
+  root = params.has("fake-long-paths") ? LONG_ROOT : SHORT_ROOT;
+  if (params.has("fake-oneoff") && params.has("fake-long-paths")) saved.unshift(base("orchestra", "Orchestra lint", LONG_COMMAND));
   flood = params.get("fake-oneoff") === "flood";
   floodLines = Number(params.get("fake-oneoff-lines") ?? 120_000) || 120_000;
   runs.length = 0;
@@ -94,6 +102,19 @@ function script(command: OneOff, target: OneOffTarget): { lines: OneOffLine[]; e
       lines: [line(0, `Error: Cannot find module 'eslint.config.js'`, { stream: "err", runs: [{ from: 0, to: 6, style: { fg: "r", bold: true } }] }), line(1, "    at Module._resolveFilename (node:internal/modules/cjs/loader:1249:15)", { stream: "err" })],
       ended: { how: "exit", code: 2 },
       every: 40,
+    };
+  }
+  if (command.id === "orchestra") {
+    // A tool that names the file by its whole path: the run line, a line and a finding with a long one.
+    const whole = `${root}\\${file.replaceAll("/", "\\")}`;
+    const head = `${whole}:12:4`;
+    return {
+      lines: [
+        line(0, `${head}: warning: the sequence's lifeline 'payments team ledger' is never closed`, { places: [{ from: 0, to: head.length, path: file, line: 12, col: 4 }], finding: { severity: "warning", said: "the sequence's lifeline 'payments team ledger' is never closed", rule: "" } }),
+        line(1, `Read the profile at C:\\Users\\someone with a long name\\AppData\\Roaming\\Orchestra Renderer\\profiles\\payments team default.json`),
+      ],
+      ended: { how: "exit", code: 1 },
+      every: 80,
     };
   }
   if (command.id === "xmllint") {
@@ -248,9 +269,11 @@ export function handlers(): Handlers {
       const running = runs.filter((r) => r.row.ended === null || r.row.ended === undefined);
       if (running.length >= 4) throw { code: "invalid", message: `four commands are running (${running.map((r) => r.row.name).join(", ")}): stop one or wait for it to end`, source_id: null };
       const id = `fake-run-${++nextRun}`;
-      const argv = command.command.split(/\s+/).map((w) => w.replace("{file}", `/Users/mara/code/payout-service/${target.kind === "file" ? target.path : ""}`).replace("{dir}", `/Users/mara/code/payout-service/${target.kind === "folder" ? target.path : ""}`));
+      const sep = root.includes("\\") ? "\\" : "/";
+      const at = (path: string) => `${root}${sep}${sep === "/" ? path : path.replaceAll("/", sep)}`;
+      const argv = (command.command.match(/"[^"]*"|\S+/g) ?? []).map((w) => w.replace(/^"|"$/g, "").replace("{file}", at(target.kind === "file" ? target.path : "")).replace("{dir}", at(target.kind === "folder" ? target.path : "")));
       const run: FakeRun = {
-        row: { id, command: command.id, name: command.name, entity_id: String(args["entityId"]), target, argv, cwd: "/Users/mara/code/payout-service", branch: "feature/retry-window", head: "7d3f2a1c", started_at: Date.now(), duration_ms: null, ended: null, lines: 0, findings: 0, kept: true },
+        row: { id, command: command.id, name: command.name, entity_id: String(args["entityId"]), target, argv, cwd: root, branch: "feature/retry-window", head: "7d3f2a1c", started_at: Date.now(), duration_ms: null, ended: null, lines: 0, findings: 0, kept: true },
         lines: [],
         findings: 0,
         bytes: 0,
@@ -308,6 +331,8 @@ export function handlers(): Handlers {
       if (bytes === undefined) throw { code: "not_found", message: "it made no result that is kept", source_id: null };
       return bytes;
     },
+    oneoff_repo_commands: () => ({ file: "/Users/mara/code/payout-service/.knobas/commands.toml", offered: [], failed: null }),
+    oneoff_copy_repo_commands: () => saved,
     oneoff_shell_path: (args) => ({
       on: typeof args["on"] === "boolean" ? (args["on"] as boolean) : true,
       offered: true,

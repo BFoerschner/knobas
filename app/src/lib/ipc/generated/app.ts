@@ -599,6 +599,23 @@ cut?: number,
 open?: boolean, };
 
 /**
+ * One command the repository's file holds, as the copy dialog shows it.
+ */
+export type OneOffOffered = { name: string, command: string, kind?: OneOffKind | null, 
+/**
+ * What Save would refuse; such a command cannot be copied.
+ */
+refused?: string | null, 
+/**
+ * The person's copy of it, by id, where they made one.
+ */
+copied?: string | null, 
+/**
+ * The copy's command line, where it differs from the file's now.
+ */
+theirs?: string | null, files: Array<string>, folders: Array<string>, has: Array<string>, repo_holds: Array<string>, stdin: OneOffStdin, shows: OneOffShows, start_in: OneOffStartIn, timeout_secs?: number | null, };
+
+/**
  * A file of the checkout a line names, with a line and maybe a column.
  */
 export type OneOffPlace = { from: number, to: number, 
@@ -606,6 +623,20 @@ export type OneOffPlace = { from: number, to: number,
  * From the repository's top, with `/`.
  */
 path: string, line: number | null, col: number | null, };
+
+/**
+ * What a repository's `.knobas/commands.toml` offers, as its copy dialog
+ * shows it.
+ */
+export type OneOffRepoCommands = { 
+/**
+ * The file's path on disk, where the checkout holds one.
+ */
+file?: string | null, offered: Array<OneOffOffered>, 
+/**
+ * Why the file could not be read.
+ */
+failed?: string | null, };
 
 /**
  * A run's result, as the dialog is told it.

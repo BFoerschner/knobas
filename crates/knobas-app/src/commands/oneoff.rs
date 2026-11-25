@@ -211,6 +211,33 @@ pub fn oneoff_result(run: String, file: Option<String>) -> Result<tauri::ipc::Re
         .map_err(|why| IpcError::new(crate::IpcErrorCode::NotFound, why))
 }
 
+/// What a repository's `.knobas/commands.toml` offers, read from the checkout
+/// on disk now (ADR-0060, section 22). Nothing in it runs.
+///
+/// # Errors
+/// As [`crate::oneoff::repo_commands`].
+#[tauri::command]
+pub async fn oneoff_repo_commands(
+    lifecycle: tauri::State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::oneoff::RepoCommands, IpcError> {
+    crate::oneoff::repo_commands(&lifecycle.pool()?, &entity_id).await
+}
+
+/// Copies the named commands of a repository's file into the person's list,
+/// scoped to that repository, after they read them; answers the list.
+///
+/// # Errors
+/// As [`crate::oneoff::copy_repo_commands`].
+#[tauri::command]
+pub async fn oneoff_copy_repo_commands(
+    lifecycle: tauri::State<'_, Lifecycle>,
+    entity_id: String,
+    names: Vec<String>,
+) -> Result<Vec<OneOff>, IpcError> {
+    crate::oneoff::copy_repo_commands(&lifecycle.pool()?, &entity_id, &names).await
+}
+
 /// Forgets one run, or every run that ended.
 #[tauri::command]
 pub fn oneoff_forget(run: Option<String>) {
@@ -264,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 11);
+        crate::commands::mirror::assert_mirrors("oneoff", MIRROR, "app/src/lib/ipc/oneoff.ts", 13);
     }
 
     #[test]
@@ -280,6 +307,8 @@ mod tests {
             ("oneoff_forget", &["run"]),
             ("oneoff_save", &["run", "name", "colours", "result", "file"]),
             ("oneoff_result", &["run", "file"]),
+            ("oneoff_repo_commands", &["entityId"]),
+            ("oneoff_copy_repo_commands", &["entityId", "names"]),
             ("oneoff_shell_path", &["again", "on"]),
         ] {
             assert_eq!(keys(invocation(MIRROR, command)), args, "{command}");

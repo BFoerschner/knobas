@@ -16,7 +16,9 @@ import type {
   OneOffFinding,
   OneOffKind,
   OneOffLine,
+  OneOffOffered,
   OneOffPlace,
+  OneOffRepoCommands,
   OneOffResult,
   OneOffResultKind,
   OneOffRun,
@@ -43,7 +45,9 @@ export type {
   OneOffFinding,
   OneOffKind,
   OneOffLine,
+  OneOffOffered,
   OneOffPlace,
+  OneOffRepoCommands,
   OneOffResult,
   OneOffResultKind,
   OneOffRun,
@@ -125,4 +129,14 @@ export function oneoffForget(run: string | null): Promise<void> {
 /** The login shell's `PATH` this session (read now with `again`), and *Use my shell's PATH* (set with `on`). */
 export function oneoffShellPath(again: boolean, on: boolean | null): Promise<OneOffShell> {
   return invoke<OneOffShell>("oneoff_shell_path", { again, on });
+}
+
+/** What a repository's `.knobas/commands.toml` offers, read from the checkout now; nothing in it runs. */
+export function oneoffRepoCommands(entityId: string): Promise<OneOffRepoCommands> {
+  return invoke<OneOffRepoCommands>("oneoff_repo_commands", { entityId });
+}
+
+/** Copies the named commands of the repository's file into the person's list, scoped to it; answers the list. */
+export function oneoffCopyRepoCommands(entityId: string, names: string[]): Promise<OneOff[]> {
+  return invoke<OneOff[]>("oneoff_copy_repo_commands", { entityId, names });
 }
