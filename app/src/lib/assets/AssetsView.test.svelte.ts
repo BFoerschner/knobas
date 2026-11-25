@@ -398,6 +398,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
   const searched: SearchQuery[] = [];
   const opened: string[] = [];
+  const held: (() => void)[] = [];
   location.hash = hash;
   const nav = createTestNav();
   app = mount(AssetsView, {
@@ -443,7 +444,9 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
         },
         getAsset: (assetId: string) => {
           try {
-            return Promise.resolve(detailOf(assetId, estate));
+            const answer = detailOf(assetId, estate);
+            if (assetId === over.holdAsset) return new Promise<AssetDetail>((resolve) => held.push(() => resolve(answer)));
+            return Promise.resolve(answer);
           } catch (cause) {
             return Promise.reject(cause);
           }
@@ -467,7 +470,9 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
     },
   });
   flushSync();
-  return { nav, asked, searched, opened };
+  /** Answer the reads of `holdAsset` held so far. */
+  const release = () => held.splice(0).forEach((answer) => answer());
+  return { nav, asked, searched, opened, release };
 }
 
 /** What a test may put in front of the view besides the estate. */
@@ -478,6 +483,8 @@ interface Over {
   answer?: SearchResponse;
   /** What a ticket's *Assets* row marks. */
   marks?: { assets: ReadonlySet<string>; holders: ReadonlySet<string>; key: string };
+  /** An asset whose read stays out until the test calls `release`, while every column answers at once, as kept ones do. */
+  holdAsset?: string;
 }
 
 /**
@@ -1168,6 +1175,24 @@ test("a walk's next level that fits still draws beside the strip", async () => {
   press("ArrowDown");
   await waitFor(() => expect(columns()).toHaveLength(3));
   expect(spines()).toEqual([]);
+});
+
+test("→ onto a holder keeps the strip while the asset is read, then focus is in its column", async () => {
+  // The press trip `strip-walk-gitea` (2026-11-25): with the columns kept by the answer cache, the top column the
+  // placeholder path asked for landed before the asset's read, the strip drew it alone, and focus went to `hel1` in it.
+  const { release } = render(`#/asset/${GITEA.id}`, ESTATE, { stripWidth: 1400, holdAsset: GITEA_DB.id });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", null]));
+  const before = columns();
+  rowNamed("gitea").focus();
+  press("ArrowRight", rowNamed("gitea"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(columns()).toEqual(before);
+
+  release();
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]));
+  await waitFor(() => expect(document.activeElement?.closest("ol.col")?.getAttribute("data-col")).toBe("3"));
+  expect(document.activeElement?.querySelector("span.nm")?.textContent?.trim()).toBe("gitea-db");
 });
 
 /** F-560: a press in the selection's own column holds the strip as `↓` does. */
