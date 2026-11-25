@@ -95,3 +95,19 @@ test("a page left mid-read stops between batches and keeps what it found; a list
   expect(failing.list).toEqual([]);
   expect(failing.failed).toContain("the mirror is locked");
 });
+
+test("the address's repository that is also the last one tried is listed once", async () => {
+  const { reads, batches } = batched();
+  const repos = new TryRepos();
+  const reading = repos.read(reads, ["gitea:o/repo-10", "gitea:o/repo-10"]);
+  await settle();
+  while (batches.length > 0) {
+    batches.shift()!();
+    await settle();
+  }
+  await reading;
+  const listed = repos.list!.map((one) => one.entityId);
+  expect(listed.filter((id) => id === "gitea:o/repo-10")).toHaveLength(1);
+  expect(new Set(listed).size).toBe(listed.length);
+  expect(repos.picked).toBe("gitea:o/repo-10");
+});
