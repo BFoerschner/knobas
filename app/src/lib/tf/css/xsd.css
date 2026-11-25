@@ -177,7 +177,7 @@
 .tf-xsd-crow[data-mark="moved"] { --mark-edge: var(--info); }
 .tf-xsd-cmark { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
 .tf-xsd-cname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-xsd-cname .tf-xsd-pre { font-weight: 400; color: var(--ink-2); }
+.tf-xsd-cname .tf-xsd-pre { font-weight: var(--wt-code, 400); color: var(--ink-2); }
 .tf-xsd-csay { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 /* Which way a change goes, where XML Schema says: the word first, its tone second. */
 .tf-xsd-dirs { display: inline-flex; gap: 4px; }
