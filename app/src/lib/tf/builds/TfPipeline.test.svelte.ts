@@ -1653,9 +1653,10 @@ test("the runs in flight are refreshed at the source once the page has drawn, th
   const drawn = draw(undefined, "PAY-231", { follow: (id) => (asked.push(id), Promise.resolve({ outcome: "refreshed" })) });
   drawn.next = [flying(1195), flying(1194), flying(1193), flying(1192), flying(1191), flying(1190), ...RUNS];
   drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Deploy" });
-  await settle();
+  // Nothing before the runs' read has answered: the page asks only once they drew. Checked before any await, since the
+  // ask comes 100 ms after the draw and a slow runner's settle can take longer than that (light CI, 2026-11-25).
   expect(asked).toEqual([]);
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  for (let waited = 0; asked.length < 5 && waited < 3_000; waited += 25) await new Promise((resolve) => setTimeout(resolve, 25));
   expect(asked).toEqual(["teamcity:build:1195", "teamcity:build:1194", "teamcity:build:1193", "teamcity:build:1192", "teamcity:build:1191"]);
   // The window back a moment later reads nothing again.
   window.dispatchEvent(new Event("focus"));
