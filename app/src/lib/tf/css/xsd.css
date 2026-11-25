@@ -194,3 +194,16 @@
 .tf-xsd-cside + .tf-xsd-cside { border-left: 1px solid var(--rule); }
 .tf-xsd-cwhich { display: block; padding: 0 12px 4px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
 .tf-xsd-cside .tf-xsd-gone { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); padding: 8px 12px; }
+
+/* ---- A schema on a Docs page (D1, `TfXsdInline`): its declarations in a box that scrolls inside itself ---- */
+.tf-xsd-inline { height: 420px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+.tf-xsd-irow { border-bottom: 1px solid var(--rule-2); }
+.tf-xsd-ibtn { width: 100%; min-height: 32px; display: grid; grid-template-columns: 14px minmax(0, max-content) auto; align-items: center; column-gap: 10px; padding: 0 12px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-ibtn:hover { background: var(--sheet-2); }
+.tf-xsd-ibtn .tf-oas-caret { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.tf-xsd-ibtn[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
+.tf-xsd-ikind { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-iopen { border-top: 1px solid var(--rule-2); padding: 4px 0 8px; }
+.tf-xsd-iopen .tf-xsd-gone { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); padding: 8px 12px; }
+/* An XML or JSON block drawn by the XML view's document (D1): as tall as the block was, 420 px at most. */
+.tf-doc-xv { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--sheet); }

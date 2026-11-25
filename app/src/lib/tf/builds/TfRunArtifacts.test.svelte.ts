@@ -6,7 +6,7 @@
  * download through knobas.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ArtifactEntry, ArtifactPreview, AttachmentBytes, DownloadTarget } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
@@ -150,7 +150,8 @@ test("a file's name opens the viewer: a text file's lines, its folder and size, 
   const view = viewer()!;
   expect(view.querySelector("h2")?.textContent).toBe("junit.xml");
   expect(view.querySelector(".tf-dsub")?.textContent).toBe("test-report/, 14.2 KB");
-  expect([...view.querySelectorAll(".tf-vstage .tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2</testsuites>"]);
+  // XML is drawn by the XML view's inline form (D1): its rows, as its worker's outline lands.
+  await vi.waitFor(() => expect([...view.querySelectorAll(".tf-vstage .tf-vdoc .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2</testsuites>"]));
   const download = view.querySelector<HTMLButtonElement>(".tf-dhead .tf-dctl .tf-acts .tf-btn")!;
   expect(download.textContent?.trim()).toBe("Download");
   download.click();
@@ -191,7 +192,7 @@ test("a head that cannot be read says why in the viewer and offers Try again, wh
   [...stage().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Try again")!.click();
   await settle();
   expect(drawn.previewed).toEqual(["test-report/junit.xml", "test-report/junit.xml"]);
-  expect([...stage().querySelectorAll(".tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2test-report/junit.xml"]);
+  await vi.waitFor(() => expect([...stage().querySelectorAll(".tf-vdoc .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2test-report/junit.xml"]));
   expect(stage().querySelector(".tf-vnote")?.textContent).toBe("The first 256 KB. Download it for the rest.");
 });
 

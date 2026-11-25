@@ -22,8 +22,10 @@
   import TfDocCode from "./TfDocCode.svelte";
   import TfMarked from "./TfMarked.svelte";
   import type { DocBlock, TableCell } from "../../ipc/entity";
-  import { SvelteSet } from "svelte/reactivity";
-  import { specBlock } from "./doc-spec";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { docBlock, specBlock } from "./doc-spec";
+  import { docViewModule } from "../render/doc/doc-module";
+  import { renderPort } from "../../render/port";
   import { DOC_BLOCKS_FIRST, TABLE_ROWS_FIRST, headed, headerColumn, includeMiss, pageHash, panelLabel, panelTone } from "./docs";
 
   let {
@@ -60,6 +62,23 @@
    */
   const asApi = new SvelteSet<DocBlock>();
   const inline = () => import("../render/TfOasInline.svelte");
+
+  /**
+   * The code blocks drawn as a schema, or by the XML view's document (D1, the XML view's design section 28): a block
+   * whose text is a schema gains *Schema*, one of 40 lines and more of XML or JSON *XML view* or *JSON view*, and its
+   * code is drawn first. Pressed, a document's view stands in a box as tall as the code was, 420 px at most.
+   */
+  const asView = new SvelteMap<DocBlock, number>();
+  const xsdInline = () => import("../render/xsd/TfXsdInline.svelte");
+  const VIEW_WORD = { xsd: "Schema", xml: "XML view", json: "JSON view" } as const;
+  function pressView(block: DocBlock, event: MouseEvent) {
+    if (asView.has(block)) {
+      asView.delete(block);
+      return;
+    }
+    const pre = (event.currentTarget as HTMLElement).closest(".tf-pre")?.querySelector("pre");
+    asView.set(block, Math.min(420, Math.max(120, Math.round(pre?.getBoundingClientRect().height ?? 420))));
+  }
 
   /** A table's rows drawn at first, and how many more each task after. */
   const ROWS_FIRST = TABLE_ROWS_FIRST;
@@ -141,10 +160,30 @@
         {#if block.language}<span>{block.language}</span>{/if}
         {#if specBlock(block.language ?? null, code)}
           <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={asApi.has(block)} onclick={() => (asApi.has(block) ? asApi.delete(block) : asApi.add(block))}>{asApi.has(block) ? "Source" : "API"}</button>
+        {:else}
+          {@const view = docBlock(block.language ?? null, code)}
+          {#if view !== null}
+            <button type="button" class="tf-btn tf-sm tf-ghost" aria-pressed={asView.has(block)} onclick={(event) => pressView(block, event)}>{asView.has(block) ? "Source" : VIEW_WORD[view]}</button>
+          {/if}
         {/if}
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => oncopy(code)}>Copy</button>
       </div>
-      {#if asApi.has(block)}
+      {#if asView.has(block)}
+        {@const view = docBlock(block.language ?? null, code)}
+        {#if view === "xsd"}
+          {#await xsdInline()}
+            <div class="tf-oas-inline-wait" role="status">Reading the schema…</div>
+          {:then { default: TfXsdInline }}
+            {#key code}<TfXsdInline text={code} />{/key}
+          {/await}
+        {:else if view !== null}
+          <div class="tf-doc-xv" {@attach (box) => box.style.setProperty("height", `${asView.get(block) ?? 420}px`)}>
+            {#await docViewModule() then { default: TfDocView }}
+              {#key code}<TfDocView inline text={code} path={view === "xml" ? "block.xml" : "block.json"} kind={view} render={renderPort()} />{/key}
+            {/await}
+          </div>
+        {/if}
+      {:else if asApi.has(block)}
         {#await inline()}
           <div class="tf-oas-inline-wait" role="status">Reading the spec…</div>
         {:then { default: TfOasInline }}
