@@ -193,9 +193,15 @@ impl JqSessions {
 }
 
 /// Starts a helper and hands it the document.
+///
+/// Through the console builder, as every program knobas starts (#2232), and
+/// with the environment the jq step's child gets (`child::run`): the
+/// parent's less every `KNOBAS_*` variable (#1643).
 async fn start(document: &[u8]) -> Result<Running, String> {
     let program = super::child::program()?;
-    let mut child = tokio::process::Command::new(program)
+    let mut built = knobas_db::console::command(program);
+    knobas_db::console::scrub_knobas_env(&mut built, std::env::vars_os());
+    let mut child = tokio::process::Command::from(built)
         .arg(super::SESSION_ARG)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
