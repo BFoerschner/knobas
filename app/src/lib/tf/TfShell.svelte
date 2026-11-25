@@ -101,7 +101,7 @@
   import { warmDiagrams } from "../render/diagram";
   import { renderPort } from "../render/port";
   import { warmDocs } from "./docs/warm";
-  import { openAhead } from "./ahead";
+  import { aheadBuilt, openAhead } from "./ahead";
   import { installFindKey } from "./filter-keys";
   import { installPlainTyping } from "./plain-typing";
   import { installExternalLinks } from "../shell/external-links";
@@ -1087,6 +1087,9 @@
   onMount(() => loadEveryFace());
   // So a pull request's first *Files changed* runs warm code (the forge-rounds pass, 2026-11-15).
   onMount(() => warmDiffView());
+  // So the first XML or JSON file opened after a start is drawn by warm code, its check by workers already up (the XML
+  // view's first open, 2026-11-25). Its module loads once the sections built ahead are, never in the start's chunks.
+  onMount(() => void aheadBuilt.then(() => import("./render/doc/doc-warm")).then((m) => m.warmXmlView(), () => {}));
   // So a README's first diagram is drawn by warm code, inside the text's hold (#2510).
   onMount(() => warmDiagrams(renderPort()));
   // So a Docs page kept hidden comes back laid out at Reading's new size (the ux18 Windows pass, Fable's ruling).

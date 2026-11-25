@@ -23,6 +23,8 @@ import type { KeepAt } from "../../../render/xsd-kept";
 import type { Words } from "../../../render/xsd-findings";
 import { isRemote } from "../../../render/xsd-locate";
 import { XsdPort, xsdEngine, type XsdEngine, type XsdReads } from "../../../render/xsd-port";
+import { hintKey, hintStore, hintedPaths, keepHint } from "../../../render/xsd-hint";
+import type { KeptValue } from "../../kept-value";
 import { firstTag } from "../../../render/xsd-sniff";
 import { XS, XSI } from "../../../render/xsd-xml";
 
@@ -238,14 +240,17 @@ export class DocCheck {
   /** The schema's file, where one was found: *Open the schema*. */
   schema = $state<string | null>(null);
   readonly #engine: XsdEngine;
+  /** Where the paths a set read are kept across restarts (`xsd-hint.ts`); `null` keeps none. */
+  readonly #hints: KeptValue | null;
   #port: XsdPort | null = null;
   /** A set open elsewhere the document was checked against ({@link runOn}): read, never closed, here. */
   #borrowed: XsdPort | null = null;
   #run = 0;
 
-  constructor(key: string, engine: XsdEngine | null = null) {
+  constructor(key: string, engine: XsdEngine | null = null, more: { hints?: KeptValue | null } = {}) {
     this.key = key;
     this.#engine = engine ?? xsdEngine();
+    this.#hints = more.hints === undefined ? hintStore() : more.hints;
   }
 
   /** Whether this file's check was stopped. */
@@ -277,19 +282,27 @@ export class DocCheck {
     }
     const port = new XsdPort(this.#engine);
     this.#port = port;
-    // Lean: the check draws no declaration, so none crosses back to the page.
-    const opening = port.open(entry.path, entry.text, reads, root!.namespace, true, landed);
     // An ask seen whole before is likely kept whole: its check is asked right behind the open, so the worker runs it
     // while the page draws. It counts only where the open answers the set whole, with nothing to ask again.
     const hint = reads.keep != null ? hintOf(reads.keep, entry, reads.pointed) : null;
-    const likely = hint !== null && seenWhole.has(hint) && text.length <= ASK_BEHIND_CAP;
+    const fits = text.length <= ASK_BEHIND_CAP;
+    const likely = hint !== null && seenWhole.has(hint) && fits;
+    // Any other crosses the document with its open, once: the round that leaves the set whole answers the verdict too.
+    // Its reads wait for the outline, as they did, and take the paths the set read last time in their first round
+    // (`xsd-hint.ts`). Started beside the outline, they were no sooner once the view was warmed (2026-11-25).
+    const hintAt = this.#hints === null ? null : hintKey(this.key.slice(0, this.key.indexOf("\n")), entry.path, entry.text);
+    const hinted = likely || hintAt === null ? [] : hintedPaths(this.#hints!, hintAt);
+    let t0 = performance.now();
+    void landed.then(() => (t0 = performance.now()));
+    // Lean: the check draws no declaration, so none crosses back to the page.
+    const opening = port.open(entry.path, entry.text, reads, root!.namespace, true, landed, { ...(!likely && fits ? { xml: text } : {}), hint: hinted });
     const asked = likely ? port.check(text) : null;
     const answer = await opening;
     if (run !== this.#run) return;
     // A set kept whole is checked beside the outline, and its departures' lines asked for: the document worker answers
     // them right behind the outline, which it reads first. A document with none needs no line: its verdict is drawn in
     // the outline's frame.
-    const early = answer.ok && answer.need.length === 0 ? (asked ?? port.check(text)) : null;
+    const early: Promise<Checked> | null = !answer.ok || answer.need.length > 0 ? null : answer.checked !== undefined ? Promise.resolve(answer.checked) : (asked ?? port.check(text));
     const earlyLines =
       early === null
         ? null
@@ -300,7 +313,6 @@ export class DocCheck {
       this.head = { k: "not-checked", warn: true, lines: [answer.error], against: null };
       return;
     }
-    const t0 = performance.now();
     await port.whole;
     if (run !== this.#run) return;
     const index = port.index!;
@@ -318,10 +330,15 @@ export class DocCheck {
     const against = file.url !== null ? baseOf(file.url) : baseOf(file.path);
     const how = file.from !== null ? `in ${file.from.name}, at ${file.from.branch}` : (FOUND[file.found ?? ""] ?? "");
     this.head = { k: "looking", found: against, how };
-    const checked: Checked = await (early ?? port.check(text));
+    // The round that left the set whole answered the verdict where the document crossed with the open.
+    const checked: Checked = early !== null ? await early : (port.checked ?? (await port.check(text)));
     if (run !== this.#run) return;
     const placed = await this.#place(run, checked, doc, { against, how, readMs, files: index.files.length - 1 }, text, earlyLines);
-    if (hint !== null && placed) sawWhole(hint);
+    if (hint !== null && placed) {
+      sawWhole(hint);
+      // Read at a pin and checked whole: the files it read are the next first open's hint.
+      if (hintAt !== null) keepHint(this.#hints!, hintAt, index.files.filter((f) => f.depth > 0 && f.found !== "bundled").map((f) => f.path));
+    }
   }
 
   /**

@@ -13,7 +13,8 @@
  *   its path, over the document's outline (`nodeAtPath`), by the view.
  * - The compiled schema is kept for the set's life (by the set's files: each path and its text, so a file changed to
  *   the same length is compiled again), and disposed when another set is checked.
- * - libxml2-wasm loads with the first check, never before.
+ * - libxml2-wasm is never in the start's chunks: it loads with the first check, or at idle after the start where this
+ *   profile checked a document lately (`doc-warm.ts`).
  */
 import type { SchemaSet } from "./xsd";
 import type { Finding } from "./xsd-findings";

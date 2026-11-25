@@ -36,6 +36,8 @@ const c = await attach(debug);
 await viewport(c, size);
 await c.send("Page.enable");
 await c.send("Runtime.enable");
+// When the XML view's warm-up (`doc-warm.ts`) drew its hidden view and took it down, from each page's start: [standing, ms].
+await c.send("Page.addScriptToEvaluateOnNewDocument", { source: "globalThis.__xvWarm = []; new MutationObserver(() => { const s = document.querySelector('.tf-xv-warm') !== null; const last = globalThis.__xvWarm.at(-1); if (last === undefined ? s : last[0] !== s) globalThis.__xvWarm.push([s, performance.now()]); }).observe(document, { childList: true, subtree: true });" });
 const home = async () => {
   await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd&fake-doc-diff${big ? "&fake-xml-big" : ""}#/inbox` });
   await sleep(2500);
@@ -96,6 +98,25 @@ const query = (value) =>
   `() => { const box = document.querySelector('.tf-xv-qfield input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
 const key = (k) => `() => document.querySelector('.tf-xv-lines .tf-code').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }))`;
 const settle = () => sleep(700);
+// In the page: once the warm-up's hidden view (`doc-warm.ts`) has stood and come down and the check's tier had its idle
+// moment (`done`; on a build without it, 6 s after the start), or as soon as it stands (`!done`).
+const warmed = (done) => `new Promise((resolve, reject) => {
+  const t0 = performance.now();
+  const look = () => {
+    const standing = document.querySelector('.tf-xv-warm') !== null;
+    const seen = globalThis.__xvWarm.some(([s]) => s);
+    if (${JSON.stringify(!done)} && standing) return resolve();
+    if (${JSON.stringify(done)} && seen && !standing) return setTimeout(resolve, 2500);
+    // A build with no warm-up (the head before it): as long an idle as a warmed one takes.
+    if (${JSON.stringify(done)} && !seen && performance.now() > 6000) return resolve();
+    if (performance.now() - t0 > 80000) return reject(new Error('the view was never warmed'));
+    if (${JSON.stringify(done)}) return setTimeout(look, 50);
+    queueMicrotask(() => requestAnimationFrame(look));
+  };
+  ${done ? "look();" : "const mo = new MutationObserver(() => { if (document.querySelector('.tf-xv-warm') !== null) { mo.disconnect(); resolve(); } }); mo.observe(document, { childList: true, subtree: true }); look();"}
+})`;
+/** Whether the warm-up's hidden view had stood before now, and whether it stands now. */
+const warmSaid = "JSON.stringify([globalThis.__xvWarm.some(([s]) => s), document.querySelector('.tf-xv-warm') !== null])";
 
 const ORDER = "orders/order-4711.xml";
 /** A prep: `path` opened until its verdict says `says`, then `then` opened. */
@@ -132,7 +153,13 @@ const CASES = [
   // The check's three opens (the schema session cache, 2026-11-24), each to its first lines, its carets and its verdict
   // in one run: the first (a fresh page each run: nothing of the set is held), the order opened again after it was
   // checked, and the other order on the same schema after this one was checked.
-  { name: "checked-first", label: "the order opened first, from the README on a fresh page", kind: "page", fresh: true, before: go(file("README.md")), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
+  // A first open after a restart (the XML view's first open, 2026-11-25): the order checked once, knobas started again on
+  // the same storage, idle until the view is warmed (`doc-warm.ts`), then the order opened from the README.
+  { name: "checked-first", label: "the order opened first after a restart, from the README", kind: "page", fresh: "warmed", setup: checkedThen(ORDER, "departures", "README.md"), before: go(file("README.md")), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
+  // Pressed before anything warmed: a fresh page on empty storage, the order opened from the README as soon as it shows.
+  { name: "checked-cold", label: "the order opened first, from the README on a fresh page, before any warming", kind: "page", fresh: "cold", before: go(file("README.md")), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
+  // Pressed while the warm-up's hidden view stands: the press takes it down and stays in its line.
+  { name: "checked-midwarm", label: "the order opened while the view is being warmed", kind: "page", fresh: "mid", setup: checkedThen(ORDER, "departures", "README.md"), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
   { name: "checked-again", label: "the order opened again, from the README after it was checked", kind: "page", before: go(file(ORDER)), prep: checkedThen(ORDER, "departures", "README.md"), act: go(file(ORDER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "departures" }], watch: LINE_ROWS },
   { name: "checked-other", label: "the other order (order-4710, valid) opened from the README after this one was checked", kind: "page", before: go(file(ORDER)), prep: checkedThen(ORDER, "departures", "README.md"), act: go(file(OTHER)), marks: [{ name: "first lines", sel: LINE_ROWS }, { name: "carets", sel: ".tf-xv .tf-xv-caret" }, { name: "verdict", sel: ".tf-xv-verdict b", text: "Valid" }], watch: LINE_ROWS },
   { name: "next", label: "N to the first departure, its line picked", kind: "press", before: go(file("README.md")), prep: `async () => {
@@ -237,17 +264,49 @@ for (const t of throttles) {
       await c.send("Emulation.setCPUThrottlingRate", { rate: t });
       const times = [];
       const marked = Object.fromEntries((k.marks ?? []).map((m) => [m.name, []]));
+      /** The warm-up as each press found it: [had stood, stands]. */
+      const warmAt = [];
       let moved = false;
+      if (k.setup) {
+        // Once a case: what the profile holds before its restarts (a check, so its set's paths are kept).
+        await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+        await c.js(`(${k.setup})()`);
+        await settle();
+      }
       for (let i = 0; i < RUNS; i++) {
         if (k.fresh) {
           await c.send("Emulation.setCPUThrottlingRate", { rate: 1 });
           await c.send("Page.navigate", { url: "about:blank" });
           await sleep(300);
-          await home();
-          await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+          const start = async (hash) => {
+            // Started at this speed and pressed as soon as the page shows: the warm-up comes a second or two after a start.
+            await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+            await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-xml&fake-xsd&fake-doc-diff${big ? "&fake-xml-big" : ""}#${hash}` });
+          };
+          if (k.fresh === "cold") {
+            // Empty storage: nothing kept from a check before, so nothing of the check is warmed either.
+            await home();
+            await c.js("localStorage.clear()");
+            await c.send("Page.navigate", { url: "about:blank" });
+            await sleep(300);
+            await start(file("README.md").slice(1));
+            await c.js(`new Promise((resolve) => { const look = () => (document.querySelector('.tf-rendered h1, .tf-rendered p') ? resolve() : setTimeout(look, 5)); look(); })`, { timeout: 30000 });
+          } else if (k.fresh === "mid") {
+            // Throttled from the start, so the hidden view stands as long as it would at this speed when the press lands.
+            await start("/inbox");
+            await c.js(warmed(false), { timeout: 90000 });
+          } else {
+            await home();
+            if (k.fresh === "warmed") await c.js(warmed(true), { timeout: 40000 });
+            await c.send("Emulation.setCPUThrottlingRate", { rate: t });
+          }
         }
-        await c.js(`(${k.before})()`);
-        await sleep(k.name.startsWith("big") ? 4000 : 900);
+        const said = k.fresh === "cold" || k.fresh === "mid" ? JSON.parse(await c.js(warmSaid)) : null;
+        if (said !== null) warmAt.push(said);
+        if (k.before && k.fresh !== "cold") {
+          await c.js(`(${k.before})()`);
+          await sleep(k.name.startsWith("big") ? 4000 : 900);
+        }
         if (k.prep) {
           await c.js(`(${k.prep})()`);
           await settle();
@@ -262,10 +321,11 @@ for (const t of throttles) {
         times.push(r.ms);
         moved ||= r.moved;
       }
-      return { times, moved, marked };
+      return { times, moved, marked, warmAt };
     });
     if (ran.failedToRun) { over++; console.log(failedLine({ name: k.label, throttle: t, failedToRun: ran.failedToRun })); continue; }
-    const { times, moved, marked } = ran.value;
+    const { times, moved, marked, warmAt } = ran.value;
+    if (warmAt.length > 0) console.log(`${t}x ${size.name} ${k.label}: the warm-up had run before ${warmAt.filter(([had, now]) => had && !now).length} of ${warmAt.length} presses, stood at ${warmAt.filter(([, now]) => now).length}`);
     if (k.marks) {
       for (const m of k.marks) {
         const ts = marked[m.name].sort((a, b) => a - b);

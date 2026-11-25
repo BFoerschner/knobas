@@ -238,8 +238,16 @@ export interface TreeRow {
 }
 
 export type XsdCall =
-  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean; keep?: KeepAt }
-  | { kind: "addFiles"; files: { path: string; text: string | null }[]; paths?: string[]; index?: SchemaIndexWire; elsewhere?: { namespace: string; list: Elsewhere[] } }
+  /**
+   * `xml`: the document a check's session checks, crossed once with its open; the set is checked as soon as a round
+   * leaves it whole, and the verdict comes back with that round's answer (`Opened.checked`).
+   */
+  | { kind: "open"; entry: string; text: string; paths: string[] | null; pointed: Pointed[]; home?: string; lean?: boolean; keep?: KeepAt; xml?: string }
+  /**
+   * `hinted`: files read because a hint named them (`xsd-hint.ts`), held aside: the walk takes one only when it asks for
+   * that path, as if the port had read it then.
+   */
+  | { kind: "addFiles"; files: { path: string; text: string | null }[]; paths?: string[]; index?: SchemaIndexWire; elsewhere?: { namespace: string; list: Elsewhere[] }; hinted?: { path: string; text: string | null }[] }
   | { kind: "pointed"; pointed: Pointed[] }
   | { kind: "page"; place: string }
   | { kind: "rows"; id: string }
@@ -294,7 +302,8 @@ export interface SchemaIndexWire {
   readonly read: number;
 }
 
-export type Opened = { ok: true; index: SetIndex; need: string[] } | { ok: false; error: string; line: number | null };
+/** `checked`: the verdict on the session's document, where it came with the open and this answer leaves the set whole. */
+export type Opened = { ok: true; index: SetIndex; need: string[]; checked?: Checked } | { ok: false; error: string; line: number | null };
 
 // ---- A session ----
 
@@ -318,6 +327,10 @@ export interface XsdSession {
   kept?: Kept;
   /** A kept set served once what moves under its pin has answered as it did. */
   verifying?: boolean;
+  /** Files a hint named, read but not yet asked for by the walk (`xsd-hint.ts`). */
+  hinted?: Map<string, string | null>;
+  /** The document a check's session checks, once the set is whole. */
+  xml?: string;
 }
 export type XsdSessions = Map<number, XsdSession>;
 
@@ -363,18 +376,19 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (kept !== undefined && kept.base.set !== null) {
         // The set kept whole: served at once, or once what moves under the pin has answered as it did.
         const s = attach(store, kept);
+        if (call.xml !== undefined) s.xml = call.xml;
         sessions.set(session, s);
         const answer = opened(kept.base.set, s.lean === true, s.index);
-        if (kept.verify.length === 0 || !answer.ok) return answer;
+        if (kept.verify.length === 0 || !answer.ok) return withCheck(s, answer, bundled);
         s.verifying = true;
         return { ...answer, need: [...kept.verify] };
       }
     }
-    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map(), ...(keep !== undefined ? { keep } : {}) };
+    const s: XsdSession = { entry: call.entry, ...(call.home !== undefined ? { home: call.home } : {}), ...(call.lean === true ? { lean: true } : {}), texts: new Map([[call.entry, call.text]]), paths: call.paths === null ? null : new Set(call.paths), pointed: call.pointed, index: null, elsewhere: new Map(), set: null, rows: new Map(), tree: new Map(), ...(keep !== undefined ? { keep } : {}), ...(call.xml !== undefined ? { xml: call.xml } : {}) };
     sessions.set(session, s);
     const answer = opened(load(s, bundled), s.lean === true, s.index);
     keepIfWhole(store, s);
-    return answer;
+    return withCheck(s, answer, bundled);
   }
   const s = sessions.get(session);
   if (s === undefined) return { ok: false, error: "The schema is no longer open.", line: null };
@@ -383,19 +397,26 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       if (s.verifying === true) {
         if (s.kept !== undefined && sameAnswers(s, s.kept.verify, call.files, call.elsewhere)) {
           delete s.verifying;
-          return opened(s.set!, s.lean === true, s.index);
+          return withCheck(s, opened(s.set!, s.lean === true, s.index), bundled);
         }
         // Something under the pin moved: the kept set is stale, and this session reads the set again.
         if (s.kept !== undefined) store.delete(s.kept.key);
       }
+      // A hinted file is held aside until the walk asks for it.
+      for (const f of call.hinted ?? []) if (!s.texts.has(f.path)) (s.hinted ??= new Map()).set(f.path, f.text);
+      const plain = call.files.length === 0 && call.paths === undefined && call.index === undefined && call.elsewhere === undefined;
+      // Hints alone change nothing the walk has not asked for: a set already whole, or one that asks for none of them, stays as it is.
+      if (plain && (s.set === null || !s.set.need.some((p) => s.hinted?.has(p) === true))) return withCheck(s, s.set === null ? { ok: false, error: "The schema is no longer open.", line: null } : opened(s.set, s.lean === true, s.index), bundled);
       detach(store, s);
       for (const f of call.files) s.texts.set(f.path, f.text);
       if (call.paths !== undefined) s.paths = new Set(call.paths);
       if (call.index !== undefined) s.index = { declares: new Map(call.index.declares.map(([p, n]) => [p, n ?? undefined])), catalogs: call.index.catalogs, total: call.index.total, read: call.index.read };
       if (call.elsewhere !== undefined) s.elsewhere.set(call.elsewhere.namespace, call.elsewhere.list);
-      const answer = opened(load(s, bundled), s.lean === true, s.index);
+      load(s, bundled);
+      walkHinted(s, bundled);
+      const answer = opened(s.set!, s.lean === true, s.index);
       keepIfWhole(store, s);
-      return answer;
+      return withCheck(s, answer, bundled);
     }
     case "pointed":
       // Pointed elsewhere, the set is no longer the one its key names: it is read again and not kept.
@@ -439,6 +460,28 @@ export function answerXsd(sessions: XsdSessions, session: number, call: XsdCall,
       sessions.delete(session);
       return null;
   }
+}
+
+/**
+ * The walk takes the hinted files it asks for, round after round inside the worker, as if the port had read each when
+ * asked: a file it never asks for is never read into the set.
+ */
+function walkHinted(s: XsdSession, bundled: Bundled): void {
+  for (let round = 0; round < 64 && s.set !== null && s.hinted !== undefined && s.hinted.size > 0; round += 1) {
+    const take = s.set.need.filter((p) => s.hinted!.has(p));
+    if (take.length === 0) return;
+    for (const p of take) {
+      s.texts.set(p, s.hinted.get(p) ?? null);
+      s.hinted.delete(p);
+    }
+    load(s, bundled);
+  }
+}
+
+/** An answer with the verdict on the session's document, where it has one and the answer leaves the set whole. */
+function withCheck(s: XsdSession, answer: Opened, bundled: Bundled): Opened | Promise<Opened> {
+  if (s.xml === undefined || !answer.ok || answer.need.length > 0 || s.verifying === true) return answer;
+  return checkWith(s, s.xml, bundled).then((checked) => ({ ...answer, checked }));
 }
 
 function opened(set: SchemaSet, lean = false, repo: { total: number; read: number } | null = null): Opened {
