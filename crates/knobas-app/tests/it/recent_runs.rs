@@ -453,3 +453,28 @@ async fn the_instant_is_read_as_parse_instant_reads_it() {
         assert_eq!(sql, knobas_core::payload::parse_instant(raw), "{raw:?}");
     }
 }
+
+/// **Planned with its values each time**: the statement is unnamed, so PostgreSQL never keeps a generic plan for it,
+/// which cannot read its `$n is null or …` filters (a page took 3.2 s on the scale database under one).
+#[tokio::test]
+async fn the_read_is_planned_with_its_values_each_time() {
+    let shared = pool().await;
+    let tc = source(&shared).await;
+    estate(&shared, &tc).await;
+    let one = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with((*shared.connect_options()).clone())
+        .await
+        .unwrap();
+    for _ in 0..7 {
+        assert_eq!(recent(&one, only(&tc), None, None).await.runs.len(), 5);
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "select count(*) from pg_prepared_statements where statement like '%from sync.run_made m%'",
+    )
+    .persistent(false)
+    .fetch_one(&one)
+    .await
+    .unwrap();
+    assert_eq!(kept, 0, "no named statement of Recent's read is kept");
+}

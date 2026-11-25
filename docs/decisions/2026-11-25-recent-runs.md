@@ -55,6 +55,41 @@ pipeline's run row with one more cell naming its pipeline, its number, and its f
 **For Björn to reverse:** runs rather than pipelines; the view kept across restarts; the rail back on a run's page;
 the minute's ask of each source while *Recent* is shown.
 
+## Found in the real app
+
+Run on the Mac (the debug app under a scratch `HOME`, its window through `mac-window-guard.sh`, driven through the
+page's own events) against a real TeamCity 2026.1.3 with one agent under OrbStack (a compose project of its own, the
+server capped at 2 GB and the agent at 1 GB, removed afterwards), with four configurations in nested projects
+(*Payments › Payouts › Settlement and reconciliation*, *Operations*):
+
+- **A build started at TeamCity never reached *Recent*.** Its head was read again on the view's own *Sync now*
+  (`syncRevision`) alone, not when a scheduled run or the minute's ask ended. It now reads its head when a CI
+  source's run that changed something ends (`sync:state`), at most once in 5 s. After: a build queued at TeamCity
+  drew at the top 27 s after it was queued, already passed (the minute's ask found it).
+- **The minute's ask looked once a minute**, so a source was asked every two. It looks every 15 s.
+- **The bar's switch sat on the window's edge and *Mark all as read* was cut at the other**: both stood outside the
+  filter bar's padded box. One band holds them now, the mark after the count.
+- A source whose builds carry no branch is not a CI filler (a role miss, ADR-0029), so a TeamCity configuration with
+  no VCS root draws nothing anywhere in Builds; the check's builds were queued with a branch.
+- Held: *Recent* replaces the rail; each row names its pipeline, number and folders (the long name cut, its folders
+  gone first); a row opens its run with the rail; `Esc` says *Back to Recent* and lands on the same rows with the
+  run's number focused; *Run again…* opens the run's page with its dialog; *Pipelines* goes back to the last pipeline
+  and the pipeline's runs draw as before.
+
+## Tested
+
+- Rust: `knobas-app`'s `tests/it/recent_runs.rs` (5): the order held to `runMade` (a long build that finished last
+  sorts by its start, a queued one by its queue time), pages that follow their cursor, the filters (results,
+  branches, sources, *Mine* with no username), the stored instant following a queued run that starts, a time that
+  moves and a delete, and `sync.run_instant` reading exactly what `parse_instant` reads. 13 mutants of the statement,
+  the read and the migration, each killed.
+- Vitest: `recent.test.ts` (the rules), `TfRecent.test.svelte.ts` (12: the rows, a pipeline's place with two
+  sources, a chip asked of the backend and words narrowing what is held, *Mine* and *This job*, *Show 1 new run* under
+  the pointer, an older page, the way back, the keys, the minute's ask and who it never asks, a source's run ending),
+  `TfBuilds` (the switch, no rail, the list read behind the first page, the kept view), the launcher's `#b` row and
+  `>recent`, the run menu's *Open pipeline*. 25 mutants of the rules and the view, each killed (one survived first:
+  its test started on an address the test before it had left).
+
 ## Reversing it
 
 Migration `0103` stays (released migrations are frozen); drop its reads: `recent_runs` (`knobas-core::builds`

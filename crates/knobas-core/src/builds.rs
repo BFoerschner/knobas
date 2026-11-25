@@ -1235,6 +1235,11 @@ pub async fn recent_runs_page(
         .bind(&filter.results)
         .bind(who)
         .bind(filter.branches.as_deref())
+        // The unnamed statement, planned with the values in hand. Its filters are `$n is null or …` and `cardinality($n)
+        // = 0 or …`, which a generic plan cannot read: once PostgreSQL kept one for the named statement (from a
+        // connection's sixth run), a page took 3.2 s on the scale database where it takes 23 ms (the probes,
+        // 2026-11-25).
+        .persistent(false)
         .fetch_all(pool)
         .await?;
     let next = (rows.len() == limit as usize)
