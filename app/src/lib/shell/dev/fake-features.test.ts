@@ -8,7 +8,7 @@ import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import type { EntityDetail, EntityPage, RunRow, SourceView } from "../../ipc/entity";
 import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
-import { DOC_BLOCK_LINES, docBlock } from "../../tf/docs/doc-spec";
+import { DOC_BLOCK_LINES, docBlock, specBlock } from "../../tf/docs/doc-spec";
 import { COMPOSED, demoHandlers, holdBack } from "./fake-tauri";
 import { expandScale, scaleForge, scalePages, scaleTickets } from "./fake-scale";
 import { historyBuilds } from "./fake/builds";
@@ -425,12 +425,13 @@ test("docs: ?fake-docs-long=<n> repeats the SEPA design page's body and comments
   expect(JSON.stringify(long.blocks.filter((b) => b.type === "heading"))).toContain("Rollout 3");
 });
 
-test("docs: EDI message formats holds the blocks D1 draws: a schema, XML and JSON of 40 lines and more, and a short XML that stays code", () => {
+test("docs: EDI message formats holds the blocks D1 draws: a schema, XML and JSON of 40 lines and more, and a short XML that stays code, and an API spec", () => {
   type Page = { blocks: { type: string; code?: string; language?: string | null }[] };
   const page = (demoHandlers() as Calls)["docs_page"]!({ entityId: "confluence:edi-formats" }) as Page;
   const code = page.blocks.filter((b) => b.type === "code");
-  expect(code.map((b) => docBlock(b.language ?? null, b.code!))).toEqual(["xsd", "xml", "json", null]);
-  expect(code.map((b) => b.code!.split("\n").length >= DOC_BLOCK_LINES)).toEqual([true, true, true, false]);
+  expect(code.map((b) => docBlock(b.language ?? null, b.code!))).toEqual(["xsd", "xml", "json", null, null]);
+  expect(code.map((b) => b.code!.split("\n").length >= DOC_BLOCK_LINES)).toEqual([true, true, true, false, false]);
+  expect(code.map((b) => specBlock(b.language ?? null, b.code!))).toEqual([false, false, false, false, true]);
   // PAY-228's report and answer, which the file viewer folds.
   const files = CORPUS.find((r) => r.entity_id === "mock:PAY-228")!.payload["attachments"] as { name: string; mime: string }[];
   expect(files.map((f) => [f.name, f.mime])).toEqual([["junit.xml", "application/xml"], ["psp-409-response.json", "application/json"]]);

@@ -72,7 +72,7 @@
   }
 </script>
 
-<div class="tf-xsd-inline" aria-label="Schema">
+<div class="tf-xsd-inline tf-dview" aria-label="Schema">
   {#if failed !== null}
     <p class="tf-stepfail" role="alert">This block is no schema knobas can read: {failed}</p>
   {:else if index === null}

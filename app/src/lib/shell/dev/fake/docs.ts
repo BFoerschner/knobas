@@ -70,7 +70,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { ASCII_AFTER, asciiArt } from "../fake-ascii";
-import { JSON_BLOCK, SCHEMA_BLOCK, SHORT_XML_BLOCK, XML_BLOCK } from "../fake-doc-blocks";
+import { JSON_BLOCK, SCHEMA_BLOCK, SHORT_XML_BLOCK, SPEC_BLOCK, XML_BLOCK } from "../fake-doc-blocks";
 import { CORPUS, fakeEmpty, fakeRoleScope } from "./corpus";
 import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
@@ -355,7 +355,8 @@ const BODIES: Record<string, Body> = {
     comments: [["TW", "2026-08-19 09:00", "Rewriting the Ledger section this week."]],
   },
   // D1 (the XML view's design, section 28): a schema block offers *Schema*, the export declaration and its status hook
-  // (61 lines each) *XML view* and *JSON view*, and the acknowledgement, 14 lines, stays plain code.
+  // (61 lines each) *XML view* and *JSON view*, the acknowledgement, 14 lines, stays plain code, and the gateway's
+  // OpenAPI document offers *API*.
   "EDI message formats": {
     labels: ["customs", "edi", "reference"],
     version: 7,
@@ -373,6 +374,9 @@ const BODIES: Record<string, Body> = {
       { h: "Acknowledgement" },
       { p: "The gateway's receipt for a lodged declaration." },
       { code: SHORT_XML_BLOCK, lang: "xml" },
+      { h: "Gateway API" },
+      { p: "The status hook's own endpoint, for a declaration the hook missed." },
+      { code: SPEC_BLOCK, lang: "yaml" },
     ],
     comments: [["JB", "2026-08-20 09:00", "Added the status hook's history array; the gateway sends it since 3.2."]],
   },

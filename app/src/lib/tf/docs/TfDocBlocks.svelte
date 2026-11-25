@@ -188,7 +188,7 @@
             {#key code}<TfXsdInline text={code} />{/key}
           {/await}
         {:else if view !== null}
-          <div class="tf-doc-xv" {@attach (box) => box.style.setProperty("height", `${asView.get(block) ?? 420}px`)}>
+          <div class="tf-doc-xv tf-dview" {@attach (box) => box.style.setProperty("height", `${asView.get(block) ?? 420}px`)}>
             {#await docViewModule() then { default: TfDocView }}
               {#key code}<TfDocView inline text={code} path={view === "xml" ? "block.xml" : "block.json"} kind={view} render={renderPort()} />{/key}
             {/await}

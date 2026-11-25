@@ -6,6 +6,7 @@
  *   complex types. It offers *Schema* at any length.
  * - **An XML document of 61 lines** and **a JSON document of 61 lines**: each offers *XML view* or *JSON view*.
  * - **An XML document of 14 lines**, under the 40 a block needs before it offers its view: it stays plain code.
+ * - **The gateway's API**, an OpenAPI document in YAML: *API*, the explorer's inline form, which a Docs page draws too.
  * - **A run's `junit.xml`** (46 lines) and **a JSON answer** (46 lines), the attachments the file viewer folds.
  */
 import UNQUALIFIED_DATA_TYPE from "../../../../../fixtures/xsd/cii-d16b/data/standard/CrossIndustryInvoice_UnqualifiedDataType_100pD16B.xsd?raw";
@@ -153,6 +154,41 @@ export const SHORT_XML_BLOCK = `<?xml version="1.0" encoding="UTF-8"?>
   </Notes>
   <Signature algorithm="none"/>
 </Acknowledgement>`;
+
+/** The gateway's API: a short OpenAPI document, which offers *API*. */
+export const SPEC_BLOCK = `openapi: 3.0.3
+info:
+  title: Customs gateway
+  version: 3.2.0
+paths:
+  /declarations/{id}:
+    get:
+      summary: A declaration and its status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The declaration and what ATLAS answered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+components:
+  schemas:
+    Status:
+      type: object
+      properties:
+        declaration:
+          type: string
+        status:
+          type: string
+          enum: [lodged, accepted, risk-checked, released]
+        mrn:
+          type: string`;
 
 /** A run's test report as JUnit writes it: one suite of eight cases, one failing, one skipped. */
 export const JUNIT_XML = `<?xml version="1.0" encoding="UTF-8"?>

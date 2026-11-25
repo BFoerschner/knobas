@@ -398,8 +398,9 @@ test("(j) Markdown's text is the interface's, its headings Headings', and a Docs
     ["lib/tf/css/markdown.css", ".tf-md code", "code"],
     ["lib/tf/css/markdown.css", ".tf-md .tf-fence pre", "code"],
     ["lib/tf/css/docs.css", ".tf-doc", "read"],
-    ["lib/tf/css/docs.css", ".tf-doc h2", "read"],
-    ["lib/tf/css/docs.css", ".tf-doc code", "code"],
+    // A view drawn in the page (`.tf-dview`: a schema, an XML or JSON view, an API) keeps its own faces: the page's rules stop at it.
+    ["lib/tf/css/docs.css", ".tf-doc h2:where(:not(.tf-dview *))", "read"],
+    ["lib/tf/css/docs.css", ".tf-doc code:where(:not(.tf-dview *))", "code"],
     ["lib/tf/css/chrome.css", ".tf-jobkey", "head"],
     ["lib/tf/css/settings.css", ".tf-stg-h h1", "head"],
     ["lib/tf/css/tokens.css", ".tf .tf-mono", "code"],
@@ -474,7 +475,7 @@ const CODE_AREAS: Record<string, string> = {
   "lib/tf/css/code.css .tf-diff": "1.6",
   "lib/tf/css/code.css .tf-was-hunk, .tf-pdfd-hunk": "1.6",
   "lib/tf/css/code.css .tf-stepfail pre": "1.5",
-  "lib/tf/css/docs.css .tf-doc pre": "1.55",
+  "lib/tf/css/docs.css .tf-doc pre:where(:not(.tf-dview *))": "1.55",
   "lib/tf/css/jar.css .tf-jar-bad pre, .tf-jar-pending pre": "1.6",
   "lib/tf/css/markdown.css .tf-md .tf-fence .tf-stepfail pre": "1.5",
   "lib/tf/css/markdown.css .tf-md .tf-fence pre": "1.6",
@@ -515,7 +516,8 @@ test("(n) every area that stacks code lines draws its rows at Code's line spacin
   const areas = /\n:is\(([^)]*(?:\([^)]*\))?[^)]*)\), :is\(\1\) > :is\(code, kbd, samp, tt\) \{ letter-spacing: var\(--ls-code, normal\); word-spacing: normal; \}/.exec(tokens);
   expect(areas, "the areas' letter spacing rule").not.toBeNull();
   const named = new Set(areas![1]!.split(",").map((selector) => selector.trim()));
-  for (const key of Object.keys(CODE_AREAS)) for (const selector of key.split(" ").slice(1).join(" ").split(", ")) expect(named, selector).toContain(selector);
+  // A boundary (`:where(:not(.tf-dview *))`, a view drawn in a Docs page) names the same area.
+  for (const key of Object.keys(CODE_AREAS)) for (const selector of key.split(" ").slice(1).join(" ").split(", ")) expect(named, selector).toContain(selector.replace(/:where\(.*\)$/, ""));
   expect(tokens).toMatch(/\.tf-code \.tf-l > span:first-child, \.tf-diff \.tf-no, \.tf-ll :is\(\.tf-no, \.tf-ts\), :is\(\.tf-was-hunk, \.tf-pdfd-hunk\) \.tf-no, \.tf-editor \.tf-nums, \.tf-oas-ln \{ letter-spacing: normal; \}/);
 });
 
