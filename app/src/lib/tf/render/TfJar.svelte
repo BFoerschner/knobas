@@ -458,7 +458,7 @@
       <span class="tf-jar-count" aria-live="polite">
         {#if tab === "deps"}{!filtering ? `${libs} ${libs === 1 ? "JAR" : "JARs"}` : `${rows.filter((r) => r.kind === "lib").length} of ${libs}`}
         {:else if !filtering || filtered?.hits == null}{total.toLocaleString("en")} {total === 1 ? "entry" : "entries"}
-        {:else}{(filtered?.hits ?? 0).toLocaleString("en")} of {total.toLocaleString("en")}{/if}
+        {:else}{filtered.hits.toLocaleString("en")} of {total.toLocaleString("en")}{/if}
       </span>
       {#if libs > 0}
         <span class="tf-trail">
