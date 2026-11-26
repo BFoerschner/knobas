@@ -1,6 +1,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+
 import type { AttachmentAnswer, Held, PwEntry, PwRow, ReadAnswer, SecretRef, WriteAnswer } from "../../ipc/passwords";
 import TfPasswords from "./TfPasswords.svelte";
 import { forgetHeld } from "./held.svelte";
@@ -535,6 +538,30 @@ test("in a folder the filter reads only that folder and the folders under it, an
   expect(text(".tf-pw-row .tf-pw-t")).not.toContain("grafana");
   await type("grafana");
   expect(text(".tf-pw-blank p")[0]).toContain('Nothing in Payments matches "grafana".');
+});
+
+test("the app ranks every entry, held to the folder's scope, marks the letters it matched, and a key keeps what was drawn until its answer (#2535)", async () => {
+  await open(ports());
+  const before = text(".tf-pw-lhead h3");
+  filterBox().value = "agnt3";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  // The answer is out: the folders' panels stand as drawn, no list of the old filter in between.
+  expect(text(".tf-pw-lhead h3")).toEqual(before);
+  await settle();
+  // No substring holds "agnt3"; its letters stand in order in "agent 3".
+  const rows = [...target.querySelectorAll(".tf-pw-row .tf-pw-t")];
+  expect(rows[0]?.textContent).toBe("agent 3");
+  expect([...rows[0]!.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("agnt3");
+  await type("grfn");
+  expect(text(".tf-pw-row .tf-pw-t")).toContain("grafana");
+  unmount(app!);
+  app = null;
+
+  await open(ports(), ["in", "pw:pay"]);
+  // "grfn" holds in grafana, which is in Platform, not under Payments.
+  await type("grfn");
+  expect(text(".tf-pw-blank p")[0]).toContain('Nothing in Payments matches "grfn".');
 });
 
 test("another folder, by a press, a link or the address, clears the filter (#2531)", async () => {
