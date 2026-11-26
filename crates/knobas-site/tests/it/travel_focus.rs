@@ -164,6 +164,31 @@ async fn the_decision_reads_the_views_history_at_the_press() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_history_read_at_the_press_reaches_the_page_before_the_hand_over() {
+    // The page sent `can_back` last; the site has since gone back to its
+    // first page by itself. The shell must hear "cannot" before `back`, or
+    // its `siteBack` steps in a site with nowhere to go and knobas stays.
+    let w = world();
+    shown(&w, "jira", true, false).await;
+    w.host.view("jira").borrow_mut().poll = Some(ViewEvent::History {
+        url: Some("https://jira.example/".into()),
+        can_back: false,
+        can_forward: true,
+        loading: None,
+    });
+    w.host.mouse("jira", Travel::Back);
+    w.shell.drain();
+    assert!(calls(&w, "jira").is_empty());
+    let told = told(&w);
+    let key = told.iter().position(|t| t == "key back").expect("handed over");
+    let cannot = told
+        .iter()
+        .position(|t| t.starts_with("status can_back=false"))
+        .expect("status sent");
+    assert!(cannot < key, "status first: {told:?}");
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_hidden_site_takes_no_mouse_travel() {
     let w = world();
     shown(&w, "jira", true, false).await;
