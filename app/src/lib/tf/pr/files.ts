@@ -82,12 +82,6 @@ export function sameTarget(a: { path: string; side: ReviewSide; line: number }, 
   return a.path === b.path && a.side === b.side && a.line === b.line;
 }
 
-/** Whether `path` matches the file filter: any part of it, in any case. */
-export function matchesPath(path: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  return q === "" || path.toLowerCase().includes(q);
-}
-
 /**
  * The two shas the pull request's diff is between (#2273's `range`: its merge
  * base and its head), for *Open in › Diff tool* (#2275). `null` before the

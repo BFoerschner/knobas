@@ -169,19 +169,13 @@
     const ops: { op: OpRow; marks: readonly number[] | null }[] = [];
     const schemas: { name: string; marks: readonly number[] | null }[] = [];
     for (const f of kept) {
-      const marks = order.marks(f);
       if (f.op !== undefined) {
-        // The row draws the path: the marks are moved back past the method and its space.
-        const from = f.op.method.length + 1;
-        const end = from + f.op.path.length;
-        const onPath: number[] = [];
-        for (let i = 0; i + 1 < marks.length; i += 2) {
-          const a = Math.max(marks[i]!, from);
-          const b = Math.min(marks[i + 1]!, end);
-          if (b > a) onPath.push(a - from, b - from);
-        }
-        ops.push({ op: f.op, marks: onPath });
-      } else schemas.push({ name: f.schema, marks: marks.length > 0 ? marks : null });
+        // The row draws the path: its marks, moved back past the method and its space.
+        ops.push({ op: f.op, marks: order.marks(f, f.op.method.length + 1, f.op.path.length) });
+      } else {
+        const marks = order.marks(f);
+        schemas.push({ name: f.schema, marks: marks.length > 0 ? marks : null });
+      }
     }
     return { ops, schemas };
   });

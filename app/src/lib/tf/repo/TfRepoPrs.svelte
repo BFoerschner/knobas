@@ -26,7 +26,8 @@
   import { tick, untrack } from "svelte";
   import type { EchoListen } from "../queued.svelte";
   import { jumpAcross } from "../opener";
-  import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
+  import { MADE_PR, REPO_PRS, repoPrText, visibleRepoPrs } from "./repo";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { stateWord } from "../state-word";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
@@ -110,7 +111,12 @@
     one: "pull request",
     chips: [{ key: "state", label: "State", options: PR_STATES.map((value) => ({ value, label: value })) }],
   });
-  const shown = $derived(rows === null ? [] : visibleRepoPrs(rows, filter.chips["state"] ?? [], filter.text));
+  const chipped = $derived(rows === null ? [] : visibleRepoPrs(rows, filter.chips["state"] ?? []));
+  /** The typed words rank the number and title of what the chips keep, best first, through the app's ranking (#2532). */
+  const order = heldOrder<EntityRow>("repo-prs");
+  $effect(() => order.ask(filter.text, chipped, repoPrText));
+  const shown = $derived(order.rows(filter.text, chipped, repoPrText));
+  const marking = $derived(order.typed(filter.text, chipped));
   /** A repository of thousands of pull requests draws only the rows near the viewport (the extremes pass, 2026-11-13); Code's row is 51 px. */
   const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.entity_id, estimate: 51 });
 
@@ -158,9 +164,9 @@
         {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
         {@const author = authors.get(row.entity_id)}
         <tr class="tf-row" data-place onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
-          <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
+          <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={marking} pairs={order.marks(row, 0, (prNumber(row.entity_id) ?? "").length)} /></td>
           <td
-            ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a><!-- The author's line is held while `code_facts` reads, so a row is as tall from its first draw (the still-rows pass, 2026-11-11). --><span class="tf-sub tf-oneline">{#if author}<Marked text={author} typed={filter.text} />{:else}&nbsp;{/if}</span></td
+            ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={marking} pairs={order.marks(row, (prNumber(row.entity_id) ?? "").length + 1, row.title.length)} /></a><!-- The author's line is held while `code_facts` reads, so a row is as tall from its first draw (the still-rows pass, 2026-11-11). --><span class="tf-sub tf-oneline">{#if author}{author}{:else}&nbsp;{/if}</span></td
           >
           <td>{#if row.state}<TfStateChip text={row.state.text} tone={row.state.tone} />{/if}</td>
           <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<TfKey chip value={belongs} class="tf-chip-job" />{:else}{belongs ?? ""}{/if}</td>

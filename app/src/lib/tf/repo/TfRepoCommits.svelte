@@ -41,12 +41,13 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { FuzzyOrder, heldOrder, inOrder } from "../filter/ranked.svelte";
   import { untrack } from "svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import { onViewFresh } from "./view-fresh.svelte";
   import { commitLine } from "./file-tree";
-  import { commitHash, compareHash, repoHash, sourceName, viewRows, visibleViewRows } from "./repo";
+  import { commitHash, commitText, compareHash, repoHash, sourceName, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, WORKING_TREE, type RangePick } from "../diff/address";
   import TfStateChip from "../TfStateChip.svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -205,15 +206,24 @@
           : `commits on ${branch} not in ${defaultBranch}`,
     chips: [{ key: "who", label: "Author", options: [{ value: "Mine", label: "Mine" }] }],
   });
-  const shown = $derived(
-    rows === null ? [] : visibleViewRows(rows, filter.text, (filter.chips["who"] ?? []).includes("Mine") ? mine : null),
-  );
+  const chipped = $derived(rows === null ? [] : visibleViewRows(rows, (filter.chips["who"] ?? []).includes("Mine") ? mine : null));
+  /**
+   * The typed words decide through the app's ranking which commits keep (#2532), and the commits stay in the
+   * branch's order: *Diff selected* reads a range by the rows' places, newest above oldest.
+   */
+  const order = heldOrder<ViewRow>("repo-commits");
+  $effect(() => order.ask(filter.text, chipped, commitText));
+  const shown = $derived(inOrder(chipped, order.rows(filter.text, chipped, commitText)));
+  const marking = $derived(order.typed(filter.text, chipped));
   /** The working tree's rows the filter keeps: none under *Mine*, which reads only what the mirror declares. */
   const mineOnly = $derived((filter.chips["who"] ?? []).includes("Mine"));
   const typed = $derived(filter.text.trim().toLowerCase());
-  const localShown = $derived(
-    mineOnly || unpushed === null ? [] : unpushed.filter((commit) => typed === "" || [commit.sha.slice(0, 7), commit.title, commit.meta ?? ""].some((text) => text.toLowerCase().includes(typed))),
-  );
+  const localText = (commit: RangeCommit) => `${commit.sha.slice(0, 7)} ${commit.title} ${commit.meta ?? ""}`;
+  const local = $derived(mineOnly || unpushed === null ? [] : unpushed);
+  const localOrder = new FuzzyOrder<RangeCommit>();
+  $effect(() => localOrder.ask(filter.text, local, localText));
+  const localShown = $derived(inOrder(local, localOrder.rows(filter.text, local, localText)));
+  const localMarking = $derived(localOrder.typed(filter.text, local));
   const dirtyShown = $derived(disk !== null && disk.changed > 0 && !mineOnly && (typed === "" || "uncommitted changes".includes(typed)));
   const anyLocal = $derived(dirtyShown || localShown.length > 0);
 
@@ -285,9 +295,9 @@
         <!-- Read from the checkout: the mirror holds no id for it yet, so it is drawn plain. -->
         <tr class="tf-rlocal" title={`${commit.sha.slice(0, 7)} is in your checkout, not on ${sourceName(source)}`}>
           {#if anyPickable}<td class="tf-rpick"></td>{/if}
-          <td class="tf-mono"><Marked text={commit.sha.slice(0, 7)} typed={filter.text} /></td>
-          <td><Marked text={commit.title} typed={filter.text} /> <TfStateChip text="not pushed" tone="warn" /></td>
-          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commit.meta ?? ""} typed={filter.text} /></span></td>
+          <td class="tf-mono"><Marked text={commit.sha.slice(0, 7)} typed={localMarking} pairs={localOrder.marks(commit, 0, 7)} /></td>
+          <td><Marked text={commit.title} typed={localMarking} pairs={localOrder.marks(commit, 8, commit.title.length)} /> <TfStateChip text="not pushed" tone="warn" /></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commit.meta ?? ""} typed={localMarking} pairs={localOrder.marks(commit, 9 + commit.title.length)} /></span></td>
           <td class="tf-ropen"></td>
         </tr>
       {/each}
@@ -301,6 +311,8 @@
         </tr>
       {/if}
       {#each shown as row, n (n)}
+        <!-- The line marks the letters ranked in the meta it is; "You" for mine is not what was ranked. -->
+        {@const line = commitLine(row, row.entity_id !== null && mine.has(row.entity_id))}
         <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
           {#if anyPickable}
           <td class="tf-rpick"
@@ -316,11 +328,11 @@
           {/if}
           <td class="tf-mono"
             >{#if row.entity_id !== null}<a href={commitHash(repoId, row.entity_id)}
-                ><Marked text={row.chip ?? ""} typed={filter.text} /></a
-              >{:else}<Marked text={row.chip ?? ""} typed={filter.text} />{/if}</td
+                ><Marked text={row.chip ?? ""} typed={marking} pairs={order.marks(row, 0, (row.chip ?? "").length)} /></a
+              >{:else}<Marked text={row.chip ?? ""} typed={marking} pairs={order.marks(row, 0, (row.chip ?? "").length)} />{/if}</td
           >
-          <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
-          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commitLine(row, row.entity_id !== null && mine.has(row.entity_id))} typed={filter.text} /></span></td>
+          <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={marking} pairs={order.marks(row, (row.chip ?? "").length + 1, row.title.length)} /></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={line} typed={line === (row.meta ?? "") ? marking : ""} pairs={line === (row.meta ?? "") ? order.marks(row, (row.chip ?? "").length + row.title.length + 2) : []} /></span></td>
           <td class="tf-ropen"
             >{#if shaOfCommit(row.entity_id) !== null}<span class="tf-rowend"><span class="tf-rowacts"><TfOpenObject
                 entityId={repoId}

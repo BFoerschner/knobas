@@ -7,7 +7,10 @@
  * whose listings name the whole tree's section.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// Go to file ranks through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { SourceView, TreeEntry } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
@@ -161,6 +164,18 @@ test("T focuses Go to file; typed into, it narrows every path at the commit and 
   press("Enter", field());
   expect(location.hash).toBe(fileHash(REPO, "src/sepa/retry.rs"));
   expect(field().value).toBe("");
+});
+
+test("Go to file ranks every path through the app's ranking, letters in order, and marks them in the folder and the name (#2532)", async () => {
+  draw(stand());
+  await settle();
+  // No substring holds "sprtrs"; its letters stand in order in two paths, the closer first.
+  typeIn(field(), "sprtrs");
+  await settle();
+  expect(found()).toEqual(["src/sepa/retry.rs", "tests/sepa_retry.rs"]);
+  const first = target.querySelector(".tf-ftree a.tf-gotof")!;
+  expect([...first.querySelectorAll("mark")].map((m) => m.textContent).join("")).toBe("sprtrs");
+  expect(first.querySelector(".tf-pdir mark")).not.toBeNull();
 });
 
 test("Esc empties Go to file and the tree is drawn again; nothing typed draws no list", async () => {

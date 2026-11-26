@@ -126,7 +126,6 @@ export interface PrFilter {
   repo: string;
   /** The *Team* dropdown's value, or `""` for *Any*: the pull request's repository is in that team. */
   team: string;
-  text: string;
 }
 
 /** Each repository's declared teams, by {@link repoKey}: what a pull request's *Team* is (#966). */
@@ -135,10 +134,10 @@ export function repoTeams(repos: readonly EntityRow[], facts: FactsById): Map<st
 }
 
 /**
- * The pull requests the filter keeps, in the order given. *Mine* is what
- * asks for your review and what you wrote, open or settled (prototype-6:
- * `p.by===ME||p.wait`).
- * The words reach the number, title, repository and author.
+ * The pull requests the filter's scope, chips and dropdowns keep, in the
+ * order given. *Mine* is what asks for your review and what you wrote, open
+ * or settled (prototype-6: `p.by===ME||p.wait`). The typed words rank
+ * {@link prText} through the app's ranking (#2532).
  */
 export function visiblePrs(
   lines: readonly PrLine[],
@@ -146,7 +145,7 @@ export function visiblePrs(
   teams: ReadonlyMap<string, readonly string[]>,
 ): PrLine[] {
   const states = filter.states.map((state) => state.toLowerCase());
-  return lines.filter(({ row, group, number, idle, author, mine }) => {
+  return lines.filter(({ row, group, idle, mine }) => {
     if (filter.scope === "job" && !filter.held(row.entity_id)) return false;
     if (filter.scope === "mine" && !isMineGroup(group) && !mine) return false;
     if (states.length > 0 && !states.includes(row.state?.text.toLowerCase() ?? "")) return false;
@@ -157,8 +156,13 @@ export function visiblePrs(
       const of = row.path === null ? [] : (teams.get(repoKey(row.source_id, row.path)) ?? []);
       if (!of.includes(filter.team)) return false;
     }
-    return matchesAll(`${number ?? ""} ${row.title} ${row.path ?? ""} ${author ?? ""}`, filter.text);
+    return true;
   });
+}
+
+/** What the *Pull requests* filter ranks a line by: its number, title, repository and author, a space between each. */
+export function prText({ row, number, author }: PrLine): string {
+  return `${number ?? ""} ${row.title} ${row.path ?? ""} ${author ?? ""}`;
 }
 
 /**
