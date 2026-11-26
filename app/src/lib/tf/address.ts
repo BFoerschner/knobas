@@ -67,8 +67,8 @@ export function legacyAddress(hash: string): Legacy {
   const id = decode(rest.join("/"));
   // A room, any room: the new shell has one list of work, and it is Tickets.
   if (head === "ctx") return { go: "#/tickets" };
-  // The sources view and the first-run wizard both live in Settings › Sources.
-  if (head === "sources" || head === "first-run") return { go: "#/settings/sources" };
+  // The sources view lives in Settings › Sources. (The first-run wizard's `#/first-run` went with it in ux31.)
+  if (head === "sources") return { go: "#/settings/sources" };
   // The standup digest is a tab of Time.
   if (head === "standup") return { go: "#/time/standup" };
   // The Assets view's *Monitors* tab (#448): Monitors is a section of its own

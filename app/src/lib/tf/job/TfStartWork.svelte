@@ -23,15 +23,32 @@
   Step 5 is the shell's *Start timer*, which opens the worklog draft for a
   timer already running on another ticket before it starts this one (R-4.9,
   story 62).
+
+  **Nothing is chosen until something runs (F-130).** The steps are a look, on the
+  card's sheet, so *Cancel* and `Esc` leave everything as it was; *Run all steps*
+  makes the ticket the job and its toast names the one it replaces, and ends
+  *Timer running.* when the same press starts the timer (F-145). Once a step has
+  run, the primary says where the flow is (`runWord`) and the page's foot comes back
+  with the timer (`started`).
+
+  **A *Skip* before the run only marks the step (F-137).** `start_work_skip` settles
+  a step and runs the flow on, so pressing it would be the run. The mark is this
+  page's, *Include* takes it back, and *Run all steps* sends it instead of `run`, as
+  it does for a refused move. There is no command that settles a step without running
+  on, so one step can sit out the run: the first, or a refused move, and with a
+  refused move the first's *Skip* is off and says why.
 -->
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
+  import { stateWord } from "../state-word";
 
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { toastStarted } from "../../shell/queued-toast";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
+  import { createStartWork, demandOf, editable, edited, runWord, unrun, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
   import { chosenJob } from "./chosen.svelte";
   import { pageVisible } from "../kept-pages.svelte";
@@ -44,6 +61,9 @@
     api,
     onstarttimer,
     moveRefused = null,
+    oncancel,
+    started = $bindable(false),
+    arrive = false,
   }: {
     detail: EntityDetail;
     /** Every repository, `null` while read: the dropdown's options. */
@@ -52,9 +72,16 @@
     suggested: string | null;
     timer: Pick<Timer, "current">;
     api: StartWorkApi;
-    onstarttimer: (entityId: string, title: string) => void;
+    /** `quiet`: this press's own toast says the timer runs, so the start says nothing more (F-145). */
+    onstarttimer: (entityId: string, name: string, quiet?: boolean) => void;
     /** Why the source's credential cannot move this ticket (#2052), or `null`. */
     moveRefused?: string | null;
+    /** *Cancel*, while nothing has run; left out where the steps are not a look (the ticket is already the job). */
+    oncancel?: (() => void) | undefined;
+    /** Whether something of the flow has run, for the page's foot. */
+    started?: boolean;
+    /** A press brought the reader here: focus comes to the steps, since the press's own button has gone. */
+    arrive?: boolean;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -81,6 +108,12 @@
     untrack(() => void flow.load(options[0]!.entity_id));
   });
 
+  const fresh = $derived(unrun(flow.steps));
+  $effect(() => {
+    started = !fresh;
+  });
+  const run = $derived(runWord(flow.steps, flow.busy));
+
   const step = (kind: StartWorkStep["step"]) => flow.steps.find((each) => each.step === kind) ?? null;
   const branch = $derived(step("create_branch"));
   const pr = $derived(step("create_pull_request"));
@@ -103,6 +136,13 @@
     if (!target || target.kind !== "entity" || target.entity_id === detail.row.entity_id) return null;
     return keyOf(target.entity_id);
   });
+
+  /** The step a *Skip* marked before the first run, by its id. Nothing is sent until *Run all steps* (F-137). */
+  let markedId = $state<number | null>(null);
+  /** A refused move is the one step that can sit out the run, so it takes the mark's place. */
+  const marked = $derived(fresh && moveRefused === null ? markedId : null);
+  /** The field of a step that won't run takes no edits. */
+  const fixed = (of: StartWorkStep | null) => !of || !editable(of.outcome) || of.id === marked;
 
   /** What the timer step says: done once the timer runs here. */
   let timerSkipped = $state(false);
@@ -142,19 +182,29 @@
     }
   }
 
-  async function runAll() {
-    // A move the credential cannot make is skipped, never queued; the skip runs the flow on past it.
-    if (moveRefused !== null && move !== null && editable(move.outcome)) await flow.skip(move.id);
-    else await flow.run();
-    if (flow.error === null) {
-      toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source);
-      // The ticket work just started on is the one home shows (spec #2227).
-      chosenJob.choose(detail.row.entity_id);
-    }
-    if (flow.error === null && !timerDone && !timerSkipped) {
-      onstarttimer(detail.row.entity_id, detail.row.title);
-    }
+  /** The steps have begun: the ticket is the job now (spec #2227), and the toast says so, what it replaced, and that the timer runs. */
+  function began(timing: boolean) {
+    const before = chosenJob.id;
+    toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source, undefined, before !== null && before !== detail.row.entity_id ? keyOf(before) : null, timing);
+    chosenJob.choose(detail.row.entity_id);
   }
+
+  async function runAll() {
+    if (!run.can) return;
+    // A move the credential cannot make is skipped, never queued. A skip runs the flow on past its step, so it is the run.
+    const sitsOut = moveRefused !== null && move !== null && editable(move.outcome) ? move.id : marked;
+    if (sitsOut !== null) await flow.skip(sitsOut);
+    else await flow.run();
+    if (flow.error !== null) return;
+    const starts = !timerDone && !timerSkipped;
+    // With another timer running, its draft comes first, so the timer isn't running yet and the draft's answer says so.
+    const atOnce = starts && timer.current === null;
+    began(atOnce);
+    if (starts) onstarttimer(detail.row.entity_id, key, atOnce);
+  }
+
+  /** Why the first step's *Skip* is off with a refused move: `start_work_skip` runs on, so only one step can be settled before the run. */
+  const ONE_SITS_OUT = "Only one step can sit out a run, and the move this source refuses is that one.";
 
   const ROWS = [
     { id: "branch", label: "Create branch" },
@@ -169,40 +219,41 @@
   }
   function stateOf(id: (typeof ROWS)[number]["id"]): string {
     if (id === "timer") return timerDone ? "done" : timerSkipped ? "skipped" : "ready";
-    return word(flowStep(id));
+    const of = flowStep(id);
+    return of !== null && of.id === marked ? "skipped" : word(of);
   }
 </script>
 
 <p class="tf-dim tf-swnote">Check the names, then run the steps. Each write waits in the queue until it reaches the source.</p>
 {#if flow.error}<p class="tf-bad tf-small" role="alert">{flow.error}</p>{/if}
-<div class="tf-steps" aria-label="Start work">
+<div class="tf-steps" role="group" aria-label="Start work" tabindex="-1" {@attach (node: HTMLElement) => { if (untrack(() => arrive)) node.focus({ preventScroll: true }); }}>
   {#each ROWS as row, index (row.id)}
     {@const of = flowStep(row.id)}
     {@const state = stateOf(row.id)}
     <div class="tf-step tf-st-{state}" data-step={row.id}>
       <span class="tf-num">{index + 1}</span>
       <strong>{row.label}</strong>
-      <span class="tf-state {state === 'ready' ? 'tf-dim' : ''}">{state}</span>
+      <span class="tf-state {state === 'ready' ? 'tf-dim' : ''}">{stateWord(state)}</span>
       <div class="tf-field">
         {#if row.id === "branch"}
-          <input aria-label={row.label} value={text(op(of)["name"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "name", event.currentTarget.value)} />
-          <select aria-label="Repository" value={repoOf} disabled={!of || !editable(of.outcome)} onchange={(event) => void pick(event.currentTarget.value)}>
+          <input aria-label={row.label} value={text(op(of)["name"])} disabled={fixed(of)} onchange={(event) => amend(of, "name", event.currentTarget.value)} />
+          <select aria-label="Repository" value={repoOf} disabled={fixed(of)} onchange={(event) => void pick(event.currentTarget.value)}>
             {#each options as repo, at (repo.entity_id)}
               <option value={repo.entity_id}>{repo.title}{at === 0 ? " (suggested)" : ""}</option>
             {/each}
           </select>
           <span class="tf-dim tf-small">from {text(op(of)["from_ref"]) || "main"}</span>
         {:else if row.id === "pr"}
-          <input aria-label={row.label} value={text(op(of)["title"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "title", event.currentTarget.value)} />
+          <input aria-label={row.label} value={text(op(of)["title"])} disabled={fixed(of)} onchange={(event) => amend(of, "title", event.currentTarget.value)} />
           <span class="tf-dim tf-small">draft, to {text(op(of)["base"]) || "main"}</span>
         {:else if row.id === "link"}
-          <input aria-label={row.label} value="{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} {key}" readonly />
+          <span class="tf-stepval">{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} <TfKey value={key} /></span>
           <span class="tf-dim tf-small">stays in knobas</span>
         {:else if row.id === "status"}
-          <input aria-label={row.label} value="{detail.status ?? 'To Do'} to {text(op(of)['status']) || 'In Progress'}" readonly {...refusedAttrs(moveRefused)} />
+          <input aria-label={row.label} value="{stateWord(detail.status ?? 'To Do')} → {stateWord(text(op(of)['status']) || 'In Progress')}" readonly {...refusedAttrs(moveRefused)} />
           <span class="tf-dim tf-small">{detail.source.display_name} transition</span>
         {:else}
-          <input aria-label={row.label} value={key} readonly />
+          <span class="tf-stepval"><TfKey value={key} /></span>
           <span class="tf-dim tf-small">{otherTimer ? `stops the timer on ${otherTimer} first` : ""}</span>
         {/if}
         {#if of && current?.id === of.id && (of.outcome === "failed" || of.outcome === "queued")}
@@ -213,19 +264,37 @@
                *Retry* (#2015). -->
           <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>{of.outcome === "queued" ? "Check again" : "Retry"}</button>
         {/if}
-        {#if of && current?.id === of.id && of.outcome !== "running"}
+        {#if of && fresh && current?.id === of.id}
+          <!-- One button whose word changes, so a keyboard's place stays on it. -->
+          <button
+            class="tf-btn tf-sm tf-ghost"
+            type="button"
+            disabled={flow.busy}
+            {...refusedAttrs(moveRefused === null ? null : ONE_SITS_OUT)}
+            onclick={() => {
+              if (moveRefused === null) markedId = marked === of.id ? null : of.id;
+            }}>{marked === of.id ? "Include" : "Skip"}</button
+          >
+        {:else if of && current?.id === of.id && of.outcome !== "running"}
           <button class="tf-btn tf-sm tf-ghost" disabled={flow.busy} onclick={() => void flow.skip(of.id)}>Skip</button>
-        {:else if row.id === "timer" && !timerDone && !timerSkipped}
-          <button class="tf-btn tf-sm tf-ghost" onclick={() => (timerSkipped = true)}>Skip</button>
+        {:else if row.id === "timer" && !timerDone && (fresh || !timerSkipped)}
+          <button class="tf-btn tf-sm tf-ghost" type="button" onclick={() => (timerSkipped = !timerSkipped)}>{timerSkipped ? "Include" : "Skip"}</button>
         {/if}
       </div>
       {#if of?.detail}<p class="tf-swdetail tf-small">{of.detail}</p>{/if}
+      {#if fresh && moveRefused !== null && of !== null && current?.id === of.id}<p class="tf-swdetail tf-small">{ONE_SITS_OUT}</p>{/if}
       <!-- A skipped refused move keeps its reason: *Run all steps* skipped it, not the reader. -->
       {#if row.id === "status" && moveRefused !== null && of?.outcome !== "succeeded"}<p class="tf-swdetail tf-small">{moveRefused}</p>{/if}
     </div>
   {/each}
   <footer>
     <span class="tf-dim tf-small tf-swhint">A failed step can be retried, skipped or amended.</span>
-    <button class="tf-btn tf-primary" disabled={flow.busy || flow.steps.length === 0} onclick={() => void runAll()}>Run all steps</button>
+    {#if fresh && oncancel}
+      <button class="tf-btn tf-ghost" type="button" onclick={oncancel}>Cancel</button>
+    {:else if !fresh}
+      <button class="tf-btn tf-ghost" type="button" onclick={openWriteQueue}>Show queue</button>
+    {/if}
+    <!-- `aria-disabled`, so a keyboard's place stays on it as it changes its words after the press. -->
+    <button class="tf-btn tf-primary" class:tf-lg={fresh} type="button" aria-disabled={run.can ? undefined : "true"} onclick={() => void runAll()}>{run.word}</button>
   </footer>
 </div>

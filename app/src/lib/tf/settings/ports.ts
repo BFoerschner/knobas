@@ -8,7 +8,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { appStatus, pagesKeptOpen, setPagesKeptOpen, type AppStatus } from "../../ipc/app";
+import { appStatus, pagesKeptOpen, setPagesKeptOpen, setSmoothScrolling, smoothScrolling, type AppStatus, type InstalledFont } from "../../ipc/app";
 import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } from "../../ipc/assets";
 import {
   backupNow,
@@ -53,6 +53,7 @@ import {
   dbStats,
   reindexFts,
   deleteSource,
+  demoLoad,
   installAdapter,
   previewInstallAdapter,
   listInstalledAdapters,
@@ -97,6 +98,8 @@ import {
 
 export interface SettingsPorts {
   listSources: () => Promise<SourceSummary[]>;
+  /** `demo_load`, *Load the Tidewater dataset* on the demo profile with no source (ux31); `demoLoad` when absent. */
+  demoLoad?: () => Promise<unknown>;
   listAdapters: () => Promise<SourceDescriptor[]>;
   syncStatus: () => Promise<SourceSyncStatus[]>;
   listSyncRuns: (sourceId: string, limit: number) => Promise<SyncRunRow[]>;
@@ -150,6 +153,7 @@ export interface SettingsPorts {
  */
 export const realSettingsPorts: SettingsPorts = {
   listSources: () => listSources(),
+  demoLoad: () => demoLoad(),
   listAdapters: () => listAdapters(),
   syncStatus: () => syncStatus(),
   listSyncRuns: (sourceId, limit) => listSyncRuns(sourceId, limit),
@@ -197,6 +201,11 @@ export interface SectionPorts {
   /** *Pages kept open* (#2247), Settings › Performance. */
   pagesKeptOpen: () => Promise<number>;
   setPagesKeptOpen: (count: number) => Promise<number>;
+  /** The installed font families, Settings › Appearance › *Code font*; the IPC read when omitted. */
+  installedFonts?: () => Promise<InstalledFont[]>;
+  /** *Smooth scrolling on 120 Hz displays*, Settings › Performance: `null` where the platform has no switch. */
+  smoothScrolling: () => Promise<boolean | null>;
+  setSmoothScrolling: (on: boolean) => Promise<boolean | null>;
   passiveAttribution: () => Promise<boolean>;
   setPassiveAttribution: (enabled: boolean) => Promise<boolean>;
   notify: (draft: { title: string; body: string; address: string }) => Promise<void>;
@@ -209,6 +218,10 @@ export interface SectionPorts {
   /** Which pages the publish target's picker offers the source's credential cannot add pages under (#2053); the IPC read when omitted. */
   refusedWrites?: RefusedWritesPort;
   monitoringSettings: () => Promise<MonitoringSettings>;
+  /** Settings › Docs' spaces (PR #2479, 2026-11-17); the IPC read when omitted. */
+  docsOutline?: () => Promise<import("../../ipc/entity").DocsTree>;
+  /** Settings › Search's read (the everything-search decisions, D13); the IPC read when omitted. */
+  searchSettings?: () => Promise<import("../../ipc/search").SearchSettings>;
   setMonitoringSettings: (settings: MonitoringSettings) => Promise<MonitoringSettings>;
   backupStatus: () => Promise<BackupStatus>;
   backupNow: () => Promise<BackupRecord>;
@@ -253,6 +266,8 @@ export interface SectionPorts {
 export const realSectionPorts: SectionPorts = {
   pagesKeptOpen: () => pagesKeptOpen(),
   setPagesKeptOpen: (count) => setPagesKeptOpen(count),
+  smoothScrolling: () => smoothScrolling(),
+  setSmoothScrolling: (on) => setSmoothScrolling(on),
   passiveAttribution: () => passiveAttribution(),
   setPassiveAttribution: (enabled) => setPassiveAttribution(enabled),
   notify: (draft) => notify(draft),

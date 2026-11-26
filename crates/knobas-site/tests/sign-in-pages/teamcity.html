@@ -1,0 +1,68 @@
+<!-- teamcity's sign-in page (TeamCity 2026.1.3), recorded 2026-11-22 from the live testenv product (scripts, styles and icons removed; the public key emptied). -->
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <title>Log in to TeamCity &mdash; TeamCity</title>
+    </head>
+    <body>
+<div id="loginPage" class="initialPage">
+  <div class="page-content-wrapper">
+    <div id="pageContent">
+      <span class="logo" title="TeamCity"></span>
+      <h1 id="header">Log in to TeamCity</h1>
+      <div id="errorMessage" ></div>
+      <div id="loginForm" >
+        <form class="loginForm" method="post">
+            <div>
+              <label for="username">Username</label>
+              <input class="text" id="username" type="text" name="username">
+              <span class="error" id="username-error"></span>
+            </div>
+          <div>
+            <label for="password">Password</label>
+            <input class="text" id="password" type="password" name="password">
+            <span class="error" id="password-error"></span>
+          </div>
+          <div class="remember-section">
+          <div  class="remember-section__inner">
+    <span class="custom-checkbox ring-checkbox-checkbox checkbox"
+          >
+      <input type="checkbox" 
+             class="custom-checkbox_input ring-checkbox-input"
+             name="remember"
+             id="remember"
+             checked
+             value="true">
+      <div class="ring-checkbox-cellWrapper">
+        <span class="ring-checkbox-cell">
+          <span
+    class="svg-icon ring-checkbox-check ring-checkbox-icon ring-icon-icon"
+  ></span>
+        </span>
+      </div>
+      <input type="hidden" name="_remember" value="">
+    </span>
+            <label class="rememberMe" for="remember">Remember me</label></div>
+            <span id="resetPasswordContainer"></span>
+          </div>
+          <div class="buttons">
+            <input class="btn loginButton" type="submit" name="submitLogin" value="Log in">
+            <div class="loader-cell"><i id="saving" style="display: none; " class="ring-loader-inline progressRing progressRingSubmitBlock" title="Please wait..."></i></div>
+          </div>
+          <input type="hidden" id="publicKey" name="publicKey" value=""/>
+        </form>
+      </div>
+    <!-- START EXTENSION CONTENT jetbrains.buildServer.controllers.resetPassword.ResetPasswordPageExtension: name:resetPasswordLink: /resetPasswordLink.jsp -->
+  <!-- END EXTENSION CONTENT jetbrains.buildServer.controllers.resetPassword.ResetPasswordPageExtension -->
+    <!-- START EXTENSION CONTENT jetbrains.buildServer.web.forbiddenDomains.ForbiddenDomainHeaderWarning$Extension: name:jetbrains.buildServer.web.forbiddenDomains.ForbiddenDomainHeaderWarning: /forbiddenDomainWarning.jsp -->
+  <!-- END EXTENSION CONTENT jetbrains.buildServer.web.forbiddenDomains.ForbiddenDomainHeaderWarning$Extension -->
+      <div class="version">
+    <span class="greyNote version"><span class="vWord">Version</span> 2026.1.3 (build 222742)</span>
+      </div>
+    </div>
+  </div>
+</div>
+    <div data-iframe-height></div>
+    </body>
+    </html>

@@ -21,7 +21,7 @@
 //! Code's facts into `knobas_core::code_facts`, *Viewed* into
 //! `knobas_core::viewed`, drawing a link into `knobas_core::link`, an action
 //! item's ticket look-up into `crate::protocol`, a saved view's layout into
-//! `crate::ticket_views` and the first run into `crate::settings`.
+//! `crate::ticket_views` and the source count into `crate::settings`.
 //! `no_command_issues_its_own_statement` keeps it so. What is also settled:
 //! who am I (`identity_of`), the declared paths and the stored declarations
 //! are each derived once per command, through `identity_of`,
@@ -29,13 +29,19 @@
 //! [`search::searcher`], not re-read in a body. (`docs_tree` still lists the
 //! sources twice, once for the paths and once in `sources::crud::fillers`.)
 
+pub mod api;
 pub mod app;
 pub mod assets;
 pub mod backup;
 pub mod entity;
+pub mod oneoff;
+pub mod passwords;
 pub mod search;
+pub mod site;
 pub mod sources;
 pub mod time;
+pub mod update;
+pub mod window;
 
 /// The most rows one list read hands the bridge, whatever limit the webview
 /// sends (#1643): a frontend arithmetic slip would otherwise serialise a whole

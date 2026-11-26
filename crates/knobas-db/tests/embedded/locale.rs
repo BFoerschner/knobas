@@ -112,3 +112,86 @@ async fn a_new_cluster_lowercases_and_keeps_non_ascii_letters_whatever_it_was_st
         "pg_trgm keeps Ü's trigrams: {with_u} for Überweisung, {without_u} for berweisung"
     );
 }
+
+/// A cluster comes up under a language the machine does not have: no
+/// category `initdb` reads is left to such an environment (the final suite,
+/// 2026-11-22: `de_DE.UTF-8` on the WSL box, which has only `C` locales,
+/// failed `initdb` with *invalid locale settings*). `xx_XX.UTF-8` is no
+/// machine's.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cluster_comes_up_under_a_language_the_machine_does_not_have() {
+    let test = "locale::a_cluster_comes_up_under_a_language_the_machine_does_not_have";
+    if std::env::var_os(CHILD).is_none() {
+        let env = [
+            (CHILD, "1"),
+            ("LC_ALL", "xx_XX.UTF-8"),
+            ("LANG", "xx_XX.UTF-8"),
+            ("LC_NUMERIC", "xx_XX.UTF-8"),
+            ("LC_TIME", "xx_XX.UTF-8"),
+            ("LC_MONETARY", "xx_XX.UTF-8"),
+        ];
+        let (_, output) = super::run_a_child_with(test, None, &env);
+        print!("{}", super::stdout_of_a_passed_child(test, &output));
+        return;
+    }
+    let (db, _dir) = fresh_cluster().await;
+    let row: Result<(String,), _> = sqlx::query_as("show lc_numeric").fetch_one(db.pool()).await;
+    db.stop().await.unwrap();
+    println!("lc_numeric {row:?}");
+    assert_eq!(
+        row.unwrap().0,
+        "C.UTF-8",
+        "the fixed one, not the environment's"
+    );
+}
+
+/// The server writes its messages and its log in English whatever language
+/// the machine is set to (the ux12 Windows pass, 2026-11-15: Björn's
+/// server log was German, `Dauer:` for `duration:`). knobas reads one thing
+/// out of the server's words, the `FATAL:` line of a failed start
+/// (`start_reason`), and every error it acts on by its SQLSTATE; the start
+/// log a user sends with a report should read the same everywhere. `initdb`
+/// records the language of its environment as the cluster's `lc_messages`,
+/// so a cluster made under a German one spoke German until the server is
+/// told `C` at every start.
+#[tokio::test]
+async fn the_server_speaks_c_whatever_language_it_was_started_under() {
+    let test = "locale::the_server_speaks_c_whatever_language_it_was_started_under";
+    if std::env::var_os(CHILD).is_none() {
+        let env = [
+            (CHILD, "1"),
+            ("LC_ALL", "de_DE.UTF-8"),
+            ("LANG", "de_DE.UTF-8"),
+            ("LC_MESSAGES", "de_DE.UTF-8"),
+        ];
+        let (_, output) = super::run_a_child_with(test, None, &env);
+        print!("{}", super::stdout_of_a_passed_child(test, &output));
+        return;
+    }
+    let (db, dir) = fresh_cluster().await;
+    let setting: Result<(String,), _> = sqlx::query_as("show lc_messages")
+        .fetch_one(db.pool())
+        .await;
+    db.stop().await.unwrap();
+    let conf = std::fs::read_to_string(dir.path().join("data/postgresql.conf")).unwrap();
+    let recorded = conf
+        .lines()
+        .find_map(|line| line.strip_prefix("lc_messages"))
+        .and_then(|rest| rest.split('#').next())
+        .map(|value| {
+            value
+                .trim()
+                .trim_start_matches('=')
+                .trim()
+                .trim_matches('\'')
+        })
+        .unwrap_or_default()
+        .to_owned();
+    println!("lc_messages {setting:?}; postgresql.conf: {recorded}");
+    assert_eq!(setting.unwrap().0, "C", "the running server's");
+    assert_eq!(
+        recorded, "C",
+        "the cluster's own, for a server started without knobas"
+    );
+}

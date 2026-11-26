@@ -906,14 +906,18 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     assert_eq!(group.kind, "monitor");
     assert_eq!(group.plural, "Monitors");
     assert_eq!(group.hits[0].row.title, "canary");
-    let excerpt: String = group.hits[0]
-        .snippet
-        .iter()
-        .map(|segment| segment.text.as_str())
-        .collect();
-    assert!(
-        excerpt.contains("up"),
-        "the launcher row shows the monitor's state under its title: {excerpt:?}"
+    // The state is on the row itself, as its chip: the launcher draws no
+    // headline (the query audit of 2026-11-12), and the excerpts quote what
+    // the title does not already say of a match.
+    assert_eq!(
+        group.hits[0]
+            .row
+            .state
+            .as_ref()
+            .map(|chip| chip.text.as_str()),
+        Some("up"),
+        "the launcher row shows the monitor's state: {:?}",
+        group.hits[0].row
     );
 
     // **A state word is not a search term, and this is where that is written
@@ -922,8 +926,8 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     // finds nothing -- measured here rather than assumed, because the obvious
     // reading of "found by name with their state" is that `kuma down` is a
     // query, and it is not. What the criterion asks for is delivered by the row
-    // above: the state is in the indexed text, so it is in the excerpt the
-    // launcher draws under the title.
+    // above: the state is in the indexed text, and the row draws it as its
+    // chip.
     let by_state = |raw: &str| {
         knobas_app::commands::search::search_inner(
             &pool,

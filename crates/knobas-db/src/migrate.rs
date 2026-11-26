@@ -10,6 +10,28 @@
 //! its line to `migrations.sha384`. This module's test fails when a file no
 //! longer matches its pinned line, or a file has no line; a changed line in the
 //! list is a diff for review to catch.
+//!
+//! # Line endings
+//!
+//! A checksum is of the file's bytes, so the same migration checked out with
+//! CRLF hashes differently. Builds before 2026-11-11 made on Windows did that:
+//! the runner's git converted line endings, and every Windows database recorded
+//! the CRLF checksums, which a Mac or Linux build refused (and the reverse).
+//! `.gitattributes` now keeps the files LF on every checkout, and [`run`]
+//! accepts a recorded checksum of the same migration with the other line
+//! endings, rewriting it to the embedded one first
+//! ([`adopt_other_line_endings`]).
+//!
+//! # A file changed before its release
+//!
+//! Two migrations of PR #2479 changed while the PR was a draft
+//! ([`SUPERSEDED`]): `0093` and `0094` each wrote `sync.item_initial` in one
+//! pass before the window opened, and the long-words pass (2026-11-16) took
+//! the pass out of both for a fill behind the app (`0095`). No release
+//! carried the first files, but the profiles the draft was run on recorded
+//! their checksums. [`run`] accepts those two and rewrites them, as it does
+//! the other line endings: what the first files left is a table `0095`'s
+//! fill reads as it reads an empty one.
 
 /// Bring `pool`'s database up to the current schema.
 ///
@@ -31,6 +53,31 @@
 /// already-applied migration's checksum no longer matches the embedded file;
 /// [`crate::DbError::Sqlx`] if no connection can be had.
 pub async fn run(pool: &sqlx::PgPool) -> Result<(), crate::DbError> {
+    run_with(&sqlx::migrate!("./migrations"), pool).await
+}
+
+/// The greatest migration version this build embeds: the schema it migrates a database to.
+/// The update page compares it with a release's `knobas.schema` to say whether that release
+/// changes the database (ADR-0052).
+#[must_use]
+pub fn newest() -> i64 {
+    sqlx::migrate!("./migrations")
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .unwrap_or(0)
+}
+
+/// [`run`] with another set of migrations: what a test uses to stand for a
+/// build whose files had other line endings.
+///
+/// # Errors
+///
+/// As [`run`].
+pub async fn run_with(
+    migrator: &sqlx::migrate::Migrator,
+    pool: &sqlx::PgPool,
+) -> Result<(), crate::DbError> {
     let options = (*pool.connect_options())
         .clone()
         .options([("statement_timeout", "0")]);
@@ -38,10 +85,135 @@ pub async fn run(pool: &sqlx::PgPool) -> Result<(), crate::DbError> {
         .max_connections(1)
         .connect_with(options)
         .await?;
-    let outcome = sqlx::migrate!("./migrations").run(&migrating).await;
+    let outcome = async {
+        adopt_other_line_endings(migrator, &migrating).await?;
+        migrator.run(&migrating).await?;
+        Ok::<(), crate::DbError>(())
+    }
+    .await;
     migrating.close().await;
-    outcome?;
-    Ok(())
+    outcome
+}
+
+/// The migrations table sqlx keeps, in the schema the connection resolves it
+/// in, as sqlx itself names it.
+const APPLIED: &str = "_sqlx_migrations";
+
+/// The migrations whose file changed before any release carried it, each
+/// with the SHA-384 of the file it was first run as, in hex: a database that
+/// recorded one ran the same migration, and [`adopt_other_line_endings`]
+/// rewrites its row to the embedded checksum.
+///
+/// **Only for a file no release shipped, and only where the schema the first
+/// file left is one every later migration and the app read as they read the
+/// new file's.** `0093` and `0094` as they were left `sync.item_initial`
+/// filled; as they are they leave it empty, and `0095`'s fill writes an item
+/// that has no row under the empty start, which is every item either way.
+const SUPERSEDED: &[(i64, &str)] = &[
+    (
+        93,
+        "98f277a00a18f76889eaac08383995e0a45b862e80d63cadc502aa4ce8b0e3e807259738b0e9f2ad248f7e08e5a7e455",
+    ),
+    (
+        94,
+        "3aea0a6a5ad23c1c09d03acef89f7b89f4707eb5f2096e206901f261717e89d4969202f024f68cfa95fa24f016eea737",
+    ),
+];
+
+/// Whether `checksum` is the one `version` was first run under
+/// ([`SUPERSEDED`]).
+fn superseded(version: i64, checksum: &[u8]) -> bool {
+    let recorded = checksum.iter().fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    });
+    SUPERSEDED
+        .iter()
+        .any(|(of, first)| *of == version && *first == recorded)
+}
+
+/// Rewrite every recorded checksum that is an embedded migration's with the
+/// other line endings to the embedded one, in one transaction. Returns how
+/// many rows changed; 0 on a database that has none, or no migrations table.
+///
+/// A recorded checksum counts as the same migration when it is the SHA-384 of
+/// the embedded SQL with every line ending LF, or with every one CRLF, or the
+/// one the migration was first run under where its file changed before a
+/// release ([`SUPERSEDED`]), and nothing else: a migration whose text changed
+/// in any other way is still the "previously applied but has been modified"
+/// the runner reports. Under
+/// `select ... for update`, so two launches that meet here rewrite each row
+/// once; sqlx's own advisory lock comes after, in [`sqlx::migrate::Migrator::run`].
+async fn adopt_other_line_endings(
+    migrator: &sqlx::migrate::Migrator,
+    pool: &sqlx::PgPool,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let (present,): (bool,) = sqlx::query_as("select to_regclass($1) is not null")
+        .bind(APPLIED)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !present {
+        return Ok(0);
+    }
+    let recorded: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "select version, checksum from {APPLIED} order by version for update"
+    )))
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut rewritten = 0;
+    for (version, checksum) in recorded {
+        let Some(migration) = migrator
+            .iter()
+            .find(|m| m.version == version && !m.migration_type.is_down_migration())
+        else {
+            continue;
+        };
+        if checksum == *migration.checksum {
+            continue;
+        }
+        let (lf, crlf) = line_ending_checksums(migration.sql.as_str());
+        if checksum != lf && checksum != crlf && !superseded(version, &checksum) {
+            continue;
+        }
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "update {APPLIED} set checksum = $1 where version = $2"
+        )))
+        .bind(migration.checksum.as_ref())
+        .bind(version)
+        .execute(&mut *tx)
+        .await?;
+        rewritten += 1;
+    }
+    tx.commit().await?;
+    if rewritten > 0 {
+        tracing::info!(
+            rewritten,
+            "migration checksums recorded with the other line endings, or under a file that \
+             changed before its release, now name the same files"
+        );
+    }
+    Ok(rewritten)
+}
+
+/// The checksums sqlx gives `sql` with every line ending LF, and with every
+/// one CRLF: [`sqlx::migrate::Migration::new`]'s own, so the hash is sqlx's.
+fn line_ending_checksums(sql: &str) -> (Vec<u8>, Vec<u8>) {
+    let lf = sql.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    let hash = |text: String| {
+        sqlx::migrate::Migration::new(
+            0,
+            "".into(),
+            sqlx::migrate::MigrationType::Simple,
+            sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(text)),
+            false,
+        )
+        .checksum
+        .into_owned()
+    };
+    (hash(lf), hash(crlf))
 }
 
 #[cfg(test)]
@@ -64,6 +236,21 @@ mod tests {
          with \"migration N was previously applied but has been modified\" (#2327). \
          Restore the file's released bytes (`git checkout <last release tag> -- <file>`) \
          and make the change in a new migration.";
+
+    /// `newest` is the greatest file number in `migrations/`, the number
+    /// `scripts/update-manifest.sh` writes into a release's `knobas.schema`.
+    #[test]
+    fn newest_is_the_greatest_file_number() {
+        let greatest = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                name.split('_').next()?.parse::<i64>().ok()
+            })
+            .max()
+            .unwrap();
+        assert_eq!(super::newest(), greatest);
+    }
 
     /// One line of the list: version, checksum, file name.
     struct Pinned {

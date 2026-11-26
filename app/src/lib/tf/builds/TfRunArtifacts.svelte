@@ -24,6 +24,7 @@
   import TfFileViewer, { type ViewerContent } from "../render/TfFileViewer.svelte";
   import type { RunPorts } from "./pipeline-ports";
   import { downloadAndSay, drawnWhole, filesText, previewable, sizeText } from "./run-reads";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     runId,
@@ -106,6 +107,28 @@
     if (to) readFolder(path);
   }
 
+  /** One drawn line of the tree: an entry, or a folder's own line while it reads or after it failed. */
+  type Line = { key: string; depth: number } & ({ entry: ArtifactEntry } | { reading: true } | { failed: string });
+
+  /** The tree as the lines it draws, open folders' entries under them (a folding list windows its visible rows). */
+  const lines = $derived.by((): Line[] => {
+    const out: Line[] = [];
+    const walk = (path: string, depth: number) => {
+      const folder = folders[path];
+      if (folder === "reading") out.push({ key: `${path}\u0000reading`, depth, reading: true });
+      else if (folder !== undefined && !Array.isArray(folder)) out.push({ key: `${path}\u0000failed`, depth, failed: folder.failed });
+      else if (folder !== undefined)
+        for (const entry of folder) {
+          out.push({ key: entry.path, depth, entry });
+          if (entry.folder && (open[entry.path] ?? false)) walk(entry.path, depth + 1);
+        }
+    };
+    walk("", 0);
+    return out;
+  });
+  /** A run of thousands of artifacts draws only the lines near the viewport (the extremes pass, 2026-11-13); a line is 33 px. */
+  const win = new Windowed({ count: () => lines.length, key: (i) => lines[i]!.key, estimate: 33 });
+
   const root = $derived(folders[""]);
   const any = $derived(Array.isArray(root) && root.length > 0);
 
@@ -160,39 +183,35 @@
   }
 </script>
 
-{#snippet tree(path: string, depth: number)}
-  {@const folder = folders[path]}
-  {#if folder === "reading"}
-    <div class={`tf-arow tf-ad${Math.min(depth, DEPTH_MAX)}`}><span class="tf-nm tf-dim">…</span></div>
-  {:else if folder !== undefined && !Array.isArray(folder)}
-    <div class={`tf-arow tf-ad${Math.min(depth, DEPTH_MAX)}`}><span class="tf-nm tf-dim">Could not be read: {folder.failed}</span></div>
-  {:else if folder !== undefined}
-    {#each folder as entry (entry.path)}
-      {@const indent = `tf-ad${Math.min(depth, DEPTH_MAX)}`}
-      {#if entry.folder}
-        {@const isOpen = open[entry.path] ?? false}
-        <div class={`tf-arow tf-dir ${indent}`}>
-          <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={() => toggle(entry.path)}
-            >{isOpen ? "▾" : "▸"} {entry.name}/</button
-          >
-          <span class="tf-sz">{filesText(entry) ?? ""}</span>
-          <span class="tf-acts"
-            ><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => download({ kind: "folder", path: entry.path }, `${entry.name}/`)}
-              >Download folder</button
-            ></span
-          >
-        </div>
-        {#if isOpen}{@render tree(entry.path, depth + 1)}{/if}
-      {:else}
-        <div class={`tf-arow ${indent}`}>
-          <button type="button" class="tf-nm tf-aopen" title="Open {entry.name}" onclick={() => showPreview(entry)}>{entry.name}</button>
-          <span class="tf-sz">{entry.size === null ? "" : sizeText(entry.size)}</span>
-          <span class="tf-acts">
-            <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "file", path: entry.path }, entry.name)}>Download</button>
-          </span>
-        </div>
-      {/if}
-    {/each}
+{#snippet line(item: Line)}
+  {@const indent = `tf-ad${Math.min(item.depth, DEPTH_MAX)}`}
+  {#if "reading" in item}
+    <div class={`tf-arow ${indent}`} {@attach win.row(item.key)}><span class="tf-nm tf-dim">…</span></div>
+  {:else if "failed" in item}
+    <div class={`tf-arow ${indent}`} {@attach win.row(item.key)}><span class="tf-nm tf-dim">Could not be read: {item.failed}</span></div>
+  {:else if item.entry.folder}
+    {@const entry = item.entry}
+    {@const isOpen = open[entry.path] ?? false}
+    <div class={`tf-arow tf-rowhost tf-dir ${indent}`} {@attach win.row(item.key)}>
+      <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={() => toggle(entry.path)}
+        >{entry.name}/</button
+      >
+      <span class="tf-sz tf-rowval">{filesText(entry) ?? ""}</span>
+      <span class="tf-rowend"><span class="tf-rowacts"
+        ><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => download({ kind: "folder", path: entry.path }, `${entry.name}/`)}
+          >Download folder</button
+        ></span></span
+      >
+    </div>
+  {:else}
+    {@const entry = item.entry}
+    <div class={`tf-arow tf-rowhost ${indent}`} {@attach win.row(item.key)}>
+      <button type="button" class="tf-nm tf-aopen" title="Open {entry.name}" onclick={() => showPreview(entry)}>{entry.name}</button>
+      <span class="tf-sz tf-rowval">{entry.size === null ? "" : sizeText(entry.size)}</span>
+      <span class="tf-rowend"><span class="tf-rowacts">
+        <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "file", path: entry.path }, entry.name)}>Download</button>
+      </span></span>
+    </div>
   {/if}
 {/snippet}
 
@@ -201,8 +220,8 @@
 {:else if !Array.isArray(root)}
   <p class="tf-dim">The artifacts could not be read: {root.failed}</p>
 {:else}
-  <div class="tf-atree">
-    {#if any}{@render tree("", 0)}{:else}<div class="tf-empty"><p>This run has published no artifacts yet.</p></div>{/if}
+  <div class="tf-atree" {@attach win.list}>
+    {#if any}{#each win.slice(lines) as item (item.key)}{@render line(item)}{/each}{:else}<div class="tf-empty"><p>This run has published no artifacts yet.</p></div>{/if}
   </div>
   {#if any}
     <div class="tf-aall">

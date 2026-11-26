@@ -2,7 +2,8 @@
  * `?fake-ipc`'s attachment bytes and download (spec #2396, #2405):
  * `attachment_bytes` answers PAY-231's two screenshots with a drawn picture
  * of a log panel each (#2406's, moved here when the two joined), its PDF
- * with a short PDF (#2415's preview), and the other files with a line of text; `download_attachment`
+ * with a short PDF (#2415's preview), its `junit.xml` and JSON answer with
+ * `fake-doc-blocks.ts`'s texts (D1), and the other files with a line of text; `download_attachment`
  * answers the path a download would land at. Both look the file up in the
  * fixture's attachment list, as the real commands look it up in the mirror's.
  *
@@ -14,6 +15,7 @@ import type { Attachment, AttachmentBytes } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
 import { SPEC_PDF } from "../../../render/pdf-fixture";
 import { CORPUS } from "./corpus";
+import { JUNIT_XML, PSP_ANSWER_JSON } from "../fake-doc-blocks";
 
 /** The cap the real command reads under: 5 MiB (`ATTACHMENT_CAP`). */
 const CAP = 5 * 1024 * 1024;
@@ -99,6 +101,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       if (mime.startsWith("image/")) return { mime: "image/bmp", data: picture(Number(file.id) || 0).slice("data:image/bmp;base64,".length) };
       if (mime === "application/pdf") return { mime, data: btoa(String.fromCharCode(...SPEC_PDF())) };
       if (mime === "text/csv") return { mime, data: btoa(BATCH_CSV) };
+      if (mime === "application/xml") return { mime, data: btoa(JUNIT_XML) };
+      if (mime === "application/json") return { mime, data: btoa(PSP_ANSWER_JSON) };
       return { mime, data: btoa(`${file.name}\n`) };
     },
     download_attachment: (args) => {

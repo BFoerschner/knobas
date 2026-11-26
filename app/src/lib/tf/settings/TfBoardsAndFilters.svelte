@@ -11,6 +11,7 @@
     knobas does not mirror, and *Hide* / *Show* (`hide_saved_view`).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { TicketViewRow } from "../../ipc/search";
   import type { SourceSummary } from "../../ipc/sources";
@@ -130,8 +131,7 @@
           {@const outside = unsyncedWords(view.saved_view_source.unsynced)}
           <tr>
             <td
-              ><a href="#/tickets/{view.id}">{view.name}</a>{#if view.saved_view_source.hidden}{" "}<span class="tf-chip">hidden</span
-                >{/if}</td
+              ><a href="#/tickets/{view.id}">{view.name}</a>{#if view.saved_view_source.hidden}{" "}<TfStateChip text="hidden" />{/if}</td
             >
             <td class="tf-dim">{viewType(view.saved_view_source)}</td>
             <td>{view.count ?? 0}{#if outside}{" "}<span class="tf-dim">{outside}</span>{/if}</td>

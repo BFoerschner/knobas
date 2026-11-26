@@ -222,6 +222,203 @@ async fn each_scalar_key_matches_its_field_any_value_and_negates() {
     }
 }
 
+/// **A key asked as a set admits the tickets its row-by-row read admitted**
+/// (the query audit of 2026-11-12). Seven keys read `sync.item_field` or a
+/// ticket's stored card once a statement now, where each probed or walked
+/// once per ticket; `sql::ids_sql_probed` still builds the statement over the
+/// earlier fragments, and every query below is asked both ways.
+///
+/// The tickets differ in every field a key reads, one has no priority and no
+/// labels, and one has lost its stored card, as a ticket the fill has not
+/// reached: its card keys walk the payload again. Each query is asked alone,
+/// left out, and beside a word, under the declarations the database stored
+/// and under ones it never stored (a candidate added after the stored ones,
+/// which no payload holds), where each stored key walks the payload instead
+/// (the broad-filters pass, 2026-11-13, which asks `fsu` per source and
+/// kind where the key asked each row's candidates).
+#[tokio::test]
+async fn a_key_asked_as_a_set_admits_what_its_row_by_row_read_did() {
+    use knobas_search::query;
+    use knobas_search::sql::{ids_sql, ids_sql_probed, query_as_with};
+
+    let pool = pool().await;
+    let p = project();
+    // The declarations first, so each ticket's stored fields and its card
+    // are written with it.
+    let searcher = searcher(&pool).await;
+    let tickets = [
+        Ticket {
+            status: "Done",
+            issuetype: "Bug",
+            priority: Some("High"),
+            assignee: Some("jonas.becker"),
+            labels: &["backend", "payouts"],
+            sprints: &["closed"],
+            age_days: 9,
+        },
+        Ticket {
+            status: "In Review",
+            issuetype: "Story",
+            priority: Some("Low"),
+            assignee: Some("mara.lindqvist"),
+            labels: &["Backend"],
+            sprints: &["future", "ACTIVE"],
+            age_days: 1,
+        },
+        Ticket {
+            status: "To Do",
+            issuetype: "Task",
+            priority: None,
+            assignee: None,
+            labels: &[],
+            sprints: &[],
+            age_days: 0,
+        },
+        Ticket {
+            status: "In Progress",
+            issuetype: "Bug",
+            priority: Some("High"),
+            assignee: Some("mara.lindqvist"),
+            labels: &["frontend"],
+            sprints: &["active", "closed"],
+            age_days: 30,
+        },
+        Ticket {
+            status: "Done",
+            issuetype: "Story",
+            priority: Some("Medium"),
+            assignee: Some("priya.nair"),
+            labels: &["payouts"],
+            sprints: &[],
+            age_days: 3,
+        },
+    ];
+    let mut stored = Vec::new();
+    for (n, ticket) in tickets.into_iter().enumerate() {
+        stored.push(store(&pool, &p, u32::try_from(n).unwrap() + 1, ticket).await);
+    }
+    let cards: i64 =
+        sqlx::query_scalar("select count(*) from sync.item_card where entity_id = any($1)")
+            .bind(&stored)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(cards, 5, "every ticket has its card");
+    sqlx::query("delete from sync.item_card where entity_id = $1")
+        .bind(&stored[3])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let vocab = searcher.vocabulary().await.unwrap();
+    let named = format!("project:\"{p} Payments\"");
+    let not_named = format!("-project:\"{p} Payments\"");
+    // A key, and the same key left out.
+    let keys: [(&str, &str); 15] = [
+        ("status:Done", "-status:Done"),
+        (
+            r#"status:"in review" status:"To Do""#,
+            r#"-status:"in review" -status:"To Do""#,
+        ),
+        ("issuetype:Bug", "-issuetype:Bug"),
+        (
+            "issuetype:story issuetype:task",
+            "-issuetype:story -issuetype:task",
+        ),
+        ("priority:High", "-priority:High"),
+        (
+            "priority:low priority:medium",
+            "-priority:low -priority:medium",
+        ),
+        ("assignee:jonas.becker", "-assignee:jonas.becker"),
+        ("assignee:@me", "-assignee:@me"),
+        ("assigned:week", "-assigned:week"),
+        ("label:backend", "-label:backend"),
+        (
+            "label:payouts label:frontend",
+            "-label:payouts -label:frontend",
+        ),
+        ("sprint:current", "-sprint:current"),
+        (&named, &not_named),
+        ("status:Done priority:High", "status:Done -priority:High"),
+        (
+            "issuetype:Bug label:frontend",
+            "-issuetype:Bug label:backend",
+        ),
+    ];
+    // The same declarations with one more candidate for each stored field:
+    // the same values resolve, under candidates no stored row was written by.
+    let stored_declarations = vocab.declarations.clone();
+    let unstored = {
+        let extra = knobas_core::payload::PayloadPath::of(["fields", "never-sent"]);
+        let kinds = stored_declarations
+            .of_source("jira")
+            .cloned()
+            .map(|mut kind| {
+                for paths in [
+                    &mut kind.status_name,
+                    &mut kind.assignee,
+                    &mut kind.project_key,
+                    &mut kind.project_name,
+                ] {
+                    if !paths.is_empty() {
+                        paths.push(extra.clone());
+                    }
+                }
+                kind
+            })
+            .collect();
+        knobas_core::payload::Declarations::empty().with("jira", kinds)
+    };
+    let mut asked = 0;
+    let mut admitted = 0;
+    for (declarations, key, left_out) in
+        [&stored_declarations, &unstored]
+            .into_iter()
+            .flat_map(|declarations| {
+                keys.iter()
+                    .map(move |(key, left_out)| (declarations, *key, *left_out))
+            })
+    {
+        // The word is the project's key, which every one of its tickets
+        // holds in its own.
+        for raw in [
+            key.to_owned(),
+            left_out.to_owned(),
+            format!("{key} {}", p.to_lowercase()),
+        ] {
+            let raw = format!("project:{p} {raw}");
+            let parsed = query::parse(&raw, &vocab);
+            assert!(
+                parsed.query.unknown_tokens.is_empty(),
+                "{raw}: {:?}",
+                parsed.query.unknown_tokens
+            );
+            let mut filters = query::merge(&parsed, &SearchFilters::default());
+            filters.kinds = vec!["ticket".to_owned()];
+            filters.declarations = declarations.clone();
+            let words = query::word_alternatives(&parsed.query.text);
+            let now: Vec<(String,)> = query_as_with(ids_sql(&words, &filters))
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            let before: Vec<(String,)> = query_as_with(ids_sql_probed(&words, &filters))
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            let now = sorted(now.into_iter().map(|(id,)| id).collect());
+            let before = sorted(before.into_iter().map(|(id,)| id).collect());
+            assert_eq!(now, before, "{raw}");
+            asked += 1;
+            admitted += usize::from(!now.is_empty());
+        }
+    }
+    assert!(
+        admitted * 4 >= asked * 3,
+        "{admitted} of {asked} queries admitted a ticket"
+    );
+}
+
 /// `project:` matches the key or the name, ignoring case, and a second
 /// project means either.
 #[tokio::test]

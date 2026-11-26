@@ -1,0 +1,21 @@
+[
+  ["com://! The app's commands."],
+  ["kw:use",": ","ty:std","op:::","ty:collections","op:::","ty:HashMap","punct:;"],
+  [],
+  ["attr:#","punct:[","attr:derive","punct:(","ty:Debug","punct:,","attr: ","ty:Clone","punct:)]"],
+  ["kw:pub",": ","kw:struct",": ","ty:Batch","punct:<'","ty:a","punct:>",": ","punct:{"],
+  [":    ","kw:pub",": id","op::",": ","op:&","punct:'","ty:a",": ","ty:str","punct:,"],
+  [":    tries","op::",": ","ty:u32","punct:,"],
+  ["punct:}"],
+  [],
+  ["kw:impl","punct:<'","ty:a","punct:>",": ","ty:Batch","punct:<'","ty:a","punct:>",": ","punct:{"],
+  [":    ","kw:pub",": ","kw:fn",": ","fn:settle","punct:(","op:&","kw:mut",": ","kw:self","punct:)",": ","op:->",": ","ty:Result","punct:<","ty:String","punct:,",": ","ty:String","punct:>",": ","punct:{"],
+  [":        ","kw:let",": ","kw:mut",": seen","op::",": ","ty:HashMap","punct:<","op:&","ty:str","punct:,",": ","ty:u32","punct:>",": ","op:=",": ","ty:HashMap","op:::","fn:new","punct:();"],
+  [":        ","kw:self","op:.",":tries ","op:+=",": ","num:1","punct:;"],
+  [":        ","kw:if",": ","kw:self","op:.",":tries ","op:>",": ","num:3",": ","punct:{",": ","kw:return",": ","ty:Err","punct:(","attr:format!","punct:(","str:\"parked ","punct:{}","str:\"","punct:,",": ","kw:self","op:.",":id","punct:));",": ","punct:}"],
+  [":        seen","op:.","fn:insert","punct:(","kw:self","op:.",":id","punct:,",": ","kw:self","op:.",":tries","punct:);"],
+  [":        ","ty:Ok","punct:(","ty:String","op:::","fn:from","punct:(","str:\"sent","esc:\\n","str:\"","punct:))"],
+  [":    ","punct:}"],
+  ["punct:}"],
+  []
+]

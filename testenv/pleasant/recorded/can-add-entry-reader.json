@@ -1,0 +1,13 @@
+{
+ "name": "can-add-entry-reader",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": false,
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/CanUserAddEntry/{folder:Tidewater/Platform/CI/Agents}"
+ }
+}

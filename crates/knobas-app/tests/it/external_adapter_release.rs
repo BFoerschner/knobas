@@ -460,7 +460,7 @@ async fn an_update_preview_shows_the_release_beside_what_is_installed_and_switch
             .iter()
             .map(|r| r.role.as_str())
             .collect::<Vec<_>>(),
-        ["wasm-fixture:survey-desk", "ci", "wiki"],
+        ["wasm-fixture:survey-desk", "ci", "wiki", "ticket-system"],
         "the fixture's custom role, CI and the wiki"
     );
     assert_eq!(

@@ -227,18 +227,39 @@ export function actionPayload(
 }
 
 /**
+ * The ops whose first choice is a fair start when the source names none: a
+ * merge's style is the source's own order and removes nothing, and *Update
+ * branch…* starts on its merge. Anywhere else the first option is a guess one
+ * key away from a write, so nothing is picked (F-028).
+ */
+const FIRST_CHOICE_STANDS: ReadonlySet<string> = new Set(["merge_pull_request", "update_pull_request_branch"]);
+
+/**
  * What the dialog's fields start with, as declared: a text its prefill, a
- * choice the option it names (the first when it names none, or one it does
- * not offer), a flag checked only for `"true"`.
+ * choice the option it names (where it names none, or one it does not offer:
+ * its only option, the first for {@link FIRST_CHOICE_STANDS}, else nothing), a
+ * flag checked only for `"true"`.
+ *
+ * Nothing that removes data starts picked, whatever the source declares: a
+ * merge never starts with *Delete branch after merge* ticked, and *Update
+ * branch…* never starts on a rebase, which rewrites history.
  */
 export function initialValues(action: ViewAction): ActionValues {
   return Object.fromEntries(
     action.fields.map((field) => {
       const kind = field.kind;
-      if (kind.type === "flag") return [field.name, field.value === "true" ? "true" : "false"];
+      if (kind.type === "flag") {
+        if (action.write_op === "merge_pull_request" && field.name === "delete_branch") return [field.name, "false"];
+        return [field.name, field.value === "true" ? "true" : "false"];
+      }
       if (kind.type === "choice") {
+        if (action.write_op === "update_pull_request_branch") {
+          const merge = kind.options.find((option) => option.value === "merge");
+          if (merge !== undefined) return [field.name, merge.value];
+        }
         const named = kind.options.find((option) => option.value === field.value);
-        return [field.name, (named ?? kind.options[0])?.value ?? ""];
+        const taken = kind.options.length === 1 || FIRST_CHOICE_STANDS.has(action.write_op) ? kind.options[0] : undefined;
+        return [field.name, (named ?? taken)?.value ?? ""];
       }
       return [field.name, field.value ?? ""];
     }),

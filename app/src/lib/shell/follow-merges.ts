@@ -56,8 +56,8 @@ export function startFollowingMerges(): () => void {
           push({
             text:
               moved === 1
-                ? "A merged pull request moved its ticket to In Review."
-                : `Merged pull requests moved ${moved} tickets to In Review.`,
+                ? "A merged pull request moved its ticket to In review."
+                : `Merged pull requests moved ${moved} tickets to In review.`,
           });
         }
       } while (again && !dead);

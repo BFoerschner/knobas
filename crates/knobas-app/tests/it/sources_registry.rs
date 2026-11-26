@@ -167,7 +167,14 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // `log_work` is M3.1's growth and is **Jira's alone**: no other
             // source knobas mirrors holds worklogs, and this table is what
             // says so across the registry rather than adapter by adapter.
-            vec!["comment", "transition", "create_ticket", "log_work"],
+            // `edit_ticket` is a ticket's fields (ADR-0054).
+            vec![
+                "comment",
+                "transition",
+                "create_ticket",
+                "log_work",
+                "edit_ticket",
+            ],
         ),
         (
             "gitea",
@@ -204,6 +211,8 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "reply_to_thread",
                 "resolve_thread",
                 "request_reviewers",
+                // A ticket's fields (ADR-0054), ratified in its frozen-surface entry.
+                "edit_ticket",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,
@@ -224,6 +233,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
         // §10.8 ratification under ADR-0006 is the diff this table exists to
         // put in front of a reviewer.
         ("kuma", vec![]),
+        // Pleasant Password Server queues nothing (ADR-0056): a change to an
+        // entry is a direct write, a `passwords::Write`, never a `WriteOp`.
+        ("pleasant", vec![]),
     ]
     .into_iter()
     .collect();

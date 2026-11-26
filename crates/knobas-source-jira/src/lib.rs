@@ -34,6 +34,7 @@ mod model;
 mod refresh;
 mod source;
 mod sync;
+mod tickets;
 mod time;
 mod translate;
 mod views;
@@ -65,6 +66,9 @@ pub const WRITE_OP_CREATE_TICKET: &str = "create_ticket";
 /// declares it, because it is the only source knobas mirrors that holds
 /// worklogs.
 pub const WRITE_OP_LOG_WORK: &str = "log_work";
+/// See [`WRITE_OP_COMMENT`]. A ticket's summary, assignee, priority and
+/// labels (ADR-0054): `PUT api/2/issue/{key}` and `PUT …/assignee`.
+pub const WRITE_OP_EDIT_TICKET: &str = "edit_ticket";
 
 /// The one entity kind this adapter emits. Epics are Jira issues of type
 /// `Epic`, so they arrive as tickets too (interfaces doc §4.2: kinds = `ticket`).

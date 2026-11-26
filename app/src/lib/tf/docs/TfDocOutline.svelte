@@ -2,8 +2,8 @@
   The page's outline, *On this page* (#861, R-10.15 as amended by #2078): it
   follows the scrolling and counts the find bar's matches per section (#860).
 
-  On a wide window it is the page's right column, sticking while the page
-  scrolls (the margin). Below 1240px (`folded`) it is a fold between the
+  Where the sheet has the room it is the page's right column, sticking while the
+  page scrolls (the margin). Otherwise (`folded`, `readerFit`) it is a fold between the
   meta line and the first section, closed, its summary counting the
   sections and, while the find bar is open, the matches in them, a badge
   drawn only above zero (#2081).
@@ -11,12 +11,14 @@
 <script lang="ts">
   import type { DocPage } from "../../ipc/entity";
   import { inlineWords, pageHash, sectionMatches, sectionsOf } from "./docs";
+  import { Windowed } from "../../shell/windowed.svelte";
 
   let {
     page,
     stems,
     active,
     folded,
+    onpick,
   }: {
     page: DocPage;
     stems: string[];
@@ -24,18 +26,22 @@
     active: number | null;
     /** Drawn as the fold above the page rather than as the margin. */
     folded: boolean;
+    /** An entry was pressed, the one the address already names too, which changes no address. */
+    onpick?: ((section: number) => void) | undefined;
   } = $props();
 
   const outline = $derived(sectionsOf(page.blocks).filter((s) => s.heading !== null));
+  /** A page of thousands of sections lists only the entries near the outline's own scroll (the extremes pass, 2026-11-13). */
+  const win = new Windowed({ count: () => outline.length, key: (i) => outline[i]!.number, estimate: 32 });
   const counts = $derived(sectionMatches(page.blocks, stems));
   const total = $derived([...counts.values()].reduce((sum, n) => sum + n, 0));
 </script>
 
 {#snippet toc()}
-  <nav class="tf-toc">
-    {#each outline as section (section.number)}
+  <nav class="tf-toc" {@attach win.list}>
+    {#each win.slice(outline) as section (section.number)}
       {@const n = counts.get(section.number)}
-      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number}
+      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number} onclick={() => onpick?.(section.number)} {@attach win.row(section.number)}
         >{inlineWords(section.heading?.text ?? [])}{#if n}<span class="tf-hits">{n}</span>{/if}</a
       >
     {/each}

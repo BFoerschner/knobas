@@ -59,6 +59,33 @@ impl crate::Sink for Walking {
     }
 }
 
+/// An in-memory [`Sink`](crate::Sink) that keeps the items and every
+/// one-time-code key handed to [`otp_key`](crate::Sink::otp_key) (ADR-0056):
+/// what clause 17 scans for a key that leaked into the mirror.
+#[derive(Default)]
+pub struct KeySink {
+    pub items: Vec<crate::SyncItem>,
+    pub keys: Vec<(String, crate::passwords::OtpKey)>,
+    /// The kinds the run said it walked whole (`Sink::walked_whole`).
+    pub whole: Vec<String>,
+}
+
+#[async_trait::async_trait]
+impl crate::Sink for KeySink {
+    async fn item(&mut self, item: crate::SyncItem) -> Result<(), crate::SourceError> {
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked_whole(&mut self, kind: &str) {
+        self.whole.push(kind.to_owned());
+    }
+
+    async fn otp_key(&mut self, entity: &EntityRef, key: crate::passwords::OtpKey) {
+        self.keys.push((entity.to_string(), key));
+    }
+}
+
 /// A sink that rejects the very first item, so the battery can check that an
 /// adapter propagates the failure instead of syncing on regardless.
 struct FailingSink;
@@ -280,6 +307,17 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // A delete could not be taken back. The target is no branch's
         // address -- it has no `@refs/heads/` -- so an adapter that attempted
         // it anyway is refused on the id's shape before a request leaves.
+        // An edit would rename somebody's ticket. The target is no ticket's
+        // address, so an adapter that attempted it anyway is refused on the
+        // id's shape before a request leaves; and it carries only a title.
+        crate::WriteOp::EditTicket {
+            entity: target.clone(),
+            title: Some("contract battery probe".into()),
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: std::collections::BTreeMap::new(),
+        },
         crate::WriteOp::DeleteBranch { entity: target },
     ]
     .into_iter()
@@ -323,11 +361,13 @@ where
     if let Err(error) = crate::instance::validate_instance_id(&src_id) {
         panic!("descriptor.id {src_id:?} is not a usable instance id: {error}");
     }
-    let mut sink = VecSink(Vec::new());
+    let mut keyed = KeySink::default();
     let cursor = s
-        .sync(None, &mut sink)
+        .sync(None, &mut keyed)
         .await
         .expect("full sync must succeed");
+    let otp_keys = keyed.keys;
+    let sink = VecSink(keyed.items);
     assert!(!sink.0.is_empty(), "full sync yielded no items");
     let declared: std::collections::HashSet<String> =
         d.entity_kinds.iter().map(|k| k.id.clone()).collect();
@@ -510,8 +550,9 @@ where
     }
     // 13. The refresh (ADR-0031): declared exactly when it answers, kind by
     //     kind (#2146), and each kind it answers for read back as the sync
-    //     emitted it.
-    check_refresh(&*s, &d, &sink.0).await;
+    //     emitted it; a kind read with what stands under it (ADR-0047)
+    //     walked from the position the idle run of clause 2 kept.
+    check_refresh(&*s, &d, &sink.0, Some(&cursor)).await;
     // 14. Code pages (#2274): each template starts with `/` and carries only
     //     its page's placeholders -- see `code_pages::check`.
     if let Some(pages) = &d.code_pages
@@ -519,6 +560,487 @@ where
     {
         panic!("descriptor.code_pages: {error}");
     }
+    // 15. A ticket's fields (ADR-0054): answered exactly when `edit_ticket`
+    //     is declared, each answer in the vocabulary's rules, an empty edit
+    //     and an edit of a field the answer does not offer refused before
+    //     anything is sent, and every searched field's list answered.
+    check_ticket_fields(&*s, &d, &sink.0).await;
+    // 16. The web sign-in's pages (ADR-0050): paths after the base URL, each
+    //     starting with `/` -- see `web_sign_in::check`.
+    if let Some(pages) = &d.web_sign_in
+        && let Err(error) = crate::web_sign_in::check(pages)
+    {
+        panic!("descriptor.web_sign_in: {error}");
+    }
+    // 17. Passwords (ADR-0056): the records are the role's and nothing else,
+    //     no code key reached an item, a secret read answers for an entry and
+    //     only for one, and a write the source does not perform is refused
+    //     before anything is sent.
+    check_passwords(&*s, &d, &sink.0, &otp_keys).await;
+    // 18. The web links (ux30): each template after the base URL, one per
+    //     declared kind with `{key}` once -- see `web_links::check`.
+    if let Some(links) = &d.web_links {
+        let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
+        if let Err(error) = crate::web_links::check(links, &kinds) {
+            panic!("descriptor.web_links: {error}");
+        }
+    }
+}
+
+/// Clause 17 rule 2: the first code key handed over that appears in an
+/// item's title, body text or payload, in any case, with the item. A key
+/// under four characters is not looked for: it would be found by chance.
+fn leaked_key<'a>(
+    keys: &'a [(String, crate::passwords::OtpKey)],
+    items: &'a [crate::SyncItem],
+) -> Option<(&'a str, &'a crate::SyncItem)> {
+    keys.iter().find_map(|(entity, key)| {
+        let secret = key.secret.expose();
+        if secret.len() < 4 {
+            return None;
+        }
+        let needle = secret.to_ascii_lowercase();
+        items
+            .iter()
+            .find(|item| {
+                format!("{}\n{}\n{}", item.title, item.body_text, item.payload)
+                    .to_ascii_lowercase()
+                    .contains(&needle)
+            })
+            .map(|item| (entity.as_str(), item))
+    })
+}
+
+/// Clause 17: the Passwords role (ADR-0056), over what the adapter's own
+/// full sync emitted and the code keys it handed the sink. Each rule panics
+/// with its number, so a fake that breaks one names it.
+///
+/// Rule 5 reads one password: on a real password manager that is one line
+/// in its audit log, and only one.
+pub async fn check_passwords(
+    s: &dyn crate::Source,
+    d: &crate::SourceDescriptor,
+    items: &[crate::SyncItem],
+    keys: &[(String, crate::passwords::OtpKey)],
+) {
+    use crate::passwords::{
+        ENTRY_KIND, EntryRecord, FOLDER_KIND, OTP_UNREADABLE, SecretAnswer, SecretAsk, SecretRef,
+        SecretText, Write, WriteKind,
+    };
+    let claims = d.roles.iter().any(|c| c.role == crate::role::PASSWORDS);
+    if !claims {
+        // Rule 7: a source that is no password manager answers no secret and
+        // performs no password write.
+        if let Some(first) = items.first() {
+            let answer = s
+                .read_secret(&SecretAsk {
+                    entity: first.entity.to_string(),
+                    which: SecretRef::Password,
+                    comment: None,
+                    folder: None,
+                })
+                .await;
+            assert!(
+                matches!(answer, Ok(SecretAnswer::NotOffered)),
+                "clause 17 rule 7: a source with no passwords claim must answer read_secret with \
+                 NotOffered, got {answer:?}"
+            );
+        }
+        let refused = s
+            .passwords_write(Write::RequestAccess {
+                entity: format!("{}:contract-battery-probe", d.id),
+                comment: "contract battery".into(),
+            })
+            .await;
+        assert!(
+            matches!(
+                refused,
+                Err(crate::SourceError::Protocol { status: None, .. })
+            ),
+            "clause 17 rule 7: a source with no passwords claim must refuse passwords_write by \
+             name with no status, got {:?}",
+            refused.map(|_| ())
+        );
+        assert!(
+            keys.is_empty(),
+            "clause 17 rule 7: a source with no passwords claim handed {} code keys to the sink",
+            keys.len()
+        );
+        return;
+    }
+    let offers = d
+        .passwords
+        .as_ref()
+        .expect("clause 10 holds a passwords claim to descriptor.passwords");
+
+    // Rule 1: every record decodes as its kind's.
+    let mut entries: Vec<(&crate::SyncItem, EntryRecord)> = Vec::new();
+    for item in items {
+        if let Err(why) = crate::passwords::check_payload(&item.kind, &item.payload) {
+            panic!(
+                "clause 17 rule 1: {} of kind {:?} carries a payload that is not its record: {why}",
+                item.entity, item.kind
+            );
+        }
+        if item.kind == ENTRY_KIND {
+            let record: EntryRecord = serde_json::from_value(item.payload.clone())
+                .expect("rule 1 decoded it a line above");
+            entries.push((item, record));
+        }
+    }
+
+    // Rule 2: no key handed over appears in any title, body text or payload
+    // string, in any case.
+    if let Some((entity, item)) = leaked_key(keys, items) {
+        panic!(
+            "clause 17 rule 2: the code key handed over for {entity} appears in {}'s title, \
+             body text or payload",
+            item.entity
+        );
+    }
+
+    // Rule 3: an entry says it has a readable code key exactly when one was
+    // handed over for it.
+    let keyed: std::collections::HashSet<&str> = keys.iter().map(|(e, _)| e.as_str()).collect();
+    for (item, record) in &entries {
+        let id = item.entity.to_string();
+        let says = record
+            .otp
+            .as_ref()
+            .is_some_and(|otp| otp.format != OTP_UNREADABLE);
+        assert_eq!(
+            says,
+            keyed.contains(id.as_str()),
+            "clause 17 rule 3: {id}'s record says otp {:?}, and the sink {} a key for it",
+            record.otp.as_ref().map(|o| o.format.as_str()),
+            if keyed.contains(id.as_str()) {
+                "was handed"
+            } else {
+                "was not handed"
+            }
+        );
+    }
+    for (entity, _) in keys {
+        assert!(
+            entries
+                .iter()
+                .any(|(item, _)| item.entity.to_string() == *entity),
+            "clause 17 rule 3: a code key was handed over for {entity}, which the sync emitted \
+             no entry for"
+        );
+    }
+
+    // Rule 4: an entry is found by its open text and nothing else: the body
+    // text is the role's own (`passwords::entry_body_text`).
+    for (item, record) in &entries {
+        assert_eq!(
+            item.body_text,
+            crate::passwords::entry_body_text(record),
+            "clause 17 rule 4: {}'s body text is not the role's (username, address, notes and \
+             the custom fields the listing sent)",
+            item.entity
+        );
+    }
+
+    // Rule 5: the password of the first readable entry is answered, asked
+    // for, or gated, and never "not offered". One read only.
+    if let Some((item, _)) = entries.iter().find(|(_, r)| r.can_read) {
+        let answer = s
+            .read_secret(&SecretAsk {
+                entity: item.entity.to_string(),
+                which: SecretRef::Password,
+                comment: None,
+                folder: None,
+            })
+            .await;
+        assert!(
+            matches!(
+                answer,
+                Ok(SecretAnswer::Value(_)
+                    | SecretAnswer::CommentRequired { .. }
+                    | SecretAnswer::ApprovalRequired { .. })
+            ),
+            "clause 17 rule 5: read_secret for the password of {} must answer a value, a \
+             comment or an approval to ask for, got {:?}",
+            item.entity,
+            answer.as_ref().map(|_| "an answer")
+        );
+    }
+
+    // Rule 6: an entity that is no entry answers NotOffered.
+    let not_an_entry = items.iter().find(|i| i.kind == FOLDER_KIND).map_or_else(
+        || format!("{}:contract-battery-probe", d.id),
+        |i| i.entity.to_string(),
+    );
+    let answer = s
+        .read_secret(&SecretAsk {
+            entity: not_an_entry.clone(),
+            which: SecretRef::Password,
+            comment: None,
+            folder: None,
+        })
+        .await;
+    assert!(
+        matches!(answer, Ok(SecretAnswer::NotOffered)),
+        "clause 17 rule 6: read_secret for {not_an_entry}, which is no entry, must answer \
+         NotOffered"
+    );
+
+    // Rule 8: a write the source does not perform is refused, nothing sent.
+    let entity = entries.first().map_or_else(
+        || format!("{}:contract-battery-probe", d.id),
+        |(i, _)| i.entity.to_string(),
+    );
+    let probes = [
+        Write::CreateEntry {
+            source: d.id.clone(),
+            folder: None,
+            title: "contract battery probe".into(),
+            username: None,
+            address: None,
+            notes: None,
+            expires: None,
+            password: SecretText::new("contract-battery-probe"),
+            otp_key: None,
+            comment: None,
+        },
+        Write::EditEntry {
+            entity: entity.clone(),
+            title: Some("contract battery probe".into()),
+            username: None,
+            address: None,
+            notes: None,
+            expires: None,
+            folder: None,
+            otp_key: None,
+            comment: None,
+            listed_in: None,
+        },
+        Write::SetPassword {
+            entity: entity.clone(),
+            password: SecretText::new("contract-battery-probe"),
+            comment: None,
+            listed_in: None,
+        },
+        Write::RequestAccess {
+            entity,
+            comment: "contract battery probe".into(),
+        },
+    ];
+    for probe in probes {
+        let kind: WriteKind = probe.kind();
+        if offers.writes(kind) {
+            // Declared: performing it would change a live password manager.
+            continue;
+        }
+        let refused = s.passwords_write(probe).await;
+        assert!(
+            matches!(
+                refused,
+                Err(crate::SourceError::Protocol { status: None, .. })
+            ),
+            "clause 17 rule 8: passwords_write of {kind:?}, which descriptor.passwords.writes \
+             does not list, must be refused with SourceError::Protocol and no status, got {:?}",
+            refused.map(|_| ())
+        );
+    }
+}
+
+/// The most tickets clause 15 asks about: its reads are safe against a live
+/// instance, but a corpus of thousands would be thousands of requests.
+const TICKET_FIELDS_ASKED: usize = 10;
+
+/// The id clause 15 names as a source's own field, which no answer lists.
+const UNLISTED_FIELD: &str = "contract_battery_probe";
+
+/// Clause 15: [`crate::Source::ticket_fields`] and
+/// [`crate::Source::field_options`] over the tickets (kind `ticket`, the
+/// ticket-system role's) the adapter's own sync emitted, the first
+/// [`TICKET_FIELDS_ASKED`] of them.
+///
+/// 1. An adapter that does not declare `edit_ticket` answers `None` for
+///    each (clause 5 already holds its refusal of the op).
+/// 2. One that declares it answers `Some` for each ticket, and `None` for
+///    an entity of another kind.
+/// 3. Each answer keeps the vocabulary's rules ([`crate::ticket::fault`]).
+/// 4. An `edit_ticket` carrying nothing is refused with
+///    [`SourceError::Protocol`](crate::SourceError::Protocol) and no status:
+///    nothing was sent.
+/// 5. An `edit_ticket` naming a source's own field the answer did not list
+///    is refused by name. One naming a field the answer lists `readonly` is
+///    refused too; it carries the value the answer says the source holds,
+///    so an adapter that wrongly sent it sets what is already set.
+/// 6. `field_options` answers `Some` for each `search` field, and each
+///    `labels` field with a scope, the answers named.
+///
+/// The edits of 4 and 5 are the only writes this battery makes on a
+/// declared op, and each is one a conforming adapter refuses before a
+/// request leaves.
+async fn check_ticket_fields(
+    s: &dyn crate::Source,
+    d: &crate::SourceDescriptor,
+    items: &[crate::SyncItem],
+) {
+    let edits = d.write_ops.iter().any(|w| w == "edit_ticket");
+    let tickets = items
+        .iter()
+        .filter(|i| i.kind == "ticket" && !i.deleted)
+        .take(TICKET_FIELDS_ASKED);
+    for item in tickets {
+        let entity = item.entity.to_string();
+        let answer = s.ticket_fields(&entity).await;
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(error) => panic!("ticket_fields of {entity} failed: {error:?}"),
+        };
+        let Some(answer) = answer else {
+            assert!(
+                !edits,
+                "an adapter that declares \"edit_ticket\" must answer ticket_fields with Some for \
+                 every ticket it emits, and answered None for {entity}"
+            );
+            continue;
+        };
+        assert!(
+            edits,
+            "an adapter that does not declare \"edit_ticket\" must answer ticket_fields with \
+             None, and answered Some for {entity}: its fields would be offered with no write to \
+             send"
+        );
+        if let Some(fault) = crate::ticket::fault(&answer) {
+            panic!("ticket_fields of {entity}: {fault}");
+        }
+        let empty = s
+            .write(crate::WriteOp::EditTicket {
+                entity: entity.clone(),
+                title: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                fields: std::collections::BTreeMap::new(),
+            })
+            .await;
+        assert!(
+            matches!(
+                &empty,
+                Err(crate::SourceError::Protocol { status: None, .. })
+            ),
+            "an edit_ticket carrying nothing must be refused with SourceError::Protocol and no \
+             status, before a request leaves; got {empty:?}"
+        );
+        let unlisted = s
+            .write(crate::WriteOp::EditTicket {
+                entity: entity.clone(),
+                title: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                fields: [(
+                    UNLISTED_FIELD.to_owned(),
+                    serde_json::json!("contract battery probe"),
+                )]
+                .into(),
+            })
+            .await;
+        match &unlisted {
+            Err(crate::SourceError::Protocol { message, .. })
+                if message.contains(UNLISTED_FIELD) => {}
+            other => panic!(
+                "an edit_ticket naming a field ticket_fields did not list ({UNLISTED_FIELD:?}) must \
+                 be refused by name with SourceError::Protocol; got {other:?}"
+            ),
+        }
+        for field in answer.fields.iter().filter(|f| f.readonly.is_some()) {
+            let op = repeat_of(&entity, field);
+            let refused = s.write(op).await;
+            assert!(
+                matches!(&refused, Err(crate::SourceError::Protocol { .. })),
+                "an edit_ticket of {:?}, which ticket_fields of {entity} lists read only, must be \
+                 refused with SourceError::Protocol; got {refused:?}",
+                field.id
+            );
+        }
+        for field in answer.fields.iter().filter(|f| f.kind.has_options()) {
+            let options = s.field_options(&entity, &field.id, "").await;
+            assert!(
+                matches!(options, Ok(Some(_))),
+                "field {:?} of {entity} is of kind {:?} and so has a list: field_options must \
+                 answer it with Some, got {options:?}",
+                field.id,
+                field.kind.word()
+            );
+        }
+    }
+    if edits && let Some(other) = items.iter().find(|i| i.kind != "ticket" && !i.deleted) {
+        let entity = other.entity.to_string();
+        let answer = s.ticket_fields(&entity).await;
+        assert!(
+            matches!(answer, Ok(None)),
+            "ticket_fields of {entity}, of kind {:?} and so not a ticket, must be None; got \
+             {answer:?}",
+            other.kind
+        );
+    }
+}
+
+/// An `edit_ticket` of `field` setting the value the answer says the source
+/// holds: what clause 15 probes a read-only field with, so even a wrong
+/// adapter that sent it would change nothing.
+fn repeat_of(entity: &str, field: &crate::ticket::TicketField) -> crate::WriteOp {
+    use crate::ticket::{ASSIGNEE, LABELS, PRIORITY, TITLE};
+    let text = || field.value.as_str().unwrap_or_default().to_owned();
+    let mut op = crate::WriteOp::EditTicket {
+        entity: entity.to_owned(),
+        title: None,
+        assignee: None,
+        priority: None,
+        labels: None,
+        fields: std::collections::BTreeMap::new(),
+    };
+    if let crate::WriteOp::EditTicket {
+        title,
+        assignee,
+        priority,
+        labels,
+        fields,
+        ..
+    } = &mut op
+    {
+        match field.id.as_str() {
+            TITLE => *title = Some(text()),
+            ASSIGNEE => {
+                *assignee = Some(match field.value.as_str() {
+                    Some(a) => crate::Assignee::Account(a.to_owned()),
+                    None => crate::Assignee::Nobody,
+                });
+            }
+            PRIORITY => *priority = Some(text()),
+            LABELS => {
+                let first = field
+                    .value
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                // Adding a label already there changes nothing; with none,
+                // removing the battery's own name changes nothing either.
+                *labels = Some(match first {
+                    Some(name) => crate::LabelChange {
+                        add: vec![name],
+                        remove: vec![],
+                    },
+                    None => crate::LabelChange {
+                        add: vec![],
+                        remove: vec![UNLISTED_FIELD.to_owned()],
+                    },
+                });
+            }
+            own => {
+                fields.insert(own.to_owned(), field.value.clone());
+            }
+        }
+    }
+    op
 }
 
 /// Clause 13: the read of one item by id ([`crate::Source::refresh`]).
@@ -542,10 +1064,17 @@ where
 ///   to each other as `Capability::Write` is to `write_ops`: an adapter that
 ///   answers for a kind declares it, and one that declares it answers for at
 ///   least one kind its sync emitted.
+/// * A kind `refresh` does not read may be read with what stands under it
+///   ([`crate::Source::refresh_under`], ADR-0047), and counts as refreshed
+///   then. Walked from `cursor`, the position a run just left on a source
+///   nothing changed since, it emits nothing and leaves the position as it
+///   is: the walk's analog of clause 2, without which every press would
+///   rewrite rows and move a position nothing moved.
 async fn check_refresh(
     s: &dyn crate::Source,
     d: &crate::SourceDescriptor,
     items: &[crate::SyncItem],
+    cursor: Option<&str>,
 ) {
     let mut kinds = std::collections::HashSet::new();
     let mut asked: Vec<&crate::SyncItem> = items
@@ -562,6 +1091,36 @@ async fn check_refresh(
         });
         let kind = item.kind.as_str();
         if matches!(answer, crate::RefreshAnswer::NotOffered) {
+            let under = s.refresh_under(&id, cursor).await.unwrap_or_else(|error| {
+                panic!("refresh_under of {id}, which the sync emitted, failed: {error}")
+            });
+            if let crate::UnderAnswer::Walked {
+                items: walked,
+                cursor: moved,
+            } = under
+            {
+                assert!(
+                    declares && d.refreshes_kind(kind),
+                    "refresh_under walks {id} but the descriptor does not declare kind {kind:?} \
+                     refreshed (and Capability::Refresh) -- its detail would draw Sync now for a \
+                     press the walk answers"
+                );
+                if cursor.is_some() && !item.deleted {
+                    assert!(
+                        walked.is_empty(),
+                        "refresh_under of {id} on a source nothing changed since the run emitted \
+                         {} items -- a walk from the run's own position must find nothing",
+                        walked.len()
+                    );
+                    assert!(
+                        moved.is_none(),
+                        "refresh_under of {id} emitted nothing but moved the position -- a walk \
+                         that found nothing must leave it as it was"
+                    );
+                }
+                answered = true;
+                continue;
+            }
             assert!(
                 !d.refreshes_kind(kind),
                 "the descriptor declares kind {kind:?} refreshed but refresh answered NotOffered \
@@ -637,7 +1196,7 @@ async fn check_refresh(
 /// witness, a monitor paused or deleted on the real server among it, so the
 /// suite hands this check the batch one of its runs emitted.
 pub async fn refreshes_as_it_syncs(source: &dyn crate::Source, items: &[crate::SyncItem]) {
-    check_refresh(source, &source.descriptor(), items).await;
+    check_refresh(source, &source.descriptor(), items, None).await;
 }
 
 /// Every payload path a kind's declaration names, read off its serialized
@@ -1929,6 +2488,30 @@ mod tests {
         ClaimsTicketSystemAndAnswersTheTransitionRead,
         /// The same claim over tickets that declare no priority (#1193).
         ClaimsTicketSystemWithoutPriority,
+        /// A ticket system that declares `edit_ticket` and claims
+        /// `ticket_fields`, answers the fields of its tickets in the
+        /// vocabulary's rules (the priority read only), refuses an empty
+        /// edit, an unlisted field and the read-only one by name, answers the
+        /// assignee's list, and panics on any other edit: the conforming case
+        /// of clause 15 (ADR-0054).
+        EditsTickets,
+        /// The same, answering `None` for its ticket.
+        EditsTicketsAnsweringNone,
+        /// The same, its summary of kind `number`.
+        EditsTicketsWithAFaultyField,
+        /// The same, taking an edit that carries nothing.
+        EditsTicketsAcceptingAnEmptyEdit,
+        /// The same, taking an edit of a field its answer did not list.
+        EditsTicketsAcceptingAnUnlistedField,
+        /// The same, taking an edit of the priority it says is read only.
+        EditsTicketsAcceptingAReadOnlyField,
+        /// The same, answering no list for its assignee.
+        EditsTicketsWithoutOptions,
+        /// The same, refusing an unlisted field without naming it.
+        EditsTicketsRefusingAnUnlistedFieldVaguely,
+        /// A read-only ticket system (`ClaimsTicketSystem`) that answers
+        /// `ticket_fields` all the same.
+        AnswersFieldsWithoutEdit,
         /// Claims CI over a pipeline and a run kind declaring their paths,
         /// with `run_log` and one optional read: conforming (#1193).
         ClaimsCi,
@@ -1977,6 +2560,14 @@ mod tests {
         RefreshesAnotherStatus,
         /// Answers a live item gone.
         RefreshesALiveItemAsGone,
+        /// Reads nothing by id and walks its item with what stands under it
+        /// (ADR-0047), finding nothing on a source nothing changed: the
+        /// conforming case of the walk.
+        WalksUnder,
+        /// Walks, and finds the sync's items again on a source nothing changed.
+        WalksUnderFindingWhatDidNotChange,
+        /// Walks, finds nothing, and moves the position all the same.
+        WalksUnderMovingThePosition,
     }
 
     struct TestSource {
@@ -2025,7 +2616,15 @@ mod tests {
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionsWithoutTheOp
                     | Behavior::SourceActionOpWithoutActions
-                    | Behavior::RepeatsASourceAction => {
+                    | Behavior::RepeatsASourceAction
+                    | Behavior::EditsTickets
+                    | Behavior::EditsTicketsAnsweringNone
+                    | Behavior::EditsTicketsWithAFaultyField
+                    | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                    | Behavior::EditsTicketsAcceptingAnUnlistedField
+                    | Behavior::EditsTicketsAcceptingAReadOnlyField
+                    | Behavior::EditsTicketsWithoutOptions
+                    | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
                         vec![Capability::Search, Capability::Write]
                     }
                     Behavior::Refreshes
@@ -2034,7 +2633,10 @@ mod tests {
                     | Behavior::RefreshesAKindDeclaredNotRefreshed
                     | Behavior::RefreshesAnotherTitle
                     | Behavior::RefreshesAnotherStatus
-                    | Behavior::RefreshesALiveItemAsGone => {
+                    | Behavior::RefreshesALiveItemAsGone
+                    | Behavior::WalksUnder
+                    | Behavior::WalksUnderFindingWhatDidNotChange
+                    | Behavior::WalksUnderMovingThePosition => {
                         vec![Capability::Search, Capability::Refresh]
                     }
                     _ => vec![Capability::Search],
@@ -2051,8 +2653,22 @@ mod tests {
                         }
                         Behavior::ClaimsTicketSystem
                         | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead
-                        | Behavior::ClaimsTicketSystemWithoutPriority => {
+                        | Behavior::ClaimsTicketSystemWithoutPriority
+                        | Behavior::AnswersFieldsWithoutEdit => {
                             vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])]
+                        }
+                        Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
+                            vec![RoleClaim::new(
+                                TICKET_SYSTEM,
+                                ["reachable_transitions", crate::role::TICKET_FIELDS],
+                            )]
                         }
                         Behavior::ClaimsCi => vec![RoleClaim::new(CI, ["run_log", "run_tests"])],
                         Behavior::ClaimsCiWithoutRunLog => vec![RoleClaim::new(CI, ["run_tests"])],
@@ -2077,6 +2693,16 @@ mod tests {
                         vec!["comment".into()]
                     }
                     Behavior::DeclaresTransition => vec!["transition".into()],
+                    Behavior::EditsTickets
+                    | Behavior::EditsTicketsAnsweringNone
+                    | Behavior::EditsTicketsWithAFaultyField
+                    | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                    | Behavior::EditsTicketsAcceptingAnUnlistedField
+                    | Behavior::EditsTicketsAcceptingAReadOnlyField
+                    | Behavior::EditsTicketsWithoutOptions
+                    | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
+                        vec!["edit_ticket".into()]
+                    }
                     Behavior::DeclaresASourceAction
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionOpWithoutActions
@@ -2100,7 +2726,11 @@ mod tests {
                     _ => Vec::new(),
                 },
                 url_forms: Vec::new(),
+                web_sign_in: None,
+                web_links: None,
                 code_pages: None,
+                by_hand_by_default: false,
+                passwords: None,
                 entity_kinds: {
                     let kind = |id: &str, label: &str, monogram: &str| KindInfo {
                         id: id.to_owned(),
@@ -2113,7 +2743,9 @@ mod tests {
                             Behavior::DeclaresRefreshForNoKind
                                 | Behavior::RefreshesAKindDeclaredNotRefreshed
                         ),
+                        title_stays_in_mirror: false,
                     };
+
                     let mut kinds = vec![kind("ticket", "Ticket", "TE")];
                     // The second kind exists only for the tolerance case, and
                     // only in `entity_kinds`: clause 1 wants a declared kind
@@ -2385,7 +3017,16 @@ mod tests {
                             ..good
                         }],
                         Behavior::ClaimsTicketSystem
-                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead => {
+                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead
+                        | Behavior::AnswersFieldsWithoutEdit
+                        | Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely => {
                             vec![ticket_system(true)]
                         }
                         Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
@@ -2591,6 +3232,29 @@ mod tests {
             Ok(crate::RefreshAnswer::Item(item))
         }
 
+        /// The walk of clause 13's ADR-0047 half, bent as the behavior says.
+        async fn refresh_under(
+            &self,
+            _entity: &str,
+            cursor: Option<&str>,
+        ) -> Result<crate::UnderAnswer, SourceError> {
+            let items = match self.behavior {
+                Behavior::WalksUnder | Behavior::WalksUnderMovingThePosition => Vec::new(),
+                Behavior::WalksUnderFindingWhatDidNotChange => {
+                    let mut synced = super::VecSink(Vec::new());
+                    self.sync(None, &mut synced).await?;
+                    synced.0
+                }
+                _ => return Ok(crate::UnderAnswer::NotOffered),
+            };
+            let moved = (self.behavior == Behavior::WalksUnderMovingThePosition)
+                .then(|| format!("{} and on", cursor.unwrap_or_default()));
+            Ok(crate::UnderAnswer::Walked {
+                items,
+                cursor: moved,
+            })
+        }
+
         async fn write(&self, op: WriteOp) -> Result<crate::WriteReceipt, SourceError> {
             if self.behavior == Behavior::DeclaresAWriteOp
                 && self
@@ -2610,6 +3274,59 @@ mod tests {
                     && matches!(op, WriteOp::SourceAction { .. })
             {
                 return Ok(crate::WriteReceipt::none());
+            }
+            if let WriteOp::EditTicket {
+                title,
+                assignee,
+                priority,
+                labels,
+                fields,
+                ..
+            } = &op
+                && matches!(
+                    self.behavior,
+                    Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely
+                )
+            {
+                if crate::edit_is_empty(
+                    title.as_ref(),
+                    assignee.as_ref(),
+                    priority.as_ref(),
+                    labels.as_ref(),
+                    fields,
+                ) {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAnEmptyEdit {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    return Err(SourceError::protocol("nothing to edit on test:1"));
+                }
+                if let Some(id) = fields.keys().next() {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAnUnlistedField {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    if self.behavior == Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely {
+                        return Err(SourceError::protocol("that field cannot be set"));
+                    }
+                    return Err(SourceError::protocol(format!(
+                        "the test adapter has no field {id:?} on test:1"
+                    )));
+                }
+                if priority.is_some() {
+                    if self.behavior == Behavior::EditsTicketsAcceptingAReadOnlyField {
+                        return Ok(crate::WriteReceipt::none());
+                    }
+                    return Err(SourceError::protocol(
+                        "the priority of test:1 cannot be changed here",
+                    ));
+                }
+                unreachable!("battery must not perform an edit a conforming adapter would send");
             }
             if let WriteOp::SourceAction { id, .. } = &op
                 && self.behavior == Behavior::DeclaresASourceAction
@@ -2673,6 +3390,98 @@ mod tests {
                 })),
                 (_, Some(other)) => Err(SourceError::protocol(format!("no section {other:?}"))),
             }
+        }
+
+        async fn ticket_fields(
+            &self,
+            entity: &str,
+        ) -> Result<Option<crate::ticket::TicketFields>, SourceError> {
+            use crate::ticket::{FieldOption, TicketField, TicketFieldKind, TicketFields};
+            if entity != "test:1"
+                || !matches!(
+                    self.behavior,
+                    Behavior::AnswersFieldsWithoutEdit
+                        | Behavior::EditsTickets
+                        | Behavior::EditsTicketsAnsweringNone
+                        | Behavior::EditsTicketsWithAFaultyField
+                        | Behavior::EditsTicketsAcceptingAnEmptyEdit
+                        | Behavior::EditsTicketsAcceptingAnUnlistedField
+                        | Behavior::EditsTicketsAcceptingAReadOnlyField
+                        | Behavior::EditsTicketsWithoutOptions
+                        | Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely
+                )
+                || self.behavior == Behavior::EditsTicketsAnsweringNone
+            {
+                return Ok(None);
+            }
+            let field = |id: &str, kind: TicketFieldKind, value: serde_json::Value| TicketField {
+                id: id.into(),
+                label: id.into(),
+                kind,
+                value,
+                shown: None,
+                required: false,
+                readonly: None,
+            };
+            let title_kind = if self.behavior == Behavior::EditsTicketsWithAFaultyField {
+                TicketFieldKind::Number
+            } else {
+                TicketFieldKind::Text
+            };
+            Ok(Some(TicketFields {
+                fields: vec![
+                    field("title", title_kind, serde_json::json!("One")),
+                    field(
+                        "assignee",
+                        TicketFieldKind::Search {
+                            scope: "PAY".into(),
+                            person: true,
+                        },
+                        serde_json::Value::Null,
+                    ),
+                    TicketField {
+                        readonly: Some("Not on this ticket's edit screen.".into()),
+                        ..field(
+                            "priority",
+                            TicketFieldKind::Choice {
+                                options: vec![FieldOption {
+                                    value: "High".into(),
+                                    label: "High".into(),
+                                    hint: None,
+                                }],
+                            },
+                            serde_json::json!("High"),
+                        )
+                    },
+                    field(
+                        "labels",
+                        TicketFieldKind::Labels {
+                            scope: None,
+                            create: true,
+                        },
+                        serde_json::json!(["payments"]),
+                    ),
+                ],
+            }))
+        }
+
+        async fn field_options(
+            &self,
+            _entity: &str,
+            field: &str,
+            _typed: &str,
+        ) -> Result<Option<crate::ticket::FieldOptions>, SourceError> {
+            if field != "assignee" || self.behavior == Behavior::EditsTicketsWithoutOptions {
+                return Ok(None);
+            }
+            Ok(Some(crate::ticket::FieldOptions {
+                options: vec![crate::ticket::FieldOption {
+                    value: "mara".into(),
+                    label: "Mara Lindqvist".into(),
+                    hint: Some("mara".into()),
+                }],
+                complete: true,
+            }))
         }
 
         async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
@@ -3411,6 +4220,138 @@ mod tests {
         .await;
     }
 
+    // -- clause 15: a ticket's fields (ADR-0054) ------------------------------
+
+    /// Its `write` panics on any edit a conforming adapter would send, so
+    /// the battery accepting it is proof clause 15 sent none.
+    #[tokio::test]
+    async fn accepts_a_ticket_system_that_edits_its_tickets() {
+        run(Behavior::EditsTickets)
+            .await
+            .expect("a ticket system that declares edit_ticket and answers its fields");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_editing_adapter_that_answers_no_fields() {
+        rejects(
+            Behavior::EditsTicketsAnsweringNone,
+            "must answer ticket_fields with Some",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_fields_answered_without_the_edit() {
+        rejects(
+            Behavior::AnswersFieldsWithoutEdit,
+            "does not declare \"edit_ticket\" must answer ticket_fields with None",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_field_answer_that_breaks_the_rules() {
+        rejects(
+            Behavior::EditsTicketsWithAFaultyField,
+            "field \"title\" is of kind \"number\"",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_an_empty_edit() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAnEmptyEdit,
+            "carrying nothing",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_an_unlisted_field() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAnUnlistedField,
+            "did not list (\"contract_battery_probe\")",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_refuses_an_unlisted_field_without_naming_it() {
+        rejects(
+            Behavior::EditsTicketsRefusingAnUnlistedFieldVaguely,
+            "must be refused by name",
+        )
+        .await;
+    }
+
+    /// Clause 15 asks a live ticket for its fields and skips a deleted one,
+    /// and holds a live item of another kind to `None` (the final suite's
+    /// mutants: either filter turned around went unseen, since the fake's
+    /// one item is a live ticket).
+    #[tokio::test]
+    async fn clause_15_asks_live_tickets_and_holds_other_kinds_to_none() {
+        let item = |key: &str, kind: &str, deleted: bool| SyncItem {
+            entity: EntityRef::new("test", key),
+            kind: kind.into(),
+            title: "One".into(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload: serde_json::json!({}),
+            web_url: None,
+            deleted,
+        };
+        let check = |items: Vec<SyncItem>| async move {
+            tokio::spawn(async move {
+                let source = TestSource {
+                    fault: Fault::None,
+                    behavior: Behavior::EditsTickets,
+                };
+                crate::contract::check_ticket_fields(&source, &source.descriptor(), &items).await;
+            })
+            .await
+            .map_err(|err| {
+                let payload = err.into_panic();
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+        };
+        // A deleted ticket, which the fake has no fields for, is not asked.
+        check(vec![item("1", "ticket", false), item("9", "ticket", true)])
+            .await
+            .expect("a deleted ticket is not asked for its fields");
+        // A live page the fake answers fields for is caught.
+        let caught = check(vec![item("1", "page", false)])
+            .await
+            .expect_err("fields answered for a page are refused");
+        assert!(caught.contains("and so not a ticket"), "{caught}");
+        // A deleted one is not looked at.
+        check(vec![item("1", "page", true)])
+            .await
+            .expect("a deleted page is not asked");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_takes_a_read_only_field() {
+        rejects(
+            Behavior::EditsTicketsAcceptingAReadOnlyField,
+            "edit_ticket of \"priority\", which ticket_fields of test:1 lists read only",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_searched_field_with_no_list() {
+        rejects(
+            Behavior::EditsTicketsWithoutOptions,
+            "field \"assignee\" of test:1 is of kind \"search\"",
+        )
+        .await;
+    }
+
     // -- clause 9: the source view (#661) ------------------------------------
 
     #[tokio::test]
@@ -3552,7 +4493,7 @@ mod tests {
     async fn rejects_a_custom_role_namespaced_to_another_adapter() {
         rejects(
             Behavior::ClaimsAnotherAdaptersCustomRole,
-            r#"descriptor.roles: role "other-adapter:thing" is neither a built-in role (code-host, ticket-system, ci, wiki, monitoring) nor a custom role named "test:<name>""#,
+            r#"descriptor.roles: role "other-adapter:thing" is neither a built-in role (code-host, ticket-system, ci, wiki, monitoring, passwords) nor a custom role named "test:<name>""#,
         )
         .await;
     }
@@ -3662,6 +4603,36 @@ mod tests {
             .expect("an adapter that refreshes faithfully must pass");
     }
 
+    /// ADR-0047: a kind `refresh` does not read, walked with what stands
+    /// under it, counts as refreshed.
+    #[tokio::test]
+    async fn accepts_an_adapter_that_walks_its_items_with_what_stands_under_them() {
+        run(Behavior::WalksUnder)
+            .await
+            .expect("a walk that finds nothing on an unchanged source must pass");
+    }
+
+    /// Clause 2's rule for the walk: from the position a run just left on an
+    /// unchanged source, a walk that finds things would rewrite rows on every
+    /// press.
+    #[tokio::test]
+    async fn rejects_a_walk_that_finds_what_did_not_change() {
+        rejects(
+            Behavior::WalksUnderFindingWhatDidNotChange,
+            "a walk from the run's own position must find nothing",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_walk_that_moves_the_position_finding_nothing() {
+        rejects(
+            Behavior::WalksUnderMovingThePosition,
+            "emitted nothing but moved the position",
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn rejects_a_refresh_without_the_capability() {
         rejects(
@@ -3742,5 +4713,333 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Clause 16's fakes (ADR-0056): a password manager with two folders, three
+/// entries (one with a code key, one it may not read) and one way to break
+/// each rule.
+#[cfg(test)]
+mod password_tests {
+    use super::{KeySink, check_passwords};
+    use crate::passwords::{
+        self, CommentRules, EntryHead, EntryRecord, FieldRecord, FolderRecord, Offers,
+        OtpAlgorithm, OtpInfo, OtpKey, SecretAnswer, SecretAsk, SecretText, Write, WriteKind,
+        Written,
+    };
+    use crate::{Cursor, Sink, Source, SourceDescriptor, SourceError};
+    use knobas_spi_types::entity::EntityRef;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Pw {
+        Conforming,
+        /// Rule 1: a raw key beside the record.
+        RawKeyInPayload,
+        /// Rule 2: the code key left in a custom field's value.
+        KeyInAField,
+        /// Rule 3: a key handed over and the record saying nothing.
+        KeyWithoutOtp,
+        /// Rule 3, the other way: the record says a code and no key came.
+        OtpWithoutKey,
+        /// Rule 4: a field the record keeps hidden put in the body text.
+        HiddenFieldInBody,
+        /// Rule 5: the password not offered.
+        PasswordNotOffered,
+        /// Rule 6: a folder answers a password.
+        FolderAnswers,
+        /// Rule 7: no claim, and a secret answered all the same.
+        UnclaimedAnswers,
+        /// Rule 8: an undeclared write sent and answered.
+        UndeclaredWriteSent,
+    }
+
+    const KEY: &str = "JBSWY3DPEHPK3PXP";
+
+    struct Vault(Pw);
+
+    #[async_trait::async_trait]
+    impl Source for Vault {
+        fn descriptor(&self) -> SourceDescriptor {
+            let claimed = self.0 != Pw::UnclaimedAnswers;
+            SourceDescriptor {
+                id: "vault".into(),
+                adapter_kind: "vault".into(),
+                name: "Vault".into(),
+                capabilities: vec![],
+                adapter_version: "1".into(),
+                auth_methods: vec![],
+                accepts_account: false,
+                min_sync_interval_secs: 60,
+                write_ops: vec![],
+                entity_kinds: passwords::kind_infos(true),
+                config_schema: serde_json::json!({}),
+                payload_paths: passwords::payload_paths(),
+                roles: if claimed {
+                    vec![crate::role::RoleClaim::new(
+                        passwords::PASSWORDS,
+                        [passwords::READ_SECRET],
+                    )]
+                } else {
+                    vec![]
+                },
+                source_actions: vec![],
+                clone_from: vec![],
+                url_forms: vec![],
+                code_pages: None,
+                web_sign_in: None,
+                web_links: None,
+                by_hand_by_default: true,
+                passwords: claimed.then(|| Offers {
+                    one_time_codes: true,
+                    writes: vec![WriteKind::SetPassword],
+                    ..Offers::default()
+                }),
+            }
+        }
+
+        async fn test_connection(&self) -> Result<crate::ConnectionInfo, SourceError> {
+            Ok(crate::ConnectionInfo::default())
+        }
+
+        async fn sync(
+            &self,
+            _cursor: Option<Cursor>,
+            sink: &mut (dyn Sink + Send),
+        ) -> Result<Cursor, SourceError> {
+            let folder = FolderRecord {
+                name: "Payments".into(),
+                parent: None,
+                path: vec![],
+                comment: CommentRules::default(),
+                can_add: true,
+            };
+            sink.item(passwords::folder_item("vault", "f1", &folder))
+                .await?;
+            let head = |key: &str, title: &str| EntryHead {
+                source: "vault".into(),
+                key: key.into(),
+                title: title.into(),
+                updated_at: None,
+            };
+            let mut coded = EntryRecord {
+                username: Some("payout_svc".into()),
+                folder: Some("vault:f1".into()),
+                fields: vec![
+                    FieldRecord {
+                        name: "Port".into(),
+                        value: Some("5432".into()),
+                    },
+                    FieldRecord {
+                        name: "PIN".into(),
+                        value: None,
+                    },
+                ],
+                otp: Some(OtpInfo {
+                    format: "keepass".into(),
+                    digits: 6,
+                    period: 30,
+                    algorithm: OtpAlgorithm::Sha1,
+                }),
+                can_read: true,
+                ..EntryRecord::default()
+            };
+            if self.0 == Pw::KeyInAField {
+                coded.fields.push(FieldRecord {
+                    name: "Seed".into(),
+                    value: Some(KEY.to_lowercase()),
+                });
+            }
+            if self.0 == Pw::KeyWithoutOtp {
+                coded.otp = None;
+            }
+            let mut item = passwords::entry_item(head("e1", "payout db"), &coded);
+            if self.0 == Pw::RawKeyInPayload {
+                item.payload["CustomUserFields"] = serde_json::json!({"Port": "5432"});
+            }
+            if self.0 == Pw::HiddenFieldInBody {
+                item.body_text.push_str("\nPIN: 4711");
+            }
+            sink.item(item).await?;
+            if self.0 != Pw::OtpWithoutKey {
+                sink.otp_key(
+                    &EntityRef::new("vault", "e1"),
+                    OtpKey {
+                        secret: SecretText::new(KEY),
+                        digits: 6,
+                        period: 30,
+                        algorithm: OtpAlgorithm::Sha1,
+                    },
+                )
+                .await;
+            }
+            let plain = EntryRecord {
+                address: Some("https://wiki".into()),
+                can_read: true,
+                ..EntryRecord::default()
+            };
+            sink.item(passwords::entry_item(head("e2", "wiki admin"), &plain))
+                .await?;
+            let locked = EntryRecord {
+                can_read: false,
+                ..EntryRecord::default()
+            };
+            sink.item(passwords::entry_item(head("e3", "root"), &locked))
+                .await?;
+            Ok("tree".into())
+        }
+
+        async fn write(&self, _op: crate::WriteOp) -> Result<crate::WriteReceipt, SourceError> {
+            Err(SourceError::protocol("no queued writes"))
+        }
+
+        async fn reachable_transitions(&self, _entity: &str) -> Result<Vec<String>, SourceError> {
+            Err(SourceError::protocol("no workflow"))
+        }
+
+        async fn view(
+            &self,
+            _entity: &str,
+            _section: Option<&str>,
+        ) -> Result<Option<crate::view::SourceView>, SourceError> {
+            Ok(None)
+        }
+
+        async fn read_secret(&self, ask: &SecretAsk) -> Result<SecretAnswer, SourceError> {
+            let is_entry = ask.entity.starts_with("vault:e");
+            Ok(match self.0 {
+                Pw::UnclaimedAnswers => SecretAnswer::Value(SecretText::new("hunter2")),
+                Pw::PasswordNotOffered => SecretAnswer::NotOffered,
+                Pw::FolderAnswers => SecretAnswer::Value(SecretText::new("hunter2")),
+                _ if is_entry => SecretAnswer::Value(SecretText::new("hunter2")),
+                _ => SecretAnswer::NotOffered,
+            })
+        }
+
+        async fn passwords_write(&self, write: Write) -> Result<Written, SourceError> {
+            let declared = self
+                .descriptor()
+                .passwords
+                .is_some_and(|o| o.writes(write.kind()));
+            if declared || self.0 == Pw::UndeclaredWriteSent {
+                return Ok(Written::default());
+            }
+            Err(passwords::undeclared("vault", write.kind()))
+        }
+    }
+
+    async fn clause(behaviour: Pw) {
+        let source = Vault(behaviour);
+        let d = source.descriptor();
+        let mut sink = KeySink::default();
+        source.sync(None, &mut sink).await.unwrap();
+        check_passwords(&source, &d, &sink.items, &sink.keys).await;
+    }
+
+    /// Rule 2 looks for a key of four characters or more, in any case, and
+    /// not for a shorter one, which a title holds by chance.
+    #[test]
+    fn rule_2_looks_for_keys_of_four_characters_or_more() {
+        let key = |secret: &str| crate::passwords::OtpKey {
+            secret: SecretText::new(secret),
+            digits: 6,
+            period: 30,
+            algorithm: OtpAlgorithm::Sha1,
+        };
+        let item = |title: &str| crate::SyncItem {
+            entity: crate::EntityRef::new("vault", "e1"),
+            kind: "entry".into(),
+            title: title.into(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload: serde_json::json!({}),
+            web_url: None,
+            deleted: false,
+        };
+        let items = [item("Root ABCD login")];
+        let four = [("vault:e1".to_owned(), key("abcd"))];
+        assert_eq!(
+            crate::contract::leaked_key(&four, &items).map(|(e, _)| e),
+            Some("vault:e1")
+        );
+        let three = [("vault:e1".to_owned(), key("bcd"))];
+        assert_eq!(
+            crate::contract::leaked_key(&three, &items).map(|(e, _)| e),
+            None
+        );
+        let absent = [("vault:e1".to_owned(), key("wxyz"))];
+        assert_eq!(
+            crate::contract::leaked_key(&absent, &items).map(|(e, _)| e),
+            None
+        );
+    }
+
+    /// The key sink keeps what a run said it walked whole, beside its keys,
+    /// as `Walking` does: a test reads both off one run.
+    #[tokio::test]
+    async fn the_key_sink_keeps_the_kinds_walked_whole() {
+        let mut sink = KeySink::default();
+        crate::Sink::walked_whole(&mut sink, "entry").await;
+        crate::Sink::walked_whole(&mut sink, "folder").await;
+        assert_eq!(sink.whole, ["entry", "folder"]);
+    }
+
+    #[tokio::test]
+    async fn a_conforming_password_source_passes_clause_16() {
+        clause(Pw::Conforming).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 1")]
+    async fn rule_1_a_key_beside_the_record() {
+        clause(Pw::RawKeyInPayload).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 2")]
+    async fn rule_2_a_code_key_left_in_a_field() {
+        clause(Pw::KeyInAField).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 3")]
+    async fn rule_3_a_key_the_record_does_not_mention() {
+        clause(Pw::KeyWithoutOtp).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 3")]
+    async fn rule_3_a_code_with_no_key() {
+        clause(Pw::OtpWithoutKey).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 4")]
+    async fn rule_4_a_hidden_field_in_the_body_text() {
+        clause(Pw::HiddenFieldInBody).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 5")]
+    async fn rule_5_a_password_not_offered() {
+        clause(Pw::PasswordNotOffered).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 6")]
+    async fn rule_6_a_folder_that_answers_a_password() {
+        clause(Pw::FolderAnswers).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 7")]
+    async fn rule_7_a_source_with_no_claim_that_answers_a_secret() {
+        clause(Pw::UnclaimedAnswers).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "clause 17 rule 8")]
+    async fn rule_8_an_undeclared_write_that_was_sent() {
+        clause(Pw::UndeclaredWriteSent).await;
     }
 }

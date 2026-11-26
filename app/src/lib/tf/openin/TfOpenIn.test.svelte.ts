@@ -1,7 +1,8 @@
 /**
  * *Open in… ▾* and *Clone* (#844, #846) over the IPC mirror: the menu, its
  * keys and what it runs; the clone's progress, *Stop*, done and failed, as
- * `clone:progress` reports them; and the dialogs.
+ * `clone:progress` reports them; *Browser*, and the links to the application
+ * page (which `TfAppPage.test.svelte.ts` drives).
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -14,6 +15,7 @@ import type {
   CloneEvent,
   OpenAt,
 } from "../../ipc/entity";
+import { acks } from "../../shell/ack.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps, type Apps } from "./apps.svelte";
@@ -51,12 +53,21 @@ let app: ReturnType<typeof mount> | null = null;
 let stored: CheckoutSettings;
 const calls = {
   open: [] as [string, OpenAt][],
+  folder: [] as [string, string, string][],
   saved: [] as [CheckoutApplicationDraft[], string | null][],
   clone: [] as [string, boolean | undefined][],
   roots: [] as string[],
 };
 let emit: (event: CloneEvent) => void = () => {};
 let cloneAnswer: CloneAnswer = { status: "cloning", path: "/Users/mara/code/payout-service" };
+/** Where the store's own read of the checkout finds the clone after it ends. */
+let checkedOut: string | null = "/Users/mara/code/payout-service";
+const PAGE = "https://git.tidewater.example/tidewater/payout-service";
+let browsed: string[] = [];
+let browse: (url: string) => Promise<void> = (url) => {
+  browsed.push(url);
+  return Promise.resolve();
+};
 let apps: Apps;
 let clones: Clones;
 
@@ -64,7 +75,13 @@ beforeEach(() => {
   stored = settings();
   for (const list of Object.values(calls)) list.length = 0;
   toasts.items = [];
+  browsed = [];
+  browse = (url) => {
+    browsed.push(url);
+    return Promise.resolve();
+  };
   cloneAnswer = { status: "cloning", path: "/Users/mara/code/payout-service" };
+  checkedOut = "/Users/mara/code/payout-service";
   apps = createApps({
     checkoutSettings: () => Promise.resolve(stored),
     setCheckoutApplications: (drafts, defaultApplication) => {
@@ -80,6 +97,10 @@ beforeEach(() => {
       calls.open.push([entityId, at]);
       return Promise.resolve(["code", "/Users/mara/code/payout-service"]);
     },
+    openFolder: (entityId, application, folder) => {
+      calls.folder.push([entityId, application, folder]);
+      return Promise.resolve(["open", "-a", "Terminal", `/Users/mara/code/payout-service/${folder}`]);
+    },
   });
   clones = createClones(
     {
@@ -87,7 +108,7 @@ beforeEach(() => {
         calls.clone.push([entityId, stop]);
         return Promise.resolve(stop ? { status: "stopped", path: "/Users/mara/code/payout-service", removed: true } : cloneAnswer);
       },
-      entityCheckout: () => Promise.resolve(view("/Users/mara/code/payout-service")),
+      entityCheckout: () => Promise.resolve(view(checkedOut)),
       listen: (_event, handler) => {
         emit = (payload) => handler({ payload });
         return Promise.resolve(() => {});
@@ -117,7 +138,7 @@ async function settle() {
 const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const layers = createLayers();
 
-async function draw(checkout: CheckoutView, file: string | null = null) {
+async function draw(checkout: CheckoutView, file: string | null = null, page?: string | null) {
   app = mount(TfOpenIn, {
     target,
     props: {
@@ -125,6 +146,9 @@ async function draw(checkout: CheckoutView, file: string | null = null) {
       title: "tidewater/payout-service",
       checkout,
       file,
+      ...(page !== undefined ? { page } : {}),
+      readPage: () => Promise.resolve(PAGE),
+      browse: (url: string) => browse(url),
       apps,
       clones,
       layers,
@@ -143,21 +167,27 @@ function button(name: string, root: ParentNode = document): HTMLButtonElement {
   return found;
 }
 
-const items = () => [...target.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
+const items = () => [...document.querySelectorAll<HTMLElement>("[role='menuitem']")];
 
 // -- Open in… (#844, R-8.22) -------------------------------------------------
 
-test("the whole button opens the menu: the default first, marked and focused, then Add and Manage", async () => {
+test("the whole button opens the menu: the default first, marked and focused, then Browser, then Add and Manage", async () => {
   await draw(view("/Users/mara/code/payout-service"));
   const face = target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!;
-  expect(text(face)).toBe("Open in… ▾");
+  expect(text(face)).toBe("Open in…");
   face.click();
   await settle();
   expect(items().map(text)).toEqual([
     "VS Code (default)code /Users/mara/code/payout-service",
     "Terminalopen -a Terminal /Users/mara/code/payout-service",
-    "Add an application…",
-    "Manage applications…",
+    `Browser${PAGE}`,
+    "Add an application",
+    "Manage applications",
+  ]);
+  // The two links go to Settings: the application page with this repository to try it on, and the list.
+  expect(items().slice(3).map((item) => item.getAttribute("href"))).toEqual([
+    "#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service",
+    "#/settings/checkouts",
   ]);
   expect(document.activeElement).toBe(items()[0]);
   expect(layers.open).toHaveLength(1);
@@ -168,7 +198,7 @@ test("the whole button opens the menu: the default first, marked and focused, th
   expect(document.activeElement).toBe(items()[1]);
   menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
   menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-  expect(document.activeElement).toBe(items()[3]);
+  expect(document.activeElement).toBe(items()[4]);
   menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   flushSync();
   expect(target.querySelector("[role='menu']")).toBeNull();
@@ -176,15 +206,33 @@ test("the whole button opens the menu: the default first, marked and focused, th
   expect(layers.open).toHaveLength(0);
 });
 
-test("choosing an application runs it at the checkout and says what it started", async () => {
+test("choosing an application runs it at the checkout, and a chip says it is opening: no toast, no command line (ux21)", async () => {
   await draw(view("/Users/mara/code/payout-service"));
   target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
   items()[0]!.click();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode", file: null, line: null }]]);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started VS Code: code /Users/mara/code/payout-service");
+  expect(acks.item?.text).toBe("Opening in VS Code");
+  expect(toasts.items).toEqual([]);
   expect(target.querySelector("[role='menu']")).toBeNull();
+});
+
+test("an application that doesn't start takes the chip away and says why in a toast", async () => {
+  apps = createApps({
+    checkoutSettings: () => Promise.resolve(stored),
+    setCheckoutApplications: () => Promise.resolve(stored),
+    openCheckout: () => Promise.reject({ code: "invalid", message: "'code {path}' could not be run: No such file or directory (os error 2)", source_id: null }),
+  });
+  await draw(view("/Users/mara/code/payout-service"));
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  items()[0]!.click();
+  await settle();
+  expect(acks.item).toBeNull();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([
+    ["Could not start VS Code: 'code {path}' could not be run: No such file or directory (os error 2)", "err"],
+  ]);
 });
 
 test("at a file, the menu shows and runs the file command", async () => {
@@ -195,6 +243,31 @@ test("at a file, the menu shows and runs the file command", async () => {
   items()[0]!.click();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode", file: "src/sepa/retry.rs", line: null }]]);
+  expect(acks.item?.text).toBe("Opening retry.rs in VS Code");
+});
+
+test("at a file, an application with no file command opens the file's folder, and says so on its line (2026-11-16)", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs");
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  expect(text(items()[1])).toBe("Terminalopen -a Terminal /Users/mara/code/payout-service/src/sepa");
+  items()[1]!.click();
+  await settle();
+  expect(calls.folder).toEqual([[REPO, "terminal", "src/sepa"]]);
+  expect(calls.open).toEqual([]);
+  expect(acks.item?.text).toBe("Opening sepa in Terminal");
+  expect(toasts.items).toEqual([]);
+});
+
+test("at a file at the checkout's top, an application with no file command opens the checkout", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "README.md");
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  expect(text(items()[1])).toBe("Terminalopen -a Terminal /Users/mara/code/payout-service");
+  items()[1]!.click();
+  await settle();
+  expect(calls.open).toEqual([[REPO, { application: "terminal" }]]);
+  expect(calls.folder).toEqual([]);
 });
 
 test("nothing is drawn before the checkout is read", async () => {
@@ -239,6 +312,46 @@ test("a finished clone says where and on which branch, offers the default applic
   toast.action!.run();
   await settle();
   expect(calls.open).toEqual([[REPO, { application: "vscode" }]]);
+});
+
+test("a finished clone reads Open in… from its end on, not Clone again while the page reads its checkout (ux20 Windows pass)", async () => {
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "progress", phase: "Receiving objects", percent: 100 });
+  flushSync();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  flushSync();
+  const faces = () => [...target.querySelectorAll("button")].map(text);
+  expect(faces()).toContain("Open in…");
+  expect(faces()).not.toContain("Clone");
+  expect(button("Open in…", target).title).toBe("Open /Users/mara/code/payout-service in an application");
+  await settle();
+  expect(faces()).toContain("Open in…");
+  expect(clones.marks[REPO]).toEqual({ kind: "cloned", path: "/Users/mara/code/payout-service" });
+});
+
+test("the page's checkout naming the folder drops the clone's mark", async () => {
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  await settle();
+  unmount(app!);
+  await draw(view("/Users/mara/code/payout-service"));
+  expect(clones.marks[REPO]).toBeUndefined();
+  expect(button("Open in…", target)).toBeTruthy();
+});
+
+test("a clone that ends with no folder the checkout names says Clone again", async () => {
+  checkedOut = null;
+  await draw(view(null));
+  button("Clone", target).click();
+  await settle();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "done" });
+  await settle();
+  expect(clones.marks[REPO]).toBeUndefined();
+  expect(button("Clone", target)).toBeTruthy();
 });
 
 test("a failed clone is said in place with what to do, and Try again starts it again", async () => {
@@ -348,171 +461,48 @@ test("with no root, Cancel in the root dialog starts nothing (#1442)", async () 
   expect(calls.roots).toEqual([]);
 });
 
-// -- Add an application, Manage applications (#844, R-8.23) -------------------
+// -- Browser (Björn, 2026-11-13: *Open on Gitea* took the app's window to Gitea) --
 
-function type(field: HTMLInputElement, value: string) {
-  field.value = value;
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-}
-
-async function openDialog(which: "Add an application…" | "Manage applications…") {
-  await draw(view("/Users/mara/My Code/payout-service"));
+test("at a file, Browser opens the file's page in the browser and the window stays where it is", async () => {
+  const at = location.href;
+  await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs", `${PAGE}/src/branch/main/src/sepa/retry.rs`);
   target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
-  items().find((item) => text(item) === which)!.click();
+  const entry = items().find((item) => text(item).startsWith("Browser"))!;
+  expect(entry.tagName).toBe("BUTTON");
+  expect(items().map((item) => item.getAttribute("href")).at(-2)).toBe("#/settings/checkouts/add/gitea%3Atidewater%2Fpayout-service/file/src%2Fsepa%2Fretry.rs");
+  entry.click();
   await settle();
-  return document.querySelector<HTMLElement>("[role='dialog']")!;
-}
-
-test("Add an application: placeholders insert, the preview fills this checkout, the warnings speak, and it saves", async () => {
-  const dialog = await openDialog("Add an application…");
-  expect(text(dialog.querySelector("h2"))).toBe("Add an application");
-  const add = button("Add application", dialog);
-  expect(add.disabled).toBe(true);
-
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
-  const command = dialog.querySelector<HTMLInputElement>("#tf-app-command")!;
-  type(command, "MyGitViewer");
-  expect([...dialog.querySelectorAll("[role='status']")].map(text)).toEqual([
-    "The command has no {path}, so the program won’t know which repository to open.",
-  ]);
-  command.focus();
-  button("{path} the checkout folder", dialog).click();
-  await settle();
-  expect(command.value).toBe("MyGitViewer {path}");
-  // A path with a space is quoted for the reader, as the backend keeps it one argument.
-  expect(text(dialog.querySelector("pre"))).toBe("MyGitViewer '/Users/mara/My Code/payout-service'");
-  expect(dialog.querySelectorAll("[role='status']")).toHaveLength(0);
-
-  type(command, "MyGitViewer {path} | tee log");
-  expect(text(dialog.querySelector("[role='status']"))).toContain("passed through as plain text");
-  type(command, "MyGitViewer {path}");
-
-  // *Try it* saves the draft, then opens it by the id the save gave it: the
-  // program is always a saved template (#1643, ADR-0016).
-  button("Try it on payout-service", dialog).click();
-  await settle();
-  expect(calls.saved).toHaveLength(1);
-  expect(calls.saved[0]![0].map((draft) => [draft.id, draft.name, draft.command])).toEqual([
-    ["terminal", "Terminal", "open -a Terminal {path}"],
-    ["vscode", "VS Code", "code {path}"],
-    [null, "MyGitViewer", "MyGitViewer {path}"],
-  ]);
-  expect(calls.open.at(-1)).toEqual([REPO, { application: "mygitviewer" }]);
-  expect(document.querySelector("[role='dialog']")).not.toBeNull();
-
-  // Adding it then writes over the entry the try saved, not a second one.
-  button("Add application", dialog).click();
-  await settle();
-  expect(calls.saved).toHaveLength(2);
-  const [drafts, defaultApplication] = calls.saved[1]!;
-  expect(drafts.map((draft) => [draft.id, draft.name, draft.command])).toEqual([
-    ["terminal", "Terminal", "open -a Terminal {path}"],
-    ["vscode", "VS Code", "code {path}"],
-    ["mygitviewer", "MyGitViewer", "MyGitViewer {path}"],
-  ]);
-  expect(defaultApplication).toBe("vscode");
-  expect(toasts.items.map((toast) => toast.text)).toContain("Added MyGitViewer. It is in every Open in… menu.");
-  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(browsed).toEqual([`${PAGE}/src/branch/main/src/sepa/retry.rs`]);
+  expect(location.href).toBe(at);
+  expect(document.querySelector("[role='menu']")).toBeNull();
 });
 
-test("Try it needs a name, and a dialog closed after a try puts the list back as it was (#1643)", async () => {
-  const dialog = await openDialog("Add an application…");
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer {path}");
-  const tryIt = button("Try it on payout-service", dialog);
-  expect(tryIt.disabled).toBe(true);
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
-  expect(tryIt.disabled).toBe(false);
-
-  tryIt.click();
+test("a file with no page of its own offers no Browser: the repository's would be the wrong page", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs", null);
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer --new {path}");
-  tryIt.click();
-  await settle();
-  expect(calls.saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
-    ["terminal", "vscode", null],
-    ["terminal", "vscode", "mygitviewer"],
-  ]);
-  expect(calls.saved[1]![0][2]!.command).toBe("MyGitViewer --new {path}");
-  expect(calls.open.map(([, at]) => at)).toEqual([{ application: "mygitviewer" }, { application: "mygitviewer" }]);
-
-  button("Cancel", dialog).click();
-  await settle();
-  expect(document.querySelector("[role='dialog']")).toBeNull();
-  expect(calls.saved).toHaveLength(3);
-  const [restored, defaultApplication] = calls.saved[2]!;
-  expect(restored.map((draft) => [draft.id, draft.command])).toEqual([
-    ["terminal", "open -a Terminal {path}"],
-    ["vscode", "code {path}"],
-  ]);
-  expect(defaultApplication).toBe("vscode");
+  expect(items().some((item) => text(item).startsWith("Browser"))).toBe(false);
 });
 
-test("a dialog closed while a try is saving puts the list back after it and starts nothing (#1643)", async () => {
-  const dialog = await openDialog("Add an application…");
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
-  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer {path}");
-  button("Try it on payout-service", dialog).click();
-  button("Cancel", dialog).click();
+test("a browser that refuses says so in a toast", async () => {
+  browse = () => Promise.reject(new Error("refused: ftp: is not http or https"));
+  await draw(view("/Users/mara/code/payout-service"));
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
-  expect(calls.saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
-    ["terminal", "vscode", null],
-    ["terminal", "vscode"],
-  ]);
-  expect(calls.open).toEqual([]);
+  items().find((item) => text(item).startsWith("Browser"))!.click();
+  await settle();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toContainEqual(["Could not open the browser: refused: ftp: is not http or https", "err"]);
+  expect(acks.item).toBeNull();
 });
 
-test("Try it on an application being edited saves the edit over it and opens it by its id", async () => {
-  const dialog = await openDialog("Manage applications…");
-  [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Edit…")!.click();
+test("Browser hands the page over, and a chip says so (ux21)", async () => {
+  await draw(view("/Users/mara/code/payout-service"));
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   await settle();
-  const editor = document.querySelector<HTMLElement>("[role='dialog']")!;
-  expect(text(editor.querySelector("h2"))).toBe("Edit an application");
-  type(editor.querySelector<HTMLInputElement>("#tf-app-command")!, "open -a iTerm {path}");
-  button("Try it on payout-service", editor).click();
+  items().find((item) => text(item).startsWith("Browser"))!.click();
   await settle();
-  expect(calls.saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
-    ["terminal", "open -a iTerm {path}"],
-    ["vscode", "code {path}"],
-  ]);
-  expect(calls.open.at(-1)).toEqual([REPO, { application: "terminal" }]);
-});
-
-test("Manage applications: the radio picks the default, ↑ moves one up, Edit… opens it with Remove", async () => {
-  const dialog = await openDialog("Manage applications…");
-  expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in…");
-  // #2289: the extra action on the far left, then the primary.
-  expect([...dialog.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b), b.className])).toEqual([
-    ["Add an application…", "tf-btn tf-first"],
-    ["Done", "tf-btn tf-primary"],
-  ]);
-  const radios = [...dialog.querySelectorAll<HTMLInputElement>("input[type='radio']")];
-  expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
-  radios[0]!.click();
-  await settle();
-  expect(calls.saved.at(-1)![1]).toBe("terminal");
-
-  const ups = [...document.querySelectorAll<HTMLButtonElement>("[role='dialog'] button[aria-label='Move up']")];
-  expect(ups[0]!.disabled).toBe(true);
-  ups[1]!.click();
-  await settle();
-  expect(calls.saved.at(-1)![0].map((draft) => draft.id)).toEqual(["vscode", "terminal"]);
-
-  [...document.querySelectorAll<HTMLButtonElement>("[role='dialog'] button")].find((b) => text(b) === "Edit…")!.click();
-  await settle();
-  const edit = document.querySelector<HTMLElement>("[role='dialog']")!;
-  expect(text(edit.querySelector("h2"))).toBe("Edit an application");
-  expect(edit.querySelector<HTMLInputElement>("#tf-app-name")!.value).toBe("VS Code");
-  // #2289: the extra actions on the far left, *Remove* drawn as a destructive start; then ghost Cancel, then the primary.
-  expect([...edit.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b).replace(/ on .*/, " on …"), b.className])).toEqual([
-    ["Remove", "tf-btn tf-ghost tf-danger"],
-    ["Try it on …", "tf-btn tf-first"],
-    ["Cancel", "tf-btn tf-ghost"],
-    ["Save", "tf-btn tf-primary"],
-  ]);
-  button("Remove", edit).click();
-  await settle();
-  expect(calls.saved.at(-1)![0].map((draft) => draft.id)).toEqual(["terminal"]);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Removed the application");
+  expect(browsed).toEqual([PAGE]);
+  expect(acks.item?.text).toBe("Opening in the browser");
+  expect(toasts.items).toEqual([]);
 });

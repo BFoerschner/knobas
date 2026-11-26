@@ -276,17 +276,21 @@ pub(super) struct CommitLine<'a> {
 }
 
 impl<'a> From<&'a Commit> for CommitLine<'a> {
-    /// The author git recorded, or the Gitea account where git named none.
+    /// The profile's name of the Gitea account Gitea matched the commit to,
+    /// so a commit names its author as the pull request does (F-107); else
+    /// the author git recorded, else the account's login.
     fn from(c: &'a Commit) -> Self {
         let inner = c.commit.as_ref();
         let git_author = inner
             .and_then(|i| i.author.as_ref())
             .and_then(|a| a.name.as_deref());
+        let account = c.author.as_ref();
         Self {
             sha: &c.sha,
             message: inner.and_then(|i| i.message.as_deref()),
-            author: non_blank(git_author)
-                .or_else(|| non_blank(c.author.as_ref().and_then(|u| u.login.as_deref()))),
+            author: non_blank(account.and_then(|u| u.full_name.as_deref()))
+                .or_else(|| non_blank(git_author))
+                .or_else(|| non_blank(account.and_then(|u| u.login.as_deref()))),
             // Go's zero time is no time (`map::real_time`).
             when: map::real_time(c.happened_at()),
             url: c.html_url.as_deref(),

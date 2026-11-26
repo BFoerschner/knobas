@@ -110,7 +110,7 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
 }
 
 async fn listed(pool: &sqlx::PgPool, id: &str) -> Option<TicketViewRow> {
-    ticket_views::list(pool, &Registry::for_process())
+    ticket_views::list(pool, &Registry::for_process(), None)
         .await
         .expect("ticket_views")
         .into_iter()
@@ -174,6 +174,7 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
             card_fields: vec!["type".into()],
             list_columns: vec!["key".into()],
             list_sort: None,
+            show_all: false,
             saved_view: None,
         },
     )
@@ -319,6 +320,7 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
             card_fields: vec!["type".into()],
             list_columns: vec!["key".into(), "summary".into()],
             list_sort: None,
+            show_all: false,
             saved_view: None,
         },
     )
@@ -380,6 +382,7 @@ fn own_draft(name: String) -> TicketViewDraft {
         card_fields: vec!["type".into()],
         list_columns: vec!["key".into()],
         list_sort: None,
+        show_all: false,
         saved_view: None,
     }
 }
@@ -992,4 +995,124 @@ async fn a_laned_jira_views_board_reads_only_the_cards_it_draws() {
             "{by:?}: the card statement sent {sent} rows for {kept} cards drawn"
         );
     }
+}
+
+/// A page of a Jira view's board (ux18, a view that shows every ticket): a
+/// column's next cards in Jira's order past those drawn, and the list sorted
+/// on the server by a header over the view's tickets, its order in `order`.
+#[tokio::test]
+async fn a_jira_views_page_reads_a_columns_next_cards_and_a_list_sorted_here() {
+    let pool = pool().await;
+    let (p, _, view) = seeded(&pool).await;
+    let registry = knobas_app::sources::Registry::for_process();
+    let doing = knobas_core::mini_board::Page {
+        after: 1,
+        statuses: Some(vec![Some("Doing".to_owned())]),
+        ..knobas_core::mini_board::Page::default()
+    };
+    let next = knobas_app::commands::entity::saved_view_board_paged(
+        &pool,
+        &registry,
+        &view,
+        Some(1),
+        None,
+        None,
+        Some(&doing),
+        None,
+    )
+    .await
+    .unwrap();
+    let drawn: Vec<(Option<String>, Vec<String>)> = next
+        .columns
+        .iter()
+        .map(|c| {
+            (
+                c.status.clone(),
+                c.cards.iter().map(|card| card.key.clone()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        drawn,
+        [(Some("Doing".into()), vec![format!("{p}-2")])],
+        "past Jira's first, its second; no other column"
+    );
+
+    let by_key = knobas_core::mini_board::Page {
+        sort: Some("key".to_owned()),
+        direction: Some("descending".to_owned()),
+        ..knobas_core::mini_board::Page::default()
+    };
+    let sorted = knobas_app::commands::entity::saved_view_board_paged(
+        &pool,
+        &registry,
+        &view,
+        Some(2),
+        None,
+        None,
+        Some(&by_key),
+        None,
+    )
+    .await
+    .unwrap();
+    let order: Vec<String> = sorted
+        .order
+        .unwrap()
+        .into_iter()
+        .map(|id| id.trim_start_matches("jira:").to_owned())
+        .collect();
+    assert_eq!(
+        order,
+        [format!("{p}-3"), format!("{p}-2")],
+        "the tickets the view's columns draw, highest key first, two"
+    );
+}
+
+/// *Show every ticket when the view opens* (ux18) is the reader's on a Jira
+/// view too: View settings stores it, and the next sync's projection of the
+/// view, which writes its name, group and columns, leaves it as it was.
+#[tokio::test]
+async fn a_jira_views_show_every_ticket_is_kept_through_its_settings_and_the_next_sync() {
+    let pool = pool().await;
+    let (_, id, _) = seeded(&pool).await;
+    let stored = listed(&pool, &id).await.unwrap().view;
+    assert!(!stored.show_all, "off until somebody turns it on");
+    let saved = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            id: Some(id.clone()),
+            name: stored.name.clone(),
+            group: stored.group.clone(),
+            position: None,
+            query: stored.query.clone(),
+            layout: stored.layout.clone(),
+            columns: stored.columns.clone(),
+            lanes: stored.lanes.clone(),
+            card_fields: stored.card_fields.clone(),
+            // What the editor sends for a row the sync made with none (`listColumnsOf`).
+            list_columns: vec!["key".into(), "summary".into()],
+            list_sort: None,
+            show_all: true,
+            saved_view: None,
+        },
+    )
+    .await
+    .expect("view settings save");
+    assert!(saved.show_all);
+    // The row's name gone stale, then synced: the sync writes the row again, and the setting stays.
+    sqlx::query("update knobas.ticket_view set name = 'stale' where id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let declared = knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+        .expect("Jira declares saved views");
+    knobas_sync::saved_views::project(&mut tx, "jira", &declared)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let after = listed(&pool, &id).await.unwrap().view;
+    assert_eq!(after.name, stored.name, "the sync wrote the row again");
+    assert!(after.show_all, "{after:?}");
 }

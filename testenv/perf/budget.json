@@ -1,0 +1,653 @@
+{
+ "_": "Lines for testenv/perf/budget.mjs, per corpus: fake (?fake-scale) and real (the saved scale database through examples/headless_ipc.rs). A list, a key or a page switch over its line fails just frame-budget. Throttle rates are the keys under each scenario. From PR #2479's smoothness pass, measured in headless Chrome on an M2 Pro; testenv/perf/README.md. The fixture's lines leave out a switch to Code: the fixture answers Code's reads with a query engine of its own that runs in the page, 400 ms of a quarter-speed main thread that the app does not spend. `long` is long.mjs's (the monitors-builds pass, 2026-11-12): Monitors shown while every source's run ends every 5 s, then kept hidden behind the Inbox. A hover is its handlers and the frame that draws it, not the wait for that frame; the 4x line is 33 ms. The real ipcP95 is a debug backend's. On the fixture the long lines hold growth and hovers only: the fixture answers each read with a query engine of its own in the page, so its main-thread time a minute and its long tasks are the fixture's work at every run's end, not the app's (on ff7b8f88, 1,763 ms a minute with a 109 ms task on the fixture against 628 and none over the saved database). The render-cost pass (2026-11-14) added Björn's standing 6x line: scrolling with no visible stall (a list at 55 frames a second or more, no task over 60 ms, as at 4x), a key painted within 200 ms and a page switch within 300; docs/decisions/2026-11-14-what-a-page-costs-to-build.md. `soak` and `soak-tour` are soak.mjs's (the hover-lag pass, 2026-11-16; the README's The soak), real only: a repository's Code page browsed for ten minutes or more, and every other page visited a few times. Growth is what the page keeps after a collection, the median of the last third of the collected laps less that of the first; the tour's is a page's last visit against the larger of its second and third, and its nodes and heap are not held, since what it presses (a column's Show 50 more, a diff's Expand all) is kept by design; `syncCalls` is the IPC calls a run's end asks and `syncCallsGrowth` how many more the last asked than the second (with every folder read again: 113 calls after ten minutes, 305 after thirty); `afterSync` and `afterReturn` are a hover, mouse move to frame, with the pointer kept moving through a run's end and a return at the slowest throttle (1,580 and 2,180 ms after thirty minutes before the pass, 27 and 170 after); a return's includes the return's own first frame. A hover's felt lines are Björn's targets, 100, 100 and 200 ms at 1x, 4x and 6x (300 for a return, a page's line at 6x), not what a quiet Mac measures (18, 21 and 23 ms at rest, 27 through a run's end, 170 through a return): the frame's own wait is in them, and a machine at a load of 40 from other sessions read 66 ms at 1x for a hover whose main-thread share was 4.9. The cost lines hold that share, and the calls hold the fault itself whatever the load. docs/decisions/2026-11-16-a-refresh-reads-what-can-have-changed.md. `drag` is run.mjs's drag kind (the sidebar-resize pass, 2026-11-16; docs/decisions/2026-11-16-every-sidebar-drags.md): a sidebar's edge held and moved 239 times a second for 2.4 s. At 1x no drag may trip the ghost (`side-pace.ts`) and its worst frame gap is a frame's; at 4x and 6x the drag holds 55 fps, from the trip on where it tripped, with no gap over 60 ms there. The two frames that trip it and the frame that lands the width on release are not the drag's (Fable's ruling). The list-scroll pass (2026-11-17) held Tickets' list at 200 elements a style pass at every throttle: a sibling rule beside a compound that names nothing had made each row a scroll drew restyle the whole tbody, 439 to 690 elements a pass, and added the laned board's scroll (`tickets-laned`) at the board's lines; docs/decisions/2026-11-17-a-row-a-list-draws-restyles-that-row.md.",
+ "real": {
+  "scroll": {
+   "tickets-board": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "tickets-laned": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "tickets-list": {
+    "1": {
+     "fps": 58,
+     "styleElements": 200
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60,
+     "styleElements": 200
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60,
+     "styleElements": 200
+    }
+   },
+   "inbox": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-prs": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-repos": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "docs-space": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "docs-page": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "builds-main": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "builds-pipeline-list": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "pipeline-history": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "monitors": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700,
+     "workP50": 7,
+     "workP99": 10
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "assets-column": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   }
+  },
+  "wheel": {
+   "tickets-list": {
+    "4": {
+     "longestTask": 50
+    }
+   }
+  },
+  "type": {
+   "tickets-board-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "tickets-board-expanded-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "tickets-list-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "code-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "monitors-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "assets-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   }
+  },
+  "nav": {
+   "#/tickets": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/inbox": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/code": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/builds": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/docs": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/monitors": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/time": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/page/live-confluence%3A362334": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/docs/space/SCLENG": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/settings": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/assets": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   }
+  },
+  "long": {
+   "shown": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "hover1xP95": 16.7,
+    "hover4xP95": 33,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 1500
+   },
+   "hidden": {
+    "taskMsPerMin": 1500,
+    "longestTask": 50,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5,
+    "ipcP95": 1500
+   }
+  },
+  "soak": {
+   "nodesGrowth": 8000,
+   "listenersGrowth": 400,
+   "tauriListenersGrowth": 8,
+   "heapGrowthMB": 12,
+   "idleMsPerMin": 300,
+   "syncCalls": 45,
+   "syncCallsGrowth": 12,
+   "syncMainMs": 1500,
+   "afterSyncFeltP95": 200,
+   "afterSyncFeltMax": 300,
+   "afterReturnFeltP95": 300,
+   "afterReturnFeltMax": 450,
+   "hover1xFeltP95": 100,
+   "hover1xCostP95": 8,
+   "hover4xFeltP95": 100,
+   "hover4xCostP95": 16,
+   "hover6xFeltP95": 200,
+   "hover6xCostP95": 24,
+   "hoverStyleElementsMax": 12
+  },
+  "soak-tour": {
+   "tauriListenersGrowth": 8,
+   "tourCallsGrowth": 8,
+   "tourMainMsGrowth": 1200,
+   "tourFeltP95": 200,
+   "tourFeltMax": 300
+  },
+  "drag": {
+   "drag-code-tree": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-pr": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-docs-tree": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-docs-outline": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-builds": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-pipeline": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-tickets": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   },
+   "drag-settings": {
+    "1": {
+     "fps": 58,
+     "maxGapMs": 20,
+     "trips": 0
+    },
+    "4": {
+     "fps": 55,
+     "maxGapMs": 60
+    },
+    "6": {
+     "fps": 55,
+     "maxGapMs": 60
+    }
+   }
+  }
+ },
+ "fake": {
+  "scroll": {
+   "tickets-list": {
+    "1": {
+     "fps": 58,
+     "styleElements": 200
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60,
+     "styleElements": 200
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60,
+     "styleElements": 200
+    }
+   },
+   "inbox": {
+    "1": {
+     "fps": 58
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-prs": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "code-repos": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   },
+   "monitors": {
+    "1": {
+     "fps": 58,
+     "styleElements": 700,
+     "workP50": 7,
+     "workP99": 10
+    },
+    "4": {
+     "fps": 55,
+     "longestTask": 60
+    },
+    "6": {
+     "fps": 55,
+     "longestTask": 60
+    }
+   }
+  },
+  "type": {
+   "code-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   },
+   "monitors-filter": {
+    "4": {
+     "maxKeyMs": 100
+    },
+    "6": {
+     "maxKeyMs": 200
+    }
+   }
+  },
+  "nav": {
+   "#/inbox": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/docs": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/monitors": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   },
+   "#/settings": {
+    "4": {
+     "switchMs": 200
+    },
+    "6": {
+     "switchMs": 300
+    }
+   }
+  },
+  "long": {
+   "shown": {
+    "hover1xP95": 16.7,
+    "hover4xP95": 33,
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5
+   },
+   "hidden": {
+    "nodesGrowth": 200,
+    "listenersGrowth": 100,
+    "heapGrowthMB": 5
+   }
+  }
+ }
+}

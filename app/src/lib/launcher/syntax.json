@@ -2,7 +2,7 @@
   {
     "token": ">",
     "insert": ">",
-    "summary": "actions — where the app can take you",
+    "summary": "go to — where the app can take you",
     "word": "go to",
     "probe": ">",
     "prefix": "action",
@@ -129,6 +129,51 @@
     "probe": "?",
     "prefix": "help",
     "expect": "recognised"
+  },
+  {
+    "token": "'word",
+    "insert": "'",
+    "summary": "names that hold the word in one piece, not its letters spread out",
+    "probe": "'proxy",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "^word",
+    "insert": "^",
+    "summary": "names that start with it — ^acme",
+    "probe": "^acme",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "word$",
+    "insert": "$",
+    "summary": "names that end with it — proxy$",
+    "probe": "proxy$",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "!word",
+    "insert": "!",
+    "summary": "leaves out names that hold it, the same as -word",
+    "probe": "acme !proxy",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
+  },
+  {
+    "token": "pay 123",
+    "insert": "",
+    "summary": "a ticket key with a space or none — pay 123, pay123 find PAY-123",
+    "probe": "pay 123",
+    "prefix": null,
+    "expect": "recognised",
+    "words": true
   },
   {
     "token": "kind:",

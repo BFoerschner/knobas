@@ -17,6 +17,7 @@
     refresh,
     reread,
     sync,
+    noun,
   }: {
     detail: RefreshSubject | null;
     refresh: DetailRefresh;
@@ -24,8 +25,10 @@
     reread: () => Promise<void> | void;
     /** The view's *Sync now*. */
     sync?: Snippet | undefined;
+    /** What *Refresh* reads, named beside the view's *Sync now*, whose name is otherwise too near: *Refresh run*. */
+    noun?: string | undefined;
   } = $props();
 </script>
 
-{#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
+{#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page noun={sync === undefined ? undefined : noun} />{/if}
 {#if detail === null || refresh.offer(detail) !== "sync"}{@render sync?.()}{/if}

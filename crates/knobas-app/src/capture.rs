@@ -457,6 +457,28 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         Some(bundle) => builder.on_web_resource_request(bundle.answer_missing_with_404()),
         None => builder,
     };
+    // The bare window in the page colour the main window keeps (ADR-0055), or knobas's own before a look is kept, so
+    // it does not flash the system's white; on macOS its web view draws no white of its own either, and there a
+    // profile with no kept look keeps the system's window colour, as the main window does.
+    #[cfg(target_os = "macos")]
+    let builder = crate::window_look::without_white(builder);
+    let look = app
+        .try_state::<crate::Profile>()
+        .and_then(|profile| crate::window_look::read(&profile.dir))
+        .or_else(|| {
+            cfg!(not(target_os = "macos")).then(crate::window_look::WindowLook::knobas_own)
+        });
+    let builder = match &look {
+        Some(look) => {
+            // The main window exists, so its side is the system's where the look follows it.
+            let system_dark = app
+                .get_webview_window("main")
+                .is_some_and(|main| matches!(main.theme(), Ok(tauri::Theme::Dark)));
+            let start = crate::bundle::look_for_window(look, Some(system_dark));
+            builder.theme(start.theme).background_color(start.colour)
+        }
+        None => builder,
+    };
     let built = builder
         .title("Capture")
         .inner_size(560.0, 260.0)
@@ -471,8 +493,10 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
         .center()
         .focused(true)
         .build();
-    if let Err(failure) = built {
-        tracing::error!(%failure, "the capture window would not open");
+    match built {
+        // WebView2's own menu trimmed here as in the main window (`webview_menu.rs`).
+        Ok(window) => crate::webview_menu::trim(&window),
+        Err(failure) => tracing::error!(%failure, "the capture window would not open"),
     }
 }
 

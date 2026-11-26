@@ -11,6 +11,12 @@ test-util = []
 
 [dependencies]
 chrono.workspace = true
+# A file that is not UTF-8 read as Windows-1252 (`code_text::decode`, the
+# everything-search decisions, D4); already in the tree through gix.
+encoding_rs = "0.8"
+# `read_scoped` reads the cards and the sources' statuses side by side
+# (`future::try_join`, the scale pass of 2026-11-10).
+futures-util.workspace = true
 # The SPI's shared types, re-exported as `payload`, `entity` and `tone`
 # (#1234). `sqlx` turns on `Declarations::as_param`, the bind every
 # path-driven statement here shares.
@@ -23,6 +29,9 @@ serde_json.workspace = true
 ts-rs.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# The fills' pause before passing again over what a running sync held
+# (`src/fill.rs`, migration `0091`); already in the tree through sqlx.
+tokio.workspace = true
 tracing = "0.1"
 uuid.workspace = true
 
@@ -33,4 +42,3 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # The clones-root scan walks a real directory tree; `src/checkout.rs` itself
 # touches no test-only dependency.
 tempfile = "3"
-tokio.workspace = true

@@ -109,11 +109,7 @@ impl Step<'_> {
                 number,
                 protocols,
             } => {
-                let mut args: Vec<OsString> = vec!["-c".into(), "protocol.allow=never".into()];
-                for protocol in protocols {
-                    args.push("-c".into());
-                    args.push(format!("protocol.{protocol}.allow=always").into());
-                }
+                let mut args = super::clone::protocol_args(url, protocols);
                 args.extend(os(&["-c", "submodule.recurse=false", "-C"]));
                 args.push(worktree.as_os_str().to_owned());
                 args.extend(os(&[

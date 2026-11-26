@@ -80,6 +80,11 @@ pub struct Vocabulary {
     /// `knobas.source_config`, because this is the one query on the hot path
     /// that already holds every source's id and adapter kind.
     pub declarations: Declarations,
+    /// The projects the mirror's tickets are numbered under, for reading
+    /// `pay 123` as the key `PAY-123` ([`crate::typed_key`]). Empty from
+    /// [`Self::load`]: a searcher with a picker fills it from the names the
+    /// picker holds, so it costs no read. Empty, no key is read.
+    pub projects: crate::typed_key::Projects,
 }
 
 /// Built-in source aliases (spec §4), mapping an alias to an **adapter kind**
@@ -207,6 +212,7 @@ impl Vocabulary {
             identity,
             kinds,
             declarations: Declarations::empty(),
+            projects: crate::typed_key::Projects::default(),
         })
     }
 
@@ -330,6 +336,7 @@ impl Vocabulary {
             identity: vec!["mara.lindqvist".to_owned()],
             kinds: KindCatalog::from_kinds(["ticket", "pr", "build", "page", "commit"]),
             declarations: Declarations::empty(),
+            projects: crate::typed_key::Projects::default(),
         }
     }
 }
@@ -531,6 +538,7 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
                     monogram: owned.monogram.to_owned(),
                     full_sync_exhaustive: false,
                     refreshes: true,
+                    title_stays_in_mirror: false,
                 },
             )
         })
@@ -563,6 +571,7 @@ fn launcher_kind(kind: &str) -> Option<KindInfo> {
             monogram: (*monogram).to_owned(),
             full_sync_exhaustive: false,
             refreshes: true,
+            title_stays_in_mirror: false,
         })
 }
 
@@ -582,6 +591,7 @@ fn derive_kind_info(kind: &str) -> KindInfo {
         // descriptor the adapter returned.
         full_sync_exhaustive: false,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -685,6 +695,7 @@ mod tests {
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
         assert_eq!(catalog.info("ticket").monogram, "JI");
         assert_eq!(catalog.declared_kinds(), ["ticket"]);
@@ -727,6 +738,7 @@ mod tests {
             monogram: "JI".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
 
         // `route` joined `asset` and `note` with M4.0's routes (#432).
@@ -789,6 +801,7 @@ mod tests {
             monogram: "ST".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }])]);
         assert_eq!(catalog.info("note").plural, "Notes");
         assert!(!catalog.is_declared("note"));
@@ -854,6 +867,7 @@ mod tests {
             monogram: monogram.to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }
     }
 
@@ -871,7 +885,11 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
             config_schema: serde_json::Value::Object(serde_json::Map::new()),

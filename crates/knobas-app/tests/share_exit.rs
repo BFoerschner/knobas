@@ -77,7 +77,7 @@ const ESTATE_FILE: &str = include_str!("../../../testenv/estate.json");
 const CONTAINER: &str = "asset:knobas-teamcity";
 const SERVER: &str = "asset:wsl";
 const CONTAINER_PATH: &str =
-    "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
+    "knobas test estate / TEST-PC / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)";
 
 /// The ticket the sharer's link names.
 ///
@@ -676,6 +676,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
             config: serde_json::json!({ "username": env.user }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

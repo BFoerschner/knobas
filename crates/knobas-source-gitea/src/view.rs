@@ -14,8 +14,8 @@
 //! comments where Gitea refuses the token's scope for them, naming it
 //! ([`grants::unread`], #2042).
 
-use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
+pub(super) use knobas_source::view::ago;
 use knobas_source::view::{Block, Fact, SourceView, ViewRow, ViewSection};
 
 use crate::keys::{self, GiteaKey};
@@ -123,8 +123,349 @@ pub(crate) fn standing(
             Standing::Moving
         }
         (Ok(GiteaKey::Repo { .. }), Some(repo::BRANCHES)) => Standing::Moving,
+        // The latest commits of a branch, or of a repository's default
+        // branch, move with every push and carry no action: kept, and read
+        // again behind (the smoothness pass of PR #2479).
+        (Ok(GiteaKey::Branch { .. } | GiteaKey::Repo { .. }), Some(repo::COMMITS)) => {
+            Standing::Moving
+        }
         _ => Standing::Live,
     }
+}
+
+/// What a branch's or repository's tree section draws from a stored tree
+/// (the stored-trees pass of PR #2479): see [`files::stored_ask`].
+pub(crate) fn tree_ask(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+) -> Option<knobas_source::tree::TreeAsk> {
+    let id = section.filter(|id| files::owns(id))?;
+    match source.key_of(entity).ok()? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } => files::stored_ask(
+            source,
+            &owner,
+            &repo,
+            files::Of::Branch(&branch),
+            id,
+            payload,
+        ),
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) => {
+            files::stored_ask(source, &owner, &repo, files::Of::Repository, id, payload)
+        }
+        _ => None,
+    }
+}
+
+/// The bytes of `path` in `repository`'s tree at `commit`, read whole as the
+/// file's own read reads them (`raw/{path}?ref={commit}`), or `None` past
+/// `cap` (the forge-rounds pass, 2026-11-15: a default branch's README, for
+/// the store).
+///
+/// # Errors
+///
+/// What Gitea's answer maps to.
+pub(crate) async fn read_blob(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    path: &str,
+    cap: u64,
+) -> Result<Option<Vec<u8>>, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit id"
+        )));
+    }
+    let cap = usize::try_from(cap).unwrap_or(usize::MAX);
+    let raw = source
+        .client
+        .raw_whole(&owner, &repo, path, commit, cap)
+        .await?;
+    Ok((!raw.cut).then_some(raw.bytes))
+}
+
+/// Every file of `repository`'s tree at `commit` that `wanted` names, from
+/// one archive (the everything-search decisions, 2026-11-20, D3): spooled to
+/// an anonymous temporary file, then read entry by entry. An entry's path
+/// loses its first component, the archive's folder; one larger than
+/// `code_text::SIZE_CAP`, or not a regular file, is skipped unread. Answers
+/// the requests sent: one.
+///
+/// # Errors
+///
+/// What Gitea's answer maps to; a protocol error for an archive that cannot
+/// be read.
+pub(crate) async fn read_archive(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+    each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+) -> Result<u32, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit id"
+        )));
+    }
+    let mut spool = tempfile::tempfile().map_err(|error| {
+        SourceError::protocol(format!("gitea: no spool for an archive: {error}"))
+    })?;
+    source
+        .client
+        .archive_to(&owner, &repo, commit, &mut spool)
+        .await?;
+    let unpack = move || unpack_archive(spool, wanted, each);
+    match tokio::runtime::Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(unpack)?,
+        _ => unpack()?,
+    }
+    Ok(1)
+}
+
+/// [`read_archive`]'s reading of the spooled `.tar.gz`.
+pub(crate) fn unpack_archive(
+    mut spool: std::fs::File,
+    wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+    each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+) -> Result<(), SourceError> {
+    use std::io::{Read as _, Seek as _};
+    let unreadable = |error: std::io::Error| {
+        SourceError::protocol(format!("gitea: an unreadable archive: {error}"))
+    };
+    spool
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(unreadable)?;
+    let mut archive =
+        tar::Archive::new(flate2::read::GzDecoder::new(std::io::BufReader::new(spool)));
+    for entry in archive.entries().map_err(unreadable)? {
+        let mut entry = entry.map_err(unreadable)?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let path = entry
+            .path()
+            .map_err(unreadable)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Some((_, path)) = path.split_once('/') else {
+            continue;
+        };
+        if path.is_empty() || !wanted(path) {
+            continue;
+        }
+        if entry.header().size().map_err(unreadable)? > knobas_core::code_text::SIZE_CAP {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).map_err(unreadable)?;
+        each(path.to_owned(), bytes);
+    }
+    Ok(())
+}
+
+/// The branch whose head a branch's or repository's tree section that names
+/// no commit reads (the forge-rounds pass, 2026-11-15): see
+/// [`files::tip_branch`].
+pub(crate) fn tip_branch(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+) -> Option<String> {
+    let id = section.filter(|id| files::owns(id))?;
+    match source.key_of(entity).ok()? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } => files::tip_branch(
+            source,
+            &owner,
+            &repo,
+            files::Of::Branch(&branch),
+            id,
+            payload,
+        ),
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) => {
+            files::tip_branch(source, &owner, &repo, files::Of::Repository, id, payload)
+        }
+        _ => None,
+    }
+}
+
+/// A branch's or repository's tree section that names no commit, read at
+/// `tip`, the commit the mirror holds at the head of the branch
+/// [`tip_branch`] names: see [`files::read_at_tip`]. `None` for a section
+/// [`tip_branch`] names no branch for. Tree sections offer no write, so
+/// nothing is narrowed (`grants`).
+///
+/// # Errors
+///
+/// What Gitea's answer maps to.
+pub(crate) async fn at_tip(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    tip: &str,
+) -> Result<Option<SourceView>, SourceError> {
+    let Some(id) = section.filter(|id| files::owns(id)) else {
+        return Ok(None);
+    };
+    let section = match source.key_of(entity)? {
+        GiteaKey::Branch {
+            owner,
+            repo,
+            branch,
+        } if !files::names_sha(id) => {
+            files::read_at_tip(
+                source,
+                &owner,
+                &repo,
+                files::Of::Branch(&branch),
+                id,
+                &branch,
+                tip,
+            )
+            .await?
+        }
+        GiteaKey::Repo { owner, repo } if !compare::owns(id) && !files::names_sha(id) => {
+            let Ok(record) = serde_json::from_value::<rows::RepoRecord>(payload.clone()) else {
+                return Ok(None);
+            };
+            let branch = record.default_branch().to_owned();
+            files::read_at_tip(
+                source,
+                &owner,
+                &repo,
+                files::Of::Repository,
+                id,
+                &branch,
+                tip,
+            )
+            .await?
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(SourceView::new(vec![section])))
+}
+
+/// A branch's or repository's tree section drawn from a stored tree, as
+/// Gitea's read at the same commit draws it: see [`files::stored_view`].
+pub(crate) fn tree_view(
+    source: &GiteaSource,
+    entity: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    tree: &knobas_source::tree::StoredTree,
+) -> Option<SourceView> {
+    let id = section.filter(|id| files::owns(id))?;
+    let section = match source.key_of(entity).ok()? {
+        GiteaKey::Branch { branch, .. } => {
+            files::stored_view(files::Of::Branch(&branch), id, tree, payload)?
+        }
+        GiteaKey::Repo { .. } if !compare::owns(id) => {
+            files::stored_view(files::Of::Repository, id, tree, payload)?
+        }
+        _ => return None,
+    };
+    Some(SourceView::new(vec![section]))
+}
+
+/// The levels of a repository's tree at `commit` the store lacks: see
+/// [`files::read_tree`].
+pub(crate) async fn read_tree(
+    source: &GiteaSource,
+    repository: &str,
+    commit: &str,
+    held: &dyn knobas_source::tree::HeldTrees,
+    cap: u64,
+) -> Result<knobas_source::tree::TreeRead, SourceError> {
+    let GiteaKey::Repo { owner, repo } = source.key_of(repository)? else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {repository:?} is not a repository"
+        )));
+    };
+    if !is_full_sha(commit) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {commit:?} is not a whole commit sha"
+        )));
+    }
+    files::read_tree(source, &owner, &repo, commit, held, cap).await
+}
+
+/// Whether a repository's `section` is drawn from its branch records
+/// ([`from_branch_records`]): its branches, and its latest commits, whose
+/// first is its default branch's tip.
+pub(crate) fn listed_from_branches(section: Option<&str>) -> bool {
+    matches!(section, Some(repo::BRANCHES | repo::COMMITS))
+}
+
+/// A repository's `branches` or `commits` section from the records the sync
+/// wrote (ADR-0042 as amended 2026-11-12, the inner-pages pass of PR #2479):
+/// `payload` the repository's, `under` its branches'. The branches are the
+/// source's own rows over the same records, in the source's order, so a
+/// branch list nothing changed since the sync reads the same as the source's
+/// answer. The commits are the one the mirror knows: the default branch's
+/// tip, the first row the source draws, with no count, since the mirror
+/// holds no count of the branch's history; the source's read behind brings
+/// the rest after it and the count. `None` for a record that is no
+/// repository's, a section drawn otherwise, or a repository with no commit.
+pub(crate) fn from_branch_records(
+    source: &GiteaSource,
+    owner: &str,
+    name: &str,
+    section: Option<&str>,
+    payload: &serde_json::Value,
+    under: &[serde_json::Value],
+) -> Option<SourceView> {
+    let record: rows::RepoRecord = serde_json::from_value(payload.clone()).ok()?;
+    let mut listing = rows::Paged {
+        items: under
+            .iter()
+            .filter_map(|raw| serde_json::from_value::<rows::ListedBranch>(raw.clone()).ok())
+            .collect(),
+        cut: false,
+    };
+    // A repository with a commit has a branch: no record under it is nothing synced yet, not an empty list.
+    if listing.items.is_empty() {
+        return None;
+    }
+    repo::sort_branches(&record, &mut listing.items);
+    let section = match section {
+        Some(repo::BRANCHES) => repo::branches(source, &record, owner, name, &listing),
+        Some(repo::COMMITS) => {
+            if record.repo.empty {
+                return None;
+            }
+            let default = record.default_branch();
+            let tip = listing
+                .items
+                .iter()
+                .find(|branch| branch.name == default)?
+                .commit
+                .as_ref()?;
+            repo::latest_commits(vec![rows::commit_row(&source.id, owner, name, tip)], None)
+        }
+        _ => return None,
+    };
+    Some(SourceView::new(vec![section]))
 }
 
 /// The bytes of the file at `path` in `entity`'s tree (#2256): at `commit`
@@ -372,6 +713,7 @@ fn fact(label: &str, value: String) -> Fact {
         label: label.to_owned(),
         value,
         tone: None,
+        account: None,
     }
 }
 
@@ -383,6 +725,29 @@ fn short(sha: &str) -> String {
 fn login(user: Option<&UserRef>) -> Option<String> {
     user.and_then(|u| u.login.clone())
         .filter(|l| !l.trim().is_empty())
+}
+
+/// A Gitea account's profile name, where it set one (F-107).
+fn profile_name(user: Option<&UserRef>) -> Option<String> {
+    user.and_then(|u| u.full_name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// What to call a Gitea account (F-107): the profile's name, else its
+/// login, as a ticket's card names its people. `None` with neither.
+fn name_of(user: Option<&UserRef>) -> Option<String> {
+    profile_name(user).or_else(|| login(user))
+}
+
+/// A fact naming `user` by [`name_of`] in `value`, carrying the login as
+/// its account, so the app knows the reader's own and what to send.
+fn person_fact(label: &str, value: String, user: Option<&UserRef>) -> Fact {
+    Fact {
+        account: login(user),
+        ..fact(label, value)
+    }
 }
 
 /// `Name <email>`, or whichever half git recorded.
@@ -413,27 +778,6 @@ fn when_of(raw: &str) -> String {
         .unwrap_or_else(|_| raw.to_owned())
 }
 
-/// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
-/// it, so a commit's age reads the same here as on a room's row: minutes,
-/// then hours, then the UTC date. A time in the future is *just now*.
-pub(super) fn ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let seconds = (now - then).num_seconds();
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    let minutes = (seconds as f64 / 60.0).round() as i64;
-    if minutes < 1 {
-        return "just now".to_owned();
-    }
-    if minutes < 60 {
-        return format!("{minutes} min ago");
-    }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    let hours = (minutes as f64 / 60.0).round() as i64;
-    if hours < 24 {
-        return format!("{hours} h ago");
-    }
-    then.format("%Y-%m-%d").to_string()
-}
-
 /// The web page of another commit in the same repository, made from this
 /// commit's own: Gitea's is `<base>/<owner>/<repo>/commit/<sha>`.
 fn sibling_url(record: &CommitDetail, sha: &str) -> Option<String> {
@@ -445,6 +789,7 @@ fn sibling_url(record: &CommitDetail, sha: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{DateTime, Utc};
 
     fn at(raw: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(raw)
@@ -467,5 +812,58 @@ mod tests {
         ] {
             assert_eq!(ago(at(then), now), said, "{then}");
         }
+    }
+
+    /// D3: an archive's entries, the first component (the archive's folder)
+    /// stripped, `wanted` obeyed, an entry past the size cap and a link
+    /// skipped unread.
+    #[test]
+    fn an_archive_hands_over_the_wanted_files_by_their_path_in_the_tree() {
+        use std::io::Write as _;
+        let mut spool = tempfile::tempfile().unwrap();
+        {
+            let gz = flate2::write::GzEncoder::new(&mut spool, flate2::Compression::fast());
+            let mut builder = tar::Builder::new(gz);
+            let mut add = |path: &str, bytes: &[u8]| {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(bytes.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, path, bytes).unwrap();
+            };
+            add(
+                "ledger-gateway/src/SettleBridgeServer.java",
+                b"class SettleBridgeServer {}",
+            );
+            add("ledger-gateway/README.md", b"The ledger gateway.");
+            add(
+                "ledger-gateway/big.json",
+                &vec![b'x'; usize::try_from(knobas_core::code_text::SIZE_CAP).unwrap() + 1],
+            );
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_cksum();
+            builder
+                .append_link(&mut link, "ledger-gateway/link", "README.md")
+                .unwrap();
+            builder
+                .into_inner()
+                .unwrap()
+                .finish()
+                .unwrap()
+                .flush()
+                .unwrap();
+        }
+        let mut got: Vec<(String, Vec<u8>)> = Vec::new();
+        let wanted = |path: &str| path != "README.md";
+        unpack_archive(spool, &wanted, &mut |path, bytes| got.push((path, bytes))).unwrap();
+        assert_eq!(
+            got,
+            [(
+                "src/SettleBridgeServer.java".to_owned(),
+                b"class SettleBridgeServer {}".to_vec()
+            )]
+        );
     }
 }

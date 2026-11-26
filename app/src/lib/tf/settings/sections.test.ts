@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTicks } from "./sections";
+import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTicks, clampNote } from "./sections";
 
 const NOW = new Date(2026, 9, 15, 14, 30);
 
@@ -39,7 +39,7 @@ test("the last backup reads as prototype-6's line", () => {
   const older = new Date(2026, 9, 2, 23, 0).toISOString();
   // CHANGED (#1986): an older backup read "2 Oct 23:00", the one date in the shell spelled with a month name.
   expect(lastBackupWords({ taken_at: older, file: "a.knobas", bytes: 1024 }, dir, NOW)).toBe(
-    `2026-10-02 23:00, 1 KB, in ${dir}`,
+    `2 Oct 23:00, 1 KB, in ${dir}`,
   );
   expect(lastBackupWords(null, dir, NOW)).toBe("None yet");
 });
@@ -59,4 +59,11 @@ test("a number field never sends NaN, and stays in its range", () => {
 test("the database line: its size and how many items it holds", () => {
   expect(databaseWords({ db_bytes: 1.2 * 1024 ** 3, item_count: 18400 })).toBe("1.2 GB, 18 400 items");
   expect(databaseWords({ db_bytes: 2048, item_count: 1 })).toBe("2 KB, 1 item");
+});
+
+test("clampNote names what was typed and what the field holds, and says nothing of a value in range (F-613)", () => {
+  expect(clampNote("9999", 0, 15, 15)).toBe("Takes 0 to 15, so 9999 became 15.");
+  expect(clampNote("0", 1, 365, 1)).toBe("Takes 1 to 365, so 0 became 1.");
+  expect(clampNote("", 1, 365, 14)).toBe("Takes 1 to 365, so this stays 14.");
+  expect(clampNote("7", 1, 365, 7)).toBeNull();
 });

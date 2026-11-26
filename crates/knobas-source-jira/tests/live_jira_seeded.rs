@@ -219,6 +219,17 @@ struct Seed {
     /// `seed-state.json` written before the seed attached them.
     #[serde(default)]
     attachments: Option<SeededAttachments>,
+    /// The empty project whose workflow narrows (#522), beside the fixture's
+    /// and deliberately not in `projects`. Its key is in the scope
+    /// [`Seeded::clear_leftovers`] works over, since the app's suite files
+    /// into it. `None` in a `seed-state.json` written before #522.
+    #[serde(default)]
+    narrowing: Option<SeededNarrowing>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededNarrowing {
+    key: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -444,6 +455,30 @@ impl Seeded {
         body["issues"].as_array().cloned().unwrap_or_default()
     }
 
+    /// Every row one JQL query answers, page after page: one page is 100
+    /// rows, and the projects this suite owns may hold more than that once a
+    /// killed run's leftovers are counted.
+    async fn jql_all(&self, jql: &str, fields: &str) -> Vec<serde_json::Value> {
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        loop {
+            let (status, body) = self
+                .get(&format!(
+                    "rest/api/2/search?jql={}&startAt={}&maxResults=100&fields={fields}",
+                    url_encode(jql),
+                    rows.len()
+                ))
+                .await;
+            assert_eq!(status, 200, "JQL {jql:?} answered {body}");
+            let page = body["issues"].as_array().cloned().unwrap_or_default();
+            let total = body["total"].as_u64().unwrap_or_default();
+            let empty = page.is_empty();
+            rows.extend(page);
+            if empty || rows.len() as u64 >= total {
+                return rows;
+            }
+        }
+    }
+
     /// The adapter over this instance, authenticating as `./seed --env` says:
     /// user and password, which is what the setup wizard's admin account has
     /// (it holds no personal access token).
@@ -495,6 +530,20 @@ impl Seeded {
         if config.get("favourite_filters").is_none() {
             config["favourite_filters"] = serde_json::Value::Bool(false);
         }
+        // The seed's projects, unless a test names its own scope. A source
+        // with none syncs every project the account sees, and this Jira may
+        // hold other estates beside the seed (`just seed-scale jira`'s SCL*
+        // projects, 20,000 issues), which every exact set here would count.
+        // With `boards: none` beside it unless the test names boards: a source
+        // with no projects brings no boards in under the default scope, and
+        // one scoped to PAY and OPS would bring the seed's two, which no
+        // test that left the scope out counts.
+        if config.get("projects").is_none() && config.get("jql_filter").is_none() {
+            config["projects"] = serde_json::json!(self.seeded_project_keys());
+            if config.get("boards").is_none() {
+                config["boards"] = serde_json::json!("none");
+            }
+        }
         match knobas_source_jira::build(SourceInstance {
             id: "jira".to_owned(),
             kind: knobas_source_jira::ADAPTER_KIND.to_owned(),
@@ -512,6 +561,31 @@ impl Seeded {
     }
 
     /// The fixture's keys, ascending, as the seed recorded them.
+    /// The fixture's projects, `seed-state.json`'s `jira.projects`: the scope
+    /// every source here syncs unless a test names its own.
+    fn seeded_project_keys(&self) -> Vec<String> {
+        self.seed.projects.iter().map(|p| p.key.clone()).collect()
+    }
+
+    /// `order` over the fixture's projects alone, as a source scoped to them
+    /// walks it: `project in (PAY, OPS) ORDER BY …`. A raw read of the walk's
+    /// order over the whole instance would count every other estate on it.
+    fn seeded_jql(&self, order: &str) -> String {
+        format!(
+            "project in ({}) {order}",
+            self.seeded_project_keys().join(", ")
+        )
+    }
+
+    /// The projects this suite and the app's write to: the fixture's and the
+    /// narrowing one. [`Seeded::clear_leftovers`] works inside them and
+    /// nowhere else, so another estate on the same Jira is never touched.
+    fn owned_project_keys(&self) -> Vec<String> {
+        let mut keys = self.seeded_project_keys();
+        keys.extend(self.seed.narrowing.iter().map(|n| n.key.clone()));
+        keys
+    }
+
     fn seeded_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.seed.issues.iter().map(|i| i.key.clone()).collect();
         keys.sort();
@@ -533,7 +607,12 @@ impl Seeded {
     ///
     /// Scoped by `seed-state.json` and by nothing a run remembers, which is the
     /// only way to reach the leftovers of a run that is gone -- the same rule
-    /// the seeded TeamCity suite's clearing works under. Five things can be
+    /// the seeded TeamCity suite's clearing works under. **Inside the projects
+    /// the suites own and nowhere else** ([`Seeded::owned_project_keys`]): the
+    /// search names them, so an issue in any other project -- `just seed-scale
+    /// jira`'s SCL* estate, 20,000 issues with sub-tasks -- is never read, let
+    /// alone deleted (until 2026-11-10 it searched the whole instance and
+    /// deleted SCLDATA-1 to 3 before a 400 on SCLDATA-4's sub-tasks). Five things can be
     /// wrong: the union of what either suite writes, and an attachment, which
     /// neither does:
     ///
@@ -564,17 +643,23 @@ impl Seeded {
     /// Not "sweep": `CONTEXT.md` spends that word on the engine pass that
     /// tombstones what a full sync no longer emitted.
     async fn clear_leftovers(&self) {
+        let owned = self.owned_project_keys().join(", ");
         let rows = self
-            .jql("ORDER BY key ASC", "status,labels,comment,attachment")
+            .jql_all(
+                &format!("project in ({owned}) ORDER BY key ASC"),
+                "status,labels,comment,attachment",
+            )
             .await;
         let mut cleared: Vec<String> = Vec::new();
         for row in &rows {
             let key = row["key"].as_str().expect("an issue has a key").to_owned();
             let Some(seeded) = self.seed.issues.iter().find(|i| i.key == key) else {
+                // `deleteSubtasks`: without it Jira answers 400 for an issue
+                // that has sub-tasks, and the whole clearing stops there.
                 let (status, body) = self
                     .request(
                         reqwest::Method::DELETE,
-                        &format!("rest/api/2/issue/{key}"),
+                        &format!("rest/api/2/issue/{key}?deleteSubtasks=true"),
                         None,
                     )
                     .await;
@@ -3898,7 +3983,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
             .collect()
     };
 
-    let created = order(seeded.jql("ORDER BY created ASC", "key").await);
+    let created = order(
+        seeded
+            .jql(&seeded.seeded_jql("ORDER BY created ASC"), "key")
+            .await,
+    );
     let mut every = created.clone();
     every.sort();
     assert_eq!(
@@ -3906,7 +3995,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
         seeded.seeded_keys(),
         "one page holds the whole corpus"
     );
-    let by_updated = order(seeded.jql("ORDER BY updated ASC", "key").await);
+    let by_updated = order(
+        seeded
+            .jql(&seeded.seeded_jql("ORDER BY updated ASC"), "key")
+            .await,
+    );
     let edited = by_updated[0].clone();
     // Later than every stamp, so the edit lands at the end and nowhere else.
     let latest = stamp_of(&seeded, &by_updated[by_updated.len() - 1]).await;
@@ -3916,7 +4009,13 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     // The index is updated asynchronously: poll for the edit to show.
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
-        let (_, last) = search_page(&seeded, "ORDER BY updated ASC", total - 1, 1).await;
+        let (_, last) = search_page(
+            &seeded,
+            &seeded.seeded_jql("ORDER BY updated ASC"),
+            total - 1,
+            1,
+        )
+        .await;
         if last == std::slice::from_ref(&edited) {
             break;
         }
@@ -3929,7 +4028,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     }
     println!("order: {edited} edited; created order {created:?}");
     assert_eq!(
-        order(seeded.jql("ORDER BY created ASC", "key").await),
+        order(
+            seeded
+                .jql(&seeded.seeded_jql("ORDER BY created ASC"), "key")
+                .await
+        ),
         created,
         "the edit to {edited} moved nothing in the created order"
     );
@@ -3946,8 +4049,8 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
-    const WALK: &str = "ORDER BY created ASC";
     let seeded = seeded();
+    let walk = seeded.seeded_jql("ORDER BY created ASC");
     seeded.clear_leftovers().await;
     let seeded_total = seeded.seeded_keys().len() as u64;
     let sub_task = SubTask::file(&seeded, "PAY-219").await;
@@ -3955,7 +4058,7 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
 
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     let (grown, last) = loop {
-        let page = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+        let page = search_page(&seeded, &walk, seeded_total as u32, 1).await;
         if page.0 == seeded_total + 1 {
             break page;
         }
@@ -3974,7 +4077,7 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
 
     // The guard deletes it and waits for the index to stop naming it.
     drop(sub_task);
-    let (shrunk, past_the_end) = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+    let (shrunk, past_the_end) = search_page(&seeded, &walk, seeded_total as u32, 1).await;
     println!(
         "shrink: total {grown} with {key}, {shrunk} after its deletion; page past the end {past_the_end:?}"
     );
@@ -4022,7 +4125,9 @@ async fn a_walk_in_pages_of_two_returns_the_whole_corpus_once() {
 async fn a_jql_id_range_stays_inside_one_project() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let rows = seeded.jql("ORDER BY id ASC", "key").await;
+    let rows = seeded
+        .jql(&seeded.seeded_jql("ORDER BY id ASC"), "key")
+        .await;
     let id_of = |row: &serde_json::Value| -> u64 {
         row["id"]
             .as_str()
@@ -5175,4 +5280,307 @@ async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
     assert!(administrator == Some(FileBytes::Read(png)));
     println!("SEEDED attachment refusal: {MINTED} -> {refused:?}; the administrator reads it");
     drop(narrowed);
+}
+
+/// Where `KNOBAS_JIRA_RECORD` names a folder, each of Jira's raw answers this
+/// case reads is written there as a fixture: the base URL masked to
+/// `https://jira.example`, e-mail addresses to `masked@example.invalid`, and
+/// a Gravatar URL's hash of the address to `masked`.
+async fn record(seeded: &Seeded, name: &str, value: &serde_json::Value) {
+    let Ok(dir) = std::env::var("KNOBAS_JIRA_RECORD") else {
+        return;
+    };
+    let text = serde_json::to_string_pretty(value)
+        .expect("JSON")
+        .replace(&seeded.url, "https://jira.example");
+    let masked = text
+        .lines()
+        .map(|line| {
+            let line = match line.find("gravatar.com/avatar/") {
+                Some(at) => {
+                    let start = at + "gravatar.com/avatar/".len();
+                    let end = line[start..]
+                        .find(|c: char| !c.is_ascii_hexdigit())
+                        .map_or(line.len(), |n| start + n);
+                    format!("{}masked{}", &line[..start], &line[end..])
+                }
+                None => line.to_owned(),
+            };
+            let line = line.as_str();
+            if line.trim_start().starts_with("\"emailAddress\"") {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                let comma = if line.trim_end().ends_with(',') {
+                    ","
+                } else {
+                    ""
+                };
+                format!("{indent}\"emailAddress\": \"masked@example.invalid\"{comma}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::create_dir_all(&dir).expect("the record folder");
+    std::fs::write(format!("{dir}/{name}.json"), masked + "\n").expect("a fixture");
+}
+
+/// **A ticket's fields against a real Jira** (ADR-0054, the 2026-11-21
+/// ruling's section 21): on an issue this case files in PAY, the adapter's
+/// `ticket_fields` reads its screen (the four named fields and the due
+/// date, a source's own), the assignable search with nothing typed answers
+/// the seeded people, and one `EditTicket` after another assigns it,
+/// prioritises it, labels it, retitles it and dates it, each read back
+/// through Jira's REST API and through the fields again; then everything is
+/// put back and the issue deleted. A move there and back witnesses
+/// `transition` beside it. An edit of a field off the screen is refused with
+/// Jira's sentence. With `KNOBAS_JIRA_RECORD`, Jira's answers are kept as
+/// fixtures.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_tickets_fields_are_edited_and_read_back_on_a_real_jira() {
+    use knobas_source::{Assignee, LabelChange, WriteOp};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let project = seeded.owned_project_keys()[0].clone();
+    let (status, made) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/issue",
+            Some(serde_json::json!({ "fields": {
+                "project": { "key": project },
+                "issuetype": { "name": "Task" },
+                "summary": "knobas live suite: a ticket's fields",
+                "labels": [LITTER_LABEL],
+            } })),
+        )
+        .await;
+    assert_eq!(status, 201, "filing the case's issue: {made}");
+    let key = made["key"]
+        .as_str()
+        .expect("a created issue has a key")
+        .to_owned();
+    let id = format!("jira:{key}");
+    let source = seeded.source(serde_json::json!({}));
+    let edit = |change: &dyn Fn(&mut WriteOp)| {
+        let mut op = WriteOp::EditTicket {
+            entity: id.clone(),
+            title: None,
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: BTreeMap::new(),
+        };
+        change(&mut op);
+        op
+    };
+    let issue = |fields: &'static str| {
+        let (seeded, key) = (&seeded, key.clone());
+        async move {
+            let (status, body) = seeded
+                .get(&format!("rest/api/2/issue/{key}?fields={fields}"))
+                .await;
+            assert_eq!(status, 200, "{body}");
+            body["fields"].clone()
+        }
+    };
+
+    // 1. The screen, raw and as the adapter reads it.
+    let (status, raw) = seeded
+        .get(&format!(
+            "rest/api/2/issue/{key}?expand=editmeta&fields=*navigable"
+        ))
+        .await;
+    assert_eq!(status, 200, "{raw}");
+    record(&seeded, "ticket-fields-issue-editmeta", &raw).await;
+    let fields = source
+        .ticket_fields(&id)
+        .await
+        .expect("the fields read")
+        .expect("an issue edits");
+    assert_eq!(knobas_source::ticket::fault(&fields), None);
+    for named in ["title", "assignee", "priority", "labels"] {
+        let field = fields
+            .get(named)
+            .unwrap_or_else(|| panic!("{named} is listed"));
+        assert_eq!(
+            field.readonly, None,
+            "{named} is on the default edit screen: {raw}"
+        );
+    }
+    let own: Vec<&str> = fields.fields[4..].iter().map(|f| f.id.as_str()).collect();
+    println!("{key}'s own fields as the adapter reads them: {own:?}");
+
+    // 2. Who can be assigned, with nothing typed (section 21's open question).
+    let (status, people_raw) = seeded
+        .get(&format!(
+            "rest/api/2/user/assignable/search?issueKey={key}&username=&maxResults=1000"
+        ))
+        .await;
+    record(&seeded, "ticket-fields-assignable-empty", &people_raw).await;
+    println!(
+        "assignable search with an empty username: {status}, {} people",
+        people_raw.as_array().map_or(0, Vec::len)
+    );
+    let people = source
+        .field_options(&id, "assignee", "")
+        .await
+        .expect("the assignable search")
+        .expect("the assignee has a list");
+    let who = people
+        .options
+        .iter()
+        .find(|o| o.value != seeded.user)
+        .or(people.options.first())
+        .expect("somebody can be assigned")
+        .value
+        .clone();
+
+    // 3. Assigned, prioritised, labelled, retitled and dated in one edit.
+    let priority = match &fields.get("priority").unwrap().kind {
+        knobas_source::ticket::TicketFieldKind::Choice { options } => options
+            .iter()
+            .map(|o| o.value.clone())
+            .find(|v| Some(v.as_str()) != fields.get("priority").unwrap().value.as_str())
+            .expect("another priority"),
+        other => panic!("priority is {other:?}"),
+    };
+    let dated = own.contains(&"duedate");
+    source
+        .write(edit(&|op| {
+            if let WriteOp::EditTicket {
+                title,
+                assignee,
+                priority: p,
+                labels,
+                fields,
+                ..
+            } = op
+            {
+                *title = Some("knobas live suite: a ticket's fields (edited)".into());
+                *assignee = Some(Assignee::Account(who.clone()));
+                *p = Some(priority.clone());
+                *labels = Some(LabelChange {
+                    add: vec!["knobas-live-fields".into()],
+                    remove: vec![],
+                });
+                if dated {
+                    fields.insert("duedate".into(), serde_json::json!("2026-12-01"));
+                }
+            }
+        }))
+        .await
+        .expect("Jira takes the edit");
+    let after = issue("summary,assignee,priority,labels,duedate").await;
+    assert_eq!(
+        after["summary"],
+        "knobas live suite: a ticket's fields (edited)"
+    );
+    assert_eq!(after["assignee"]["name"], who.as_str(), "{after}");
+    assert_eq!(after["priority"]["name"], priority.as_str());
+    let labels: Vec<&str> = after["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|l| l.as_str())
+        .collect();
+    assert!(
+        labels.contains(&"knobas-live-fields") && labels.contains(&LITTER_LABEL),
+        "{labels:?}"
+    );
+    if dated {
+        assert_eq!(after["duedate"], "2026-12-01");
+    }
+    let read = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(read.get("assignee").unwrap().value, serde_json::json!(who));
+    assert_eq!(
+        read.get("priority").unwrap().value,
+        serde_json::json!(priority)
+    );
+
+    // 4. A field off the screen: refused with Jira's own sentence, raw too.
+    let (status, refusal) = seeded
+        .request(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{key}"),
+            Some(serde_json::json!({ "fields": { "resolution": { "name": "Done" } } })),
+        )
+        .await;
+    record(&seeded, "ticket-fields-off-screen-400", &refusal).await;
+    println!("an edit off the screen: {status} {refusal}");
+    assert_eq!(status, 400, "{refusal}");
+
+    // 5. Moved and back (`transition`, the moving build's witness).
+    let reach = source
+        .reachable_transitions(&id)
+        .await
+        .expect("the workflow read");
+    let was = issue("status").await["status"]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // Jira lists the status a ticket stands in among those it can reach: a move is to another one.
+    let to = reach.iter().find(|s| **s != was).cloned();
+    assert!(to.is_some(), "{key} can go somewhere from {was}: {reach:?}");
+    if let Some(to) = to {
+        source
+            .write(WriteOp::Transition {
+                entity: id.clone(),
+                status: to.clone(),
+            })
+            .await
+            .expect("Jira takes the move");
+        assert_eq!(issue("status").await["status"]["name"], to.as_str());
+        let back = source.reachable_transitions(&id).await.unwrap();
+        if back.iter().any(|s| s == &was) {
+            source
+                .write(WriteOp::Transition {
+                    entity: id.clone(),
+                    status: was.clone(),
+                })
+                .await
+                .expect("Jira takes the move back");
+            assert_eq!(issue("status").await["status"]["name"], was.as_str());
+        }
+        println!("{key} moved {was} -> {to} and back where Jira lets it; reachable: {reach:?}");
+    }
+
+    // 6. Put back: unassigned, the label off, the date cleared, then gone.
+    source
+        .write(edit(&|op| {
+            if let WriteOp::EditTicket {
+                assignee,
+                labels,
+                fields,
+                ..
+            } = op
+            {
+                *assignee = Some(Assignee::Nobody);
+                *labels = Some(LabelChange {
+                    add: vec![],
+                    remove: vec!["knobas-live-fields".into()],
+                });
+                if dated {
+                    fields.insert("duedate".into(), serde_json::Value::Null);
+                }
+            }
+        }))
+        .await
+        .expect("Jira takes the edit back");
+    let back = issue("assignee,labels,duedate").await;
+    assert!(back["assignee"].is_null(), "{back}");
+    assert!(back["duedate"].is_null(), "{back}");
+    let (status, body) = seeded
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/issue/{key}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 204, "deleting {key}: {body}");
+    println!(
+        "{key} assigned to {who}, set to {priority}, labelled, retitled{} and deleted",
+        if dated { ", dated" } else { "" }
+    );
 }

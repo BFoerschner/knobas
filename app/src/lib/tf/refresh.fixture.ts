@@ -82,7 +82,6 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
     ports: {
       refreshEntity: (entityId) => (probe.refreshed.push(entityId), probe.answer()),
       syncs: createSourceSyncs({
-        syncRole: () => Promise.reject(new Error("a detail never syncs a role")),
         syncNow: (sourceId) => (probe.synced.push(sourceId), probe.run()),
         syncStatus: () => hold<SourceSyncStatus[]>([]),
         listen: (_event, handler) => {
@@ -90,6 +89,17 @@ export function refreshProbe(options: RefreshProbeOptions = {}): RefreshProbe {
           return hold(() => void handlers.delete(handler));
         },
       }),
+      syncStatus: () => hold<SourceSyncStatus[]>([]),
+      // The next run of the source that {@link RefreshProbe.end} ends: what a press during a run waits for (ux25).
+      runEnds: (sourceId) =>
+        new Promise<void>((resolve) => {
+          const heard = ({ payload }: { payload: unknown }) => {
+            if ((payload as SourceSyncStatus).source_id !== sourceId) return;
+            handlers.delete(heard);
+            resolve();
+          };
+          handlers.add(heard);
+        }),
     },
   };
   return probe;

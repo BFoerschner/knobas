@@ -50,11 +50,17 @@ function fakes(
     rows?: (filter: EntityFilter) => EntityRow[];
     board?: (query: string) => Promise<MiniBoard>;
     checkout?: (id: string) => Promise<CheckoutView>;
+    /** Offer `cardReads` (ux19): the reach and the four sections in one read, answered from the reads it stands for. */
+    card?: boolean | "failing";
+    /** What the promotion answers over the default (a ticket's context made long ago). */
+    context?: Partial<ContextRow>;
   } = {},
 ) {
   /** Tickets whose reads wait, by id, with what lets them go. */
   const held = new Map<string, { gate: Promise<void>; release: () => void }>();
   const asked: string[] = [];
+  /** Each card read as it is sent, before it answers. */
+  const cardsSent: string[] = [];
   const status = new Map<string, string>();
   const wait = (id: string | null | undefined) => held.get(id ?? "")?.gate ?? Promise.resolve();
   const ports: JobReaderPorts = {
@@ -70,7 +76,7 @@ function fakes(
     promoteContext: async (id) => {
       asked.push(`promoteContext ${id}`);
       await wait(id);
-      return { id: `ctx:${id}`, kind: "ticket", title: id, anchor_id: id, created_at: "", archived_at: null } satisfies ContextRow;
+      return { id: `ctx:${id}`, kind: "ticket", title: id, anchor_id: id, created_at: "", archived_at: null, ...over.context } satisfies ContextRow;
     },
     listEntities: async (filter: EntityFilter) => {
       asked.push(`listEntities ${filter.role} ${filter.reach}`);
@@ -104,6 +110,27 @@ function fakes(
     ticketBoard: over.board ?? (() => Promise.reject(new Error("no board"))),
     entityCheckout: over.checkout ?? ((id) => Promise.reject(new Error(`no checkout ${id}`))),
   };
+  if (over.card !== undefined && over.card !== false) {
+    const { jobReach, listEntities } = ports;
+    /** Takes back the line a read it stands for logged: the card is asked as one read. */
+    const unlog = (line: string) => asked.splice(asked.lastIndexOf(line), 1);
+    ports.cardReads = async (id, sections, limit) => {
+      cardsSent.push(id);
+      if (over.card === "failing") {
+        asked.push(`cardReads ${id}`);
+        throw { code: "internal", message: "the walk failed", source_id: null };
+      }
+      // Answered by the reads it stands for, as the fixture's `card_reads` is, and asked as one.
+      const reached = await jobReach(id);
+      const rows = await Promise.all(
+        sections.map((filter) => listEntities({ ...filter, reach: id }, limit, 0).then((page) => page.rows, () => [] as EntityRow[])),
+      );
+      unlog(`jobReach ${id}`);
+      for (const filter of sections) unlog(`listEntities ${filter.role} ${id}`);
+      asked.push(`cardReads ${id} ${sections.map((filter) => filter.role).join(",")} ${limit}`);
+      return { reached, sections: rows };
+    };
+  }
   const reader = createJobReader(ports, { registry: { load: () => Promise.resolve() } });
   function hold(id: string) {
     let release = () => {};
@@ -114,7 +141,7 @@ function fakes(
       release();
     };
   }
-  return { reader, asked, hold, status, holdRole: (role: string) => hold(`role ${role}`) };
+  return { reader, asked, cardsSent, hold, status, holdRole: (role: string) => hold(`role ${role}`) };
 }
 
 /** What the reader holds about which ticket, one line a slot. */
@@ -371,4 +398,127 @@ test("a branch counts as not pushed when its checkout stands on it with commits 
   reader.open("jira:PAY-231");
   await flush();
   expect([...reader.unpushed]).toEqual(["b:ahead"]);
+});
+
+// ---- the card's sections in one read (ux19) ----
+
+test("with the card's read, opening asks the reach and the four sections once, and draws what the five reads drew", async () => {
+  const five = fakes();
+  five.reader.open("jira:B");
+  await flush();
+  const one = fakes({ card: true });
+  one.reader.open("jira:B");
+  await flush();
+  expect(slots(one.reader)).toEqual(slots(five.reader));
+  expect(slots(one.reader)).toEqual(B);
+  expect(one.asked.filter((call) => /^(jobReach|listEntities|cardReads)/.test(call))).toEqual(["cardReads jira:B code-host,ci,wiki,monitoring 200"]);
+});
+
+test("the card's read lands every section at once, so the card's hold waits on one answer", async () => {
+  const { reader, holdRole } = fakes({ card: true });
+  const releaseWiki = holdRole("wiki");
+  reader.open("jira:B");
+  await flush();
+  // Docs is held, so the one read is: nothing of it has landed, not even the sections that answered.
+  expect([reader.code, reader.builds, reader.pages, reader.monitors]).toEqual([null, null, null, null]);
+  expect(reader.reached.size).toBe(0);
+  releaseWiki();
+  await flush();
+  expect(slots(reader)).toEqual(B);
+});
+
+test("a card read that fails draws every section as having nothing, and the ticket still draws", async () => {
+  const { reader } = fakes({ card: "failing" });
+  reader.open("jira:B");
+  await flush();
+  expect(slots(reader)).toEqual({ ...B, reached: [], code: [], builds: [], pages: [], monitors: [] });
+  expect(reader.assets).toEqual([]);
+});
+
+test("a card read for a job left behind lands nothing", async () => {
+  const { reader, hold } = fakes({ card: true });
+  const releaseA = hold("jira:A");
+  reader.open("jira:A");
+  await flush();
+  reader.open("jira:B");
+  await flush();
+  releaseA();
+  await flush();
+  expect(slots(reader)).toEqual(B);
+});
+
+test("with the card's read, a reread after Hide here asks the link sets, the sub-tasks and the card once", async () => {
+  const { reader, asked } = fakes({ card: true });
+  reader.open("jira:B");
+  await flush();
+  asked.length = 0;
+  reader.rereadReach("jira:B");
+  await flush();
+  expect(asked.sort()).toEqual(["cardReads jira:B code-host,ci,wiki,monitoring 200", "jobLinkSets jira:B"]);
+  expect(slots(reader)).toEqual(B);
+});
+
+test("an epic's context the promotion just made reads the card again; an epic's older one, or a ticket's, does not", async () => {
+  const cards = (asked: string[]) => asked.filter((call) => call.startsWith("cardReads")).length;
+  const made = fakes({ card: true, context: { kind: "epic", created_at: new Date().toISOString() } });
+  made.reader.open("jira:B");
+  await flush();
+  expect(cards(made.asked)).toBe(2);
+  expect(slots(made.reader)).toEqual(B);
+
+  const older = fakes({ card: true, context: { kind: "epic", created_at: "2026-01-01T00:00:00Z" } });
+  older.reader.open("jira:B");
+  await flush();
+  expect(cards(older.asked)).toBe(1);
+
+  const story = fakes({ card: true, context: { kind: "ticket", created_at: new Date().toISOString() } });
+  story.reader.open("jira:B");
+  await flush();
+  expect(cards(story.asked)).toBe(1);
+});
+
+test("an address naming the ticket's id sends the card's read with the press, before the ticket answers", async () => {
+  const { reader, cardsSent, hold, asked } = fakes({ card: true });
+  const release = hold("jira:B");
+  reader.open("jira:B");
+  await flush();
+  expect(reader.detail).toBeUndefined();
+  expect(cardsSent).toEqual(["jira:B"]);
+  release();
+  await flush();
+  // The one read sent early is the card's: none is sent again once the ticket answers.
+  expect(cardsSent).toEqual(["jira:B"]);
+  expect(asked.filter((call) => call.startsWith("cardReads"))).toHaveLength(1);
+  expect(slots(reader)).toEqual(B);
+});
+
+test("an address naming a key alone sends the card's read once the ticket is found", async () => {
+  const { reader, cardsSent, hold } = fakes({ card: true });
+  const release = hold("jira:B");
+  reader.open("B");
+  await flush();
+  expect(cardsSent).toEqual([]);
+  release();
+  await flush();
+  expect(cardsSent).toEqual(["jira:B"]);
+  expect(slots(reader)).toEqual(B);
+});
+
+test("the sub-tasks' board is asked with the press, under the key the address names, and once", async () => {
+  const queries: string[] = [];
+  const { reader, hold } = fakes({
+    board: (query) => {
+      queries.push(query);
+      return Promise.resolve(board([["To Do", 1], ["Done", 2]]));
+    },
+  });
+  const release = hold("jira:PAY-231");
+  reader.open("PAY-231");
+  await flush();
+  expect(reader.detail).toBeUndefined();
+  expect(queries).toEqual(["under:PAY-231"]);
+  release();
+  await flush();
+  expect(queries).toEqual(["under:PAY-231"]);
+  expect(reader.subtasks).toEqual({ total: 3, open: 1 });
 });

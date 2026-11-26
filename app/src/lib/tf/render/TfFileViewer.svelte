@@ -24,13 +24,25 @@
     | { kind: "pdf"; read: () => Promise<Uint8Array>; size: number }
     | { kind: "text"; text: string; truncated: boolean }
     | { kind: "none" }
-    | { kind: "missing"; why: string; retry: (() => void) | null };
+    | { kind: "missing"; why: string; retry: (() => void) | null }
+    /**
+     * An image at an address, offered (the XML view's design, 2026-11-23, section 14): nothing has been fetched.
+     * `load` asks the address once; with `always`, the host is kept and its images load when their dialog opens.
+     */
+    | { kind: "offer"; url: string; host: string; load: (always: boolean) => void; browser: () => void; loading: boolean; why: string | null };
 </script>
 
 <script lang="ts">
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfPdf from "./TfPdf.svelte";
+  import { isXmlFile } from "../../render/xml-sniff";
+  import { isJsonFile } from "../../render/json-sniff";
+  import { renderPort } from "../../render/port";
+  import { docViewModule } from "./doc/doc-module";
+
+  /** Text that is XML or JSON is drawn by the XML view's inline form (D1): it folds; anything else as numbered lines. */
+  const docKind = (text: string, at: string): "xml" | "json" | null => (isXmlFile(text, at) ? "xml" : isJsonFile(text, at) ? "json" : null);
 
   let {
     name,
@@ -56,6 +68,11 @@
     layers?: Layers;
     onclose: () => void;
   } = $props();
+
+  // A file named as XML or JSON: the XML view's code loads with the press that opened it, beside the read of its bytes.
+  $effect(() => {
+    if (/\.(xml|xsd|xsl|xslt|wsdl|json|jsonc)$/i.test(name)) void Promise.resolve(docViewModule()).catch(() => {});
+  });
 </script>
 
 {#snippet downloadButton()}
@@ -79,6 +96,14 @@
         <img src={content.src} alt={name} />
       {:else if content.kind === "pdf"}
         <TfPdf read={content.read} size={content.size} />
+      {:else if content.kind === "text" && docKind(content.text, name) !== null}
+        {@const as = docKind(content.text, name)!}
+        <div class="tf-vdoc">
+          {#await docViewModule() then { default: TfDocView }}
+            {#key content.text}<TfDocView inline text={content.text} path={name} kind={as} render={renderPort()} />{/key}
+          {/await}
+        </div>
+        {#if content.truncated}<p class="tf-vnote">The first 256 KB. Download it for the rest.</p>{/if}
       {:else if content.kind === "text"}
         <pre class="tf-code">{#each content.text.replace(/\r?\n$/, "").split("\n") as text, i (i)}<div class="tf-l"><span>{i + 1}</span><span>{text || " "}</span></div>{/each}</pre>
         {#if content.truncated}<p class="tf-vnote">The first 256 KB. Download it for the rest.</p>{/if}
@@ -86,6 +111,17 @@
         <div class="tf-vempty">
           <span class="tf-tkkind" aria-hidden="true">{kind}</span>
           <p>No preview for this kind of file. Download it to open it.</p>
+        </div>
+      {:else if content.kind === "offer"}
+        <div class="tf-vempty tf-xv-offerbox">
+          <p>This image is at <code class="tf-xv-code">{content.url}</code>. knobas loads nothing from the web by itself.</p>
+          <div class="tf-xv-offer">
+            <button type="button" class="tf-btn tf-sm tf-primary" disabled={content.loading} onclick={() => content.load(false)}>{content.loading ? "Loading…" : "Load it"}</button>
+            <button type="button" class="tf-btn tf-sm" disabled={content.loading} onclick={() => content.load(true)}>Always load images from {content.host}</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={content.browser}>Open in the browser</button>
+          </div>
+          <p class="tf-dim">Loading asks {content.host} once, with no cookie and no sign-in of yours.</p>
+          {#if content.why !== null}<p class="tf-xv-warn" role="alert">{content.why}</p>{/if}
         </div>
       {:else if content.kind === "missing"}
         <div class="tf-vempty">

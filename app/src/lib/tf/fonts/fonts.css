@@ -1,0 +1,139 @@
+/*
+  The faces knobas brings along (2026-11-20, `docs/decisions/2026-11-20-the-faces-knobas-brings.md`). Every file is in
+  this folder beside its licence and `SOURCE.md`, and loads from the bundle, never from the network. `bundled-faces.ts`
+  lists them for Settings › Fonts, which shows each licence.
+
+  **Inter** (Interface, Headings and Reading): Inter 4.1, variable, `wght` 100 to 900 and `opsz` 14 to 32, so a
+  heading at 24 px and up draws in Inter's display cut (`font-optical-sizing`, on for headings only, below) and the
+  11 to 15 px of a list in its text cut. Google Fonts' build, split by script as `@fontsource-variable/inter` 5.3.0 ships it
+  (`inter/SOURCE.md`); its licence reserves no name, so the split is allowed. Upright only: the few emphasised words
+  in tickets and Docs take the browser's slant, and Inter's italic files would add as much again to the bundle.
+
+  **Optical sizes for headings only** (the ux30 Windows pass, 2026-11-23,
+  `docs/decisions/2026-11-23-optical-sizes-for-headings-only.md`): each size drawn with optical sizing on is an instance
+  of the font of its own, and in WebView2 on Windows every instance shapes and measures its glyphs from cold on a
+  page's first open. The 11 to 15 px of lists and text drew in five-odd instances that look the same (Inter's optical
+  axis starts at 14), and a first open at CPU 6x took 30 to 70 ms longer for them. So optical sizing is on only where
+  the heading face is set (`font-family: var(--head)` with `--optical: auto`, which its words inherit), and off
+  everywhere else, with `!important` so a `font` shorthand, which resets it, does not turn it back on. Text and lists
+  draw in the text cut they drew in; a heading keeps its display cut.
+
+  `font-display: block`, not `swap`: the latin file is preloaded from `index.html`, so it has landed when the shell first
+  lays out, and a face that never arrives in time is not drawn in a fallback first and then again in Inter, which
+  moved every word on the page (the brief: no text reflows after first paint). A face that has not landed at all draws
+  after 3 s in the fallback, as a broken bundle would.
+
+  **Cascadia Mono** (Code, since 2026-11-21, `docs/decisions/2026-11-21-code-is-cascadia-mono.md`) and **Cascadia Code**
+  (Code with *Ligatures in code* on): Microsoft's own woff2 files from release v2407.24, unmodified
+  (`cascadia-mono/SOURCE.md`, `cascadia-code/SOURCE.md`). Mono is Code without the programming ligatures, so `->`,
+  `=>`, `---`, `|--` and box drawing stay the characters they are; the metrics are the same to the unit, so switching
+  moves nothing. The licence reserves the name "Cascadia Code": a modified copy may not carry it, so the files are
+  never subset or re-encoded. One variable file a style, weights 200 to 700; the italic draws comments. `--mono` names
+  only the one the switch draws (`css/tokens.css`), so the other is never loaded.
+
+  The CSS names are "knobas Cascadia Mono" and "knobas Cascadia Code" (2026-11-21, Björn: "is it possible to have
+  knobas pick the bundled font over the installed one? Maybe have them as different fonts in the list"): a name of its
+  own, so the bundled file is drawn even where a font of the plain name is installed, and the plain name is the
+  installed one. Naming a face in CSS does not change the font: the files are still Microsoft's, byte for byte.
+
+  `size-adjust: 105%`: Cascadia's lower case is .518 em, JetBrains Mono's was .55, so at the code role's sizes
+  Cascadia drew a step smaller than the face it replaced. At 105 % it draws as tall (.544 em), which is the size Björn
+  set Cascadia to by hand, and it is the code role's 100 % now. Only the glyphs grow: every code view's line height is
+  a number of the font size, so rows and windowed lists keep their heights. `swap`, with its stand-ins below: code is
+  drawn on few first pages, and `shell/faces.ts` loads it while the app is idle.
+*/
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-cyrillic-ext-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-cyrillic-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-greek-ext-opsz-normal.woff2") format("woff2");
+  unicode-range: U+1F00-1FFF;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-greek-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-vietnamese-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-latin-ext-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url("./inter/inter-latin-opsz-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "knobas Cascadia Mono"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-mono/CascadiaMono.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "knobas Cascadia Mono"; font-style: italic; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-mono/CascadiaMonoItalic.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "knobas Cascadia Code"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-code/CascadiaCode.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "knobas Cascadia Code"; font-style: italic; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-code/CascadiaCodeItalic.woff2") format("woff2");
+  size-adjust: 105%;
+}
+
+/* Optical sizing where a heading's face is set, and nowhere else (see the top of this file). */
+*, *::before, *::after { font-optical-sizing: var(--optical, none) !important; }
+
+/*
+  **Cascadia Mono and Cascadia Code 2009.22** (2026-11-21, Björn: "maybe include also the older version of cascadia code
+  then, I think that'd be interesting"; `docs/decisions/2026-11-21-fonts-you-can-tune.md`): Microsoft's woff2 files
+  from release v2009.22, unmodified (`cascadia-2009/SOURCE.md`), offered in Settings › Fonts › Code beside the current
+  release. Its box glyphs are taller (`│` 1.56 em, no `rclt` swap), so boxes join at any code row height. The same
+  metrics as 2407.24 to the unit, so it moves nothing; named apart, so neither release stands in for the other. Upright
+  only, as the release ships: comments stand upright while it draws (`--mono-synth`, `css/code.css`). `--mono` names it
+  only when chosen, and the idle loader leaves it alone, so it loads only then.
+*/
+@font-face {
+  font-family: "knobas Cascadia Mono 2009"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-2009/CascadiaMono.woff2") format("woff2");
+  size-adjust: 105%;
+}
+@font-face {
+  font-family: "knobas Cascadia Code 2009"; font-style: normal; font-weight: 200 700; font-display: swap;
+  src: url("./cascadia-2009/CascadiaCode.woff2") format("woff2");
+  size-adjust: 105%;
+}
+
+/*
+  The Cascadias' stand-ins (Mono's and Code's metrics are one): the system's own monospace, sized to Cascadia's metrics at its 105 %, drawn in the
+  moment before the bundled face has loaded, so a line of code is as wide and sits where it will when the face lands.
+  Cascadia: 1200 of 2048 units an advance (times 1.05: .6152 em), ascent 1900, descent 480, no line gap.
+  `size-adjust` matches the advance (Menlo 1233 of 2048, Consolas 1126 of 2048); the overrides are Cascadia's times
+  1.05, divided by the stand-in's own `size-adjust`, since `size-adjust` scales them too. WebKit takes `size-adjust`
+  and not yet the overrides; every code view sets a line height of its own, so they move nothing there either way.
+*/
+@font-face {
+  font-family: "Cascadia over Menlo"; src: local("Menlo"), local("Menlo-Regular");
+  size-adjust: 102.19%; ascent-override: 95.32%; descent-override: 24.08%; line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Cascadia over Consolas"; src: local("Consolas");
+  size-adjust: 111.9%; ascent-override: 87.05%; descent-override: 21.99%; line-gap-override: 0%;
+}

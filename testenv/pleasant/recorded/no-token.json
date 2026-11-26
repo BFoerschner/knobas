@@ -1,0 +1,16 @@
+{
+ "name": "no-token",
+ "status": 401,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "www-authenticate": "Bearer"
+ },
+ "body": {
+  "Message": "Authorization has been denied for this request."
+ },
+ "request": {
+  "as": "none",
+  "method": "GET",
+  "path": "/api/v5/rest/folders/root"
+ }
+}

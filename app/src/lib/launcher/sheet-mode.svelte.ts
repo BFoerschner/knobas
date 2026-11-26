@@ -9,15 +9,21 @@
  * panel when a key is let go. The host's getters are read when they are used,
  * so a prop that changes is seen.
  */
+import { leftTheInbox } from "../inbox/inbox.svelte";
 import { tick } from "svelte";
+import { oneoffs, targetOf } from "../render/oneoff.svelte";
 
-import { ipcErrorMessage } from "../ipc";
+
+import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { LinkSetRow, ViewAction } from "../ipc/entity";
 import { drawn } from "../detail/relations";
 import { linkFailureMessage } from "../detail/links";
+import type { QueuedWrite } from "../ipc/sources";
+import { toastQueued } from "../shell/queued-toast";
 import { push } from "../shell/toasts.svelte";
 import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
-import { argvText, menuOrder } from "../tf/openin/openin";
+import { menuOrder } from "../tf/openin/openin";
+import { acknowledge, openingWords } from "../shell/ack.svelte";
 import { KeyPanelMode, type KeyTarget } from "./key-panel.svelte";
 import { type Chord, chordOf, isBoxChord, isHelpPress, refusalOf } from "./keys";
 import type { KeyStore } from "./keys.svelte";
@@ -38,6 +44,8 @@ import {
   subjectOf,
 } from "./sheet";
 import type { SheetPorts } from "./sheet-ports";
+import type { ReadAnswer } from "../ipc/passwords";
+import { itemHash } from "../tf/job/job";
 
 /**
  * A flow in the sheet: `id` tells one flow's late answer from another's,
@@ -125,6 +133,7 @@ export class SheetMode {
     job: this.#host.job ?? null,
     canTime: this.#host.ontimer !== undefined,
     apps: this.#applications,
+    commands: oneoffs.commands,
     favourites: this.#favourites,
     sets: this.#linkSets,
     merge: this.#mergeOf(this.current?.subject),
@@ -153,12 +162,12 @@ export class SheetMode {
   /** What the empty box says while a sheet is open. */
   readonly placeholder = $derived(
     this.current?.panel
-      ? "press the keys"
+      ? "Press the keys"
       : this.current?.renaming != null
-        ? "the list's new name"
+        ? "The list's new name"
         : this.current?.flow
-          ? "narrow the choices"
-          : "narrow the actions",
+          ? "Narrow the choices"
+          : "Narrow the actions",
   );
   /** What the box holds while a sheet is open. */
   readonly text = $derived(this.current ? (this.current.panel ? "" : (this.current.renaming ?? this.current.filter)) : "");
@@ -306,6 +315,19 @@ export class SheetMode {
   }
 
   /**
+   * Whether `event` is a chord bound to an action, from the results: it runs on the selected row, so while the
+   * answer to the box's text is owed it waits for it, as Enter does (`Launcher.svelte`). A list's chord applies its
+   * text whatever is selected and is no such key, and in the sheet the row is the one it pinned.
+   */
+  actsOnTheRow(event: KeyboardEvent): boolean {
+    if (this.current || refusalOf(event) !== null) return false;
+    const chord = chordOf(event);
+    if (chord === null) return false;
+    const { keys } = this.#host;
+    return keys.listOf(chord) === undefined && keys.actions.some((key) => key.chord === chord);
+  }
+
+  /**
    * A bound chord, from the results or the sheet's actions: a list's applies
    * it, an action's runs on the selected row when it is bound on that row's
    * kind. `true` when the chord was one; every other key goes on as before.
@@ -366,17 +388,27 @@ export class SheetMode {
     if (!at) return;
     const { subject, relation } = at;
     const { io, session, focus, close, navigate } = this.#host;
-    const settled = (work: () => Promise<unknown>, said: () => string) => void this.#settled(work, said);
+    const settled = (work: () => Promise<unknown>, said: () => string | null, undo?: () => Promise<unknown>, name?: string) => void this.#settled(work, said, undo, name);
     switch (does.kind) {
       case "go":
         close();
         return navigate(does.hash);
+      case "oneoff": {
+        const command = oneoffs.commands.find((c) => c.id === does.command);
+        if (subject.kind !== "entity" || command === undefined) return;
+        close();
+        return void oneoffs.openRun(command, subject.entityId, subject.title, targetOf({ kind: "repository" }, command));
+      }
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
+      case "pw-copy": {
+        if (subject.kind !== "entity") return;
+        return void this.#passwordCopy(subject, does.what);
+      }
       case "write":
-        return settled(() => io.submitWrite(does.payload), () => does.said);
+        return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null, does.where);
       case "ack":
-        return settled(() => io.ackAlert(does.monitorId), () => does.said);
+        return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId), subject.kind === "entity" ? subject.title : undefined);
       case "link": {
         const job = this.#host.job;
         if (!job || subject.kind !== "entity") return;
@@ -398,19 +430,27 @@ export class SheetMode {
       case "timer": {
         const { ontimer } = this.#host;
         if (subject.kind !== "entity" || !ontimer) return;
-        ontimer(subject.entityId, subject.title);
+        ontimer(subject.entityId, nameOf(subject));
         return close();
       }
       case "open-in": {
         if (subject.kind !== "entity") return;
-        let argv: string[] = [];
+        // The chip where the press was says it is opening, and the launcher closes; a toast only for why not (ux21).
         return settled(
           async () => {
-            const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
-            if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
-            argv = await io.openCheckout(where, { application: does.application });
+            const ack = acknowledge(openingWords(does.name));
+            try {
+              const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
+              if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
+              await io.openCheckout(where, { application: does.application });
+              ack.settle();
+            } catch (cause) {
+              ack.fail();
+              // Said as every Open in… says it: which application, then why.
+              throw new Error(`Could not start ${does.name}: ${ipcErrorMessage(cause)}`);
+            }
           },
-          () => `Started ${does.name}: ${argvText(argv)}`,
+          () => null,
         );
       }
       case "clone":
@@ -466,25 +506,111 @@ export class SheetMode {
         if (subject.kind !== "inbox") return;
         const { item } = subject;
         if (does.op === "rerun") {
-          return settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
+          return void this.#queued(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), `re-run ${item.title}`, item.source_id);
         }
         if (does.op === "ack") {
-          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.");
+          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key), item.title);
         }
         return settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
       }
     }
   }
 
-  /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async #settled(work: () => Promise<unknown>, said: () => string): Promise<void> {
+  /**
+   * *Undo* on a toast: its own failure is said too, since nothing else is looking. A monitor that recovered meanwhile has
+   * no alert left to take back, which is news and no fault: said as the Inbox says it, never the backend's `no open alert`.
+   */
+  #undone(undo: () => Promise<unknown>, name?: string): void {
+    undo().catch((cause: unknown) => push(this.#refusal(cause, name)));
+  }
+
+  /** What a write's refusal says: an alert that left at its source in words, anything else as the backend put it. */
+  #refusal(cause: unknown, name?: string): { text: string; tone?: "err" } {
+    if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: leftTheInbox(name) };
+    return { text: ipcErrorMessage(cause), tone: "err" };
+  }
+
+  /**
+   * A password entry's copy (ADR-0056). The entry is read from the mirror first, which asks the source nothing: one
+   * that asks a usage comment or an approval for a read opens on the Passwords page instead, as the decisions' section
+   * 26 says, so the launcher never asks a comment and never reads a password it would have to refuse.
+   */
+  async #passwordCopy(subject: Extract<SheetSubject, { kind: "entity" }>, what: "password" | "username" | "code"): Promise<void> {
+    const { io, close, navigate } = this.#host;
+    const pw = io.passwords;
+    let opened = false;
+    await this.#settled(
+      async () => {
+        const entry = await pw.entry(subject.entityId);
+        if (entry === null) throw new Error(`${subject.title} is gone from the last sync.`);
+        if (what === "username") {
+          if (entry.username === null) throw new Error(`${subject.title} has no username.`);
+          return pw.copyPlain(entry.username);
+        }
+        if (what === "code") {
+          if (entry.otp === null) throw new Error(`${subject.title} has no one-time code.`);
+          const answer = await pw.copyCode(subject.entityId);
+          if (answer.kind === "needs_sync") throw new Error("Sync now to make codes here.");
+          if (answer.kind === "unreadable") throw new Error(`${subject.title}'s code key is in a form knobas cannot read.`);
+          if (answer.kind === "hidden") throw new Error(`${subject.title} is hidden until your request is approved.`);
+          return;
+        }
+        if (entry.comment.read || entry.approval.state !== "none" || !entry.can_read) {
+          opened = true;
+          return;
+        }
+        const answer = await pw.copy(subject.entityId, { kind: "password" }, null);
+        if (answer.kind === "copied") return;
+        if (answer.kind === "comment_required" || answer.kind === "approval_required") {
+          opened = true;
+          return;
+        }
+        throw new Error(readRefusal(answer, subject.title));
+      },
+      () => (opened ? null : what === "password" ? `Copied the password of ${subject.title}. It clears in 30 seconds.` : what === "username" ? `Copied the username of ${subject.title}` : `Copied the code of ${subject.title}. It clears in 30 seconds.`),
+    );
+    if (opened) {
+      close();
+      navigate(itemHash({ entity_id: subject.entityId, kind: subject.entityKind }));
+    }
+  }
+
+  /** A write or a read is out: a second press before it answers sends nothing (F-340's trip, by key). */
+  #sending = false;
+
+  /** A write or a read that answers: said in a toast (unless `said` has nothing to say) and the launcher closed, or the reason said and the sheet kept. */
+  async #settled(work: () => Promise<unknown>, said: () => string | null, undo?: () => Promise<unknown>, name?: string): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
     try {
       await work();
-      push({ text: said() });
+      const text = said();
+      if (text !== null) push({ text, ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
       this.#host.close();
     } catch (cause) {
-      push({ text: ipcErrorMessage(cause), tone: "err" });
+      push(this.#refusal(cause, name));
       this.#host.focus();
+    } finally {
+      this.#sending = false;
+    }
+  }
+
+  /** A write: the one queued toast every page raises, which says *Sent* in place once it has gone, and the launcher closed. */
+  async #queued(work: () => Promise<QueuedWrite>, what: string, source: string | null, where?: { label: string; hash: string }): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
+    const { navigate } = this.#host;
+    try {
+      toastQueued(what, source === null ? null : { id: source, display_name: "" }, {
+        write: await work(),
+        ...(where === undefined ? {} : { where: { label: where.label, run: () => navigate(where.hash) } }),
+      });
+      this.#host.close();
+    } catch (cause) {
+      push(this.#refusal(cause));
+      this.#host.focus();
+    } finally {
+      this.#sending = false;
     }
   }
 
@@ -681,6 +807,13 @@ export class SheetMode {
   #mergeOf(subject: SheetSubject | undefined): ViewAction | null {
     return subject?.kind === "entity" && this.#merge?.prId === subject.entityId ? this.#merge.action : null;
   }
+}
+
+/** Why a password's copy did not land, in the page's words. */
+function readRefusal(answer: ReadAnswer, title: string): string {
+  if (answer.kind === "unreachable") return "The password manager does not answer. Nothing was copied.";
+  if (answer.kind === "refused") return answer.reason;
+  return `${title}'s password cannot be read here.`;
 }
 
 /** A fresh sheet on `row`: the actions, unnarrowed, the first selected. */

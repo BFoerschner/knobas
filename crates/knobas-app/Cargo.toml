@@ -33,16 +33,30 @@ tauri-build = { version = "2", features = [] }
 async-trait.workspace = true
 # `EntityRow`'s two timestamps: `DateTime<Utc>` on the wire is RFC 3339.
 chrono.workspace = true
+# A ticket card's sections read at once (`card_reads`, ux19).
+futures-util.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
+# The files index Everything reads a repository's files from (the
+# everything-search decisions, 2026-11-20, D6): opened at bring-up.
+knobas-files = { path = "../knobas-files" }
 # The hcloud importer's transport (#509). The stack every adapter shares --
 # rustls with the platform roots, one rate limiter, one retry budget, one fault
 # mapping -- rather than a `reqwest::Client` of this crate's own, which is the
 # hole `knobas-http` exists to close (`Request` has no `send`). An importer is
 # not a source (ADR-0015), but it is HTTP, and there is one HTTP stack.
+# A clone read in knobas's own process, where the checkout module started
+# `git` for every read (the git-starts pass, 2026-11-16,
+# `docs/decisions/2026-11-16-a-clone-is-read-in-process.md`).
+knobas-git = { path = "../knobas-git" }
 knobas-http = { path = "../knobas-http" }
+# The JAR view's archive and class-file reader (ux19), knobas's own.
+knobas-jar = { path = "../knobas-jar" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
+# A source's own website inside knobas (ADR-0050): the rules, the controller
+# and the native view, made with raw wry as a child of the main window.
+knobas-site = { path = "../knobas-site" }
 # The credential store, behind its trait. The concrete `KeyringStore` is picked
 # in `sources::start`; every test gets `MemoryStore` (interfaces §3).
 knobas-secrets = { path = "../knobas-secrets" }
@@ -54,23 +68,41 @@ knobas-source-confluence = { path = "../knobas-source-confluence" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 knobas-source-jira = { path = "../knobas-source-jira" }
 knobas-source-kuma = { path = "../knobas-source-kuma" }
+knobas-source-pleasant = { path = "../knobas-source-pleasant" }
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-source-teamcity = { path = "../knobas-source-teamcity" }
 knobas-sync = { path = "../knobas-sync" }
 # External adapters (ADR-0028): a WASM component is one more `Source` the
 # registry builds, beside the compiled-in rows above.
 knobas-wasm-host = { path = "../knobas-wasm-host" }
+# knobas updates itself (ADR-0052): the version order, the manifest, the
+# signature check, the download and the installers; `update.rs` wires them.
+knobas-update = { path = "../knobas-update" }
 # A user renderer's bytes in and its image out cross the bridge as base64
 # (#2262).
 base64 = "0.22"
+sha2 = "0.10"
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true
 # `EntityDetail::payload` is the source record verbatim (§3a), which is a
 # `serde_json::Value` all the way to the webview.
 serde_json.workspace = true
+# The place finder's shapes (ADR-0060); already in the tree through other crates.
+regex = "1"
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true
+# One-time codes, made on this machine (ADR-0056, RFC 6238). All four were in
+# the lock already through other crates; MIT OR Apache-2.0.
+hmac = "0.13"
+sha1 = "0.11"
+# `hmac` 0.13 takes the digest-0.11 hashes; `sha2` 0.10 above serves the rest.
+sha2-otp = { package = "sha2", version = "0.11" }
+data-encoding = "2.11"
+# The clipboard a copied secret goes to and is cleared from, by the Rust side,
+# with the platforms' "keep out of history" marks (ADR-0056). MIT OR
+# Apache-2.0, about 55 KB, no image code.
+arboard = { version = "3.7", default-features = false }
 # `tracing` makes Tauri wrap every command in the spans `logging::CommandLog`
 # times (#747); it adds no IPC and no permission.
 tauri = { version = "2", features = ["tracing"] }
@@ -78,11 +110,20 @@ tauri = { version = "2", features = ["tracing"] }
 # cancellation. Everything else in this crate runs on Tauri's runtime without
 # naming it; a loop that has to be stoppable cannot. `process` is the working
 # tree read (#704): `git status` with a timeout that kills it.
-tokio = { workspace = true, features = ["process", "sync"] }
+# `signal`: a stop signal is a quit (`stop_signals.rs`).
+tokio = { workspace = true, features = ["process", "signal", "sync", "io-util"] }
 tokio-util = { version = "0.7", default-features = false }
 # The platform data directory `live-sources` (#2371) finds the demo profile
 # under: the one Tauri's `app_data_dir` joins the identifier to.
 dirs = "6"
+# Settings › Appearance › *Code font* (2026-11-16): the installed font
+# families, read from the system's font folders (`code_font.rs`). Pure Rust
+# (`ttf-parser`, `memmap2`, and on Linux `fontconfig-parser` for the folders
+# fontconfig names); MIT. `ttf-parser` (MIT or Apache-2.0, no dependencies)
+# reads a face's advances where its `post` table does not say it is fixed
+# pitch, as many patched coding fonts do not.
+fontdb = "0.24"
+ttf-parser = "0.25"
 # *Open in browser* (interfaces §8 P5). The first Tauri plugin in the app, and
 # the one that discharges the M0 carry-over about `capabilities/default.json`
 # holding only `core:default`. Pinned exactly, and to the same version as
@@ -129,6 +170,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 # download's path taken apart, an artifact's URL joined beside its manifest.
 # The copy `knobas-http` already resolves.
 url = "2"
+# A secret typed in the API explorer is zeroed when it is dropped (ux31, ADR-0057); the copy knobas-source resolves.
+zeroize = "1.9"
 # A release download's tag and file, read out of their path segments, and
 # a tag or file name put back into one. The copy `url` itself depends on.
 percent-encoding = "2"
@@ -153,17 +196,41 @@ jaq-core = "=3.1.1"
 jaq-std = "=3.0.3"
 jaq-json = "=2.0.3"
 flate2 = "=1.1.9"
+# A value read in a character set (the XML view's *read as* step, ADR-0059): the copy the lock already holds, named
+# directly. Licence (Apache-2.0 OR MIT) AND BSD-3-Clause.
+encoding_rs = "=0.8.35"
 ruzstd = "=0.9.1"
 bzip2 = "=0.6.1"
 lzma-rs = "=0.3.0"
 serde_norway = "=0.9.42"
 toml = { version = "=0.9.12", features = ["preserve_order"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# *Smooth scrolling on 120 Hz displays* (`frame_rate.rs`): the WebKit SPI that
+# lifts WKWebView's 60 fps cap. The copies already in the lockfile through wry.
+objc2 = "=0.6.4"
+# `NSValue` and `NSKeyValueCoding` for *The window's own look* (`window_look.rs`): the web view told to draw no
+# white of its own before the page's first paint.
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSValue", "NSKeyValueCoding"] }
+# The configuration the main and capture windows' web views are built with (`window_look.rs`), which Tauri takes
+# as this type. The copy already in the lockfile through wry.
+objc2-web-kit = { version = "=0.3.2", default-features = false, features = ["std", "WKWebViewConfiguration"] }
+
+[target.'cfg(windows)'.dependencies]
+# *WebView2's own menu, trimmed* (`webview_menu.rs`): the main window's
+# `ContextMenuRequested`, which Tauri does not expose. The copies already in
+# the lockfile through wry.
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
+# *The window's own look* (`window_look.rs`): the system's side read from the registry before the window is built,
+# so WebView2 is made with the page colour of that side. The copy already in the lockfile through tao and wry.
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
 [target.'cfg(unix)'.dependencies]
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
 # the whole group is killed at its timeout: a wrapper script's children go
 # with it. The copy already in the lockfile.
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.
@@ -187,6 +254,12 @@ knobas-http = { path = "../knobas-http", features = ["test-util"] }
 knobas-wasm-host = { path = "../knobas-wasm-host", features = ["test-util"] }
 # The command tests need a real PostgreSQL: `test-util` starts one per binary.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
+# The search's statements planned as on Windows with a worker made to look
+# free (`knobas_search::sql::explain_with_workers_free`), for
+# `tests/it/read_plans.rs`' workers check (the workers pass, 2026-11-16).
+knobas-search = { path = "../knobas-search", features = ["test-util"] }
+# The fake platform the site commands are tested on, on every platform.
+knobas-site = { path = "../knobas-site", features = ["test-util"] }
 # `tauri::test`: the mock runtime `tests/it/ipc.rs` invokes commands through, so
 # ruling P3's decode question is answered by the real IPC pipeline rather than
 # by reading documentation. Feature-unified with the `[dependencies]` entry
@@ -213,7 +286,7 @@ wat = "=1.258.3"
 # nothing new goes in. It brings no `reqwest` of its own; `cargo tree -i
 # reqwest` must stay at one.
 wiremock = "0.6"
-tokio.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
 # Per-test source ids: the database is shared across a test binary, and a
 # hardcoded id would make two tests each other's fixture. For the same reason a
 # corpus assertion has to be scoped to a token nothing else in the binary can

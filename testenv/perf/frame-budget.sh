@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# The frame budget (testenv/perf/README.md): builds the app as the probes measure it, serves it on loopback for the
+# length of the run, drives it in a headless Chrome at each throttle, and fails when a list, a key or a page switch is
+# over its line in budget.json, or when a box that scrolls has no opaque background.
+#
+#   testenv/perf/frame-budget.sh [--real <port>] [--throttle 1,4,6] [--only a,b | --all] [--sizes "WxH@s ..." | --sizes none]
+#                                [--out <dir>]
+#
+# By default the lists and moments the smoothness targets name (`only` below, about 15 minutes), and a sidebar's edge
+# dragged on the busiest pages (`drag-`, the sidebar-resize pass); --all runs every
+# scenario of run.mjs, an hour or more on the fixture, whose own query engine runs in the page. A pipeline's runs
+# (`builds-main`, `pipeline-history`) are held on the saved database (`--real`), at 1x, 4x and 6x; the fixture's
+# pipelines are short, and its own query engine's tasks fall in the scroll, so it holds no line for them.
+#
+# --real <port>  the windowless backend on a real database (examples/headless_ipc.rs) instead of the fixture at
+#                scale (?fake-scale); the budget's "real" lines then apply
+# --sizes        the pages run again at these sizes, at 4x and 6x, against the same lines (the sizes pass, 2026-11-15):
+#                by default a 4K screen at 200 % (1920x1080@2, the most device pixels) and a 1440p screen at 125 %
+#                (2560x1440@1.25, the most CSS pixels at a fractional scale); `none` runs 1440x868@1 alone
+#
+# Then the long-run probe (long.mjs): Monitors left open while every source's run ends every 5 s for 2 minutes, then
+# kept hidden behind the Inbox for 1, against the budget's `long` lines: growth, main-thread time, long tasks, hovers.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+real="" throttle="1,4,6" out="" sizes="1920x1080@2 2560x1440@1.25"
+only="monitors,code-prs,code-repos,tickets-list,inbox,builds-main,pipeline-history,code-filter,monitors-filter,#/inbox,#/code,#/monitors,#/docs,#/settings,drag-"
+while [ $# -gt 0 ]; do
+  case $1 in
+    --real) real=$2; shift 2 ;;
+    --throttle) throttle=$2; shift 2 ;;
+    --only) only=$2; shift 2 ;;
+    --all) only=""; shift ;;
+    --out) out=$2; shift 2 ;;
+    --sizes) sizes=$2; shift 2 ;;
+    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  esac
+done
+out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/knobas-frame-budget.XXXXXX")}
+mkdir -p "$out"
+port=${KNOBAS_PERF_PORT:-5361}
+KNOBAS_PERF=1 "$root/testenv/ui-checks/build-app.sh" "$root" "$out/app" || exit 1
+if [ -n "$real" ]; then corpus="fake-real=$real" lines=real; else corpus="fake-scale" lines=fake; fi
+url="http://127.0.0.1:$port/?fake-ipc&$corpus#/inbox"
+"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run.json" \
+  --label "frame-budget $(git -C "$root" rev-parse --short HEAD)" --throttle "$throttle" --kinds scroll,type,nav,drag ${only:+--only "$only"} || exit 1
+# The scrollers' audit with a long asset column in the fixture's tree (`?fake-assets`), as the perf estate has on a real
+# database: it fails on a transparent scroller, and on a layer over a list that draws nothing there (the ux24 pass).
+"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/scrollers.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-assets=300&$corpus#/inbox" --strict --out "$out/scrollers.json" > "$out/scrollers.log"
+scrollers=$?
+grep '^LAYER OVER' "$out/scrollers.log"
+tail -1 "$out/scrollers.log"
+node "$here/budget.mjs" "$out/run.json" --lines "$lines" --md "$out/budget.md"
+budget=$?
+# The full-screen sizes at the throttles they are held at, 4x and 6x, of those asked for.
+size_throttle=$(echo "$throttle" | tr ',' '\n' | grep -xE '4|6' | paste -sd, -)
+[ "$sizes" != none ] && [ -n "$size_throttle" ] && for size in $sizes; do
+  echo "frame-budget: $size at ${size_throttle//,/x, }x"
+  "$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/run.mjs" --app "$url" --out "$out/run-$size.json" --size "$size" \
+    --label "frame-budget $(git -C "$root" rev-parse --short HEAD) $size" --throttle "$size_throttle" --kinds scroll,type,nav,drag ${only:+--only "$only"} || exit 1
+  node "$here/budget.mjs" "$out/run-$size.json" --lines "$lines" --md "$out/budget-$size.md" || budget=1
+done
+"$root/testenv/ui-checks/with-built.sh" "$out/app" "$port" node "$here/long.mjs" --app "http://127.0.0.1:$port/?fake-ipc&fake-hooks&$corpus#/inbox" \
+  --out "$out/long.json" --lines "$lines" --minutes 2 --every 5 --then-minutes 1 > "$out/long.log"
+long=$?
+tail -16 "$out/long.log"
+echo "frame-budget: results in $out"
+[ $budget -eq 0 ] && [ $scrollers -eq 0 ] && [ $long -eq 0 ]

@@ -36,6 +36,43 @@ pub async fn code_facts(
     code_facts_inner(&pool, lifecycle.registry(), &entity_ids).await
 }
 
+// -- what an id is ------------------------------------------------------------
+
+pub use knobas_core::briefs::EntityBrief;
+
+/// [`entity_briefs`] over a pool, for a test: [`knobas_core::briefs::read`].
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn entity_briefs_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_ids: &[String],
+) -> Result<Vec<EntityBrief>, IpcError> {
+    let declarations = declared_paths(pool, registry).await?;
+    Ok(knobas_core::briefs::read(pool, &declarations, entity_ids).await?)
+}
+
+/// What each of `entity_ids` is (the query audit of PR #2479): its kind,
+/// source, title and state chip, in the order asked, for the pages that
+/// asked `get_entity` once a row for one of them. An id the mirror does not
+/// hold, withdrawn or not, is left out, where `get_entity` answers
+/// `not_found`.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+#[tauri::command]
+pub async fn entity_briefs(
+    lifecycle: State<'_, Lifecycle>,
+    entity_ids: Vec<String>,
+) -> Result<Vec<EntityBrief>, IpcError> {
+    let pool = lifecycle.pool()?;
+    entity_briefs_inner(&pool, lifecycle.registry(), &entity_ids).await
+}
+
 // -- the URL a paste names --------------------------------------------------
 
 pub use knobas_core::web_url::UrlMatch;

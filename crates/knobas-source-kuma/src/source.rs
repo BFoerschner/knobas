@@ -388,7 +388,8 @@ impl Source for KumaSource {
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
-            | WriteOp::RequestReviewers { .. } => {
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => {
                 return Err(SourceError::protocol(format!(
                     "the Uptime Kuma adapter offers pause, resume and create, so it cannot \
                      perform {:?}",

@@ -33,6 +33,9 @@ export const CI = "ci";
 export const WIKI = "wiki";
 export const MONITORING = "monitoring";
 export const TICKET_SYSTEM = "ticket-system";
+/** A password manager's entries (ADR-0056): `knobas_source::role::PASSWORDS`. */
+export const PASSWORDS = "passwords";
+
 /** The ticket system's optional read that turns a saved view's query into conditions (#1208). */
 export const TRANSLATE_QUERY = "translate_query";
 
@@ -44,6 +47,11 @@ export interface ClaimingSource {
   roles: readonly RoleClaim[];
   /** The claimed roles whose declared paths missed on the source's records (#1199). */
   role_misses: readonly RoleMiss[];
+  /**
+   * The writes its adapter declares (ADR-0054): a ticket is asked where it can go, and offered a move, only where its
+   * source declares `transition`. A list that leaves it out declares none.
+   */
+  write_ops?: readonly string[];
   /**
    * Whether the source is turned on: a turned-off one is never run (#2106).
    * `list_sources` always says; a list that leaves it out reads as on.
@@ -75,12 +83,23 @@ export interface SourceRoles {
   answers(role: string, sourceId: string, read: string): boolean;
   /** What a person calls `sourceId` (#1476): its display name, or the id when the list never said. */
   nameOf(sourceId: string): string;
+  /** `sourceId`'s display name from Settings › Sources, or `null` while the list has not said or names it blank. */
+  displayName(sourceId: string): string | null;
   /**
    * Whether a role view draws *Sync now* (#2106): some enabled source fills
    * `role`. Not knowing is no. Which sources a click runs is the mirror's
    * answer (`sync_role`); this only says whether there is one to ask about.
    */
   syncs(role: string): boolean;
+  /** Whether `sourceId` fills `role` (a run of it can bring that role's views something new). Not knowing is no. */
+  filledBy(role: string, sourceId: string): boolean;
+  /** Whether the list the shell read last names `sourceId` at all (a source added since is not known yet). */
+  knows(sourceId: string): boolean;
+  /**
+   * Whether `sourceId`'s adapter declares the write `op` (ADR-0054: `transition`, a ticket's move). Not knowing is no:
+   * an undeclared write is not drawn (ADR-0020). Whether this instance's credential may make it is `refused_writes`'.
+   */
+  writes(sourceId: string, op: string): boolean;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -93,6 +112,7 @@ export function createSourceRoles(): SourceRoles {
         display_name: row.display_name,
         roles: [...row.roles],
         role_misses: [...row.role_misses],
+        write_ops: [...(row.write_ops ?? [])],
         enabled: row.enabled !== false,
       }));
     },
@@ -107,8 +127,21 @@ export function createSourceRoles(): SourceRoles {
     nameOf(sourceId) {
       return state.sources?.find((row) => row.id === sourceId)?.display_name ?? sourceId;
     },
+    displayName(sourceId) {
+      return state.sources?.find((row) => row.id === sourceId)?.display_name.trim() || null;
+    },
     syncs(role) {
       return state.sources?.some((source) => source.enabled !== false && fills(source, role)) ?? false;
+    },
+    filledBy(role, sourceId) {
+      const source = state.sources?.find((row) => row.id === sourceId);
+      return source !== undefined && fills(source, role);
+    },
+    knows(sourceId) {
+      return state.sources?.some((row) => row.id === sourceId) ?? false;
+    },
+    writes(sourceId, op) {
+      return state.sources?.find((row) => row.id === sourceId)?.write_ops?.includes(op) ?? false;
     },
   };
 }

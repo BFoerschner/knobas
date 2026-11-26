@@ -6,7 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import { createKeptPagesSetting, type KeptPagesSetting } from "./kept-pages.svelte";
+import { createKeptPagesSetting, holdAhead, type KeptPagesSetting } from "./kept-pages.svelte";
 import { definePage, type TfPageContext, type TfPageEntry } from "./page-entry";
 import type { RoleSyncs } from "./role-sync.svelte";
 import { parseTfHash, type Section, type TfRoute } from "./route";
@@ -22,6 +22,8 @@ let setting: KeptPagesSetting;
 const state = $state<{ route: TfRoute }>({ route: parseTfHash("#/inbox") });
 /** Moves a role's revision, as a run of *Sync now* ending does. */
 const roleRevision = $state({ n: 0 });
+/** Moves as a run of a source filling the role ends with something new, whoever started it. */
+const roleRan = $state({ n: 0 });
 /** Moves as the shell's does when the state colours change (spec #2463). */
 const stale = $state({ n: 0 });
 
@@ -71,6 +73,9 @@ beforeEach(() => {
         get revision() {
           return roleRevision.n;
         },
+        get ran() {
+          return roleRan.n;
+        },
       }),
     } as unknown as RoleSyncs,
   } as unknown as Omit<TfPageContext, "visible">;
@@ -113,7 +118,7 @@ test("visiting six pages and going back to the second shows it without remountin
   const reads = log.reads.length;
   go("#/builds");
   expect(count(log.mounts, "builds"), "no new instance").toBe(1);
-  expect(log.reads.length, "no initial read: it is the instance it was").toBe(reads + 1 /* the role view's re-read on return */);
+  expect(log.reads.length, "no read: it is the instance it was, and no run changed anything while it was hidden").toBe(reads);
   expect(shownPages()).toEqual(["builds"]);
   expect(held()).toHaveLength(6);
 });
@@ -165,14 +170,66 @@ test("two addresses drawing the same component are two kept pages", () => {
   expect(shownPages()).toEqual(["repo one"]);
 });
 
-test("a role view shown again re-reads, and one never left does not", () => {
+test("a role view shown again reads nothing when no run changed anything meanwhile (Björn, 2026-11-10), and after Sync now ends it reads", () => {
   go("#/builds");
   expect(count(log.reads, "builds")).toBe(1);
   go("#/inbox");
   go("#/builds");
-  expect(count(log.reads, "builds")).toBe(2);
+  expect(count(log.reads, "builds"), "a return to what nothing changed").toBe(1);
   go("#/builds/pipeline");
-  expect(count(log.reads, "builds"), "another address of the shown page is no return").toBe(2);
+  expect(count(log.reads, "builds"), "another address of the shown page is no return").toBe(1);
+  // *Sync now*'s runs ended: the shown view reads, as before.
+  roleRevision.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds")).toBe(2);
+  // Ended while it was hidden: read once on its return.
+  go("#/inbox");
+  roleRevision.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds"), "hidden").toBe(2);
+  go("#/builds");
+  expect(count(log.reads, "builds"), "its return").toBe(3);
+});
+
+test("a hidden role view's reads stay asleep while the reader moves elsewhere (2026-11-10: Code re-read on every leave)", () => {
+  log.wakes = [];
+  go("#/builds");
+  const woke = count(log.wakes, "builds");
+  for (const hash of ["#/inbox", "#/docs", "#/monitors", "#/sets"]) go(hash);
+  expect(count(log.wakes, "builds"), "no prop of a hidden page moved").toBe(woke);
+  expect(count(log.reads, "builds")).toBe(1);
+});
+
+test("a shown role view reads again when a run of its role's sources ends with something new; a hidden one waits for its return", () => {
+  go("#/builds");
+  expect(count(log.reads, "builds")).toBe(1);
+  roleRan.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds")).toBe(2);
+
+  go("#/inbox");
+  roleRan.n += 1;
+  flushSync();
+  expect(count(log.reads, "builds"), "hidden: nothing read").toBe(2);
+  go("#/builds");
+  expect(count(log.reads, "builds"), "its return reads once").toBe(3);
+});
+
+test("syncAsked moves when the person's own Sync now ends, not on another run's end, and a hidden view holds it until its return (the ux30 end gate)", () => {
+  log.asks = [];
+  go("#/builds");
+  roleRan.n += 1;
+  flushSync();
+  expect(log.asks, "a run nobody here pressed").toEqual([]);
+  roleRevision.n += 1;
+  flushSync();
+  expect(log.asks).toEqual(["builds"]);
+  go("#/inbox");
+  roleRevision.n += 1;
+  flushSync();
+  expect(log.asks, "hidden").toEqual(["builds"]);
+  go("#/builds");
+  expect(log.asks, "its return").toEqual(["builds", "builds"]);
 });
 
 test("an address with no page hides every kept page", () => {
@@ -180,7 +237,7 @@ test("an address with no page hides every kept page", () => {
   go("#/nowhere");
   expect(shownPages()).toEqual([]);
   expect(held()?.sort()).toEqual(["builds", "inbox"]);
-  expect(target.textContent).toContain("Nothing lives at");
+  expect(target.textContent).toContain("knobas has no such page.");
 });
 
 test("when what every page drew goes stale, the hidden pages are dropped and each mounts afresh on its return; the shown one stays", () => {
@@ -198,4 +255,39 @@ test("when what every page drew goes stale, the hidden pages are dropped and eac
   // Pages held after the change are kept as before.
   go("#/sets");
   expect(count(log.mounts, "sets")).toBe(2);
+});
+
+test("a section held ahead mounts hidden behind the shown page, and its press shows that instance without mounting or reading again (the ux13-overs pass)", () => {
+  holdAhead("#/builds");
+  flushSync();
+  expect(held()?.sort()).toEqual(["builds", "inbox"]);
+  expect(shownPages(), "the reader's page stays in front").toEqual(["inbox"]);
+  expect(pageEl("builds").dataset["visible"]).toBe("false");
+  expect(pageEl("builds").dataset["shown"], "inside it too: it pauses what it does while hidden").toBe("false");
+  expect(count(log.mounts, "builds")).toBe(1);
+  go("#/builds");
+  expect(count(log.mounts, "builds"), "the press shows the page built ahead").toBe(1);
+  expect(count(log.reads, "builds"), "and reads nothing again: no run changed anything meanwhile").toBe(1);
+  expect(shownPages()).toEqual(["builds"]);
+});
+
+test("a section held ahead takes only a free room: it never drops a page the reader left, and at 0 none is held", () => {
+  setting.set(2);
+  flushSync();
+  for (const hash of ["#/docs", "#/sets", "#/time"]) go(hash);
+  holdAhead("#/builds");
+  flushSync();
+  expect(held(), "two hidden already: no room").not.toContain("builds");
+  expect(held()?.sort()).toEqual(["docs", "sets", "time"]);
+  setting.set(0);
+  flushSync();
+  holdAhead("#/monitors");
+  flushSync();
+  expect(held()).toEqual(["time"]);
+});
+
+test("an address no page has, or one its page does not know, is held ahead as nothing", () => {
+  holdAhead("#/nowhere");
+  flushSync();
+  expect(held()).toEqual(["inbox"]);
 });

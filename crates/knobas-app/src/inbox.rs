@@ -108,6 +108,63 @@ pub async fn stream(
         .collect())
 }
 
+/// The stream and the snoozed shelf together, and how many need you now:
+/// what the window's inbox holds, from one run of the derivation.
+///
+/// `count` is the stream's length, the number [`inbox_count`] answers
+/// (`crate::commands::entity::inbox_count`): one statement decides both
+/// shelves, so the badge cannot disagree with the list under it.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct InboxShelves {
+    /// What needs you now, newest first: `inbox_items` of the stream.
+    pub stream: Vec<InboxEntry>,
+    /// What you deferred, newest first: `inbox_items` of the snoozed shelf.
+    pub snoozed: Vec<InboxEntry>,
+    /// How many items are on the stream.
+    pub count: u32,
+}
+
+/// Both shelves with each item's offered actions, from one run
+/// (`knobas_core::inbox::shelves`).
+///
+/// # Errors
+///
+/// `internal` if the derivation or the source listing fails.
+pub async fn shelves(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    identity: &[String],
+    now: DateTime<Utc>,
+) -> Result<InboxShelves, IpcError> {
+    let sources = knobas_sync::config::list(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let declared = declared_ops_of(&sources, registry);
+    let overrides = knobas_core::state_colours::overrides(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let declarations = crate::sources::paths::declared_paths_of(sources, registry, &overrides);
+    let read = inbox::shelves(pool, identity, now, &declarations)
+        .await
+        .map_err(IpcError::internal)?;
+    let entries = |items: Vec<InboxItem>| -> Vec<InboxEntry> {
+        items
+            .into_iter()
+            .map(|item| InboxEntry {
+                actions: offer(item.category, declared.get(&item.source_id)),
+                item,
+            })
+            .collect()
+    };
+    let stream = entries(read.stream);
+    Ok(InboxShelves {
+        count: u32::try_from(stream.len()).unwrap_or(u32::MAX),
+        stream,
+        snoozed: entries(read.snoozed),
+    })
+}
+
 /// What one item offers: its category's candidates, kept only where the source
 /// declares them.
 ///
@@ -211,9 +268,22 @@ pub async fn answer(
 ) -> Result<ActivityRow, IpcError> {
     let item = find(pool, identity, now, item_key, declarations).await?;
 
-    match answer {
-        Answer::Snooze(until) => inbox::snooze(pool, item_key, until).await,
-        Answer::Done => inbox::complete(pool, item_key, now).await,
+    match (answer, knobas_core::run_read::failed_build_run(item_key)) {
+        (Answer::Snooze(until), _) => inbox::snooze(pool, item_key, until).await,
+        // *Done* on a failed build is reading its run (ux18, `0098`): one
+        // notion, so the row is written with the answer or not at all.
+        (Answer::Done, Some(run)) => {
+            let mut tx = pool.begin().await?;
+            inbox::complete_with(&mut *tx, item_key, now)
+                .await
+                .map_err(IpcError::internal)?;
+            knobas_core::run_read::mark_with(&mut *tx, run)
+                .await
+                .map_err(IpcError::internal)?;
+            tx.commit().await?;
+            Ok(())
+        }
+        (Answer::Done, None) => inbox::complete(pool, item_key, now).await,
     }
     .map_err(IpcError::internal)?;
 

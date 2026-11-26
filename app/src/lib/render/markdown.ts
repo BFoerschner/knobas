@@ -34,7 +34,7 @@
 import DOMPurify, { type Config } from "dompurify";
 import MarkdownIt from "markdown-it";
 
-import { drawDiagram } from "./diagram";
+import { drawDiagram, type DiagramEngine, type DiagramRoom } from "./diagram";
 import type { LineTokens, RenderPort } from "./port";
 import { D2, GRAPHVIZ, MERMAID, renderersForFence } from "./registry";
 
@@ -127,10 +127,15 @@ export function slug(heading: string): string {
 const engine = new MarkdownIt({ html: true, linkify: true, typographer: false });
 
 const escape = engine.utils.escapeHtml;
-const fence = (lang: string, code: string) =>
-  `<pre data-md-fence="${escape(lang)}"><code>${escape(code.replace(/\n$/, ""))}</code></pre>\n`;
-engine.renderer.rules.fence = (tokens, idx) => fence(tokens[idx]!.info.trim().split(/\s+/)[0] ?? "", tokens[idx]!.content);
-engine.renderer.rules.code_block = (tokens, idx) => fence("", tokens[idx]!.content);
+const fence = (lang: string, code: string, lines: string | null = null) =>
+  `<pre data-md-fence="${escape(lang)}"${lines === null ? "" : ` data-md-lines="${escape(lines)}"`}><code>${escape(code.replace(/\n$/, ""))}</code></pre>\n`;
+/** A block's source lines, where the text is drawn with them (`tf-lines` below). */
+const linesOf = (token: { attrGet(name: string): string | number | null }) => {
+  const lines = token.attrGet("data-md-lines");
+  return lines === null ? null : String(lines);
+};
+engine.renderer.rules.fence = (tokens, idx) => fence(tokens[idx]!.info.trim().split(/\s+/)[0] ?? "", tokens[idx]!.content, linesOf(tokens[idx]!));
+engine.renderer.rules.code_block = (tokens, idx) => fence("", tokens[idx]!.content, linesOf(tokens[idx]!));
 // `~~struck~~` is `<del>`, as GitHub draws it.
 engine.renderer.rules.s_open = () => "<del>";
 engine.renderer.rules.s_close = () => "</del>";
@@ -174,6 +179,20 @@ engine.core.ruler.push("tf-tasks", (state) => {
   return true;
 });
 
+/**
+ * Each top-level block's source lines (ux26, a rendered comparison's changed blocks, ruling 3): where the text is drawn
+ * with `lines`, every block-opening token of level 0 that markdown-it mapped (a paragraph, a heading, a list, a table, a
+ * fence, a quote, a rule) carries `data-md-lines="<from>-<to>"`, from 1, both ends counted. Raw HTML carries none.
+ */
+engine.core.ruler.push("tf-lines", (state) => {
+  if ((state.env as { lines?: boolean } | undefined)?.lines !== true) return true;
+  for (const token of state.tokens) {
+    if (token.level !== 0 || token.nesting < 0 || token.map === null || token.type === "inline" || token.type === "html_block") continue;
+    token.attrSet("data-md-lines", `${token.map[0] + 1}-${token.map[1]}`);
+  }
+  return true;
+});
+
 /** What raw HTML may keep (#2255; spec story 22). */
 export const SANITIZE: Config = {
   USE_PROFILES: { html: true },
@@ -186,20 +205,78 @@ export const SANITIZE: Config = {
     "poster", "background", "usemap", "download",
   ],
   ALLOW_DATA_ATTR: false,
-  ADD_ATTR: ["data-md-fence", "data-md-task", "data-md-attachment"],
+  ADD_ATTR: ["data-md-fence", "data-md-task", "data-md-attachment", "data-md-lines"],
 };
 
 /** `text` drawn as Markdown: sanitized, its links, fences and task boxes in place. */
-export function markdownFragment(text: string, links: MarkdownLinks): DocumentFragment {
-  const html = engine.render(text);
+export function markdownFragment(text: string, links: MarkdownLinks, how: { lines?: boolean } = {}): DocumentFragment {
+  const html = engine.render(text, how.lines ? { lines: true } : {});
   const fragment = DOMPurify.sanitize(html, { ...SANITIZE, RETURN_DOM_FRAGMENT: true });
   finish(fragment, links);
   return fragment;
 }
 
-function finish(root: DocumentFragment, links: MarkdownLinks) {
-  const doc = root.ownerDocument;
+/**
+ * A long text's fragment a piece at a time (the render-cost pass, 2026-11-14): parsed whole, so a reference, a list's
+ * numbering and a task box come out as in {@link markdownFragment}, then rendered and sanitized a run of top-level
+ * blocks at a time, about `budget` characters of the text each, with heading ids counted across the pieces. Sanitizing
+ * a 300 KB comment whole was most of a 194 ms task on a quarter-speed main thread before any of it could draw. A piece
+ * never ends inside raw HTML that one block opens and a later one closes.
+ */
+export function markdownPieces(text: string, links: MarkdownLinks, how: { lines?: boolean } = {}): { next(budget: number): DocumentFragment | null; done(): boolean } {
+  const env = how.lines ? { lines: true } : {};
+  const tokens = engine.parse(text, env);
+  // Cut only between top-level blocks, and never inside raw HTML a block opened and a later one closes (a `<details>`
+  // around paragraphs), which sanitized apart would close early.
+  const blocks: [number, number][] = [];
+  let start = 0;
+  let open = 0;
+  tokens.forEach((token, i) => {
+    if (token.type === "html_block") open = Math.max(0, open + htmlDepth(token.content));
+    for (const child of token.children ?? []) if (child.type === "html_inline") open = Math.max(0, open + htmlDepth(child.content));
+    if (token.level === 0 && token.nesting <= 0 && open === 0) {
+      blocks.push([start, i + 1]);
+      start = i + 1;
+    }
+  });
+  if (start < tokens.length) blocks.push([start, tokens.length]);
   const seen = new Map<string, number>();
+  let at = 0;
+  return {
+    next(budget) {
+      if (at >= blocks.length) return null;
+      const from = blocks[at]![0];
+      let to = from;
+      let size = 0;
+      while (at < blocks.length && (to === from || size < budget)) {
+        const [a, b] = blocks[at++]!;
+        for (let i = a; i < b; i++) size += tokens[i]!.content.length;
+        to = b;
+      }
+      const html = engine.renderer.render(tokens.slice(from, to), engine.options, env);
+      const fragment = DOMPurify.sanitize(html, { ...SANITIZE, RETURN_DOM_FRAGMENT: true });
+      finish(fragment, links, seen);
+      return fragment;
+    },
+    done: () => at >= blocks.length,
+  };
+}
+
+/** Elements HTML never closes. */
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+
+/** How many elements raw HTML `html` leaves open: its opening tags less its closing ones. */
+function htmlDepth(html: string): number {
+  let depth = 0;
+  for (const [, close, name, self] of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)[^<>]*?(\/?)>/g)) {
+    if (VOID.has(name!.toLowerCase()) || self === "/") continue;
+    depth += close === "/" ? -1 : 1;
+  }
+  return depth;
+}
+
+function finish(root: DocumentFragment, links: MarkdownLinks, seen = new Map<string, number>()) {
+  const doc = root.ownerDocument;
   for (const heading of root.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
     const base = slug(heading.textContent);
     const count = seen.get(base) ?? 0;
@@ -258,6 +335,11 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
     const block = doc.createElement("div");
     block.className = "tf-fence";
     block.dataset["lang"] = lang;
+    // The fence's box is the block on the page: its source lines go with it (ux26, a comparison's changed blocks).
+    if (pre.dataset["mdLines"] !== undefined) {
+      block.dataset["mdLines"] = pre.dataset["mdLines"];
+      delete pre.dataset["mdLines"];
+    }
     const header = doc.createElement("header");
     const label = doc.createElement("span");
     label.textContent = lang === "" ? "text" : lang;
@@ -268,6 +350,8 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
     header.append(label, copy);
     const body = doc.createElement("div");
     body.className = "tf-fence-body";
+    // Kept beside the block: a diagram's drawing takes the `<pre>`'s place, and *Copy* still copies the source.
+    codes.set(block, pre.querySelector("code")?.textContent ?? "");
     pre.replaceWith(block);
     body.append(pre);
     block.append(header, body);
@@ -275,11 +359,18 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
 }
 
 /**
+ * Holds what stands from `block` down in the text unseen until what is drawn into it has its size, at most the text's
+ * hold (`TfMarkdown`, as it holds what stands under an image of unknown size); answers how to end it.
+ */
+export type FenceHold = (block: HTMLElement) => () => void;
+
+/**
  * Draws a fence's code into `into` (its `.tf-fence-body`, holding the plain
  * `<pre>` until then); returns how to stop. The code is the fence's text as
  * written: a drawer that makes HTML or SVG of it sanitizes what it inserts.
+ * `hold`, where the text can hold what stands under the fence.
  */
-export type FenceDraw = (code: string, into: HTMLElement, port: RenderPort) => (() => void) | void;
+export type FenceDraw = (code: string, into: HTMLElement, port: RenderPort, hold?: FenceHold) => (() => void) | void;
 
 const fenceDraws = new Map<string, FenceDraw>();
 
@@ -292,17 +383,81 @@ export function registerFence(id: string, draw: FenceDraw): () => void {
   };
 }
 
-/** The fence's code as written. */
+/** Each fence's code as written, by its block. */
+const codes = new WeakMap<Element, string>();
+
+/** The fence's code as written, whatever is drawn in its place now. */
 export function fenceCode(fence: Element): string {
-  return fence.querySelector("pre code")?.textContent ?? "";
+  return codes.get(fence) ?? fence.querySelector("pre code")?.textContent ?? "";
+}
+
+/**
+ * A diagram fence's room, kept at `height` (a CSS length) since its drawing landed late (`diagram.ts`, #2510): the
+ * fence is the text's `at`-th, from 0, and holds `code`.
+ */
+export interface FenceRoom {
+  at: number;
+  code: string;
+  height: string;
+}
+
+/** The rooms the diagram fences under `root` are kept at now. */
+export function keptFenceRooms(root: Scope): FenceRoom[] {
+  const rooms: FenceRoom[] = [];
+  let at = 0;
+  for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
+    const body = block.querySelector<HTMLElement>(":scope > .tf-fence-body.tf-roomkept");
+    if (body !== null && body.style.height !== "") rooms.push({ at, code: fenceCode(block), height: body.style.height });
+    at += 1;
+  }
+  return rooms;
+}
+
+/**
+ * Gives each fence under `root` the room it was kept at, before it is drawn: the fence in the same place in the text
+ * that holds the same code, so a text drawn again (its read answered again) stands as it stood, and a text that
+ * changed there does not. `from`: how many of the text's fences came before `root` (a long text is drawn a piece at a
+ * time). Answers how many have come by its end.
+ */
+export function keepFenceRooms(root: Scope, rooms: readonly FenceRoom[], from = 0): number {
+  let at = from;
+  for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
+    const room = rooms.find((kept) => kept.at === at && kept.code === fenceCode(block));
+    const body = block.querySelector<HTMLElement>(":scope > .tf-fence-body");
+    if (room !== undefined && body !== null) {
+      body.style.height = room.height;
+      body.classList.add("tf-roomkept");
+    }
+    at += 1;
+  }
+  return at;
+}
+
+/** Where a drawing looks for what to draw: an element, a fragment, or the nodes one piece of a long text added. */
+export type Scope = { querySelectorAll<E extends Element = Element>(selectors: string): Iterable<E> };
+
+/** The nodes `nodes` and everything under them, as one place to look in (a long text drawn a piece at a time). */
+export function nodesScope(nodes: readonly Node[]): Scope {
+  return {
+    querySelectorAll<E extends Element = Element>(selectors: string): E[] {
+      const found: E[] = [];
+      for (const node of nodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(selectors)) found.push(node as E);
+        found.push(...node.querySelectorAll<E>(selectors));
+      }
+      return found;
+    },
+  };
 }
 
 /**
  * Draws every `.tf-fence` under `root`: by the first renderer for its language
  * with a drawer, else highlighted (a fence with no language stays plain).
- * Returns how to stop every drawing still going.
+ * `hold`, where the text holds what stands under a fence whose drawing's size
+ * is not known yet. Returns how to stop every drawing still going.
  */
-export function drawFences(root: ParentNode, port: RenderPort): () => void {
+export function drawFences(root: Scope, port: RenderPort, hold?: FenceHold): () => void {
   const stops: (() => void)[] = [];
   for (const block of root.querySelectorAll<HTMLElement>(".tf-fence")) {
     const lang = block.dataset["lang"] ?? "";
@@ -313,7 +468,7 @@ export function drawFences(root: ParentNode, port: RenderPort): () => void {
       .map((renderer) => fenceDraws.get(renderer.id))
       .find((found) => found !== undefined);
     if (draw !== undefined) {
-      const stop = draw(code, body, port);
+      const stop = draw(code, body, port, hold);
       if (stop) stops.push(stop);
       continue;
     }
@@ -355,7 +510,17 @@ function highlightInto(into: Element, code: string, lang: string, port: RenderPo
   return () => job.cancel();
 }
 
+/** A fence's room for its diagram (#2510): the text goes on under it, and its header holds its actions. */
+function fenceRoom(into: HTMLElement, hold: FenceHold | undefined): DiagramRoom {
+  return { hold, actions: into.parentElement?.querySelector<HTMLElement>(":scope > header") ?? null };
+}
+
+const diagramFence =
+  (engine: DiagramEngine): FenceDraw =>
+  (code, into, port, hold) =>
+    drawDiagram(engine, code, into, port, fenceRoom(into, hold));
+
 // Mermaid's fences (#2258): the built-in diagram drawer, through the port's lazily loaded engine.
-registerFence(MERMAID.id, (code, into, port) => drawDiagram("mermaid", code, into, port));
-registerFence(D2.id, (code, into, port) => drawDiagram("d2", code, into, port));
-registerFence(GRAPHVIZ.id, (code, into, port) => drawDiagram("graphviz", code, into, port));
+registerFence(MERMAID.id, diagramFence("mermaid"));
+registerFence(D2.id, diagramFence("d2"));
+registerFence(GRAPHVIZ.id, diagramFence("graphviz"));

@@ -84,6 +84,8 @@ fi
 #
 # KUMA_WAIT_S is the guard on each of the seed's socket waits (kuma-seed.mjs,
 # #1961); unset here, it goes in empty and the seed takes its own default.
+# KNOBAS_LIVE_NOTEBOOK_IP (testenv/live.env) is the address the `notebook` ping
+# watches; empty, an existing ping keeps its own (kuma-seed.mjs).
 # The two files go in as a tar on stdin: the container mounts nothing, so the
 # engine may be another machine's (docker-compose.yml, kuma-seed). Plain
 # ustar, and no AppleDouble files: busybox tar in the node image reads that.
@@ -91,6 +93,7 @@ out=$(COPYFILE_DISABLE=1 tar --format ustar -c kuma-seed.mjs monitors.json | doc
         -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
         -e KNOBAS_KEY_NAME="$KEY_NAME" \
         -e KUMA_WAIT_S="${KUMA_WAIT_S:-}" \
+        -e KNOBAS_LIVE_NOTEBOOK_IP="${KNOBAS_LIVE_NOTEBOOK_IP:-}" \
         kuma-seed)
 
 case "$out" in
@@ -112,4 +115,4 @@ case "$out" in
     ;;
 esac
 
-echo "seed-kuma: Kuma now holds exactly the monitors monitors.json names"
+echo "seed-kuma: Kuma now holds exactly the monitors monitors.json names, beside any scale-* ones"

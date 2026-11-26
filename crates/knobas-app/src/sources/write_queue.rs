@@ -282,9 +282,14 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
             let registry = std::sync::Arc::clone(&self.registry);
             let source_id = status.source_id.clone();
             // Refused once the quit has begun: the next sync resolves it.
-            self.background.spawn(async move {
-                resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
-            });
+            // After a run, for the run: any request it sends yields to a
+            // person's, as the run's own did (the priority lane, 2026-11-13).
+            self.background.spawn(knobas_http::on_lane(
+                knobas_http::Lane::Background,
+                async move {
+                    resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
+                },
+            ));
         }
         self.inner.sync_state(status);
     }
@@ -299,6 +304,14 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     }
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
+    }
+    // The files pass's index and progress, passed on wherever this wrapper
+    // sits in the stack (`tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
     }
 }
 
@@ -580,6 +593,18 @@ where
             );
             return;
         }
+        // Refused: what the page was told the credential may write may be
+        // wrong, so its kept grants go (`live::GRANTS_FRESH`).
+        let refused: Option<String> =
+            sqlx::query_scalar("select state from knobas.write_queue where id = $1")
+                .bind(id)
+                .fetch_optional(&task.pool)
+                .await
+                .ok()
+                .flatten();
+        if refused.as_deref() == Some("refused") {
+            task.live.forget_grants(&source_id);
+        }
         after(task).await;
     });
     if !spawned {
@@ -859,7 +884,9 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// offer the read is not refreshed. Then a run of the write's source that
 /// **began after the write**, waited for ([`Scheduler::sync_after_write`]),
 /// for what the write changed elsewhere (story 15); a run already in flight,
-/// which began before the write, does not stand in for it.
+/// which began before the write, does not stand in for it. Where the item
+/// read back is a run in flight (a build the write queued), it is read on to
+/// its end beside that run ([`super::follow_run`], the TeamCity run fix).
 ///
 /// A failure of either is logged and dropped: the write **landed**, and
 /// reporting the follow-up read's failure as the write's would tell the user
@@ -867,7 +894,24 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// and the next scheduled sync re-reads the source either way.
 pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let entity = read_back(&scheduler.deps().pool, write).await;
-    if let Err(error) = crate::sources::refresh::refresh(scheduler, &entity, Some(write.id)).await {
+    let refresh = crate::sources::refresh::refresh(
+        scheduler,
+        &entity,
+        Some(write.id),
+        knobas_sync::refresh::Lock::Wait,
+    );
+    tokio::pin!(refresh);
+    // The read-back asks for the lock first; once it waits, a run that may
+    // stand aside is stopped, so Postgres hands the lock to the read-back and
+    // a run started in the gap queues behind it (ADR-0031 as amended
+    // 2026-11-24). A read-back that never waits (nothing in flight, a kind the
+    // adapter does not read) stops nothing.
+    let refreshed = tokio::select! {
+        biased;
+        refreshed = &mut refresh => refreshed,
+        () = stand_aside_once_waiting(scheduler, write) => refresh.await,
+    };
+    if let Err(error) = refreshed {
         tracing::warn!(
             source = %write.source_id,
             write_id = write.id,
@@ -876,6 +920,11 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             "a write landed but its item could not be refreshed"
         );
     }
+    // A run it started (or any run in flight it was read back by) is read on
+    // to its end, beside the run that follows the write (the TeamCity run
+    // fix, 2026-11-25): that run catches the build where it stands then, and
+    // the next scheduled one is minutes away.
+    super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -883,6 +932,40 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             %error,
             "a write landed but the mirror could not be re-read for it"
         );
+    }
+}
+
+/// How long a landed write's read-back is watched for its wait on the run's
+/// lock before nothing is stopped: building the source (its keychain read)
+/// comes first.
+const ASIDE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Stop the run of `write`'s source in flight, where one that may stand
+/// aside goes and the read-back's ask for the lock is waiting on it
+/// ([`Scheduler::stand_aside`]); answers once that is done or given up on.
+async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
+    if !scheduler.may_stand_aside(&write.source_id).await {
+        return;
+    }
+    let pool = &scheduler.deps().pool;
+    let started = std::time::Instant::now();
+    while started.elapsed() < ASIDE_PATIENCE {
+        let waiting: Result<bool, sqlx::Error> = sqlx::query_scalar(
+            "select exists (select 1 from pg_locks where locktype = 'advisory' and not granted)",
+        )
+        .fetch_one(pool)
+        .await;
+        if matches!(waiting, Ok(true)) {
+            if scheduler.stand_aside(&write.source_id, write.id).await {
+                tracing::info!(
+                    source = %write.source_id,
+                    write_id = write.id,
+                    "a run stood aside so the landed write's read-back went first"
+                );
+            }
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -926,6 +1009,10 @@ pub(crate) struct FollowLandings {
     /// The landed writes whose [`after_landing`] has not ended, counted per
     /// source: what [`sync_after_write`] waits out (#2115).
     following: Following,
+    /// The runs started in knobas being read to their end
+    /// ([`super::follow_run`], the TeamCity run fix). Not counted in
+    /// `following`: a run that follows a write does not wait out a build.
+    runs: super::follow_run::RunFollows,
 }
 
 /// How many landed writes of each source are still being followed: counted up
@@ -1019,9 +1106,17 @@ impl FollowLandings {
                 inner,
                 scheduler_slot,
                 following: Following::default(),
+                runs: super::follow_run::RunFollows::default(),
             },
             slot,
         )
+    }
+}
+
+impl FollowLandings {
+    /// The runs being followed ([`super::follow_run`]).
+    pub(crate) fn runs(&self) -> super::follow_run::RunFollows {
+        self.runs.clone()
     }
 }
 
@@ -1036,6 +1131,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
         self.inner.activity_new(row);
     }
     fn write_landed(&self, write: &QueuedWrite) {
+        // The page that made it reads its echo back behind its views: as a
+        // person's read for a while (`live::note_write`, the ux16 overs pass).
+        crate::sources::live::note_write(&write.entity_id);
         if let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade()) {
             let (task, landed) = (scheduler.clone(), write.clone());
             // Counted before the flush that sent it returns, and until the
@@ -1061,6 +1159,17 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
+    }
+    // The files pass's index and its progress (the everything-search
+    // decisions, D7), from `FilesOnSync` inside. This wrapper is the
+    // outermost the scheduler holds, and a method it leaves out answers the
+    // trait's default: the pass never ran in the app until these two were
+    // passed on (the ux26 boot check, `tests/it/files_on_sync.rs`).
+    fn files(&self) -> Option<knobas_sync::code_files::Files> {
+        self.inner.files()
+    }
+    fn code_files(&self, progress: &knobas_sync::code_files::FilesProgress) {
+        self.inner.code_files(progress);
     }
 }
 
@@ -1302,6 +1411,7 @@ mod tests {
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -1414,6 +1524,7 @@ mod tests {
                         username: "knobas".to_owned(),
                         password: "knobas-dev".to_owned(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

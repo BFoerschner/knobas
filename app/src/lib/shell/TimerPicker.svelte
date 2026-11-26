@@ -181,7 +181,7 @@
   }
 </script>
 
-<TfDialog title="What is the time on?" {onclose} {layers}>
+<TfDialog why={labelTarget === null ? (candidates.length + assets.length > 0 ? "Type a label, or pick one below." : "Type a label.") : null} title="What is the time on?" {onclose} {layers}>
   {#snippet body()}
     <form class="tf-formgrid" id={formId} onsubmit={submit}>
       <label for={labelId}>A label</label>

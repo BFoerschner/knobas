@@ -2,7 +2,7 @@
   *Open in… ▾* on a code object (#2274, spec #2234 step 6c): a commit row, a
   commit's page, a range's diff address, a diff file header at its line, a
   pull request's header and Compare. A ghost button, as every "Open in" is
-  (#2238); the menu is `TfOpenIn`'s, keys and all.
+  (#2238); `TfMenu` draws it, as it does `TfOpenIn`'s.
 
   - The applications that accept the object (`objectMenu`: the ones with a
     command for its kind), the default first, each with its command filled
@@ -18,10 +18,13 @@
     from the source's typed base URL), handed to the opener. Offered on every
     platform whenever the source declares its pages.
   - With neither, one line says why nothing opens it here.
+  - Last, as on every *Open in…*: *Add an application*, the application page
+    with this repository and this object to try it on, and *Manage
+    applications*, Settings › Checkouts and Open in (PR #2479, 2026-11-13).
 -->
 <script module lang="ts">
   import { diffTool, entityCheckout, objectPage, openDiffTool, type CheckoutView, type OpenObject } from "../../ipc/entity";
-  import { openExternal } from "../../shell/open-external";
+  import { openExternal } from "../../shell/open-external"; // browser on purpose: the menu's *Browser*
 
   /** What the menu reads and the one thing it hands the OS. */
   export interface OpenObjectPorts {
@@ -52,9 +55,13 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import TfMenu from "../TfMenu.svelte";
+  import TfPath from "../TfPath.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
+  import { appPageHash } from "./app-page";
   import { argvText, fillObject, objectCommand, objectMenu, worktreeOf } from "./openin";
 
   let {
@@ -94,7 +101,18 @@
   /** The Diff tool's ends and argv, when it is offered. */
   let tool = $state<{ ends: DiffEnds; argv: string[] } | null>(null);
   let face = $state<HTMLButtonElement | null>(null);
-  let menu = $state<HTMLDivElement | null>(null);
+  /** The repository the checkout read named: a branch's address opens on its repository. */
+  let repoId = $state<string | null>(null);
+
+  /** The application page, to try the new one on this object. */
+  const addHash = $derived(
+    appPageHash({
+      repo: repoId ?? entityId,
+      kind: object.kind,
+      value:
+        object.kind === "file" ? object.path : object.kind === "commit" ? object.sha : object.kind === "pull_request" ? String(object.number) : null,
+    }),
+  );
 
   const entries = $derived(
     path === null || apps.settings === null ? [] : objectMenu(apps.settings, object.kind),
@@ -114,6 +132,7 @@
     // A row redrawn with another object while this read ran: that object's menu reads its own.
     if (key !== JSON.stringify([entityId, object])) return;
     path = view?.path ?? null;
+    repoId = view?.repo_entity_id ?? null;
     worktree =
       asked.kind === "pull_request" && view !== null ? worktreeOf(view.clones_root, view.repo_entity_id, asked.number) : null;
     page = url;
@@ -135,45 +154,8 @@
   }
 
   $effect(() => {
-    if (!open) return;
-    void untrack(() => read());
-    const off = untrack(() => layers.add({ kind: "dialog", close: () => close() }));
-    const outside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && !menu?.contains(target) && !face?.contains(target)) open = false;
-    };
-    window.addEventListener("click", outside, true);
-    return () => {
-      off();
-      window.removeEventListener("click", outside, true);
-    };
+    if (open) void untrack(() => read());
   });
-
-  // The first entry takes the focus once the reads have drawn it, so `Enter` runs the default.
-  $effect(() => {
-    if (open && !reading) queueMicrotask(() => menu?.querySelector<HTMLButtonElement>("button")?.focus());
-  });
-
-  function close() {
-    open = false;
-    face?.focus();
-  }
-
-  function onkeydown(event: KeyboardEvent) {
-    const items = [...(menu?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    } else if (event.key === "ArrowDown" && items.length > 0) {
-      event.preventDefault();
-      items[(at + 1) % items.length]?.focus();
-    } else if (event.key === "ArrowUp" && items.length > 0) {
-      event.preventDefault();
-      items[(at - 1 + items.length) % items.length]?.focus();
-    }
-  }
 
   function run(id: string, name: string) {
     open = false;
@@ -182,15 +164,15 @@
 
   function diff(at: DiffEnds) {
     open = false;
-    ports.openDiffTool(entityId, at.base, at.head).then(
-      (argv) => push({ text: `Started the Diff tool: ${argvText(argv)}` }),
-      (cause: unknown) => push({ text: `Could not start the Diff tool: ${ipcErrorMessage(cause)}`, tone: "err" }),
+    // The chip says it is opening (ux21); a toast only for why it did not start.
+    acknowledged(openingWords("the Diff tool"), () => ports.openDiffTool(entityId, at.base, at.head)).catch((cause: unknown) =>
+      push({ text: `Could not start the Diff tool: ${ipcErrorMessage(cause)}`, tone: "err" }),
     );
   }
 
   function browse(url: string) {
     open = false;
-    ports.openExternal(url).catch((cause: unknown) => {
+    acknowledged(openingWords("the browser"), () => ports.openExternal(url)).catch((cause: unknown) => {
       push({ text: `Could not open the browser: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }
@@ -208,38 +190,37 @@
     onclick={(event) => {
       event.stopPropagation();
       open = !open;
-    }}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button
+    }}>Open in…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
   >
-  {#if open}
-    <!-- svelte-ignore a11y_interactive_supports_focus -->
-    <div class="tf-menu tf-appmenu" role="menu" aria-label="Open in" bind:this={menu} {onkeydown}>
+  <TfMenu bind:open opener={face} label="Open in" className="tf-appmenu" ready={!reading} {layers}>
       {#if reading}
         <span class="tf-dim tf-appmenu-note" aria-live="polite">Reading…</span>
       {:else}
         {#each entries as entry (entry.app.id)}
+          {@const line = fillObject(objectCommand(entry.app, object.kind) ?? "", { path: worktree ?? path ?? "", object, url: page })}
           <button role="menuitem" onclick={() => run(entry.app.id, entry.app.name)}
-            ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><span
-              class="tf-mono">{fillObject(objectCommand(entry.app, object.kind) ?? "", { path: worktree ?? path ?? "", object, url: page })}</span
-            ></button
+            ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><TfPath path={line} /></button
           >
         {/each}
         {#if tool !== null}
           {@const at = tool.ends}
           {#if entries.length > 0}<hr />{/if}
-          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><span class="tf-mono">{argvText(tool.argv)}</span></button>
+          <button role="menuitem" onclick={() => diff(at)}><b>Diff tool</b><span class="tf-mono tf-appmenu-argv">{argvText(tool.argv)}</span></button>
         {/if}
         {#if page !== null}
           {#if entries.length > 0 || tool !== null}<hr />{/if}
-          <button role="menuitem" onclick={() => browse(page!)}><b>Browser</b><span class="tf-mono">{page}</span></button>
+          <button role="menuitem" onclick={() => browse(page!)}><b>Browser</b><span class="tf-mono" title={page}>{page}</span></button>
         {/if}
         {#if entries.length === 0 && page === null && tool === null}
           <span class="tf-dim tf-appmenu-note"
             >{path === null
               ? "The repository is not on this machine, and its source has no web page for this."
-              : `No application opens ${WHAT[object.kind]}: add one in Settings › Checkouts.`}</span
+              : `No application opens ${WHAT[object.kind]} yet.`}</span
           >
         {/if}
+        <hr />
+        <a role="menuitem" href={addHash} onclick={() => (open = false)}>Add an application</a>
+        <a role="menuitem" href="#/settings/checkouts" onclick={() => (open = false)}>Manage applications</a>
       {/if}
-    </div>
-  {/if}
+  </TfMenu>
 </span>

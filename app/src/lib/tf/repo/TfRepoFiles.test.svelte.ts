@@ -12,12 +12,14 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { SourceView, TreeEntry, TreeSections } from "../../ipc/entity";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import TfRepoFilesRefreshed from "./TfRepoFiles.refresh.fixture.svelte";
-import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
+import type { EngineId } from "../../render/engines";
+import { workerPort, type HighlightHandlers, type HighlightMessage, type HighlightReply, type HighlightRequest, type RenderPort } from "../../render/port";
 import { installCommands, type CommandPort } from "../../render/command";
 import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
 import type { RendererDefault } from "../../render/defaults";
 import { fileHash, lineHash } from "./repo";
 import { toasts } from "../../shell/toasts.svelte";
+import { zen } from "../zen.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -97,6 +99,7 @@ beforeEach(() => {
 afterEach(() => {
   if (view) unmount(view);
   view = null;
+  zen.on = false;
   target.remove();
 });
 
@@ -182,7 +185,9 @@ test("the deep file draws as soon as its read answers, and the tree fills in as 
   release("files");
   release("files:src");
   await settle();
-  expect(tree()).toEqual(["src", "psp", "README.md"]);
+  // Down to the first open folder still reading: README.md waits below it, so nothing drawn moves when psp opens
+  // (the final suite's `just moves`, 2026-11-22).
+  expect(tree()).toEqual(["src", "psp"]);
 
   for (const section of ["files:src/psp", "files:src/psp/gateway", "files:src/psp/gateway/sepa"]) release(section);
   await settle();
@@ -282,7 +287,7 @@ test("a link to a file that does not exist says so once its directory is read", 
 
   for (const read of [...source.asked]) if (!source.answered.includes(read.section)) read.release();
   await settle();
-  expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toBe(`There is no file ${missing} on main.`);
+  expect(text(target.querySelector(".tf-fileview .tf-nohere p"))).toBe("main has no file at this path.");
 });
 
 test("a source that declares no tree sections asks for no section its listings have not named (#2298)", async () => {
@@ -342,12 +347,22 @@ test("a 50,000-line file draws fewer than 500 of its lines", async () => {
   expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);
 });
 
-test("a 1,999-line file draws whole", async () => {
-  draw(openSource({ "BULK.rs": long(1_999) }).entityView, "BULK.rs");
+test("a 300-line file draws whole", async () => {
+  draw(openSource({ "BULK.rs": long(300) }).entityView, "BULK.rs");
   await settle();
 
-  expect(drawnLines()).toHaveLength(1_999);
-  expect(lineText(1_998)).toEqual(["1999", "let value_1999 = 1999;"]);
+  expect(drawnLines()).toHaveLength(300);
+  expect(lineText(299)).toEqual(["300", "let value_300 = 300;"]);
+});
+
+// The inner-6x pass (2026-11-15): drawn whole, a 400-line file was most of a return's build at 6x.
+test("a 400-line file draws the lines near the view, as every list past 300 rows does", async () => {
+  draw(openSource({ "BULK.rs": long(400) }).entityView, "BULK.rs");
+  await settle();
+
+  expect(drawnLines().length).toBeGreaterThan(0);
+  expect(drawnLines().length).toBeLessThan(400);
+  expect(lineText(0)).toEqual(["1", "let value_1 = 1;"]);
 });
 
 test("a link to line 40,000 of a long file draws and marks that line", async () => {
@@ -411,6 +426,39 @@ test("a file draws as plain text first and gains colour when the highlighter ans
 
   expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
   expect(lineText(1)).toEqual(["2", "    run(42);"]);
+});
+
+test("a change of highlighter recolours an open file in place: its old colours stay until the new land (the re-ruling, test 10)", async () => {
+  // The app's port over a worker answered by hand, so the replay is the port's own.
+  const sent: HighlightMessage[] = [];
+  let listen: (event: { data: HighlightReply }) => void = () => {};
+  let engine: EngineId = "pierre";
+  const port = workerPort(
+    () =>
+      ({
+        postMessage: (message: HighlightMessage) => void sent.push(message),
+        addEventListener: (_type: string, handler: (event: { data: HighlightReply }) => void) => (listen = handler),
+      }) as unknown as Pick<Worker, "postMessage" | "addEventListener">,
+    () => ({ engine: () => engine, failed: () => {} }),
+  );
+  draw(openSource({ "src/main.rs": "fn main() {\n    run(42);\n}" }).entityView, "src/main.rs", null, port);
+  await settle();
+  const opened = () => sent.filter((m): m is Extract<HighlightMessage, { type: "open" }> => m.type === "open");
+  listen({ data: { type: "lines", id: opened()[0]!.id, from: 0, lines: [[["fn", "kw"], [" main() {", ""]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", ""]]] } });
+  flushSync();
+  const rows = [...target.querySelectorAll(".tf-fileview .tf-code .tf-l")];
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  engine = "shiki";
+  port.rehighlight();
+  flushSync();
+  expect(opened()[1]).toMatchObject({ engine: "shiki", path: "src/main.rs" });
+  // Before any new answer the rows still carry their role spans, and they are the same rows.
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-num:42"]);
+  expect([...target.querySelectorAll(".tf-fileview .tf-code .tf-l")]).toEqual(rows);
+  listen({ data: { type: "lines", id: opened()[1]!.id, from: 0, lines: [[["fn", "kw"], [" ", ""], ["main", "fn"], ["() {", "punct"]], [["    run(", ""], ["42", "num"], [");", ""]], [["}", "punct"]]] } });
+  flushSync();
+  expect(colored()).toEqual(["tf-hl-kw:fn", "tf-hl-fn:main", "tf-hl-punct:() {", "tf-hl-num:42", "tf-hl-punct:}"]);
+  expect([...target.querySelectorAll(".tf-fileview .tf-code .tf-l")]).toEqual(rows);
 });
 
 test("a file in a language the highlighter does not know stays plain text, with no error", async () => {
@@ -560,6 +608,30 @@ test("a file a saved command renderer accepts is run by its id and drawn in the 
   }
 });
 
+test("Render as shows a command renderer by its name and program alone, the whole command in its title (render-as pass)", async () => {
+  const command = String.raw`"C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe" --profile "C:\Users\some one\AppData\Roaming\profiles\default.json" --format svg`;
+  const name = "Orchestra score renderer for the payments team's sequence diagrams";
+  installCommands([{ id: "orchestra", name, command, patterns: ["*.page"], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  const commands: CommandPort = { run: async () => ({ outcome: "failed", status: 127, stderr: "" }) };
+  try {
+    draw(openSource({ "docs/index.page": "<p>Hi</p>" }).entityView, "docs/index.page", null, undefined, commands);
+    await settle();
+
+    expect(target.querySelector(".tf-rsw-face")?.getAttribute("title")).toBe(`Render as ${name}`);
+    menuItems();
+    const item = [...target.querySelectorAll<HTMLElement>(".tf-rsw .tf-menu [role='menuitemradio']")].find((one) => text(one).includes("Orchestra"))!;
+    expect(text(item.querySelector(".tf-rsw-nm"))).toBe(name);
+    const program = item.querySelector(".tf-path")!;
+    expect(text(program)).toBe(String.raw`C:\Program Files\Some Vendor\Orchestra Renderer 2026\bin\orchestra-render.exe`);
+    expect(text(program.querySelector(".tf-path-tail"))).toBe("orchestra-render.exe");
+    expect(text(item)).not.toContain("--profile");
+    expect(item.getAttribute("title")).toBe(`${name}\n${command}`);
+    expect(program.getAttribute("title")).toBe(command);
+  } finally {
+    installCommands([]);
+  }
+});
+
 // -- Markdown (#2255) -----------------------------------------------------------
 
 const MD_FILES: Files = {
@@ -670,7 +742,7 @@ test("a .md file mapped to Source opens as source, and the switcher offers Markd
   expect(face()).toBe("Render as Source");
   expect(menuItems()).toEqual([
     "Markdown built in",
-    "*Source built in · highlighted DEFAULT FOR *.md",
+    "*Source built in · highlighted Default for *.md",
     "Use Markdown for *.md by default",
     "Renderers and defaults… Settings › Renderers",
   ]);
@@ -694,7 +766,7 @@ test("a pick in the switcher holds for that file; Make default writes the patter
   view = mount(TfRepoFiles, { target, props });
   await settle();
   expect(menuItems()).toEqual([
-    "*Markdown built in DEFAULT FOR *.md",
+    "*Markdown built in Default for *.md",
     "Source built in · highlighted",
     "Use Source for *.md by default",
     "Renderers and defaults… Settings › Renderers",
@@ -747,7 +819,7 @@ test("a file only Source takes still shows the switcher, with nothing to make de
   draw(openSource(MD_FILES).entityView, "src/retry.rs");
   await settle();
   expect(face()).toBe("Render as Source");
-  expect(menuItems()).toEqual(["*Source built in · highlighted DEFAULT FOR *.rs", "Renderers and defaults… Settings › Renderers"]);
+  expect(menuItems()).toEqual(["*Source built in · highlighted Default for *.rs", "Renderers and defaults… Settings › Renderers"]);
 });
 
 // -- Mermaid files (#2258) --------------------------------------------------------
@@ -775,7 +847,7 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect([frame.width, frame.height]).toEqual(["300", "120"]);
   expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
   expect(menuItems()).toEqual([
-    "*Mermaid built in · strict security DEFAULT FOR *.mmd",
+    "*Mermaid built in · strict security Default for *.mmd",
     "Source built in · highlighted",
     "Use Source for *.mmd by default",
     "Renderers and defaults… Settings › Renderers",
@@ -824,7 +896,7 @@ test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed fra
     expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
     expect(render.asked).toEqual(["a -> b"]);
     expect(menuItems()).toEqual([
-      `*${engine} built in · ${blurb} DEFAULT FOR ${pattern}`,
+      `*${engine} built in · ${blurb} Default for ${pattern}`,
       "Source built in · highlighted",
       `Use Source for ${pattern} by default`,
       "Renderers and defaults… Settings › Renderers",
@@ -891,6 +963,157 @@ test("the app's view:fresh for the top directory reads the tree at the new commi
   expect(source.reads).toContain("file@2:main.rs");
 });
 
+test("a refresh reads the top again and not a file drawn at a commit; a branch that moved draws the file at its new commit", async () => {
+  const source = commitSource();
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "main.rs" as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: { dir: "files:", file: "file:" },
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run of the source ended and the branch stands where it did: the top is read again, the file at the commit it was
+  // drawn at is not, since it cannot have changed (the WSL block, 2026-11-14: every run's end read it again from Gitea,
+  // 0.2 to 2.2 s, and a page opened meanwhile waited on it).
+  const before = source.reads.length;
+  props.refreshed += 1;
+  await settle();
+  expect(source.reads.slice(before)).toContain("files");
+  expect(source.reads.slice(before).filter((id) => id.endsWith("main.rs")), "the file drawn at its commit is not read again").toEqual([]);
+  expect(lineText(0)).toEqual(["1", "// one"]);
+
+  // A run that moved the branch: the top names the file at the new commit, and that is read and drawn.
+  source.push();
+  props.refreshed += 1;
+  await settle();
+  expect(lineText(0)).toEqual(["1", "// two"]);
+  expect(source.reads).toContain("file@2:main.rs");
+});
+
+/**
+ * A source whose listings name a commit, as Gitea's do (`files@<sha>:<dir>`): each folder holds `count` files, and
+ * `push` moves the branch.
+ */
+function commitTree(folders: number) {
+  let tip = 1;
+  const reads: string[] = [];
+  const names = Array.from({ length: folders }, (_, i) => `pkg${String(i).padStart(2, "0")}`);
+  const entityView = async (_at: string, section: string | null): Promise<SourceView> => {
+    const id = section ?? "";
+    reads.push(id);
+    const one = (blocks: unknown[]) => ({ sections: [{ id, title: "Files", count: null, deferred: false, blocks }], actions: [] }) as unknown as SourceView;
+    const tree = (entries: TreeEntry[]) => one([{ type: "tree", trail: [], entries, truncated: false, url: null }]);
+    if (id === "files") return tree(names.map((name) => ({ name, kind: "dir", size: null, section: `files@${tip}:${name}` })));
+    const dir = /^files@(\d+):(.*)$/.exec(id);
+    if (dir !== null) return tree([{ name: `at${dir[1]}.rs`, kind: "file", size: 5, section: `file@${dir[1]}:${dir[2]}/at${dir[1]}.rs` }]);
+    throw { code: "not_found", message: `no section ${id}` };
+  };
+  return { reads, entityView, push: () => (tip += 1) };
+}
+
+// The hover-lag pass (2026-11-16): a refresh read every folder opened so far again, one read each, and each answer drew
+// the whole tree again; on a forge that was a request a folder on every run's end, and on any tree a redraw a folder.
+test("a refresh reads the top again and no folder read at a commit; a branch that moved reads the open folders at the new one", async () => {
+  const source = commitTree(30);
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: null as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: { dir: "files:", file: "file:" },
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await settle();
+  for (const folder of target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")) folder.click();
+  await settle();
+  expect(tree()).toHaveLength(60);
+  const folderReads = () => source.reads.filter((id) => id.startsWith("files@"));
+  expect(folderReads()).toHaveLength(30);
+
+  // The branch stands where it did: the top says so, and the thirty folders at its commit are not asked for again.
+  props.refreshed += 1;
+  await settle();
+  props.refreshed += 1;
+  await settle();
+  expect(folderReads(), "no folder at its commit is read again").toHaveLength(30);
+  expect(tree()).toHaveLength(60);
+
+  // The branch moved: the top names every folder at the new commit, and the open ones are read there.
+  source.push();
+  props.refreshed += 1;
+  await settle();
+  expect(folderReads().filter((id) => id.startsWith("files@2:"))).toHaveLength(30);
+  expect(tree()).toContain("at2.rs");
+  expect(tree()).not.toContain("at1.rs");
+});
+
+test("a folder read by its path alone is still read again on a refresh, and the answers are drawn together", async () => {
+  const files: Files = { "README.md": "# payout-service", "docs/guide.md": "# guide", "src/lib.rs": "pub fn pay() {}" };
+  const source = heldSource(files);
+  const releaseAll = async () => {
+    for (let round = 0; round < 6; round += 1) {
+      for (const read of source.asked.splice(0)) read.release();
+      await settle();
+    }
+  };
+  const props = $state({
+    ports: {
+      entityView: source.entityView,
+      submitWrite: async () => {
+        throw { code: "invalid", message: "no write in this suite" };
+      },
+    },
+    repoId: REPO,
+    at: REPO,
+    branch: "main",
+    path: "README.md" as string | null,
+    refreshed: 0,
+    changed: new Set<string>(),
+    treeSections: GITEA_TREE,
+  });
+  view = mount(TfRepoFilesRefreshed, { target, props: { props } });
+  await releaseAll();
+  for (const folder of target.querySelectorAll<HTMLButtonElement>(".tf-ftree button.tf-fdir")) folder.click();
+  await releaseAll();
+  expect(tree()).toEqual(["docs", "guide.md", "src", "lib.rs", "README.md"]);
+
+  // Each folder gained a file on the source; the refresh asks for both again, since their sections name no commit.
+  files["docs/intro.md"] = "# intro";
+  files["src/retry.rs"] = "pub fn retry() {}";
+  source.answered.length = 0;
+  props.refreshed += 1;
+  await settle();
+  // (And the README, read by its path too.)
+  expect(source.asked.map((read) => read.section).sort()).toEqual(["file:README.md", "files", "files:docs", "files:src"]);
+  // One folder's answer alone draws nothing yet: the tree is drawn once, when every folder has answered.
+  source.asked.find((read) => read.section === "files:docs")!.release();
+  await settle();
+  expect(tree()).toEqual(["docs", "guide.md", "src", "lib.rs", "README.md"]);
+  source.asked.find((read) => read.section === "files:src")!.release();
+  await settle();
+  expect(tree()).toEqual(["docs", "guide.md", "intro.md", "src", "lib.rs", "retry.rs", "README.md"]);
+});
+
 test("a deep link's guess that drew the file stands for the section its listing names, so the file is not read twice", async () => {
   const source = commitSource();
   draw(source.entityView, "main.rs");
@@ -900,6 +1123,75 @@ test("a deep link's guess that drew the file stands for the section its listing 
 });
 
 // -- The scroll a file opens at (#2260's merger) ---------------------------------
+
+// The inner-6x pass (2026-11-15): measured in the task that builds the file, the page was laid out half built and then
+// again whole. Where the engine has a resize observer, the file is measured in its first call, after the frame's layout.
+test("another file's scroll to its top is measured after the frame's layout, not while the file is built", async () => {
+  const main = document.createElement("div");
+  main.className = "tf-main";
+  target.appendChild(main);
+  const rect = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) });
+  const real = Element.prototype.getBoundingClientRect;
+  let measured = 0;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this === main) return rect(100);
+    if (this.classList.contains("tf-fileview")) return (measured += 1), rect(100 + 300 - main.scrollTop);
+    return real.call(this);
+  };
+  // A stand-in observer that calls back only when told, as the engine does after a frame's layout.
+  const observers: { fire: () => void; on: boolean }[] = [];
+  const had = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    entry: { fire: () => void; on: boolean };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { fire: () => this.entry.on && callback([], this as unknown as ResizeObserver), on: false };
+      observers.push(this.entry);
+    }
+    observe() {
+      this.entry.on = true;
+    }
+    unobserve() {}
+    disconnect() {
+      this.entry.on = false;
+    }
+  } as unknown as typeof ResizeObserver;
+  try {
+    const props = $state({
+      ports: { ...openSource(DEEP_FILES), submitWrite: async () => ({}) as never },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      path: "README.md" as string | null,
+      line: null as number | null,
+      refreshed: 0,
+      changed: new Set<string>(),
+      defaults: createRendererDefaults(storedDefaults().port),
+    });
+    view = mount(TfRepoFilesRefreshed, { target: main, props: { props } });
+    await settle();
+    observers.forEach((o) => o.fire());
+
+    main.scrollTop = 1500;
+    measured = 0;
+    props.path = "src/psp/gateway/sepa/mod.rs";
+    await settle();
+    expect(text(main.querySelector(".tf-code"))).toContain("pub mod codes;");
+    // Built and drawn, and not measured yet: nothing has moved.
+    expect(measured).toBe(0);
+    expect(main.scrollTop).toBe(1500);
+    // The frame's layout done: the file's top comes to rest 12 px under the scroller's.
+    observers.forEach((o) => o.fire());
+    expect(main.scrollTop).toBe(300 - 12);
+    expect(measured).toBe(1);
+    // It asked once: a later layout moves nothing.
+    main.scrollTop = 1500;
+    observers.forEach((o) => o.fire());
+    expect(main.scrollTop).toBe(1500);
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+    globalThis.ResizeObserver = had;
+  }
+});
 
 test("another file opens at its top, not at the depth the last one was read to; a link to a line keeps its own scroll", async () => {
   // The shell's one scroller, with the file view 300 px down its content.
@@ -957,3 +1249,34 @@ test("another file opens at its top, not at the depth the last one was read to; 
     Element.prototype.getBoundingClientRect = real;
   }
 });
+
+// -- Zen mode (ux31; everywhere in Code since Z1: the shell owns its key, button and Esc rung) -------------------
+
+const zenPress = (key: string, at: EventTarget = window, extra: KeyboardEventInit = {}) => {
+  at.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra }));
+  flushSync();
+};
+
+test("Zen mode: the file view draws no Zen button of its own and leaves Z to the shell; Source and Markdown alike", async () => {
+  for (const path of ["README.md", "src/retry.rs"]) {
+    draw(openSource(MD_FILES).entityView, path);
+    await settle();
+    expect(target.querySelector(".tf-fileview .tf-zenbtn")).toBeNull();
+    zenPress("z");
+    expect(zen.on).toBe(false);
+    unmount(view!);
+    view = null;
+  }
+});
+
+test("Zen mode: T leaves it first, so Go to file, which it hides, takes the focus", async () => {
+  zen.here = true;
+  zen.on = true;
+  draw(openSource(MD_FILES).entityView, "README.md");
+  await settle();
+  zenPress("t");
+  expect(zen.on).toBe(false);
+  expect(document.activeElement).toBe(target.querySelector(".tf-gotofile input"));
+  zen.here = false;
+});
+

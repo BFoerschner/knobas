@@ -209,7 +209,7 @@ test("no {@html} — source text is untrusted (gotcha 7)", () => {
 
 /**
  * `default-src 'self'`: a bundle reaches nothing on the network but the IPC.
- * Fonts are npm-vendored (`@fontsource/*`) and bundled, never fetched.
+ * Fonts are the app's own files (`lib/tf/fonts/`), bundled, never fetched.
  *
  * Two exemptions, and both are exempt because they cannot reach anything:
  *
@@ -452,7 +452,14 @@ test("only the launcher resolves a pasted URL to an entity", () => {
     "lib/launcher/session.svelte.ts",
     // Not a pasted text (#841): a pull request's check links its run, and the
     // page opens the run the mirror holds at that link. No text is rewritten.
+    // Not a pasted text either (2026-11-16): a right-click's *Open in knobas* on a link to a mirrored source opens
+    // what the mirror holds at it, when chosen. No text is rewritten.
+    "lib/tf/context/TfContextMenu.svelte",
+    "lib/tf/context/ports.ts",
     "lib/tf/pr/TfPr.svelte",
+    // Not a pasted text (ADR-0050): a site's page offers *Open in knobas* for the address it stands at, read from
+    // the mirror, and the items it stood on are refreshed when it is left. No text is rewritten.
+    "lib/tf/site/visits.ts",
   ]);
 });
 
@@ -678,6 +685,28 @@ test("the key-split rule reads an id's split, not a clock's", () => {
   }
 });
 
+/**
+ * A length has one spelling (design system, Words): `secondsLabel` and `minutesLabel`, `lib/time/format.ts`. A run read
+ * *4 m 12 s* where a worklog read *2h 10m* because each page wrote its own. Three places keep their own words on
+ * purpose: a sync's cadence in a sentence (*every 20 s*, #1188, in `settings.ts` and `diagnostics.ts`), and a developer's
+ * error with a fraction of a second in it (`d2.ts`, `port.ts`).
+ */
+const LENGTH_IN_PLACE = /\$\{[^{}]+\} [sm]\b|\{[^{}]+\} s</;
+const OWN_LENGTH_WORDS = ["tf/settings/settings.ts", "sources/diagnostics.ts", "render/d2.ts", "render/port.ts", "time/format.ts"];
+
+test("no module writes a length in place", () => {
+  expect(
+    offenders(
+      (text, file) =>
+        !/\.test\.(svelte\.)?ts$/.test(file) &&
+        !file.includes(join("shell", "dev")) &&
+        !OWN_LENGTH_WORDS.some((own) => file.endsWith(join(...own.split("/")))) &&
+        LENGTH_IN_PLACE.test(text),
+    ),
+    "a length is secondsLabel or minutesLabel from lib/time/format.ts",
+  ).toEqual([]);
+});
+
 test("no module splits an entity id into its key in place", () => {
   expect(
     offenders(
@@ -686,4 +715,34 @@ test("no module splits an entity id into its key in place", () => {
     ),
     "an entity id's key is keyOf from lib/time/format.ts",
   ).toEqual([]);
+});
+
+/**
+ * Where a web address opens is decided in one place (ADR-0050, decisions §12): `open-web.ts`. A module that takes the
+ * browser's own opener (`openExternal`, or `openInBrowser`) opens the browser whatever the source's *Open its pages
+ * inside knobas* says, so only `open-web.ts` and the two modules it stands in front of may import them, and an import
+ * marked `// browser on purpose` (an item named *Open in browser* or *Browser*), which says why on its line.
+ */
+const BROWSER_OPENERS = /import\s*\{[^}]*\b(openExternal|openInBrowser)\b[^}]*\}\s*from\s*"[^"]*(open-external|external-links)"/;
+const MAY_OPEN_THE_BROWSER = ["shell/open-web.ts", "shell/open-external.ts", "shell/external-links.ts"];
+
+function browserOpenersIn(files: readonly { path: string; text: string }[]): string[] {
+  const found: string[] = [];
+  for (const { path, text } of files) {
+    if (MAY_OPEN_THE_BROWSER.some((allowed) => path.endsWith(allowed)) || /\.test\.(svelte\.)?ts$/.test(path)) continue;
+    for (const line of text.split("\n")) {
+      if (BROWSER_OPENERS.test(line) && !line.includes("browser on purpose")) found.push(`${path.slice(ROOT.length)}: ${line.trim()}`);
+    }
+  }
+  return found;
+}
+
+test("only open-web.ts decides that a web address opens the browser", () => {
+  const files = sources().map((path) => ({ path, text: readFileSync(path, "utf8") }));
+  expect(browserOpenersIn(files)).toEqual([]);
+  // The rule's own witness: a new component that takes the browser's opener is refused, a marked one passes.
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openExternal } from "../../shell/open-external";` }])).toHaveLength(1);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openInBrowser, openLink } from "../../shell/external-links";` }])).toHaveLength(1);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openLink } from "../../shell/external-links";` }])).toHaveLength(0);
+  expect(browserOpenersIn([{ path: `${ROOT}lib/tf/x/TfNew.svelte`, text: `  import { openExternal } from "../../shell/open-external"; // browser on purpose: *Browser*` }])).toHaveLength(0);
 });

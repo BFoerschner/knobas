@@ -32,16 +32,22 @@ export function echoEvents(settle: () => Promise<void>) {
 
 /** A follower the test speaks for: `sent(id)` is the queue's next read no longer listing write `id`. */
 export function echoFollower() {
-  const hears = new Map<number, Hear>();
+  // Several of one write: a page's echo and its toast each follow it.
+  const hears = new Map<number, Set<Hear>>();
   const follower: WriteFollower = {
     follow(id, hear) {
-      hears.set(id, hear);
-      return () => hears.delete(id);
+      const all = hears.get(id) ?? new Set<Hear>();
+      hears.set(id, all);
+      all.add(hear);
+      return () => all.delete(hear);
     },
   };
+  const tell = (id: number, row: unknown) => {
+    for (const hear of [...(hears.get(id) ?? [])]) hear(row as never);
+  };
   const sent = (id: number) => {
-    hears.get(id)!(undefined);
+    tell(id, undefined);
     flushSync();
   };
-  return { follower, sent, hear: (id: number, row: unknown) => hears.get(id)?.(row as never) };
+  return { follower, sent, hear: tell };
 }

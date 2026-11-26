@@ -1,0 +1,19 @@
+[
+  ["kw:package",": payout"],
+  [],
+  ["kw:import",": kotlinx.coroutines.delay"],
+  [],
+  ["attr:@Suppress",":(","str:\"unused\"",":)"],
+  ["kw:data",": ","kw:class",": ","ty:Batch",":(","kw:val",": id: ","ty:String",":, ","kw:val",": tries: ","ty:Int",": ","op:=",": ","num:0",":)"],
+  [],
+  ["kw:suspend",": ","kw:fun",": ","fn:settle",":(batch: ","ty:Batch",":): ","ty:Result","op:<","ty:String","op:>",": {"],
+  [":    ","kw:if",": (batch.","prop:tries",": ","op:>",": ","num:3",":) ","kw:return",": ","ty:Result",":.","fn:failure",":(","fn:IllegalStateException",":(","str:\"parked\"",":))"],
+  [":    ","fn:delay",":(","num:250L",":)"],
+  [":    ","kw:val",": name ","op:=",": ","str:\"batch-${batch.id}\""],
+  [":    ","kw:return",": ","kw:when",": (batch.","prop:id",":) {"],
+  [":        ","kw:is",": ","ty:String",": ","op:->",": ","ty:Result",":.","fn:success",":(name)"],
+  [":        ","kw:else",": ","op:->",": ","ty:Result",":.","fn:failure",":(","fn:Exception",":())"],
+  [":    }"],
+  [":}"],
+  []
+]

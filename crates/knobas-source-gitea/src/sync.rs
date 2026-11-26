@@ -179,7 +179,11 @@ use crate::model;
 /// accurate count of what it walked ([`cap_reached`]) rather than being
 /// silently truncated.
 const MAX_LIST_PAGES: u32 = 21;
-const MAX_BRANCH_PAGES: u32 = 21;
+/// The branch walk's guard: 10,000 branches in one repository, as the issues' is (`MAX_ISSUE_PAGES`), plus the
+/// empty page that ends them. It was 1,000 with the repositories' until the extremes pass (PR #2479, 2026-11-13):
+/// a repository of 5,000 branches, which a real team's long-lived monorepo has, failed the whole source's run
+/// with `cap_reached`, so nothing of it was mirrored at all. Past 10,000 it still fails loudly.
+const MAX_BRANCH_PAGES: u32 = 201;
 // The two budgeted walks' page caps. Both sit at 1,000 records, which is
 // exactly the largest `prs_per_repo`/`commits_per_repo` the config schema
 // allows (`config::config_schema`, `"maximum": 1000`). Sitting them *there* is
@@ -203,7 +207,7 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
 // before any request for the empty page that would have confirmed the end.
 // That is why these two stayed at 20 when `MAX_LIST_PAGES` and
-// `MAX_BRANCH_PAGES` went to 21: a 21st request is one they never make.
+// `MAX_BRANCH_PAGES` went to 21 (the branches' since to 201): a 21st request is one they never make.
 /// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
 /// Pages per walk of one branch. `commits_per_repo` is the whole-repository
@@ -506,6 +510,107 @@ pub(crate) async fn run(
         return Ok(unchanged);
     }
     Ok(next.to_json())
+}
+
+/// A refresh under one repository (ADR-0047, `Source::refresh_under`): the
+/// run's walk of `owner/name` alone, from where the stored position says it
+/// stood, and that position moved as the run would move it.
+///
+/// * **No position, no walk.** A cursor that does not parse, names no
+///   repository, or holds one the scope no longer admits owes a full sync
+///   (`run`'s rules); a position naming this one repository would make the
+///   next run incremental and cancel that sync and its sweep. So
+///   `NotOffered`, and the app runs the source.
+/// * **Identity first**, as `run`: only a token shown good lets a 404 below
+///   be read as a fact about the repository.
+/// * **The repository read by name** (`GET /repos/{owner}/{repo}`), which
+///   Gitea answers with the record its listing gives, so the fingerprint the
+///   change gate compares is the run's.
+/// * **Gone is a 404 on that read**: the repository's tombstone, and its entry
+///   leaves the position, so one that comes back is walked from blank.
+/// * **Any other refusal fails the refresh**: `walk_repo`'s skip arms are a
+///   run's, which goes on to the next repository; a refresh has none.
+/// * **The position moves only when the walk emitted something**, as a run's
+///   does; every other repository's entry and `repos_listed_at` stay.
+pub(crate) async fn walk_one(
+    source: &crate::GiteaSource,
+    owner: &str,
+    name: &str,
+    cursor: Option<&str>,
+) -> Result<knobas_source::UnderAnswer, SourceError> {
+    use knobas_source::UnderAnswer;
+    let Some(mut position) = GiteaCursor::parse(cursor) else {
+        return Ok(UnderAnswer::NotOffered);
+    };
+    let full_name = format!("{owner}/{name}");
+    if position.repos.is_empty()
+        || position
+            .repos
+            .keys()
+            .any(|stored| !in_scope(&source.config, stored))
+        || !admits(&source.config, owner, &full_name)
+    {
+        return Ok(UnderAnswer::NotOffered);
+    }
+    source.client.current_user().await?;
+    let raw = match source.client.get_repo(owner, name).await {
+        Ok(raw) => raw,
+        Err(error) if error.status() == Some(404) => {
+            let stored = position.entry_like(&full_name).map(|(key, _)| key.clone());
+            if let Some(key) = stored {
+                position.repos.remove(&key);
+            }
+            return Ok(UnderAnswer::Walked {
+                items: vec![map::repo_tombstone(&source.id, owner, name)],
+                cursor: Some(position.to_json()),
+            });
+        }
+        Err(error) => return Err(in_repository(&full_name, error)),
+    };
+    let repo: model::Repo = serde_json::from_value(raw.clone()).map_err(|error| {
+        SourceError::protocol(format!(
+            "gitea: {full_name} answered a record this adapter cannot read: {error}"
+        ))
+    })?;
+    if repo.owner_repo().is_none() {
+        return Err(SourceError::protocol(format!(
+            "gitea: {full_name} answered an unaddressable name {:?}",
+            repo.full_name
+        )));
+    }
+    let selected = Selected {
+        full_name: repo.full_name.clone(),
+        raw,
+        repo,
+        listed: false,
+    };
+    let before = position.repo(&selected.full_name);
+    let mut after = before.clone();
+    let mut buffer = Buffered(Vec::new());
+    let mut emitted = 0;
+    if let Err(RepoError::Fatal(error) | RepoError::Skip(error)) = sync_repo(
+        source,
+        &selected,
+        &before,
+        &mut after,
+        &mut buffer,
+        &mut emitted,
+    )
+    .await
+    {
+        return Err(in_repository(&selected.full_name, error));
+    }
+    if emitted == 0 {
+        return Ok(UnderAnswer::Walked {
+            items: Vec::new(),
+            cursor: None,
+        });
+    }
+    position.repos.insert(selected.full_name.clone(), after);
+    Ok(UnderAnswer::Walked {
+        items: buffer.0,
+        cursor: Some(position.to_json()),
+    })
 }
 
 /// How one repository's walk ended.

@@ -294,6 +294,7 @@ pub async fn add(
             kind: input.auth_kind,
             value: typed,
             account: input.secret.account.clone().map(Into::into),
+            web: None,
         },
     )
     .await?;
@@ -309,6 +310,7 @@ pub async fn add(
             config: input.config,
             sync_interval_secs: interval,
             enabled: input.enabled,
+            sync_by_hand: input.sync_by_hand.unwrap_or(false),
         },
     )
     .await;
@@ -380,6 +382,14 @@ pub async fn list(
     let mut misses = knobas_sync::role_check::misses(pool).await?;
     // Once, not once per row: `descriptors()` builds every template.
     let templates = registry.descriptors();
+    // Every source's last finished run in one read, not one per row.
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    let mut last_runs: std::collections::HashMap<String, _> =
+        knobas_sync::run_log::last_finished_of(pool, &ids)
+            .await?
+            .into_iter()
+            .map(|run| (run.source_id.clone(), run))
+            .collect();
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -396,6 +406,10 @@ pub async fn list(
             .map(|t| t.roles.clone())
             .unwrap_or_default();
         out.push(SourceSummary {
+            write_ops: template
+                .as_ref()
+                .map(|t| t.write_ops.clone())
+                .unwrap_or_default(),
             role_misses: still_claimed(misses.remove(&id).unwrap_or_default(), &roles),
             roles,
             item_count: counts.get(&id).copied().unwrap_or(0),
@@ -403,7 +417,7 @@ pub async fn list(
                 .iter()
                 .find(|s| s.source_id == id)
                 .and_then(|s| s.next_run_at),
-            last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
+            last_run: last_runs.remove(&id),
             kinds: template.map(|t| t.entity_kinds).unwrap_or_default(),
             auth_kind: row.auth_kind.method(),
             id: row.id,
@@ -412,6 +426,7 @@ pub async fn list(
             base_url: row.base_url,
             enabled: row.enabled,
             sync_interval_secs: row.sync_interval_secs,
+            sync_by_hand: row.sync_by_hand,
             config: row.config,
             health: row.health,
         });
@@ -469,6 +484,7 @@ pub async fn update(
             base_url: patch.base_url,
             config: patch.config,
             sync_interval_secs: patch.sync_interval_secs,
+            sync_by_hand: patch.sync_by_hand,
             enabled: patch.enabled,
         },
     )
@@ -504,11 +520,25 @@ pub async fn delete(
     }
     // Dropped once the row is gone, so no read builds it again in between.
     live.forget(id);
+    // Its folder renders go with it (ADR-0044).
+    crate::folder_render::runs::Runs::global().forget_source(id);
     knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
+    // Its one-time-code keys go with its credential (ADR-0056), so kept
+    // entries can no longer make a code. Warned about rather than raised: the
+    // source is gone either way, and a store that keeps no text items (a
+    // test's) has none to delete.
+    if let Err(error) = knobas_secrets::otp::spawn::delete(secrets, id).await {
+        tracing::warn!(source = id, %error, "the source's one-time-code keys could not be deleted");
+    }
     // Settings that hang off the id go with it (#2440), last: a failure here
+
     // leaves the keychain item already gone, and at worst a row that keeps a
     // source added again under the id with embeds off, the safe side.
     crate::docs::forget_run_embedded_html(pool, id).await?;
+    // Its hidden spaces and a Docs home in it (PR #2479, 2026-11-17), as its embeds' row.
+    crate::docs::forget_docs_choices(pool, id).await?;
+    // Its site's switch, allowed origins and *Kept since* (ADR-0050).
+    crate::site::forget_settings(pool, id).await?;
     Ok(())
 }
 
@@ -549,10 +579,12 @@ pub async fn set_secret(
     // show. Removing an account is therefore not something this call can do;
     // deleting and re-adding the source is, and it is the honest cost of a
     // form that may never read a credential back.
-    let credential = Credential::keeping(
-        &secret,
-        knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?,
-    );
+    let stored =
+        knobas_secrets::spawn::get(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
+    // A saved web sign-in (ADR-0050) is not part of the form: re-entering the
+    // credential keeps it.
+    let web = stored.as_ref().and_then(|stored| stored.web.clone());
+    let credential = Credential::keeping(&secret, stored);
     let Some(value) = credential.secret.clone() else {
         return Err(SourcesError::Invalid(format!(
             "source {id:?} has no stored credential to keep -- type one in"
@@ -566,12 +598,16 @@ pub async fn set_secret(
             kind: method,
             value,
             account: credential.account.clone(),
+            web,
         },
     )
     .await?;
     // The live reads' instance holds the credential it was built with
     // (#2240): the next read builds it again over this one.
     live.forget(id);
+    super::held::forget(pool, id).await;
+    // A new credential may read less: its folder renders go too (ADR-0044).
+    crate::folder_render::runs::Runs::global().forget_source(id);
     release_credential_waits(pool, id).await;
 
     let source = knobas_sync::scheduler::build_off_runtime(
@@ -842,6 +878,55 @@ pub async fn reachable_transitions(
     Ok(source.reachable_transitions(entity_id).await?)
 }
 
+/// What a person may change on `entity_id` besides its status (ADR-0054),
+/// asked of its adapter live as [`reachable_transitions`] is and never
+/// stored. `None` is an adapter that offers no edits, or an entity that is
+/// not a ticket.
+///
+/// An answer whose fields break the vocabulary's rules is drawn without
+/// them: each such field is dropped with a log line naming the source, never
+/// drawn half (a WASM guest is not held to the battery at run time).
+///
+/// # Errors
+///
+/// As [`reachable_transitions`].
+pub async fn ticket_fields(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+) -> Result<Option<knobas_source::ticket::TicketFields>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
+    let Some(answer) = source.ticket_fields(entity_id).await? else {
+        return Ok(None);
+    };
+    let (kept, dropped) = knobas_source::ticket::keep_fitting(answer);
+    for why in dropped {
+        tracing::warn!(entity = entity_id, "ticket_fields: a field left out: {why}");
+    }
+    Ok(Some(kept))
+}
+
+/// The choices of `field` on `entity_id` matching `typed` (ADR-0054), asked
+/// of its adapter live and never stored; the window keeps them by scope.
+///
+/// # Errors
+///
+/// As [`reachable_transitions`].
+pub async fn field_options(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+    field: &str,
+    typed: &str,
+) -> Result<Option<knobas_source::ticket::FieldOptions>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
+    Ok(source.field_options(entity_id, field, typed).await?)
+}
+
 /// The writes among `asks` their sources' credentials cannot make, each with
 /// its reason (#2040): what a surface that draws a write from the template
 /// `write_ops` asks after drawing it, to draw the refused ones disabled.
@@ -943,9 +1028,51 @@ pub async fn view(
     section: Option<&str>,
 ) -> Result<Option<knobas_source::view::SourceView>, SourcesError> {
     let source = live.source(pool, secrets, registry, entity_id).await?;
-    let Some(mut view) = live.view(&source, entity_id, section).await? else {
+    let Some(view) = live.view(&source, entity_id, section).await? else {
         return Ok(None);
     };
+    finish(pool, registry, view)
+        .await
+        .map(|(view, _)| Some(view))
+}
+
+/// [`view`] as a page draws it (ADR-0042): what knobas last read where it
+/// holds one, with when it was read, and the source read behind it
+/// ([`LiveSources::shown`]); the app's work on the answer as [`view`]'s.
+///
+/// # Errors
+///
+/// As [`view`], for a view knobas holds nothing of.
+pub async fn shown(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+    section: Option<&str>,
+) -> Result<Option<super::live::ShownView>, SourcesError> {
+    let source = live.source(pool, secrets, registry, entity_id).await?;
+    let (view, held_at, tree_unkept) = live.shown(&source, entity_id, section).await?;
+    let Some(view) = view else {
+        return Ok(None);
+    };
+    let (view, unsynced) = finish(pool, registry, view).await?;
+    Ok(Some(super::live::ShownView {
+        view,
+        held_at,
+        unsynced,
+        tree_unkept,
+    }))
+}
+
+/// The app's work on a view the adapter answered: rule 7 and the commit
+/// hints, as [`view`] says. Answers beside it each row rule 7 cleared, with
+/// the id the adapter named for it ([`super::live::Unsynced`]).
+async fn finish(
+    pool: &PgPool,
+    registry: &Arc<dyn AdapterRegistry>,
+    mut view: knobas_source::view::SourceView,
+) -> Result<(knobas_source::view::SourceView, Vec<super::live::Unsynced>), SourcesError> {
     resolve_commit_hints(pool, registry.as_ref(), &mut view).await?;
     let named: Vec<String> = view
         .sections
@@ -959,7 +1086,7 @@ pub async fn view(
         .filter_map(|row| row.entity_id.clone())
         .collect();
     if named.is_empty() {
-        return Ok(Some(view));
+        return Ok((view, Vec::new()));
     }
     let held: std::collections::HashSet<String> =
         sqlx::query_scalar("select entity_id from sync.item where entity_id = any($1)")
@@ -968,16 +1095,25 @@ pub async fn view(
             .await?
             .into_iter()
             .collect();
-    for block in view.sections.iter_mut().flat_map(|s| &mut s.blocks) {
-        if let knobas_source::view::Block::Entities { rows, .. } = block {
-            for row in rows {
-                if row.entity_id.as_ref().is_some_and(|id| !held.contains(id)) {
-                    row.entity_id = None;
+    let mut unsynced = Vec::new();
+    for section in &mut view.sections {
+        for block in &mut section.blocks {
+            if let knobas_source::view::Block::Entities { rows, .. } = block {
+                for row in rows {
+                    if row.entity_id.as_ref().is_some_and(|id| !held.contains(id))
+                        && let Some(id) = row.entity_id.take()
+                    {
+                        unsynced.push(super::live::Unsynced {
+                            section: section.id.clone(),
+                            title: row.title.clone(),
+                            entity_id: id,
+                        });
+                    }
                 }
             }
         }
     }
-    Ok(Some(view))
+    Ok((view, unsynced))
 }
 
 /// The bytes of the file at `path` in `entity_id`'s tree, at `commit` (a
@@ -1003,6 +1139,41 @@ pub async fn file_bytes(
     Ok(live.bytes(&source, entity_id, path, commit, cap).await?)
 }
 
+/// The adapter's answer for pipeline `entity_id`'s settings, a moving read
+/// (ADR-0042): what knobas last read when it holds one, and the source read
+/// behind it, told on `view:fresh` as the section `settings`; read now and
+/// waited for only the first time.
+///
+/// # Errors
+///
+/// As [`view`], on a read made now.
+async fn held_settings(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &Arc<dyn AdapterRegistry>,
+    live: &LiveSources,
+    entity_id: &str,
+) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
+    let lent = live.source(pool, secrets, registry, entity_id).await?;
+    let source = Arc::clone(&lent.source);
+    let entity = entity_id.to_owned();
+    let read: super::live::ReadAgain = Arc::new(move || {
+        let (source, entity) = (Arc::clone(&source), entity.clone());
+        Box::pin(async move {
+            let settings = source.pipeline_settings(&entity).await?;
+            serde_json::to_value(settings)
+                .map_err(|error| knobas_source::SourceError::protocol(error.to_string()))
+        })
+    });
+    let (settings, _) = live
+        .moving_read(&lent, entity_id, PIPELINE_SETTINGS, read)
+        .await?;
+    Ok(settings)
+}
+
+/// The name a pipeline's settings are kept and told under (ADR-0042).
+pub const PIPELINE_SETTINGS: &str = "settings";
+
 /// A pipeline's settings, read live from its own source (ADR-0022, #851),
 /// routed like [`view`].
 ///
@@ -1024,8 +1195,7 @@ pub async fn pipeline_settings(
     live: &LiveSources,
     entity_id: &str,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
-    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
-    let Some(mut settings) = source.pipeline_settings(entity_id).await? else {
+    let Some(mut settings) = held_settings(pool, secrets, registry, live, entity_id).await? else {
         return Ok(None);
     };
     if settings.repositories.iter().any(|r| r.url.is_some()) {
@@ -1091,8 +1261,7 @@ pub async fn pipeline_commits(
     shas: &[String],
 ) -> Result<std::collections::HashMap<String, String>, SourcesError> {
     let mut found = std::collections::HashMap::new();
-    let source = adapter_for(pool, secrets, registry, live, entity_id).await?;
-    let Some(settings) = source.pipeline_settings(entity_id).await? else {
+    let Some(settings) = held_settings(pool, secrets, registry, live, entity_id).await? else {
         return Ok(found);
     };
     let urls: Vec<&str> = settings
@@ -1224,6 +1393,34 @@ pub async fn run_source(
     entity_id: &str,
 ) -> Result<Arc<dyn knobas_source::Source>, SourcesError> {
     adapter_for(pool, secrets, registry, live, entity_id).await
+}
+
+/// Whether the mirror says run `run` has finished: its declared `finished`
+/// instant is set (ADR-0042). A finished run's log, tests and artifacts can
+/// no longer change, so a page reads them from what knobas kept or held. A
+/// run the mirror lacks, or whose kind declares no `finished`, has not.
+pub(crate) async fn run_finished(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run: &knobas_core::entity::EntityRef,
+) -> bool {
+    let row: Option<(String, serde_json::Value)> =
+        sqlx::query_as("select kind, payload from sync.item where entity_id = $1")
+            .bind(run.to_string())
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    let Some((kind, payload)) = row else {
+        return false;
+    };
+    let Ok(declarations) = crate::sources::paths::declared_paths(pool, registry).await else {
+        return false;
+    };
+    declarations
+        .get(&run.namespace, &kind)
+        .and_then(|paths| knobas_core::payload::resolve_string(&payload, &paths.finished))
+        .is_some()
 }
 
 /// A repository's web page from a clone URL: its `.git` and trailing slash
@@ -1460,28 +1657,60 @@ pub async fn role_scope(
     registry: &dyn AdapterRegistry,
     role: &str,
 ) -> Result<RoleScope, sqlx::Error> {
-    let rows = config::list(pool).await?;
+    let mut scopes = role_scopes(pool, registry, &[role]).await?;
+    Ok(scopes.remove(0))
+}
+
+/// [`role_scope`] for each of `roles`, in order, with the sources and their
+/// misses read once, at once (ux19: a ticket card's four sections each read
+/// both again, one after another).
+///
+/// # Errors
+///
+/// The database's.
+pub async fn role_scopes(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    roles: &[&str],
+) -> Result<Vec<RoleScope>, sqlx::Error> {
     // The misses as the source list reads them, so the two cannot disagree.
-    let mut misses = knobas_sync::role_check::misses(pool).await?;
+    let (rows, misses) =
+        tokio::try_join!(config::list(pool), knobas_sync::role_check::misses(pool))?;
     let templates = registry.descriptors();
+    Ok(roles
+        .iter()
+        .map(|role| scope_of(&rows, &misses, &templates, role))
+        .collect())
+}
+
+/// One role's scope over the sources, their misses and the templates read.
+fn scope_of(
+    rows: &[config::SourceConfigRow],
+    misses: &std::collections::HashMap<String, Vec<knobas_source::role::data::RoleMiss>>,
+    templates: &[SourceDescriptor],
+    role: &str,
+) -> RoleScope {
     let filling: Vec<(String, &SourceDescriptor)> = rows
-        .into_iter()
+        .iter()
         .filter_map(|row| {
             let template = templates
                 .iter()
                 .find(|t| t.adapter_kind == row.adapter_kind)?;
             let claims = template.roles.iter().any(|claim| claim.role == role);
-            let missed = still_claimed(misses.remove(&row.id).unwrap_or_default(), &template.roles)
-                .iter()
-                .any(|miss| miss.role == role);
-            (claims && !missed).then_some((row.id, template))
+            let missed = still_claimed(
+                misses.get(&row.id).cloned().unwrap_or_default(),
+                &template.roles,
+            )
+            .iter()
+            .any(|miss| miss.role == role);
+            (claims && !missed).then_some((row.id.clone(), template))
         })
         .collect();
     let kinds = role_kinds(role, filling.iter().map(|(_, template)| *template));
-    Ok(RoleScope {
+    RoleScope {
         sources: filling.into_iter().map(|(id, _)| id).collect(),
         kinds,
-    })
+    }
 }
 
 /// The kinds of `role` among `fillers`, sorted: a built-in role's own (see
@@ -1571,6 +1800,7 @@ async fn summarize(
         last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
         kinds: template.entity_kinds.clone(),
         roles: template.roles.clone(),
+        write_ops: template.write_ops.clone(),
         role_misses: still_claimed(
             knobas_sync::role_check::misses(pool)
                 .await?
@@ -1585,6 +1815,7 @@ async fn summarize(
         base_url: row.base_url,
         enabled: row.enabled,
         sync_interval_secs: row.sync_interval_secs,
+        sync_by_hand: row.sync_by_hand,
         config: row.config,
         health: row.health,
     })

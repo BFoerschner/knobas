@@ -727,8 +727,18 @@ setup_jira() {
 
   if [ "$(state_of "$JIRA_URL")" = "RUNNING" ]; then
     say "jira is already set up"
-    _v=$(curl -sS -u "$ADMIN_USER:$ADMIN_PASS" "$JIRA_URL/rest/api/2/serverInfo" \
-         | jq -r '.version // "unknown"')
+    # A Jira started from a stopped container says RUNNING while its REST
+    # plugins still warm, and `serverInfo` then answers an empty version
+    # (2026-11-09): recorded, it fails `live_jira_seeded`'s *Test connection*
+    # test against the real version a minute later. So ask until it names one.
+    _v=""
+    for _ in $(seq 1 60); do
+      _v=$(curl -sS -m 10 -u "$ADMIN_USER:$ADMIN_PASS" "$JIRA_URL/rest/api/2/serverInfo" 2>/dev/null \
+           | jq -r '.version // ""' 2>/dev/null) || _v=""
+      [ -z "$_v" ] || break
+      sleep 5
+    done
+    [ -n "$_v" ] || _v=unknown
     record jira "$(jq -n --arg u "$JIRA_URL" --arg n "$ADMIN_USER" --arg p "$ADMIN_PASS" --arg v "$_v" \
       '{url:$u, user:$n, password:$p, version:$v}')"
     return 0

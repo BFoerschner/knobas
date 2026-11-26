@@ -11,7 +11,7 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchQuery, SearchResponse } from "../ipc";
-import { Session } from "./session.svelte";
+import { askedAs, DEBOUNCE_MS, Session, WAIT_SAID_MS } from "./session.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -66,20 +66,42 @@ function ports(search: (q: SearchQuery) => Promise<SearchResponse>) {
   return { search, launcherHome: async () => EMPTY_HOME };
 }
 
-test("a word typed one letter at a time is one query, not five", async () => {
+test("a word typed one letter at a time is two queries, not five: its first key at once, the rest when the keys pause", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
-  for (const raw of ["s", "se", "sep", "sepa"]) {
+  // The first key of a settled box is asked at once (the broad-filters pass, 2026-11-13).
+  session.type("s");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s"]);
+  await vi.advanceTimersByTimeAsync(20);
+  for (const raw of ["se", "sep", "sepa"]) {
     session.type(raw);
-    // Four keystrokes inside one debounce window.
+    // Three more keystrokes inside one debounce window.
     await vi.advanceTimersByTimeAsync(20);
   }
-  expect(search).not.toHaveBeenCalled();
+  expect(search).toHaveBeenCalledTimes(1);
 
   await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa"]);
+
+  // A key typed after the box settled again is asked at once.
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("sepal");
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["s", "sepa", "sepal"]);
+});
+
+test("a key typed while a query is out waits for the keys to pause", async () => {
+  let answerIt: () => void = () => {};
+  const search = vi.fn((q: SearchQuery) => new Promise<SearchResponse>((resolve) => (answerIt = () => resolve(answer(q.raw)))));
+  const session = new Session(ports(search));
+
+  session.type("p");
+  await vi.advanceTimersByTimeAsync(200);
+  session.type("pa");
   expect(search).toHaveBeenCalledTimes(1);
-  expect(search.mock.calls[0]?.[0]?.raw).toBe("sepa");
+  answerIt();
+  await vi.advanceTimersByTimeAsync(90);
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["p", "pa"]);
 });
 
 /**
@@ -232,10 +254,12 @@ test("closing the box cancels a keystroke that has not fired yet", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
 
+  // The first key is asked at once; the next, inside the debounce, waits and is cancelled with the box.
+  session.type("se");
   session.type("sep");
   session.dispose();
   await vi.advanceTimersByTimeAsync(500);
-  expect(search).not.toHaveBeenCalled();
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["se"]);
 });
 
 /**
@@ -255,7 +279,7 @@ test("the panel follows the backend's prefix, not the typed characters", async (
   );
 
   session.raw = "?";
-  expect(session.mode, "no answer yet, so nothing has been interpreted").toBe("results");
+  expect(session.mode, "no answer yet, so nothing has been interpreted: the list is what it was").toBe("board");
 
   session.set("?");
   await vi.advanceTimersByTimeAsync(0);
@@ -344,14 +368,21 @@ test("while the resolver is being asked there is no answer yet", async () => {
 
   session.type(PASTED);
   await vi.advanceTimersByTimeAsync(120);
-  expect(session.mode, "the box already knows it holds a link").toBe("url");
+  expect(session.url, "the box already knows it holds a link").not.toBeNull();
   expect(session.urlAnswer, "and does not yet know what it names").toBeNull();
   expect(session.pending).toBe(true);
+  // The list is what it was until the lookup answers, or has been waited on long enough to say so (2026-11-16).
+  expect(session.mode).toBe("board");
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS);
+  expect(session.late).toBe(true);
+  expect(session.mode, "a wait that has lasted is said").toBe("url");
 
   settle!(null);
   await vi.advanceTimersByTimeAsync(0);
   expect(session.urlAnswer).toEqual({ match: null });
   expect(session.pending).toBe(false);
+  expect(session.late).toBe(false);
+  expect(session.mode).toBe("url");
 });
 
 /**
@@ -479,7 +510,10 @@ test("an answer to a paste the reader has typed over is dropped", async () => {
   await vi.advanceTimersByTimeAsync(0);
 
   expect(session.urlAnswer, "nothing to navigate on").toBeNull();
-  expect(session.mode).toBe("results");
+  expect(session.url).toBeNull();
+  // The search is still out, so the list is what it was.
+  expect(session.mode).toBe("board");
+  expect(session.owed).toBe(true);
 });
 
 /** And the mirror image: a search answer overtaken by a paste. */
@@ -645,4 +679,220 @@ test("asking again under the other mode keeps a list just saved as saved", async
   expect(session.savedId).toBe("list-1");
 
   session.dispose();
+});
+
+test("a pull request written as a developer writes it is asked as one, and anything else goes as typed (F-066)", () => {
+  for (const raw of ["PR 142", "pr 142", "PR #142", "PR#142", " pull request 142 "]) expect(askedAs(raw), raw).toBe("#p 142");
+  for (const raw of ["142", "#142", "PR-142", "pr142", "PR 142 retry", "#t PR 142", "prose 142"]) expect(askedAs(raw), raw).toBe(raw);
+});
+
+test("the box keeps what was typed, the engine is asked for pull requests, and a saved list keeps what was asked (F-066)", async () => {
+  const asked: string[] = [];
+  const created: string[] = [];
+  const session = new Session({
+    debounceMs: 0,
+    search: async (query: SearchQuery) => {
+      asked.push(query.raw);
+      return { interpreted: { text: "142", prefix: null, filters: { sources: [], kinds: ["pr"], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] }, groups: [], total: 0, took_ms: 1, coverage: [] } as unknown as SearchResponse;
+    },
+    launcherHome: async () => ({}) as LauncherHome,
+    createSmartList: async (name: string, query: string) => (created.push(query), { id: "list-1", name, query }) as never,
+  });
+  session.set("PR 142");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(asked).toEqual(["#p 142"]);
+  expect(session.raw).toBe("PR 142");
+  await session.saveCurrent("That one");
+  expect(created).toEqual(["#p 142"]);
+});
+
+// -- between a key and its answer (2026-11-16) --------------------------------
+
+/** A search each of whose answers the test lets through by hand, in the order asked. */
+function gated() {
+  const gates: { raw: string; answer: (response?: SearchResponse) => void; fail: () => void }[] = [];
+  const search = vi.fn(
+    (q: SearchQuery) =>
+      new Promise<SearchResponse>((resolve, reject) => {
+        gates.push({
+          raw: q.raw,
+          answer: (response) => resolve(response ?? answer(q.raw, [q.raw])),
+          fail: () => reject({ code: "internal", message: "index is rebuilding" }),
+        });
+      }),
+  );
+  return { search, gates };
+}
+
+const titles = (session: Session) => session.rows.flatMap((row) => (row.kind === "hit" ? [row.hit.title] : []));
+
+/**
+ * The list is what it was until the answer to the box's text lands: the board after the first key, the answer
+ * before while a word grows. There is no state between in which it holds nothing, so no wait line stands where rows
+ * stood (`docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`).
+ */
+test("the list keeps what it drew until the answer to the box's text lands", async () => {
+  const { search, gates } = gated();
+  const recent = { entity_id: "jira:PAY-1", kind: "ticket", source_id: "jira", title: "Recent", updated_at: null, synced_at: "2026-08-25T12:00:00Z", path: null, state: null };
+  const session = new Session({ search, launcherHome: async () => ({ ...EMPTY_HOME, recent: [recent] }) as LauncherHome });
+  await session.loadHome();
+  expect(session.mode).toBe("board");
+  expect(session.rows.map((row) => row.kind)).toEqual(["recent"]);
+  expect(session.owed).toBe(false);
+
+  // The first key: asked at once, and the board stands until it is answered.
+  session.type("p");
+  expect(session.owed).toBe(true);
+  expect(session.mode).toBe("board");
+  expect(session.rows.map((row) => row.kind)).toEqual(["recent"]);
+  expect(session.answered).toBe("");
+  gates[0]!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(session.owed).toBe(false);
+  expect(session.mode).toBe("results");
+  expect(titles(session)).toEqual(["p"]);
+  expect(session.answered).toBe("p");
+
+  // The word grows: the rows of `p` stand through the pause between keys and through the read.
+  session.type("pa");
+  expect(session.owed, "the query waits for the keys to pause").toBe(true);
+  expect(search).toHaveBeenCalledTimes(1);
+  expect(titles(session)).toEqual(["p"]);
+  expect(session.answered).toBe("p");
+  await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+  expect(search).toHaveBeenCalledTimes(2);
+  expect(session.owed).toBe(true);
+  expect(titles(session)).toEqual(["p"]);
+  gates[1]!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(session.owed).toBe(false);
+  expect(titles(session)).toEqual(["pa"]);
+  expect(session.answered).toBe("pa");
+
+  // The box emptied is the board at once: nothing is asked, so nothing is owed.
+  session.set("");
+  expect(session.mode).toBe("board");
+  expect(session.owed).toBe(false);
+  expect(session.answered).toBe("");
+});
+
+/**
+ * A wait is said once it has lasted `WAIT_SAID_MS`, counted from the last change of the box's text: typing a long
+ * word at speed is no wait, and an answer that lands ends it unsaid. Rows kept past it are `outdated`, which the
+ * launcher dims; a list that drew nothing has none, and says its wait instead.
+ */
+test("a wait is said once it has lasted, counted from the last key, and an answer ends it", async () => {
+  const { search, gates } = gated();
+  const session = new Session(ports(search));
+  await session.loadHome();
+
+  // Keys every 80 ms for well past the threshold: each restarts the count.
+  for (const raw of ["p", "pa", "pay", "payo", "payou", "payout", "payouts"]) {
+    session.type(raw);
+    await vi.advanceTimersByTimeAsync(80);
+    expect(session.late, raw).toBe(false);
+  }
+  // The keys stop; the answer does not come.
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS - 81);
+  expect(session.late).toBe(false);
+  await vi.advanceTimersByTimeAsync(2);
+  expect(session.late).toBe(true);
+  expect(session.outdated, "the board it kept answers no text of the box's").toBe(true);
+
+  // The newest answer ends it.
+  gates.at(-1)!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(session.late).toBe(false);
+  expect(session.outdated).toBe(false);
+  expect(session.mode).toBe("results");
+
+  // An answer inside the threshold: the wait is never said, then or after.
+  session.set("ledger");
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS - 1);
+  gates.at(-1)!.answer();
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS);
+  expect(session.late).toBe(false);
+
+  // A search that fails ends the wait, and its rows go: the reason stands in their place.
+  session.set("drift");
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS + 1);
+  expect(session.outdated).toBe(true);
+  gates.at(-1)!.fail();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(session.late).toBe(false);
+  expect(session.error).toBe("index is rebuilding");
+  expect(session.rows).toEqual([]);
+});
+
+/**
+ * An opening starts with nothing of the opening before: words draw when their answer lands, and nothing until then,
+ * where the answer left in the session would have been drawn for a frame. Such a list has no rows to dim, so past
+ * the threshold it is `late` and not `outdated`: it says what it waits for.
+ */
+test("an opening on words draws nothing of the opening before, and says its wait once it has lasted", async () => {
+  const { search, gates } = gated();
+  const session = new Session(ports(search));
+  await session.loadHome();
+  session.set("ledger");
+  gates[0]!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(titles(session)).toEqual(["ledger"]);
+  session.dispose();
+
+  session.begin("#t pay");
+  expect(session.mode).toBe("results");
+  expect(session.rows).toEqual([]);
+  expect(session.response).toBeNull();
+  await vi.advanceTimersByTimeAsync(WAIT_SAID_MS + 1);
+  expect(session.late).toBe(true);
+  expect(session.outdated).toBe(false);
+  gates[1]!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(titles(session)).toEqual(["#t pay"]);
+  expect(session.late).toBe(false);
+
+  // An opening on the empty box is the board, at once.
+  session.dispose();
+  session.begin("");
+  expect(session.mode).toBe("board");
+  expect(session.owed).toBe(false);
+});
+
+/** A key that acts on the answer says the typing is done: a query that waited for the keys to pause is asked now. */
+test("flush asks at once what waited for the keys to pause, and nothing where nothing waited", async () => {
+  const { search, gates } = gated();
+  const session = new Session(ports(search));
+  session.type("p");
+  gates[0]!.answer();
+  await vi.advanceTimersByTimeAsync(0);
+  session.flush();
+  expect(search, "nothing waited").toHaveBeenCalledTimes(1);
+
+  session.type("pa");
+  expect(search).toHaveBeenCalledTimes(1);
+  session.flush();
+  expect(search.mock.calls.map((call) => call[0].raw)).toEqual(["p", "pa"]);
+  expect(session.owed).toBe(true);
+  // The pause that was waited for asks nothing more.
+  await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
+  expect(search).toHaveBeenCalledTimes(2);
+});
+
+test("the rows are flattened once for an answer, however often they are read, and again for the next (the ux30 Windows pass)", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw, ["one", "two"]));
+  const session = new Session(ports(search));
+  session.type("pay");
+  await vi.runAllTimersAsync();
+  flushSync();
+  const rows = session.rows;
+  expect(rows.length).toBeGreaterThan(0);
+  // The launcher reads them ten times in a key's update: each read is the same list, not a new flattening.
+  expect(session.rows).toBe(rows);
+  expect(session.current).toBe(rows[session.selected] ?? null);
+  session.type("payo");
+  await vi.runAllTimersAsync();
+  flushSync();
+  expect(session.rows).not.toBe(rows);
+  expect(session.rows).toBe(session.rows);
 });

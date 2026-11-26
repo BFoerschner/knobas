@@ -466,7 +466,7 @@ pub async fn uninstall(
         {
             return Err(InstallError::Remove {
                 id: removal.source_id.clone(),
-                error,
+                error: Box::new(error),
                 removed: answered[..done].to_vec(),
             });
         }

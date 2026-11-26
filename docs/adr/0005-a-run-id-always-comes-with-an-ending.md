@@ -23,3 +23,7 @@ status: accepted
 
 - No frozen surface changes: `crates/knobas-sync/**` is not in §10.8's list and `item_count` already crosses IPC.
 - The contract has its own test: a caller attaching to an already-finished run receives an ending. A later reader who sees only the happy path would simplify it away.
+
+## Amendment (2026-11-22, ux31)
+
+The first-run wizard is gone (`docs/decisions/2026-11-22-no-first-run-screen.md`), and with it `sync_now_with_progress`, the one command that triggered `FirstRun` with a channel. The contract stands: a source's page attaches to the run in flight with `watch_sync` and gets its ending whoever started it, and the wake after *Add a source* still logs the first sync as `first_run`. The engine's claim on a source's first sync (`Scheduler::trigger` with `FirstRun` and a sink) is kept and tested in `knobas-sync`, though no app command asks that way today. The "mirrored N items" sentence went with the wizard; a source's row and page read the corpus from `SourceSummary.item_count` as before.

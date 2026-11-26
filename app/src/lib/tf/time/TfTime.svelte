@@ -15,9 +15,11 @@
   import type { Worklog } from "../../ipc/time";
   import { followWrite } from "../../shell/follow-write";
   import type { Timer } from "../../shell/timer.svelte";
-  import { dayKey } from "../../time/day";
+  import { dayKey, dayLabel } from "../../time/day";
   import { weekWindows } from "../../time/week";
+  import type { EscTarget } from "../escape";
   import { layers } from "../layers.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfDay from "./TfDay.svelte";
   import TfLogAll from "./TfLogAll.svelte";
   import TfStandup from "./TfStandup.svelte";
@@ -33,7 +35,10 @@
     revision = 0,
     onchanged,
     job = null,
+    back = null,
   }: {
+    /** Where `Esc` goes, for the breadcrumb's hint. */
+    back?: EscTarget | null;
     /** The shell's current job, for the Day's *Add to <job>* on open rows (#1027). */
     job?: { key: string; entityId: string } | null;
     /** Whether the database answers yet: the day's reads wait for it. */
@@ -54,6 +59,9 @@
   const day = $derived(rest[0] !== undefined && DATE.test(rest[0]) ? rest[0] : null);
   const week = $derived(rest[0] === "week" && rest[1] !== undefined && DATE.test(rest[1]) ? rest[1] : null);
   const standup = $derived(rest[0] === "standup" && rest[1] !== undefined && DATE.test(rest[1]) ? rest[1] : null);
+
+  /** A day opened to come back from is named on the path (F-354). Elsewhere the title names the page, so the bar draws only for its hint. */
+  const path = $derived<Crumb[]>(day !== null && back !== null ? [{ name: "Time", href: "#/time" }, { name: dayLabel(day) }] : [{ name: "Time" }]);
 
   /** The week *Log all…* previews: the one on screen. */
   let logAll = $state<ReturnType<typeof weekWindows> | null>(null);
@@ -82,35 +90,38 @@
   ] as const;
 </script>
 
-<header class="tf-fhead">
-  <div>
-    <h1>Time</h1>
-    <div class="tf-sub">
-      {tab === "standup"
-        ? `Your standup for ${protocolDay(standup ?? dayKey(new Date()))}, from what knobas saw since your last working day.`
-        : "What you tracked, what knobas saw while you worked, and what is still to log to Jira."}
+<div class="tf-full">
+  <TfCrumbs parts={path} {back} sectionTop />
+  <header class="tf-fhead">
+    <div>
+      <h1>Time</h1>
+      <div class="tf-sub">
+        {tab === "standup"
+          ? `Your standup for ${protocolDay(standup ?? dayKey(new Date()))}, from what knobas saw since your last working day.`
+          : "What you tracked, what knobas saw while you worked, and what is still to log to Jira."}
+      </div>
     </div>
+    {#if tab !== "standup"}
+      <div class="tf-acts"><button class="tf-btn tf-primary" onclick={openLogAll}>Log all…</button></div>
+    {/if}
+  </header>
+  <nav class="tf-tabs" aria-label="Time">
+    {#each TABS as [name, label, href] (name)}
+      <a {href} aria-current={name === tab ? "page" : undefined}>{label}</a>
+    {/each}
+  </nav>
+  <div class="tf-tm-wrap">
+    {#if tab === "day"}
+      <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} {job} />
+    {:else if tab === "week"}
+      <TfWeek databaseReady={ready} {week} {timer} {revision} />
+    {:else}
+      <!-- Keyed: the tab reads its day once, so another date is a fresh protocol. -->
+      {#key standup}
+        <TfStandup databaseReady={ready} date={standup} />
+      {/key}
+    {/if}
   </div>
-  {#if tab !== "standup"}
-    <div class="tf-acts"><button class="tf-btn tf-primary" onclick={openLogAll}>Log all…</button></div>
-  {/if}
-</header>
-<nav class="tf-tabs" aria-label="Time">
-  {#each TABS as [name, label, href] (name)}
-    <a {href} aria-current={name === tab ? "page" : undefined}>{label}</a>
-  {/each}
-</nav>
-<div class="tf-tm-wrap">
-  {#if tab === "day"}
-    <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} {job} />
-  {:else if tab === "week"}
-    <TfWeek databaseReady={ready} {week} {timer} {revision} />
-  {:else}
-    <!-- Keyed: the tab reads its day once, so another date is a fresh protocol. -->
-    {#key standup}
-      <TfStandup databaseReady={ready} date={standup} />
-    {/key}
-  {/if}
 </div>
 {#if logAll !== null}
   <TfLogAll days={logAll} {timer} {layers} onclose={() => (logAll = null)} ondone={logged} />

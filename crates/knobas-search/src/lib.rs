@@ -39,10 +39,12 @@ pub mod corpus;
 pub(crate) mod coverage;
 pub mod excerpt;
 pub mod favourites;
+mod files;
 pub mod frames;
 pub mod group;
 pub mod home;
 pub mod keys;
+pub mod picker;
 pub mod query;
 pub mod saved;
 pub mod snippet;
@@ -51,10 +53,13 @@ pub(crate) mod suggest;
 /// The deterministic corpus the perf gate and the bench share.
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
+pub mod typed_key;
 pub mod types;
 pub(crate) mod under;
 pub mod vocab;
+pub mod warm;
 
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use sqlx::PgPool;
@@ -70,10 +75,10 @@ pub use query::{
 pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension,
-    FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix,
-    ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
-    SourceSuggestion,
+    EntityRow, EverythingMatches, Excerpt, FieldSuggestion, FileAt, FilesFound, FilesInRepo,
+    FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion, PageSearch,
+    ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
+    SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -94,6 +99,18 @@ const MAX_LIMIT: u32 = 200;
 /// instances than any installation has and far fewer than an `= any(...)` that
 /// costs anything.
 pub(crate) const MAX_FILTER_VALUES: usize = 32;
+
+/// The most bytes the future of [`Searcher::search`] or
+/// [`Searcher::page_search`] may take (the ux21 Windows pass, 2026-11-19).
+///
+/// A Tauri command's future is built and moved by value several times on
+/// the thread that answers the webview before it is spawned, and on Windows
+/// that is the main thread, whose stack is 1 MB, and each of those frames
+/// holds several copies of it. ux20's search future was 10 kB and its largest
+/// such frame 146 kB; ux21's inline branches made the future 37 kB, the
+/// frames 444 kB, and the launcher's first letter overflowed the stack. A
+/// branch that grows the future past this goes on the heap.
+pub const FUTURE_MOST: usize = 16 * 1024;
 
 /// How many rows one kind may contribute to a page.
 ///
@@ -146,6 +163,31 @@ pub struct Searcher {
     /// `note:` finds nothing, and `kind:` stops offering `note`. The notes
     /// themselves stay (D10).
     notes_shown: bool,
+    /// How many rows may hold a query for it to be ranked whole, and how many
+    /// of a kind's newest rows a broader one is looked for in:
+    /// [`sql::RANKED_WHOLE`] and [`sql::WALK`], but for a test, whose mirror
+    /// holds tens of rows ([`Self::bounded_at`]).
+    bounds: (u32, u32),
+    /// Whether its statements are planned as on Windows, where no read a
+    /// person waits on asks for a parallel worker ([`sql::matched_planning`],
+    /// [`sql::letter_planning`]; the workers pass, 2026-11-16): `cfg!(windows)`,
+    /// but for a test or a probe that plans the Windows statements on another
+    /// platform ([`Self::planned_as_windows`]).
+    windows: bool,
+    /// Every name of the mirror, read by a picker (the fuzzy-search
+    /// decisions, 2026-11-19): its names join each answer
+    /// ([`Self::with_picker`]). `None`, and a picker that holds no name yet,
+    /// answer exactly as before it.
+    picker: Option<picker::Picker>,
+    /// What *Everything* matches beyond names and keys (Settings › Search,
+    /// the everything-search decisions, D13): every box on unless
+    /// [`Self::with_everything`] says otherwise.
+    everything: EverythingMatches,
+    /// The files index (the everything-search decisions, D8 and D9): a
+    /// repository is found by its files' names and text under *Everything*
+    /// ([`Self::with_files`]). `None`, and an index that holds no file,
+    /// answer exactly as before it.
+    files: Option<knobas_files::FileIndex>,
 }
 
 impl Searcher {
@@ -161,7 +203,99 @@ impl Searcher {
             kinds: KindCatalog::default(),
             payload_paths: Vec::new(),
             notes_shown: true,
+            bounds: (sql::RANKED_WHOLE, sql::WALK),
+            windows: cfg!(windows),
+            picker: None,
+            everything: EverythingMatches::default(),
+            files: None,
         }
+    }
+
+    /// The same searcher, the names `picker` holds joining each launcher
+    /// answer (the fuzzy-search decisions, 2026-11-19, D2 and D6): what
+    /// was typed is read against every name in memory, and the names it
+    /// finds join PostgreSQL's rows without moving one of them. A searcher
+    /// built without this call is the launcher as it was before.
+    #[must_use]
+    pub fn with_picker(mut self, picker: picker::Picker) -> Self {
+        self.picker = Some(picker);
+        self
+    }
+
+    /// The same searcher, its statements planned as on Windows where
+    /// `windows` says so, whatever this build runs on. A new searcher plans
+    /// as its platform does.
+    #[must_use]
+    pub fn planned_as_windows(mut self, windows: bool) -> Self {
+        self.windows = windows;
+        self
+    }
+
+    /// The same searcher, *Everything* finding a repository by its files in
+    /// `files` too (the everything-search decisions, D8): the one switch, as
+    /// ADR-0050 says.
+    #[must_use]
+    pub fn with_files(mut self, files: knobas_files::FileIndex) -> Self {
+        self.files = Some(files);
+        self
+    }
+
+    /// The files of `repository` that `raw`'s words find (the
+    /// everything-search decisions, D11): what the pane lists under the
+    /// file the answer carried, eight at most, each with its line. Nothing
+    /// where the searcher has no files index, the boxes ask no file, or the
+    /// index knows no such repository.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the vocabulary cannot be read.
+    pub async fn files_in_repo(
+        &self,
+        repository: &str,
+        raw: &str,
+    ) -> Result<FilesInRepo, SearchError> {
+        let Some(index) = self.files.clone() else {
+            return Ok(FilesInRepo::default());
+        };
+        let reads = knobas_files::Reads {
+            names: self.everything.file_names,
+            text: self.everything.file_text,
+        };
+        let repos = index.repos();
+        let Some((no, repo)) = repos.iter().find(|(_, repo)| repo.entity_id == repository) else {
+            return Ok(FilesInRepo::default());
+        };
+        if reads.none() {
+            return Ok(FilesInRepo::default());
+        }
+        let vocab = self.vocabulary().await?;
+        let typed = query::parse(raw, &vocab).query.text;
+        let terms = knobas_core::code_text::query(&typed).terms;
+        let no = *no;
+        let found =
+            tokio::task::spawn_blocking(move || index.in_repo_counted(no, &typed, reads, 8))
+                .await
+                .unwrap_or_default();
+        Ok(FilesInRepo {
+            more: usize::try_from(found.total).unwrap_or(usize::MAX) > found.files.len(),
+            files: found
+                .files
+                .iter()
+                .map(|hit| files::excerpt(hit, &terms))
+                .collect(),
+            by_text: found.by_text,
+            by_name: found.by_name,
+            branch: repo.branch.clone(),
+        })
+    }
+
+    /// The same searcher, *Everything* matching what `matches` says beyond
+    /// names and keys (Settings › Search, D13). A new searcher matches
+    /// everything.
+    #[must_use]
+    pub fn with_everything(mut self, matches: EverythingMatches) -> Self {
+        self.everything = matches;
+        self
     }
 
     /// The same searcher, searching notes or leaving them out (#940). A new
@@ -169,6 +303,17 @@ impl Searcher {
     #[must_use]
     pub fn with_notes_shown(mut self, shown: bool) -> Self {
         self.notes_shown = shown;
+        self
+    }
+
+    /// The same searcher, ranking a query whole while no more than
+    /// `ranked_whole` rows hold it and looking for a broader one's text in
+    /// `walk` of a kind's newest rows: the two bounds of
+    /// [`Self::rows_by_words`], at a size a test's mirror reaches.
+    #[cfg(any(test, feature = "test-util"))]
+    #[must_use]
+    pub fn bounded_at(mut self, ranked_whole: u32, walk: u32) -> Self {
+        self.bounds = (ranked_whole, walk);
         self
     }
 
@@ -190,6 +335,11 @@ impl Searcher {
             kinds,
             payload_paths: Vec::new(),
             notes_shown: true,
+            bounds: (sql::RANKED_WHOLE, sql::WALK),
+            windows: cfg!(windows),
+            picker: None,
+            everything: EverythingMatches::default(),
+            files: None,
         }
     }
 
@@ -322,9 +472,19 @@ impl Searcher {
                 )
             })
             .collect();
-        Ok(Vocabulary::load(&self.pool, self.kinds.clone())
+        let mut vocab = Vocabulary::load(&self.pool, self.kinds.clone())
             .await?
-            .declaring(&templates))
+            .declaring(&templates);
+        if let Some(picker) = &self.picker {
+            // Read on their own where the names are not yet (ux26): the
+            // first key typed after a start reads as the key. A failed read
+            // reads no key, as before.
+            vocab.projects = match picker.projects_read(&self.pool).await {
+                Ok(projects) => projects,
+                Err(_) => picker.projects(),
+            };
+        }
+        Ok(vocab)
     }
 
     /// Read `raw` as a link-set pattern (#868, R-7.2) with this
@@ -358,10 +518,40 @@ impl Searcher {
     /// [`SearchError::Invalid`] for a query outside the engine's bounds,
     /// [`SearchError::Db`] if the statement fails.
     pub async fn search(&self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
+        self.search_as(query, true).await
+    }
+
+    /// [`Self::search`] with a word's first characters ranked as longer words
+    /// are ([`sql::search_sql`]), as every query was answered before the
+    /// one-letter pass (2026-11-15): the reference `tests/it/one_letter.rs`
+    /// and `tests/it/short_words.rs` hold the queries the names do not
+    /// answer to, and show one to three characters against.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::search`].
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn search_by_words(&self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
+        self.search_as(query, false).await
+    }
+
+    /// [`Self::search`], a word's first characters answered by names where
+    /// `by_name` says so.
+    async fn search_as(
+        &self,
+        query: SearchQuery,
+        by_name: bool,
+    ) -> Result<SearchResponse, SearchError> {
         let started = Instant::now();
         let query = validate(query)?;
 
-        let vocab = self.vocabulary().await?;
+        // The vocabulary, and beside it what the database holds of the
+        // mirror's stored reads (migrations `0084` and `0093` to `0095`,
+        // [`corpus::stored`]): one round trip, asked while the vocabulary's
+        // two reads are out, so it adds no wait of its own.
+        let (vocab, stored) = tokio::try_join!(self.vocabulary(), async {
+            Ok(corpus::stored(&self.pool).await?)
+        })?;
         let mut parsed = query::parse(&query.raw, &vocab);
         // Pipelines under the shell's word, and no runs or commits (#2422).
         let frames = frames::LauncherFrames::of(&vocab.declarations);
@@ -371,11 +561,20 @@ impl Searcher {
         // says which known names have nothing the launcher admits beneath
         // them, the left-out kinds being what it leaves out (#2495).
         let known_under = under::report_unknown(&self.pool, &mut parsed, &frames.left_out).await?;
+        // Settings › Search (D13): under *Everything*, what a cleared box
+        // leaves to names and keys, bound only where words are matched.
+        let everything = if query.titles {
+            EverythingMatches::default()
+        } else {
+            self.everything
+        };
         let filters = EffectiveFilters {
             titles: query.titles,
             excerpts: !query.titles,
             pipeline_kinds: frames.pipelines,
             hidden_kinds: frames.left_out,
+            names_only_kinds: everything.names_only_kinds(),
+            no_logs: !everything.build_logs,
             ..query::merge(&parsed, &query.filters)
         };
         let mut interpreted = ParsedQuery {
@@ -397,29 +596,234 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
+        // The picker's names, read beside the statements (D6): only for a
+        // searcher that holds names, text of two letters and more, and a
+        // query whose `under:` admits something.
+        let picking = self
+            .picker
+            .as_ref()
+            .filter(|picker| picker.holds_names() && !known_under.admits_nothing)
+            .and(text)
+            .and_then(|typed| {
+                picker::Typed::read(typed)
+                    .filter(|read| read.letters() >= 2)
+                    .map(|read| (typed.to_owned(), read))
+            });
+        // A leading `!` on a word is the picker's sign for *not*, and
+        // `websearch_to_tsquery` would read it as the word itself: the
+        // statements are handed `-` in its place (D4 rule 9). The echo stays
+        // as typed.
+        let negated = picking
+            .as_ref()
+            .and_then(|(typed, _)| query::bangs_as_minus(typed));
+        let text = negated.as_deref().or(text);
+        // A ticket key typed with a space or none (`pay 123`, `pay123`), read
+        // as the key where the mirror's tickets are numbered under its
+        // project ([`typed_key`]): asked beside the words as typed, its
+        // answer leads, and the words' answer follows it.
+        let keyed = text.and_then(|typed| vocab.projects.read(typed));
+        interpreted.keyed.clone_from(&keyed);
+
         // An `under:` scoped to names with nothing admitted beneath any of
         // them answers with nothing, and the statement is not asked: to say
         // nothing, it reads the whole mirror twice, for the live items and
         // for the run logs (#2495).
-        let rows: Vec<RawHit> = if known_under.admits_nothing {
-            Vec::new()
-        } else {
-            let corpora = corpus::searched(self.corpora(), filters.titles);
-            let built = sql::search_sql(
-                &corpora,
-                text,
-                parsed.prefix_last_term,
-                &filters,
-                PER_GROUP,
-                query.limit,
-            );
-            sql::query_as_with(built).fetch_all(&self.pool).await?
+        let ask = async |text: Option<&str>, prefix_last: bool| {
+            if known_under.admits_nothing {
+                return Ok::<Vec<RawHit>, SearchError>(Vec::new());
+            }
+            // A word's first characters are read off the stored ones only
+            // once every item has its own (`Stored::names`): until bring-up's
+            // fill has passed, they are ranked as every query was before.
+            let named = self
+                .rows_by_name(
+                    text.filter(|_| by_name && stored.names),
+                    prefix_last,
+                    &filters,
+                    query.limit,
+                )
+                .await?;
+            Ok(match named {
+                Named::Rows(rows) => rows,
+                words => {
+                    // The mirror's match stage off its search copies alone,
+                    // once every copy holds what the stage reads (migration
+                    // `0084`).
+                    let corpora = corpus::with_mirror(
+                        corpus::searched(self.corpora(), filters.titles, !filters.no_logs),
+                        stored.mirror,
+                    );
+                    let rows = self
+                        .rows_by_words(
+                            &corpora,
+                            text,
+                            prefix_last,
+                            &filters,
+                            query.limit,
+                            by_name && stored.whole(),
+                        )
+                        .await?;
+                    match words {
+                        // Few names: the text's rows in the room they leave.
+                        Named::Few(names) => group::filled(names, rows, PER_GROUP, query.limit),
+                        // No name holds the characters, or they are no
+                        // word's first: the words' answer whole.
+                        _ => rows,
+                    }
+                }
+            })
         };
+        // The files (the everything-search decisions, D8): under
+        // *Everything*, with words, a box of them set, and the kinds asked for
+        // admitting repositories. Read beside the picker's names, and their
+        // rows read by the picker's statement.
+        let file_reads = knobas_files::Reads {
+            names: everything.file_names,
+            text: everything.file_text,
+        };
+        let filing = self
+            .files
+            .as_ref()
+            .filter(|files| files.holds_files())
+            .filter(|_| !filters.titles && !file_reads.none() && !known_under.admits_nothing)
+            .filter(|_| {
+                let kinds = filters.kind_scope();
+                kinds.is_empty() || kinds.iter().any(|kind| kind == "repo")
+            })
+            .and(text)
+            .map(str::to_owned);
+        let names = async {
+            let typed = picking.as_ref().map(|(typed, _)| typed.as_str());
+            if typed.is_none() && filing.is_none() {
+                return Ok::<Option<PickedRows>, SearchError>(None);
+            }
+            self.named_and_filed(typed, filing.as_deref(), file_reads, &filters, query.limit)
+                .await
+                .map(Some)
+        };
+        // What the mirror's words make of the text, under *Everything* (the
+        // fuzzy-search decisions, D10): the longer words a written word is
+        // part of, asked beside the text as typed, and the nearest written
+        // word for one nobody wrote, asked only where the text found nothing.
+        let reading = match (&self.picker, text) {
+            (Some(picker), Some(typed)) if !filters.titles && picker.holds_words() => {
+                picker.reading(typed, parsed.prefix_last_term)
+            }
+            _ => picker::WordReading::default(),
+        };
+        let parts = async {
+            match reading.parts.as_deref() {
+                Some(parts) if !known_under.admits_nothing => {
+                    ask(Some(parts), false).await.map(Some)
+                }
+                _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        // The corrected text is known before the first answer: asked beside it,
+        // and taken only where the text as typed found nothing, so a key with
+        // a word nobody wrote waits for one round trip, not two.
+        let corrected = async {
+            match reading.corrected.as_deref() {
+                Some(corrected) if !known_under.admits_nothing => {
+                    ask(Some(corrected), parsed.prefix_last_term)
+                        .await
+                        .map(Some)
+                }
+                _ => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        let keyed_answer = async {
+            match keyed.as_deref() {
+                Some(keyed) => ask(Some(keyed), parsed.prefix_last_term).await.map(Some),
+                None => Ok::<Option<Vec<RawHit>>, SearchError>(None),
+            }
+        };
+        // Each branch on the heap (the ux21 Windows pass, 2026-11-19): four
+        // of them hold a whole `ask`, so inline they made this future 37 kB,
+        // and Windows copies a command's future several times on the main
+        // thread's 1 MB stack before it is spawned: the launcher's first
+        // letter overflowed it (`0xc00000fd`). [`FUTURE_MOST`] holds it.
+        let (rows, parted, picked, corrected_rows, keyed_rows) = tokio::join!(
+            Box::pin(ask(text, parsed.prefix_last_term)),
+            Box::pin(parts),
+            Box::pin(names),
+            Box::pin(corrected),
+            Box::pin(keyed_answer)
+        );
+        let mut rows = rows?;
+        let corrected_rows = corrected_rows?;
+        // The key's answer, where it holds a row: the text found something,
+        // so no word of it is corrected.
+        let keyed_rows = keyed_rows?.filter(|keyed| keyed.iter().any(RawHit::is_hit));
+        let mut needles = query::needles(&parsed.query.text);
+        let mut needles_of = |asked: &str| {
+            for needle in query::needles(asked) {
+                if !needles.contains(&needle) {
+                    needles.push(needle);
+                }
+            }
+        };
+        if rows.is_empty()
+            && keyed_rows.is_none()
+            && let (Some(corrected), Some(answer)) = (reading.corrected.as_deref(), corrected_rows)
+        {
+            rows = answer;
+            needles_of(corrected);
+        }
+        // The picker's names join the text's own answer (D6), and the rows of
+        // the longer words follow in the room both leave (D10): a name the
+        // second ask also found stands where the merge put it, not after a
+        // single mention.
+        // The files' rows the text alone found, placed last (D9 row 7), and
+        // what the files found of every repository on the page.
+        let mut filed: Option<(Vec<RawHit>, HashMap<String, group::InFiles>)> = None;
+        if let Some(picked) = picked? {
+            let PickedRows {
+                rows: picked,
+                found,
+                text_only,
+            } = picked;
+            let (last, picked): (Vec<RawHit>, Vec<RawHit>) = picked
+                .into_iter()
+                .partition(|row| row.id().is_some_and(|id| text_only.contains(id)));
+            let named = |title: &str| {
+                picking
+                    .as_ref()
+                    .is_some_and(|(_, typed)| typed.names(title))
+            };
+            rows = group::with_names(rows, picked, &named, PER_GROUP, query.limit);
+            filed = Some((last, found));
+        }
+        if let Some(parted) = parted?.filter(|parted| !parted.is_empty()) {
+            if let Some(asked) = reading.parts.as_deref() {
+                needles_of(asked);
+            }
+            rows = group::filled(rows, parted, PER_GROUP, query.limit);
+        }
+        if let (Some(keyed), Some(answer)) = (keyed.as_deref(), keyed_rows) {
+            needles_of(keyed);
+            rows = group::keyed_first(answer, rows, PER_GROUP, query.limit);
+        }
+        if let Some((last, found)) = filed {
+            if last.iter().any(RawHit::is_hit) {
+                rows = group::filled(rows, last, PER_GROUP, query.limit);
+            }
+            // A repository the statements found that the files found too
+            // keeps its place and is shown by its file (D9 point 6).
+            for row in &mut rows {
+                if let Some(in_files) = row.id().and_then(|id| found.get(id)) {
+                    row.in_files = Some(in_files.clone());
+                }
+            }
+        }
+        if let Some((_, typed)) = &picking {
+            group::mark(&mut rows, typed);
+        }
         if rows.is_empty() {
             interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
         }
         let mut groups = if filters.excerpts {
-            group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
+            group::with_excerpts(rows, &vocab.kinds, &needles, &filters.names_only_kinds)
         } else {
             group::group(rows, &vocab.kinds)
         };
@@ -441,6 +845,302 @@ impl Searcher {
         })
     }
 
+    /// The rows the picker chooses for `typed` (D5), as the statement that
+    /// reads them by key gives them (D8, [`sql::picked_sql`]): live, within
+    /// every filter, each kind's best ten and twice the page at most. The
+    /// read itself runs on a blocking thread, one core, and the statement
+    /// on a pooled connection of its own, beside the words' statements.
+    async fn picked_rows(
+        &self,
+        typed: &str,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<Vec<RawHit>, SearchError> {
+        let Some(picker) = self.picker.clone() else {
+            return Ok(Vec::new());
+        };
+        let limits = picker::Limits {
+            sources: filters.sources.clone(),
+        };
+        let typed = typed.to_owned();
+        let Ok(picked) = tokio::task::spawn_blocking(move || picker.pick(&typed, &limits)).await
+        else {
+            // A read that panicked answers as no names: the statements'
+            // rows stand alone.
+            return Ok(Vec::new());
+        };
+        if picked.is_empty() {
+            return Ok(Vec::new());
+        }
+        let built = sql::picked_sql(
+            &picked.ids(),
+            &picked.ranks(),
+            filters,
+            PER_GROUP,
+            limit.saturating_mul(2),
+        );
+        Ok(sql::fetch_kept(&self.pool, built).await?)
+    }
+
+    /// The picker's names and the repositories the files found (the
+    /// everything-search decisions, D8 and D9), read side by side on two
+    /// blocking threads, then by one statement ([`sql::picked_sql`]): the
+    /// picker's rows with their ranks, and each repository the files found
+    /// and the picker did not with the rank D9 gives it. A repository of a
+    /// source the query leaves out is dropped.
+    async fn named_and_filed(
+        &self,
+        typed: Option<&str>,
+        filing: Option<&str>,
+        reads: knobas_files::Reads,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<PickedRows, SearchError> {
+        let picker = self.picker.clone().zip(typed.map(str::to_owned));
+        let limits = picker::Limits {
+            sources: filters.sources.clone(),
+        };
+        let files = self.files.clone().zip(filing.map(str::to_owned));
+        let most = if filters.sources.is_empty() { 30 } else { 200 };
+        let asked = files.clone();
+        let (picked, in_files) = tokio::join!(
+            async move {
+                match picker {
+                    Some((picker, typed)) => {
+                        tokio::task::spawn_blocking(move || picker.pick(&typed, &limits))
+                            .await
+                            .unwrap_or_default()
+                    }
+                    None => picker::Picked::default(),
+                }
+            },
+            async move {
+                match asked {
+                    Some((index, typed)) => {
+                        tokio::task::spawn_blocking(move || index.ask(&typed, reads, most))
+                            .await
+                            .unwrap_or_default()
+                    }
+                    None => Vec::new(),
+                }
+            }
+        );
+        let mut ids = picked.ids();
+        let mut ranks = picked.ranks();
+        let mut found: HashMap<String, group::InFiles> = HashMap::new();
+        let mut text_only: HashSet<String> = HashSet::new();
+        if let Some((index, typed)) = &files {
+            let repos = index.repos();
+            let terms = knobas_core::code_text::query(typed).terms;
+            let (mut named, mut texted) = (0_usize, 0_usize);
+            for hit in in_files {
+                let Some(repo) = repos.get(&hit.no) else {
+                    continue;
+                };
+                if !filters.sources.is_empty() && !filters.sources.contains(&repo.source_id) {
+                    continue;
+                }
+                let id = repo.entity_id.clone();
+                found.insert(
+                    id.clone(),
+                    group::InFiles {
+                        found: types::FilesFound {
+                            by_text: hit.by_text,
+                            by_name: hit.by_name,
+                            branch: repo.branch.clone(),
+                        },
+                        excerpt: files::excerpt(&hit.best, &terms),
+                    },
+                );
+                // A repository the picker chose keeps the picker's rank.
+                if ids.contains(&id) {
+                    continue;
+                }
+                let rank = if hit.by_name > 0 {
+                    named += 1;
+                    files::named_rank(named - 1)
+                } else {
+                    texted += 1;
+                    text_only.insert(id.clone());
+                    files::text_rank(texted - 1)
+                };
+                ids.push(id);
+                ranks.push(rank);
+            }
+        }
+        if ids.is_empty() {
+            return Ok(PickedRows::default());
+        }
+        let built = sql::picked_sql(&ids, &ranks, filters, PER_GROUP, limit.saturating_mul(2));
+        let mut rows: Vec<RawHit> = sql::fetch_kept(&self.pool, built).await?;
+        for row in &mut rows {
+            if let Some(in_files) = row.id().and_then(|id| found.get(id)) {
+                row.in_files = Some(in_files.clone());
+            }
+        }
+        Ok(PickedRows {
+            rows,
+            found,
+            text_only,
+        })
+    }
+
+    /// The rows **a word's first characters** are answered with: one typed
+    /// character (the one-letter pass, 2026-11-15;
+    /// `docs/decisions/2026-11-15-one-letter-is-answered-by-names.md`), and
+    /// two or three (the two-letters pass, 2026-11-16;
+    /// `docs/decisions/2026-11-16-two-letters-by-names-and-keys-wait-for-their-answer.md`).
+    /// The names that hold a word beginning with them, those that begin
+    /// with them first, then the newest ([`sql::letter_sql`]), under
+    /// *Titles* and under *Everything* alike.
+    ///
+    /// Where [`sql::search_sql`] is to answer instead, or beside, it says
+    /// which way:
+    ///
+    /// * [`Named::NotAsked`] for a longer word, a finished one (`p` and a
+    ///   space), two or three characters that are not all letters and
+    ///   digits, or a query that asks what the stored characters do not
+    ///   hold.
+    /// * [`Named::NoName`] where, under *Everything*, no name holds the
+    ///   characters, so the bodies are asked as before and *nothing matches*
+    ///   stays true of them too.
+    /// * [`Named::Few`] where, under *Everything*, the names of two or three
+    ///   characters are few, filling no kind and not the page
+    ///   ([`group::few`]): the text is asked too, and its rows take the room
+    ///   the names leave ([`group::filled`]). Names that fill a kind are the
+    ///   answer, and so are one character's, as they were decided.
+    ///
+    /// Under *Titles* the names were the whole question, and none is the
+    /// answer.
+    async fn rows_by_name(
+        &self,
+        words: Option<&str>,
+        prefix_last: bool,
+        filters: &EffectiveFilters,
+        limit: u32,
+    ) -> Result<Named, sqlx::Error> {
+        let Some(typed) = words.filter(|text| prefix_last && named_by_its_start(text)) else {
+            return Ok(Named::NotAsked);
+        };
+        // Names, so no run log: a log is never one (`corpus::searched`).
+        let corpora = corpus::searched(self.corpora(), true, true);
+        let Some(built) = sql::letter_sql(&corpora, typed, filters, PER_GROUP, limit) else {
+            return Ok(Named::NotAsked);
+        };
+        let rows: Vec<RawHit> = sql::fetch_named(&self.pool, built).await?;
+        Ok(if filters.titles {
+            Named::Rows(rows)
+        } else if rows.is_empty() {
+            Named::NoName
+        } else if typed.chars().count() > 1 && group::few(&rows, PER_GROUP, limit) {
+            Named::Few(rows)
+        } else {
+            Named::Rows(rows)
+        })
+    }
+
+    /// The rows **words** are answered with (the long-words pass, 2026-11-16;
+    /// `docs/decisions/2026-11-16-a-word-many-rows-hold.md`): four typed
+    /// characters and more, a finished word, and what a word's first
+    /// characters leave to the text ([`Self::rows_by_name`]).
+    ///
+    /// The matches are counted first, no further than one past
+    /// [`sql::RANKED_WHOLE`] ([`sql::probe_sql`]):
+    ///
+    /// * **Few rows hold the query**: every match is ranked, as
+    ///   [`sql::search_sql`] always ranked, the same answer
+    ///   ([`sql::kept_search_sql`]).
+    /// * **Many do**: the rows the query names, ranked where they are few
+    ///   and the newest where they are many too, and under *Everything*,
+    ///   where they leave a kind room, that kind's newest rows whose text
+    ///   holds it ([`sql::broad_sql`]). Ranking 18,553 matches to keep ten a
+    ///   kind was 54 ms of `payout` on Björn's scale; this is 10.
+    ///
+    /// Both run under one plan a connection ([`sql::fetch_kept`]).
+    ///
+    /// `bounded` says the stored reads those statements take are whole
+    /// (`corpus::Stored::whole`) and a word's first characters are answered
+    /// by names: where it is false, and for a browse or a query that asks
+    /// what the narrow relations do not hold (an author, a parent, a reach,
+    /// a name glob, a ticket key), [`sql::search_sql`] answers, planned for
+    /// the query, as before.
+    async fn rows_by_words(
+        &self,
+        corpora: &[&'static corpus::Corpus],
+        text: Option<&str>,
+        prefix_last: bool,
+        filters: &EffectiveFilters,
+        limit: u32,
+        bounded: bool,
+    ) -> Result<Vec<RawHit>, sqlx::Error> {
+        let whole = || sql::search_sql(corpora, text, prefix_last, filters, PER_GROUP, limit);
+        let Some(typed) = text.filter(|_| bounded) else {
+            return self.rows_of(whole(), text).await;
+        };
+        let (ranked_whole, walk) = self.bounds;
+        let Some(probe) = sql::probe_sql(typed, prefix_last, filters, ranked_whole) else {
+            return self.rows_of(whole(), text).await;
+        };
+        // The count and the answer in one transaction, on one connection.
+        let mut kept = sql::Kept::begin(&self.pool).await?;
+        let (matched, named) = kept
+            .fetch::<(i64, i64)>(probe)
+            .await?
+            .first()
+            .copied()
+            .unwrap_or_default();
+        let cap = i64::from(ranked_whole);
+        let built = if matched <= cap {
+            sql::kept_search_sql(corpora, typed, prefix_last, filters, PER_GROUP, limit)
+        } else {
+            let names = if named <= cap {
+                sql::Names::Ranked
+            } else {
+                sql::Names::Newest
+            };
+            sql::broad_sql(
+                corpora,
+                typed,
+                prefix_last,
+                filters,
+                PER_GROUP,
+                limit,
+                names,
+                walk,
+            )
+        };
+        let Some(built) = built else {
+            kept.end().await?;
+            return self.rows_of(whole(), text).await;
+        };
+        let rows = kept.fetch(built).await?;
+        kept.end().await?;
+        Ok(rows)
+    }
+
+    /// The rows of a statement [`sql::search_sql`] built: through the indexes
+    /// when it has words to match ([`sql::fetch_matched`]), the narrow table
+    /// read whole for a single character
+    /// ([`sql::fetch_matched_by_a_letter`]), as the planner chooses for a
+    /// browse. A single character reaches it from the Docs search, and from
+    /// the launcher only where no name holds it or it is a finished word
+    /// ([`Self::rows_by_name`]).
+    async fn rows_of(
+        &self,
+        built: sql::SearchSql,
+        words: Option<&str>,
+    ) -> Result<Vec<RawHit>, sqlx::Error> {
+        match words {
+            // One character matches most of any mirror: read whole, where
+            // the whole is the narrow table and not the mirror's own rows.
+            Some(text) if text.chars().count() == 1 && built.matches_narrowly() => {
+                sql::fetch_matched_by_a_letter_as(&self.pool, built, self.windows).await
+            }
+            Some(_) => sql::fetch_matched_as(&self.pool, built, self.windows).await,
+            None => sql::query_as_with(built).fetch_all(&self.pool).await,
+        }
+    }
+
     /// Every entity id of `kind` the query admits, uncapped (#810): the
     /// ticket-first Tickets view's server-side filter (R-2.7), which hands the
     /// ids to the board it narrows. `None` for a query with neither text nor a
@@ -452,7 +1152,9 @@ impl Searcher {
     /// words are the view's: each must appear in the row's key, title,
     /// assignee or epic, a `-word` or `-"phrase"` must not, and `or`
     /// separates alternatives ([`query::word_alternatives`],
-    /// [`sql::ids_sql`], #1889). Over the live mirror. A prefix (`#`, `>`)
+    /// [`sql::ids_sql`], #1889). A key typed with a space or none (`pay
+    /// 123`, `pay123`) admits what the key admits too, where the searcher's
+    /// picker holds its project ([`typed_key::alternatives`]). Over the live mirror. A prefix (`#`, `>`)
     /// and `list:` mean nothing here and are not acted on.
     ///
     /// # Errors
@@ -481,6 +1183,23 @@ impl Searcher {
         raw: &str,
         kind: &str,
     ) -> Result<Option<Vec<String>>, SearchError> {
+        match Self::admits_in(vocab, raw, kind)? {
+            Admits::Every => Ok(None),
+            Admits::Nothing => Ok(Some(Vec::new())),
+            Admits::Some(narrowing) => Ok(Some(narrowing.ids(&self.pool).await?)),
+        }
+    }
+
+    /// What `raw` admits of `kind`, as [`matching_ids`](Self::matching_ids)
+    /// reads it, without asking the mirror for the ids: for a reader that
+    /// narrows a scan of its own by the query ([`Narrowing`]), the Tickets
+    /// view's board, which then reads its tickets once and not twice (the
+    /// broad-keys pass, 2026-11-13).
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a query past the launcher's length.
+    pub fn admits_in(vocab: &Vocabulary, raw: &str, kind: &str) -> Result<Admits, SearchError> {
         let query = validate(SearchQuery {
             titles: false,
             raw: raw.to_owned(),
@@ -489,17 +1208,18 @@ impl Searcher {
         })?;
         let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
-        let words = query::word_alternatives(&parsed.query.text);
-        if words.is_empty() && filters.is_empty() {
-            return Ok(None);
+        let alternatives = typed_key::alternatives(&parsed.query.text, &vocab.projects);
+        if alternatives.is_empty() && filters.is_empty() {
+            return Ok(Admits::Every);
         }
         if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == kind) {
-            return Ok(Some(Vec::new()));
+            return Ok(Admits::Nothing);
         }
         filters.kinds = vec![kind.to_owned()];
-        let built = sql::ids_sql(&words, &filters);
-        let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
-        Ok(Some(ids.into_iter().map(|(id,)| id).collect()))
+        Ok(Admits::Some(Box::new(Narrowing {
+            alternatives,
+            filters,
+        })))
     }
 
     /// The Docs search (#860, R-10.3, R-10.4): the live pages a query
@@ -572,21 +1292,170 @@ impl Searcher {
                 me: Vec::new(),
             });
         }
-        let built = sql::search_sql(
-            &[&corpus::LIVE_ITEM],
-            text,
-            parsed.prefix_last_term,
-            &filters,
-            query.limit,
-            query.limit,
-        );
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        let stored = corpus::stored(&self.pool).await?;
+        let whole = || {
+            sql::search_sql(
+                &[stored.mirror],
+                text,
+                parsed.prefix_last_term,
+                &filters,
+                query.limit,
+                query.limit,
+            )
+        };
+        // **One typed character is answered by the pages' names** once every
+        // item has its stored characters (the workers pass, 2026-11-16;
+        // Fable's ruling): the pages a name of which holds a word beginning
+        // with it, those that begin with it first, then the newest, all of
+        // them counted ([`sql::page_letter_sql`]). A character no page's
+        // name holds is asked of the bodies as before, so *no pages* is
+        // never said of one a body holds; and so is every character until
+        // the names are whole.
+        let named = match text {
+            Some(typed)
+                if stored.names && parsed.prefix_last_term && typed.chars().count() == 1 =>
+            {
+                match sql::page_letter_sql(
+                    &[stored.mirror],
+                    typed,
+                    &filters,
+                    query.limit,
+                    query.limit,
+                ) {
+                    Some(built) => sql::fetch_named::<RawHit>(&self.pool, built).await?,
+                    None => Vec::new(),
+                }
+            }
+            _ => Vec::new(),
+        };
+        // A key typed with a space or none, read as the key ([`typed_key`]):
+        // the pages that name it, asked beside the words and first.
+        let keyed = text.and_then(|typed| vocab.projects.read(typed));
+        let keyed_answer = async {
+            let Some(keyed) = keyed.as_deref() else {
+                return Ok::<Option<Vec<RawHit>>, sqlx::Error>(None);
+            };
+            let built = sql::search_sql(
+                &[stored.mirror],
+                Some(keyed),
+                parsed.prefix_last_term,
+                &filters,
+                query.limit,
+                query.limit,
+            );
+            self.rows_of(built, Some(keyed)).await.map(Some)
+        };
+        let words = async {
+            if named.is_empty() {
+                self.rows_of(whole(), text).await
+            } else {
+                Ok(named)
+            }
+        };
+        // On the heap, as in [`Self::search_as`] (the ux21 Windows pass).
+        let (rows, keyed_rows) = tokio::join!(Box::pin(words), Box::pin(keyed_answer));
+        let mut rows = rows?;
+        let keyed_rows = keyed_rows?.filter(|keyed| keyed.iter().any(RawHit::is_hit));
+        // The pages' names by the picker and the mirror's words, as the
+        // launcher reads them (the fuzzy-search decisions, D12 step 3): a
+        // word nobody wrote asked again where the text found nothing, the
+        // longer words a written one is part of beside it, and the pages
+        // whose names hold what was typed, kept to pages and the space asked
+        // for. A searcher with no picker answers as before.
+        let mut needles = query::needles(&parsed.query.text);
+        if let (Some(picker), Some(typed)) = (&self.picker, text) {
+            let reading = if picker.holds_words() {
+                picker.reading(typed, parsed.prefix_last_term)
+            } else {
+                picker::WordReading::default()
+            };
+            let mut needles_of = |asked: &str| {
+                for needle in query::needles(asked) {
+                    if !needles.contains(&needle) {
+                        needles.push(needle);
+                    }
+                }
+            };
+            if rows.is_empty()
+                && keyed_rows.is_none()
+                && let Some(corrected) = reading.corrected.as_deref()
+            {
+                let built = sql::search_sql(
+                    &[stored.mirror],
+                    Some(corrected),
+                    parsed.prefix_last_term,
+                    &filters,
+                    query.limit,
+                    query.limit,
+                );
+                rows = self.rows_of(built, Some(corrected)).await?;
+                needles_of(corrected);
+            }
+            let reads = picker::Typed::read(typed).filter(|read| read.letters() >= 2);
+            let names = async {
+                if reads.is_none() || !picker.holds_names() {
+                    return Ok::<Vec<RawHit>, SearchError>(Vec::new());
+                }
+                self.picked_rows(typed, &filters, query.limit).await
+            };
+            let parts = async {
+                match reading.parts.as_deref() {
+                    Some(parts) => {
+                        let built = sql::search_sql(
+                            &[stored.mirror],
+                            Some(parts),
+                            false,
+                            &filters,
+                            query.limit,
+                            query.limit,
+                        );
+                        Ok::<Vec<RawHit>, SearchError>(self.rows_of(built, Some(parts)).await?)
+                    }
+                    None => Ok(Vec::new()),
+                }
+            };
+            // On the heap, as in [`Self::search_as`] (the ux21 Windows pass).
+            let (picked, parted) = tokio::join!(Box::pin(names), Box::pin(parts));
+            if let Some(read) = &reads {
+                rows = group::with_names(
+                    rows,
+                    picked?,
+                    &|title| read.names(title),
+                    query.limit,
+                    query.limit,
+                );
+            }
+            let parted = parted?;
+            if !parted.is_empty() {
+                if let Some(asked) = reading.parts.as_deref() {
+                    needles_of(asked);
+                }
+                rows = group::filled(rows, parted, query.limit, query.limit);
+            }
+            if let Some(read) = &reads {
+                group::mark(&mut rows, read);
+            }
+        }
+        if let (Some(keyed), Some(answer)) = (keyed.as_deref(), keyed_rows) {
+            for needle in query::needles(keyed) {
+                if !needles.contains(&needle) {
+                    needles.push(needle);
+                }
+            }
+            rows = group::keyed_first(answer, rows, query.limit, query.limit);
+        }
         let group = group::group(rows, &vocab.kinds)
             .into_iter()
             .find(|g| g.kind == PAGE);
         Ok(Some(match group {
-            Some(group) => answer(group.hits, group.total),
-            None => answer(Vec::new(), 0),
+            Some(group) => PageSearch {
+                needles,
+                ..answer(group.hits, group.total)
+            },
+            None => PageSearch {
+                needles,
+                ..answer(Vec::new(), 0)
+            },
         }))
     }
 
@@ -610,7 +1479,21 @@ impl Searcher {
         // The readable texts that still need a count: (slot in `out`, words, filters).
         let mut pending: Vec<(usize, Vec<query::WordAlternative>, query::EffectiveFilters)> =
             Vec::new();
+        // **A text is counted once** however many views hold it (the workers
+        // pass, 2026-11-16): the same text reads the same, and each count is
+        // a read of every live row of `kind` the text admits. Björn's nine
+        // views held one text between them, and the statement counted his
+        // 23,176 tickets nine times. Each later view of a text is pointed at
+        // the slot of its first.
+        let mut first_of: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut same_as: Vec<(usize, usize)> = Vec::new();
         for raw in raws {
+            if let Some(first) = first_of.get(raw) {
+                same_as.push((out.len(), *first));
+                out.push(None);
+                continue;
+            }
+            first_of.insert(*raw, out.len());
             if let Err(error) = validate(SearchQuery {
                 titles: false,
                 raw: (*raw).to_owned(),
@@ -636,7 +1519,7 @@ impl Searcher {
                 continue;
             }
             filters.kinds = vec![kind.to_owned()];
-            let words = query::word_alternatives(&parsed.query.text);
+            let words = typed_key::alternatives(&parsed.query.text, &vocab.projects);
             pending.push((out.len(), words, filters));
             out.push(None);
         }
@@ -655,6 +1538,9 @@ impl Searcher {
                     out[*slot] = Some(Reading::Count(u64::try_from(count).unwrap_or(0)));
                 }
             }
+        }
+        for (slot, first) in same_as {
+            out[slot] = out[first].clone();
         }
         Ok(out
             .into_iter()
@@ -751,6 +1637,37 @@ impl Searcher {
         })
     }
 
+    /// The parents [`Searcher::filter_parent_suggestions`] offers, read by
+    /// the whole statement however many parent rows there are: what the
+    /// newest rows' shortcut has to answer the same as.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn whole_parent_suggestions(
+        &self,
+        under: &str,
+    ) -> Result<Vec<ParentSuggestion>, SearchError> {
+        suggest::whole_parents(&self.pool, under).await
+    }
+
+    /// The ticket keys' values [`Searcher::filter_suggestions`] offers, as
+    /// `(key, value, detail)` rows, read from what the database stores and
+    /// then by the walk of every sampled payload the statement made before:
+    /// the two a test holds equal.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a read fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn field_suggestion_rows_both_ways(
+        &self,
+    ) -> Result<(Vec<suggest::FieldRow>, Vec<suggest::FieldRow>), SearchError> {
+        let vocab = self.vocabulary().await?;
+        suggest::field_rows_both_ways(&self.pool, &vocab).await
+    }
+
     /// The plan the board's recency read runs under.
     ///
     /// # Errors
@@ -820,6 +1737,138 @@ impl Searcher {
     /// [`SearchError::Db`] if the delete fails.
     pub async fn delete_list(&self, id: &str) -> Result<(), SearchError> {
         saved::delete(&self.pool, id).await
+    }
+}
+
+/// What the names say of a word's first characters
+/// ([`Searcher::rows_by_name`]).
+enum Named {
+    /// The answer: the rows the names give, which under *Titles* may be none.
+    Rows(Vec<RawHit>),
+    /// The names of two or three characters, and few of them: under
+    /// *Everything* the text is still to ask, for the room they leave.
+    Few(Vec<RawHit>),
+    /// No name holds the characters, and under *Everything* the bodies are
+    /// still to ask.
+    NoName,
+    /// Not a word's first characters, or asked with what the stored
+    /// characters do not hold: the words' ranking answers, as before.
+    NotAsked,
+}
+
+/// What [`Searcher::named_and_filed`] read: the rows, what the files found of
+/// each repository, and the repositories only the files' text found.
+#[derive(Default)]
+struct PickedRows {
+    rows: Vec<RawHit>,
+    found: HashMap<String, group::InFiles>,
+    text_only: HashSet<String>,
+}
+
+/// Whether `text` is a word's first characters as the stored ones hold them
+/// (`sync.item_initial`): one character, or two or three that are all
+/// letters and digits. A longer word is ranked, and so are two or three
+/// characters the parser would read as more than one word (`c#`, `a-b`,
+/// `-pa`): their lexemes are not what was typed.
+fn named_by_its_start(text: &str) -> bool {
+    match text.chars().count() {
+        1 => true,
+        2 | 3 => text.chars().all(char::is_alphanumeric),
+        _ => false,
+    }
+}
+
+/// What a query admits of one kind ([`Searcher::admits_in`]).
+#[derive(Debug)]
+pub enum Admits {
+    /// A query with neither words nor a filter: it narrows nothing.
+    Every,
+    /// One that admits none of the kind, a `type:` naming another among
+    /// them.
+    Nothing,
+    /// The rows of the kind the [`Narrowing`] keeps.
+    Some(Box<Narrowing>),
+}
+
+/// A query as the rows of one kind it keeps: the words and keys of
+/// [`Searcher::matching_ids`], parsed and not yet asked of the mirror.
+///
+/// Asked for the ids ([`Self::ids`]), or put in a ticket board's own scan:
+/// it is a [`knobas_core::mini_board::CardsNarrowing`], which reads the board's
+/// card rows with the query's predicates beside the board's
+/// ([`sql::board_sql`]).
+#[derive(Debug)]
+pub struct Narrowing {
+    alternatives: Vec<query::WordAlternative>,
+    filters: query::EffectiveFilters,
+}
+
+impl Narrowing {
+    /// Every live id the narrowing keeps: [`sql::ids_sql`]'s.
+    ///
+    /// # Errors
+    ///
+    /// [`sqlx::Error`] if the statement fails.
+    pub async fn ids(&self, pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+        let built = sql::ids_sql(&self.alternatives, &self.filters);
+        let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(pool).await?;
+        Ok(ids.into_iter().map(|(id,)| id).collect())
+    }
+
+    /// Whether a board bound to `declarations` takes the narrowing in its
+    /// own scan ([`sql::board_sql`]): they are the declarations the query
+    /// was parsed with. Under any others the narrowing reads its ids first.
+    #[must_use]
+    pub fn in_scan_under(&self, declarations: &knobas_core::payload::Declarations) -> bool {
+        self.declared_as(&declarations.as_param().0)
+    }
+
+    fn declared_as(&self, declared: &serde_json::Value) -> bool {
+        self.filters.declarations.as_param().0 == *declared
+    }
+}
+
+impl knobas_core::mini_board::CardsNarrowing for Narrowing {
+    /// The board's card rows for the tickets the query keeps.
+    ///
+    /// In the board's own scan where the board binds the declarations the
+    /// query was parsed with, which is every board the app reads: both come
+    /// from the registry's descriptors and the configured sources. A board
+    /// bound to other declarations reads the ids first and its statement
+    /// over them, the two statements a filter always was: the query's words
+    /// and keys read a stored card and stored fields under *its*
+    /// declarations, and in the board's scan they would read the board's.
+    async fn rows(
+        &self,
+        pool: &PgPool,
+        statement: knobas_core::mini_board::CardsStatement,
+        binds: knobas_core::mini_board::CardsBinds<'_>,
+    ) -> Result<Vec<knobas_core::mini_board::CardRow>, sqlx::Error> {
+        if self.declared_as(&binds.declared.0) {
+            let built = sql::board_sql(statement, binds, &self.alternatives, &self.filters);
+            return sql::query_as_with(built).fetch_all(pool).await;
+        }
+        let mut ids = self.ids(pool).await?;
+        if let Some(members) = binds.members {
+            let members: std::collections::HashSet<&str> =
+                members.iter().map(String::as_str).collect();
+            ids.retain(|id| members.contains(id.as_str()));
+        }
+        let query = sqlx::query_as(statement.whole)
+            .persistent(false)
+            .bind(&ids)
+            .bind(binds.sources)
+            .bind(binds.project)
+            .bind(binds.declared)
+            .bind(binds.per_column)
+            .bind(binds.lanes)
+            .bind(binds.lanes_first);
+        // `$8` only where the statement reads a page (`CardsStatement::paged`).
+        if statement.paged {
+            query.bind(binds.page).fetch_all(pool).await
+        } else {
+            query.fetch_all(pool).await
+        }
     }
 }
 

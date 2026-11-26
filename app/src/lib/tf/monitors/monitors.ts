@@ -10,18 +10,19 @@
  */
 import type { AssetDetail, AssetProperty, MonitorRow, MonitorTarget, UnmonitoredAsset } from "../../ipc/assets";
 import type { MonitorKind } from "../../ipc/sources";
-import { bar, chipOf as chipStateOf } from "../../assets/monitors";
+import { BAR_BUCKETS, chipOf as chipStateOf } from "../../assets/monitors";
 import { matchesAll } from "../filter/filter";
 import { stampLabel } from "../../time/format";
+import { stateWord } from "../state-word";
 import type { JobIndex } from "../job/open-jobs";
 
 /** A chip's tone; `null` is the muted chip (paused, no reading). */
 export type ChipTone = "ok" | "warn" | "err" | "info" | null;
 
-/** Where each chip sorts: down, warning, then what is neither up nor broken, paused, up. */
+/** Where each chip sorts: down, slow, then what is neither up nor broken, paused, up. */
 const RANK: Record<string, number> = { down: 0, warn: 1, pending: 2, other: 3, paused: 4, up: 5 };
 
-/** The roster in prototype-6's order: down, warning, paused, up; by name inside each. */
+/** The roster in prototype-6's order: down, slow, paused, up; by name inside each. */
 export function sorted(rows: readonly MonitorRow[]): MonitorRow[] {
   return [...rows].sort(
     (a, b) => (RANK[chipStateOf(a)] ?? 3) - (RANK[chipStateOf(b)] ?? 3) || a.name.localeCompare(b.name),
@@ -44,37 +45,29 @@ export function uptimeText(row: Pick<MonitorRow, "uptime">): string {
   return `${Number((ratio * 100).toFixed(2))} %`;
 }
 
-/** When the newest run of `down` samples began, or `null` when no sample says. */
+/** When the monitor went down, as the backend read it (`down_since`, the newest run of `down` samples' first). */
 function downSince(row: MonitorRow): Date | null {
-  let since: string | null = null;
-  for (let at = row.samples.length - 1; at >= 0; at -= 1) {
-    const sample = row.samples[at]!;
-    if (sample.state === null) continue;
-    if (sample.state !== "down") break;
-    since = sample.taken_at;
-  }
-  const date = since === null ? null : new Date(since);
+  const date = row.down_since === null || row.down_since === undefined ? null : new Date(row.down_since);
   return date !== null && !Number.isNaN(date.getTime()) ? date : null;
 }
 
 /**
- * The state chip: its words, as prototype-6 words them, and its tone. *down
- * since 12:40* today, else *yesterday 12:40* or *2026-10-12 12:40*
- * (`stampLabel`, #1986).
+ * The state chip: the word and its tone. A chip holds the state alone, so it
+ * never gives up its end: how long a monitor has been down is `since`, plain
+ * text beside it (*since 12:40* today, else *since yesterday 12:40* or *since
+ * 2026-10-12 12:40*, `stampLabel`, #1986), and a slow monitor's time is the
+ * row's Response.
  */
-export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone } {
+export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone; since?: string } {
   switch (chipStateOf(row)) {
     case "paused":
       return { label: "paused", tone: null };
     case "down": {
       const since = downSince(row);
-      return { label: since ? `down since ${stampLabel(since.toISOString(), now, true)}` : "down", tone: "err" };
+      return since ? { label: "down", tone: "err", since: `since ${stampLabel(since.toISOString(), now, true)}` } : { label: "down", tone: "err" };
     }
     case "warn":
-      return {
-        label: row.response_time_ms !== null ? `slow, ${responseText(row.response_time_ms)}` : "warning",
-        tone: "warn",
-      };
+      return { label: "slow", tone: "warn" };
     case "up":
       return { label: "up", tone: "ok" };
     case "pending":
@@ -87,16 +80,113 @@ export function stateChip(row: MonitorRow, now: Date = new Date()): { label: str
 /** What a segment of the bar is drawn as. */
 export type Segment = "up" | "warn" | "down" | "paused" | "gap";
 
-/** The 24-hour bar: 48 half-hours, oldest first; a paused monitor's is paused throughout. */
-export function segments(row: MonitorRow, now: number): Segment[] {
-  return bar(row.samples, now).map((bucket) => {
-    if (row.tombstoned) return "paused";
-    if (bucket.state === null) return "gap";
-    if (bucket.state === "down") return "down";
-    if (bucket.state === "warn") return "warn";
-    if (bucket.state === "up") return "up";
-    return "paused";
+/** Each letter of the backend's bar (`MonitorRow::bar`, `0099`) as what its half-hour draws; any other is a gap. */
+const LETTER: Record<string, Segment> = { d: "down", w: "warn", p: "paused", m: "paused", u: "up" };
+
+/**
+ * The 24-hour bar: 48 half-hours, oldest first, the newest the half-hour now is in; a paused monitor's is paused
+ * throughout. The backend keeps each half-hour's worst state as its samples arrive (`0099`), so the bar is 48 letters
+ * and not a day of samples (the monitors-page pass, 2026-11-19: 1.4 MB a Kuma poll).
+ */
+export function segments(row: Pick<MonitorRow, "bar" | "tombstoned">): Segment[] {
+  const letters = [...row.bar].slice(-BAR_BUCKETS);
+  const bar = [...Array<string>(BAR_BUCKETS - letters.length).fill("-"), ...letters];
+  return bar.map((letter) => (row.tombstoned ? "paused" : (LETTER[letter] ?? "gap")));
+}
+
+const WORST: readonly Segment[] = ["down", "warn", "paused", "up", "gap"];
+
+/** A bar to draw: its state, its key, and what its title says. */
+export interface Bar {
+  state: Segment;
+  at: number;
+  title: string;
+}
+
+/** What each state is called in a bar's title; a pale gap is a half-hour with no reading. */
+const SEGMENT_WORD: Record<Segment, string> = { up: "up", warn: "slow", down: "down", paused: "paused", gap: "no data" };
+
+/** The bars the roster draws: the 48 half-hours, or below the narrow width one bar an hour, each worst-of. */
+export function barsOf(all: readonly Segment[], hourly: boolean): Bar[] {
+  const step = hourly ? 2 : 1;
+  const bars: Bar[] = [];
+  for (let at = 0; at < all.length; at += step) {
+    const part = all.slice(at, at + step);
+    const state = WORST.find((word) => part.includes(word)) ?? "gap";
+    const hoursAgo = (all.length - at) / 2;
+    bars.push({ state, at, title: `${hoursAgo} h ago: ${SEGMENT_WORD[state]}` });
+  }
+  return bars;
+}
+
+/**
+ * What each state's bar is painted with (the monitors-page pass, 2026-11-19): what is wrong in its tone at full
+ * strength, an hour that was up in a pale `--ok` (`--tf-mon-up`, mixed once in `monitors.css`), so a roster of healthy
+ * monitors reads as quiet and a red or amber bar is the first thing seen; paused and no reading in the rules' greys.
+ */
+const BAR_PAINT: Record<Segment, string> = {
+  up: "var(--tf-mon-up)",
+  down: "var(--err)",
+  warn: "var(--warn)",
+  paused: "var(--rule)",
+  gap: "var(--rule-2)",
+};
+/** A hidden monitor's bars: its states in grey, as the rest of its row is drawn, a down hour a shade darker. */
+const QUIET_PAINT: Record<Segment, string> = { up: "var(--rule)", down: "var(--muted)", warn: "var(--muted)", paused: "var(--rule)", gap: "var(--rule-2)" };
+
+/**
+ * The 24-hour strip as one element's background (PR #2479): a bar `width` px wide every `width + 1` px, in its
+ * state's colour. Two layers: on top, the 1 px between bars in the colour the strip sits on (`--tf-mon-gap`); under it,
+ * one stretch of colour for each run of bars of one state. It was a pair of stops for each of the 48 bars, a
+ * `color-mix` in each up one, and a roster drawn whole parsed and resolved 218 such gradients as it drew (the
+ * monitors-page pass, 2026-11-19). The open monitor's (`big`) is 5 px a bar, its ends rounded by a mask.
+ */
+export function stripPaint(bars: readonly Bar[], hourly: boolean, quiet = false, big = false): { image: string; width: number; pitch: number } {
+  const width = big ? 5 : hourly ? 3 : 2;
+  const pitch = width + 1;
+  const paint = quiet ? QUIET_PAINT : BAR_PAINT;
+  const total = Math.max(0, bars.length * pitch - 1);
+  const runs: string[] = [];
+  for (let at = 0; at < bars.length; ) {
+    let end = at + 1;
+    while (end < bars.length && bars[end]!.state === bars[at]!.state) end += 1;
+    runs.push(`${paint[bars[at]!.state]} ${at * pitch}px ${Math.min(total, end * pitch)}px`);
+    at = end;
+  }
+  const gaps = `repeating-linear-gradient(to right, transparent 0 ${width}px, var(--tf-mon-gap) ${width}px ${pitch}px)`;
+  return { image: bars.length === 0 ? "none" : `${gaps}, linear-gradient(to right, ${runs.join(", ")})`, width: total, pitch };
+}
+
+/**
+ * What a roster row draws, as one string: a row whose drawn parts are the same as before is the same row. Its
+ * response time is drawn only while it is slow (a slow monitor's time is the reason), and when it was read not at
+ * all, so a poll that moves every monitor's response by a millisecond and changes nothing else draws nothing.
+ */
+export function drawnKey(row: MonitorRow): string {
+  return JSON.stringify([
+    row.name, row.source_id, row.state, row.monitor_type, row.bar, row.down_since ?? null, row.tombstoned, row.hidden,
+    uptimeText(row), row.actions, row.refreshes, row.assets.map((asset) => [asset.id, asset.name, asset.type_label]),
+    row.state === "warn" ? responseText(row.response_time_ms) : null,
+  ]);
+}
+
+/**
+ * The roster read again, with every row whose drawn parts did not change kept as the object it was (the
+ * monitors-page pass, 2026-11-19): the list is keyed, so a kept object draws nothing, and an Uptime Kuma poll that
+ * changes one monitor redraws one row and not 218.
+ */
+export function keepDrawn(previous: readonly MonitorRow[] | null, next: MonitorRow[]): MonitorRow[] {
+  if (previous === null || previous.length === 0) return next;
+  const before = new Map(previous.map((row) => [row.entity_id, row]));
+  let same = previous.length === next.length;
+  const kept = next.map((row, at) => {
+    const was = before.get(row.entity_id);
+    const keep = was !== undefined && drawnKey(was) === drawnKey(row) ? was : row;
+    if (keep !== previous[at]) same = false;
+    return keep;
   });
+  // Nothing drawn changed: the very list, so nothing that reads the roster runs again.
+  return same ? (previous as MonitorRow[]) : kept;
 }
 
 /**
@@ -111,9 +201,31 @@ export function kindWord(type: string | null): string {
   return KIND_WORDS[type] ?? type;
 }
 
-/** The state chips of the filter bar, and which chip of a row each keeps. */
-export const STATE_CHIPS = ["Down", "Warning", "Up", "Paused"] as const;
-const CHIP_STATE: Record<string, string> = { Down: "down", Warning: "warn", Up: "up", Paused: "paused" };
+/** The asset type a monitor's kind of check usually watches: a Docker check a container, a database check a database. */
+const WATCHED_TYPE: Record<string, string> = {
+  docker: "container",
+  postgres: "database",
+  mysql: "database",
+  mongodb: "database",
+  redis: "database",
+  sqlserver: "database",
+  ping: "vm",
+};
+
+/**
+ * What *New asset for it* on an open monitor starts from (2026-11-19, Assets back in the nav): the monitor's own name and
+ * the type its kind of check usually watches, a service where the kind says nothing more (an HTTP or TCP check). Both
+ * stay the reader's to change.
+ */
+export function assetFor(monitor: Pick<MonitorRow, "name" | "monitor_type">): { name: string; typeId: string } {
+  return { name: monitor.name, typeId: (monitor.monitor_type !== null && WATCHED_TYPE[monitor.monitor_type]) || "service" };
+}
+
+/**
+ * The state pills of the filter bar: the words a row's chip says, so a pill keeps the rows that read as it does. *No
+ * reading* has no pill, because it is not a state to look for: such a row shows while no pill is on.
+ */
+export const STATE_CHIPS = ["Down", "Slow", "Up", "Paused", "Pending", "Maintenance"] as const;
 
 /** What the filter bar has set. */
 export interface MonitorFilter {
@@ -129,8 +241,9 @@ export interface MonitorFilter {
 
 /**
  * What the filter keeps, split in two: the roster proper, and the monitors the
- * reader hid, which the page draws in a fold at its end. Every filter applies
- * to both, so a hidden monitor is found by the same words as any other.
+ * reader hid, which the page draws after it, under their own line, dimmed.
+ * Every filter applies to both, so a hidden monitor is found by the same words
+ * as any other.
  */
 export interface KeptMonitors {
   shown: MonitorRow[];
@@ -150,21 +263,18 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
     if (filter.scope === "mine" && !idsOf(row).some((id) => index.jobOf({ entity_id: id, kind: null }) !== null)) {
       return false;
     }
-    if (filter.states.length > 0 && !filter.states.some((chip) => CHIP_STATE[chip] === chipStateOf(row))) return false;
+    if (filter.states.length > 0 && !filter.states.includes(stateWord(stateChip(row).label))) return false;
     if (filter.type !== "" && kindWord(row.monitor_type) !== filter.type) return false;
-    const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
-    return matchesAll(haystack, filter.text);
+    return monitorMatches(row, filter.text);
   });
   return { shown: kept.filter((row) => !row.hidden), hidden: kept.filter((row) => row.hidden) };
 }
 
-/**
- * Whether the fold of hidden monitors is open: as the reader last left it,
- * and before they have touched it, open only when it holds every match, so a
- * search that finds only hidden monitors shows them rather than nothing.
- */
-export function hiddenFoldOpen(remembered: boolean | null, kept: KeptMonitors): boolean {
-  return remembered ?? (kept.shown.length === 0 && kept.hidden.length > 0);
+/** Whether a monitor holds every typed word: in its name, its type, or the name or type of an asset it watches. */
+export function monitorMatches(row: MonitorRow, text: string): boolean {
+  if (text.trim() === "") return true;
+  const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
+  return matchesAll(haystack, text);
 }
 
 /**

@@ -83,9 +83,13 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 5,
+    minor: 7,
     patch: 0,
 };
+
+/// The minor of 1.x from which the host reads the descriptor's
+/// `web_sign_in` (ADR-0050, ux30).
+const WEB_SIGN_IN_FROM_MINOR: u64 = 7;
 
 /// The interface the component exports, without its version.
 const SOURCE_EXPORT: &str = "knobas:adapter/source";
@@ -103,6 +107,14 @@ const REFRESH_EXPORT: &str = "knobas:adapter/refresh";
 /// The optional interface a 1.5.0 component exports the docs projection
 /// in (#2442).
 const DOCS_EXPORT: &str = "knobas:adapter/docs";
+
+/// The optional interface a 1.6.0 component exports a ticket's fields in
+/// (ADR-0054).
+const TICKETS_EXPORT: &str = "knobas:adapter/tickets";
+
+/// The write a component that exports [`TICKETS_EXPORT`] declares, and only
+/// such a component.
+const EDIT_TICKET: &str = "edit_ticket";
 
 /// The function `name` of the optional interface `interface` (without its
 /// version), or `None` when the component does not export the interface:
@@ -124,6 +136,25 @@ pub(crate) fn optional_export(
         .get_export_index(Some(&instance), name)
         .map(Some)
         .ok_or_else(|| LoadError::Link(format!("{interface} exports no {name}")))
+}
+
+/// The `tickets` export and the `edit_ticket` write are two signals for one
+/// fact (ADR-0054): a component that declares the write exports the
+/// interface its fields are read through, or it is refused, naming both.
+/// The reverse is not a fault: the SDK's `export!` exports the interface for
+/// every component built against 1.6.0, a wiki's included, so an export
+/// without the write answers `Ok(false)` and the host never calls it (the
+/// component offers no edits), as it drops an unanswered `refresh`.
+/// `Ok(true)`: the interface is kept.
+fn check_tickets(template: &SourceDescriptor, exports: bool) -> Result<bool, String> {
+    let declares = template.write_ops.iter().any(|op| op == EDIT_TICKET);
+    match (declares, exports) {
+        (true, false) => Err(format!(
+            "it declares the {EDIT_TICKET:?} write and exports no {TICKETS_EXPORT}, which a \
+             ticket's fields are read through"
+        )),
+        (declares, exports) => Ok(declares && exports),
+    }
 }
 
 /// A semver `major.minor.patch`, as a component's export names it.
@@ -208,6 +239,10 @@ struct Inner {
     /// that exports `docs` exports with `project` (1.5.0, #2443).
     edit_section: Option<ComponentExportIndex>,
     body_from_text: Option<ComponentExportIndex>,
+    /// `tickets.ticket-fields` and `tickets.field-options`, when the
+    /// component exports them (1.6.0, ADR-0054).
+    pub(crate) ticket_fields: Option<ComponentExportIndex>,
+    pub(crate) field_options: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -278,6 +313,8 @@ impl WasmAdapter {
         let project = optional_export(&component, DOCS_EXPORT, "project")?;
         let edit_section = optional_export(&component, DOCS_EXPORT, "edit-section")?;
         let body_from_text = optional_export(&component, DOCS_EXPORT, "body-from-text")?;
+        let ticket_fields = optional_export(&component, TICKETS_EXPORT, "ticket-fields")?;
+        let field_options = optional_export(&component, TICKETS_EXPORT, "field-options")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -290,6 +327,8 @@ impl WasmAdapter {
                 project,
                 edit_section,
                 body_from_text,
+                ticket_fields,
+                field_options,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -302,9 +341,35 @@ impl WasmAdapter {
         let template = adapter
             .describe(&probe.adapter_kind, &probe.adapter_kind)
             .map_err(|e| LoadError::Descriptor(e.to_string()))?;
+        if let Some(pages) = &template.web_sign_in
+            && let Err(error) = knobas_source::web_sign_in::check(pages)
+        {
+            return Err(LoadError::Descriptor(format!("web_sign_in: {error}")));
+        }
+        if let Some(links) = &template.web_links {
+            let kinds: Vec<&str> = template
+                .entity_kinds
+                .iter()
+                .map(|k| k.id.as_str())
+                .collect();
+            if let Err(error) = knobas_source::web_links::check(links, &kinds) {
+                return Err(LoadError::Descriptor(format!("web_links: {error}")));
+            }
+        }
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
+        let keeps = check_tickets(
+            &adapter.inner.template,
+            adapter.inner.ticket_fields.is_some(),
+        )
+        .map_err(LoadError::Link)?;
+        if !keeps {
+            let inner =
+                Arc::get_mut(&mut adapter.inner).expect("nothing else holds the adapter yet");
+            inner.ticket_fields = None;
+            inner.field_options = None;
+        }
         if adapter.inner.download.is_some() {
             block_on(source::check_download(&adapter)).map_err(LoadError::Link)?;
         }
@@ -366,6 +431,32 @@ impl WasmAdapter {
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.inner.refresh.is_some()
+    }
+
+    /// Whether the host reads the descriptor's `web_sign_in` (1.7.0,
+    /// ADR-0050): where the source's own website shows its sign-in form, so
+    /// a saved web sign-in is filled there by itself. A component built
+    /// against an older minor has it dropped, and its site offers *Fill
+    /// sign-in* alone.
+    #[must_use]
+    pub fn declares_web_sign_in(&self) -> bool {
+        reads_web_sign_in(&self.inner.version)
+    }
+
+    /// Whether the host reads the descriptor's `web_links` (1.7.0, ux30):
+    /// where the source's own website shows an item of a kind, and its front
+    /// page. A component built against an older minor has them dropped, and
+    /// its site opens at its base URL.
+    #[must_use]
+    pub fn declares_web_links(&self) -> bool {
+        reads_web_sign_in(&self.inner.version)
+    }
+
+    /// Whether the component exports a ticket's fields (1.6.0, ADR-0054).
+    /// One that does not reads its tickets' fields as text in knobas.
+    #[must_use]
+    pub fn edits_tickets(&self) -> bool {
+        self.inner.ticket_fields.is_some()
     }
 
     /// Whether the component exports the docs projection (1.5.0, #2442).
@@ -673,13 +764,24 @@ fn new_store(
     store
 }
 
+/// Whether a component built against `version` has its descriptor's
+/// `web_sign_in` and `web_links` read: 1.7.0 and every later minor, and any
+/// later major.
+fn reads_web_sign_in(version: &Version) -> bool {
+    version.major > 1 || version.minor >= WEB_SIGN_IN_FROM_MINOR
+}
+
 /// Where `just wasm-fixture` writes the fixture component, or
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
 /// fixture is a test adapter and nothing ships it, hence `test-util`.
 ///
-/// Panics when the component at the default path is older than a source it
-/// was built from (#2442): a test on a stale fixture can pass without
-/// seeing what the fixture now does, as a mutant once survived that way.
+/// **Built here when it is missing or stale** (the final suite, 2026-11-22):
+/// a plain `cargo test -p knobas-app` in a fresh clone failed 61 tests until
+/// `just wasm-fixture` had run, and so did every copy `cargo mutants` makes,
+/// since a copy has no `target`. [`build_fixture`] does what the recipe does.
+/// A stale one matters as much as a missing one (#2442): a test on a stale
+/// fixture can pass without seeing what the fixture now does, as a mutant once
+/// survived that way.
 #[cfg(feature = "test-util")]
 #[must_use]
 pub fn fixture_component() -> std::path::PathBuf {
@@ -687,39 +789,125 @@ pub fn fixture_component() -> std::path::PathBuf {
         || {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm");
-            assert_fixture_fresh(&path);
+            if fixture_stale(&path).is_some() {
+                build_fixture(&path);
+            }
             path
         },
         std::path::PathBuf::from,
     )
 }
 
-/// Panics naming a source newer than the component at `path`, read from
-/// the dep-info file cargo writes beside it (every source the build read,
-/// the WIT included). A component or dep-info that is missing is left to
-/// the load, which names the recipe.
+/// Why the component at `path` needs building: it is missing, or a source it
+/// was built from (read from the dep-info file cargo writes beside it, the WIT
+/// included) is newer. `None` when it is fresh.
 #[cfg(feature = "test-util")]
-fn assert_fixture_fresh(path: &Path) {
+fn fixture_stale(path: &Path) -> Option<String> {
     let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let Some(built) = modified(path) else {
-        return;
+        return Some("it is not there".to_owned());
     };
     let Ok(dep_info) = std::fs::read_to_string(path.with_extension("d")) else {
+        return Some("its dep-info is not there".to_owned());
+    };
+    let (_, sources) = dep_info.lines().next().and_then(|l| l.split_once(": "))?;
+    sources
+        .split_whitespace()
+        .map(Path::new)
+        .find(|source| modified(source).is_some_and(|changed| changed > built))
+        .map(|source| format!("{} is newer", source.display()))
+}
+
+/// The variants `just wasm-fixture` builds, in its order, each kept beside
+/// the current one under its feature's name; the current one last.
+#[cfg(feature = "test-util")]
+const FIXTURE_VARIANTS: [Option<&str>; 5] =
+    [Some("v1_0"), Some("v1_3"), Some("v1_5"), Some("v1_6"), None];
+
+/// Build the fixture component and its older-world variants into `path`'s
+/// folder, as `just wasm-fixture` does, once across every test thread and
+/// binary: a file lock beside it, and a second look once it is held.
+///
+/// In a target folder of its own (`target/wasm-fixture`), then copied: the
+/// `cargo test` that runs this holds its own target folder's lock, and a
+/// build there would wait on it for ever.
+///
+/// # Panics
+/// When cargo cannot build it: the tests that load it cannot go on.
+#[cfg(feature = "test-util")]
+fn build_fixture(path: &Path) {
+    static BUILT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _thread = BUILT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let folder = path.parent().expect("the fixture's folder");
+    std::fs::create_dir_all(folder).expect("the fixture's folder can be made");
+    let lock = std::fs::File::create(folder.join("knobas_wasm_fixture.lock"))
+        .expect("the fixture's lock file");
+    lock.lock().expect("the fixture's lock");
+    let Some(why) = fixture_stale(path) else {
         return;
     };
-    let Some((_, sources)) = dep_info.lines().next().and_then(|l| l.split_once(": ")) else {
-        return;
-    };
-    for source in sources.split_whitespace().map(Path::new) {
-        if modified(source).is_some_and(|changed| changed > built) {
-            panic!(
-                "the fixture component at {} is older than {}, which it is built from; \
-                 `just wasm-fixture` rebuilds it",
-                path.display(),
-                source.display()
-            );
+    eprintln!("knobas-wasm-host: building the fixture component ({why})");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let own = root.join("target/wasm-fixture");
+    let built = own.join("wasm32-wasip2/release/knobas_wasm_fixture");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for feature in FIXTURE_VARIANTS {
+        let mut command = std::process::Command::new(&cargo);
+        command
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &own)
+            .args([
+                "build",
+                "-p",
+                "knobas-wasm-fixture",
+                "--target",
+                "wasm32-wasip2",
+            ])
+            .args(["--release", "--quiet"]);
+        if let Some(feature) = feature {
+            command.args(["--features", feature]);
+        }
+        let status = command.status().expect("cargo runs");
+        assert!(
+            status.success(),
+            "cargo could not build the fixture component ({feature:?})"
+        );
+        let name = feature.map_or_else(
+            || "knobas_wasm_fixture".to_owned(),
+            |feature| format!("knobas_wasm_fixture_{feature}"),
+        );
+        std::fs::copy(
+            built.with_extension("wasm"),
+            folder.join(format!("{name}.wasm")),
+        )
+        .expect("copy the built fixture");
+        if feature.is_none() {
+            std::fs::copy(built.with_extension("d"), path.with_extension("d"))
+                .expect("copy the fixture's dep-info");
         }
     }
+}
+
+/// The fixture built against the frozen 1.5.0 world, the minor before a
+/// ticket's fields, which `just wasm-fixture` keeps beside
+/// [`fixture_component`] (ADR-0054).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_5() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_5.wasm")
+}
+
+/// The fixture built against the frozen 1.6.0 world, the minor before the
+/// descriptor's `web_sign_in` is read, which `just wasm-fixture` keeps beside
+/// [`fixture_component`] (ADR-0050, ux30).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_6() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_6.wasm")
 }
 
 /// The fixture built against the frozen 1.0.0 world, which `just
@@ -793,6 +981,101 @@ pub fn load_fixture() -> WasmAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The web sign-in pages are read from 1.7.0 on, and from any later
+    /// major whatever its minor.
+    #[test]
+    fn web_sign_in_is_read_from_1_7_and_every_later_major() {
+        let at = |major, minor| {
+            reads_web_sign_in(&Version {
+                major,
+                minor,
+                patch: 0,
+            })
+        };
+        assert!(!at(1, 6) && !at(1, 0));
+        assert!(at(1, 7) && at(1, 8));
+        assert!(at(2, 0) && at(3, 1));
+    }
+
+    /// The build does what `just wasm-fixture` does: the component, its
+    /// dep-info and the four older worlds' variants, beside the path asked
+    /// for.
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn the_fixture_is_built_with_its_older_worlds_beside_it() {
+        let dir = std::env::temp_dir().join(format!("knobas-fixture-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let component = dir.join("knobas_wasm_fixture.wasm");
+        build_fixture(&component);
+        for name in [
+            "knobas_wasm_fixture.wasm",
+            "knobas_wasm_fixture.d",
+            "knobas_wasm_fixture_v1_0.wasm",
+            "knobas_wasm_fixture_v1_3.wasm",
+            "knobas_wasm_fixture_v1_5.wasm",
+            "knobas_wasm_fixture_v1_6.wasm",
+        ] {
+            let bytes = std::fs::read(dir.join(name)).unwrap_or_default();
+            assert!(!bytes.is_empty(), "{name} was built");
+        }
+        assert_eq!(fixture_stale(&component), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A missing component, or one older than a source its dep-info names,
+    /// is built; one newer than every source is left alone.
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_missing_or_older_fixture_is_built_and_a_fresh_one_kept() {
+        let dir = std::env::temp_dir().join(format!("knobas-fixture-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let component = dir.join("fixture.wasm");
+        let source = dir.join("lib.rs");
+        assert_eq!(
+            fixture_stale(&component).as_deref(),
+            Some("it is not there")
+        );
+        std::fs::write(&source, "// source").unwrap();
+        std::fs::write(&component, b"\0asm").unwrap();
+        assert_eq!(
+            fixture_stale(&component).as_deref(),
+            Some("its dep-info is not there")
+        );
+        std::fs::write(
+            component.with_extension("d"),
+            format!("{}: {}\n", component.display(), source.display()),
+        )
+        .unwrap();
+        let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
+        assert_eq!(fixture_stale(&component), None, "newer than its source");
+        let same = std::fs::metadata(&component).unwrap().modified().unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(same)
+            .unwrap();
+        assert_eq!(fixture_stale(&component), None, "as old as its source");
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(
+            fixture_stale(&component).is_some_and(|why| why.ends_with("is newer")),
+            "older than its source"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// A component exporting `interface` with one function `function`, or
     /// with none when `interface` is `None`; `knobas:adapter/source@1.0.0`

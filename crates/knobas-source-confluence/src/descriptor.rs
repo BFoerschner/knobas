@@ -60,7 +60,13 @@ pub fn descriptor_template() -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: url_forms(),
+        web_links: None,
+        web_sign_in: Some(knobas_source::web_sign_in::WebSignInPages::at(&[
+            "/login.action",
+        ])),
         code_pages: None,
+        by_hand_by_default: false,
+        passwords: None,
         write_ops: vec![
             "comment".to_owned(),
             "update_page".to_owned(),
@@ -87,6 +93,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             // no rows in the mirror for a sweep to tombstone.
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         }],
         config_schema: config_schema(),
         payload_paths: payload_paths(),

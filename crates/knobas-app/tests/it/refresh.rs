@@ -25,7 +25,7 @@ use knobas_source::{
     AuthMethod, Capability, ConnectionInfo, Cursor, KindInfo, RefreshAnswer, Sink, Source,
     SourceDescriptor, SourceError, SyncItem, WriteOp, WriteReceipt,
 };
-use knobas_sync::refresh::{RefreshError, RefreshOutcome};
+use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::{
     AdapterRegistry, RefreshEnd, RefreshEnded, RunConnections, SchedulerDeps, SchedulerTiming,
     SyncEvents,
@@ -37,6 +37,12 @@ const SOURCE: &str = "refreshing";
 const TICKET: &str = "refreshing:PAY-1";
 const BUILD: &str = "refreshing:BUILD-1";
 const FILED: &str = "refreshing:PAY-9";
+/// A run a `TriggerBuild` puts on the queue, whose state the test moves.
+const RUN: &str = "refreshing:BUILD-2";
+/// The pipeline it runs.
+const PIPELINE: &str = "refreshing:CONF-1";
+/// A parent its source reads with what stands under it (ADR-0047).
+const REPO: &str = "refreshing:REPO-1";
 const PATIENCE: Duration = Duration::from_secs(20);
 
 /// How the fake answers a read of one item.
@@ -62,6 +68,18 @@ struct Remote {
     /// One permit per sync the test lets through.
     door: Semaphore,
     syncs_entered: AtomicUsize,
+    /// The positions each walk under a parent was handed, in order.
+    walks: Mutex<Vec<Option<String>>>,
+    /// Whether a walk under REPO-1 finds something (PAY-1 and REPO-1 as the
+    /// source holds them, and a position moved past the one handed in), or
+    /// nothing, as on a source unchanged since the run.
+    walk_finds: Mutex<bool>,
+    /// The keys a walk under REPO-1 answers as deleted: an item under the
+    /// parent the source dropped, or the parent itself.
+    walk_deleted: Mutex<Vec<&'static str>>,
+    /// BUILD-2 as the source holds it: `None` until a trigger queues it, then
+    /// `queued`, `running` or `finished`.
+    run_state: Mutex<Option<&'static str>>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -78,6 +96,26 @@ fn ticket(key: &str, title: &str) -> SyncItem {
     }
 }
 
+/// BUILD-2 in `state`: a finished one carries its `finishDate`, which the
+/// build kind declares as its `finished` instant.
+fn run_build(state: &str) -> SyncItem {
+    let mut payload = json!({ "state": state });
+    if state == "finished" {
+        payload["finishDate"] = json!("20261125T100000+0000");
+    }
+    SyncItem {
+        entity: EntityRef::new(SOURCE, "BUILD-2"),
+        kind: "build".to_owned(),
+        title: "Build #2".to_owned(),
+        body_text: String::new(),
+        author: None,
+        updated_at: None,
+        payload,
+        web_url: None,
+        deleted: false,
+    }
+}
+
 fn build() -> SyncItem {
     SyncItem {
         entity: EntityRef::new(SOURCE, "BUILD-1"),
@@ -86,7 +124,7 @@ fn build() -> SyncItem {
         body_text: String::new(),
         author: None,
         updated_at: None,
-        payload: json!({ "status": "FAILURE" }),
+        payload: json!({ "status": "FAILURE", "finishDate": "20261124T100000+0000" }),
         web_url: None,
         deleted: false,
     }
@@ -133,6 +171,10 @@ impl Source for Fake {
                 *self.0.filed.lock().unwrap() = true;
                 Ok(WriteReceipt::id("PAY-9"))
             }
+            WriteOp::TriggerBuild { .. } => {
+                *self.0.run_state.lock().unwrap() = Some("queued");
+                Ok(WriteReceipt::id("BUILD-2"))
+            }
             _ => {
                 *self.0.title.lock().unwrap() = "after".to_owned();
                 Ok(WriteReceipt::none())
@@ -149,12 +191,49 @@ impl Source for Fake {
             Reads::Answers => Ok(match entity {
                 TICKET => RefreshAnswer::Item(ticket("PAY-1", &self.0.title.lock().unwrap())),
                 BUILD => RefreshAnswer::Item(build()),
+                RUN => match *self.0.run_state.lock().unwrap() {
+                    Some(state) => RefreshAnswer::Item(run_build(state)),
+                    None => RefreshAnswer::Gone,
+                },
+                REPO => RefreshAnswer::NotOffered,
                 FILED if *self.0.filed.lock().unwrap() => {
                     RefreshAnswer::Item(ticket("PAY-9", "Build #1 failed"))
                 }
                 _ => RefreshAnswer::Gone,
             }),
         }
+    }
+
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        if entity != REPO {
+            return Ok(knobas_source::UnderAnswer::NotOffered);
+        }
+        self.0.walks.lock().unwrap().push(cursor.map(str::to_owned));
+        if !*self.0.walk_finds.lock().unwrap() {
+            return Ok(knobas_source::UnderAnswer::Walked {
+                items: Vec::new(),
+                cursor: None,
+            });
+        }
+        let mut repo = ticket("REPO-1", "payout-service");
+        repo.kind = "repo".to_owned();
+        let deleted = self.0.walk_deleted.lock().unwrap().clone();
+        repo.deleted = deleted.contains(&"REPO-1");
+        let mut items = vec![repo, ticket("PAY-1", &self.0.title.lock().unwrap())];
+        for key in deleted.into_iter().filter(|key| *key != "REPO-1") {
+            items.push(SyncItem {
+                deleted: true,
+                ..ticket(key, "dropped")
+            });
+        }
+        Ok(knobas_source::UnderAnswer::Walked {
+            items,
+            cursor: Some(format!("{} walked", cursor.unwrap_or("none"))),
+        })
     }
 
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
@@ -178,6 +257,7 @@ fn kind(id: &str) -> KindInfo {
         monogram: "T".to_owned(),
         full_sync_exhaustive: true,
         refreshes: true,
+        title_stays_in_mirror: false,
     }
 }
 
@@ -199,11 +279,31 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
         source_actions: Vec::new(),
         clone_from: Vec::new(),
         url_forms: Vec::new(),
+        web_sign_in: None,
+        web_links: None,
         code_pages: None,
-        write_ops: vec!["comment".to_owned(), "create_ticket".to_owned()],
-        entity_kinds: vec![kind("ticket"), kind("build")],
+        by_hand_by_default: false,
+        passwords: None,
+        write_ops: vec![
+            "comment".to_owned(),
+            "create_ticket".to_owned(),
+            "trigger_build".to_owned(),
+        ],
+        entity_kinds: vec![
+            kind("ticket"),
+            kind("build"),
+            kind("repo"),
+            kind("build_config"),
+        ],
         config_schema: json!({"type": "object", "properties": {}}),
-        payload_paths: Vec::new(),
+        // A build is a run, finished once its `finishDate` is there: what
+        // the follow of a started run reads (the TeamCity run fix).
+        payload_paths: vec![knobas_source::KindPaths {
+            kind: "build".to_owned(),
+            frame: Some(knobas_source::Frame::Run),
+            finished: vec![knobas_source::PayloadPath::of(["finishDate"])],
+            ..knobas_source::KindPaths::default()
+        }],
     }
 }
 
@@ -293,6 +393,7 @@ async fn fixture(name: &str) -> Fixture {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -306,6 +407,10 @@ async fn fixture(name: &str) -> Fixture {
         filed: Mutex::new(false),
         door: Semaphore::new(0),
         syncs_entered: AtomicUsize::new(0),
+        walks: Mutex::new(Vec::new()),
+        walk_finds: Mutex::new(true),
+        walk_deleted: Mutex::new(Vec::new()),
+        run_state: Mutex::new(None),
     });
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(Arc::clone(&remote)));
     let heard = Heard::default();
@@ -492,6 +597,113 @@ async fn a_refresh_waits_behind_a_run_in_flight_whose_older_payload_does_not_ove
     f.state.scheduler.shutdown().await;
 }
 
+/// A run of `trigger` of its own, not the one [`mirrored`] just finished:
+/// that run's row closes a moment before its watchers do, and a trigger in
+/// between joins it.
+async fn a_run_of_its_own(f: &Fixture, trigger: knobas_sync::SyncTrigger) {
+    let last: i64 = sqlx::query_scalar("select max(id) from knobas.sync_run where source_id = $1")
+        .bind(SOURCE)
+        .fetch_one(&f.state.pool)
+        .await
+        .unwrap();
+    tokio::time::timeout(PATIENCE, async {
+        while f
+            .state
+            .scheduler
+            .trigger(SOURCE, trigger, None)
+            .await
+            .expect("a run starts")
+            == last
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("a run of its own starts");
+}
+
+/// **A scheduled run stands aside for a landed write's read-back** (ADR-0031
+/// as amended 2026-11-24, the pr-state fix). The source holds a position, so
+/// the run is incremental; it is held at the door, the lock in its hands. The
+/// write lands: its read-back must not wait for the run, which is stopped,
+/// rolled back and logged as standing aside, and the run after the write
+/// starts again from the same position.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_writes_read_back_stops_a_scheduled_run_in_its_way() {
+    let f = fixture("refresh_stands_aside").await;
+    mirrored(&f).await;
+    let entered = f.remote.syncs_entered.load(Ordering::SeqCst);
+    a_run_of_its_own(&f, knobas_sync::SyncTrigger::Schedule).await;
+    until("the scheduled run holds the lock", || async {
+        f.remote.syncs_entered.load(Ordering::SeqCst) > entered
+    })
+    .await;
+
+    let id = write_queue::submit_in_background(&f.state, comment())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the read-back goes first, the door still shut", || async {
+        live_title(&f.state.pool, TICKET).await.as_deref() == Some("after")
+    })
+    .await;
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 1);
+    let aside: Option<String> = sqlx::query_scalar(
+        "select error from knobas.sync_run where source_id = $1 and trigger = 'schedule'
+            and finished_at is not null and error like 'stood aside%'",
+    )
+    .bind(SOURCE)
+    .fetch_optional(&f.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        aside,
+        Some(format!("{}{id}", knobas_sync::run_log::STOOD_ASIDE_PREFIX)),
+        "the stopped run's row says which write it stood aside for"
+    );
+    assert_eq!(
+        knobas_sync::run_log::failures_since_last_ok(&f.state.pool, SOURCE)
+            .await
+            .unwrap(),
+        0,
+        "standing aside is no failure of the source"
+    );
+
+    f.open_the_door();
+    run_after(&f.state.pool, SOURCE, id).await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// A run a person pressed is not stopped: the read-back waits for it, as
+/// before (Fable's ruling 1).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_landed_writes_read_back_waits_for_a_run_a_person_pressed() {
+    let f = fixture("refresh_waits_for_a_person").await;
+    mirrored(&f).await;
+    let entered = f.remote.syncs_entered.load(Ordering::SeqCst);
+    a_run_of_its_own(&f, knobas_sync::SyncTrigger::Manual).await;
+    until("the pressed run holds the lock", || async {
+        f.remote.syncs_entered.load(Ordering::SeqCst) > entered
+    })
+    .await;
+    let id = write_queue::submit_in_background(&f.state, comment())
+        .await
+        .expect("queued")
+        .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        f.remote.refreshes.load(Ordering::SeqCst),
+        0,
+        "the read-back waits for the pressed run"
+    );
+    f.open_the_door();
+    run_after(&f.state.pool, SOURCE, id).await;
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 1);
+    f.state.scheduler.shutdown().await;
+}
+
 /// A refresh that fails is only a failed read: the write stays `sent`, the
 /// run after it still starts, and the shell hears `failed`.
 #[tokio::test(flavor = "multi_thread")]
@@ -534,7 +746,7 @@ async fn a_refresh_writes_no_activity_line_and_leaves_the_cursor() {
         .await
         .unwrap();
 
-    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None).await;
+    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait).await;
     assert!(
         matches!(outcome, Ok(RefreshOutcome::Refreshed)),
         "{outcome:?}"
@@ -575,7 +787,7 @@ async fn a_refresh_writes_no_activity_line_and_leaves_the_cursor() {
 #[tokio::test(flavor = "multi_thread")]
 async fn gone_tombstones_the_item_and_an_answer_brings_it_back() {
     let f = fixture("refresh_gone").await;
-    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None);
+    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait);
 
     assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
     assert!(live_title(&f.state.pool, TICKET).await.is_some());
@@ -621,7 +833,7 @@ async fn a_turned_off_sources_item_is_refused_and_nothing_is_read() {
         .await
         .unwrap();
 
-    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None).await;
+    let outcome = refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait).await;
     assert!(
         matches!(&outcome, Err(RefreshError::TurnedOff(id)) if id == SOURCE),
         "{outcome:?}"
@@ -784,6 +996,7 @@ async fn scheduled(
                 config: config.clone(),
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -849,7 +1062,7 @@ async fn a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts() 
     let (state, heard) = mock_fixture("refresh_mock").await;
     // At the mock's own position, so the run after each write is incremental
     // and writes nothing over what the refresh wrote.
-    sqlx::query("update knobas.source_config set cursor = 'tidewater-v6' where id = 'mockread'")
+    sqlx::query("update knobas.source_config set cursor = 'tidewater-v8' where id = 'mockread'")
         .execute(&state.pool)
         .await
         .unwrap();
@@ -926,7 +1139,7 @@ async fn a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts() 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mock_that_does_not_offer_the_read_gets_the_run_alone() {
     let (state, heard) = mock_fixture("refresh_mock_unoffered").await;
-    sqlx::query("update knobas.source_config set cursor = 'tidewater-v6' where id = 'mocknoread'")
+    sqlx::query("update knobas.source_config set cursor = 'tidewater-v8' where id = 'mocknoread'")
         .execute(&state.pool)
         .await
         .unwrap();
@@ -1051,4 +1264,332 @@ async fn a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone() {
     );
     assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
     state.scheduler.shutdown().await;
+}
+
+/// **The reader's *Refresh* does not wait behind a run** (the query audit of
+/// PR #2479, 2026-11-12). A run holds its source's lock for the whole run,
+/// network included, and the button said *Refreshing…* all that while. With
+/// the lock held, the reader's refresh answers *a run is in flight* at once:
+/// nothing is read from the source, nothing written, nobody told. Once the
+/// run commits, the same press refreshes the item.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_readers_refresh_says_a_run_is_in_flight_instead_of_waiting() {
+    let f = fixture("refresh_run_in_flight").await;
+    let mut run = f.state.pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(SOURCE)
+        .execute(&mut *run)
+        .await
+        .unwrap();
+
+    let asked = std::time::Instant::now();
+    let answer = refresh::of_reader(&f.state.scheduler, TICKET).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::RunInFlight)),
+        "{answer:?}"
+    );
+    assert!(
+        asked.elapsed() < std::time::Duration::from_secs(5),
+        "answered without waiting for the run: {:?}",
+        asked.elapsed()
+    );
+    assert_eq!(f.remote.refreshes.load(Ordering::SeqCst), 0, "nothing read");
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await,
+        None,
+        "nothing written"
+    );
+    assert!(
+        f.heard().is_empty(),
+        "a refresh held off is no refresh that ended"
+    );
+
+    run.rollback().await.unwrap();
+    let again = refresh::of_reader(&f.state.scheduler, TICKET).await;
+    assert!(
+        matches!(again, Ok(refresh::EntityRefresh::Refreshed)),
+        "{again:?}"
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("before")
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// The stored position, as a run or a walk left it.
+async fn stored_cursor(pool: &sqlx::PgPool) -> Option<String> {
+    sqlx::query_scalar("select cursor from knobas.source_config where id = $1")
+        .bind(SOURCE)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// ADR-0047: a parent `refresh` does not read is walked with what stands
+/// under it, from the stored position read inside the lock, and what the walk
+/// found is written with the parent's position moved, in one transaction. No
+/// run, no activity line, and the reader is told it refreshed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refresh_under_a_parent_writes_what_it_walked_and_moves_the_position_with_it() {
+    let f = fixture("refresh_under_walks").await;
+    sqlx::query("update knobas.source_config set cursor = 'c-7' where id = $1")
+        .bind(SOURCE)
+        .execute(&f.state.pool)
+        .await
+        .unwrap();
+    *f.remote.title.lock().unwrap() = "pushed".to_owned();
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "{answer:?}"
+    );
+    assert_eq!(*f.remote.walks.lock().unwrap(), [Some("c-7".to_owned())]);
+    assert_eq!(
+        live_title(&f.state.pool, REPO).await.as_deref(),
+        Some("payout-service")
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("pushed"),
+        "what stands under the parent is written too"
+    );
+    assert_eq!(
+        stored_cursor(&f.state.pool).await.as_deref(),
+        Some("c-7 walked"),
+        "the parent's position moves with its rows"
+    );
+    assert_eq!(finished_runs(&f.state.pool, SOURCE).await, 1, "no run");
+    let lines: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.activity where actor = $1 and verb = 'synced'",
+    )
+    .bind(format!("sync:{SOURCE}"))
+    .fetch_one(&f.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, 0, "a refresh is not a sync");
+    assert_eq!(
+        f.heard(),
+        [RefreshEnded {
+            entity_id: REPO.to_owned(),
+            write_id: None,
+            ended: RefreshEnd::Refreshed,
+        }]
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// A walk says the parent is gone only when it answers the parent itself
+/// deleted: an item under it the source dropped is written as gone, and the
+/// parent still refreshed (the final suite's mutants: the test turned around,
+/// or widened to any deleted item, went unseen).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_is_gone_only_when_it_answers_the_parent_deleted() {
+    let f = fixture("refresh_under_gone").await;
+    *f.remote.walk_deleted.lock().unwrap() = vec!["PAY-2"];
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "a dropped child is not the parent gone: {answer:?}"
+    );
+    *f.remote.walk_deleted.lock().unwrap() = vec!["REPO-1"];
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Gone)),
+        "the parent answered deleted: {answer:?}"
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// A walk that found nothing leaves the position byte for byte, as an idle
+/// run does, and still says it refreshed. It tells the shell nothing (the
+/// pr-state fix, 2026-11-24): the repository page walks its repository each
+/// time it is shown, and a walk with no news must not drop every answer the
+/// window holds.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_that_found_nothing_leaves_the_position() {
+    let f = fixture("refresh_under_idle").await;
+    sqlx::query("update knobas.source_config set cursor = 'c-7' where id = $1")
+        .bind(SOURCE)
+        .execute(&f.state.pool)
+        .await
+        .unwrap();
+    *f.remote.walk_finds.lock().unwrap() = false;
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "{answer:?}"
+    );
+    assert_eq!(stored_cursor(&f.state.pool).await.as_deref(), Some("c-7"));
+    assert_eq!(
+        live_title(&f.state.pool, REPO).await,
+        None,
+        "nothing written"
+    );
+    assert!(
+        f.heard().is_empty(),
+        "no item:refreshed for a walk with no news"
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// Never beside a run (Fable's ruling 4): the walk is not asked while a run
+/// of the source holds its lock, and the reader is told the run is in flight.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_is_not_asked_while_a_run_holds_the_source() {
+    let f = fixture("refresh_under_in_flight").await;
+    let mut run = f.state.pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(SOURCE)
+        .execute(&mut *run)
+        .await
+        .unwrap();
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::RunInFlight)),
+        "{answer:?}"
+    );
+    assert!(f.remote.walks.lock().unwrap().is_empty(), "nothing walked");
+    run.rollback().await.unwrap();
+    f.state.scheduler.shutdown().await;
+}
+
+/// The refreshes heard for `entity` with no write behind them.
+fn heard_after(f: &Fixture, entity: &str) -> Vec<RefreshEnd> {
+    f.heard()
+        .into_iter()
+        .filter(|ended| ended.entity_id == entity && ended.write_id.is_none())
+        .map(|ended| ended.ended)
+        .collect()
+}
+
+/// The state the mirror holds BUILD-2 in.
+async fn mirrored_state(pool: &sqlx::PgPool) -> Option<String> {
+    sqlx::query_scalar("select payload->>'state' from sync.live_item where entity_id = $1")
+        .bind(RUN)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+/// **A run started in knobas moves on in the mirror as it moves at the
+/// source** (the TeamCity run fix, 2026-11-25): queued at the read-back, then
+/// running and finished within a read of each, with no run of the source;
+/// then nothing reads it again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_started_here_is_read_on_until_it_finishes() {
+    let f = fixture("refresh_follow_run").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let id = write_queue::submit_in_background(
+        &f.state,
+        json!({ "TriggerBuild": { "entity": PIPELINE } }),
+    )
+    .await
+    .expect("queued")
+    .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the read-back holds the queued run", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("queued")
+    })
+    .await;
+    until("the run is followed", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE) == [RUN]
+    })
+    .await;
+
+    // The agent takes it: the next read, 2 s on, says running.
+    *f.remote.run_state.lock().unwrap() = Some("running");
+    let moved = std::time::Instant::now();
+    until("the mirror says running", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("running")
+    })
+    .await;
+    assert!(
+        moved.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        moved.elapsed()
+    );
+    assert_eq!(heard_after(&f, RUN), [RefreshEnd::Refreshed]);
+
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the mirror says finished", || async {
+        mirrored_state(&f.state.pool).await.as_deref() == Some("finished")
+    })
+    .await;
+    until("the follow ends", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE).is_empty()
+    })
+    .await;
+    let reads = f.remote.refreshes.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        f.remote.refreshes.load(Ordering::SeqCst),
+        reads,
+        "a finished run is read no more"
+    );
+    f.state.scheduler.shutdown().await;
+}
+
+/// **A followed run that has not moved tells nothing**: each read finds it
+/// as the mirror holds it (`Unchanged`), so the window keeps its answers and
+/// no page reads again while a build waits for an agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_followed_run_that_has_not_moved_tells_nothing() {
+    let f = fixture("refresh_follow_quiet").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let id = write_queue::submit_in_background(
+        &f.state,
+        json!({ "TriggerBuild": { "entity": PIPELINE } }),
+    )
+    .await
+    .expect("queued")
+    .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+    until("the run is followed", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE) == [RUN]
+    })
+    .await;
+    let reads = f.remote.refreshes.load(Ordering::SeqCst);
+    until("two more reads of the queued run", || async {
+        f.remote.refreshes.load(Ordering::SeqCst) >= reads + 2
+    })
+    .await;
+    assert_eq!(heard_after(&f, RUN), [], "an unchanged read tells nothing");
+    assert_eq!(
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE),
+        [RUN],
+        "still followed while it waits"
+    );
+
+    // Gone at the source (deleted from the queue): the follow ends.
+    *f.remote.run_state.lock().unwrap() = None;
+    until("the follow ends", || async {
+        knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE).is_empty()
+    })
+    .await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// **A one-item refresh that finds the item as the mirror holds it is
+/// `Unchanged`** and tells nothing; one that finds it moved is `Refreshed`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refresh_of_an_unmoved_item_is_unchanged_and_tells_nothing() {
+    let f = fixture("refresh_unchanged").await;
+    let refreshed = |_: ()| refresh::refresh(&f.state.scheduler, TICKET, None, Lock::Wait);
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Unchanged)));
+    *f.remote.title.lock().unwrap() = "after".to_owned();
+    assert!(matches!(refreshed(()).await, Ok(RefreshOutcome::Refreshed)));
+    assert_eq!(
+        f.heard().len(),
+        2,
+        "the unchanged read told nothing: {:?}",
+        f.heard()
+    );
+    f.state.scheduler.shutdown().await;
 }

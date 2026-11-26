@@ -1,0 +1,68 @@
+/**
+ * A page's list ranked by `fuzzy_rank` (the fuzzy-search pass, 2026-11-19): the latest answer only, what was drawn
+ * kept until it lands, the filter as it was where the ask fails.
+ */
+import { expect, test, vi } from "vitest";
+
+const pending: { text: string; resolve: (ranked: unknown) => void; reject: (error: unknown) => void }[] = [];
+vi.mock("../../ipc/search", () => ({
+  fuzzyRank: (text: string) =>
+    new Promise((resolve, reject) => {
+      pending.push({ text, resolve, reject });
+    }),
+}));
+
+const { FuzzyOrder } = await import("./ranked.svelte");
+
+const rows = ["acme/auth-proxy", "acme/ADProxy", "acme/routing"];
+const same = (row: string) => row;
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("the answer's rows are drawn once it lands, what was drawn until then, and a late answer is dropped", async () => {
+  const order = new FuzzyOrder<string>();
+  expect(order.rows("", rows, same)).toEqual(rows);
+  order.ask("prox", rows, same);
+  order.ask("proxy", rows, same);
+  // Nothing answered: what was drawn stays.
+  expect(order.rows("proxy", rows, same)).toEqual(rows);
+  expect(order.settled("proxy", rows)).toBe(false);
+  // The answer to the text the page moved past is dropped.
+  pending[0]!.resolve([{ index: 2, loose: false, marks: [] }]);
+  await flush();
+  expect(order.rows("proxy", rows, same)).toEqual(rows);
+  pending[1]!.resolve([
+    { index: 1, loose: false, marks: [7, 12] },
+    { index: 0, loose: false, marks: [10, 15] },
+  ]);
+  await flush();
+  expect(order.settled("proxy", rows)).toBe(true);
+  expect(order.rows("proxy", rows, same)).toEqual(["acme/ADProxy", "acme/auth-proxy"]);
+  expect(order.marks("acme/ADProxy")).toEqual([7, 12]);
+  // No text: the rows as given.
+  expect(order.rows("", rows, same)).toEqual(rows);
+  pending.length = 0;
+});
+
+test("a list drawn for the first time with words kept draws the filter as it was, and a failed ask is that filter", async () => {
+  const order = new FuzzyOrder<string>();
+  expect(order.rows("routing", rows, same)).toEqual(["acme/routing"]);
+  order.ask("auth", rows, same);
+  pending[0]!.reject(new Error("no such command"));
+  await flush();
+  expect(order.rows("auth", rows, same)).toEqual(["acme/auth-proxy"]);
+  expect(order.marks("acme/auth-proxy")).toEqual([]);
+  pending.length = 0;
+});
+
+test("an older text's answer that lands after a newer one's never replaces it", async () => {
+  const order = new FuzzyOrder<string>();
+  order.ask("proxy", rows, same);
+  order.ask("prox", rows, same);
+  pending[1]!.resolve([{ index: 1, loose: false, marks: [] }]);
+  await flush();
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [] }]);
+  await flush();
+  expect(order.settled("prox", rows)).toBe(true);
+  expect(order.rows("prox", rows, same)).toEqual(["acme/ADProxy"]);
+  pending.length = 0;
+});

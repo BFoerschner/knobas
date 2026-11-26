@@ -12,13 +12,23 @@
 
   A ticket view says what its cards show (#812, R-3.16, *Cards show*):
   `fields` names them; without it the card shows what it always has.
+
+  A move (ADR-0054) draws a chip at the right end of the head line, *Queued*
+  then *Sent* (*In Review, queued* where its column holds several statuses):
+  the type and priority give way to it, so no card changes height when it
+  comes or goes. A move the source refused, or knobas holds, is a note under
+  the head line in the source's words, with a `×` that discards the write.
 -->
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
   import type { MiniBoardCard } from "../../ipc/entity";
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import Signals from "./Signals.svelte";
-  import { commentsLine, epicLine, initials } from "./tickets";
+  import { assigneeName, commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
+  import { menuThing } from "../context/thing";
+  import { ticketHash } from "../route";
 
   let {
     card,
@@ -29,6 +39,10 @@
     onopen,
     fields = null,
     source = null,
+    row,
+    write = null,
+    note = null,
+    ondismiss,
   }: {
     card: MiniBoardCard;
     needles: readonly string[];
@@ -42,13 +56,21 @@
     fields?: CardField[] | null;
     /** The source's name, when another source holds the same key (#1476); `null` draws none. */
     source?: string | null;
+    /** On the card itself: its column's window measures it and holds it still (`TicketStack`). */
+    row?: Attachment<HTMLElement>;
+    /** Where its move's write is, drawn as a chip on the head line; `null` draws none. `other`: the words it turns to or from, kept under it so its width holds. */
+    write?: { words: string; other?: string; tone: "info" | "muted"; title?: string } | null;
+    /** What the card says of a move the source refused or knobas holds; `null` draws none. */
+    note?: { tone: "err" | "warn"; lead: string; words: string } | null;
+    /** The note's `×`: its write discarded. */
+    ondismiss?: () => void;
   } = $props();
 
   const shows = (field: CardField) => fields === null || fields.includes(field);
   /** Labels are shown only when a view asks for them, as in prototype-6. */
   const labels = $derived(fields?.includes("labels") ? card.labels : []);
 
-  const kind = $derived([card.issue_type, card.priority].filter(Boolean).join(", "));
+  const kind = $derived([card.issue_type, sentenceCase(card.priority)].filter(Boolean).join(", "));
   const epic = $derived(epicLine(card));
   const comments = $derived(commentsLine(card.comment_count));
 </script>
@@ -62,18 +84,47 @@
   data-entity={card.entity_id}
   onclick={onselect}
   ondblclick={onopen}
+  {@attach row}
+  {@attach menuThing(() => ({ kind: "ticket", id: card.entity_id, hash: ticketHash(card.entity_id) }))}
 >
-  <span class="tf-k"><Marked text={card.key} {needles} /></span>
+  <span class="tf-thead">
+    <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>
+    {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
+    {#if write}<span class="tf-chip tf-twrite" class:tf-info={write.tone === "info"} class:tf-muted={write.tone === "muted"} title={write.title}
+        ><span class="tf-wwords"><span class="tf-won">{write.words}</span>{#if write.other}<span aria-hidden="true">{write.other}</span>{/if}</span></span
+      >{/if}
+  </span>
+  {#if note}
+    {@const said = `${note.lead} ${note.words}`.trim()}
+    <span class="tf-trefused" class:tf-held={note.tone === "warn"} title={said}
+      ><span class="tf-trefused-w">{said}</span><span
+        class="tf-trefused-x"
+        role="button"
+        tabindex="0"
+        aria-label="Discard the move"
+        title="Discard the move"
+        onclick={(event) => {
+          event.stopPropagation();
+          ondismiss?.();
+        }}
+        onkeydown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          ondismiss?.();
+        }}>×</span
+      ></span
+    >
+  {/if}
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
-  {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {needles} /></span>
-  {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
+  {#if epic && shows("epic")}<span class="tf-cep"><TfKeyed text={epic} /></span>{/if}
   <span class="tf-meta">
     {#if shows("signals")}<Signals signals={card.signals} />{/if}
     {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}
     {#if comments && shows("comments")}<span class="tf-signal tf-dim tf-comments">{comments}</span>{/if}
     {#if shows("assignee")}
-      <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
+      <span class="tf-av" class:tf-me={card.mine} title={assigneeName(card) ?? "Unassigned"}>{initials(assigneeName(card))}</span>
     {/if}
   </span>
 </button>

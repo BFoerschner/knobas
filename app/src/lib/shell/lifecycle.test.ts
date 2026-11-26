@@ -35,7 +35,6 @@ import { waitFor } from "./test-wait";
 function status(db: DbState, extra: Partial<AppStatus> = {}): AppStatus {
   return {
     db,
-    first_run: true,
     demo: true,
     source_count: 0,
     app_version: "0.1.0",

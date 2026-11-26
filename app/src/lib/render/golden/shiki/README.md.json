@@ -1,0 +1,17 @@
+[
+  ["head:# knobas"],
+  [],
+  [":A personal work cockpit. See ","punct:[","link:the notes","punct:](","link:https://example.test/notes","punct:)",": for ","punct:**","strong:why","punct:**",":."],
+  [],
+  ["head:## Running it"],
+  [],
+  ["punct:-",": ","punct:`","str:just dev","punct:`",": starts the app"],
+  ["punct:-",": ","punct:*","emph:Settings","punct:*",": holds the sources"],
+  [],
+  ["punct:```","str:bash"],
+  ["str:just live-demo"],
+  ["punct:```"],
+  [],
+  ["punct:>",": A quote, with ","punct:`","str:code","punct:`",":."],
+  []
+]

@@ -1,0 +1,16 @@
+[
+  ["tag:<?xml","attr: version=","str:\"1.0\"","attr: encoding=","str:\"UTF-8\"","tag:?>"],
+  ["com:<!-- The payout service. -->"],
+  ["tag:<project",": ","attr:xmlns",":=","str:\"urn:example:pom\"","tag:>"],
+  [":  ","tag:<modelVersion>",":4.0.0","tag:</modelVersion>"],
+  [":  ","tag:<artifactId>",":payout-service","tag:</artifactId>"],
+  [":  ","tag:<dependencies>"],
+  [":    ","tag:<dependency",": ","attr:scope",":=","str:\"test\"","tag:>"],
+  [":      ","tag:<groupId>",":org.junit","tag:</groupId>"],
+  [":      ","tag:<version>",":${junit.version}","tag:</version>"],
+  [":    ","tag:</dependency>"],
+  [":  ","tag:</dependencies>"],
+  [":  ","tag:<description>","str:<![CDATA[Retries & parks]]>","tag:</description>"],
+  ["tag:</project>"],
+  []
+]

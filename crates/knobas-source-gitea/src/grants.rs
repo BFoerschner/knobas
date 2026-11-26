@@ -109,6 +109,9 @@ fn category(op: &str) -> Category {
         crate::WRITE_OP_COMMENT
         | crate::WRITE_OP_TRANSITION
         | crate::WRITE_OP_CREATE_TICKET
+        // A ticket's title, assignee and labels (ADR-0054): the issue's own
+        // routes, so the same scope and the same right on the repository.
+        | crate::WRITE_OP_EDIT_TICKET
         // *Add label…*, the one source action this adapter declares.
         | knobas_source::SOURCE_ACTION => Category::Issue,
         _ => Category::Repository,

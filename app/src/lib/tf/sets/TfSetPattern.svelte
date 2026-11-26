@@ -1,7 +1,9 @@
 <!--
   *Add a pattern…* (#868, R-7.2, R-7.7), prototype-6's `openPattern`: for
   pipelines a project (or any) and a name glob, for pages a space and a parent
-  page (or the whole space), and a live "Matches now: N" list. The fields are
+  page (or the whole space), and a live "Matches now: N" list. It waits for a
+  project, a name or a space with a line, as pipelines and pages both ask for
+  something: only a single space is taken for the reader. The fields are
   written as a query in the search grammar (`patternQuery`), and the backend
   reads it (`preview_link_set_pattern`): what the list shows is what the set
   will match, and the reason it says when the query is not a pattern.
@@ -10,7 +12,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetMemberKind, LinkSetPatternPreview } from "../../ipc/entity";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { patternQuery } from "./sets";
+  import { patternQuery, patternShown } from "./sets";
+  import { stateWord } from "../state-word";
   import { toneClass } from "../tone";
 
   let {
@@ -26,6 +29,8 @@
     onadd: (query: string) => void;
     onclose: () => void;
   } = $props();
+
+  const uid = $props.id();
 
   /** How many matches the list draws. */
   const DRAWN = 150;
@@ -43,7 +48,9 @@
   const projects = $derived(
     [...(answer?.projects ?? [])].sort((a, b) => (pipelines ? projectLabel(a).localeCompare(projectLabel(b)) : 0)),
   );
-  const addable = $derived(answer !== null && answer.refusal === null && failed === null);
+  /** A pipeline pattern with neither a project nor a name would add every pipeline, and a page pattern is a space: each asks first. */
+  const chosen = $derived(project !== "" || (pipelines && typed.trim() !== ""));
+  const addable = $derived(chosen && answer !== null && answer.refusal === null && failed === null);
   /** What the query matches now; a refused query matches nothing. */
   const matched = $derived(answer && answer.refusal === null ? answer : { count: 0, matches: [] });
 
@@ -55,14 +62,19 @@
         if (turn !== asked) return;
         answer = read;
         failed = null;
-        // A page pattern is a space: the first one the pages sit in, until one is picked.
-        if (!pipelines && project === "" && read.projects[0]) project = read.projects[0].key;
+        // One space leaves nothing to choose between, so it is taken (the enabled rule).
+        if (!pipelines && project === "" && read.projects.length === 1) project = read.projects[0]!.key;
       },
       (error: unknown) => {
         if (turn === asked) failed = ipcErrorMessage(error);
       },
     );
   });
+
+  function submit(event: SubmitEvent) {
+    event.preventDefault();
+    if (addable) onadd(query);
+  }
 
   /** prototype-6's `Payments › Payouts` for a project in a chain; else the key and its name. */
   function projectLabel(row: { key: string; name: string | null; path: string[] }): string {
@@ -71,47 +83,53 @@
   }
 </script>
 
-<TfDialog title="Add a pattern to {setName}" {onclose}>
+<TfDialog why={!chosen ? (pipelines ? "Pick a project or type a name." : "Pick a space.") : failed !== null || answer?.refusal ? "Change it: knobas can’t read this pattern." : null} title="Add a pattern to {setName}" {onclose}>
   {#snippet body()}
+    <form id="tf-pat-{uid}" class="tf-dform" onsubmit={submit}></form>
     <p class="tf-dim tf-pat-intro">
       A pattern is a saved filter. It picks up new {pipelines ? "pipelines" : "pages"} as they appear, without editing the set.
     </p>
     <div class="tf-formgrid">
       {#if pipelines}
-        <span>Project</span>
-        <select aria-label="Project" bind:value={project}>
+        <label for="tf-pat-project-{uid}">Project</label>
+        <select id="tf-pat-project-{uid}" aria-label="Project" bind:value={project}>
           <option value="">Any</option>
           {#each projects as row (`${row.source_id}|${row.key}`)}<option value={row.key}>{projectLabel(row)}</option>{/each}
         </select>
-        <span>Name matches</span>
-        <input type="text" aria-label="Name matches" bind:value={typed} placeholder="e.g. Payout_*" />
+        <label for="tf-pat-typed-{uid}">Name matches</label>
+        <input id="tf-pat-typed-{uid}" type="text" aria-label="Name matches" form="tf-pat-{uid}" data-arrive bind:value={typed} placeholder="e.g. Payout_*" />
       {:else}
-        <span>Space</span>
-        <select aria-label="Space" bind:value={project}>
+        <label for="tf-pat-project-{uid}">Space</label>
+        <select id="tf-pat-project-{uid}" aria-label="Space" bind:value={project}>
+          {#if project === ""}<option value="" disabled>Choose a space…</option>{/if}
           {#each projects as row (`${row.source_id}|${row.key}`)}<option value={row.key}>{projectLabel(row)}</option>{/each}
         </select>
-        <span>Under page</span>
-        <input type="text" aria-label="Under page" bind:value={typed} placeholder="e.g. Runbooks (empty for the whole space)" />
+        <label for="tf-pat-typed-{uid}">Under page</label>
+        <input id="tf-pat-typed-{uid}" type="text" aria-label="Under page" form="tf-pat-{uid}" bind:value={typed} placeholder="e.g. Runbooks (empty for the whole space)" />
       {/if}
     </div>
     {#if failed !== null}
       <p class="tf-ifail">Could not read what the pattern matches: {failed}</p>
-    {:else if answer?.refusal}
+    {:else if chosen && answer?.refusal}
       <p class="tf-ifail">{answer.refusal}</p>
     {/if}
-    <div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>
-    <div class="tf-picks tf-pat-matches" role="list" aria-label="Matches now">
+    {#if chosen}<div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>{/if}
+    {#if chosen && answer !== null && matched.count === 0}
+      <p class="tf-dim tf-picks-more">Nothing matches this yet. A pattern with no matches still picks up what appears later.</p>
+    {/if}
+    <div class="tf-picks tf-pat-matches" class:tf-hidden-empty={matched.count === 0 || !chosen} role="list" aria-label="Matches now">
       {#each matched.matches.slice(0, DRAWN) as row (row.entity_id)}
         <div class="tf-pat-match" role="listitem">
-          <span class="tf-dot {toneClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
+          <!-- A dot only where the source reports a state: tone is for state, and a row of grey dots says nothing. -->
+          {#if row.state}<span class="tf-dot {toneClass(row.state)}" title={stateWord(row.state.text)}></span>{/if}{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
         </div>
       {/each}
     </div>
-    <p class="tf-dim tf-pat-query">Stored as <code>{query}</code></p>
+    {#if chosen}<p class="tf-dim tf-pat-query">Pattern: <code>{patternShown(kind, query)}</code></p>{/if}
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={!addable} onclick={() => onadd(query)}>Add pattern</button>
+    <button type="submit" class="tf-btn tf-primary" form="tf-pat-{uid}" disabled={!addable}>Add pattern</button>
   {/snippet}
 </TfDialog>

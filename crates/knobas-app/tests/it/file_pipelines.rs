@@ -182,6 +182,7 @@ async fn fixture() -> Fixture {
             secret: SecretInput::of("pat"),
             sync_interval_secs: 300,
             enabled: true,
+            sync_by_hand: None,
         },
     )
     .await
@@ -320,6 +321,35 @@ async fn a_run_is_kept_by_sha_and_pipeline() {
         .await;
     assert_eq!(done(&levels).1, "[\n  \"info\",\n  \"error\"\n]\n");
     let again = f.piped("events.json.gz", &codes).await;
+    assert!(Arc::ptr_eq(&first, &again), "the kept run, not a new one");
+    assert_eq!(f.shelf.reads.load(Ordering::SeqCst), 1, "one byte read");
+}
+
+/// A value pipeline (ADR-0059): `Take` cuts the value out of the file, then
+/// base64 and gunzip unwrap it; the same chain again is the kept run, with no
+/// second byte read.
+#[tokio::test]
+async fn a_value_is_taken_out_of_the_file_unwrapped_and_kept() {
+    use base64::Engine as _;
+    use knobas_app::file_pipeline::TakeAs;
+    let f = fixture().await;
+    let wrapped = base64::engine::general_purpose::STANDARD.encode(gzip(b"the log, gzipped"));
+    let file = format!("<?xml version=\"1.0\"?>\n<a>\n  <AUDIT>\n{wrapped}\n  </AUDIT>\n</a>\n");
+    let from = file.find("<AUDIT>").expect("the element") + "<AUDIT>".len();
+    let to = file.find("</AUDIT>").expect("its end");
+    f.put("order.xml", file.into_bytes());
+    let chain = [
+        PipeStep::Take {
+            from: from as u64,
+            to: to as u64,
+            read: TakeAs::XmlText,
+        },
+        PipeStep::Base64Decode,
+        PipeStep::Gunzip,
+    ];
+    let first = f.piped("order.xml", &chain).await;
+    assert_eq!(done(&first).1, "the log, gzipped");
+    let again = f.piped("order.xml", &chain).await;
     assert!(Arc::ptr_eq(&first, &again), "the kept run, not a new one");
     assert_eq!(f.shelf.reads.load(Ordering::SeqCst), 1, "one byte read");
 }
@@ -562,13 +592,21 @@ async fn a_never_writing_jq_child_is_killed_at_its_timeout() {
 /// cap first: two spaces of indent a level.) The jq step now runs in a child, so the
 /// child dies and the step says why. That this test process is still here to
 /// assert is half of the claim.
+///
+/// The step gets a minute, not the usual ten seconds: building two values a
+/// million levels deep took longer than ten on a hosted runner (the ux30 gate's
+/// mutants baseline), and this test is about how the step fails, not how fast.
 #[tokio::test]
 async fn a_value_nested_deep_at_run_time_fails_the_step_not_the_app() {
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        ..Limits::default()
+    };
     for filter in [
         "reduce range(1000000) as $_ (0; [.]) | tojson",
         "def deep: reduce range(1000000) as $_ (0; [.]); deep == deep",
     ] {
-        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", Limits::default()).await;
+        let run = run_bytes(&[jq(filter)], b"null".to_vec(), "x.json", limits).await;
         let failed = failure(&run);
         assert_eq!((failed.index, failed.name.as_str()), (0, "jq"), "{filter}");
         assert_eq!(failed.why, PipeWhy::Error, "{filter}: {failed:?}");
@@ -961,6 +999,7 @@ async fn named_pipelines_round_trip_and_refuse_by_name() {
         id: id.map(str::to_owned),
         name: name.to_owned(),
         steps,
+        fields: None,
     };
     let saved = saved::save_named_pipelines(
         &f.pool,

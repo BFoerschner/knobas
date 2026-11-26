@@ -57,7 +57,11 @@ impl AdapterRegistry for Probe {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -66,6 +70,7 @@ impl AdapterRegistry for Probe {
                 monogram: "PT".to_owned(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: json!({}),
             payload_paths: vec![

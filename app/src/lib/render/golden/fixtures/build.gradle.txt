@@ -1,0 +1,16 @@
+plugins {
+    id 'java'
+    id "org.springframework.boot" version '3.3.0'
+}
+
+def retries = 3
+
+dependencies {
+    implementation 'org.springframework:spring-core:6.1.0'
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    maxParallelForks = retries * 2
+}

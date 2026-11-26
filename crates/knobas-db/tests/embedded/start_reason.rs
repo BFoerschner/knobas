@@ -197,3 +197,52 @@ async fn a_start_without_a_fatal_line_never_reports_an_earlier_starts_fatal() {
         "the first start's FATAL is not the second's reason: {second}"
     );
 }
+
+/// The Windows pass on ux28: a cluster whose `postgresql.conf` holds a bad
+/// value. The start stops at the server's start, and the report holds what
+/// the server said: the cause in its `LOG` line, then the `FATAL` summary,
+/// last. A start after the fix leaves the report with nothing said.
+#[tokio::test]
+async fn a_failed_start_reports_what_the_server_said_and_a_good_one_clears_it() {
+    use knobas_db::report::{StartReport, Step};
+
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("data").join("postgresql.conf");
+    EmbeddedDb::start(config(dir.path()))
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let good = std::fs::read_to_string(&conf).unwrap();
+    std::fs::write(&conf, format!("{good}\nshared_buffers = nonsense_value\n")).unwrap();
+
+    let mut report = StartReport::default();
+    let Err(error) = EmbeddedDb::start_reporting(config(dir.path()), &mut report).await else {
+        panic!("a bad shared_buffers started");
+    };
+    assert_eq!(report.step, Step::ServerStart, "{error}\n{report:#?}");
+    let cause = report
+        .server_said
+        .iter()
+        .position(|line| {
+            line.starts_with(
+                "LOG: invalid value for parameter \"shared_buffers\": \"nonsense_value\"",
+            )
+        })
+        .unwrap_or_else(|| panic!("{report:#?}"));
+    let fatal = report
+        .server_said
+        .iter()
+        .position(|line| line.starts_with("FATAL: configuration file"))
+        .unwrap_or_else(|| panic!("{report:#?}"));
+    assert!(cause < fatal, "{report:#?}");
+
+    std::fs::write(&conf, good).unwrap();
+    let mut report = StartReport::default();
+    let db = EmbeddedDb::start_reporting(config(dir.path()), &mut report)
+        .await
+        .unwrap();
+    assert!(report.server_said.is_empty(), "{report:#?}");
+    db.stop().await.unwrap();
+}

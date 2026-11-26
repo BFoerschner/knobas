@@ -41,6 +41,8 @@ pub const CI: &str = "ci";
 pub const WIKI: &str = "wiki";
 /// Monitoring: monitors, whose samples knobas keeps.
 pub const MONITORING: &str = "monitoring";
+/// Passwords: a password manager's entries and folders (ADR-0056).
+pub const PASSWORDS: &str = crate::passwords::PASSWORDS;
 
 /// One role a source claims.
 ///
@@ -229,7 +231,7 @@ const fn frame(frame: Frame, paths: &'static [Field]) -> KindMinimum {
     }
 }
 
-/// The five built-in roles' minimums (spec #1192, ADR-0029).
+/// The six built-in roles' minimums (spec #1192, ADR-0029, ADR-0056).
 pub const MINIMUMS: &[Minimum] = &[
     Minimum {
         role: CODE_HOST,
@@ -315,9 +317,17 @@ pub const MINIMUMS: &[Minimum] = &[
         // ticket system has no moves to offer. The battery's clause 8 holds
         // both halves.
         reads: &["reachable_transitions"],
-        // *Make an editable copy* of a saved view (#1208).
-        optional_reads: &[TRANSLATE_QUERY],
-        writes: &["transition", "comment", "create_ticket", "log_work"],
+        // *Make an editable copy* of a saved view (#1208); what a ticket
+        // lets a person change (ADR-0054), read exactly when `edit_ticket`
+        // is declared (`check`).
+        optional_reads: &[TRANSLATE_QUERY, TICKET_FIELDS],
+        writes: &[
+            "transition",
+            "comment",
+            "create_ticket",
+            "log_work",
+            "edit_ticket",
+        ],
     },
     Minimum {
         role: CI,
@@ -371,6 +381,24 @@ pub const MINIMUMS: &[Minimum] = &[
         optional_reads: &[],
         writes: &["create_monitor", "pause_monitor", "resume_monitor"],
     },
+    Minimum {
+        role: PASSWORDS,
+        // An entry sits in a folder where the source has folders; a manager
+        // with none emits no folder kind and still fills the role. The
+        // record is fixed by the role (`passwords::EntryRecord`), so no other
+        // path is read.
+        kinds: &[kind(crate::passwords::ENTRY_KIND, &[]).with_optional(&[Field::Parent])],
+        optional_kinds: &[kind(crate::passwords::FOLDER_KIND, &[]).with_optional(&[Field::Parent])],
+        reads: &[crate::passwords::READ_SECRET],
+        optional_reads: &[
+            crate::passwords::ENTRY_HISTORY,
+            crate::passwords::ENTRY_ATTACHMENTS,
+            crate::passwords::ACCESS_STATE,
+        ],
+        // No queued write: a change to an entry is a direct write
+        // (`passwords::Write`), which is not a `WriteOp`.
+        writes: &[],
+    },
 ];
 
 /// The minimum of a built-in role, `None` for any other name.
@@ -385,7 +413,7 @@ pub fn minimum(role: &str) -> Option<&'static Minimum> {
 pub enum ClaimError {
     #[error(
         "role {role:?} is neither a built-in role (code-host, ticket-system, ci, wiki, \
-         monitoring) nor a custom role named \"{adapter_kind}:<name>\""
+         monitoring, passwords) nor a custom role named \"{adapter_kind}:<name>\""
     )]
     UnknownRole { role: String, adapter_kind: String },
     #[error("role {role:?} is claimed twice")]
@@ -417,6 +445,39 @@ pub enum ClaimError {
          reads \"clone_urls\""
     )]
     UnclaimedCloneAddress,
+    #[error(
+        "descriptor.write_ops declares \"edit_ticket\", and no \"ticket-system\" claim reads \
+         \"ticket_fields\": a ticket's editable fields are what the shell offers an edit from"
+    )]
+    EditWithoutFields,
+    #[error(
+        "the \"ticket-system\" claim reads \"ticket_fields\", and descriptor.write_ops does not \
+         declare \"edit_ticket\": the fields would be offered with no write to send"
+    )]
+    FieldsWithoutEdit,
+    #[error(
+        "the \"passwords\" claim and descriptor.passwords go together: {claimed}, and \
+         descriptor.passwords is {offers}"
+    )]
+    PasswordsOffersMismatch {
+        claimed: &'static str,
+        offers: &'static str,
+    },
+    #[error(
+        "descriptor.passwords says {offer} is {said}, and the \"passwords\" claim {reads} the \
+         read {read:?}: the two are one fact"
+    )]
+    PasswordsReadMismatch {
+        offer: &'static str,
+        said: &'static str,
+        reads: &'static str,
+        read: &'static str,
+    },
+    #[error(
+        "descriptor.passwords offers access requests, and its writes do not list request_access: \
+         a request would be offered with no write to send it"
+    )]
+    AccessWithoutRequest,
 }
 
 /// The code-host read a descriptor answers with
@@ -425,6 +486,12 @@ pub const CLONE_URLS: &str = "clone_urls";
 /// The ticket-system read [`Source::translate_query`](crate::Source::translate_query)
 /// answers (#1208): a saved view's query read into the search grammar.
 pub const TRANSLATE_QUERY: &str = "translate_query";
+/// The ticket-system read [`Source::ticket_fields`](crate::Source::ticket_fields)
+/// answers (ADR-0054): what a ticket lets a person change. Claimed exactly
+/// when the descriptor declares the `edit_ticket` write.
+pub const TICKET_FIELDS: &str = "ticket_fields";
+/// The write [`TICKET_FIELDS`] goes with.
+const EDIT_TICKET: &str = "edit_ticket";
 
 /// Hold every role `descriptor` claims to that role's minimum, and answer the
 /// first item missing. A descriptor that claims nothing passes.
@@ -484,7 +551,75 @@ pub fn check(descriptor: &SourceDescriptor) -> Result<(), ClaimError> {
             return Err(ClaimError::NoCloneAddress { role });
         }
     }
-    check_clone_from(descriptor)
+    check_clone_from(descriptor)?;
+    check_ticket_fields(descriptor)?;
+    check_passwords(descriptor)
+}
+
+/// A `passwords` claim and `descriptor.passwords` are present together, and
+/// each optional read the claim declares is the ability `Offers` says
+/// (ADR-0056): `history` with `entry_history`, `attachments` with
+/// `entry_attachments`, `access_requests` with `access_state` and the
+/// `RequestAccess` write.
+fn check_passwords(d: &SourceDescriptor) -> Result<(), ClaimError> {
+    use crate::passwords::{ACCESS_STATE, ENTRY_ATTACHMENTS, ENTRY_HISTORY, WriteKind};
+    let claim = d.roles.iter().find(|c| c.role == PASSWORDS);
+    let (claim, offers) = match (claim, &d.passwords) {
+        (None, None) => return Ok(()),
+        (Some(_), None) => {
+            return Err(ClaimError::PasswordsOffersMismatch {
+                claimed: "it is claimed",
+                offers: "absent",
+            });
+        }
+        (None, Some(_)) => {
+            return Err(ClaimError::PasswordsOffersMismatch {
+                claimed: "it is not claimed",
+                offers: "present",
+            });
+        }
+        (Some(claim), Some(offers)) => (claim, offers),
+    };
+    let reads = |read: &str| claim.reads.iter().any(|r| r == read);
+    let pairs: [(&'static str, bool, &'static str); 3] = [
+        ("history", offers.history.is_some(), ENTRY_HISTORY),
+        ("attachments", offers.attachments, ENTRY_ATTACHMENTS),
+        ("access_requests", offers.access_requests, ACCESS_STATE),
+    ];
+    for (offer, offered, read) in pairs {
+        if offered != reads(read) {
+            return Err(ClaimError::PasswordsReadMismatch {
+                offer,
+                said: if offered { "offered" } else { "not offered" },
+                reads: if offered {
+                    "does not declare"
+                } else {
+                    "declares"
+                },
+                read,
+            });
+        }
+    }
+    if offers.access_requests && !offers.writes(WriteKind::RequestAccess) {
+        return Err(ClaimError::AccessWithoutRequest);
+    }
+    Ok(())
+}
+
+/// `edit_ticket` in `write_ops` and a ticket-system claim's `ticket_fields`
+/// are two signals for one fact (ADR-0054), held to each other as
+/// `Capability::Write` is to `write_ops`.
+fn check_ticket_fields(d: &SourceDescriptor) -> Result<(), ClaimError> {
+    let edits = d.write_ops.iter().any(|w| w == EDIT_TICKET);
+    let reads = d
+        .roles
+        .iter()
+        .any(|c| c.role == TICKET_SYSTEM && c.reads.iter().any(|r| r == TICKET_FIELDS));
+    match (edits, reads) {
+        (true, false) => Err(ClaimError::EditWithoutFields),
+        (false, true) => Err(ClaimError::FieldsWithoutEdit),
+        _ => Ok(()),
+    }
 }
 
 /// `clone_from` and a code-host claim's `clone_urls` are two signals for one
@@ -602,6 +737,7 @@ mod tests {
             monogram: "XX".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         };
         let at = |key: &str| vec![PayloadPath::of([key])];
         let parent = vec![ParentPath {
@@ -627,7 +763,11 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: vec![crate::clone_urls::CloneFrom::BaseUrl],
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: vec![],
             entity_kinds: ["repo", "branch", "pr", "commit"].map(kind).to_vec(),
             config_schema: serde_json::json!({}),
@@ -652,6 +792,117 @@ mod tests {
 
     fn code_host_min() -> &'static Minimum {
         minimum(CODE_HOST).expect("code-host is a built-in role")
+    }
+
+    /// A password manager that fills its role (ADR-0056).
+    fn password_source(
+        reads: &[&str],
+        offers: Option<crate::passwords::Offers>,
+    ) -> SourceDescriptor {
+        SourceDescriptor {
+            id: "vault".into(),
+            adapter_kind: "vault".into(),
+            name: "Vault".into(),
+            clone_from: Vec::new(),
+            roles: vec![RoleClaim::new(PASSWORDS, reads.iter().copied())],
+            entity_kinds: crate::passwords::kind_infos(true),
+            payload_paths: crate::passwords::payload_paths(),
+            passwords: offers,
+            ..code_host(Vec::new(), "repo")
+        }
+    }
+
+    #[test]
+    fn a_password_claim_needs_read_secret_and_its_offers() {
+        use crate::passwords::{HistoryKind, Offers, WriteKind};
+        let offers = Offers {
+            one_time_codes: true,
+            ..Offers::default()
+        };
+        assert_eq!(
+            check(&password_source(&["read_secret"], Some(offers.clone()))),
+            Ok(())
+        );
+        assert_eq!(
+            check(&password_source(&[], Some(offers.clone()))),
+            Err(ClaimError::MissingRead {
+                role: PASSWORDS.into(),
+                read: "read_secret".into()
+            })
+        );
+        assert_eq!(
+            check(&password_source(
+                &["read_secret", "run_log"],
+                Some(offers.clone())
+            )),
+            Err(ClaimError::UnknownRead {
+                role: PASSWORDS.into(),
+                read: "run_log".into()
+            })
+        );
+        assert!(matches!(
+            check(&password_source(&["read_secret"], None)),
+            Err(ClaimError::PasswordsOffersMismatch { .. })
+        ));
+        let no_claim = SourceDescriptor {
+            roles: Vec::new(),
+            ..password_source(&[], Some(offers.clone()))
+        };
+        assert!(matches!(
+            check(&no_claim),
+            Err(ClaimError::PasswordsOffersMismatch { .. })
+        ));
+        // Each optional read goes with its offer, both ways.
+        let history = Offers {
+            history: Some(HistoryKind::Log),
+            ..offers.clone()
+        };
+        assert!(matches!(
+            check(&password_source(&["read_secret"], Some(history.clone()))),
+            Err(ClaimError::PasswordsReadMismatch {
+                read: "entry_history",
+                ..
+            })
+        ));
+        assert_eq!(
+            check(&password_source(
+                &["read_secret", "entry_history"],
+                Some(history)
+            )),
+            Ok(())
+        );
+        assert!(matches!(
+            check(&password_source(
+                &["read_secret", "entry_attachments"],
+                Some(offers.clone())
+            )),
+            Err(ClaimError::PasswordsReadMismatch {
+                read: "entry_attachments",
+                ..
+            })
+        ));
+        let access = Offers {
+            access_requests: true,
+            ..offers.clone()
+        };
+        assert_eq!(
+            check(&password_source(
+                &["read_secret", "access_state"],
+                Some(access.clone())
+            )),
+            Err(ClaimError::AccessWithoutRequest)
+        );
+        let access = Offers {
+            writes: vec![WriteKind::RequestAccess],
+            ..access
+        };
+        assert_eq!(
+            check(&password_source(
+                &["read_secret", "access_state"],
+                Some(access)
+            )),
+            Ok(())
+        );
     }
 
     /// A field's name is the key `KindPaths` serializes it under, so a
@@ -739,6 +990,7 @@ mod tests {
             monogram: "MO".into(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         });
         let monitor = KindPaths {
             kind: "monitor".into(),
@@ -774,6 +1026,7 @@ mod tests {
             monogram: "TK".into(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         };
         d.entity_kinds.push(info("ticket"));
         let at = |key: &str| vec![PayloadPath::of([key])];
@@ -811,6 +1064,68 @@ mod tests {
             saved.optional_paths,
             [Field::BoardType, Field::SubQuery, Field::Sprint]
         );
+    }
+
+    /// `edit_ticket` and the ticket-system read `ticket_fields` go together
+    /// (ADR-0054): a claim with the read and without the op is refused, and
+    /// the reverse, each by its own sentence.
+    #[test]
+    fn edit_ticket_and_ticket_fields_go_together() {
+        let ticket_system = |reads: &[&str], ops: &[&str]| {
+            let mut d = code_host(
+                vec![RoleClaim::new(TICKET_SYSTEM, reads.iter().copied())],
+                "repo",
+            );
+            d.clone_from.clear();
+            d.entity_kinds.push(KindInfo {
+                id: "ticket".into(),
+                label: "Ticket".into(),
+                plural: "Tickets".into(),
+                monogram: "TK".into(),
+                full_sync_exhaustive: true,
+                refreshes: true,
+                title_stays_in_mirror: false,
+            });
+            let at = |key: &str| vec![PayloadPath::of([key])];
+            d.payload_paths.push(KindPaths {
+                kind: "ticket".into(),
+                status_name: at("status"),
+                priority: at("priority"),
+                assignee: at("assignee"),
+                issue_type: at("type"),
+                labels: vec![crate::ListPath::default()],
+                parent: vec![ParentPath {
+                    kind: "ticket".into(),
+                    at: PayloadPath::of(["parent"]),
+                    names: vec![PayloadPath::of(["key"])],
+                }],
+                project_key: at("project"),
+                ..KindPaths::default()
+            });
+            d.write_ops = ops.iter().map(|o| (*o).to_owned()).collect();
+            check(&d)
+        };
+        assert_eq!(
+            ticket_system(&["reachable_transitions"], &["transition"]),
+            Ok(())
+        );
+        assert_eq!(
+            ticket_system(
+                &["reachable_transitions", TICKET_FIELDS],
+                &["transition", "edit_ticket"]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            ticket_system(&["reachable_transitions", TICKET_FIELDS], &["transition"]),
+            Err(ClaimError::FieldsWithoutEdit)
+        );
+        let refused = ticket_system(&["reachable_transitions"], &["edit_ticket"]);
+        assert_eq!(refused, Err(ClaimError::EditWithoutFields));
+        assert!(refused.unwrap_err().to_string().contains("ticket_fields"));
+        let min = minimum(TICKET_SYSTEM).unwrap();
+        assert!(min.writes.contains(&"edit_ticket"));
+        assert!(min.optional_reads.contains(&TICKET_FIELDS));
     }
 
     #[test]

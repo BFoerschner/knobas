@@ -207,6 +207,20 @@ pub struct EntityFilter {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub role: Option<String>,
+    /// Only rows that name a parent by this name (#2479's query audit): a
+    /// repository page asks for its own pull requests by the repository's
+    /// name, `owner/name`, and not for every pull request of its source.
+    /// Read from the stored parents (`sync.item_parent`, ADR-0019), the
+    /// child arm, compared case-insensitively as `item_parent_name_idx`
+    /// indexes it: every name a parent answers to, so a bare repository name
+    /// two owners share matches both owners' rows. It narrows to a superset
+    /// of the rows whose path line is that name, and a caller that wants the
+    /// path line exactly keeps those (`repoPrs` in the app). `None` is
+    /// unscoped, and absent on the wire reads as `None`, as [`Self::reach`]
+    /// does.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub parent: Option<String>,
 }
 
 /// The orderings a room reads in: the two plain ones, and since #680 the two
@@ -334,57 +348,102 @@ pub struct EntityPage {
     pub groups: Option<Vec<GroupTally>>,
 }
 
-/// The live corpus, newest first.
+/// Whether the row `$row` names a parent called `$name` ([`EntityFilter::parent`]):
+/// its stored child-arm parents, by `item_parent_name_idx`.
+macro_rules! parent_named {
+    ($row:literal, $name:literal) => {
+        concat!(
+            $row,
+            ".entity_id in (select ip.entity_id from sync.item_parent ip where ip.arm = 'child' and lower(ip.name) = lower(",
+            $name,
+            "))"
+        )
+    };
+}
+
+/// A plain order's page (#2479's query audit): the set is filtered, counted
+/// and cut **first**, over the row's own columns, and only the page's rows are
+/// joined back to `sync.item` for the path line and the state chip.
 ///
-/// `count(*) over ()` is the unpaged total in the same round trip, and the
-/// window is evaluated before `limit`, so it describes the set rather than the
-/// page.
-const LIVE_UPDATED: &str = concat!(
-    r#"
+/// Both are walks of the row's payload, about 0.13 ms a row. Computed above
+/// the `limit` they were paid for every row the page skipped too, so a page
+/// at offset N cost N + limit walks: Code's four 500-row pages of pull
+/// requests walked 4,710 payloads for 1,710 rows, 711 ms in series. Cut first,
+/// a page walks its own rows and no others.
+///
+/// **The path and the state come from the item's stored row** where it has
+/// one (`sync.item_row`, migration `0081`, [`crate::row_join!`]), and from
+/// the walk where it has none: a page of 500 pull requests took 87 ms and
+/// takes 29. The row holds the two as these macros read them under the
+/// bound declarations, so it is the same answer; `knobas-app`'s
+/// `a_list_answers_the_same_from_its_stored_rows_and_from_the_payloads`
+/// reads every order with every row, some and none.
+///
+/// `$from` is the filtered set with its alias `i`; `$key` the columns the
+/// order reads, beside `entity_id`; `$order` and `$outer` the same order over
+/// `i` and over the cut page `p`, because a join keeps no order. `count(*)
+/// over ()` is the unpaged total in the same round trip: the window is
+/// evaluated before `limit`, so it describes the set rather than the page.
+macro_rules! plain_page {
+    ($from:expr, $key:expr, $order:expr, $outer:expr) => {
+        concat!(
+            "\nwith ",
+            crate::row_keys!("$8"),
+            r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-    crate::path_line_read!("$8"),
-    r#" as path,
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
+            r#" as path,
        "#,
-    crate::declared_state!("$8"),
-    r#" as state, i.key_cell as cell,
-       count(*) over () as total
-  from sync.live_item i
- where ($1::text[] is null or i.source_id = any($1))
-   and ($2::text[] is null or i.kind      = any($2))
-   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or i.entity_id = any($6))
-   and ($7::text   is null or "#,
-    crate::project_key_read!("$8"),
-    r#" = $7)
- order by i.item_updated_at desc nulls last, i.entity_id
- limit $4 offset $5
-"#
+            crate::row_or!("rw", "state", crate::declared_state!("$8")),
+            r#" as state, i.key_cell as cell,
+       p.total
+  from (select i.entity_id, "#,
+            $key,
+            r#",
+               count(*) over () as total
+          from "#,
+            $from,
+            r#"
+         where ($1::text[] is null or i.source_id = any($1))
+           and ($2::text[] is null or i.kind      = any($2))
+           and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+           and ($6::text[] is null or i.entity_id = any($6))
+           and ($7::text   is null or "#,
+            crate::project_key_read!("$8"),
+            r#" = $7)
+           and ($9::text   is null or "#,
+            parent_named!("i", "$9"),
+            r#")
+         order by "#,
+            $order,
+            r#"
+         limit $4 offset $5) p
+  join sync.item i on i.entity_id = p.entity_id"#,
+            crate::row_join!("rw", "i"),
+            r#"
+ order by "#,
+            $outer,
+            "\n"
+        )
+    };
+}
+
+/// The live corpus, newest first.
+const LIVE_UPDATED: &str = plain_page!(
+    "sync.live_item i",
+    "i.item_updated_at",
+    "i.item_updated_at desc nulls last, i.entity_id",
+    "p.item_updated_at desc nulls last, p.entity_id"
 );
 
 /// The live corpus, alphabetically. A second statement rather than an
 /// interpolated `order by`.
-const LIVE_TITLE: &str = concat!(
-    r#"
-select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
-       "#,
-    crate::path_line_read!("$8"),
-    r#" as path,
-       "#,
-    crate::declared_state!("$8"),
-    r#" as state, i.key_cell as cell,
-       count(*) over () as total
-  from sync.live_item i
- where ($1::text[] is null or i.source_id = any($1))
-   and ($2::text[] is null or i.kind      = any($2))
-   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or i.entity_id = any($6))
-   and ($7::text   is null or "#,
-    crate::project_key_read!("$8"),
-    r#" = $7)
- order by i.title asc, i.entity_id
- limit $4 offset $5
-"#
+const LIVE_TITLE: &str = plain_page!(
+    "sync.live_item i",
+    "i.title",
+    "i.title asc, i.entity_id",
+    "p.title asc, p.entity_id"
 );
 
 /// As [`LIVE_UPDATED`], reaching past the tombstone filter.
@@ -393,53 +452,19 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// null` and, since migration `0012`, the disabled-source filter. Both are
 /// dropped on purpose: an `include_deleted` read lists a disabled source's
 /// rows too, ratified in the #202 §10.8 entry.
-const ALL_UPDATED: &str = concat!(
-    r#"
-select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
-       "#,
-    crate::path_line_read!("$8"),
-    r#" as path,
-       "#,
-    crate::declared_state!("$8"),
-    r#" as state, i.key_cell as cell,
-       count(*) over () as total
-  from sync.item i
-  join knobas.entity e on e.id = i.entity_id
- where ($1::text[] is null or i.source_id = any($1))
-   and ($2::text[] is null or i.kind      = any($2))
-   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or i.entity_id = any($6))
-   and ($7::text   is null or "#,
-    crate::project_key_read!("$8"),
-    r#" = $7)
- order by i.item_updated_at desc nulls last, i.entity_id
- limit $4 offset $5
-"#
+const ALL_UPDATED: &str = plain_page!(
+    "sync.item i\n          join knobas.entity e on e.id = i.entity_id",
+    "i.item_updated_at",
+    "i.item_updated_at desc nulls last, i.entity_id",
+    "p.item_updated_at desc nulls last, p.entity_id"
 );
 
 /// As [`LIVE_TITLE`], reaching past the tombstone filter.
-const ALL_TITLE: &str = concat!(
-    r#"
-select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
-       "#,
-    crate::path_line_read!("$8"),
-    r#" as path,
-       "#,
-    crate::declared_state!("$8"),
-    r#" as state, i.key_cell as cell,
-       count(*) over () as total
-  from sync.item i
-  join knobas.entity e on e.id = i.entity_id
- where ($1::text[] is null or i.source_id = any($1))
-   and ($2::text[] is null or i.kind      = any($2))
-   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or i.entity_id = any($6))
-   and ($7::text   is null or "#,
-    crate::project_key_read!("$8"),
-    r#" = $7)
- order by i.title asc, i.entity_id
- limit $4 offset $5
-"#
+const ALL_TITLE: &str = plain_page!(
+    "sync.item i\n          join knobas.entity e on e.id = i.entity_id",
+    "i.title",
+    "i.title asc, i.entity_id",
+    "p.title asc, p.entity_id"
 );
 
 /// The live corpus a tile order starts from: the same five filters as
@@ -480,8 +505,10 @@ macro_rules! tile_ruled {
     };
     ($rule:expr, $join:expr) => {
         concat!(
-            r#"
-with ruled as materialized (
+            "\nwith ",
+            crate::row_keys!("$8"),
+            r#",
+ruled as materialized (
   select i.entity_id, i.source_id, i.kind, i.item_updated_at"#,
             $rule,
             r#"
@@ -498,6 +525,9 @@ with ruled as materialized (
      and ($7::text   is null or "#,
             crate::project_key_read!("$8"),
             r#" = $7)
+     and ($9::text   is null or "#,
+            parent_named!("i", "$9"),
+            r#")
 )"#
         )
     };
@@ -523,7 +553,7 @@ macro_rules! tile_page {
             r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        "#,
-            crate::path_line_read!("$8"),
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
             r#" as path, i.key_cell as cell,
        p.state, p.total, p.tally, p.groups
   from (select d.entity_id, d.item_updated_at, d.state, d.tone, d.grp,
@@ -540,7 +570,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
                   coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], d.tone), 6),
                   d.item_updated_at desc nulls last, d.entity_id
          limit $4 offset $5) p
-  join sync.item i on i.entity_id = p.entity_id
+  join sync.item i on i.entity_id = p.entity_id"#,
+            crate::row_join!("rw", "i"),
+            r#"
  order by p.grp nulls first,
           coalesce(array_position(array['err', 'warn', 'info', 'ok', 'muted'], p.tone), 6),
           p.item_updated_at desc nulls last, p.entity_id
@@ -572,6 +604,16 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// a branch and not its pull request must not call the branch unproposed.
 /// Each is read once, `materialized`, as `ruled` is.
 ///
+/// **Every declared read here takes the item's stored row first**
+/// (`sync.item_row`, migration `0081`; the query audit of 2026-11-12): the
+/// state, the reviewers, a branch's path and its repository's default, and
+/// in `open_head` a pull request's head, head repository and state. The
+/// order cannot cut its page first, because it orders by the state, so it
+/// walked each of them out of every pull request's payload: 196 ms for
+/// Code's 1,710 pull requests, and a cold first open of Code at 245 ms. From
+/// the rows it is 19 ms and 51. An item with no row is walked as before
+/// ([`crate::row_or!`]).
+///
 /// **The repo is matched by the pull request's declared `head_repo`** (#718:
 /// a fork's pull request is opened from the fork, so its base repo's
 /// same-named branch is not the one proposed) against the branch's path
@@ -585,35 +627,51 @@ const LIVE_ATTENTION: &str = concat!(
     tile_ruled!(
         concat!(
             ",\n         ",
-            crate::declared_state!("$8"),
+            crate::row_or!("rw", "state", crate::declared_state!("$8")),
             " as state, i.author, i.title, me.me,
-         i.kind = 'pr' and me.me is not null and coalesce((select true from ",
+         i.kind = 'pr' and me.me is not null
+           and (case when rw.entity_id is null
+                     then coalesce((select true from ",
             crate::declared_list!("$8", "reviewers"),
-            " v where v.value = me.me limit 1), false) as asked,
+            " v where v.value = me.me limit 1), false)
+                     else me.me = any(rw.reviewers) end) as asked,
          case when i.kind = 'branch' then ",
-            crate::path_line_read!("$8"),
+            crate::row_or!("rw", "path", crate::path_line_read!("$8")),
             " end as branch_path,
          i.kind = 'branch' and i.title = ",
-            crate::declared_string!("$8", "default_branch"),
+            crate::row_or!(
+                "rw",
+                "default_branch",
+                crate::declared_string!("$8", "default_branch")
+            ),
             " as is_default"
         ),
-        "
+        concat!(
+            crate::row_join!("rw", "i"),
+            "
     left join lateral (select nullif(btrim(s.config->>'username'), '') as me
                          from knobas.source_config s where s.id = i.source_id) me on true"
+        )
     ),
     r#",
 open_head as materialized (
   select i.source_id, "#,
-    crate::declared_string!("$8", "head"),
+    crate::row_or!("rw", "head", crate::declared_string!("$8", "head")),
     r#" as head,
          "#,
-    crate::declared_string!("$8", "head_repo"),
+    crate::row_or!(
+        "rw",
+        "head_repo",
+        crate::declared_string!("$8", "head_repo")
+    ),
     r#" as head_repo
-    from sync.live_item i
+    from sync.live_item i"#,
+    crate::row_join!("rw", "i"),
+    r#"
    where i.kind = 'pr'
      and i.source_id in (select r.source_id from ruled r where r.kind = 'branch' and r.me is not null)
      and coalesce("#,
-    crate::declared_state!("$8"),
+    crate::row_or!("rw", "state", crate::declared_state!("$8")),
     r#"->>'tone', '') not in ('ok', 'muted')
 ),
 drawn as (
@@ -741,9 +799,11 @@ drawn as (
          null::int as grp
     from (select i.entity_id, i.kind, i.item_updated_at,
                  "#,
-    crate::declared_state!("$8"),
+    crate::row_or!("rw", "state", crate::declared_state!("$8")),
     r#" as state
-            from sync.item i
+            from sync.item i"#,
+    crate::row_join!("rw", "i"),
+    r#"
            where i.entity_id = any(array(select l.entity_id from latest l))) k
 )"#,
     tile_page!(),
@@ -831,6 +891,26 @@ pub async fn read(
     declarations: &crate::payload::Declarations,
     fillers: Option<RoleScope>,
 ) -> Result<EntityPage, CoreError> {
+    read_reached(pool, filter, limit, offset, declarations, fillers, None).await
+}
+
+/// [`read`], with what the filter's [`EntityFilter::reach`] reaches already
+/// walked: `reached` the walk's ids, read in its place (#2479's query audit,
+/// a card's four sections over one walk). `None` walks it, as [`read`] does;
+/// ignored where the filter names no reach.
+///
+/// # Errors
+///
+/// As [`read`].
+pub async fn read_reached(
+    pool: &PgPool,
+    filter: &EntityFilter,
+    limit: u32,
+    offset: u32,
+    declarations: &crate::payload::Declarations,
+    fillers: Option<RoleScope>,
+    reached: Option<&[String]>,
+) -> Result<EntityPage, CoreError> {
     // `u32 -> i32` and not `as`: `updated_within_days` past `i32::MAX` is a
     // caller error, and silently wrapping it into a negative interval would
     // turn "the last four billion days" into "the next few".
@@ -854,11 +934,14 @@ pub async fn read(
     // same parameter: a job's sections read their rows through it.
     let members = match filter.reach.as_deref() {
         Some(ticket) => {
-            let reached: Vec<String> = crate::reach::reach(pool, ticket)
-                .await?
-                .into_iter()
-                .map(|row| row.entity_id)
-                .collect();
+            let reached: Vec<String> = match reached {
+                Some(walked) => walked.to_vec(),
+                None => crate::reach::reach(pool, ticket)
+                    .await?
+                    .into_iter()
+                    .map(|row| row.entity_id)
+                    .collect(),
+            };
             Some(match members {
                 Some(held) => reached.into_iter().filter(|id| held.contains(id)).collect(),
                 None => reached,
@@ -902,6 +985,7 @@ pub async fn read(
         .bind(members)
         .bind(filter.project.as_deref())
         .bind(declarations.as_param())
+        .bind(filter.parent.as_deref())
         .fetch_all(pool)
         .await?;
 
@@ -1005,6 +1089,7 @@ mod tests {
             include_deleted,
             reach: None,
             role: None,
+            parent: None,
         };
         let chosen = |include_deleted, order| statement(&filter(include_deleted, order)).ok();
         assert_eq!(chosen(false, EntityOrder::UpdatedDesc), Some(LIVE_UPDATED));

@@ -1,0 +1,10 @@
+[0m[0m
+[0m[4m/home/dev/runcmd/fixrepo/src/retry/window.js[24m[0m
+[0m  [2m1:5[22m   [31merror[39m    'attempts' is never reassigned. Use 'const' instead  [2mprefer-const[22m[0m
+[0m  [2m2:7[22m   [33mwarning[39m  'unused' is assigned a value but never used          [2mno-unused-vars[22m[0m
+[0m  [2m3:23[22m  [33mwarning[39m  'x' is defined but never used                        [2mno-unused-vars[22m[0m
+[0m  [2m4:21[22m  [31merror[39m    'undefinedThing' is not defined                      [2mno-undef[22m[0m
+[0m[0m
+[0m[31m[1m✖ 4 problems (2 errors, 2 warnings)[22m[39m[0m
+[0m[31m[1m[22m[39m[31m[1m  1 error and 0 warnings potentially fixable with the `--fix` option.[22m[39m[0m
+[0m[31m[1m[22m[39m[0m

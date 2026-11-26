@@ -100,7 +100,11 @@ impl Source for Slow {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             // The comment its writes are: the flush refuses an op the source
             // does not declare (#1950).
             write_ops: vec!["comment".into()],
@@ -111,6 +115,7 @@ impl Source for Slow {
                 monogram: "SL".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to
@@ -352,6 +357,7 @@ async fn seed(pool: &PgPool, n: usize) -> Vec<String> {
                 config: serde_json::json!({}),
                 sync_interval_secs: 60,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -806,6 +812,122 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
         .unwrap();
     assert_eq!(items, 0);
     retire(&pool, &ids).await;
+}
+
+/// Events whose `sync_state` blocks its thread once the quit has begun, until
+/// the test lets it go: as knobas-app's did on Windows (2026-11-22), where an
+/// event to the page is a blocking round trip to the main thread, and the
+/// main thread was the quit, waiting for this run.
+struct StuckAtQuit {
+    quitting: Arc<std::sync::atomic::AtomicBool>,
+    release: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    stuck: Arc<AtomicUsize>,
+}
+impl SyncEvents for StuckAtQuit {
+    fn sync_state(&self, _s: SourceSyncStatus) {
+        if !self.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        self.stuck.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (lock, wake) = &*self.release;
+        let mut free = lock.lock().unwrap();
+        while !*free {
+            free = wake.wait(free).unwrap();
+        }
+    }
+    fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+    fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+}
+
+/// A quit with one run stuck in a blocking call, as the app quits: the
+/// scheduler's shutdown spawned and waited for by the wall clock
+/// (`finish_within`) from a thread that is not a worker. Answers what
+/// `finish_within` answered, how long it took, and how many calls were stuck.
+async fn quit_with_a_stuck_run(grace: Duration, bound: Duration) -> (Option<()>, Duration, usize) {
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (mut deps, held) = held_deps(sched_pool).await;
+    let quitting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let stuck = Arc::new(AtomicUsize::new(0));
+    deps.events = Arc::new(StuckAtQuit {
+        quitting: Arc::clone(&quitting),
+        release: Arc::clone(&release),
+        stuck: Arc::clone(&stuck),
+    });
+    deps.timing.shutdown_grace = grace;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    await_inside(&held.inside).await;
+
+    quitting.store(true, std::sync::atomic::Ordering::SeqCst);
+    let runtime = tokio::runtime::Handle::current();
+    let quitter = scheduler.clone();
+    let started = std::time::Instant::now();
+    let stopped = tokio::task::block_in_place(|| {
+        knobas_sync::scheduler::finish_within(&runtime, bound, async move {
+            quitter.shutdown().await;
+        })
+    });
+    let took = started.elapsed();
+    // Let the stuck thread go whatever the answer, so the runtime can end.
+    {
+        let (lock, wake) = &*release;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+    }
+    let stuck = stuck.load(std::sync::atomic::Ordering::SeqCst);
+    // A quit cut short leaves its run to finish now that it is let go.
+    tokio::time::timeout(HANG_GUARD, scheduler.shutdown())
+        .await
+        .expect("the run, let go, ends and the scheduler with it");
+    retire(&pool, &ids).await;
+    (stopped, took, stuck)
+}
+
+/// The final suite's real window (Windows, 2026-11-22): knobas never quit.
+/// A run cancelled by the quit reported its end through an event that waited
+/// on the thread running the quit, and the quit waited for the run. With a
+/// worker so blocked the runtime's timers stopped firing, for a `block_on`
+/// quit and (measured here) for a spawned one too, so no timeout inside
+/// `Scheduler::shutdown` ends it: the quit's wall clock does. At the app's own
+/// bound it answers by `QUIT_BOUND` (before `finish_within`, this hung for
+/// good).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_stuck_in_a_blocking_call_does_not_hold_the_quit() {
+    let _serial = serially().await;
+    let bound = knobas_sync::scheduler::QUIT_BOUND;
+    let (_stopped, took, stuck) = quit_with_a_stuck_run(Duration::from_millis(300), bound).await;
+    assert!(
+        stuck > 0,
+        "the run never reported its end, so nothing was stuck"
+    );
+    assert!(
+        took < bound + Duration::from_secs(2),
+        "the quit took {took:?}, past its bound of {bound:?}"
+    );
+}
+
+/// And past every grace the wall clock still ends the wait: `finish_within`
+/// answers `None` at its bound, so the app goes on to its database.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_quits_wall_clock_ends_the_wait_for_a_stuck_scheduler() {
+    let _serial = serially().await;
+    let (stopped, took, stuck) =
+        quit_with_a_stuck_run(PATIENT_GRACE, Duration::from_millis(300)).await;
+    assert!(
+        stuck > 0,
+        "the run never reported its end, so nothing was stuck"
+    );
+    assert!(stopped.is_none(), "an hour's grace cannot have ended");
+    assert!(
+        took < Duration::from_secs(5),
+        "the bound of 300 ms took {took:?}"
+    );
 }
 
 /// The other half of the same carry-over, and the one worth measuring: a
@@ -1357,33 +1479,40 @@ async fn a_backfill_is_logged_under_its_own_trigger() {
 /// id for. Five seconds is the deadline every other wait in this file
 /// allows, for the same reason -- a loaded machine, not a measurement.
 async fn await_source_idle(pool: &PgPool, source_id: &str) {
-    for _ in 0..200 {
+    let deadline = tokio::time::Instant::now() + HANG_GUARD;
+    while tokio::time::Instant::now() < deadline {
         let runs = run_log::list(pool, Some(source_id), 10).await.unwrap();
         if !runs.is_empty() && runs.iter().all(|r| r.finished_at.is_some()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("{source_id} still has a run open after five seconds");
+    panic!("{source_id} still has a run open after {HANG_GUARD:?}");
 }
 
 /// Wait for one run's log row to be finished. Polls rather than sleeping a
 /// fixed span: the row is written by the spawned task, and a fixed sleep is
 /// either a flake or slow. Note what this does *not* promise -- see the two
 /// meanings of "over" on the test above.
+///
+/// The run is read by its id, not looked for among the log's newest rows:
+/// `trigger_all` starts a run for every enabled source in the database, other
+/// tests' too, so more than a page of newer runs can push this one out of a
+/// "newest 50" while it finishes. And the wait is [`HANG_GUARD`], a deadline
+/// against a hang: five seconds was a span, and `trigger_all`'s runs queue
+/// for [`knobas_sync::scheduler::SYNC_CONCURRENCY`] permits behind every
+/// other source's (the final suite, 2026-11-22: "run 58 never finished" at
+/// load 22 on the WSL box).
 async fn await_finish(pool: &PgPool, run_id: i64) {
-    for _ in 0..200 {
-        let finished = run_log::list(pool, None, 50)
-            .await
-            .unwrap()
-            .iter()
-            .any(|r| r.id == run_id && r.finished_at.is_some());
-        if finished {
+    let deadline = tokio::time::Instant::now() + HANG_GUARD;
+    while tokio::time::Instant::now() < deadline {
+        let run = run_log::get(pool, run_id).await.unwrap();
+        if run.is_some_and(|r| r.finished_at.is_some()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("run {run_id} never finished");
+    panic!("run {run_id} never finished within {HANG_GUARD:?}");
 }
 
 // -- ADR-0005: a run id always comes with an ending ---------------------------
@@ -1502,7 +1631,8 @@ async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
         .await
         .expect("the sync after the write answers once its run ends")
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .expect("a scheduled source runs after a write");
     scheduler.shutdown().await;
 
     assert_ne!(
@@ -1553,7 +1683,12 @@ async fn a_sync_after_a_write_with_nothing_in_flight_starts_one_run_and_no_more(
     let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
-    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
+    let waited_on = scheduler
+        .sync_after_write(&id)
+        .await
+        .unwrap()
+        .expect("a scheduled source runs after a write");
+
     scheduler.shutdown().await;
 
     let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
@@ -1564,6 +1699,52 @@ async fn a_sync_after_a_write_with_nothing_in_flight_starts_one_run_and_no_more(
          for: {runs:?}"
     );
     assert_eq!(runs[0].id, waited_on, "and it is the one it named");
+    retire(&pool, &ids).await;
+}
+
+/// **A write to a source that syncs only by hand starts no run** (ADR-0056).
+/// A write is not a press: the landed write's refresh reads its own item
+/// back, and anything else it changed waits for the next *Sync now*. A press
+/// still runs it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sync_after_a_write_to_a_source_by_hand_starts_no_run_and_a_press_still_does() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    sqlx::query("update knobas.source_config set sync_by_hand = true where id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(100)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let waited_on = scheduler.sync_after_write(&id).await.unwrap();
+    assert_eq!(waited_on, None, "a write started a run of a source by hand");
+    assert!(
+        run_log::list(&pool, Some(&id), 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a run was logged for a source by hand that nobody pressed"
+    );
+
+    let pressed = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    let mut runs = Vec::new();
+    for _ in 0..100 {
+        runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
+        if runs.iter().any(|run| run.finished_at.is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    scheduler.shutdown().await;
+    assert_eq!(runs.len(), 1, "a press runs a source by hand: {runs:?}");
+    assert_eq!(runs[0].id, pressed);
     retire(&pool, &ids).await;
 }
 
@@ -2344,6 +2525,7 @@ async fn re_add(pool: &PgPool, id: &str) {
             // would make those assertions test visibility rather than the
             // purge they are about.
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

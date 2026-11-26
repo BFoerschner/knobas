@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile, SourceView } from "../../ipc/entity";
-import { commitContext, parentOf, rangeContext } from "./context";
+import { commitContext, localContext, parentOf, rangeContext } from "./context";
+import type { DrawnFile } from "./diff";
 
 const fileView = (text: string, cut = false): SourceView =>
   ({ sections: [{ id: "file:x", title: "x", blocks: [{ type: "file", trail: [], path: "x", text, language: null, size: text.length, truncated: cut, binary: false, url: null, sha: null }] }], actions: [] }) as unknown as SourceView;
@@ -89,4 +90,35 @@ test("a range runs a pipeline on each side in its repository at its two shas (#2
   const missing = () => Promise.reject({ code: "not_found", message: "not there" });
   expect(await rangeContext(() => Promise.resolve(null), RANGE, undefined, missing).piped!(FILE, "old", [])).toBeNull();
   expect(rangeContext(() => Promise.resolve(null), RANGE).piped).toBeUndefined();
+});
+
+test("Local changes reads its four ends at the checkout: not staged is the index to the working tree, staged HEAD to the index (ux26)", async () => {
+  const asked: string[] = [];
+  const bytes = (id: string, path: string, commit: string | null) => (asked.push(`${id} ${path} ${commit}`), Promise.resolve(new TextEncoder().encode(`${commit}:${path}`)));
+  const context = localContext(bytes, "g:o/r", "c0ffee0000000000000000000000000000000000");
+  const unstaged: DrawnFile = { ...FILE, half: "unstaged" };
+  const staged: DrawnFile = { ...FILE, half: "staged" };
+  expect(await context.text(unstaged, "old")).toBe("~index:src/old.rs");
+  expect(await context.text(unstaged, "new")).toBe("~working-tree:src/new.rs");
+  expect(await context.text(staged, "old")).toBe("c0ffee0000000000000000000000000000000000:src/old.rs");
+  expect(await context.text(staged, "new")).toBe("~index:src/new.rs");
+  expect(asked).toEqual([
+    "g:o/r src/old.rs ~index",
+    "g:o/r src/new.rs ~working-tree",
+    "g:o/r src/old.rs c0ffee0000000000000000000000000000000000",
+    "g:o/r src/new.rs ~index",
+  ]);
+  // No commit yet: a staged file has no side before.
+  expect(await localContext(bytes, "g:o/r", null).bytes!(staged, "old")).toBeNull();
+});
+
+test("a range that ends at the working tree reads its text side as bytes, never from the source (ux26)", async () => {
+  const views: string[] = [];
+  const read = (id: string, section: string | null) => (views.push(`${id} ${section}`), Promise.resolve(fileView("from the source")));
+  const bytes = (_: string, path: string, commit: string | null) => Promise.resolve(new TextEncoder().encode(`${commit}:${path}`));
+  const range = { repository: "g:o/r", base: "a".repeat(40), head: "~working-tree", commits: [] };
+  const context = rangeContext(read, range, bytes);
+  expect(await context.text(FILE, "new")).toBe("~working-tree:src/new.rs");
+  expect(views).toEqual([]);
+  expect(await context.text(FILE, "old")).toBe("from the source");
 });

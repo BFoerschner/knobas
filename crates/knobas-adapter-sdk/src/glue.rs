@@ -218,3 +218,164 @@ impl<A: Adapter> docs::Guest for A {
         A::body_from_text(&text)
     }
 }
+
+/// `tickets` (1.6.0, ADR-0054): free functions, as `query` is.
+#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+impl<A: Adapter> crate::bindings::exports::knobas::adapter::tickets::Guest for A {
+    fn ticket_fields(
+        instance: wit::Instance,
+        entity: String,
+    ) -> Result<Option<String>, wit::SourceError> {
+        json_option(A::new(convert::instance(instance)).ticket_fields(&entity))
+    }
+
+    fn field_options(
+        instance: wit::Instance,
+        entity: String,
+        field: String,
+        typed: String,
+    ) -> Result<Option<String>, wit::SourceError> {
+        json_option(A::new(convert::instance(instance)).field_options(&entity, &field, &typed))
+    }
+}
+
+/// The `tickets` glue on the host target (ux30 end gate, mutants): what an
+/// adapter answers is what crosses, for the instance and the entity the host
+/// named. A glue that dropped the answer would leave every WASM adapter's
+/// tickets read only in knobas.
+#[cfg(test)]
+#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+mod tests {
+    use crate::bindings::exports::knobas::adapter::tickets::Guest as Tickets;
+    use crate::bindings::knobas::adapter::types as wit;
+    use crate::{
+        Adapter, ConnectionInfo, Cursor, Instance, Sink, SourceDescriptor, SourceError, WriteOp,
+        WriteReceipt,
+    };
+    use knobas_source::ticket::{
+        FieldOption, FieldOptions, TicketField, TicketFieldKind, TicketFields,
+    };
+
+    /// Answers with what it was asked, so the test sees the call's inputs
+    /// arrive as well as its answer leave.
+    struct Echo(Instance);
+
+    impl Adapter for Echo {
+        fn new(instance: Instance) -> Self {
+            Self(instance)
+        }
+        fn descriptor(&self) -> SourceDescriptor {
+            unreachable!("not called by `tickets`")
+        }
+        fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+            unreachable!("not called by `tickets`")
+        }
+        fn sync(&self, _: Option<Cursor>, _: &mut Sink) -> Result<Cursor, SourceError> {
+            unreachable!("not called by `tickets`")
+        }
+        fn write(&self, _: WriteOp) -> Result<WriteReceipt, SourceError> {
+            unreachable!("not called by `tickets`")
+        }
+        fn reachable_transitions(&self, _: &str) -> Result<Vec<String>, SourceError> {
+            unreachable!("not called by `tickets`")
+        }
+        fn view(
+            &self,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+            unreachable!("not called by `tickets`")
+        }
+        fn ticket_fields(&self, entity: &str) -> Result<Option<TicketFields>, SourceError> {
+            if entity.ends_with("NONE") {
+                return Ok(None);
+            }
+            Ok(Some(TicketFields {
+                fields: vec![TicketField {
+                    id: "title".to_owned(),
+                    label: format!("{} {entity}", self.0.display_name),
+                    kind: TicketFieldKind::Text,
+                    value: serde_json::json!("Retry failed SEPA payouts"),
+                    shown: None,
+                    required: true,
+                    readonly: None,
+                }],
+            }))
+        }
+        fn field_options(
+            &self,
+            entity: &str,
+            field: &str,
+            typed: &str,
+        ) -> Result<Option<FieldOptions>, SourceError> {
+            if field == "none" {
+                return Ok(None);
+            }
+            Ok(Some(FieldOptions {
+                options: vec![FieldOption {
+                    value: format!("{entity}/{field}"),
+                    label: typed.to_owned(),
+                    hint: Some(self.0.id.clone()),
+                }],
+                complete: true,
+            }))
+        }
+    }
+
+    fn instance() -> wit::Instance {
+        wit::Instance {
+            id: "jira-work".to_owned(),
+            kind: "echo".to_owned(),
+            display_name: "Work".to_owned(),
+            base_url: "https://jira.example".to_owned(),
+            config: "{}".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_tickets_fields_cross_as_the_adapter_answered_them() {
+        let json = <Echo as Tickets>::ticket_fields(instance(), "jira-work:PAY-231".to_owned())
+            .expect("no error")
+            .expect("some fields");
+        let fields: TicketFields = serde_json::from_str(&json).expect("the fields' json");
+        assert_eq!(fields.fields.len(), 1);
+        assert_eq!(fields.fields[0].id, "title");
+        assert_eq!(fields.fields[0].label, "Work jira-work:PAY-231");
+        assert_eq!(fields.fields[0].value, "Retry failed SEPA payouts");
+
+        let none = <Echo as Tickets>::ticket_fields(instance(), "jira-work:NONE".to_owned())
+            .expect("no error");
+        assert_eq!(none, None, "no edits offered stays none");
+    }
+
+    #[test]
+    fn a_fields_options_cross_as_the_adapter_answered_them() {
+        let json = <Echo as Tickets>::field_options(
+            instance(),
+            "jira-work:PAY-231".to_owned(),
+            "assignee".to_owned(),
+            "pri".to_owned(),
+        )
+        .expect("no error")
+        .expect("some options");
+        let options: FieldOptions = serde_json::from_str(&json).expect("the options' json");
+        assert!(options.complete);
+        assert_eq!(
+            options.options,
+            [FieldOption {
+                value: "jira-work:PAY-231/assignee".to_owned(),
+                label: "pri".to_owned(),
+                hint: Some("jira-work".to_owned()),
+            }]
+        );
+
+        let none = <Echo as Tickets>::field_options(
+            instance(),
+            "jira-work:PAY-231".to_owned(),
+            "none".to_owned(),
+            String::new(),
+        )
+        .expect("no error");
+        assert_eq!(none, None, "a field with no list stays none");
+    }
+}

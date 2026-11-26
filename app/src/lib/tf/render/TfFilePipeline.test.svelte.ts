@@ -32,19 +32,47 @@ function draw() {
 }
 
 const stepEl = (i: number) => target.querySelectorAll<HTMLElement>(".tf-pstep")[i]!;
-const fire = (el: HTMLElement, type: string) => el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+const grip = (i: number) => stepEl(i).querySelector<HTMLElement>(".tf-pgrip")!;
 
-test("a dragged step dropped on another moves there", () => {
+/** A pointer event as a person's: the primary pointer, its main button. */
+function pointer(type: string, x: number, y: number): Event {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true } });
+  return event;
+}
+
+/** Press `handle`, move past a tremble to where the hit test answers `onto`, and let go there. */
+function dragOnto(handle: Element, onto: Element | null) {
+  document.elementsFromPoint = () => (onto === null ? [] : [onto]);
+  // As a real pointer: past its first move it is over the other step, not the grip.
+  const elsewhere = onto ?? document.body;
+  handle.dispatchEvent(pointer("pointerdown", 10, 10));
+  elsewhere.dispatchEvent(pointer("pointermove", 40, 12));
+  elsewhere.dispatchEvent(pointer("pointerup", 40, 12));
+}
+
+test("a step's grip dragged by pointer onto another step moves it there (HTML5 drag never drops on Windows)", () => {
   const onchange = draw();
-  fire(stepEl(0), "dragstart");
-  fire(stepEl(1), "drop");
+  dragOnto(grip(0), stepEl(1).querySelector(".tf-pname") ?? stepEl(1));
   expect(onchange).toHaveBeenCalledWith([STEPS[1], STEPS[0]]);
+  expect(stepEl(0).classList.contains("tf-lifted")).toBe(false);
 });
 
-test("a drag that ends without a drop leaves nothing held: a later drop from elsewhere moves nothing", () => {
+test("a press that travels no more than a tremble, a release on nothing, and Esc move nothing", () => {
   const onchange = draw();
-  fire(stepEl(0), "dragstart");
-  fire(stepEl(0), "dragend");
-  fire(stepEl(1), "drop");
+  document.elementsFromPoint = () => [stepEl(1)];
+  grip(0).dispatchEvent(pointer("pointerdown", 10, 10));
+  grip(0).dispatchEvent(pointer("pointermove", 13, 11));
+  grip(0).dispatchEvent(pointer("pointerup", 13, 11));
+  dragOnto(grip(0), null);
+  grip(0).dispatchEvent(pointer("pointerdown", 10, 10));
+  grip(0).dispatchEvent(pointer("pointermove", 40, 12));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  grip(0).dispatchEvent(pointer("pointerup", 40, 12));
   expect(onchange).not.toHaveBeenCalled();
+});
+
+test("no step can be dragged by HTML5 drag, which Tauri swallows on Windows", () => {
+  draw();
+  expect(target.querySelector("[draggable=true]")).toBeNull();
 });

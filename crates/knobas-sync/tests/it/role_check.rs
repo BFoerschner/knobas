@@ -52,6 +52,7 @@ impl Source for Tickets {
                 monogram: "TI".into(),
                 full_sync_exhaustive: false,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {
@@ -76,7 +77,11 @@ impl Source for Tickets {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
         }
     }
 

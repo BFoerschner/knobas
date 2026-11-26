@@ -28,9 +28,18 @@ afterEach(() => vi.useRealTimers());
 // A page's session memory lives in its component's `<script module>`, out of a
 // test's reach without mounting it; these stand in so the case below can see
 // that the reset reaches each one's own door.
-const pages = vi.hoisted(() => ({ forgetFolds: vi.fn(), forgetBranches: vi.fn(), forgetTicketsSession: vi.fn() }));
+const pages = vi.hoisted(() => ({
+  forgetFolds: vi.fn(),
+  forgetBranches: vi.fn(),
+  forgetHeaderSearches: vi.fn(),
+  forgetHeaderLooks: vi.fn(),
+  forgetHeaderReads: vi.fn(),
+  forgetPickWidth: vi.fn(),
+  forgetTicketsSession: vi.fn(),
+}));
 vi.mock("../tf/builds/TfBuilds.svelte", () => ({ forgetFolds: pages.forgetFolds }));
-vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches }));
+vi.mock("../tf/repo/TfRepo.svelte", () => ({ forgetBranches: pages.forgetBranches, forgetHeaderSearches: pages.forgetHeaderSearches, forgetHeaderLooks: pages.forgetHeaderLooks, forgetHeaderReads: pages.forgetHeaderReads }));
+vi.mock("../tf/pr/TfPrFiles.svelte", () => ({ forgetPickWidth: pages.forgetPickWidth }));
 vi.mock("../tf/tickets/TicketsPage.svelte", () => ({ forgetTicketsSession: pages.forgetTicketsSession }));
 
 /** A listener that records when it is torn down. */
@@ -123,6 +132,7 @@ function inboxPorts(overrides: Partial<Parameters<typeof createInbox>[0] & objec
     snoozeInboxItem: async () => {},
     completeInboxItem: async () => {},
     ackAlert: async () => {},
+    unackAlert: async () => {},
     listen: listener().listen,
     ...overrides,
   };
@@ -272,7 +282,8 @@ test("clones.reset drops the marks and the finished count and unlistens", async 
   await clones.start({ entityId: "done", name: "n", repoUrl: null, root: null });
   expect(clones.finished).toBe(1);
   await clones.start({ entityId: "e", name: "n", repoUrl: null, root: null });
-  expect(Object.keys(clones.marks)).toEqual(["e"]);
+  // The finished clone keeps its folder as a mark until a page's checkout names it (the ux20 Windows pass).
+  expect(clones.marks).toEqual({ done: { kind: "cloned", path: "/q" }, e: { kind: "running", percent: 0, path: "/p" } });
   clones.reset();
   expect(clones.marks).toEqual({});
   expect(clones.finished).toBe(0);

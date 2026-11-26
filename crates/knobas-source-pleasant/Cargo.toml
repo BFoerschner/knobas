@@ -1,0 +1,32 @@
+[package]
+name = "knobas-source-pleasant"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# Pleasant Password Server (ADR-0056): the first source of the Passwords role.
+# A built-in adapter, because it signs in with an OAuth2 password grant the
+# sandboxed host cannot do for a component. It mirrors entries and folders,
+# never a password; a password is read live, one request a press, and a
+# one-time-code key goes to the sink's side channel and from there to the OS
+# keychain.
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+# Code keys are re-encoded to Base32 (`otp`); already in the lock.
+data-encoding = "2.11"
+knobas-http = { path = "../knobas-http" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+# `spawn_blocking` for the tree's parse, `sync` for the token map's lock.
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing = "0.1"
+# An `otpauth://` URI and KeeOtp's query string; already in the tree.
+url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The in-process stand-in that replays a Pleasant server's answers, as the
+# other adapters' tests do. Brings no `reqwest` of its own.
+wiremock = "0.6"

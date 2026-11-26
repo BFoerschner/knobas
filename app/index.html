@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>knobas</title>
+    <!-- The interface's face, fetched as the page parses so it has landed when the shell first lays out: its
+         `@font-face` blocks text until it has (`src/lib/tf/fonts/fonts.css`), so no word is drawn twice. -->
+    <link rel="preload" href="/src/lib/tf/fonts/inter/inter-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- The window's side and theme before the first paint (ADR-0055): a classic script, which the parser runs
+         before it draws anything, where the module below runs after the first paint. -->
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="app"></div>

@@ -5,7 +5,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile, DiffLine } from "../../ipc/entity";
-import { changedWords, hiddenBefore, shownLayout, sidesOf, splitRows, unifiedRows } from "./diff";
+import { changedWords, changedWordsOf, hiddenBefore, shownLayout, sidesOf, splitRows, unifiedRows } from "./diff";
 
 const ctx = (old: number, nu: number, text: string): DiffLine => ({ kind: "context", old, new: nu, text });
 const del = (old: number, text: string): DiffLine => ({ kind: "del", old, new: null, text });
@@ -131,6 +131,15 @@ test("a removed line and the added line beside it are marked word by word", () =
   expect([...marks.keys()]).toEqual([]);
   const pair: DiffFile = { ...FILE, hunks: [{ header: "@@ -1 +1 @@", lines: [del(1, "let a = u8;"), add(1, "let a = u9;")] }] };
   expect(Object.fromEntries(changedWords(pair))).toEqual({ 0: [[8, 10]], 1: [[8, 10]] });
+});
+
+test("a file's changed words asked line by line are the ones worked out for the whole file, matched only for the lines asked (the compare-jump-speed pass)", () => {
+  const lines = [del(1, "let a = u8;"), del(2, "let b = 1;"), add(1, "let a = u9;"), add(2, "let b = 2;"), ctx(3, 3, "same"), del(4, "gone"), add(4, "x y z")];
+  const file: DiffFile = { ...FILE, hunks: [{ header: "@@ -1,4 +1,4 @@", lines }] };
+  const whole = changedWords(file);
+  const asked = changedWordsOf(file);
+  // Asked in any order, each line's marks are the whole file's, and a line with none has none.
+  for (const at of [6, 2, 0, 4, 5, 3, 1, 9]) expect(asked.get(at)).toEqual(whole.get(at));
 });
 
 test("with the whole files read, each side is its file and lines index by their numbers", () => {

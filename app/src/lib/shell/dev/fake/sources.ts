@@ -7,7 +7,8 @@ import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, S
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fills } from "../../../tf/roles.svelte";
-import { CORPUS, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
+import { CORPUS, fakeEmpty, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
+import { signInFails } from "../../health.svelte";
 
 /** The sources *Run embedded HTML* is off for (#2440): `fake/docs.ts` reads it for a page's `run_embeds`. */
 export const EMBEDS_OFF = new Set<string>();
@@ -113,7 +114,22 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
     ...fixtureSource("kestrel", "kestrel", "Tidewater Kestrel", "https://kestrel.tidewater.example", "ok", 1, 97, "Pat"),
     roles: [{ role: "ticket-system", reads: [] }],
   },
+  // The Passwords page's one source (ADR-0056): a Pleasant Password Server set to sync only by hand, so Settings ›
+  // Sources shows *Only when I press Sync now* and the source's *Passwords* section.
+  {
+    ...fixtureSource("team", "pleasant", "Team passwords", "https://passwords.tidewater.example:10001", "ok", 32, 98, "UserPassword"),
+    sync_by_hand: true,
+    next_run_at: null,
+    config: { username: "mara.lindqvist" } as Record<string, unknown>,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+  },
 ];
+
+// A ticket system the fixture draws moves, edits and comments on its tickets (ADR-0054), as Jira's and Gitea's
+// adapters declare (`fake/ticket-fields.ts` answers their fields); a Kestrel, whose adapter does not exist, declares nothing.
+for (const source of FIXTURE_SOURCES) {
+  if (source.id !== "kestrel" && source.roles.some((claim) => claim.role === "ticket-system")) source.write_ops = ["comment", "transition", "edit_ticket"];
+}
 
 /**
  * The `base_url` is passed in and spelled out at each call site rather than
@@ -153,6 +169,7 @@ function fixtureSource(
     base_url: baseUrl,
     enabled: true,
     sync_interval_secs: 900,
+    sync_by_hand: false,
     // The user a Settings page shows (#830): the config's `username`, which
     // only a username-and-password source carries here.
     config: (authKind === "UserPassword" ? { username: "mara.oyelaran" } : {}) as Record<string, unknown>,
@@ -190,6 +207,8 @@ function fixtureSource(
     roles: [],
     // Its claimed roles whose paths missed (#1199): none, until a test records one.
     role_misses: [],
+    // The writes its adapter declares (ADR-0054): the ticket systems' are set below, from the roles each claims.
+    write_ops: [],
   };
 }
 
@@ -240,6 +259,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     auth_methods: ["ApiToken"],
     // The adapter's sync-interval floor (#1187).
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [],
     write_ops: [],
     entity_kinds: KIND_INFO,
@@ -254,6 +274,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193, #1208).
     roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     write_ops: [],
@@ -280,6 +301,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     // The roles it claims, as the real adapter does (#1193, #1206).
     roles: [
       { role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] },
@@ -298,6 +320,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 20,
+    by_hand_by_default: false,
     // The role it claims, as the real adapter does (#1193).
     roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "artifact_bytes", "download", "run_chain"] }],
     write_ops: [],
@@ -315,7 +338,31 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     ],
     config_schema: TEAMCITY_SCHEMA,
   }),
+  // Pleasant Password Server (ADR-0056): what the Passwords role's first adapter declares.
+  descriptor({
+    id: "pleasant",
+    adapter_kind: "pleasant",
+    name: "Pleasant Password Server",
+    capabilities: [],
+    adapter_version: "3.2.8",
+    auth_methods: ["UserPassword"],
+    min_sync_interval_secs: 60,
+    by_hand_by_default: true,
+    roles: [{ role: "passwords", reads: ["read_secret"] }],
+    write_ops: [],
+    entity_kinds: [
+      { id: "password_entry", label: "Password entry", plural: "Password entries", monogram: "PW", full_sync_exhaustive: true },
+      { id: "password_folder", label: "Password folder", plural: "Password folders", monogram: "PF", full_sync_exhaustive: true },
+    ],
+    config_schema: {
+      type: "object",
+      properties: { username: { type: "string", title: "Username", description: "The account knobas signs in as, with the password below. Test connection says whom it signed in as." } },
+      required: ["username"],
+    },
+    passwords: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: true, access_requests: false, marks_protected_fields: false, writes: ["create_entry", "edit_entry", "set_password"] },
+  }),
   // The fixture-only second ticket system (#2032): one saved-view kind, named Kestrel.
+
   descriptor({
     id: "kestrel",
     adapter_kind: "kestrel",
@@ -324,6 +371,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    by_hand_by_default: false,
     roles: [{ role: "ticket-system", reads: [] }],
     write_ops: [],
     entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
@@ -335,10 +383,24 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
   }),
 ];
 
+/** The fixture's own sources, as against one *Add a source* stored since. */
+const SEEDED = new Set(FIXTURE_SOURCES.map((source) => source.id));
+
+/**
+ * The sources as they answer: under `?fake-empty=wiki` no source holds pages, so Docs draws what it draws with no wiki
+ * source set up, on a built app as on a dev server. Under `?fake-empty=sources` there is none of the fixture's, only
+ * what *Add a source* stored since: a fresh profile, which opens on Tickets' zero-source state (ux31).
+ */
+function answeredSources(): SourceSummary[] {
+  if (fakeEmpty("sources")) return FIXTURE_SOURCES.filter((source) => !SEEDED.has(source.id));
+  if (!fakeEmpty("wiki")) return FIXTURE_SOURCES;
+  return FIXTURE_SOURCES.map((source) => ({ ...source, roles: source.roles.filter((claim) => claim.role !== "wiki") }));
+}
+
 // The role a faked read asks for (#1294) is answered from these sources'
 // claims and misses, and from the frames their adapter declares kinds on.
 ROLE_CLAIMERS.push(() =>
-  FIXTURE_SOURCES.map((source) => {
+  answeredSources().map((source) => {
     const adapter = FIXTURE_ADAPTERS.find((entry) => entry.adapter_kind === source.adapter_kind);
     return { ...source, payload_paths: adapter && "payload_paths" in adapter ? adapter.payload_paths : [] };
   }),
@@ -425,6 +487,7 @@ const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   adapter_version: "0.1.0",
   auth_methods: ["Pat"],
   min_sync_interval_secs: 60,
+  by_hand_by_default: false,
   roles: [{ role: "wasm-fixture:survey-desk", reads: [] as string[] }],
   // Its one write is its source action, *Book repair…* (#1407).
   write_ops: ["source_action"],
@@ -577,6 +640,20 @@ onFakeReset(() => {
   bridge = null;
 });
 
+let changedRun = 900;
+
+/**
+ * Every enabled source's run ends having changed something, as a scheduled run that brought new rows does
+ * (`?fake-hooks`' `endRuns`, for the still-rows trips, 2026-11-11): a role view shown reads again, a hidden one on its
+ * return.
+ */
+export function endRunsChanged(): void {
+  for (const source of FIXTURE_SOURCES.filter((row) => row.enabled)) {
+    changedRun += 1;
+    bridge?.emit("sync:state", { ...fakeStatus(source), run_id: changedRun, last_changed: true });
+  }
+}
+
 /**
  * `sync_role` (#2106): one run per enabled fixture source that fills `role`
  * (claims it and missed none of its paths), id order, as the mirror answers.
@@ -601,6 +678,23 @@ function syncRole(args: Record<string, unknown>): { source_id: string; run_id: n
 }
 
 /**
+ * `sync_all`, by `trigger_all`'s rule: each enabled source runs, for long enough to look at, but one only a person can make
+ * answer gets no run. `?fake-sync-held` keeps them going, as for `sync_role`.
+ */
+function syncAll(): number[] {
+  const on = FIXTURE_SOURCES.filter((source) => source.enabled && !signInFails(source.health.state));
+  // Past every fixture's last run, which `sync_status` answers: a press must wait for each run's own ending.
+  const runs = on.map((source, index) => ({ source, run_id: 291 + index }));
+  for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), running: true, run_id });
+  if (!new URLSearchParams(location.search).has("fake-sync-held")) {
+    setTimeout(() => {
+      for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), run_id });
+    }, 4000);
+  }
+  return runs.map((run) => run.run_id);
+}
+
+/**
  * Reads `?fake-sources-healthy` before the bridge is installed: no source needs
  * the reader. The README's screenshots (`docs/screenshots/shots.txt`) ask for it,
  * because the refusing TeamCity and the missing Kuma token draw in err tone at
@@ -622,7 +716,7 @@ export function handlers(): Handlers {
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
-    list_sources: () => FIXTURE_SOURCES,
+    list_sources: () => answeredSources(),
     list_adapters: () => FIXTURE_ADAPTERS,
     preview_install_adapter: (args) => previewFor(String(args["manifest"] ?? "")),
     install_adapter: (args) => installAdapter(args),
@@ -631,16 +725,16 @@ export function handlers(): Handlers {
     preview_update_adapter: (args) => previewUpdate(args),
     update_adapter: (args) => updateOne(args),
     uninstall_adapter: (args) => uninstallOne(args),
-    credential_health: () => FIXTURE_SOURCES.map((source) => source.health),
-    sync_status: () => FIXTURE_SOURCES.map((source) => fakeStatus(source)),
+    credential_health: () => answeredSources().map((source) => source.health),
+    sync_status: () => answeredSources().map((source) => fakeStatus(source)),
     list_sync_runs: (args) => fakeRuns(args),
     db_stats: () => FIXTURE_DB_STATS,
     sync_now: () => 91,
-    sync_now_with_progress: () => 91,
     // No fixture source is running (`fakeStatus`), so there is no run to join
     // and the channel hears nothing, as on an idle source (#1384).
     watch_sync: () => null,
-    sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
+    // As the scheduler does: a running `sync:state` before it answers, and its end a moment later (F-645).
+    sync_all: () => syncAll(),
     sync_role: (args) => syncRole(args),
     reindex_fts: () => null,
     delete_source: () => null,
@@ -711,6 +805,8 @@ export function handlers(): Handlers {
         auth_kind: (input["auth_kind"] ?? null) as AuthMethod | null,
         config: (input["config"] ?? {}) as Record<string, unknown>,
         sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
+        sync_by_hand: input["sync_by_hand"] === true,
+
         health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },
         // The adapter's claims and kinds, as `list_sources` takes them from its template.
         roles: adapter === undefined ? [] : adapter.roles,

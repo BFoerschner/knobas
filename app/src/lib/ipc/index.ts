@@ -24,6 +24,8 @@ export * from "./search";
 export * from "./sources";
 export * from "./time";
 export * from "./assets";
+export * from "./api";
+export * from "./oneoff";
 
 // `IpcError.code`'s type: `knobas_app::IpcErrorCode`, generated, and exported by
 // the sources barrel because `ConnectionReport.code` reaches it (#1372).
@@ -68,6 +70,46 @@ export const EVENTS = {
    * A page showing that view reads it again.
    */
   viewFresh: "view:fresh",
+  /**
+   * `Fetched` — a branch's tip, fetched into its checkout behind a local read
+   * that found it missing, landed (ADR-0041): a page showing that tree reads
+   * it again at the checkout.
+   */
+  checkoutFetched: "checkout:fetched",
+  /** `CloneAllState` — where *Clone all* is: each clone's start and end, and the run's. */
+  cloneAll: "clone:all",
+  /**
+   * `FolderRenderMoved` — a folder renderer's run on a folder moved or ended
+   * (ADR-0044): the page showing that folder asks again.
+   */
+  folderRender: "folder-render:moved",
+  /** A command's run started or ended (ADR-0060): `OneOffRunRow`. */
+  oneoffMoved: "oneoff:moved",
+  /**
+   * `FilesProgress` — the files pass's progress, at each repository's end (the everything-search decisions, D7):
+   * Settings › Search reads its status again.
+   */
+  codeFiles: "code:files",
+  /**
+   * `ClipState` — what the clipboard holds for knobas now: a secret it put there, whose and until when, or nothing
+   * (ADR-0056). The status bar draws it.
+   */
+  clipboardState: "clipboard:state",
+
+  /** `SiteStatus` — a live site's state changed (ADR-0050). */
+  siteStatus: "site:status",
+  /** `SiteKey` — a key knobas took from a site, by name. */
+  siteKey: "site:key",
+  /** `SiteRouted` — a navigation a site may not show went to the browser, another site, or nowhere. */
+  siteRouted: "site:routed",
+  /** `SiteDownload` — a site's download started, saved or failed. */
+  siteDownload: "site:download",
+  /** `SiteClosed` — a site's view closed, and why. */
+  siteClosed: "site:closed",
+  /** `SiteStatus[]` — knobas was asked to quit and these sites hold changes. */
+  siteQuit: "site:quit",
+  /** `UpdateState` — what the updater knows changed: a check, a download's progress, an install's step (ADR-0052). */
+  updateState: "update:state",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

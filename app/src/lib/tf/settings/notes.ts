@@ -4,6 +4,8 @@
  * Pure, so every sentence the section draws is testable as a string.
  */
 
+import { onMac } from "../../shell/platform";
+
 /** *1 note*, *37 notes*. */
 export function noteCount(total: number): string {
   return total === 1 ? "1 note" : `${total} notes`;
@@ -46,6 +48,23 @@ const KEY_CAPS: Record<string, string> = {
 /** Mac's modifier order: ⌃ ⌥ ⇧ ⌘, then the key. */
 const ORDER = ["⌃", "⌥", "⇧", "⌘"];
 
+/** The same modifiers named as Windows and Linux name them (the Windows pass, 2026-11-14), and their order there. */
+const OFF_MAC: Record<string, string> = {
+  cmdorctrl: "Ctrl",
+  commandorcontrol: "Ctrl",
+  commandorctrl: "Ctrl",
+  cmdorcontrol: "Ctrl",
+  cmd: "Win",
+  command: "Win",
+  super: "Win",
+  alt: "Alt",
+  option: "Alt",
+  shift: "Shift",
+  ctrl: "Ctrl",
+  control: "Ctrl",
+};
+const OFF_MAC_ORDER = ["Ctrl", "Alt", "Shift", "Win"];
+
 /**
  * The keys the capture registrar accepts (global-hotkey 0.8.0's `parse_key`, upper
  * case; a hand copy, re-check it on a bump of the crate): a token outside this set and the modifiers is refused (#1467).
@@ -87,7 +106,10 @@ export function keyCaps(accelerator: string): string[] {
     caps.push(cap);
   }
   caps.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
-  return [...caps, key.toUpperCase()];
+  if (onMac()) return [...caps, key.toUpperCase()];
+  // Off the Mac the names, in Ctrl, Alt, Shift order: `CmdOrCtrl` is Ctrl there, and `Super` the Windows key.
+  const names = modifiers.map((token) => OFF_MAC[token.toLowerCase()]!);
+  return [...new Set(names)].sort((a, b) => OFF_MAC_ORDER.indexOf(a) - OFF_MAC_ORDER.indexOf(b)).concat(key.toUpperCase());
 }
 
 /** A folder under a home directory, written from `~` as prototype-6 writes it. */

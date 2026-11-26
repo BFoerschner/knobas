@@ -7,8 +7,8 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { createBoardReader, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
+import type { BoardPage, LanesAsked, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import { createBoardReader, LIST_SETTLE_MS, PAGE_CARDS, TYPED_WAIT_MOST, type BoardReaderPorts, type BoardView, type ViewSessions } from "./board-reader.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -22,6 +22,7 @@ interface Read {
   savedView: string | null | undefined;
   lanes: LanesAsked | null | undefined;
   role: string | undefined;
+  page: BoardPage | null | undefined;
   answer: (board: MiniBoard) => void;
   fail: (error: Error) => void;
 }
@@ -64,24 +65,16 @@ const FIRST = board(column("To Do", 12, 8), column("Done", 5));
 
 function fakes() {
   const reads: Read[] = [];
-  const details: { id: string; answer: (text: string) => void }[] = [];
-  const reaches: string[] = [];
   const ports: BoardReaderPorts = {
-    board: (perColumn, query, savedView, lanes, role) =>
-      new Promise((answer, fail) => reads.push({ perColumn, query, savedView, lanes, role, answer, fail })),
-    detail: (id) => new Promise((answer) => details.push({ id, answer: (text) => answer({ description: text, markup: "jira_wiki" }) })),
-    listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
-    jobReach: (id) => {
-      reaches.push(id);
-      return Promise.resolve([]);
-    },
+    board: (perColumn, query, savedView, lanes, role, page) =>
+      new Promise((answer, fail) => reads.push({ perColumn, query, savedView, lanes, role, page, answer, fail })),
   };
   const sessions: ViewSessions = $state({ views: {} });
   const view: BoardView = $state({ columns: [], layout: "board", lanes: "none" });
   const reader = createBoardReader(ports, { typingPause: 40, sessions, view: () => view });
   /** What each read asked for, without its answer. */
   const asked = () => reads.map(({ perColumn, query, lanes }) => (lanes ? { perColumn, query, lanes } : { perColumn, query }));
-  return { reader, reads, details, reaches, sessions, view, asked };
+  return { reader, reads, sessions, view, asked };
 }
 
 const ALL = { key: "", base: "", savedView: null };
@@ -101,6 +94,35 @@ test("the keys typed inside the typing pause are one read of the whole word, fif
   await vi.advanceTimersByTimeAsync(1);
   expect(asked().slice(1)).toEqual([{ perColumn: 50, query: "sepa" }]);
   expect(reads[1]!.role).toBe("ticket-system");
+});
+
+test("the first key typed into a settled board reads at once; the keys typed within the pause after it wait (the broad-filters pass, 2026-11-13)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "p", words: true });
+  expect(asked().slice(1)).toEqual([{ perColumn: 50, query: "p" }]);
+  reads[1]!.answer(board(column("To Do", 3)));
+  await flush();
+  expect(reader.board?.columns[0]!.total).toBe(3);
+  // Typed 20 ms later, after "p" answered: within the pause, so it waits for the keys to stop.
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(20);
+  reader.setFilter({ query: "pay", words: true });
+  expect(reads).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "pay" }]);
+  // A read still out holds the next key, however long ago the last was typed.
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 2)));
+  await flush();
+  expect(asked().slice(3)).toEqual([{ perColumn: 50, query: "payo" }]);
 });
 
 test("an older answer never lands: not one a later read overtook, nor one out when the next key was typed", async () => {
@@ -139,6 +161,16 @@ test("a failed read says why, and the next answer clears it", async () => {
   expect(reader.shown).toBe(17);
 });
 
+test("a ticket's sub-tasks read every card and leave the ticket out, so its count is theirs (the live run, 2026-11-09)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open({ key: "", base: "under:PAY-219", savedView: null, without: "PAY-219" }, { query: "under:PAY-219", words: false });
+  expect(asked()).toEqual([{ perColumn: null, query: "under:PAY-219" }]);
+  reads[0]!.answer(board({ status: "To Do", cards: [card("PAY-266"), card("PAY-254")], total: 2 }, { status: "Done", cards: [card("PAY-219")], total: 1 }));
+  await flush();
+  expect(reader.board?.columns.map((c) => [c.status, c.total])).toEqual([["To Do", 2]]);
+  expect(reader.total).toBe(2);
+});
+
 test("expand raises the cap to that column's count and draws it whole; the others keep theirs", async () => {
   const { reader, reads, asked } = fakes();
   reader.open(ALL, NO_WORDS);
@@ -152,6 +184,22 @@ test("expand raises the cap to that column's count and draws it whole; the other
   await flush();
   expect(reader.expanded).toEqual(["To Do"]);
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([12, 3]);
+});
+
+test("a long column's Show more reads and draws fifty more a press, never the whole board (2026-11-10)", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  const long = { ...column("To Do", 8), total: 8016 };
+  reads[0]!.answer(board(long, column("Done", 5)));
+  await flush();
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 58, query: null });
+  reads[1]!.answer(board({ ...column("To Do", 58), total: 8016 }, column("Done", 5)));
+  await flush();
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([58, 3]);
+  reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+  expect(asked().at(-1)).toEqual({ perColumn: 108, query: null });
+  expect(reader.expanded).toEqual(["To Do", "To Do"]);
 });
 
 test("in lanes, expand raises the cap for that lane's column only", async () => {
@@ -194,6 +242,80 @@ test("the list's Show N more reads every column whole and the board keeps its ca
   expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
 });
 
+test("a list showing every ticket reads fifty a column as words change, and all of them once the keys pause (2026-11-10)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.chooseLayout("list");
+  reader.expandAll();
+  reads[1]!.answer(board(column("To Do", 120), column("Done", 900)));
+  await flush();
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[2]!.perColumn).toBe(50);
+  reads[2]!.answer(board({ ...column("To Do", 50), total: 70 }, { ...column("Done", 50), total: 400 }));
+  await flush();
+  // Another key inside the pause starts it over: no whole read yet.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[3]!.perColumn).toBe(50);
+  reads[3]!.answer(board({ ...column("To Do", 50), total: 60 }, { ...column("Done", 50), total: 300 }));
+  await flush();
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS - 1);
+  expect(reads).toHaveLength(4);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(reads[4]!.query).toBe("payo");
+  expect(reads[4]!.perColumn).toBe(300);
+});
+
+test("a board whose Show more drew past fifty a column reads fifty a column on a key, and the rest once the keys pause (the ux13-overs pass, Fable's ruling)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ ...column("To Do", 8), total: 900 }, column("Done", 5)));
+  await flush();
+  for (let press = 0; press < 4; press += 1) {
+    reader.expand(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column);
+    reads.at(-1)!.answer(board({ ...column("To Do", 8 + 50 * (press + 1)), total: 900 }, column("Done", 5)));
+    await flush();
+  }
+  expect(reads.at(-1)!.perColumn).toBe(208);
+  const before = reads.length;
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[before]!.perColumn, "the key: what the screen shows").toBe(50);
+  reads[before]!.answer(board({ ...column("To Do", 50), total: 400 }, column("Done", 5)));
+  await flush();
+  expect(reader.bands[0]!.drawn[0]!.cards).toHaveLength(50);
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS);
+  expect(reads[before + 1]!.query).toBe("pay");
+  expect(reads[before + 1]!.perColumn, "the pause: as many as its four presses of Show more draw under words").toBe(250);
+  // The words cleared: still fifty a column on the key, never the eight a column of a board not expanded.
+  reads[before + 1]!.answer(board({ ...column("To Do", 208), total: 400 }, column("Done", 5)));
+  await flush();
+  reader.setFilter({ query: "", words: false });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[before + 2]!.perColumn).toBe(50);
+});
+
+test("a quick read whose answer holds every card of every column is the whole read: no read follows it once the keys pause", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.chooseLayout("list");
+  reader.expandAll();
+  reads[1]!.answer(board(column("To Do", 120), column("Done", 900)));
+  await flush();
+  reader.setFilter({ query: "payout-17", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(reads[2]!.perColumn).toBe(50);
+  reads[2]!.answer(board(column("To Do", 3), column("Done", 1)));
+  await flush();
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS * 2);
+  expect(reads).toHaveLength(3);
+});
+
 // #2200's class: the list's Show N more reads every ticket, and a deep proxy
 // over thousands of cards made each draw subscribe to every field it read.
 test("the board drawn is the answer as read, not a reactive copy of each card", async () => {
@@ -221,13 +343,42 @@ test("the total is counted once per base: from a base answer, or one count read 
   reader.setFilter({ query: "assignee:@me sep", words: true });
   await vi.advanceTimersByTimeAsync(40);
   expect(asked().slice(2)).toEqual([{ perColumn: 50, query: "assignee:@me sep" }]);
-  // A read of the base itself counts the whole as it draws it.
+  // A read of the base itself counts the whole as it draws it, once the read still out has answered.
   reader.setFilter({ query: "assignee:@me", words: false });
   await vi.advanceTimersByTimeAsync(40);
-  reads.at(-1)!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  expect(reads).toHaveLength(3);
+  reads[2]!.answer(board(column("To Do", 9)));
   await flush();
   expect(reads).toHaveLength(4);
+  reads[3]!.answer(board(column("To Do", 31, 8), column("Done", 4)));
+  await flush();
   expect(reader.total).toBe(35);
+});
+
+test("words typed while a read is out wait for it, then read once as they are by then; a hung read holds them 400 ms at most", async () => {
+  const { reader, reads, asked } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  reader.setFilter({ query: "p", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  // Two more keys while "p" is out: no read of "pa", one of "pay" when "p" answers, and its answer is not drawn.
+  reader.setFilter({ query: "pa", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked().map((read) => read.query)).toEqual([null, "p"]);
+  reads[1]!.answer(board(column("To Do", 50)));
+  await flush();
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay"]);
+  expect(reader.board).toBe(FIRST);
+  // "pay" never answers: "payo" waits for it, and goes 400 ms after "pay" was sent.
+  reader.setFilter({ query: "payo", words: true });
+  await vi.advanceTimersByTimeAsync(40);
+  expect(asked()).toHaveLength(3);
+  await vi.advanceTimersByTimeAsync(TYPED_WAIT_MOST);
+  expect(asked().map((read) => read.query)).toEqual([null, "p", "pay", "payo"]);
 });
 
 test("a laned board reads its first ten lanes, ten more each time, and ten again for another field", async () => {
@@ -270,46 +421,16 @@ test("a scope change starts fresh and drops what the last scope still had out", 
   expect(reader.board).toBeNull();
 });
 
-test("the preview reads once per ticket and drops the answer of one no longer previewed", async () => {
-  const { reader, details, reaches } = fakes();
-  reader.preview("jira:PAY-1");
-  reader.preview("jira:PAY-1");
-  expect(details.map(({ id }) => id)).toEqual(["jira:PAY-1"]);
-  details[0]!.answer("One.");
-  await flush();
-  expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual([]);
-
-  reader.preview("jira:PAY-2");
-  expect(reader.description).toBeNull();
-  reader.preview("jira:PAY-3");
-  details[1]!.answer("Two, late.");
-  await flush();
-  expect(reader.description).toBeNull();
-  details[2]!.answer("Three.");
-  await flush();
-  expect(reader.description).toEqual({ text: "Three.", markup: "jira_wiki" });
-  expect(reaches).toEqual(["jira:PAY-1", "jira:PAY-2", "jira:PAY-3"]);
-
-  // Nothing selected, then the same ticket again: it is read again.
-  reader.preview(null);
-  reader.preview("jira:PAY-3");
-  expect(details).toHaveLength(4);
-});
-
 test("close stops the pause and drops every answer still out", async () => {
-  const { reader, reads, details } = fakes();
+  const { reader, reads } = fakes();
   reader.open(ALL, NO_WORDS);
-  reader.preview("jira:PAY-1");
   reader.setFilter({ query: "x", words: true });
   reader.close();
   await vi.advanceTimersByTimeAsync(100);
   expect(reads).toHaveLength(1);
   reads[0]!.answer(FIRST);
-  details[0]!.answer("Gone.");
   await flush();
   expect(reader.board).toBeNull();
-  expect(reader.description).toBeNull();
 });
 
 test("a Jira view's column draws three when every status it lists is done, whatever its name (#1423)", async () => {
@@ -333,4 +454,240 @@ test("a Jira view's column draws three when every status it lists is done, whate
     [3, true],
     [8, false],
   ]);
+});
+
+
+// -- a view that shows every ticket (ux18, Björn: "always show all the tickets on open"; Fable's ruling on how) --
+
+/** A column of `total` cards of which the first `drawn` are read, keyed from `from`. */
+function cards(status: string, from: number, count: number): MiniBoardCard[] {
+  return Array.from({ length: count }, (_, i) => card(`${status[0]}-${from + i}`, null, status));
+}
+
+test("off, a view opens as it always did: eight a column, three for Done, and Show more to press", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  expect(reads[0]!.perColumn).toBe(8);
+  expect(reads[0]!.page ?? null).toBeNull();
+  reads[0]!.answer(board(column("To Do", 300, 8), { status: "Done", cards: cards("Done", 1, 8), total: 900 }));
+  await flush();
+  expect(reader.all).toBe(false);
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([8, 3]);
+});
+
+test("on, a board opens on fifty a column and draws every card it reads, Done too: no column is cut", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  expect(reads).toHaveLength(1);
+  expect(reads[0]!.perColumn).toBe(50);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }, { status: "Done", cards: cards("Done", 1, 50), total: 900 }));
+  await flush();
+  expect(reader.all).toBe(true);
+  // No eight, no three for Done: the fifty read are drawn, and nothing else is read until a column's foot nears.
+  expect(reader.bands[0]!.drawn.map(({ cards }) => cards.length)).toEqual([50, 50]);
+  expect(reads).toHaveLength(1);
+});
+
+test("on, a column's foot nearing reads its next 200 past those it holds, joined below them; once a column, and none for a whole one", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }, { status: "Done", cards: cards("Done", 1, 3), total: 3 }));
+  await flush();
+  const [todo, done] = reader.bands[0]!.drawn;
+  reader.more(reader.bands[0]!.lane, todo!.column, todo!.listed);
+  reader.more(reader.bands[0]!.lane, todo!.column, todo!.listed);
+  reader.more(reader.bands[0]!.lane, done!.column, done!.listed);
+  expect(reads).toHaveLength(2);
+  expect(reads[1]!.perColumn).toBe(PAGE_CARDS);
+  // Past the column's last card held (the ux18 Windows pass): a mark, not a count.
+  expect(reads[1]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-50" }] });
+  reads[1]!.answer(board({ status: "To Do", cards: cards("To Do", 51, 200), total: 300 }));
+  await flush();
+  const drawn = reader.bands[0]!.drawn[0]!.cards;
+  expect(drawn).toHaveLength(250);
+  expect(drawn[49]!.key).toBe("T-50");
+  expect(drawn[50]!.key).toBe("T-51");
+  // The next page goes past the 250 held.
+  reader.more(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column, []);
+  expect(reads[2]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-250" }] });
+});
+
+/** `count` cards of `status`, keyed from `from`, each a minute older than the last from `newest` (minutes after midnight). */
+function dated(status: string, letter: string, from: number, count: number, newest: number): MiniBoardCard[] {
+  return Array.from({ length: count }, (_, i) => {
+    const minute = newest - (from - 1 + i);
+    const at = new Date(Date.UTC(2026, 7, 20, 0, minute)).toISOString().replace(".000Z", "Z");
+    return { ...card(`${letter}-${from + i}`, null, status), updated_at: at };
+  });
+}
+
+test("on, a view's column that gathers statuses reads past each one's last card held and draws only what holds every card before it (the ux18 Windows pass)", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.columns = [{ name: "Doing", statuses: ["In Progress", "In Review"], limit: null }];
+  reader.open(ALL, NO_WORDS);
+  // 300 In Progress, all newer than 60 In Review: the first read holds the first fifty of each.
+  const progress = (from: number, count: number) => dated("In Progress", "P", from, count, 1000);
+  const review = (from: number, count: number) => dated("In Review", "R", from, count, 600);
+  reads[0]!.answer(board({ status: "In Progress", cards: progress(1, 50), total: 300 }, { status: "In Review", cards: review(1, 50), total: 60 }));
+  await flush();
+  let [doing] = reader.bands[0]!.drawn;
+  expect(doing!.column.status).toBe("Doing");
+  expect(doing!.column.total).toBe(360);
+  // In Review's fifty are older than In Progress's 51st, which is not read yet: they wait, undrawn, for the pages.
+  expect(doing!.cards.map((one) => one.key)).toEqual(progress(1, 50).map((one) => one.key));
+  reader.more(reader.bands[0]!.lane, doing!.column, doing!.listed);
+  // `after: 100` over both ranked as one read In Progress 101 on: 51 to 100 were never read.
+  expect(reads[1]!.page).toEqual({
+    after: 0,
+    statuses: ["In Progress", "In Review"],
+    frontier: [
+      { status: "In Progress", id: "jira:P-50" },
+      { status: "In Review", id: "jira:R-50" },
+    ],
+  });
+  // The server's page: the 200 next past the marks, ranked as one.
+  reads[1]!.answer(board({ status: "In Progress", cards: progress(51, 200), total: 300 }));
+  await flush();
+  [doing] = reader.bands[0]!.drawn;
+  expect(doing!.cards.map((one) => one.key)).toEqual(progress(1, 250).map((one) => one.key));
+  reader.more(reader.bands[0]!.lane, doing!.column, doing!.listed);
+  expect(reads[2]!.page!.frontier).toEqual([
+    { status: "In Progress", id: "jira:P-250" },
+    { status: "In Review", id: "jira:R-50" },
+  ]);
+  reads[2]!.answer(board({ status: "In Progress", cards: progress(251, 50), total: 300 }, { status: "In Review", cards: review(51, 10), total: 60 }));
+  await flush();
+  [doing] = reader.bands[0]!.drawn;
+  // Every card once, newest first: In Progress's 300, then In Review's 60.
+  expect(doing!.cards.map((one) => one.key)).toEqual([...progress(1, 300), ...review(1, 60)].map((one) => one.key));
+  expect(doing!.cards.length).toBe(doing!.column.total);
+});
+
+test("on, a Jira view's column pages by its name, past the cards it holds in its source's order", async () => {
+  const jira = fakes();
+  jira.view.showAll = true;
+  jira.view.columns = [{ name: "Doing", statuses: ["Doing"], limit: null }];
+  jira.view.listed = [{ name: "Doing", statuses: ["In Progress", "In Review"], limit: null }];
+  jira.reader.open({ key: "j", base: "", savedView: "jira:board-21" }, NO_WORDS);
+  jira.reads[0]!.answer(board({ status: "Doing", cards: cards("Doing", 1, 50), total: 400 }));
+  await flush();
+  const [column] = jira.reader.bands[0]!.drawn;
+  jira.reader.more(jira.reader.bands[0]!.lane, column!.column, column!.listed);
+  expect(jira.reads[1]!.savedView).toBe("jira:board-21");
+  expect(jira.reads[1]!.page).toEqual({ after: 50, statuses: ["Doing"] });
+});
+
+test("on, a laned board reads eight a lane's column and ten lanes, pages a lane's column in its lane, and keeps the depth for ten more lanes", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.lanes = "assignee";
+  reader.open(ALL, NO_WORDS);
+  expect(reads[0]!.perColumn).toBe(8);
+  expect(reads[0]!.lanes).toEqual({ by: "assignee", first: 10 });
+  const first = cards("To Do", 1, 8);
+  reads[0]!.answer({
+    columns: [{ status: "To Do", cards: first, total: 40 }],
+    sources: [],
+    lanes: [{ key: "mara", count: 40, columns: [{ status: "To Do", ids: first.map((one) => one.entity_id), total: 40 }] }],
+    more_lanes: 12,
+  });
+  await flush();
+  const band = reader.bands[0]!;
+  reader.more(band.lane, band.drawn[0]!.column, []);
+  expect(reads[1]!.lanes).toEqual({ by: "assignee", first: 1_000_000 });
+  expect(reads[1]!.page).toEqual({ after: 0, statuses: ["To Do"], frontier: [{ status: "To Do", id: "jira:T-8" }], lane: "mara" });
+  const next = cards("To Do", 9, 32);
+  reads[1]!.answer({
+    columns: [{ status: "To Do", cards: next, total: 40 }],
+    sources: [],
+    lanes: [{ key: "mara", count: 40, columns: [{ status: "To Do", ids: next.map((one) => one.entity_id), total: 40 }] }],
+    more_lanes: 0,
+  });
+  await flush();
+  expect(reader.bands[0]!.drawn[0]!.cards).toHaveLength(40);
+  // Ten lanes more as the foot nears, each lane's column as deep as it reads now.
+  reader.moreLanes();
+  expect(reads[2]!.lanes).toEqual({ by: "assignee", first: 20 });
+  expect(reads[2]!.perColumn).toBe(40);
+});
+
+test("on, the list reads its counts and its first 200 rows sorted on the server, the next 200 as its foot nears, and its first page again for another sort", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  view.layout = "list";
+  view.sort = { column: "priority", direction: "ascending" };
+  reader.open(ALL, NO_WORDS);
+  expect(reads.map(({ perColumn, page }) => [perColumn, page?.sort ?? null])).toEqual([[1, null], [PAGE_CARDS, "priority"]]);
+  expect(reads[1]!.page).toMatchObject({ after: 0, direction: "ascending", priority_order: expect.arrayContaining(["high", "low"]) });
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 1), total: 300 }, { status: "Done", cards: cards("Done", 1, 1), total: 100 }));
+  const page = [...cards("Done", 1, 100), ...cards("To Do", 1, 100)];
+  reads[1]!.answer({ ...board({ status: "To Do", cards: page.slice(100), total: 300 }, { status: "Done", cards: page.slice(0, 100), total: 100 }), order: page.map((one) => one.entity_id) });
+  await flush();
+  // In the server's order, not grouped by column.
+  expect(reader.rows!.slice(0, 2).map((one) => one.key)).toEqual(["D-1", "D-2"]);
+  expect(reader.rows!.at(-1)!.key).toBe("T-100");
+  reader.moreRows();
+  reader.moreRows();
+  expect(reads).toHaveLength(3);
+  expect(reads[2]!.page).toMatchObject({ after: 200, sort: "priority" });
+  const more = cards("To Do", 101, 200);
+  reads[2]!.answer({ ...board({ status: "To Do", cards: more, total: 300 }), order: more.map((one) => one.entity_id) });
+  await flush();
+  expect(reader.rows).toHaveLength(400);
+  // Every row read: no page more.
+  reader.moreRows();
+  expect(reads).toHaveLength(3);
+  view.sort = { column: "key", direction: "descending" };
+  reader.resort();
+  expect(reads[3]!.page).toMatchObject({ after: 0, sort: "key", direction: "descending" });
+});
+
+test("on, a key reads fifty a column once and no whole read follows; a sync's re-read reads each column as deep as it holds", async () => {
+  const { reader, reads, view } = fakes();
+  view.showAll = true;
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 50), total: 300 }));
+  await flush();
+  reader.more(reader.bands[0]!.lane, reader.bands[0]!.drawn[0]!.column, []);
+  reads[1]!.answer(board({ status: "To Do", cards: cards("To Do", 51, 200), total: 300 }));
+  await flush();
+  reader.refresh();
+  expect(reads[2]!.perColumn).toBe(250);
+  reads[2]!.answer(board({ status: "To Do", cards: cards("To Do", 1, 250), total: 300 }));
+  await flush();
+  reader.setFilter({ query: "pay", words: true });
+  await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS * 2);
+  expect(reads.slice(3).map(({ perColumn, query }) => [perColumn, query])).toEqual([[50, "pay"]]);
+});
+
+test("a key draws nothing new until its answer lands: the board drawn keeps the cards and the filter it was read with (the ux19 overs pass)", async () => {
+  const { reader, reads } = fakes();
+  reader.open(ALL, NO_WORDS);
+  reads[0]!.answer(FIRST);
+  await flush();
+  const done = () => reader.bands[0]!.drawn.find(({ column }) => column.status === "Done")!.cards.length;
+  expect(done()).toBe(3);
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "d", words: true, text: "d" });
+  expect(reads).toHaveLength(2);
+  // The frame after the key: the Done column held eight and drew three, and took all five the moment the bar had words.
+  expect(done()).toBe(3);
+  expect(reader.typing).toBe(false);
+  expect(reader.drawnFilter.query).toBe("");
+  reads[1]!.answer(board(column("To Do", 2), column("Done", 5)));
+  await flush();
+  expect(done()).toBe(5);
+  expect(reader.typing).toBe(true);
+  expect(reader.drawnFilter).toMatchObject({ query: "d", text: "d" });
+  // Cleared, the fifty a column stay drawn until the board without words answers.
+  await vi.advanceTimersByTimeAsync(100);
+  reader.setFilter({ query: "", words: false, text: "" });
+  expect(done()).toBe(5);
+  reads[2]!.answer(FIRST);
+  await flush();
+  expect(done()).toBe(3);
+  expect(reader.typing).toBe(false);
 });

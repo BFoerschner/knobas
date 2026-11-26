@@ -22,7 +22,7 @@
 //! next limiter for the origin is built: one already held keeps waiting on
 //! what governed when the last one was.
 //!
-//! A changed quota is a new governor limiter, which every holder waits on
+//! A changed quota is a new limiter, which every holder waits on
 //! from its next request. Two sources at different quotas on one server,
 //! syncing one after the other, would be handed a fresh burst on every
 //! alternation if either kind of change started full. Both count the
@@ -51,62 +51,88 @@
 //! than before, never sooner. A test that pauses tokio's clock moves the
 //! quota with the budget, so it can assert what a quota lets through exactly,
 //! where governor's own clock and timer would have kept wall time under it.
+//!
+//! **A person's request goes ahead of the sync's** (the priority lane,
+//! 2026-11-13). The quota is shared by the background sync and by the read a
+//! person is waiting for, and a sync keeps it full, so before the lane a
+//! person's read queued behind sync requests: a first open of a file on a
+//! forge without a clone took five to seven seconds against a Gitea that
+//! answers each request in fifty milliseconds. Every request now waits in a
+//! [`Lane`], read from the task it is sent on ([`on_lane`]). A request in
+//! [`Lane::Background`] -- a sync run, the write queue's tick -- yields while
+//! any [`Lane::Interactive`] request for the same origin is waiting on the
+//! quota or, sent through [`HttpClient`](crate::HttpClient) or the wasm
+//! host, for its answer ([`Sending`]), and goes again once none is;
+//! everything not marked is interactive. The answer counts because the
+//! quota is not all a busy server spends: measured on the scale estate, a
+//! Gitea that answers a pull request in 50 ms took 2.2 s with a backfill's
+//! eight repositories in flight, so a sync that only gave up its turn at the
+//! quota still loaded the server under the person's read. And the sync
+//! **leaves half the burst** ([`Paced`]): a background request goes only
+//! while half the burst could still go at once after it, so a page's first
+//! requests go at once even while a sync keeps the quota full, rather than
+//! one a refill apart. The lane only decides **who takes which request the
+//! quota lets through**: every request of either lane passes the same
+//! limiter, so the origin sees no more requests a second, and no bigger
+//! burst, than before.
+//!
+//! **A read behind a drawn answer waits as the sync does** ([`behind`], the
+//! ux16 overs pass, 2026-11-17; ADR-0042): a page draws what knobas held and
+//! the app reads the source again behind it; nobody waits on that read, so
+//! its requests go in [`Lane::Background`]. Before, they were interactive,
+//! and on Björn's PC a branch's standing read behind Compare put eight
+//! requests on Gitea beside the compare's two, which then took 600 ms at 6x
+//! where it takes 40 to 90 alone. [`is_behind`] tells such a read from the
+//! sync's, for what treats the lane as the sync's.
+//!
+//! **The sync is not starved** ([`BACKGROUND_FLOOR`]): once an origin's
+//! background requests have stood aside for a second without one let
+//! through, they stop yielding and keep no reserve, and a person's requests
+//! let them have the next request the quota lets through (2026-11-15: before,
+//! one past the floor only raced every waiting person's request for each
+//! refill, and with a hundred of them waiting lost nearly every time). A
+//! person's requests that trickle below the quota leave the sync the rest of
+//! it; ones that fill it for longer than a second still leave the sync about
+//! one request a second.
+//!
+//! **Standing aside is not the sync's own wait** (the ux12 Windows pass,
+//! 2026-11-15): the time a background request waits while a person's
+//! requests hold the origin is not counted against the time it may wait
+//! ([`InstanceLimiter::until_ready_sending`], and
+//! [`SEND_BUDGET`](crate::SEND_BUDGET) beside it), for at most
+//! [`STAND_ASIDE_CEILING`] more.
+//!
+//! **The sync keeps few requests on the server, and waits out a page's
+//! rounds** (the ux13 Windows pass, 2026-11-15). Standing aside holds back
+//! the sync's next requests, not the ones it already sent: with eight
+//! repositories walked at once, a person's read reached a Gitea busy with
+//! up to eight of the sync's, and a Gitea that answers a branch's view in
+//! 300 ms alone took one to three seconds for four at once. A page's read
+//! that needs two or three rounds, each sent on the answer of the one
+//! before, also let the sync's waiting requests through in the moment
+//! between them, so each round met a server freshly loaded. So an origin's
+//! background requests have at most [`BACKGROUND_IN_FLIGHT`] in flight at
+//! once (a request's place held from before its wait on the quota until its
+//! answer is in, [`Sending`]), and they stand aside for
+//! [`INTERACTIVE_LINGER`] past a person's last answer (of a request held
+//! over its answer: one that only waited on the quota has no next round to
+//! wait for). Neither changes what
+//! the quota lets through: the cap only lowers how many of the sync's are
+//! on the server when a person's arrives, and the linger is inside the
+//! [`BACKGROUND_FLOOR`] like any standing aside. Waiting for a place in
+//! flight is not the sync's own wait either: it is the server's time on the
+//! sync's earlier requests, which each request's own timeout bounds.
 
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
-use governor::clock::{Clock, Reference};
-use governor::middleware::NoOpMiddleware;
-use governor::nanos::Nanos;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use tokio::time::Instant;
-
-type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, TokioClock, NoOpMiddleware<Tick>>;
-
-/// Governor's clock, read from tokio's ([`tokio::time::Instant`]): the
-/// monotonic clock, unless a test paused tokio's (#1925).
-#[derive(Debug, Clone, Copy, Default)]
-struct TokioClock;
-
-impl Clock for TokioClock {
-    type Instant = Tick;
-
-    fn now(&self) -> Tick {
-        Tick(Instant::now())
-    }
-}
-
-/// One reading of [`TokioClock`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Tick(Instant);
-
-impl std::ops::Add<Nanos> for Tick {
-    type Output = Self;
-
-    fn add(self, other: Nanos) -> Self {
-        Self(self.0 + Duration::from(other))
-    }
-}
-
-impl Reference for Tick {
-    fn duration_since(&self, earlier: Self) -> Nanos {
-        self.0.saturating_duration_since(earlier.0).into()
-    }
-
-    /// `duration` before this reading, or this reading itself where that
-    /// would fall before the clock's start: what governor's trait asks for,
-    /// and what its own clocks do.
-    fn saturating_sub(&self, duration: Nanos) -> Self {
-        Self(self.0.checked_sub(duration.into()).unwrap_or(self.0))
-    }
-}
 
 /// One instance origin's share of the process-wide rate limit.
 ///
@@ -185,14 +211,90 @@ impl InstanceLimiter {
     ///
     /// [`LocalQuota`] if `within` ran out first. Nothing was sent: the wait
     /// is knobas' own, and the instance has not been asked anything.
+    ///
+    /// The wait is in the [`Lane`] of the task it runs on ([`current_lane`]):
+    /// a background one yields to interactive ones for the same origin. An
+    /// interactive request counts as waiting until this returns; one that
+    /// goes on counting until its answer is in is
+    /// [`until_ready_sending`](Self::until_ready_sending)'s.
     pub async fn until_ready_within(&self, within: Duration) -> Result<(), LocalQuota> {
-        let paced = self.slot.current();
-        match tokio::time::timeout(within, paced.until_ready()).await {
-            Ok(()) => {
-                self.slot.granted();
-                Ok(())
+        self.until_ready_sending(within).await.map(Sending::let_go)
+    }
+
+    /// [`until_ready_within`](Self::until_ready_within), handing back the
+    /// [`Sending`] that keeps an interactive request counted until it is
+    /// dropped: held over the request until its answer is in, it keeps the
+    /// origin's background requests standing aside for the whole of what a
+    /// person waits for, not only its wait on the quota (the priority lane,
+    /// 2026-11-13). A background request's holds its place among the
+    /// origin's [`BACKGROUND_IN_FLIGHT`] until it is dropped.
+    ///
+    /// # Errors
+    ///
+    /// As [`until_ready_within`](Self::until_ready_within).
+    pub async fn until_ready_sending(&self, within: Duration) -> Result<Sending, LocalQuota> {
+        self.until_ready_counted(within)
+            .await
+            .map(|(sending, _)| sending)
+    }
+
+    /// [`until_ready_sending`](Self::until_ready_sending), handing back
+    /// beside the [`Sending`] how long of the wait a background request
+    /// stood aside for interactive ones: time `within` did not count.
+    ///
+    /// **Standing aside is not the sync's own wait** (the ux12 Windows
+    /// pass, 2026-11-15). `within` counts only the time no interactive
+    /// request held the origin ([`Sending`]), for at most
+    /// [`STAND_ASIDE_CEILING`] more: a Gitea run stopped on knobas' own
+    /// quota after 45 s while a person's reads filled it, a wait that said
+    /// nothing about the forge. A forge that is gone fails a person's
+    /// requests too, so it does not hold the sync, and the ceiling ends a
+    /// wait behind a person whose requests never stop. An interactive
+    /// request's whole wait counts, and it stood aside for nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`until_ready_within`](Self::until_ready_within).
+    pub(crate) async fn until_ready_counted(
+        &self,
+        within: Duration,
+    ) -> Result<(Sending, Duration), LocalQuota> {
+        let lane = current_lane();
+        if lane == Lane::Interactive {
+            let sending = Sending::enter(&self.slot);
+            return match tokio::time::timeout(within, self.slot.until_ready(lane)).await {
+                Ok(()) => {
+                    self.slot.granted();
+                    Ok((sending, Duration::ZERO))
+                }
+                Err(_) => Err(self.ran_out(within)),
+            };
+        }
+        let began = Instant::now();
+        // A place among the origin's background requests in flight first
+        // ([`BACKGROUND_IN_FLIGHT`]): the wait for it is the server's time on
+        // the sync's own earlier requests, not this one's, so `within` does
+        // not count it, for at most the ceiling.
+        let Ok(flight) = tokio::time::timeout(STAND_ASIDE_CEILING, Flight::enter(&self.slot)).await
+        else {
+            return Err(self.ran_out(began.elapsed()));
+        };
+        let room = began.elapsed();
+        let held_before = self.slot.held_for();
+        let mut wait = std::pin::pin!(self.slot.until_ready(lane));
+        loop {
+            let aside = room + aside_since(&self.slot, held_before);
+            let left = (within + aside).saturating_sub(began.elapsed());
+            if left.is_zero() {
+                return Err(self.ran_out(began.elapsed()));
             }
-            Err(_) => Err(self.ran_out(within)),
+            // Woken when what is left at this count runs out, to count again:
+            // a person's requests meanwhile moved it on.
+            if tokio::time::timeout(left, &mut wait).await.is_ok() {
+                self.slot.granted();
+                let aside = room + aside_since(&self.slot, held_before);
+                return Ok((Sending(Some(Place::Background(flight))), aside));
+            }
         }
     }
 
@@ -206,6 +308,14 @@ impl InstanceLimiter {
             waited,
         }
     }
+}
+
+/// How long interactive requests have held `slot` since it read
+/// `held_before`, at most [`STAND_ASIDE_CEILING`].
+fn aside_since(slot: &Slot, held_before: Duration) -> Duration {
+    slot.held_for()
+        .saturating_sub(held_before)
+        .min(STAND_ASIDE_CEILING)
 }
 
 /// A wait on the local quota that ran out of time before the quota let the
@@ -279,6 +389,104 @@ pub(crate) fn stopped_on(quota: &LocalQuota) {
     let _ = STOPPED.try_with(|stopped| stopped.set(Some(quota.clone())));
 }
 
+/// Who a request is for, which decides who takes the next request the
+/// quota lets through: a person's requests go first ([module](self) docs).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Lane {
+    /// A request somebody is waiting for: a page's live read, a hover's
+    /// prefetch, a *Test connection*, a write they pressed and watch a toast
+    /// for. What every request not marked otherwise is. Not a read behind an
+    /// answer a page already drew ([`behind`], the ux16 overs pass,
+    /// 2026-11-17): nobody waits on that one.
+    #[default]
+    Interactive,
+    /// A request nobody is waiting on: a sync run, the write queue's tick, a
+    /// read asked ahead (`ahead:`), a read behind a drawn answer ([`behind`]).
+    /// It yields while an interactive request for its origin waits, for at
+    /// most [`BACKGROUND_FLOOR`].
+    Background,
+}
+
+/// The longest an origin's background requests yield to interactive ones
+/// without one let through: past it, the next takes the next request the
+/// quota lets through like any other, so the sync goes on, about a request a
+/// second, even while a person's fill the quota.
+pub const BACKGROUND_FLOOR: Duration = Duration::from_secs(1);
+
+/// The longest a background request's wait on the quota goes past its own
+/// allowance while it stands aside for a person's requests
+/// ([`InstanceLimiter::until_ready_sending`]). Five minutes: a page's reads
+/// fill the quota for seconds, and the whole first sync of the scale
+/// estate's Gitea, every branch's tree stored, took about as long.
+pub const STAND_ASIDE_CEILING: Duration = Duration::from_secs(300);
+
+/// The most [`Lane::Background`] requests one origin has in flight at once
+/// (the ux13 Windows pass, 2026-11-15): from before a request's wait on the
+/// quota until its answer is in ([`Sending`]). Two: a person's read reaches
+/// a server busy with at most two of the sync's, where it met up to eight
+/// (a Gitea run's repositories at once). Two in flight keep a sync at a
+/// quota of ten a second against a server that answers in 200 ms; a slower
+/// one gets the sync's requests one after another, and a person's beside
+/// them.
+pub const BACKGROUND_IN_FLIGHT: usize = 2;
+
+/// How long past the answer to a person's last request on an origin its
+/// background requests go on standing aside (the ux13 Windows pass,
+/// 2026-11-15): a page's next round is sent on the answer of the one before
+/// (a file's entry, then its bytes; a pull request's record, then its
+/// compare), and the sync's waiting requests went in the moment between
+/// them. 150 ms: the backend sends a round within milliseconds of the answer
+/// before it, a page its next read within a frame or two at 4x. Only after a
+/// request held over its answer ([`InstanceLimiter::until_ready_sending`]),
+/// and inside [`BACKGROUND_FLOOR`] like any standing aside.
+pub const INTERACTIVE_LINGER: Duration = Duration::from_millis(150);
+
+tokio::task_local! {
+    /// The lane of the requests sent on this task, where [`on_lane`] set one.
+    static LANE: Lane;
+}
+
+/// Run `call` with every request sent inside it -- through an
+/// [`HttpClient`](crate::HttpClient) or an [`InstanceLimiter`] -- waiting in
+/// `lane`. A lane inside a lane holds for its own call.
+///
+/// Like any task-local, it holds on the task `call` is polled on: a task
+/// spawned from `call` starts outside it, in [`Lane::Interactive`]. A sender
+/// that drives its requests elsewhere takes [`current_lane`] with it.
+pub async fn on_lane<F: Future>(lane: Lane, call: F) -> F::Output {
+    LANE.scope(lane, call).await
+}
+
+/// The lane a request sent here and now waits in: the innermost
+/// [`on_lane`]'s, or [`Lane::Interactive`] outside any.
+#[must_use]
+pub fn current_lane() -> Lane {
+    LANE.try_with(|lane| *lane).unwrap_or_default()
+}
+
+tokio::task_local! {
+    /// Set by [`behind`]: the requests sent on this task read again what a
+    /// page already drew.
+    static BEHIND: ();
+}
+
+/// Run `call` as a read behind an answer a page already drew (ADR-0042; the
+/// ux16 overs pass, 2026-11-17): in [`Lane::Background`], so its requests
+/// stand aside while a person's to the same server wait or are out, and
+/// marked so ([`is_behind`]), so a sender that tells the sync apart by its
+/// lane still knows this is no sync. Nobody waits on such a read: the page
+/// drew what knobas held and is told if the source moved.
+pub async fn behind<F: Future>(call: F) -> F::Output {
+    BEHIND.scope((), LANE.scope(Lane::Background, call)).await
+}
+
+/// Whether the requests sent here are a read behind ([`behind`]): in the
+/// background lane, but no sync's.
+#[must_use]
+pub fn is_behind() -> bool {
+    BEHIND.try_with(|()| ()).is_ok()
+}
+
 /// A quota: sustained requests a second and how many may go at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Rate {
@@ -302,6 +510,12 @@ impl Rate {
             per_second: self.per_second.min(other.per_second),
             burst: self.burst.min(other.burst),
         }
+    }
+
+    /// How many of the burst a background request leaves for a person's
+    /// ([`Paced`]): half, rounded down, so a burst of one keeps none.
+    fn reserve(self) -> u32 {
+        self.burst.get() / 2
     }
 
     /// How many requests this rate refills in `idle`, rounded down and not
@@ -330,6 +544,174 @@ struct Slot {
     /// every grant without the lock, so it only ever moves forward
     /// ([`granted`](Self::granted)).
     last_grant: AtomicU64,
+    /// Nanoseconds from `born` to the last [`Lane::Background`] request let
+    /// through, or `0`: what [`BACKGROUND_FLOOR`] counts from.
+    last_background: AtomicU64,
+    /// How many [`Lane::Interactive`] requests are waiting on this origin's
+    /// quota or for its answer right now ([`Sending`]): while any is, a
+    /// background one yields.
+    interactive: AtomicUsize,
+    /// Told when the last interactive request is answered or gives up: what
+    /// a yielding background request wakes on.
+    yielded: tokio::sync::Notify,
+    /// Nanoseconds from `born` to when the last interactive request was
+    /// answered or gave up with none left, plus one; `0` if none has:
+    /// [`INTERACTIVE_LINGER`] counts from it.
+    interactive_ended: AtomicU64,
+    /// How many [`Lane::Background`] requests hold a place in flight
+    /// ([`Flight`]), at most [`BACKGROUND_IN_FLIGHT`].
+    background_in_flight: AtomicUsize,
+    /// Told when a background request gives its place in flight back.
+    flight_room: tokio::sync::Notify,
+    /// When interactive requests held the origin ([`held_for`](Self::held_for)).
+    busy: Mutex<Busy>,
+    /// How many [`Lane::Background`] requests wait on the quota right now
+    /// ([`Queued`]).
+    background_waiting: AtomicUsize,
+    /// Nanoseconds from `born` to when the background requests waiting now
+    /// began to: set when the first of them arrives at none waiting. What
+    /// [`floor`](Self::floor) counts from beside the last one let through.
+    queued_since: AtomicU64,
+}
+
+/// The time interactive requests held an origin: the sum of the spells
+/// past, and when the one going on began, if one is.
+#[derive(Default)]
+struct Busy {
+    total: Duration,
+    since: Option<Instant>,
+}
+
+/// A background request's place among the origin's waiting ones, given
+/// back when its wait ends however it ends ([`Slot::floor`]).
+struct Queued<'slot>(&'slot Slot);
+
+impl<'slot> Queued<'slot> {
+    fn enter(slot: &'slot Slot) -> Self {
+        if slot.background_waiting.fetch_add(1, Ordering::SeqCst) == 0 {
+            let now = u64::try_from(slot.born.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            slot.queued_since.store(now, Ordering::Relaxed);
+        }
+        Self(slot)
+    }
+}
+
+impl Drop for Queued<'_> {
+    fn drop(&mut self) {
+        self.0.background_waiting.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A request's place among its origin's
+/// ([`InstanceLimiter::until_ready_sending`]), given back when dropped,
+/// however the request ends: answered, out of time, or cancelled. While an
+/// interactive request's is held, the origin's background requests stand
+/// aside; a background request's is one of the origin's
+/// [`BACKGROUND_IN_FLIGHT`].
+#[must_use = "dropping it ends the request's place at once"]
+pub struct Sending(Option<Place>);
+
+/// What a [`Sending`] holds.
+enum Place {
+    /// One of the origin's interactive requests: counted until dropped, and
+    /// whether [`INTERACTIVE_LINGER`] follows it (it was held over its
+    /// answer, not only its wait on the quota).
+    Interactive(Arc<Slot>, bool),
+    /// One of the origin's background requests in flight.
+    Background(Flight),
+}
+
+impl Sending {
+    fn enter(slot: &Arc<Slot>) -> Self {
+        let mut busy = slot.busy.lock().unwrap_or_else(PoisonError::into_inner);
+        if slot.interactive.fetch_add(1, Ordering::SeqCst) == 0 {
+            busy.since = Some(Instant::now());
+        }
+        drop(busy);
+        Self(Some(Place::Interactive(Arc::clone(slot), true)))
+    }
+
+    /// Give the place back at once, as a request that only waited on the
+    /// quota does: no next round of it follows its answer, so no
+    /// [`INTERACTIVE_LINGER`] either.
+    fn let_go(mut self) {
+        if let Some(Place::Interactive(_, linger)) = &mut self.0 {
+            *linger = false;
+        }
+    }
+}
+
+impl std::fmt::Debug for Sending {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (lane, origin) = match &self.0 {
+            Some(Place::Interactive(slot, _)) => (Some(Lane::Interactive), Some(&slot.origin)),
+            Some(Place::Background(Flight(slot))) => (Some(Lane::Background), Some(&slot.origin)),
+            None => (None, None),
+        };
+        formatter
+            .debug_tuple("Sending")
+            .field(&lane)
+            .field(&origin)
+            .finish()
+    }
+}
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        // A background place gives itself back ([`Flight`]'s drop).
+        if let Some(Place::Interactive(slot, linger)) = self.0.take() {
+            let mut busy = slot.busy.lock().unwrap_or_else(PoisonError::into_inner);
+            if slot.interactive.fetch_sub(1, Ordering::SeqCst) == 1 {
+                if let Some(since) = busy.since.take() {
+                    busy.total += since.elapsed();
+                }
+                if linger {
+                    let now = u64::try_from(slot.born.elapsed().as_nanos()).unwrap_or(u64::MAX - 1);
+                    slot.interactive_ended.store(now + 1, Ordering::SeqCst);
+                }
+                drop(busy);
+                slot.yielded.notify_waiters();
+            }
+        }
+    }
+}
+
+/// A background request's place among its origin's
+/// [`BACKGROUND_IN_FLIGHT`], given back when dropped.
+struct Flight(Arc<Slot>);
+
+impl Flight {
+    /// Wait for a place among `slot`'s background requests in flight, and
+    /// take it.
+    async fn enter(slot: &Arc<Slot>) -> Self {
+        loop {
+            let notified = slot.flight_room.notified();
+            let mut notified = std::pin::pin!(notified);
+            // Registered before the count is read, so a place given back
+            // between the read and the wait still wakes it.
+            notified.as_mut().enable();
+            let flying = slot.background_in_flight.load(Ordering::SeqCst);
+            if flying < BACKGROUND_IN_FLIGHT {
+                if slot
+                    .background_in_flight
+                    .compare_exchange(flying, flying + 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    return Self(Arc::clone(slot));
+                }
+                continue;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        self.0.background_in_flight.fetch_sub(1, Ordering::SeqCst);
+        // Every waiter tries again; the ones that lose the race wait again.
+        self.0.flight_room.notify_waiters();
+    }
 }
 
 /// What a [`Slot`] guards: the limiter as it stands, and who asked for what.
@@ -352,14 +734,181 @@ impl Slot {
             }),
             born: Instant::now(),
             last_grant: AtomicU64::new(0),
+            last_background: AtomicU64::new(0),
+            interactive: AtomicUsize::new(0),
+            yielded: tokio::sync::Notify::new(),
+            interactive_ended: AtomicU64::new(0),
+            background_in_flight: AtomicUsize::new(0),
+            flight_room: tokio::sync::Notify::new(),
+            busy: Mutex::new(Busy::default()),
+            background_waiting: AtomicUsize::new(0),
+            queued_since: AtomicU64::new(0),
         }
+    }
+
+    /// Wait until the quota lets one request of `lane` through.
+    ///
+    /// Both lanes wait on the limiter as it stood when the wait began, as
+    /// every wait did before the lane (#1728): a quota changed meanwhile
+    /// governs from the next request. A background one checks for waiting
+    /// interactive requests before each try at the limiter, and stands aside
+    /// while there are any ([`yield_to_interactive`]), so a request the quota
+    /// lets through while an interactive one waits for it goes to that one.
+    ///
+    /// **Past the floor the sync goes next** ([`overdue`]): an interactive
+    /// request that finds the origin's background requests have stood aside
+    /// for [`BACKGROUND_FLOOR`] lets them have the next request the quota
+    /// lets through. Before the ux12 Windows pass the floor only stopped the
+    /// sync yielding, and a request past it raced every waiting interactive
+    /// one for each refill: a hundred of a person's requests queued beside
+    /// ten of a sync's let none of the ten through in five seconds.
+    ///
+    /// [`yield_to_interactive`]: Self::yield_to_interactive
+    /// [`overdue`]: Self::overdue
+    async fn until_ready(&self, lane: Lane) {
+        let paced = self.current();
+        match lane {
+            // Counted by the caller's [`Sending`], from before this wait.
+            Lane::Interactive => loop {
+                if self.overdue() {
+                    // The next request the quota lets through is the sync's;
+                    // the one after is the first this could take.
+                    tokio::time::sleep_until(paced.free_at() + paced.interval).await;
+                    continue;
+                }
+                match paced.take(1, 0) {
+                    Ok(()) => return,
+                    Err(at) => tokio::time::sleep_until(at).await,
+                }
+            },
+            Lane::Background => {
+                let _queued = Queued::enter(self);
+                loop {
+                    self.yield_to_interactive().await;
+                    // The reserve is kept until the floor: past it, the sync
+                    // takes what any request would.
+                    let floor = self.floor();
+                    let now = Instant::now();
+                    let reserve = if now >= floor {
+                        0
+                    } else {
+                        paced.rate.reserve()
+                    };
+                    match paced.take(1, reserve) {
+                        Ok(()) => {
+                            self.background_granted();
+                            return;
+                        }
+                        // Woken at the floor at the latest, where the reserve
+                        // is no longer kept from it; past the floor, when the
+                        // quota has room. Never at a floor already behind it:
+                        // that sleep ends at once, and the wait spun a core
+                        // until the quota refilled (and, on a paused clock,
+                        // for ever).
+                        Err(at) => {
+                            tokio::time::sleep_until(if now < floor { at.min(floor) } else { at })
+                                .await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// When the origin's waiting background requests stop yielding: a
+    /// [`BACKGROUND_FLOOR`] after the later of the last one let through and
+    /// when the ones waiting now began to (the origin's, not one request's,
+    /// so both lanes read the same instant). A sync request that only queued
+    /// behind its own run's is not starved, and a sync that just started
+    /// after a quiet still yields its first request.
+    fn floor(&self) -> Instant {
+        let queued = self.born + Duration::from_nanos(self.queued_since.load(Ordering::Relaxed));
+        self.last_background().max(queued) + BACKGROUND_FLOOR
+    }
+
+    /// Whether a background request waits and the origin's are past their
+    /// [`floor`](Self::floor): the next request the quota lets through is
+    /// theirs.
+    fn overdue(&self) -> bool {
+        self.background_waiting.load(Ordering::SeqCst) > 0 && Instant::now() >= self.floor()
+    }
+
+    /// Return once no interactive request waits on this origin and the last
+    /// one's answer is [`INTERACTIVE_LINGER`] behind, or once the origin's
+    /// background requests are past their [`floor`](Self::floor), whichever
+    /// is first.
+    async fn yield_to_interactive(&self) {
+        loop {
+            let notified = self.yielded.notified();
+            let mut notified = std::pin::pin!(notified);
+            // Registered before the count is read, so a last interactive
+            // request that goes between the read and the wait still wakes it.
+            notified.as_mut().enable();
+            let lingers = self.lingers_until();
+            let now = Instant::now();
+            if self.interactive.load(Ordering::SeqCst) == 0 && lingers.is_none_or(|end| now >= end)
+            {
+                return;
+            }
+            let until = self.floor();
+            if now >= until {
+                return;
+            }
+            if self.interactive.load(Ordering::SeqCst) == 0
+                && let Some(end) = lingers
+            {
+                // A person's next round may be on its way: woken at the
+                // linger's end to look again, or by a request of theirs
+                // that came and went meanwhile.
+                tokio::select! {
+                    () = notified => {}
+                    () = tokio::time::sleep_until(end.min(until)) => {}
+                }
+                continue;
+            }
+            // Woken at `until`, the floor is read again: another background
+            // request let through meanwhile moved it.
+            tokio::select! {
+                () = notified => {}
+                () = tokio::time::sleep_until(until) => {}
+            }
+        }
+    }
+
+    /// When [`INTERACTIVE_LINGER`] past the last interactive request's
+    /// answer ends, if one has been answered.
+    fn lingers_until(&self) -> Option<Instant> {
+        match self.interactive_ended.load(Ordering::SeqCst) {
+            0 => None,
+            ended => Some(self.born + Duration::from_nanos(ended - 1) + INTERACTIVE_LINGER),
+        }
+    }
+
+    /// How long, summed, any interactive request has held this origin
+    /// ([`Sending`]), to now: a background request's wait takes the growth
+    /// of this over it as time it stood aside, which its own allowance does
+    /// not count ([`InstanceLimiter::until_ready_counted`]).
+    fn held_for(&self) -> Duration {
+        let busy = self.busy.lock().unwrap_or_else(PoisonError::into_inner);
+        busy.total + busy.since.map_or(Duration::ZERO, |since| since.elapsed())
+    }
+    /// Note that a background request was let through just now.
+    fn background_granted(&self) {
+        let now = u64::try_from(self.born.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.last_background.fetch_max(now, Ordering::Relaxed);
+    }
+
+    /// When the origin last let a background request through, or when the
+    /// slot was built if it has not.
+    fn last_background(&self) -> Instant {
+        self.born + Duration::from_nanos(self.last_background.load(Ordering::Relaxed))
     }
 
     /// Count `asked` until the returned registration is dropped, and set the
     /// quota to the stricter of every live holder's.
     ///
-    /// A changed quota is a new governor limiter -- governor cannot change
-    /// the quota of one it has built -- and every holder waits on it from its
+    /// A changed quota is a new limiter ([`Paced`] keeps the quota it was
+    /// built with), and every holder waits on it from its
     /// next request. One looser in either field starts with what its rate
     /// refilled since the origin's last request ([`Paced::loosened`]), so a
     /// loosening hands out what the quiet earned and nothing the limiter it
@@ -416,10 +965,30 @@ impl Slot {
     }
 }
 
-/// A governor limiter and the quota it was built with.
+/// One quota's limiter: the generic cell rate algorithm (GCRA) on tokio's
+/// clock, the arithmetic governor did before it (2026-11-13), with a
+/// tolerance a caller may take smaller.
+///
+/// It keeps one instant, the **theoretical arrival time**: when the next
+/// request would be on time if every request so far had gone exactly one
+/// [interval](Self::interval) apart. A request goes when that is at most
+/// `burst - 1` intervals ahead of now, and moves it one interval on: so a
+/// full limiter lets `burst` through at once and then one an interval. A
+/// caller that keeps a **reserve** of `r` asks for it to be at most
+/// `burst - 1 - r` intervals ahead: it goes only while `r` more could still
+/// go at once after it, which no other caller is held to. The background
+/// lane keeps half the burst that way ([`Rate::reserve`]), so a person's
+/// first requests go at once even while a sync keeps the quota full; the
+/// server sees no more at once, nor more a second, than the burst and rate
+/// allow whoever sends them.
 struct Paced {
     rate: Rate,
-    limiter: DirectLimiter,
+    /// One request's share of a second: a second over the rate, rounded
+    /// down to the nanosecond as governor's did.
+    interval: Duration,
+    /// The theoretical arrival time; `None` for a limiter nothing has gone
+    /// through, which has its whole burst.
+    tat: Mutex<Option<Instant>>,
 }
 
 impl Paced {
@@ -427,20 +996,54 @@ impl Paced {
     fn new(rate: Rate) -> Self {
         Self {
             rate,
-            limiter: RateLimiter::direct_with_clock(
-                Quota::per_second(rate.per_second).allow_burst(rate.burst),
-                TokioClock,
-            ),
+            interval: Duration::from_secs(1) / rate.per_second.get(),
+            tat: Mutex::new(None),
         }
     }
 
-    /// Wait until the limiter lets one request through: governor's
-    /// `until_ready`, sleeping on tokio's timer rather than its own, so the
-    /// wait keeps the clock the limiter reads (#1925).
-    async fn until_ready(&self) {
-        while let Err(not_until) = self.limiter.check() {
-            tokio::time::sleep(not_until.wait_time_from(TokioClock.now())).await;
+    /// Let `n` requests through at once if they fit with `reserve` more
+    /// still able to go after them, or say when they would.
+    ///
+    /// # Errors
+    ///
+    /// The instant they would fit, if no one else went before; `None`-like
+    /// far future where `n` can never fit (more than the burst).
+    fn take(&self, n: u32, reserve: u32) -> Result<(), Instant> {
+        let now = Instant::now();
+        let mut tat = self.tat.lock().unwrap_or_else(PoisonError::into_inner);
+        let burst = self.rate.burst.get();
+        let tolerance = self.interval * burst.saturating_sub(1).saturating_sub(reserve);
+        let from = tat.unwrap_or(now).max(now);
+        // The last of the `n` is on time when its own arrival time is within
+        // the tolerance of now.
+        let last = from + self.interval * n.saturating_sub(1);
+        let ahead = last.saturating_duration_since(now);
+        if n <= burst && ahead <= tolerance {
+            *tat = Some(from + self.interval * n);
+            Ok(())
+        } else {
+            Err(now + ahead.saturating_sub(tolerance))
         }
+    }
+
+    /// When one request could next go, with no reserve kept: now, if it
+    /// could go at once. Takes nothing.
+    fn free_at(&self) -> Instant {
+        let now = Instant::now();
+        let tat = *self.tat.lock().unwrap_or_else(PoisonError::into_inner);
+        let tolerance = self.interval * self.rate.burst.get().saturating_sub(1);
+        let ahead = tat.unwrap_or(now).saturating_duration_since(now);
+        now + ahead.saturating_sub(tolerance)
+    }
+
+    /// How many requests could go at once right now.
+    fn left(&self) -> u32 {
+        let now = Instant::now();
+        let tat = *self.tat.lock().unwrap_or_else(PoisonError::into_inner);
+        let ahead = tat.unwrap_or(now).saturating_duration_since(now);
+        let tolerance = self.interval * self.rate.burst.get();
+        let room = tolerance.saturating_sub(ahead);
+        u32::try_from(room.as_nanos() / self.interval.as_nanos().max(1)).unwrap_or(u32::MAX)
     }
 
     /// A limiter at `rate`, looser than the one it replaces in at least one
@@ -471,7 +1074,7 @@ impl Paced {
     /// Send `n` requests' worth through the limiter at once if it has them,
     /// and say whether it did. Nothing waits; zero always fits.
     fn spend(&self, n: u32) -> bool {
-        NonZeroU32::new(n).is_none_or(|n| matches!(self.limiter.check_n(n), Ok(Ok(()))))
+        n == 0 || self.take(n, 0).is_ok()
     }
 
     /// A limiter at `rate`, no looser in either field than `old`'s, taking
@@ -499,23 +1102,14 @@ impl Paced {
     }
 
     /// Take every request this limiter could send at once, and count them.
-    ///
-    /// Governor has no reading of what a limiter has left, so it is taken in
-    /// halving steps from the largest power of two within the burst: each
-    /// step that fits is kept, and what is left after it is less than the
-    /// step, so the sum is the count. A token that refills between two steps
-    /// can be missed, which only ever counts low.
     fn take_left(&self) -> u32 {
-        let mut left = 0;
-        let mut step = 1 << self.rate.burst.ilog2();
-        loop {
-            if self.spend(step) {
-                left += step;
-            }
-            if step == 1 {
-                return left;
-            }
-            step /= 2;
+        let left = self.left();
+        // What `left` counted fits unless another caller took some between
+        // the two, and then it is counted again.
+        if self.spend(left) {
+            left
+        } else {
+            self.take_left()
         }
     }
 }
@@ -568,7 +1162,25 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::{InstanceLimiter, Paced, PoisonError, Rate};
+    use super::{InstanceLimiter, Lane, Paced, PoisonError, Rate};
+
+    /// A read behind a drawn answer waits in the background lane and says it
+    /// is one (the ux16 overs pass, 2026-11-17); the sync's, in the same
+    /// lane, does not, and neither does a person's.
+    #[tokio::test]
+    async fn a_read_behind_is_in_the_background_lane_and_says_so() {
+        assert_eq!(
+            (super::current_lane(), super::is_behind()),
+            (Lane::Interactive, false)
+        );
+        let behind = super::behind(async { (super::current_lane(), super::is_behind()) }).await;
+        assert_eq!(behind, (Lane::Background, true));
+        let sync = super::on_lane(Lane::Background, async {
+            (super::current_lane(), super::is_behind())
+        })
+        .await;
+        assert_eq!(sync, (Lane::Background, false));
+    }
 
     /// One entry per origin, however its quota moves, and a dropped holder
     /// does not stay on the books: building a limiter prunes the dead.
@@ -810,5 +1422,619 @@ mod tests {
     #[test]
     fn a_zero_quota_reads_as_one() {
         assert_eq!(Rate::new(0, 0), Rate::new(1, 1));
+    }
+
+    mod lane {
+        //! The priority lane (2026-11-13), on tokio's paused clock: a sleep
+        //! is exactly as long as it says, so when each request is let
+        //! through is a literal.
+
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        use tokio::time::Instant;
+
+        use super::super::{
+            BACKGROUND_FLOOR, BACKGROUND_IN_FLIGHT, INTERACTIVE_LINGER, InstanceLimiter, Lane,
+            current_lane, on_lane,
+        };
+        use super::Rate;
+
+        /// Who was let through, and when, counted from the test's start.
+        type Grants = Arc<Mutex<Vec<(Lane, Duration)>>>;
+
+        /// One request in `lane` on `limiter`, sent `after` from `start`,
+        /// recorded in `grants` once let through.
+        fn send(
+            limiter: &InstanceLimiter,
+            lane: Lane,
+            start: Instant,
+            after: Duration,
+            grants: &Grants,
+        ) -> tokio::task::JoinHandle<()> {
+            let (limiter, grants) = (limiter.clone(), Arc::clone(grants));
+            tokio::spawn(on_lane(lane, async move {
+                tokio::time::sleep_until(start + after).await;
+                limiter
+                    .until_ready_within(Duration::from_secs(3_600))
+                    .await
+                    .expect("let through");
+                grants.lock().unwrap().push((lane, start.elapsed()));
+            }))
+        }
+
+        async fn all(handles: Vec<tokio::task::JoinHandle<()>>) {
+            for handle in handles {
+                handle.await.expect("the request's task");
+            }
+        }
+
+        fn ms(n: u64) -> Duration {
+            Duration::from_millis(n)
+        }
+
+        /// Whether `grants`, sorted, are requests a server held to `rate`
+        /// a second with a burst of `burst` could have been sent: replayed
+        /// through the quota's own arithmetic, none early. The first one
+        /// early, where one is.
+        fn early(grants: &[Duration], rate: u32, burst: u32) -> Option<Duration> {
+            let interval = Duration::from_secs(1) / rate;
+            let mut tat = Duration::ZERO;
+            grants.iter().copied().find(|&at| {
+                let from = tat.max(at);
+                let early = from - at > interval * (burst - 1);
+                tat = from + interval;
+                early
+            })
+        }
+
+        /// A sync's twenty requests queued at the start, and a person's
+        /// eight arriving a few at a time while they wait, at ten a second
+        /// with a burst of five: run once with the person's requests in the
+        /// interactive lane and once in the background one, beside the sync
+        /// as they waited before the lane. Both runs are within the quota,
+        /// replayed through its arithmetic: the origin sees no more a second
+        /// and no bigger burst whoever sends. With the lane, the person's
+        /// first two of each few go the moment they arrive, out of the half
+        /// of the burst the sync leaves, and the third at the next refill;
+        /// the sync ends when it would have with the burst its own but for
+        /// the two it left, 200 ms at ten a second.
+        #[tokio::test(start_paused = true)]
+        async fn the_lane_changes_who_goes_and_never_how_many() {
+            async fn run(origin: &str, person: Lane) -> Vec<(Lane, Duration)> {
+                let url = url::Url::parse(origin).expect("url");
+                let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
+                let grants = Grants::default();
+                let start = Instant::now();
+                let mut handles = Vec::new();
+                for _ in 0..20 {
+                    handles.push(send(&limiter, Lane::Background, start, ms(0), &grants));
+                }
+                // Never at an instant the quota lets one through: who of two
+                // arriving together goes first is the runtime's, not the lane's.
+                for at in [350, 350, 360, 905, 910, 1_501, 1_501, 1_502] {
+                    handles.push(send(&limiter, person, start, ms(at), &grants));
+                }
+                all(handles).await;
+                let mut grants = grants.lock().unwrap().clone();
+                grants.sort_by_key(|g| g.1);
+                grants
+            }
+
+            let laned = run("http://laned.invalid:2479", Lane::Interactive).await;
+            let unlaned = run("http://unlaned.invalid:2479", Lane::Background).await;
+
+            let when = |grants: &[(Lane, Duration)]| grants.iter().map(|g| g.1).collect::<Vec<_>>();
+            assert_eq!((laned.len(), unlaned.len()), (28, 28));
+            assert_eq!(early(&when(&laned), 10, 5), None, "{laned:?}");
+            assert_eq!(early(&when(&unlaned), 10, 5), None, "{unlaned:?}");
+            assert_eq!(laned.last().map(|g| g.1), Some(ms(2_500)));
+            let person: Vec<Duration> = laned
+                .iter()
+                .filter(|g| g.0 == Lane::Interactive)
+                .map(|g| g.1)
+                .collect();
+            assert_eq!(
+                person,
+                [350, 350, 400, 905, 910, 1_501, 1_501, 1_600].map(ms)
+            );
+        }
+
+        /// The checker above is no rubber stamp: a sixth request at once, or
+        /// one sooner than a refill after the burst, is early.
+        #[test]
+        fn a_burst_past_the_quota_is_early() {
+            assert_eq!(early(&[ms(0); 5], 10, 5), None);
+            assert_eq!(early(&[ms(0); 6], 10, 5), Some(ms(0)));
+            let mut steady = vec![ms(0); 5];
+            steady.extend([ms(100), ms(150)]);
+            assert_eq!(early(&steady, 10, 5), Some(ms(150)));
+        }
+
+        /// A sync keeping the quota full leaves half the burst: a person's
+        /// page of two requests goes at once, where it waited a refill for
+        /// each before the reserve (the priority lane, 2026-11-13).
+        #[tokio::test(start_paused = true)]
+        async fn a_persons_first_requests_go_at_once_beside_a_full_sync() {
+            let url = url::Url::parse("http://reserve.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let sync = {
+                let (limiter, grants) = (limiter.clone(), Arc::clone(&grants));
+                tokio::spawn(on_lane(Lane::Background, async move {
+                    while start.elapsed() < ms(2_000) {
+                        limiter
+                            .until_ready_within(Duration::from_secs(60))
+                            .await
+                            .expect("let through");
+                        grants
+                            .lock()
+                            .unwrap()
+                            .push((Lane::Background, start.elapsed()));
+                    }
+                }))
+            };
+            let person: Vec<_> = [1_050, 1_050]
+                .into_iter()
+                .map(|at| send(&limiter, Lane::Interactive, start, ms(at), &grants))
+                .collect();
+            all(person).await;
+            sync.await.expect("the sync");
+
+            let mut grants = grants.lock().unwrap().clone();
+            grants.sort_by_key(|g| g.1);
+            let person: Vec<Duration> = grants
+                .iter()
+                .filter(|g| g.0 == Lane::Interactive)
+                .map(|g| g.1)
+                .collect();
+            assert_eq!(person, [ms(1_050), ms(1_050)]);
+            assert_eq!(
+                early(&grants.iter().map(|g| g.1).collect::<Vec<_>>(), 10, 4),
+                None
+            );
+        }
+
+        /// The quota spent and four sync requests queued behind it: a
+        /// person's request that arrives next is let through next, at the
+        /// next refill, ahead of all four.
+        #[tokio::test(start_paused = true)]
+        async fn a_persons_request_takes_the_next_request_ahead_of_a_queued_sync() {
+            let url = url::Url::parse("http://next.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let mut handles = Vec::new();
+            for _ in 0..5 {
+                handles.push(send(&limiter, Lane::Background, start, ms(0), &grants));
+            }
+            handles.push(send(&limiter, Lane::Interactive, start, ms(10), &grants));
+            all(handles).await;
+
+            let grants = grants.lock().unwrap().clone();
+            assert_eq!(grants[0], (Lane::Background, ms(0)), "the burst");
+            assert_eq!(grants[1], (Lane::Interactive, ms(100)), "the next one");
+            assert!(grants[2..].iter().all(|g| g.0 == Lane::Background));
+            assert_eq!(grants[5].1, ms(500), "and the sync goes on after it");
+        }
+
+        /// A person's requests trickling at two a second, under a quota of
+        /// ten, leave the sync the other eight: over three seconds a sync
+        /// that always has a request waiting is let through 25 times
+        /// besides the person's six, and each of those waits at most one
+        /// refill.
+        #[tokio::test(start_paused = true)]
+        async fn the_sync_goes_on_while_a_persons_requests_trickle() {
+            let url = url::Url::parse("http://trickle.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let sync = {
+                let (limiter, grants) = (limiter.clone(), Arc::clone(&grants));
+                tokio::spawn(on_lane(Lane::Background, async move {
+                    while start.elapsed() < ms(3_000) {
+                        limiter
+                            .until_ready_within(Duration::from_secs(60))
+                            .await
+                            .expect("let through");
+                        grants
+                            .lock()
+                            .unwrap()
+                            .push((Lane::Background, start.elapsed()));
+                    }
+                }))
+            };
+            let person: Vec<_> = [250, 750, 1_250, 1_750, 2_250, 2_750]
+                .into_iter()
+                .map(|at| send(&limiter, Lane::Interactive, start, ms(at), &grants))
+                .collect();
+            all(person).await;
+            sync.await.expect("the sync");
+
+            let grants = grants.lock().unwrap().clone();
+            let synced = grants.iter().filter(|g| g.0 == Lane::Background).count();
+            assert_eq!(synced, 25, "{grants:?}");
+            let person: Vec<Duration> = grants
+                .iter()
+                .filter(|g| g.0 == Lane::Interactive)
+                .map(|g| g.1)
+                .collect();
+            assert_eq!(person, [300, 800, 1_300, 1_800, 2_300, 2_800].map(ms));
+        }
+
+        /// Fifty of a person's requests, five seconds of the quota, do not
+        /// hold a sync request for five seconds: it stands aside for
+        /// [`BACKGROUND_FLOOR`] and then takes the next request the quota
+        /// lets through.
+        #[tokio::test(start_paused = true)]
+        async fn the_sync_is_not_starved_by_a_person_who_fills_the_quota() {
+            let url = url::Url::parse("http://starved.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let mut handles = Vec::new();
+            for _ in 0..50 {
+                handles.push(send(&limiter, Lane::Interactive, start, ms(0), &grants));
+            }
+            handles.push(send(&limiter, Lane::Background, start, ms(0), &grants));
+            all(handles).await;
+
+            let grants = grants.lock().unwrap().clone();
+            let synced = grants
+                .iter()
+                .find(|g| g.0 == Lane::Background)
+                .expect("the sync's request")
+                .1;
+            assert!(
+                synced >= BACKGROUND_FLOOR && synced <= BACKGROUND_FLOOR + ms(100),
+                "{synced:?}: {grants:?}"
+            );
+        }
+
+        /// A person's request whose answer is not in holds the sync off as
+        /// one waiting on the quota does ([`super::super::Sending`]): the
+        /// quota has room, but a sync request sent while the person's is in
+        /// flight goes [`INTERACTIVE_LINGER`] after its answer is in. One
+        /// whose answer takes five seconds holds it [`BACKGROUND_FLOOR`] and
+        /// no longer.
+        #[tokio::test(start_paused = true)]
+        async fn the_sync_stands_aside_until_a_persons_answer_is_in() {
+            async fn held_for(origin: &str, flight: Duration) -> Duration {
+                let url = url::Url::parse(origin).expect("url");
+                let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
+                let start = Instant::now();
+                let sending = on_lane(
+                    Lane::Interactive,
+                    limiter.until_ready_sending(Duration::from_secs(60)),
+                )
+                .await
+                .expect("the burst has room");
+                let sync = {
+                    let limiter = limiter.clone();
+                    tokio::spawn(on_lane(Lane::Background, async move {
+                        tokio::time::sleep(ms(10)).await;
+                        limiter
+                            .until_ready_within(Duration::from_secs(60))
+                            .await
+                            .expect("let through");
+                        start.elapsed()
+                    }))
+                };
+                tokio::time::sleep(flight).await;
+                drop(sending);
+                sync.await.expect("the sync")
+            }
+
+            assert_eq!(
+                held_for("http://flight.invalid:2479", ms(300)).await,
+                ms(300) + INTERACTIVE_LINGER
+            );
+            assert_eq!(
+                held_for("http://long.invalid:2479", ms(5_000)).await,
+                ms(10) + BACKGROUND_FLOOR,
+                "stood aside from 10 ms, a second without one let through"
+            );
+        }
+
+        /// A sync request's wait holds no place: a person's request behind
+        /// it is held by nothing but the quota.
+        #[tokio::test(start_paused = true)]
+        async fn a_sync_requests_answer_holds_nobody() {
+            let url = url::Url::parse("http://nobody.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
+            let sync = on_lane(
+                Lane::Background,
+                limiter.until_ready_sending(Duration::from_secs(60)),
+            )
+            .await
+            .expect("the burst has room");
+            let start = Instant::now();
+            on_lane(
+                Lane::Interactive,
+                limiter.until_ready_within(Duration::from_secs(60)),
+            )
+            .await
+            .expect("the burst has room");
+            assert_eq!(start.elapsed(), Duration::ZERO);
+            drop(sync);
+        }
+
+        /// The ux13 Windows pass (2026-11-15): a page's read in rounds, each
+        /// sent 20 ms after the answer to the one before, as a file's entry
+        /// and then its bytes are. The sync's request queued behind the
+        /// first round waits out the second too, rather than going in the
+        /// moment between them: red before the linger, when it went at
+        /// 300 ms, onto the server the second round then reached.
+        #[tokio::test(start_paused = true)]
+        async fn a_persons_next_round_finds_the_sync_still_aside() {
+            let url = url::Url::parse("http://rounds.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 5));
+            let start = Instant::now();
+            let round = || {
+                on_lane(
+                    Lane::Interactive,
+                    limiter.until_ready_sending(Duration::from_secs(60)),
+                )
+            };
+            let first = round().await.expect("the burst has room");
+            let sync = {
+                let limiter = limiter.clone();
+                tokio::spawn(on_lane(Lane::Background, async move {
+                    tokio::time::sleep(ms(10)).await;
+                    limiter
+                        .until_ready_within(Duration::from_secs(60))
+                        .await
+                        .expect("let through");
+                    start.elapsed()
+                }))
+            };
+            tokio::time::sleep(ms(300)).await;
+            drop(first);
+            tokio::time::sleep(ms(20)).await;
+            let second = round().await.expect("the burst has room");
+            tokio::time::sleep(ms(300)).await;
+            drop(second);
+            assert_eq!(
+                sync.await.expect("the sync"),
+                ms(620) + INTERACTIVE_LINGER,
+                "after the second round's answer, and the linger past it"
+            );
+        }
+
+        /// The linger never holds the sync past [`BACKGROUND_FLOOR`]: a
+        /// person whose answered requests come every 100 ms, each starting
+        /// a new linger before the last ends, still lets the sync's waiting
+        /// request through a floor after it began to wait.
+        #[tokio::test(start_paused = true)]
+        async fn the_linger_holds_the_sync_no_longer_than_the_floor() {
+            let url = url::Url::parse("http://linger.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let person = {
+                let limiter = limiter.clone();
+                tokio::spawn(on_lane(Lane::Interactive, async move {
+                    for _ in 0..30 {
+                        let sending = limiter
+                            .until_ready_sending(Duration::from_secs(60))
+                            .await
+                            .expect("the quota has room");
+                        tokio::time::sleep(ms(10)).await;
+                        drop(sending);
+                        tokio::time::sleep(ms(90)).await;
+                    }
+                }))
+            };
+            tokio::time::sleep(ms(5)).await;
+            let synced = sync_within(&limiter, start, ms(20), Duration::from_secs(60));
+            assert_eq!(
+                synced.await.expect("the sync"),
+                (ms(20) + BACKGROUND_FLOOR, true)
+            );
+            person.await.expect("the person");
+        }
+
+        /// The ux13 Windows pass (2026-11-15): eight of a sync's requests
+        /// at once, as a Gitea run walks eight repositories, each answered
+        /// in a second, on a quota with room for all of them. At most
+        /// [`BACKGROUND_IN_FLIGHT`] are on the server at once, so a
+        /// person's request meets two of the sync's, not eight; and a
+        /// person's request beside them goes at once. Red before the cap:
+        /// all eight went at once.
+        #[tokio::test(start_paused = true)]
+        async fn a_sync_keeps_at_most_two_requests_in_flight() {
+            let url = url::Url::parse("http://flights.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let flying = Arc::new(Mutex::new((0usize, 0usize)));
+            let mut handles = Vec::new();
+            for _ in 0..8 {
+                let (limiter, flying) = (limiter.clone(), Arc::clone(&flying));
+                handles.push(tokio::spawn(on_lane(Lane::Background, async move {
+                    let sending = limiter
+                        .until_ready_sending(Duration::from_secs(60))
+                        .await
+                        .expect("let through");
+                    {
+                        let mut flying = flying.lock().unwrap();
+                        flying.0 += 1;
+                        flying.1 = flying.1.max(flying.0);
+                    }
+                    tokio::time::sleep(ms(1_000)).await;
+                    flying.lock().unwrap().0 -= 1;
+                    drop(sending);
+                })));
+            }
+            tokio::time::sleep(ms(10)).await;
+            let person = Instant::now();
+            on_lane(
+                Lane::Interactive,
+                limiter.until_ready_within(Duration::from_secs(60)),
+            )
+            .await
+            .expect("the quota has room");
+            assert_eq!(person.elapsed(), Duration::ZERO);
+            all(handles).await;
+            assert_eq!(flying.lock().unwrap().1, BACKGROUND_IN_FLIGHT);
+            assert_eq!(start.elapsed(), ms(4_000), "two at a time, a second each");
+        }
+
+        /// A sync request waiting for a place in flight waits on the
+        /// server's time on the sync's earlier requests, not its own: two
+        /// that take ten seconds each leave a third, allowed one second of
+        /// waiting, to go once one of theirs is answered.
+        #[tokio::test(start_paused = true)]
+        async fn waiting_for_a_place_in_flight_does_not_count_against_the_wait() {
+            let url = url::Url::parse("http://place.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(100, 100));
+            let start = Instant::now();
+            let held = on_lane(Lane::Background, async {
+                let mut held = Vec::new();
+                for _ in 0..BACKGROUND_IN_FLIGHT {
+                    held.push(
+                        limiter
+                            .until_ready_sending(Duration::from_secs(60))
+                            .await
+                            .expect("a place"),
+                    );
+                }
+                held
+            })
+            .await;
+            let third = sync_within(&limiter, start, ms(0), Duration::from_secs(1));
+            tokio::time::sleep(ms(10_000)).await;
+            drop(held);
+            assert_eq!(third.await.expect("the sync"), (ms(10_000), true));
+        }
+
+        /// A person's request yields nothing on another origin: the sync of
+        /// a second server goes on at its own quota.
+        #[tokio::test(start_paused = true)]
+        async fn a_person_on_one_origin_holds_no_sync_on_another() {
+            let one = url::Url::parse("http://one.invalid:2479").expect("url");
+            let other = url::Url::parse("http://other.invalid:2479").expect("url");
+            let busy = InstanceLimiter::for_origin(&one, Rate::new(1, 1));
+            let quiet = InstanceLimiter::for_origin(&other, Rate::new(10, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            // The first takes `one`'s burst; the second waits a second on it.
+            let person = vec![
+                send(&busy, Lane::Interactive, start, ms(0), &grants),
+                send(&busy, Lane::Interactive, start, ms(0), &grants),
+            ];
+            let sync = vec![
+                send(&quiet, Lane::Background, start, ms(10), &grants),
+                send(&quiet, Lane::Background, start, ms(10), &grants),
+            ];
+            all(sync).await;
+            assert_eq!(start.elapsed(), ms(110), "the other origin's own pace");
+            all(person).await;
+        }
+
+        /// One sync request in the background lane with `within` to wait,
+        /// sent `after` from `start`: when it ended and whether it was let
+        /// through.
+        fn sync_within(
+            limiter: &InstanceLimiter,
+            start: Instant,
+            after: Duration,
+            within: Duration,
+        ) -> tokio::task::JoinHandle<(Duration, bool)> {
+            let limiter = limiter.clone();
+            tokio::spawn(on_lane(Lane::Background, async move {
+                tokio::time::sleep_until(start + after).await;
+                let went = limiter.until_ready_within(within).await.is_ok();
+                (start.elapsed(), went)
+            }))
+        }
+
+        /// A person filling the quota for ten seconds, and a sync with ten
+        /// requests queued, each allowed five seconds of waiting. The
+        /// person leaves the sync about one request a second
+        /// ([`BACKGROUND_FLOOR`]), so its later requests stand aside for
+        /// more than five seconds: none of that is the sync's own wait, so
+        /// every one goes (the ux12 Windows pass: a Gitea run stopped on
+        /// knobas' own quota after 45 s of a person's reads). Counted
+        /// against the wait, the last five run out.
+        #[tokio::test(start_paused = true)]
+        async fn standing_aside_for_a_person_does_not_count_against_the_wait() {
+            let url = url::Url::parse("http://aside.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(10, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let person: Vec<_> = (0..100)
+                .map(|_| send(&limiter, Lane::Interactive, start, ms(0), &grants))
+                .collect();
+            let sync: Vec<_> = (0..10)
+                .map(|_| sync_within(&limiter, start, ms(1), Duration::from_secs(5)))
+                .collect();
+            let mut ended = Vec::new();
+            for handle in sync {
+                ended.push(handle.await.expect("the sync request's task"));
+            }
+            all(person).await;
+
+            assert!(ended.iter().all(|(_, went)| *went), "{ended:?}");
+            assert!(
+                ended.iter().any(|(at, _)| *at > Duration::from_secs(6)),
+                "some stood aside past the five seconds: {ended:?}"
+            );
+        }
+
+        /// The sync does not wait for ever behind a person: a request's wait
+        /// ends [`STAND_ASIDE_CEILING`](super::super::STAND_ASIDE_CEILING)
+        /// past its own allowance however long a person's requests fill the
+        /// quota. Fifteen minutes of a person at one a second, and five
+        /// hundred sync requests: the floor lets about one a second of them
+        /// through, so the late ones end on the quota, none later than the
+        /// ceiling.
+        #[tokio::test(start_paused = true)]
+        async fn a_sync_request_stands_aside_for_at_most_the_ceiling() {
+            use super::super::STAND_ASIDE_CEILING;
+            let url = url::Url::parse("http://ceiling.invalid:2479").expect("url");
+            let limiter = InstanceLimiter::for_origin(&url, Rate::new(1, 1));
+            let grants = Grants::default();
+            let start = Instant::now();
+            let within = Duration::from_secs(5);
+            let person: Vec<_> = (0..900)
+                .map(|_| send(&limiter, Lane::Interactive, start, ms(0), &grants))
+                .collect();
+            let sync: Vec<_> = (0..500)
+                .map(|_| sync_within(&limiter, start, ms(1), within))
+                .collect();
+            let mut ended = Vec::new();
+            for handle in sync {
+                ended.push(handle.await.expect("the sync request's task"));
+            }
+            all(person).await;
+
+            let limit = ms(1) + within + STAND_ASIDE_CEILING;
+            assert!(
+                ended.iter().all(|(at, _)| *at <= limit),
+                "{:?}",
+                ended.iter().map(|e| e.0).max()
+            );
+            assert!(
+                ended.iter().any(|(_, went)| !went),
+                "the ceiling ended some"
+            );
+            assert!(ended.iter().any(|(_, went)| *went), "the floor let some go");
+        }
+
+        /// Outside any lane a request is a person's; a lane inside a lane
+        /// holds for its own call.
+        #[tokio::test]
+        async fn a_request_is_a_persons_unless_marked() {
+            assert_eq!(current_lane(), Lane::Interactive);
+            on_lane(Lane::Background, async {
+                assert_eq!(current_lane(), Lane::Background);
+                on_lane(Lane::Interactive, async {
+                    assert_eq!(current_lane(), Lane::Interactive);
+                })
+                .await;
+                assert_eq!(current_lane(), Lane::Background);
+            })
+            .await;
+        }
     }
 }

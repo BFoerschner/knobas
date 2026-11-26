@@ -128,6 +128,7 @@ async fn app(jira_url: &str) -> SourcesState {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -149,6 +150,7 @@ async fn app(jira_url: &str) -> SourcesState {
             config: json!({}),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

@@ -13,6 +13,7 @@ import {
   headerLine,
   openPrsOf,
   prLines,
+  twinRows,
   repoTeams,
   visiblePrs,
   visibleRepos,
@@ -64,7 +65,7 @@ function facts(entityId: string, over: Partial<CodeFacts>): CodeFacts {
   return { entity_id: entityId, author: null, mine: false, language: null, teams: [], ...over };
 }
 
-test("a pull request carries its author, and a settled one of yours is under Yours (#966)", () => {
+test("a pull request carries its author, and a settled one of yours stays under Merged or closed (2026-11-11)", () => {
   const id = (n: string) => `gitea:tidewater/payout-service#${n}`;
   const known = factsById([
     facts(id("142"), { author: "mara", mine: true }),
@@ -79,8 +80,20 @@ test("a pull request carries its author, and a settled one of yours is under You
   );
   expect(lines.map((line) => [line.number, line.group, line.author])).toEqual([
     ["#142", "yours", "mara"],
-    ["#139", "yours", "mara"],
+    // Yours is open work: only `code_facts` knows #139 is mine, and it lands after the rows drew.
+    ["#139", "settled", "mara"],
     ["#57", "settled", "tom"],
+  ]);
+  expect(lines.find((line) => line.number === "#139")?.mine).toBe(true);
+});
+
+test("a pull request's opener is named by the profile where the source keeps one, else by the account (F-107)", () => {
+  const id = (n: string) => `gitea:tidewater/payout-service#${n}`;
+  const known = factsById([facts(id("142"), { author: "jonas.becker", author_name: "Jonas Becker" }), facts(id("57"), { author: "tom" })]);
+  const lines = prLines(page([]), page([pr("142", "open"), pr("57", "closed")]), NOW, known);
+  expect(lines.map((line) => [line.number, line.author])).toEqual([
+    ["#142", "Jonas Becker"],
+    ["#57", "tom"],
   ]);
 });
 
@@ -227,8 +240,20 @@ test("New pull request opens the compare page for the job's branch in its reposi
 
 test("the header names the one host the repositories come from", () => {
   expect(headerLine(47, [repo("a")], [{ id: "gitea", base_url: "https://git.example.com/" }])).toBe(
-    "47 repositories on git.example.com, what asks for you first.",
+    "47 repositories on git.example.com, yours first.",
   );
-  expect(headerLine(2, [repo("a"), { ...repo("b"), source_id: "gitea-eu" }], [])).toBe("2 repositories, what asks for you first.");
-  expect(headerLine(1, [repo("a")], [{ id: "gitea", base_url: "not a url" }])).toBe("1 repository, what asks for you first.");
+  expect(headerLine(2, [repo("a"), { ...repo("b"), source_id: "gitea-eu" }], [])).toBe("2 repositories, yours first.");
+  expect(headerLine(1, [repo("a")], [{ id: "gitea", base_url: "not a url" }])).toBe("1 repository, yours first.");
+});
+
+test("a repository two sources hold names its source, and one only one holds does not (the live run, 2026-11-09)", () => {
+  const rows = [
+    { entity_id: "live-gitea:tidewater/payout-service", source_id: "live-gitea", title: "tidewater/payout-service" },
+    { entity_id: "live-forgejo:tidewater/payout-service", source_id: "live-forgejo", title: "tidewater/payout-service" },
+    { entity_id: "live-gitea:tidewater/milestone-review", source_id: "live-gitea", title: "tidewater/milestone-review" },
+    { entity_id: "mock:payout-service", source_id: "mock", title: "payout-service" },
+  ];
+  expect([...twinRows(rows, (row) => row.title)].sort()).toEqual(["live-forgejo:tidewater/payout-service", "live-gitea:tidewater/payout-service"]);
+  // One source holding a name twice is one place drawn twice, and no twin.
+  expect(twinRows([rows[0]!, { ...rows[0]!, entity_id: "live-gitea:again" }], (row) => row.title).size).toBe(0);
 });

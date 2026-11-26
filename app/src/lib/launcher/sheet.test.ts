@@ -31,10 +31,11 @@ const entity = (entityKind: string, entityId: string, title = "Title"): SheetSub
 
 const ids = (subject: SheetSubject, ctx: SheetContext = CTX) => sheetActions(subject, ctx).map((action) => action.id);
 
-test("a ticket: the link first, then the timer, Work on this and Copy key", () => {
-  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["link", "timer", "work", "fav", "copy"]);
+test("a ticket: Work on this, the timer, the link and Copy key, in one order whatever the job (F-637)", () => {
+  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["work", "timer", "link", "fav", "copy"]);
   const actions = sheetActions(entity("ticket", "jira:PAY-231"), CTX);
-  expect(actions[0]?.label).toBe("Link to PAY-999");
+  expect(actions[0]?.label).toBe("Work on this");
+  expect(ids(entity("ticket", "jira:PAY-231"), { ...CTX, job: null })).toEqual(["work", "timer", "fav", "copy"]);
   expect(actions.find((a) => a.id === "work")?.does).toEqual({ kind: "go", hash: "#/job/jira%3APAY-231" });
   expect(actions.find((a) => a.id === "copy")).toMatchObject({ label: "Copy key", does: { kind: "copy", text: "PAY-231" } });
 });
@@ -56,31 +57,33 @@ test("Start timer is a ticket's alone", () => {
 test("a pull request: the files, the conversation, Approve, one Open in per application, Copy title", () => {
   const actions = sheetActions(entity("pr", "gitea:acme/svc#142", "Backoff"), CTX);
   expect(actions.map((a) => a.label)).toEqual([
-    "Link to PAY-999",
     "Review the files",
     "Conversation",
     "Approve",
+    "Link to PAY-999",
     "Open in VS Code",
     "Open in IntelliJ",
     "Favourite",
     "Copy title",
   ]);
-  expect(actions[1]?.does).toEqual({ kind: "go", hash: "#/pr/gitea%3Aacme%2Fsvc%23142/diff" });
-  expect(actions[3]?.does).toMatchObject({ kind: "write", payload: { Approve: { entity: "gitea:acme/svc#142", body: "" } } });
+  expect(actions[0]?.does).toEqual({ kind: "go", hash: "#/pr/gitea%3Aacme%2Fsvc%23142/diff" });
+  expect(actions[2]?.does).toMatchObject({ kind: "write", payload: { Approve: { entity: "gitea:acme/svc#142", body: "" } } });
   expect(actions[5]?.does).toEqual({ kind: "open-in", application: "idea", name: "IntelliJ" });
 });
 
 test("a repository: Pull requests, Branches, Open in, Clone", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["link", "prs", "branches", "open-code", "open-idea", "clone", "fav", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["prs", "branches", "link", "open-code", "open-idea", "clone", "fav", "copy"]);
 });
 
 test("no application configured: no Open in row", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["link", "prs", "branches", "clone", "fav", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["prs", "branches", "link", "clone", "fav", "copy"]);
 });
 
 test("a branch opens in each application; a pipeline runs; a monitor is acknowledged", () => {
   expect(ids(entity("branch", "gitea:acme/svc@main"))).toEqual(["link", "open-code", "open-idea", "fav", "copy"]);
   const run = sheetActions(entity("pipeline", "teamcity:Pay_Build"), CTX).find((a) => a.id === "run");
+  // The run it starts can be reached from its toast, as a page's *Re-run* can (F-644).
+  expect(run?.does).toMatchObject({ where: { label: "Show in runs" } });
   expect(run?.does).toMatchObject({ kind: "write", payload: { TriggerBuild: { entity: "teamcity:Pay_Build" } } });
   const ack = sheetActions(entity("monitor", "kuma:7"), CTX).find((a) => a.id === "ack");
   expect(ack?.does).toMatchObject({ kind: "ack", monitorId: "kuma:7" });
@@ -147,8 +150,8 @@ const SET = {
 
 test("the set row sits with the pair, after the link, and a member or a manual rule already there is not added twice", async () => {
   const ctx = { ...CTX, sets: [SET] };
-  expect(ids(entity("monitor", "kuma:7"), ctx).slice(0, 3)).toEqual(["link", "set", "ack"]);
-  expect(ids(entity("ticket", "jira:PAY-231"), ctx).slice(0, 3)).toEqual(["link", "set", "timer"]);
+  expect(ids(entity("monitor", "kuma:7"), ctx).slice(0, 3)).toEqual(["ack", "link", "set"]);
+  expect(ids(entity("ticket", "jira:PAY-231"), ctx).slice(0, 4)).toEqual(["work", "timer", "link", "set"]);
   for (const kind of ["pr", "branch", "pipeline", "page", "asset", "repo"]) {
     expect(ids(entity(kind, `x:${kind}`), ctx).includes("set"), kind).toBe(kind !== "pr" && kind !== "branch");
   }
@@ -214,7 +217,7 @@ test("a set: Open, then Show on the chosen job, which shows the set on the job's
   const actions = sheetActions(set, ctx);
   expect(actions.map((a) => a.id)).toEqual(["open", "show"]);
   expect(actions[1]).toMatchObject({
-    label: "Show on PAY-999",
+    label: "Apply to PAY-999",
     does: { kind: "save-set", said: "Payments now shows on PAY-999", draft: { rules: [{ kind: "manual", value: "jira:PAY-231" }, { kind: "manual", value: "jira:PAY-999" }] } },
   });
   // Already shown there: saved as it is, no second rule.
@@ -230,4 +233,26 @@ test("a key is kept per kind: an entity's own kind, else the row's", () => {
   expect(kindOf({ kind: "entity", entityId: "gitea:r", entityKind: "repo", title: "r", sourceId: "gitea", path: null })).toBe("repo");
   expect(kindOf({ kind: "list", id: "l", label: "L", text: "#t", refusal: null })).toBe("list");
   expect(kindOf({ kind: "view", id: "v", title: "V" })).toBe("view");
+});
+
+test("a password entry: its three copies, Open, Favourite and Copy title; never the link, a set or the timer (ADR-0056)", () => {
+  const entry = entity("password_entry", "pw:e1", "payout db");
+  const sets = [{ id: "s1", name: "Payout stack", description: "", rules: [], members: [] } as unknown as LinkSetRow];
+  expect(ids(entry, { ...CTX, sets })).toEqual(["pw-password", "pw-username", "pw-code", "open", "fav", "copy"]);
+  const actions = sheetActions(entry, CTX);
+  expect(actions.slice(0, 3).map((a) => a.label)).toEqual(["Copy password", "Copy username", "Copy one-time code"]);
+  expect(actions.find((a) => a.id === "pw-password")?.does).toEqual({ kind: "pw-copy", what: "password" });
+  expect(actions.find((a) => a.id === "open")?.does).toEqual({ kind: "go", hash: "#/passwords/entry/pw%3Ae1" });
+  const folder = entity("password_folder", "pw:f1", "Payments");
+  expect(ids(folder, { ...CTX, sets })).toEqual(["open", "fav", "copy"]);
+  expect(sheetActions(folder, CTX)[0]?.does).toEqual({ kind: "go", hash: "#/passwords/in/pw%3Af1" });
+});
+
+test("a repository's commands follow its Open in rows: Run ⟨first⟩ and the Run… flow (ADR-0060)", () => {
+  const commands = [
+    { id: "tests", name: "Tests", command: "npm test" },
+    { id: "eslint", name: "ESLint", command: "eslint {file}" },
+  ].map((c) => ({ stdin: "none" as const, files: [], folders: [], has: [], repo_holds: [], repos: [], shows: "auto" as const, start_in: "root" as const, path: [], env: [], colours: true, timeout_secs: 120, wsl_paths: false, ...c }));
+  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, commands })).toEqual(["prs", "branches", "link", "open-code", "open-idea", "run-tests", "run", "clone", "fav", "copy"]);
+  expect(ids(entity("branch", "gitea:acme/svc@main"), { ...CTX, commands })).not.toContain("run");
 });

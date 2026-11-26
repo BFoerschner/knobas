@@ -10,9 +10,12 @@
 //!
 //! # What runs (ADR-0036, on ADR-0021's terms)
 //!
-//! Two read-only subcommands, under [`working_tree`](super::working_tree)'s
-//! environment and guards, and nothing else (the module's tests record every
-//! command line):
+//! Each read is answered in knobas's own process first
+//! ([`Reader`](super::reader), the git-starts pass, 2026-11-16), which prints
+//! what the command below prints and starts nothing; where it cannot answer
+//! exactly, the command itself runs. Two read-only subcommands, under
+//! [`working_tree`](super::working_tree)'s environment and guards, and
+//! nothing else (the module's tests record every command line):
 //!
 //! - `git rev-parse --verify --quiet <sha>^{commit}` per end, which is the
 //!   [`holds_commits`] check and resolves an end to its whole sha; for a root
@@ -39,19 +42,12 @@ use knobas_core::checkout::open::is_sha;
 use knobas_core::checkout::worktree::is_diff_end;
 use knobas_source::diff::{DiffFile, parse_view};
 
-use super::uncommitted::{READ_BYTES, READ_LINES, run_capped};
-use super::working_tree::{
-    APPLE_SHIM, PROTOCOL_VARIABLES, command_line_tools_installed, git_at, is_dir_off_runtime,
-    locate,
-};
+use super::reader::{Form, Reader};
+use super::uncommitted::{READ_BYTES, READ_LINES};
+use super::working_tree::{PROTOCOL_VARIABLES, git_at};
 
 /// How long the whole local read may take, as for the uncommitted diff.
 pub const TIMEOUT: Duration = super::uncommitted::TIMEOUT;
-
-/// The empty tree of a SHA-1 repository: what a root commit's diff is from.
-const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-/// The empty tree of a SHA-256 repository.
-const EMPTY_TREE_SHA256: &str = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 
 /// A range's diff as local git answered it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,24 +63,41 @@ pub struct LocalDiff {
 }
 
 /// The diff from `base` to `head` at the checkout `path`, `-w` with
-/// `ignore_whitespace`; `None` when it cannot be read here (no git, no
-/// repository, a name that is not a sha, a commit the checkout does not
-/// hold, git refusing or slow), so the source is asked.
+/// `ignore_whitespace`; `None` when it cannot be read here (no repository, a
+/// name that is not a sha, a commit the checkout does not hold, and with
+/// git asked: no git, git refusing or slow), so the source is asked.
+///
+/// Read in knobas's own process, and by git where that cannot answer
+/// ([`Reader`], the git-starts pass, 2026-11-16).
 pub async fn read(
     path: &Path,
     base: &str,
     head: &str,
     ignore_whitespace: bool,
 ) -> Option<LocalDiff> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    read_with(&search, path, base, head, ignore_whitespace).await
+    read_via(&Reader::at(path), base, head, ignore_whitespace).await
 }
 
-/// [`read`] with the `PATH` to find `git` on, so a test can put a recording
-/// `git` first.
+/// [`read`] by the `git` on `search` alone, so a test can put a recording
+/// `git` first and see every command line.
 pub async fn read_with(
     search: &OsStr,
     path: &Path,
+    base: &str,
+    head: &str,
+    ignore_whitespace: bool,
+) -> Option<LocalDiff> {
+    read_via(
+        &Reader::git_alone(search, path),
+        base,
+        head,
+        ignore_whitespace,
+    )
+    .await
+}
+
+async fn read_via(
+    reader: &Reader,
     base: &str,
     head: &str,
     ignore_whitespace: bool,
@@ -96,41 +109,30 @@ pub async fn read_with(
     if !is_sha(stem) || !is_sha(head) {
         return None;
     }
-    let git = locate(
-        search,
-        Path::new(APPLE_SHIM),
-        command_line_tools_installed,
-        TIMEOUT,
-    )
-    .await
-    .ok()?;
-    if !is_dir_off_runtime(path).await {
-        return None;
-    }
     let all = async {
-        let head = commit(&git, path, head).await?;
-        let stem = commit(&git, path, stem).await?;
+        let head = reader.commit(head).await?;
+        let stem = reader.commit(stem).await?;
         let base = if caret {
-            match commit(&git, path, &format!("{stem}^")).await {
+            match reader.commit(&format!("{stem}^")).await {
                 Some(parent) => Some(parent),
                 None => {
                     // No parent: a root commit, or a shallow clone's cut,
                     // whose parent exists and is not here.
-                    let empty = empty_tree_if_whole(&git, path).await?;
-                    return diff(&git, path, &empty, &head, ignore_whitespace)
-                        .await
-                        .map(|(files, truncated)| LocalDiff {
+                    let empty = reader.empty_tree_if_whole().await?;
+                    return diff(reader, &empty, &head, ignore_whitespace).await.map(
+                        |(files, truncated)| LocalDiff {
                             files,
                             truncated,
                             base: None,
                             head,
-                        });
+                        },
+                    );
                 }
             }
         } else {
             Some(stem)
         }?;
-        let (files, truncated) = diff(&git, path, &base, &head, ignore_whitespace).await?;
+        let (files, truncated) = diff(reader, &base, &head, ignore_whitespace).await?;
         Some(LocalDiff {
             files,
             truncated,
@@ -141,36 +143,41 @@ pub async fn read_with(
     tokio::time::timeout(TIMEOUT, all).await.ok().flatten()
 }
 
-/// Whether the checkout at `path` holds every one of `ends` as a commit:
-/// each a checked sha (ADR-0034), which may end in one `^` for its parent,
-/// that `rev-parse` resolves locally, never fetched. What *Diff tool*
-/// (#2275) asks before it is offered.
-pub async fn holds_commits(path: &Path, shas: &[&str]) -> bool {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    holds_commits_with(&search, path, shas).await
+/// The best common ancestor of `a` and `b` at the checkout `path` (`git
+/// merge-base`, read-only), each a checked sha the checkout holds: what a
+/// source's three-dot compare diffs from (ADR-0041). `None` when it cannot
+/// be read here, or the two share no history.
+pub async fn merge_base(path: &Path, a: &str, b: &str) -> Option<String> {
+    if !is_sha(a) || !is_sha(b) {
+        return None;
+    }
+    let reader = Reader::at(path);
+    tokio::time::timeout(TIMEOUT, reader.merge_base(a, b))
+        .await
+        .ok()
+        .flatten()
 }
 
-/// [`holds_commits`] with the `PATH` to find `git` on.
+/// Whether the checkout at `path` holds every one of `ends` as a commit:
+/// each a checked sha (ADR-0034), which may end in one `^` for its parent,
+/// resolved locally, never fetched. What *Diff tool* (#2275) asks before it
+/// is offered.
+pub async fn holds_commits(path: &Path, shas: &[&str]) -> bool {
+    holds_via(&Reader::at(path), shas).await
+}
+
+/// [`holds_commits`] by the `git` on `search` alone.
 pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> bool {
+    holds_via(&Reader::git_alone(search, path), shas).await
+}
+
+async fn holds_via(reader: &Reader, shas: &[&str]) -> bool {
     if shas.iter().any(|sha| !is_diff_end(sha, true)) {
-        return false;
-    }
-    let Ok(git) = locate(
-        search,
-        Path::new(APPLE_SHIM),
-        command_line_tools_installed,
-        TIMEOUT,
-    )
-    .await
-    else {
-        return false;
-    };
-    if !is_dir_off_runtime(path).await {
         return false;
     }
     let all = async {
         for sha in shas {
-            if commit(&git, path, sha).await.is_none() {
+            if reader.commit(sha).await.is_none() {
                 return false;
             }
         }
@@ -190,7 +197,7 @@ pub async fn holds_commits_with(search: &OsStr, path: &Path, shas: &[&str]) -> b
 /// git looks for the repository at `path` and no higher
 /// (`GIT_CEILING_DIRECTORIES` is its parent): a checkout whose `.git` is
 /// gone is no repository, never the one some folder above it belongs to.
-fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
+pub(super) fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
     let mut command = git_at(git, path);
     command
         .args(["-c", "protocol.allow=never"])
@@ -208,65 +215,25 @@ fn git_read(git: &Path, path: &Path) -> tokio::process::Command {
     command
 }
 
-/// The whole sha of the commit `name` names at the checkout, if it holds it.
-/// `name` is a checked sha, or one with a `^`.
-async fn commit(git: &Path, path: &Path, name: &str) -> Option<String> {
-    let mut command = git_read(git, path);
-    command.args(["rev-parse", "--verify", "--quiet", "--end-of-options"]);
-    command.arg(format!("{name}^{{commit}}"));
-    let (out, cut) = run_capped(command, 2, 1024).await.ok()?;
-    let sha = String::from_utf8_lossy(&out).trim().to_owned();
-    (!cut && is_sha(&sha)).then_some(sha)
-}
-
-/// The empty tree's name in this repository's object format, unless the
-/// repository is shallow: there a commit with no parent here may well have
-/// one, and the source is asked instead.
-async fn empty_tree_if_whole(git: &Path, path: &Path) -> Option<String> {
-    let mut command = git_read(git, path);
-    command.args([
-        "rev-parse",
-        "--is-shallow-repository",
-        "--show-object-format",
-    ]);
-    let (out, _) = run_capped(command, 4, 1024).await.ok()?;
-    let out = String::from_utf8_lossy(&out);
-    let mut lines = out.lines().map(str::trim);
-    if lines.next()? != "false" {
-        return None;
-    }
-    match lines.next()? {
-        "sha1" => Some(EMPTY_TREE_SHA1.to_owned()),
-        "sha256" => Some(EMPTY_TREE_SHA256.to_owned()),
-        _ => None,
-    }
-}
-
-/// `git diff <base> <head>`, parsed, cut as the uncommitted diff is cut.
+/// The patch from `base` to `head`, parsed, cut as the uncommitted diff is
+/// cut.
 async fn diff(
-    git: &Path,
-    path: &Path,
+    reader: &Reader,
     base: &str,
     head: &str,
     ignore_whitespace: bool,
 ) -> Option<(Vec<DiffFile>, bool)> {
-    let mut command = git_read(git, path);
-    command.args([
-        "-c",
-        "diff.autoRefreshIndex=false",
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--no-textconv",
-        "-M",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-    ]);
-    if ignore_whitespace {
-        command.arg("-w");
-    }
-    command.args([base, head, "--"]);
-    let (text, cut) = run_capped(command, READ_LINES, READ_BYTES).await.ok()?;
+    let (text, cut) = reader
+        .diff(
+            Form::Patch,
+            base,
+            Some(head),
+            ignore_whitespace,
+            &[],
+            READ_LINES,
+            READ_BYTES,
+        )
+        .await?;
     let (mut files, mut truncated) = parse_view(&String::from_utf8_lossy(&text));
     if cut {
         truncated = true;

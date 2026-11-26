@@ -648,6 +648,7 @@ async fn app_over(
                 config,
                 sync_interval_secs: 86_400,
                 enabled: true,
+                sync_by_hand: false,
             },
         )
         .await
@@ -1396,6 +1397,7 @@ async fn gitea_app(env: &Env, repos: &[String]) -> SourcesState {
             config: json!({ "repos": repos }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await
@@ -2113,6 +2115,7 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
             config: json!({ "repos": [repo] }),
             sync_interval_secs: 86_400,
             enabled: true,
+            sync_by_hand: false,
         },
     )
     .await

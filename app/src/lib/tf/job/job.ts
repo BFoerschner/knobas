@@ -8,12 +8,13 @@
  * links the detail already carries.
  */
 import type { AssetStatus } from "../../ipc/assets";
-import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
+import type { EntityBrief, EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
 import { keyOf, minutesLabel } from "../../time/format";
 import { CI } from "../roles.svelte";
+import { ENTRY_KIND, FOLDER_KIND } from "../passwords/kinds";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
 export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
@@ -56,16 +57,31 @@ export async function resolveTicket(
   segment: string,
   sources: readonly { id: string }[],
   read: (entityId: string) => Promise<EntityDetail>,
+  briefs?: Briefs,
 ): Promise<EntityDetail | null> {
   const candidates = isEntityId(segment) ? [segment] : sources.map((source) => `${source.id}:${segment}`);
-  return (await ticketsOf(candidates, read))[0] ?? null;
+  return (await ticketsOf(candidates, read, briefs))[0] ?? null;
 }
+
+/** What many ids are, in one read (`entity_briefs`): how a job address finds its ticket among the sources' candidates. */
+export type Briefs = (entityIds: string[]) => Promise<readonly Pick<EntityBrief, "entity_id" | "kind">[]>;
 
 /** What a job address opens (#1476): its ticket, and the other sources' tickets under the same key. */
 export interface ResolvedJob {
   ticket: EntityDetail;
   /** Every other listed source's ticket of that key, in list order; empty when the key is one source's. */
   others: EntityDetail[];
+}
+
+/**
+ * The ids a job address could name, in the order {@link resolveJob} asks them: every listed source's ticket under the
+ * address's key, and the id itself first where the address names one no source's key gives.
+ */
+export function jobCandidates(segment: string, sources: readonly { id: string }[]): string[] {
+  const key = segmentKey(segment);
+  const candidates = sources.map((source) => `${source.id}:${key}`);
+  if (isEntityId(segment) && !candidates.includes(segment)) candidates.unshift(segment);
+  return candidates;
 }
 
 /**
@@ -79,12 +95,11 @@ export async function resolveJob(
   segment: string,
   sources: readonly { id: string }[],
   read: (entityId: string) => Promise<EntityDetail>,
+  briefs?: Briefs,
 ): Promise<ResolvedJob | null> {
   const named = isEntityId(segment);
-  const key = segmentKey(segment);
-  const candidates = sources.map((source) => `${source.id}:${key}`);
-  if (named && !candidates.includes(segment)) candidates.unshift(segment);
-  const tickets = await ticketsOf(candidates, read);
+  const candidates = jobCandidates(segment, sources);
+  const tickets = await ticketsOf(candidates, read, briefs);
   const ticket = named ? tickets.find((each) => each.row.entity_id === segment) : tickets[0];
   if (ticket === undefined) return null;
   return { ticket, others: tickets.filter((each) => each !== ticket) };
@@ -95,8 +110,22 @@ export async function resolveJob(
  * hold the key answers `not_found`, the ordinary miss; anything else (the
  * database down, the bridge gone) is a failure to say as one, never "not in
  * the mirror", when no candidate answered.
+ *
+ * With `briefs`, the candidates are asked what they are in one read first, and only the tickets among them are read
+ * whole (the query audit, 2026-11-12: a job open read one detail a source, five of six for a miss). Where the briefs
+ * name no ticket, or cannot be read, every candidate is read as before, so a miss or a failure says what it said.
  */
-async function ticketsOf(candidates: string[], read: (entityId: string) => Promise<EntityDetail>): Promise<EntityDetail[]> {
+async function ticketsOf(candidates: string[], read: (entityId: string) => Promise<EntityDetail>, briefs?: Briefs): Promise<EntityDetail[]> {
+  if (briefs !== undefined) {
+    const known = await briefs(candidates).catch(() => null);
+    const tickets = new Set(known?.filter((brief) => brief.kind === "ticket").map((brief) => brief.entity_id));
+    const wanted = candidates.filter((id) => tickets.has(id));
+    if (wanted.length > 0) {
+      const whole = await Promise.allSettled(wanted.map((id) => read(id)));
+      const found = whole.flatMap((answer) => (answer.status === "fulfilled" && answer.value.row.kind === "ticket" ? [answer.value] : []));
+      if (found.length > 0) return found;
+    }
+  }
   const answers = await Promise.allSettled(candidates.map((id) => read(id)));
   const tickets = answers.flatMap((answer) =>
     answer.status === "fulfilled" && answer.value.row.kind === "ticket" ? [answer.value] : [],
@@ -259,7 +288,12 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
     case "asset":
       return `#/asset/${id}`;
     case "monitor":
-      return "#/monitors";
+      return `#/monitors/at/${id}`;
+    // The Passwords page (ADR-0056), never `#/item`, whose page draws the payload.
+    case ENTRY_KIND:
+      return `#/passwords/entry/${id}`;
+    case FOLDER_KIND:
+      return `#/passwords/in/${id}`;
     case "jira_view":
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     // A pipeline under the shell's word (#2422, the launcher's kind) or the
@@ -528,7 +562,7 @@ export function footAction(ticket: {
   timerOnIt: boolean;
 }): { label: string; does: FootDoes } | null {
   if (ticket.pinned) {
-    return ticket.timerOnIt ? { label: "Stop and log", does: "stop" } : { label: "Start timer", does: "start-timer" };
+    return ticket.timerOnIt ? { label: "Stop and log…", does: "stop" } : { label: "Start timer", does: "start-timer" };
   }
   if ((ticket.status?.toLowerCase() ?? "") === "done") return null;
   if (offersStartWork(ticket.status, ticket.mine)) return { label: "Start work", does: "start-work" };

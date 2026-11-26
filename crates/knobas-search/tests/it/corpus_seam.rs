@@ -158,7 +158,13 @@ async fn run(pool: &sqlx::PgPool, text: &str, limit: u32) -> Vec<knobas_search::
         CORPORA,
         Some(text),
         false,
-        &EffectiveFilters::default(),
+        // With the headline no command asks for (`EffectiveFilters::headline`):
+        // `headline_text` is one of the fragments a corpus is made of, and
+        // these tests read what it composes.
+        &EffectiveFilters {
+            headline: true,
+            ..EffectiveFilters::default()
+        },
         10,
         limit,
     );

@@ -35,7 +35,7 @@ use sqlx::PgPool;
 use crate::CoreError;
 use crate::delivery::Projection;
 use crate::entity::EntityRef;
-use crate::payload::{StatePath, resolve_state};
+use crate::payload::{KindPaths, StatePath, resolve_state, resolve_string};
 
 crate::closed_vocabulary! {
     /// What the queue will do about a write next.
@@ -338,6 +338,50 @@ pub async fn queue(
     Ok(row)
 }
 
+/// The statuses an entity's earlier moves are going to set, oldest first: each
+/// `"transition"` still pending, held as a send its source may have taken
+/// ([`QueuedWrite::may_have_landed`]), or sent in the last ten minutes, whose
+/// refresh may not have reached the mirror yet. A move queued after them
+/// carries these as `after` (ADR-0054), so their landing does not hold it. A
+/// held move that was never sent and a refused one set nothing, and are left
+/// out. A status the person's own move set is never a reason to hold their
+/// next one: the ticket stands where they last put it. `before`
+/// keeps only rows queued before that one (an amended row's own id).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn statuses_on_their_way(
+    pool: &PgPool,
+    entity: &EntityRef,
+    before: Option<i64>,
+) -> Result<Vec<String>, CoreError> {
+    let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "select ",
+        queue_columns!(),
+        " from knobas.write_queue
+           where entity_id = $1 and op = 'transition'
+             and (state in ('pending','held')
+                  or state = 'sent' and settled_at > now() - interval '10 minutes')
+             and ($2::bigint is null or id < $2)
+           order by id"
+    ))
+    .bind(entity.to_string())
+    .bind(before)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .filter(|row| row.state != WriteState::Held || row.may_have_landed())
+        .filter_map(|row| {
+            row.payload
+                .pointer("/Transition/status")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect())
+}
+
 /// One queued write by id, or `None` if nothing carries it.
 ///
 /// # Errors
@@ -416,7 +460,7 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 ///
 /// ## Per op
 ///
-/// Three shapes ([`Projection`]), and which one an op gets is a statement
+/// Four shapes ([`Projection`]), and which one an op gets is a statement
 /// about what that op could *overwrite* -- never about how much work the
 /// comparison is. `WriteOp::delivery` states it per variant; the reasons are
 /// argued here.
@@ -442,7 +486,32 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// approval or a review on the whole record; with the send behind the reader,
 /// both made a quick second write hold on the first one's echo.
 ///
-/// **The whole mirrored record** ([`Projection::Whole`]) -- `"transition"`, `"merge_pull_request"`,
+/// **The status** ([`Projection::Status`]) -- `"transition"` (ADR-0054). A
+/// move puts a judgement onto the ticket's status and onto nothing else, so
+/// the status is what it compares: the one the target's kind **declares**
+/// (`KindPaths::status_name`, the ticket-system role's minimum), resolved by
+/// [`resolve_string`]. A colleague's comment, a new label or a sync that
+/// touches the ticket is not a reason to look again; somebody else moving it
+/// is, and the queue panel draws both statuses side by side, as the snapshot
+/// is `{"op", "live", "text"}`, the shape [`added`] answers. A target that is
+/// gone projects `{"op", "live": false}`. A declaration that resolves nothing
+/// projects the **whole record**, so a miss is a false hold, never a missed
+/// one (ADR-0007).
+///
+/// This replaces issue #43's choice, which compared a transition on the whole
+/// record because there was then no adapter-independent way to read a status.
+/// There is one now (`KindPaths::status_name`, required of every ticket kind
+/// by the role), and the whole record cost more than noise once the board made
+/// moves quick: the refresh after a person's own landed move changed the
+/// record, so their next move of the same card was held whenever that refresh
+/// beat its send. The status alone is not enough for that either: the second
+/// move was queued while the mirror still said *To Do*, and at its send the
+/// mirror says *In Progress* because the first one landed. So a queued move's
+/// snapshot also carries `after`, the statuses the same ticket's earlier open
+/// moves were going to set, and [`same_target`] takes one of those as no
+/// change.
+///
+/// **The whole mirrored record** ([`Projection::Whole`]) -- `"merge_pull_request"`,
 /// `"delete_branch"` and `"update_pull_request_branch"`, the ops that put a
 /// *judgement* onto a target whose current state is the whole reason for the
 /// judgement, `"set_parameter"`, which overwrites a value, and `"source_action"`
@@ -450,25 +519,6 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// all holds the write. `"edit_pull_request"` takes this shape only when it
 /// changes the pull request's state; see **Per field** below.
 ///
-/// * `"transition"` is the conservative choice **and it was a choice**
-///   (issue #43). What one would rather compare is the status alone, and there
-///   is no adapter-independent way to read it: §4.1 guarantees `title`,
-///   `body_text`, `author`, `updated_at` and a verbatim `payload`, and the
-///   status lives
-///   only in the last of those, under `fields.status.name` for Jira and `state`
-///   for Gitea. Reading it here would mean this module -- which cannot see
-///   `WriteOp` at all, let alone an adapter -- learning every source's payload
-///   shape, which is the coupling `SourceDescriptor` exists to avoid. ADR-0007
-///   ratifies this refusal as the *write* direction's rule -- in a hold
-///   decision a payload read that misses is a missed hold, a wrong action --
-///   and it is not the blanket ban it may read as: a derivation whose miss
-///   costs only an absent item may read (`suggest`, `inbox`, under that ADR's
-///   three requirements). The cost
-///   is noise on a busy ticket: a comment arriving while the source is down
-///   holds a queued transition. The cost of the other direction is moving a
-///   ticket somebody else already moved, silently, which is the one thing
-///   issue #42 exists to prevent. A false hold shows both versions side by side
-///   and is one *Apply anyway* away; a missed hold shows nothing.
 /// * `"merge_pull_request"` because it acts on a specific state of the pull
 ///   request (issue #667): a merge lands whatever the pull request carries *at the flush*, so
 ///   a commit pushed after the reader pressed *Merge…* would otherwise go into
@@ -529,6 +579,13 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 ///
 /// What each field compares goes into the projection's `text`, one part per
 /// field, so the held panel shows the two sides of exactly what was compared.
+///
+/// `"edit_ticket"` (ADR-0054) shares the shape and compares its own way
+/// ([`ticket_edit`]): the title, assignee and priority it writes, each as the
+/// mirror holds it, by name in `fields`, and never its labels or a source's
+/// own field. [`same_target`] compares the fields one by one, and a value one
+/// of the same ticket's earlier open edits was going to set (`after`, by
+/// field) is not a change.
 ///
 /// Which fields the op carries is read from the queued payload -- knobas'
 /// own serde shape, so ADR-0007's requirements 2 and 3 bind it -- in one
@@ -620,7 +677,7 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// one where that clause has teeth (issue #286).
 ///
 /// **The whole mirrored record, and the version inside it** -- `"update_page"`
-/// joins `"transition"` and `"merge_pull_request"` in the whole-record shape,
+/// joins `"merge_pull_request"` in the whole-record shape,
 /// and the reason is the sharpest of them: this op *replaces a page's body*.
 /// Anything at all that happened to the page since the reader started typing
 /// is something their re-assembled body would silently delete.
@@ -639,8 +696,8 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// stating for this op.** A colleague replying to the page bumps no version
 /// number, but the reply rides in `children.comment` inside the payload and in
 /// `body_text` beside it, so it holds the edit -- a *false* hold, over two
-/// bodies that read alike. That is `"transition"`'s trade-off in its own
-/// words: a false hold shows both versions side by side and is one *Apply
+/// bodies that read alike. That is the whole record's trade-off (ADR-0007):
+/// a false hold shows both versions side by side and is one *Apply
 /// anyway* away, a missed hold shows nothing. The panel prints the version
 /// number beside each side precisely so a reader can see at a glance that this
 /// is the false one. And in the other direction, an edit whose `base_version`
@@ -658,23 +715,29 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 ///
 /// **There is no fallback shape.** `WriteOp::delivery` matches with no
 /// wildcard arm (ADR-0006, amended 2026-10-19), so a new op does not compile
-/// until somebody writes down which of the three shapes it gets.
+/// until somebody writes down which of the shapes it gets.
 ///
-/// `payload` is the queued write's own (`WriteOp`'s serde form) and `state`
-/// the target kind's declared state paths; only a per-field record reads the
-/// first, and only it and the declared state the second
-/// ([`Projection::reads_declared_state`]).
+/// `payload` is the queued write's own (`WriteOp`'s serde form) and `paths`
+/// the target kind's declared paths; only a per-field record reads the
+/// first, and only it, the declared state and the status the second
+/// ([`Projection::reads_declared_state`],
+/// [`Projection::reads_declared_status`]).
 #[must_use]
 pub fn project(
     op: &str,
     shape: Projection,
     payload: &serde_json::Value,
     target: Option<&Target>,
-    state: &[StatePath],
+    paths: Option<&KindPaths>,
 ) -> serde_json::Value {
+    let state = paths.map_or(&[][..], |paths| paths.state.as_slice());
     match shape {
         Projection::Liveness => serde_json::json!({ "op": op, "live": target.is_some() }),
         Projection::DeclaredState => added(op, target, state),
+        Projection::Status => status(op, target, paths),
+        Projection::Whole { per_field: true } if payload.get("EditTicket").is_some() => {
+            ticket_edit(op, payload, target, paths)
+        }
         Projection::Whole { per_field: true } => {
             match edit_text(edit_writes(payload), target, state) {
                 Some(text) => {
@@ -697,6 +760,251 @@ fn added(op: &str, target: Option<&Target>, state: &[StatePath]) -> serde_json::
         Some(chip) => serde_json::json!({ "op": op, "live": true, "text": chip.text }),
         // A declaration that reads nothing: fail wide (ADR-0007).
         None => whole(op, Some(target)),
+    }
+}
+
+/// What a move compares (ADR-0054): its target's declared status, or the
+/// whole record where the declaration resolves nothing.
+fn status(op: &str, target: Option<&Target>, paths: Option<&KindPaths>) -> serde_json::Value {
+    let Some(target) = target else {
+        return serde_json::json!({ "op": op, "live": false });
+    };
+    match paths.and_then(|paths| resolve_string(&target.payload, &paths.status_name)) {
+        Some(text) => serde_json::json!({ "op": op, "live": true, "text": text }),
+        // A declaration that reads nothing: fail wide (ADR-0007).
+        None => whole(op, Some(target)),
+    }
+}
+
+/// Whether the target as it stands `now` is the target a write was queued
+/// against (`queued`, its snapshot): what the flush asks before it sends, and
+/// a `false` holds the write. Three ways to be the same:
+///
+/// * equal as JSON once the queued side's `after` is set aside;
+/// * for a projection that carries a status (`"text"`), `op` and `live`
+///   equal and the status now one of `queued.after`, the statuses the same
+///   ticket's earlier open moves were going to set when this one was queued
+///   (ADR-0054): a person's own earlier move landing is not a change;
+/// * a `"transition"` queued before it compared on the status, whose
+///   snapshot is the whole record (it carries `payload`) where `now` is the
+///   status alone: the queued status is resolved from that `payload` by the
+///   same declared paths and compared with `now`'s, so no open move is held
+///   by the upgrade. Where the paths resolve nothing on it, it is a change.
+///
+/// Statuses compare trimmed and ignoring ASCII case, as the adapters match
+/// a status's name.
+#[must_use]
+pub fn same_target(
+    queued: &serde_json::Value,
+    now: &serde_json::Value,
+    paths: Option<&KindPaths>,
+) -> bool {
+    let mut bare = queued.clone();
+    let after = bare
+        .as_object_mut()
+        .and_then(|fields| fields.remove("after"));
+    if &bare == now {
+        return true;
+    }
+    if let (Some(was), Some(fields)) = (bare.get("fields"), now.get("fields")) {
+        return bare.get("op") == now.get("op")
+            && bare.get("live") == now.get("live")
+            && same_fields(was, fields, after.as_ref());
+    }
+    let same_status = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    let Some(text) = now.get("text").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    if bare.get("op") != now.get("op") || bare.get("live") != now.get("live") {
+        return false;
+    }
+    if after
+        .as_ref()
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|after| {
+            after
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|status| same_status(status, text))
+        })
+    {
+        return true;
+    }
+    // A row queued before ADR-0054: the whole record against the status.
+    if bare.get("op").and_then(serde_json::Value::as_str) == Some("transition")
+        && now.get("payload").is_none()
+        && let (Some(payload), Some(paths)) = (bare.get("payload"), paths)
+    {
+        return resolve_string(payload, &paths.status_name)
+            .is_some_and(|was| same_status(&was, text));
+    }
+    false
+}
+
+/// An `EditTicket`'s fields, field by field (ADR-0054): each one `now` holds
+/// is the one it held when the edit was queued, or one an earlier open edit
+/// of the same ticket was going to set (`after`, by field).
+fn same_fields(
+    was: &serde_json::Value,
+    now: &serde_json::Value,
+    after: Option<&serde_json::Value>,
+) -> bool {
+    let (Some(was), Some(now)) = (was.as_object(), now.as_object()) else {
+        return false;
+    };
+    was.len() == now.len()
+        && now.iter().all(|(field, value)| {
+            was.get(field) == Some(value)
+                || after
+                    .and_then(|after| after.get(field))
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|values| values.contains(value))
+        })
+}
+
+/// The ticket fields an `EditTicket` overwrites that the mirror can read
+/// (ADR-0054): its title, assignee and priority. Its labels add and remove
+/// names, which compose with whatever anybody else did, and a source's own
+/// field the mirror does not hold, so neither is compared.
+///
+/// Read off the queued payload as [`edit_writes`] reads an
+/// `edit_pull_request`'s, and failing wide the same way: a field is written
+/// unless its key is present and `null`.
+const TICKET_FIELDS: [&str; 3] = ["title", "assignee", "priority"];
+
+/// What a path the kind declares holds: `Some(Some(text))`, `Some(None)` where
+/// the source says nothing (the walk meets a `null`: an unassigned ticket),
+/// and `None` for a miss, a key the record does not have.
+#[allow(clippy::option_option)]
+fn declared_text(
+    payload: &serde_json::Value,
+    candidates: &[crate::payload::PayloadPath],
+) -> Option<Option<String>> {
+    if let Some(text) = resolve_string(payload, candidates) {
+        return Some(Some(text));
+    }
+    let says_nothing = candidates.iter().any(|path| {
+        let mut at = payload;
+        for segment in path.segments() {
+            match at.as_object().and_then(|fields| fields.get(segment)) {
+                Some(serde_json::Value::Null) => return true,
+                Some(next) => at = next,
+                None => return false,
+            }
+        }
+        at.is_null()
+    });
+    says_nothing.then_some(None)
+}
+
+/// What an `EditTicket` compares (ADR-0054): `{"op", "live", "fields":
+/// {…}, "text"}` with only the named fields it writes, each as the mirror
+/// holds it (the item's title, the kind's declared assignee and priority),
+/// and their values one a line for the queue panel. An edit of only its
+/// labels or a source's own fields compares the target's liveness alone. A
+/// written field whose declared path misses compares the whole record
+/// (ADR-0007): a miss is a false hold, never a missed one.
+fn ticket_edit(
+    op: &str,
+    payload: &serde_json::Value,
+    target: Option<&Target>,
+    paths: Option<&KindPaths>,
+) -> serde_json::Value {
+    let written: Vec<&str> = TICKET_FIELDS
+        .into_iter()
+        .filter(|field| {
+            !payload
+                .pointer(&format!("/EditTicket/{field}"))
+                .is_some_and(serde_json::Value::is_null)
+        })
+        .collect();
+    let Some(target) = target else {
+        return serde_json::json!({ "op": op, "live": false });
+    };
+    if written.is_empty() {
+        return serde_json::json!({ "op": op, "live": true });
+    }
+    let mut fields = serde_json::Map::new();
+    let mut lines = Vec::new();
+    for field in written {
+        let value = match field {
+            "title" => Some(Some(target.title.clone())),
+            "assignee" => paths.and_then(|p| declared_text(&target.payload, &p.assignee)),
+            _ => paths.and_then(|p| declared_text(&target.payload, &p.priority)),
+        };
+        let Some(value) = value else {
+            return whole(op, Some(target));
+        };
+        lines.push(format!("{field}: {}", value.as_deref().unwrap_or("none")));
+        fields.insert(field.to_owned(), serde_json::json!(value));
+    }
+    serde_json::json!({
+        "op": op,
+        "live": true,
+        "fields": fields,
+        "text": lines.join("\n"),
+    })
+}
+
+/// The values the same ticket's open `EditTicket`s are going to set, by
+/// field (ADR-0054): what a later edit's `after` holds, so the person's own
+/// earlier edit landing first is not a change. The assignee as its account,
+/// `null` for nobody. Open means pending, held as a send that may have
+/// landed, or sent in the last ten minutes, as for a move.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn fields_on_their_way(
+    pool: &PgPool,
+    entity: &EntityRef,
+    before: Option<i64>,
+) -> Result<serde_json::Map<String, serde_json::Value>, CoreError> {
+    let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "select ",
+        queue_columns!(),
+        " from knobas.write_queue
+           where entity_id = $1 and op = 'edit_ticket'
+             and (state in ('pending','held')
+                  or state = 'sent' and settled_at > now() - interval '10 minutes')
+             and ($2::bigint is null or id < $2)
+           order by id"
+    ))
+    .bind(entity.to_string())
+    .bind(before)
+    .fetch_all(pool)
+    .await?;
+    let mut after = serde_json::Map::new();
+    for row in rows
+        .iter()
+        .filter(|row| row.state != WriteState::Held || row.may_have_landed())
+    {
+        after_of(&row.payload, &mut after);
+    }
+    Ok(after)
+}
+
+/// One queued `EditTicket`'s values into `after`, by field.
+fn after_of(payload: &serde_json::Value, after: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(edit) = payload.get("EditTicket") else {
+        return;
+    };
+    for field in TICKET_FIELDS {
+        let value = match (field, edit.get(field)) {
+            (_, None | Some(serde_json::Value::Null)) => continue,
+            // `{"account": …}` is a person; `"nobody"`, which carries no
+            // account, reads as null.
+            ("assignee", Some(who)) => who.get("account").cloned().unwrap_or_default(),
+            (_, Some(value)) => value.clone(),
+        };
+        if let Some(values) = after
+            .entry(field.to_owned())
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            && !values.contains(&value)
+        {
+            values.push(value);
+        }
     }
 }
 
@@ -1490,7 +1798,7 @@ mod tests {
 
         let op = "comment";
         assert!(Projection::DeclaredState.reads_declared_state());
-        let at = |t: Option<&Target>, s: &[StatePath]| {
+        let at = |t: Option<&Target>, s: Option<&KindPaths>| {
             project(op, Projection::DeclaredState, &none, t, s)
         };
         for (moved, what) in [
@@ -1499,28 +1807,28 @@ mod tests {
             (&pushed, "a push"),
         ] {
             assert_eq!(
-                at(Some(&before), &declared),
-                at(Some(moved), &declared),
+                at(Some(&before), Some(&declared)),
+                at(Some(moved), Some(&declared)),
                 "{op}: {what} is not what a write that adds holds on"
             );
         }
         for (moved, what) in [(&closed, "a close"), (&merged, "a merge")] {
             assert_ne!(
-                at(Some(&before), &declared),
-                at(Some(moved), &declared),
+                at(Some(&before), Some(&declared)),
+                at(Some(moved), Some(&declared)),
                 "{op}: {what} makes the write moot"
             );
         }
         assert_ne!(
-            at(Some(&before), &declared),
-            at(None, &[]),
+            at(Some(&before), Some(&declared)),
+            at(None, None),
             "{op}: a target that is gone has changed"
         );
         // A kind that declares no state: a reply still goes, a vanishing
         // target still holds.
-        assert_eq!(at(Some(&before), &[]), at(Some(&replied), &[]));
-        assert_eq!(at(Some(&before), &[]), at(Some(&closed), &[]));
-        assert_ne!(at(Some(&before), &[]), at(None, &[]));
+        assert_eq!(at(Some(&before), None), at(Some(&replied), None));
+        assert_eq!(at(Some(&before), None), at(Some(&closed), None));
+        assert_ne!(at(Some(&before), None), at(None, None));
     }
 
     /// A write that adds, over a declared state that resolves nothing,
@@ -1533,7 +1841,7 @@ mod tests {
             Projection::DeclaredState,
             &serde_json::Value::Null,
             Some(&before),
-            &gitea_pr_state(),
+            Some(&gitea_pr_state()),
         );
         assert_eq!(projected["payload"], before.payload);
         assert_ne!(
@@ -1543,7 +1851,7 @@ mod tests {
                 Projection::DeclaredState,
                 &serde_json::Value::Null,
                 Some(&after),
-                &gitea_pr_state()
+                Some(&gitea_pr_state())
             )
         );
     }
@@ -1565,12 +1873,12 @@ mod tests {
         )
     }
 
-    /// Issue #43's decision, pinned rather than left in a doc comment: the
-    /// ops that put a judgement onto a target hold on **anything** about that
-    /// target moving -- including a change only the raw payload can see, which
-    /// is where every source keeps the status a transition is about and the
-    /// head commit a merge takes. (An approval and a review left this list
-    /// with #752: they add, and hold on the declared state.)
+    /// The ops that put a judgement onto a target hold on **anything** about
+    /// that target moving -- including a change only the raw payload can see,
+    /// which is where a pull request keeps the head commit a merge takes. (An
+    /// approval and a review left this list with #752: they add, and hold on
+    /// the declared state; a transition left it with ADR-0054, and holds on
+    /// the declared status.)
     #[test]
     fn a_judgement_op_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
@@ -1581,13 +1889,13 @@ mod tests {
         // The payload the shape carries is where a Confluence page keeps
         // `version.number`, which is why "the mirror's version has passed the
         // one the edit was made against" needs no separate check (#286).
-        // `"transition"`, `"update_page"`, `"merge_pull_request"`,
+        // `"update_page"`, `"merge_pull_request"`,
         // `"set_parameter"`, `"delete_branch"` (#707),
         // `"update_pull_request_branch"` (#708) and `"source_action"` (#1194)
         // take this shape (`WriteOp::delivery`).
-        let op = "transition";
+        let op = "merge_pull_request";
         let at =
-            |t: Option<&Target>| project(op, Projection::WHOLE, &serde_json::Value::Null, t, &[]);
+            |t: Option<&Target>| project(op, Projection::WHOLE, &serde_json::Value::Null, t, None);
         assert_ne!(
             at(Some(&before)),
             at(Some(&after)),
@@ -1619,7 +1927,7 @@ mod tests {
         // (#822), take this shape (`WriteOp::delivery`).
         let op = "create_ticket";
         let live = |t: Option<&Target>| {
-            project(op, Projection::Liveness, &serde_json::Value::Null, t, &[])
+            project(op, Projection::Liveness, &serde_json::Value::Null, t, None)
         };
         assert_eq!(
             live(Some(&before)),
@@ -1650,14 +1958,14 @@ mod tests {
                 Projection::Liveness,
                 &serde_json::Value::Null,
                 None,
-                &[]
+                None
             ),
             project(
                 "create_ticket",
                 Projection::Liveness,
                 &serde_json::Value::Null,
                 None,
-                &[]
+                None
             )
         );
         assert_eq!(
@@ -1666,7 +1974,7 @@ mod tests {
                 Projection::Liveness,
                 &serde_json::Value::Null,
                 None,
-                &[]
+                None
             )["live"],
             serde_json::json!(false)
         );
@@ -1685,10 +1993,10 @@ mod tests {
 
     /// Gitea's pull request state as `knobas-source-gitea` declares it: the
     /// merged flag first, then the state word.
-    fn gitea_pr_state() -> Vec<StatePath> {
+    fn gitea_pr_state() -> KindPaths {
         use crate::payload::{PayloadPath, StateValue};
         use crate::tone::Tone;
-        vec![
+        let state = vec![
             StatePath {
                 at: PayloadPath::of(["merged"]),
                 open: false,
@@ -1704,7 +2012,12 @@ mod tests {
                     StateValue::of("closed", Tone::Muted),
                 ],
             },
-        ]
+        ];
+        KindPaths {
+            kind: "pr".to_owned(),
+            state,
+            ..KindPaths::default()
+        }
     }
 
     /// A close whose declared state resolves nothing -- a record the
@@ -1719,7 +2032,7 @@ mod tests {
             BY_FIELD,
             &close,
             Some(&before),
-            &gitea_pr_state(),
+            Some(&gitea_pr_state()),
         );
         assert_eq!(projected["payload"], before.payload);
         assert_ne!(
@@ -1729,7 +2042,7 @@ mod tests {
                 BY_FIELD,
                 &close,
                 Some(&after),
-                &gitea_pr_state()
+                Some(&gitea_pr_state())
             )
         );
     }
@@ -1771,8 +2084,13 @@ mod tests {
         // adapter, it is handed the paths.
         let declared = gitea_pr_state();
         let held = |op: &serde_json::Value, after: Option<&Target>| {
-            project("edit_pull_request", BY_FIELD, op, Some(&before), &declared)
-                != project("edit_pull_request", BY_FIELD, op, after, &declared)
+            project(
+                "edit_pull_request",
+                BY_FIELD,
+                op,
+                Some(&before),
+                Some(&declared),
+            ) != project("edit_pull_request", BY_FIELD, op, after, Some(&declared))
         };
 
         let title = edit(Some("t"), None, None);
@@ -1808,8 +2126,8 @@ mod tests {
         // A source that declares no state: the whole record, so the same
         // retitle holds -- a false hold, never a missed one.
         assert_ne!(
-            project("edit_pull_request", BY_FIELD, &close, Some(&before), &[]),
-            project("edit_pull_request", BY_FIELD, &close, Some(&retitled), &[]),
+            project("edit_pull_request", BY_FIELD, &close, Some(&before), None),
+            project("edit_pull_request", BY_FIELD, &close, Some(&retitled), None),
         );
 
         for op in [&title, &body, &close] {
@@ -1836,7 +2154,7 @@ mod tests {
             Projection::WHOLE,
             &serde_json::Value::Null,
             Some(&before),
-            &[],
+            None,
         );
         for payload in [
             serde_json::Value::Null,
@@ -1844,14 +2162,390 @@ mod tests {
             serde_json::json!({ "EditPullRequest": { "title": "t" } }),
             edit(None, None, None),
         ] {
-            let projected = project("edit_pull_request", BY_FIELD, &payload, Some(&before), &[]);
+            let projected = project("edit_pull_request", BY_FIELD, &payload, Some(&before), None);
             assert_eq!(projected["payload"], whole["payload"], "{payload}");
             assert_ne!(
                 projected,
-                project("edit_pull_request", BY_FIELD, &payload, Some(&after), &[]),
+                project("edit_pull_request", BY_FIELD, &payload, Some(&after), None),
                 "{payload}: a payload-only change must hold"
             );
         }
+    }
+
+    /// A Jira-like ticket with an assignee and a priority, as `edited` reads it.
+    fn assigned(title: &str, assignee: Option<&str>, priority: &str, labels: &[&str]) -> Target {
+        Target {
+            entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
+            title: title.to_owned(),
+            body_text: title.to_owned(),
+            item_updated_at: None,
+            payload: serde_json::json!({ "fields": {
+                "assignee": assignee.map(|name| serde_json::json!({ "name": name })),
+                "priority": { "name": priority },
+                "labels": labels,
+            } }),
+        }
+    }
+
+    fn edit_paths() -> KindPaths {
+        use crate::payload::PayloadPath;
+        KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
+            priority: vec![PayloadPath::of(["fields", "priority", "name"])],
+            ..KindPaths::default()
+        }
+    }
+
+    /// An `EditTicket` as the queue stores it: every field spelt, `null` where unset.
+    fn ticket_edit_payload(change: serde_json::Value) -> serde_json::Value {
+        let mut edit = serde_json::json!({
+            "entity": "jira:PAY-231", "title": null, "assignee": null, "priority": null,
+            "labels": null, "fields": {}
+        });
+        for (field, value) in change.as_object().unwrap() {
+            edit[field] = value.clone();
+        }
+        serde_json::json!({ "EditTicket": edit })
+    }
+
+    fn edited(change: &serde_json::Value, t: Option<&Target>) -> serde_json::Value {
+        project("edit_ticket", BY_FIELD, change, t, Some(&edit_paths()))
+    }
+
+    /// ADR-0054: an assignee edit compares the assignee and nothing else: a
+    /// retitle or a priority somebody set is not a change, somebody else's
+    /// reassignment is. Mutant: every field counted as written (the retitle
+    /// would hold it).
+    #[test]
+    fn an_assignee_edit_holds_on_a_reassignment_and_not_on_a_retitle() {
+        let paths = edit_paths();
+        let assign = ticket_edit_payload(serde_json::json!({ "assignee": { "account": "mara" } }));
+        let queued = edited(
+            &assign,
+            Some(&assigned("a payout fails", Some("ben"), "High", &[])),
+        );
+        assert_eq!(
+            queued,
+            serde_json::json!({
+                "op": "edit_ticket", "live": true,
+                "fields": { "assignee": "ben" }, "text": "assignee: ben"
+            })
+        );
+        let retitled = edited(
+            &assign,
+            Some(&assigned("payouts fail", Some("ben"), "Low", &["x"])),
+        );
+        assert!(
+            same_target(&queued, &retitled, Some(&paths)),
+            "a retitle holds no assignee edit"
+        );
+        let theirs = edited(
+            &assign,
+            Some(&assigned("a payout fails", Some("olu"), "High", &[])),
+        );
+        assert!(
+            !same_target(&queued, &theirs, Some(&paths)),
+            "somebody else's reassignment holds it"
+        );
+        let unassigned = edited(
+            &assign,
+            Some(&assigned("a payout fails", None, "High", &[])),
+        );
+        assert_eq!(
+            unassigned["fields"]["assignee"],
+            serde_json::Value::Null,
+            "nobody is a value"
+        );
+        assert!(!same_target(&queued, &unassigned, Some(&paths)));
+        let gone = edited(&assign, None);
+        assert!(
+            !same_target(&queued, &gone, Some(&paths)),
+            "a ticket that left holds it"
+        );
+    }
+
+    /// An edit of only labels (or a source's own field) compares liveness:
+    /// names added and removed compose with anybody else's.
+    #[test]
+    fn a_labels_edit_holds_only_when_the_ticket_leaves() {
+        let paths = edit_paths();
+        let label =
+            ticket_edit_payload(serde_json::json!({ "labels": { "add": ["sepa"], "remove": [] } }));
+        let queued = edited(&label, Some(&assigned("a", Some("ben"), "High", &[])));
+        assert_eq!(
+            queued,
+            serde_json::json!({ "op": "edit_ticket", "live": true })
+        );
+        let changed = edited(
+            &label,
+            Some(&assigned("b", Some("olu"), "Low", &["triage"])),
+        );
+        assert!(same_target(&queued, &changed, Some(&paths)));
+        assert!(!same_target(&queued, &edited(&label, None), Some(&paths)));
+    }
+
+    /// Two assignee edits in a row both go: the second was queued while the
+    /// mirror held the first's old value, and the first landing is not a
+    /// change (`after`). A third value is somebody else's. Mutant: `after`
+    /// ignored (the second is held).
+    #[test]
+    fn a_second_edit_is_not_held_by_the_persons_own_first() {
+        let paths = edit_paths();
+        let assign = ticket_edit_payload(serde_json::json!({ "assignee": { "account": "olu" } }));
+        let mut queued = edited(&assign, Some(&assigned("a", Some("ben"), "High", &[])));
+        let mut after = serde_json::Map::new();
+        after_of(
+            &ticket_edit_payload(serde_json::json!({ "assignee": { "account": "mara" } })),
+            &mut after,
+        );
+        after_of(
+            &ticket_edit_payload(serde_json::json!({ "assignee": "nobody", "priority": "Low" })),
+            &mut after,
+        );
+        assert_eq!(
+            serde_json::Value::Object(after.clone()),
+            serde_json::json!({ "assignee": ["mara", null], "priority": ["Low"] })
+        );
+        queued["after"] = serde_json::Value::Object(after);
+        let landed = edited(&assign, Some(&assigned("a", Some("mara"), "High", &[])));
+        assert!(
+            same_target(&queued, &landed, Some(&paths)),
+            "the person's own first edit landed"
+        );
+        let nobody = edited(&assign, Some(&assigned("a", None, "High", &[])));
+        assert!(same_target(&queued, &nobody, Some(&paths)));
+        let third = edited(&assign, Some(&assigned("a", Some("priya"), "High", &[])));
+        assert!(
+            !same_target(&queued, &third, Some(&paths)),
+            "a third assignee is somebody else's"
+        );
+    }
+
+    /// A written field whose declared path misses (a key the record lacks)
+    /// compares the whole record (ADR-0007), so a payload-only change holds.
+    #[test]
+    fn an_edit_over_a_path_the_declaration_misses_holds_on_the_whole_record() {
+        let priority = ticket_edit_payload(serde_json::json!({ "priority": "High" }));
+        let (before, after) = payload_differs();
+        let queued = edited(&priority, Some(&before));
+        assert!(queued.get("payload").is_some(), "{queued}");
+        assert!(!same_target(
+            &queued,
+            &edited(&priority, Some(&after)),
+            Some(&edit_paths())
+        ));
+        let undeclared = project(
+            "edit_ticket",
+            BY_FIELD,
+            &priority,
+            Some(&assigned("a", None, "High", &[])),
+            None,
+        );
+        assert!(
+            undeclared.get("payload").is_some(),
+            "no declared paths: the whole record"
+        );
+        let title = ticket_edit_payload(serde_json::json!({ "title": "b" }));
+        assert_eq!(
+            project("edit_ticket", BY_FIELD, &title, Some(&before), None)["fields"],
+            serde_json::json!({ "title": "a payout fails" }),
+            "the title is the item's own"
+        );
+    }
+
+    /// A Jira-like ticket kind: its status at `fields.status.name`.
+    fn ticket_paths() -> KindPaths {
+        KindPaths {
+            kind: "ticket".to_owned(),
+            status_name: vec![crate::payload::PayloadPath::of([
+                "fields", "status", "name",
+            ])],
+            ..KindPaths::default()
+        }
+    }
+
+    fn ticket(status: &str, body: &str) -> Target {
+        Target {
+            entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
+            title: "a payout fails".to_owned(),
+            body_text: body.to_owned(),
+            item_updated_at: None,
+            payload: serde_json::json!({ "fields": { "status": { "name": status }, "comment": body } }),
+        }
+    }
+
+    fn moved(t: Option<&Target>) -> serde_json::Value {
+        project(
+            "transition",
+            Projection::Status,
+            &serde_json::Value::Null,
+            t,
+            Some(&ticket_paths()),
+        )
+    }
+
+    /// ADR-0054: a move compares the declared status and nothing else. A
+    /// comment synced between the queue and the flush is not a change; the
+    /// status moving is, and both statuses are the two sides the panel draws.
+    #[test]
+    fn a_move_holds_on_the_status_and_not_on_a_comment() {
+        let paths = ticket_paths();
+        let queued = moved(Some(&ticket("To Do", "it does")));
+        assert_eq!(
+            queued,
+            serde_json::json!({ "op": "transition", "live": true, "text": "To Do" })
+        );
+        let commented = moved(Some(&ticket("To Do", "it does\n\nlooking")));
+        assert!(
+            same_target(&queued, &commented, Some(&paths)),
+            "a comment holds no move"
+        );
+        let theirs = moved(Some(&ticket("Done", "it does")));
+        assert!(
+            !same_target(&queued, &theirs, Some(&paths)),
+            "somebody else's move holds it"
+        );
+        assert_eq!(theirs["text"], "Done");
+        let gone = moved(None);
+        assert_eq!(
+            gone,
+            serde_json::json!({ "op": "transition", "live": false })
+        );
+        assert!(
+            !same_target(&queued, &gone, Some(&paths)),
+            "a ticket that left holds it"
+        );
+    }
+
+    /// A status an earlier open move of the same ticket was going to set is
+    /// not a change (`after`), compared as the adapters compare a status;
+    /// any other status still is.
+    #[test]
+    fn a_move_is_not_held_by_the_persons_own_earlier_move() {
+        let paths = ticket_paths();
+        let mut queued = moved(Some(&ticket("To Do", "")));
+        queued["after"] = serde_json::json!(["In Progress"]);
+        assert!(same_target(
+            &queued,
+            &moved(Some(&ticket("To Do", ""))),
+            Some(&paths)
+        ));
+        assert!(same_target(
+            &queued,
+            &moved(Some(&ticket("in progress ", ""))),
+            Some(&paths)
+        ));
+        assert!(
+            !same_target(
+                &queued,
+                &moved(Some(&ticket("In Review", ""))),
+                Some(&paths)
+            ),
+            "a third status is somebody else's"
+        );
+        assert!(
+            !same_target(&queued, &moved(None), Some(&paths)),
+            "a ticket that left holds it whatever `after` says"
+        );
+    }
+
+    /// `after` is no change only on a target as it was: a move queued against a ticket that was gone, whose ticket
+    /// is back in a status an earlier move set, has changed (its liveness did), and so has one whose `op` differs.
+    #[test]
+    fn after_holds_nothing_when_the_target_came_or_went() {
+        let paths = ticket_paths();
+        let mut gone = moved(None);
+        gone["after"] = serde_json::json!(["In Progress"]);
+        assert!(!same_target(
+            &gone,
+            &moved(Some(&ticket("In Progress", ""))),
+            Some(&paths)
+        ));
+        let mut other = moved(Some(&ticket("To Do", "")));
+        other["op"] = serde_json::json!("comment");
+        other["after"] = serde_json::json!(["In Progress"]);
+        assert!(!same_target(
+            &other,
+            &moved(Some(&ticket("In Progress", ""))),
+            Some(&paths)
+        ));
+    }
+
+    /// A kind whose status path resolves nothing compares the whole record
+    /// (ADR-0007): a payload-only change holds, and liveness alone would not.
+    #[test]
+    fn a_move_over_a_status_the_declaration_misses_holds_on_the_whole_record() {
+        let (before, after) = payload_differs();
+        let at = |t: &Target| {
+            project(
+                "transition",
+                Projection::Status,
+                &serde_json::Value::Null,
+                Some(t),
+                Some(&ticket_paths()),
+            )
+        };
+        assert_eq!(at(&before)["payload"], before.payload);
+        assert!(!same_target(
+            &at(&before),
+            &at(&after),
+            Some(&ticket_paths())
+        ));
+        let undeclared = project(
+            "transition",
+            Projection::Status,
+            &serde_json::Value::Null,
+            Some(&before),
+            None,
+        );
+        assert_eq!(
+            undeclared["payload"], before.payload,
+            "no paths at all: the whole record"
+        );
+    }
+
+    /// A move queued before ADR-0054 carries the whole record: its status is
+    /// read from that record's payload, so the upgrade holds no open move
+    /// whose status did not change, and still holds one whose status did.
+    #[test]
+    fn a_move_queued_on_the_whole_record_compares_its_status() {
+        let paths = ticket_paths();
+        let old = whole("transition", Some(&ticket("To Do", "it does")));
+        assert!(same_target(
+            &old,
+            &moved(Some(&ticket("To Do", "a comment later"))),
+            Some(&paths)
+        ));
+        assert!(!same_target(
+            &old,
+            &moved(Some(&ticket("Done", "it does"))),
+            Some(&paths)
+        ));
+        assert!(
+            !same_target(&old, &moved(Some(&ticket("To Do", ""))), None),
+            "no paths: a change"
+        );
+        assert!(
+            !same_target(
+                &whole("comment", Some(&ticket("To Do", ""))),
+                &serde_json::json!({ "op": "comment", "live": true, "text": "To Do" }),
+                Some(&paths)
+            ),
+            "only a transition is read so"
+        );
+    }
+
+    /// Every other projection compares as JSON, as it did.
+    #[test]
+    fn same_target_is_equality_where_there_is_no_after() {
+        let (before, after) = payload_differs();
+        let a = whole("merge_pull_request", Some(&before));
+        let b = whole("merge_pull_request", Some(&after));
+        assert!(same_target(&a, &a.clone(), None));
+        assert!(!same_target(&a, &b, None));
     }
 
     /// Each shape projects the field set its doc names. Liveness and the
@@ -1874,7 +2568,7 @@ mod tests {
                 shape,
                 &edit(Some("t"), None, None),
                 Some(&target),
-                &[],
+                None,
             )
             .as_object()
             .expect("a projection is an object")

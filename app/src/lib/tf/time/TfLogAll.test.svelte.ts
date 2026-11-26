@@ -252,3 +252,34 @@ test("a row whose source's credential cannot log work is drawn unticked and disa
   await settle();
   expect(logged.map(([entity]) => entity)).toEqual(["jira:PAY-231", "jira:PAY-231"]);
 });
+
+test("an edited comment outlives Esc and ×, a comment left alone is the draft's, and Cancel ends it (F-647)", async () => {
+  const box = () => rows()[0]!.querySelector("textarea")!;
+  const close = () => target.querySelector<HTMLButtonElement>(".tf-dclose")!;
+  await render();
+  const drafted = box().value;
+  box().value = "My own words";
+  box().dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  close().click();
+  unmount(view!);
+  await render();
+  expect(box().value).toBe("My own words");
+  [...target.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Cancel")!.click();
+  unmount(view!);
+  await render();
+  expect(box().value).toBe(drafted);
+});
+
+test("a worklog that went takes its comment's draft with it (F-647)", async () => {
+  const box = () => rows()[0]!.querySelector("textarea")!;
+  await render();
+  box().value = "My own words";
+  box().dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  send().click();
+  await settle();
+  unmount(view!);
+  await render();
+  expect(box().value).not.toBe("My own words");
+});

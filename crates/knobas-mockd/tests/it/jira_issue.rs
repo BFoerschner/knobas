@@ -445,3 +445,197 @@ async fn another_instances_custom_field_is_still_refused() {
             .all(|v| v.kind == knobas_mockd::ViolationKind::UnknownField)
     );
 }
+
+// -- ADR-0054: editing a ticket's fields, its assignee, and who it can go to --
+
+async fn put(
+    base: &str,
+    path: &str,
+    body: serde_json::Value,
+) -> (reqwest::StatusCode, serde_json::Value) {
+    let r = reqwest::Client::new()
+        .put(format!("{base}{path}"))
+        .header("Authorization", "Bearer t")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let st = r.status();
+    (st, r.json().await.unwrap_or(serde_json::Value::Null))
+}
+
+#[tokio::test]
+async fn an_edit_sets_the_summary_and_priority_and_moves_labels_in_later_gets() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231",
+        serde_json::json!({
+            "fields": { "summary": "Retry failed SEPA payouts twice", "priority": { "name": "Low" } },
+            "update": { "labels": [ { "add": "sepa" }, { "add": "payouts" } ] },
+        }),
+    )
+    .await;
+    assert_eq!(st, 204, "Jira answers an edit with no content");
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231",
+        serde_json::json!({ "update": { "labels": [ { "remove": "sepa" } ] } }),
+    )
+    .await;
+    assert_eq!(st, 204);
+
+    let (_, v) = get(
+        &base,
+        "/rest/api/2/issue/PAY-231?fields=summary,priority,labels",
+    )
+    .await;
+    assert_eq!(v["fields"]["summary"], "Retry failed SEPA payouts twice");
+    assert_eq!(v["fields"]["priority"]["name"], "Low");
+    assert_eq!(v["fields"]["labels"], serde_json::json!(["payouts"]));
+    s.assert_no_violations();
+}
+
+#[tokio::test]
+async fn an_edit_of_the_summary_alone_leaves_the_priority() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    let (st, v) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231",
+        serde_json::json!({ "fields": { "summary": "Only the words" } }),
+    )
+    .await;
+    assert_eq!(st, 204, "{v}");
+    let (_, v) = get(&base, "/rest/api/2/issue/PAY-231?fields=summary,priority").await;
+    assert_eq!(v["fields"]["summary"], "Only the words");
+    assert_eq!(v["fields"]["priority"]["name"], "High");
+}
+
+/// What Jira refuses in an edit, mockd refuses too: a field off the edit
+/// screen (under `fields` or `update`), a label operation it does not take,
+/// an empty summary, a priority without a name.
+#[tokio::test]
+async fn an_edit_mockd_does_not_take_is_a_400_that_changes_nothing() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    for body in [
+        serde_json::json!({ "fields": { "duedate": "2026-12-01" } }),
+        serde_json::json!({ "update": { "components": [ { "add": { "name": "api" } } ] } }),
+        serde_json::json!({ "update": { "labels": [ { "set": ["sepa"] } ] } }),
+        serde_json::json!({ "fields": { "summary": "  " } }),
+        serde_json::json!({ "fields": { "priority": { "id": "2" } } }),
+        serde_json::json!({ "fields": { "priority": { "name": "Urgent" } } }),
+    ] {
+        let (st, v) = put(&base, "/rest/api/2/issue/PAY-231", body.clone()).await;
+        assert_eq!(st, 400, "{body}: {v}");
+        assert!(!v["errorMessages"].as_array().unwrap().is_empty(), "{v}");
+    }
+    let (_, v) = get(
+        &base,
+        "/rest/api/2/issue/PAY-231?fields=summary,priority,labels",
+    )
+    .await;
+    assert_eq!(v["fields"]["summary"], "Retry failed SEPA payouts");
+    assert_eq!(v["fields"]["priority"]["name"], "High");
+    assert_eq!(v["fields"]["labels"], serde_json::json!([]));
+
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-999",
+        serde_json::json!({ "fields": { "summary": "x" } }),
+    )
+    .await;
+    assert_eq!(st, 404);
+}
+
+#[tokio::test]
+async fn an_assignee_is_set_and_cleared_on_its_own_resource() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231/assignee",
+        serde_json::json!({ "name": "priya.nair" }),
+    )
+    .await;
+    assert_eq!(st, 204);
+    let (_, v) = get(&base, "/rest/api/2/issue/PAY-231?fields=assignee").await;
+    assert_eq!(v["fields"]["assignee"]["name"], "priya.nair");
+
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231/assignee",
+        serde_json::json!({ "name": null }),
+    )
+    .await;
+    assert_eq!(st, 204);
+    let (_, v) = get(&base, "/rest/api/2/issue/PAY-231?fields=assignee").await;
+    assert!(v["fields"]["assignee"].is_null(), "{v}");
+
+    let (st, _) = put(
+        &base,
+        "/rest/api/2/issue/PAY-231/assignee",
+        serde_json::json!({ "name": "nobody.here" }),
+    )
+    .await;
+    assert_eq!(st, 400);
+    s.assert_no_violations();
+}
+
+/// Who an issue can go to: everyone without `username`; with it, those whose
+/// username or whose name holds it, either one.
+#[tokio::test]
+async fn the_assignable_search_matches_the_username_or_the_name() {
+    let s = spawn_mock_jira().await;
+    let base = s.base_url();
+    let names = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|u| u["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let path = "/rest/api/2/user/assignable/search?issueKey=PAY-231";
+    let (st, all) = get(&base, path).await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        names(&all).len(),
+        knobas_source_mock::fixture().people.len()
+    );
+
+    // `.` is in every username and in no name.
+    let (_, v) = get(&base, &format!("{path}&username=.")).await;
+    assert_eq!(names(&v), names(&all));
+    // `a l` is in Mara Lindqvist's name and in no username.
+    let (_, v) = get(&base, &format!("{path}&username=a%20l")).await;
+    assert_eq!(names(&v), ["mara.lindqvist"]);
+
+    let (st, _) = get(&base, "/rest/api/2/user/assignable/search").await;
+    assert_eq!(st, 400, "one of issueKey and project is required");
+    s.assert_no_violations();
+}
+
+/// `expand=editmeta`: the four fields mockd's one user may change.
+#[tokio::test]
+async fn editmeta_names_the_four_fields_an_edit_takes() {
+    let s = spawn_mock_jira().await;
+    let (_, v) = get(&s.base_url(), "/rest/api/2/issue/PAY-231?expand=editmeta").await;
+    let fields = v["editmeta"]["fields"]
+        .as_object()
+        .expect("editmeta fields");
+    let mut ids: Vec<&str> = fields.keys().map(String::as_str).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["assignee", "labels", "priority", "summary"]);
+    assert_eq!(fields["summary"]["required"], true);
+    assert_eq!(
+        fields["priority"]["allowedValues"][0],
+        serde_json::json!({ "id": "1", "name": "Highest" })
+    );
+    assert_eq!(
+        fields["labels"]["operations"],
+        serde_json::json!(["add", "set", "remove"])
+    );
+    s.assert_no_violations();
+}

@@ -42,9 +42,10 @@
  * (`takeAgain`).
  */
 import type { QueuedWrite } from "../ipc/sources";
-import { listen as tauriListen } from "@tauri-apps/api/event";
+import { windowListen } from "../ipc/shared-listen";
 
 import { EVENTS } from "../ipc";
+import { cacheEvents } from "../ipc/answer-cache";
 import type { RefreshEnded, SourceSyncStatus } from "../ipc/sources";
 import { onWithdrawn } from "../shell/write-queue.svelte";
 import { followWrite, writeFollower, type Following, type WriteFollower } from "../shell/follow-write";
@@ -59,6 +60,8 @@ export interface Echo {
   text: string;
   /** What the read said when the write was queued, for a page whose read moving is the landing. */
   base: string | null;
+  /** Where it goes, for a write whose place is a pair (a pull request from the default branch: its *Into*). */
+  into?: string;
   /** Where its write is: `queued` while open, `sent` once it left the queue's open rows as sent (#2102). */
   state: "queued" | "sent";
   /** The surface that drew it, whose `watchEchoes` re-reads for it; `null` for none. */
@@ -73,6 +76,8 @@ export interface Echoing {
   write?: (Pick<QueuedWrite, "id"> & Partial<Pick<QueuedWrite, "state">>) | null;
   /** What the read said as the write was queued. */
   base?: string | null;
+  /** Where it goes, where `base` alone does not say (a pull request's *Into*). */
+  into?: string;
   /** Several of this kind live side by side (comments, pages); otherwise a new one replaces the old. */
   many?: boolean;
   /** Follow the write: held or refused drops the echo and toasts in these words (held as unconfirmed keeps it, #1966). */
@@ -101,7 +106,7 @@ export function echoWrite(entity: string, kind: string, text: string, how: Echoi
   const write = typeof how.write?.id === "number" ? how.write.id : null;
   const kept = (echoes[entity] ?? []).filter((echo) => how.many || echo.kind !== kind);
   const state = how.write?.state === "sent" ? "sent" : "queued";
-  echoes[entity] = [...kept, { write, kind, text, base: how.base ?? null, state, surface: how.surface ?? null, source: how.source ?? null }];
+  echoes[entity] = [...kept, { write, kind, text, base: how.base ?? null, ...(how.into === undefined ? {} : { into: how.into }), state, surface: how.surface ?? null, source: how.source ?? null }];
   if (write === null) return;
   const gone = () => drop(entity, (echo) => echo.write === write);
   follows.add(onWithdrawn(write, gone));
@@ -125,6 +130,15 @@ function drop(entity: string, gone: (echo: Echo) => boolean): void {
   if (kept.length === had.length) return;
   if (kept.length === 0) delete echoes[entity];
   else echoes[entity] = kept;
+}
+
+/**
+ * The entities with an echo now, of any kind: one read, so a board laid over its echoes asks only these after their
+ * echoes, not each of its cards (221 reads of the echoes on a laned board at every drop, the ux30 card-drag gate).
+ * Reactive: it moves when an entity gains its first echo or loses its last.
+ */
+export function echoedEntities(): Set<string> {
+  return new Set(Object.keys(echoes));
 }
 
 /** The echoes on `entity`, of `kind` when given, oldest first. */
@@ -172,7 +186,7 @@ export interface EchoWatch {
  * stops a listen still being set up.
  */
 export function watchEchoes(surface: string, reread: () => void, how: EchoWatch = {}): () => void {
-  const listen = how.listen ?? ((event, handler) => tauriListen(event, handler));
+  const listen = how.listen ?? ((event, handler) => windowListen(event, handler));
   const mine = () => Object.entries(echoes).flatMap(([entity, all]) => all.filter((m) => m.surface === surface).map((m) => ({ entity, m })));
   let dead = false;
   const offs: (() => void)[] = [];
@@ -186,7 +200,12 @@ export function watchEchoes(surface: string, reread: () => void, how: EchoWatch 
     const ended = payload as RefreshEnded;
     // A refresh that followed a write follows it landed (ADR-0031): its echo is *sent*, whatever the follow has heard yet.
     if (ended.write_id !== null) for (const all of Object.values(echoes)) for (const echo of all) if (echo.write === ended.write_id) echo.state = "sent";
-    if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) reread();
+    if (mine().some(({ entity, m }) => entity === ended.entity_id || (m.write !== null && m.write === ended.write_id))) {
+      // What the refresh moved goes from the window's answers before the read again: the cache hears the event on a
+      // listener of its own, in no set order with this one (the TeamCity run fix, 2026-11-25).
+      cacheEvents.refreshed(ended);
+      reread();
+    }
   });
   if (how.runEnds !== false)
     hear(EVENTS.syncState, (payload) => {

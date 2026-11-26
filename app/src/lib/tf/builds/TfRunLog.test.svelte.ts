@@ -98,8 +98,8 @@ test("each step is a fold with its duration and lines; a failed one is open, a p
   draw();
   await settle();
   expect(folds().map((d) => [d.querySelector("summary")?.textContent, d.open])).toEqual([
-    ["Checkout12 s, 2 lines", false],
-    ["cargo test1 m 22 s, 4 lines", true],
+    ["Checkout12s, 2 lines", false],
+    ["cargo test1m 22s, 4 lines", true],
   ]);
   expect(folds()[1]!.querySelector(".tf-dot.tf-err")).not.toBeNull();
   expect(shown()).toEqual([1, 4, 5, 6, 7, 8]);
@@ -142,7 +142,7 @@ test("errors and warnings only, wrap and timestamps are toggles on the toolbar",
 });
 
 test("Errors and warnings only draws the log anew instead of dropping its lines one at a time (#2200's class)", async () => {
-  // Dropping 15,000 lines of an open step one by one took 3 s on the main
+  // Dropping 15,000 lines of an open step one by one took 3s on the main
   // thread; drawing the steps anew drops each fold whole.
   draw();
   await settle();

@@ -42,7 +42,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use knobas_core::activity;
 use knobas_core::delivery::Projection;
 use knobas_core::entity::EntityRef;
-use knobas_core::payload::StatePath;
+use knobas_core::payload::KindPaths;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
 use knobas_http::LocalQuota;
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
@@ -201,7 +201,7 @@ pub async fn queue(
     })?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let snapshot = project_now(deps, &op, &entity, &payload).await?;
+    let snapshot = snapshot(deps, &op, &entity, &payload, None).await?;
 
     let queued = store::queue(
         &deps.pool,
@@ -735,7 +735,7 @@ pub async fn amend(
         EntityRef::parse(op.target()).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let snapshot = project_now(deps, &op, &entity, &payload).await?;
+    let snapshot = snapshot(deps, &op, &entity, &payload, Some(id)).await?;
 
     let Some(amended) = store::amend(&deps.pool, id, payload, snapshot).await? else {
         return Ok(None);
@@ -767,29 +767,33 @@ pub async fn discard(deps: &SchedulerDeps, id: i64) -> Result<Option<QueuedWrite
     Ok(Some(discarded))
 }
 
-/// The state paths the target's source declares for the target's kind
-/// (`KindPaths::state`, #666), for the ops whose hold reads them
-/// ([`Projection::reads_declared_state`]): an `edit_pull_request` that closes or
-/// reopens holds on the declared state rather than the whole record (#706),
-/// and a comment, an approval or a review holds on nothing else (#752).
-/// Empty for every other op, for a target that is gone, and for a source
+/// The paths the target's source declares for the target's kind, for the
+/// ops whose hold reads them: its state (`KindPaths::state`, #666,
+/// [`Projection::reads_declared_state`]) -- an `edit_pull_request` that closes
+/// or reopens holds on the declared state rather than the whole record
+/// (#706), and a comment, an approval or a review holds on nothing else
+/// (#752) -- and its status (`KindPaths::status_name`,
+/// [`Projection::reads_declared_status`]), which a move holds on (ADR-0054).
+/// `None` for every other op, for a target that is gone, and for a source
 /// whose adapter is not compiled in or declares nothing.
 ///
 /// The **template** descriptor, keyed by the entity's namespace (the source
 /// instance id), as `knobas-app`'s `declared_paths` reads it: where a source
 /// keeps its state is a property of the adapter kind, so this needs no
 /// secret and no built adapter, and the queue and the flush read it alike.
-async fn declared_state(
+async fn declared_paths(
     deps: &SchedulerDeps,
     entity: &EntityRef,
     shape: Projection,
     target: Option<&store::Target>,
-) -> Result<Vec<StatePath>, FlushError> {
-    let Some(target) = target.filter(|_| shape.reads_declared_state()) else {
-        return Ok(Vec::new());
+) -> Result<Option<KindPaths>, FlushError> {
+    let Some(target) =
+        target.filter(|_| shape.reads_declared_state() || shape.reads_declared_status())
+    else {
+        return Ok(None);
     };
     let Some(source) = config::get(&deps.pool, &entity.namespace).await? else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     Ok(deps
         .registry
@@ -797,30 +801,62 @@ async fn declared_state(
         .into_iter()
         .filter(|d| d.adapter_kind == source.adapter_kind)
         .flat_map(|d| d.payload_paths)
-        .find(|paths| paths.kind == target.kind)
-        .map(|paths| paths.state)
-        .unwrap_or_default())
+        .find(|paths| paths.kind == target.kind))
 }
 
 /// The op's target as the mirror holds it now, projected by the shape its
 /// delivery states: the snapshot a queued write is taken with and the value a
-/// held one is compared against.
+/// held one is compared against. With it, the declared paths the projection
+/// read, which the comparison reads again ([`store::same_target`]).
 async fn project_now(
     deps: &SchedulerDeps,
     op: &WriteOp,
     entity: &EntityRef,
     payload: &serde_json::Value,
-) -> Result<serde_json::Value, FlushError> {
+) -> Result<(serde_json::Value, Option<KindPaths>), FlushError> {
     let shape = op.delivery().projection;
     let target = store::target_of(&deps.pool, entity).await?;
-    let state = declared_state(deps, entity, shape, target.as_ref()).await?;
-    Ok(store::project(
+    let paths = declared_paths(deps, entity, shape, target.as_ref()).await?;
+    let projected = store::project(
         op.identifier(),
         shape,
         payload,
         target.as_ref(),
-        &state,
-    ))
+        paths.as_ref(),
+    );
+    Ok((projected, paths))
+}
+
+/// The snapshot a write is queued (or amended) with: the target projected
+/// now, and for a move, `after`, the statuses the same ticket's open moves
+/// are going to set (ADR-0054), for a ticket's edit the values its open
+/// edits are going to set, by field, so the person's own earlier move landing
+/// before this one is sent does not hold it. Read before the row is written,
+/// so a new move never lists itself; an amended one (`amended`, its id) lists
+/// only the moves queued before it.
+async fn snapshot(
+    deps: &SchedulerDeps,
+    op: &WriteOp,
+    entity: &EntityRef,
+    payload: &serde_json::Value,
+    amended: Option<i64>,
+) -> Result<serde_json::Value, FlushError> {
+    let (mut snapshot, _) = project_now(deps, op, entity, payload).await?;
+    if op.delivery().projection.reads_declared_status() {
+        let after = store::statuses_on_their_way(&deps.pool, entity, amended).await?;
+        if let (false, Some(fields)) = (after.is_empty(), snapshot.as_object_mut()) {
+            fields.insert("after".to_owned(), serde_json::json!(after));
+        }
+    }
+    // An edit of a ticket's fields: the values its earlier open edits are
+    // going to set, by field (ADR-0054), where it compares any field at all.
+    if matches!(op, WriteOp::EditTicket { .. }) && snapshot.get("fields").is_some() {
+        let after = store::fields_on_their_way(&deps.pool, entity, amended).await?;
+        if let (false, Some(fields)) = (after.is_empty(), snapshot.as_object_mut()) {
+            fields.insert("after".to_owned(), serde_json::Value::Object(after));
+        }
+    }
+    Ok(snapshot)
 }
 
 /// Attempt one write. `Ok(true)` if it was delivered, so the caller knows the
@@ -898,8 +934,8 @@ async fn attempt(
 
     // Hold detection: the target as it stands *now*, against the snapshot
     // taken when the write was queued.
-    let current = project_now(deps, &op, &entity, &write.payload).await?;
-    if current != write.target_snapshot {
+    let (current, paths) = project_now(deps, &op, &entity, &write.payload).await?;
+    if !store::same_target(&write.target_snapshot, &current, paths.as_ref()) {
         if let Some(held) = store::hold(&deps.pool, write.id, current).await? {
             announce(deps, "held", &held).await;
         }

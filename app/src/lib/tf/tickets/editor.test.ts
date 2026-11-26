@@ -99,9 +99,9 @@ describe("the board's columns", () => {
 
   test("one column per status, in the board's order", () => {
     expect(onePerStatus(statuses).map((column) => [column.name, column.statuses, column.limit])).toEqual([
-      ["To Do", ["To Do"], null],
-      ["In Progress", ["In Progress"], null],
-      ["In Review", ["In Review"], null],
+      ["To do", ["To Do"], null],
+      ["In progress", ["In Progress"], null],
+      ["In review", ["In Review"], null],
       ["Done", ["Done"], null],
     ]);
   });
@@ -125,8 +125,8 @@ describe("the board's columns", () => {
 
   test("columns move earlier and later", () => {
     const columns = onePerStatus(statuses);
-    expect(moveColumn(columns, 0, 1).map((column) => column.name)).toEqual(["In Progress", "To Do", "In Review", "Done"]);
-    expect(moveColumn(columns, 3, -1).map((column) => column.name)).toEqual(["To Do", "In Progress", "Done", "In Review"]);
+    expect(moveColumn(columns, 0, 1).map((column) => column.name)).toEqual(["In progress", "To do", "In review", "Done"]);
+    expect(moveColumn(columns, 3, -1).map((column) => column.name)).toEqual(["To do", "In progress", "Done", "In review"]);
   });
 
   test("one column per status is stored as none of its own; anything else as typed, a blank limit as none", () => {

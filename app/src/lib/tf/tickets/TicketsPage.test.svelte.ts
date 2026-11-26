@@ -1,32 +1,27 @@
 /**
  * Tickets in the ticket-first shell (#810): the ticket board and the list
  * over `mini_board`, the filter bar sending its query to the server, the
- * outlined selected card and the preview.
+ * outlined selected card, and no preview beside them (ux18).
  */
-import { needles } from "./needles";
+import { wordAlternatives } from "./needles";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 
-import type {
-  ContextRow,
-  EntityFilter,
-  EntityRow,
-  LanesAsked,
-  MiniBoard,
-  MiniBoardCard,
-  Reached,
-  StateChip,
-} from "../../ipc/entity";
+import type { BoardPage, ContextRow, LanesAsked, MiniBoard, MiniBoardCard } from "../../ipc/entity";
 import type { QueryTranslation, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
+import { growWindowsNow } from "../../shell/windowed.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
+import { scopedTicket } from "../job/scoped.svelte";
+import { layers } from "../layers.svelte";
 import { until } from "../../shell/test-wait";
+import { withStatusEchoes } from "./echo-board";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
-// bypasses them (as `promote_context` would to draw the preview, #1030).
+// bypasses them (as `promote_context` would have, #1030).
 const bridged = vi.hoisted(() => [] as string[]);
 vi.mock("@tauri-apps/api/core", async (original) => ({
   ...(await original<typeof import("@tauri-apps/api/core")>()),
@@ -36,6 +31,11 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
   },
 }));
 
+// The board laid over its echoes, counted (the ux30 end gate): a write's answer must not lay it over again.
+vi.mock("./echo-board", async (original) => {
+  const real = await original<typeof import("./echo-board")>();
+  return { ...real, withStatusEchoes: vi.fn(real.withStatusEchoes) };
+});
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
 
@@ -55,6 +55,12 @@ afterEach(() => {
 async function settle() {
   for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
+}
+
+/** The frame after: what a growing column draws below its first cards. */
+async function nextFrame() {
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  await settle();
 }
 
 function card(key: string, title: string, extra: Partial<MiniBoardCard> = {}): MiniBoardCard {
@@ -102,6 +108,7 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
       path: "PAY-300",
       comment_count: 0,
       assignee: "mara.lindqvist",
+      assignee_name: "Mara Lindqvist",
       signals: [
         { kind: "failing-build", text: "build failed", tone: "err" },
         { kind: "open-pr", text: "PR #142 open", tone: "info" },
@@ -126,37 +133,6 @@ interface Harness {
   opened: string[];
   /** Every `translate_ticket_view` (#1208). */
   translated: string[];
-  /** The mirror rows a reach or a context can hold. */
-  rows: EntityRow[];
-  /** What each ticket reaches (`job_reach`), by entity id. */
-  reach: Record<string, Reached[]>;
-  /** A stored context's members, by context id. */
-  members: Record<string, string[]>;
-  /** Every `list_entities` filter the page sent. */
-  lists: EntityFilter[];
-}
-
-function row(entity_id: string, kind: string, tone: StateChip["tone"] | null = null): EntityRow {
-  return {
-    entity_id,
-    kind,
-    source_id: kind === "build" ? "teamcity" : "gitea",
-    title: entity_id,
-    updated_at: null,
-    synced_at: "",
-    path: null,
-    state: tone === null ? null : { text: tone === "err" ? "failed" : "success", tone },
-  };
-}
-
-const PR = row("gitea:payout-service#142", "pr", "info");
-const BUILD_FAILED = row("teamcity:it#1187", "build", "err");
-const BUILD_OK = row("teamcity:lint#904", "build", "ok");
-/** What the reads above can answer with. */
-const AROUND_ROWS = [PR, BUILD_FAILED, BUILD_OK];
-
-function own(of: EntityRow): Reached {
-  return { entity_id: of.entity_id, kind: of.kind, step: of.entity_id, origin: { kind: "own" } };
 }
 
 /**
@@ -203,10 +179,6 @@ function harness(
     hidden: [],
     opened: [],
     translated: [],
-    rows: [...AROUND_ROWS],
-    reach: {},
-    members: {},
-    lists: [],
     ports: {
       views: () => Promise.resolve(h.views.map((row) => ({ ...row }))),
       saveView: (draft) => {
@@ -245,8 +217,9 @@ function harness(
       },
       board: (perColumn, query, _savedView, lanes) => {
         reads.push(lanes ? { perColumn, query, lanes } : { perColumn, query });
-        // Grammar keys narrow nothing here; the reads record them. The words are the needles, a phrase whole.
-        const words = needles(query ?? "");
+        // Grammar keys narrow nothing here; the reads record them. The words are what the filter holds, a phrase whole:
+        // not the needles, which add the key a key typed with a space spells, to mark, never to narrow (ux26).
+        const words = wordAlternatives(query ?? "").flatMap((alternative) => alternative.holds);
         const kept = corpus.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
@@ -264,7 +237,6 @@ function harness(
         if (lanes) return Promise.resolve(inLanes(board, lanes, perColumn));
         return Promise.resolve(board);
       },
-      detail: (id) => Promise.resolve({ description: `The description of ${id}.`, markup: "text" }),
       // No longer a port: a page that still asked would count here (#1502).
       ...{
         contexts: () => {
@@ -272,29 +244,6 @@ function harness(
           return Promise.resolve(contexts);
         },
       },
-      // The mirror's rows, as the job's section reads ask for them: scoped by
-      // what a ticket reaches, or (what no read should ask any more) by a
-      // stored context's membership.
-      listEntities: (filter) => {
-        h.lists.push(filter);
-        const ids =
-          filter.reach != null
-            ? new Set((h.reach[filter.reach] ?? []).map((row) => row.entity_id))
-            : filter.context !== null
-              ? new Set(h.members[filter.context] ?? [])
-              : new Set(h.rows.map((row) => row.entity_id));
-        // Asked for CI with no kinds, the mirror reads the run kinds CI's
-        // fillers declare (#1295); here, the fixture's builds.
-        const roleKinds = filter.role === "ci" ? ["build"] : null;
-        const rows = h.rows.filter(
-          (row) =>
-            ids.has(row.entity_id) &&
-            (filter.kinds.length === 0 || filter.kinds.includes(row.kind)) &&
-            (roleKinds === null || roleKinds.includes(row.kind)),
-        );
-        return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
-      },
-      jobReach: (id) => Promise.resolve(h.reach[id] ?? []),
       suggestions: () =>
         Promise.resolve({
           fields: [
@@ -310,8 +259,8 @@ function harness(
 }
 
 /** Opens the page; the filter's typing pause is none unless a test asks for one. */
-async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null, typingPause = 0) {
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId, typingPause } });
+async function open(h: Harness, _timed: string | null = null, viewId: string | null = null, typingPause = 0) {
+  page = mount(TicketsPage, { target, props: { ready: true, ports: h.ports, viewId, typingPause } });
   await settle();
 }
 
@@ -322,8 +271,7 @@ const columns = () =>
     more: col.querySelector(".tf-more")?.textContent ?? null,
   }));
 const count = () => target.querySelector(".tf-fcount")!.textContent;
-const preview = () => target.querySelector<HTMLElement>(".tf-preview")!;
-const field = () => target.querySelector<HTMLInputElement>("input[data-filter]")!;
+const field = () => target.querySelector<HTMLInputElement>(".tf-fbar input[data-filter]")!;
 
 function type(input: HTMLInputElement, char: string) {
   const at = input.selectionStart ?? input.value.length;
@@ -332,13 +280,27 @@ function type(input: HTMLInputElement, char: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+test("an open View fold is a panel: Esc folds it first, and focus returns to its bar (F-619)", async () => {
+  await open(harness());
+  const before = layers.open.length;
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  layers.open.at(-1)!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(bar);
+  expect(layers.open).toHaveLength(before);
+});
+
 test("every synced ticket on the board: a column per status, eight cards then Show N more, Done three", async () => {
   const h = harness();
   await open(h);
   expect(h.reads[0]).toEqual({ perColumn: 8, query: null });
   expect(columns()).toEqual([
-    { head: "To Do 12", cards: 8, more: "Show 4 more" },
-    { head: "In Progress 1", cards: 1, more: null },
+    { head: "To do 12", cards: 8, more: "Show 4 more" },
+    { head: "In progress 1", cards: 1, more: null },
     { head: "Done 5", cards: 3, more: "Show 2 more done" },
   ]);
   expect(count()).toBe("18 tickets");
@@ -346,8 +308,9 @@ test("every synced ticket on the board: a column per status, eight cards then Sh
   expect(target.querySelector(".tf-views .tf-count")!.textContent).toBe("18");
 });
 
-test("the first card is selected: outlined, and the preview shows it with Start work", async () => {
-  await open(harness());
+test("the first card is selected and outlined, and the board takes the width: no preview of it beside (ux18)", async () => {
+  const h = harness();
+  await open(h);
   const first = target.querySelector<HTMLElement>(".tf-tcard")!;
   expect(first.classList.contains("tf-sel")).toBe(true);
   expect(first.getAttribute("aria-current")).toBe("true");
@@ -355,32 +318,24 @@ test("the first card is selected: outlined, and the preview shows it with Start 
   // No job is chosen, so nothing is yellow (spec #2396, #2398).
   expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(0);
   expect(first.textContent).toContain("Story, High");
-  expect(first.querySelector(".tf-av")!.textContent).toBe("ML");
+  expect(first.querySelector(".tf-av")!.textContent).toBe("MA");
   expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
-
-  expect(preview().querySelector("h2")!.textContent).toBe("Retry failed SEPA payouts");
-  expect(preview().textContent).toContain("The description of jira:PAY-1.");
-  const button = preview().querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!;
-  expect(button.textContent).toBe("Start work");
-  expect(button.getAttribute("href")).toBe("#/job/jira%3APAY-1");
+  // Björn: "Remove the right sidebar from the tickets view": no pane, no edge to drag it by, and nothing read for it.
+  expect(target.querySelector(".tf-preview, [aria-label='Selected ticket']")).toBeNull();
+  expect([...target.querySelectorAll(".tf-tickets > .tf-sedge")].map((edge) => edge.getAttribute("data-at"))).toEqual(["start"]);
+  expect(bridged).not.toContain("get_entity");
+  expect(bridged).not.toContain("card_reads");
+  expect(bridged).not.toContain("promote_context");
 });
 
-test("selecting another card moves the outline and the preview's button follows its state", async () => {
-  await open(harness(), "PAY-40");
+test("a click on a card opens its ticket page, as the app's other rows do, and the way back selects it (ux18)", async () => {
+  await open(harness());
   const pick = (key: string) => target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!;
   pick("PAY-40").click();
+  expect(location.hash).toBe("#/ticket/jira%3APAY-40");
   await settle();
   expect(pick("PAY-40").classList.contains("tf-sel")).toBe(true);
   expect(pick("PAY-1").classList.contains("tf-sel")).toBe(false);
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Resume work");
-  expect(preview().textContent).toContain("Your timer is running on this ticket.");
-
-  pick("PAY-2").click();
-  await settle();
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open job");
-  // Somebody else's ticket is only read from here (spec #2396): its page, not the job's address.
-  expect(preview().querySelector(".tf-go .tf-primary")!.getAttribute("href")).toBe("#/ticket/jira%3APAY-2");
-  expect(preview().textContent).toContain("Assigned to jonas.becker.");
 });
 
 test("typing filters on the server, keeps focus and the caret, shows the matches and marks the words", async () => {
@@ -395,7 +350,7 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   }
   expect(input.selectionStart).toBe(4);
   expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "sepa" });
-  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+  expect(columns()).toEqual([{ head: "To do 1", cards: 1, more: null }]);
   expect(count()).toBe("1 of 18 tickets");
   expect(target.querySelector(".tf-tcard mark")!.textContent).toBe("SEPA");
 
@@ -408,25 +363,218 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   expect(input.value).toBe("s epa");
 });
 
-test("a typed filter reads and draws fifty a column under its total, and Show N more reads the rest (#1024)", async () => {
-  const bulk = (status: string, n: number, word: string) =>
-    Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
+// The ux14 pass (2026-11-16): a column that windowed once drew the whole overscan below the view in the first frame of
+// every key after, 88 cards at 5120 x 1440 where 66 were on screen. Each new set of cards draws the screen's first.
+test("each key's new cards draw the screen's first and the overscan below them a frame later", async () => {
   const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
   await open(h);
+  // No frame comes on its own, so the overscan below grows only when `growWindowsNow` says: on a loaded machine two of
+  // jsdom's frames can pass inside `settle`.
+  // The frames are the test's own, run one at a time: the board's whole draw waits one, the overscan two.
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
   for (const char of "bulk") type(field(), char);
   await settle();
-  expect(columns()).toEqual([
-    { head: "To Do 60", cards: 50, more: "Show 10 more" },
-    { head: "Done 55", cards: 50, more: "Show 5 more done" },
+  // The frame the answer lands: a column that showed eight draws eight (the ux18 Windows pass), the screen's the next.
+  expect(stacks()[0]!.cards).toBe(8);
+  await oneFrame();
+  const onScreen = stacks()[0]!.cards;
+  growWindowsNow();
+  await settle();
+  const grown = stacks()[0]!.cards;
+  expect(grown).toBeGreaterThan(onScreen);
+  // Cleared, each column is back to its eight cards; typed again, its cards are a new set.
+  const input = field();
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  await oneFrame();
+  expect(stacks()[0]!.cards).toBe(8);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(stacks()[0]!.cards).toBe(8);
+  await oneFrame();
+  expect(stacks()[0]!.cards).toBe(onScreen);
+  const first = [...target.querySelectorAll(".tf-tcard")];
+  growWindowsNow();
+  await settle();
+  expect(stacks()[0]!.cards).toBe(grown);
+  expect(first.every((card) => card.isConnected)).toBe(true);
+});
+
+// The ux18 Windows pass (Fable's ruling): at 5120 px a key's answer drew about twelve cards in each of six 520 px
+// columns in the frame it landed, 69 cards, and that frame went from 32 to 45 ms at CPU 4x. A column that windows and
+// showed eight draws eight in that frame and the rest of its screen the frame after, below them; one that showed more
+// draws its screen at once, so no card drawn goes.
+test("a key's answer draws eight in a long column that showed eight, the rest the frame after below them; one that showed more draws at once", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
+  await open(h);
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
+  const keys = () => [...target.querySelectorAll<HTMLElement>(".tf-cards")].map((box) => [...box.querySelectorAll(".tf-tkey, .tf-k")].map((key) => key.textContent));
+  const rooms = () => stacks().map(({ room }) => room);
+  // Widening: eight a column to fifty.
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(stacks().map(({ cards }) => cards)).toEqual([8, 8]);
+  const firstEight = [...target.querySelectorAll(".tf-tcard")];
+  const shareKeys = keys();
+  const shareRooms = rooms();
+  await oneFrame();
+  const after = stacks().map(({ cards }) => cards);
+  expect(after[0]).toBeGreaterThanOrEqual(8);
+  // The eight stay where they drew, the rest join below them, and the room held for the rest only shrinks by them.
+  expect(firstEight.every((card) => card.isConnected)).toBe(true);
+  keys().forEach((column, at) => expect(column.slice(0, 8)).toEqual(shareKeys[at]));
+  rooms().forEach((room, at) => expect(Number.parseFloat(room || "0")).toBeLessThanOrEqual(Number.parseFloat(shareRooms[at] || "0")));
+  growWindowsNow();
+  await settle();
+  const grown = stacks()[0]!.cards;
+  expect(grown).toBeGreaterThan(8);
+  // Narrowing: a column that showed more than eight draws its screen in the answer's frame, so none of its cards goes.
+  const drawn = [...target.querySelectorAll(".tf-tcard")];
+  type(field(), " ");
+  type(field(), "1");
+  await settle();
+  const narrowed = stacks()[0]!.cards;
+  expect(narrowed).toBeGreaterThan(8);
+  const still = new Set([...target.querySelectorAll(".tf-tcard")]);
+  // Every card of the narrowed column that drew before still stands (Bulk 1, Bulk 10 to 19).
+  expect(drawn.filter((card) => still.has(card)).length).toBeGreaterThan(0);
+  await oneFrame();
+  expect(stacks()[0]!.cards).toBeGreaterThanOrEqual(narrowed);
+});
+
+const bulk = (status: string, n: number, word: string) =>
+  Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
+/** A column's cards box: the drawn cards' count, and the room it holds for the rest below them. */
+const stacks = () =>
+  [...target.querySelectorAll<HTMLElement>(".tf-cards")].map((box) => ({
+    cards: box.querySelectorAll(".tf-tcard").length,
+    room: box.style.paddingBottom,
+  }));
+
+// The Windows pass (2026-11-14): columns a filter's words or *Show more* made long drew every card, and each key drew
+// all of them again (1,243 cards, 248 to 732 ms a key in WebView2 at 4x). A column of 24 or more draws the screen's.
+test("a typed filter reads fifty a column under its total, a long column draws the cards near the screen, and Show N more reads the rest (#1024)", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
+  await open(h);
+  // The frames are the test's own, run one at a time (as the test above runs them): jsdom's own came inside the wait for
+  // the words' answer on a loaded machine, so the screen's cards or the overscan had drawn before the first look, and the
+  // overscan grew nothing past it (8 > 8, 13 > 13: the ux21 moves pass).
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  onTestFinished(() => (raf.mockRestore(), caf.mockRestore()));
+  const oneFrame = async () => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(performance.now());
+    await settle();
+  };
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  // The words' read waits out the typing pause: on a loaded machine `settle` ended first, and both looks below saw the
+  // board before the answer, eight a column (the ux21 overs pass).
+  for (let turn = 0; turn < 500 && count() !== "115 of 133 tickets"; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  // The cards on screen, drawn the frame after the answer's, then the overscan below them once that frame has drawn (the
+  // sizes pass, 2026-11-15).
+  await oneFrame();
+  const onScreen = stacks()[0]!.cards;
+  growWindowsNow();
+  await settle();
+  const drawn = stacks()[0]!.cards;
+  expect(drawn).toBeGreaterThan(onScreen);
+  expect(drawn).toBeGreaterThan(5);
+  expect(drawn).toBeLessThan(24);
+  // Every undrawn card's room, at its floor (`cardFloor`: 84 px for a line of summary) and the 6 px between cards,
+  // under the drawn ones.
+  expect(stacks()).toEqual([
+    { cards: drawn, room: `${(50 - drawn) * 90}px` },
+    { cards: drawn, room: `${(50 - drawn) * 90}px` },
   ]);
+  expect(columns()).toEqual([
+    { head: "To do 60", cards: drawn, more: "Show 10 more" },
+    { head: "Done 55", cards: drawn, more: "Show 5 more done" },
+  ]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  await oneFrame();
+  expect(stacks()[0]!.cards).toBe(drawn);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
   expect(count()).toBe("115 of 133 tickets");
+  // The column's *Show more* stands below the room, not after the last card drawn.
+  expect(target.querySelector(".tf-cards + .tf-more")).not.toBeNull();
 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
   expect(columns()).toEqual([
-    { head: "To Do 60", cards: 60, more: null },
-    { head: "Done 55", cards: 50, more: "Show 5 more done" },
+    { head: "To do 60", cards: drawn, more: null },
+    { head: "Done 55", cards: drawn, more: "Show 5 more done" },
   ]);
+  expect(stacks()[0]!.room).toBe(`${(60 - drawn) * 90}px`);
+});
+
+test("a column a filter grows under 24 cards draws its first sixteen in the frame the answer lands, the rest the frame after (the broad-filters pass, 2026-11-13)", async () => {
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 20, "Bulk")]);
+  await open(h);
+  // The frames are the test's own: a loaded machine's five turns of `settle` outlasted jsdom's frame, which then drew
+  // the rest before the first look (the ux13-overs pass: a flake under load).
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 16, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
+  expect(stacks()).toEqual([{ cards: 20, room: "" }]);
+});
+
+test("j walks down a long column past the cards it drew, drawing and focusing each card it reaches, and k back up", async () => {
+  const h = harness([], [], bulk("To Do", 50, "Bulk"));
+  await open(h);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  field().blur();
+  const drawn = () => [...target.querySelectorAll(".tf-tcard")].map((el) => el.getAttribute("data-entity"));
+  const first = drawn();
+  expect(first.length).toBeLessThan(24);
+  for (let step = 0; step < first.length + 10; step += 1) press("j");
+  const at = `BLK-T${first.length + 11}`;
+  expect(selectedKey()).toBe(at);
+  expect(document.activeElement?.getAttribute("data-entity")).toBe(`jira:${at}`);
+  expect(drawn()).not.toContain("jira:BLK-T1");
+  for (let step = 0; step < first.length + 10; step += 1) press("k");
+  expect(selectedKey()).toBe("BLK-T1");
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:BLK-T1");
 });
 
 test("no match says so and offers to clear the filter", async () => {
@@ -451,7 +599,7 @@ test("a chip and a dropdown are sent as the grammar's keys", async () => {
   await settle();
   expect(h.reads.at(-1)!.query).toBe("issuetype:Bug");
   const select = target.querySelector<HTMLSelectElement>(".tf-fsel select")!;
-  expect([...select.options].map((o) => o.textContent)).toEqual(["Any", "Me"]);
+  expect([...select.options].map((o) => o.textContent).slice(0, 2)).toEqual(["Any", "Me"]);
   select.value = "@me";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
@@ -463,7 +611,7 @@ test("Show N more reads the column whole and draws all of it", async () => {
   await open(h);
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 12, more: null });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 12, more: null });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -482,6 +630,30 @@ test("the list draws the same tickets newest first, the selected row outlined", 
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
 
+test("*Assignee* draws the name the column draws, and offers the people on the cards it read (F-161, F-165)", async () => {
+  const h = harness();
+  const asked = h.ports.suggestions;
+  h.ports.suggestions = (...args) =>
+    asked(...args).then((answer) => ({
+      ...answer,
+      fields: [...answer.fields, { key: "assignee", value: "mara.lindqvist", detail: "" }, { key: "assignee", value: "someone.else", detail: "" }],
+    }));
+  await open(h);
+  const select = [...target.querySelectorAll<HTMLSelectElement>(".tf-fsel select")].find((one) => [...one.options].some((option) => option.value === "@me"))!;
+  expect([...select.options].map((one) => one.textContent)).toEqual(["Any", "Me", "Jonas", "Mara", "Someone"]);
+});
+
+test("the list calls an assignee by first name, with the whole name in its title (F-144)", async () => {
+  await open(harness());
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]
+    .find((b) => b.textContent === "List")!
+    .click();
+  await settle();
+  const named = [...target.querySelectorAll<HTMLElement>(".tf-tbl td.tf-c-assignee")].filter((td) => td.title.includes(" "));
+  expect(named.length).toBeGreaterThan(0);
+  for (const cell of named) expect(cell.textContent).toBe(cell.title.split(" ")[0]);
+});
+
 test("the list's Show N more reads every ticket, and the board keeps its caps", async () => {
   const h = harness();
   await open(h);
@@ -496,7 +668,7 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   expect(target.querySelector(".tf-list-more")).toBeNull();
   layout("Board");
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 8, more: "Show 4 more" });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 8, more: "Show 4 more" });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -510,58 +682,6 @@ test("an ad-hoc context draws no Not a ticket group and is never read for", asyn
   expect(views.textContent).not.toContain("Not a ticket");
   expect(views.textContent).not.toContain("Staging DB configuration");
   expect(h.contextReads).toBe(0);
-});
-
-const around = () => [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
-
-// #1030: the preview counts what the job's sections show, from the job-reach
-// read, whether or not anybody has opened the ticket's job yet.
-test("Around this ticket counts what the ticket reaches, with no context stored for it", async () => {
-  const h = harness();
-  h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
-  await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing or down"]);
-  // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
-  const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
-  expect(builds).toHaveLength(1);
-  expect(builds[0]).toMatchObject({ role: "ci", kinds: [], reach: "jira:PAY-1" });
-});
-
-test("Around this ticket counts a parent's link the reach brings in and the context's membership does not", async () => {
-  const h = harness([{ id: "ctx:2", kind: "ticket", title: "PAY-1", anchor_id: "jira:PAY-1", created_at: "", archived_at: null }]);
-  // The job's Builds section draws both builds: one the ticket's own, one its parent's (R-7.3).
-  h.reach["jira:PAY-1"] = [
-    own(PR),
-    own(BUILD_OK),
-    { entity_id: BUILD_FAILED.entity_id, kind: "build", step: "jira:PAY-200", origin: { kind: "parent", ticket: "jira:PAY-200" } },
-  ];
-  h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
-  await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing or down"]);
-});
-
-test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
-  const h = harness();
-  h.reach["jira:PAY-2"] = [own(PR)];
-  await open(h);
-  expect(around()).toEqual([]);
-  expect(preview().textContent).toContain("Nothing connected yet.");
-  target.querySelector<HTMLButtonElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.click();
-  await settle();
-  expect(around()).toEqual(["Code1 pull request"]);
-});
-
-test("selecting a card never creates a context", async () => {
-  const h = harness();
-  h.reach["jira:PAY-1"] = [own(PR)];
-  await open(h);
-  for (const key of ["PAY-2", "PAY-40", "PAY-1"]) {
-    target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!.click();
-    await settle();
-  }
-  expect(around()).toEqual(["Code1 pull request"]);
-  expect(bridged).not.toContain("promote_context");
-  expect(h.lists.every((filter) => filter.context === null)).toBe(true);
 });
 
 test("Enter on a card opens its ticket page, not the job (spec #2227)", async () => {
@@ -617,24 +737,24 @@ test("lanes split the board into bands by size, each with its columns and count,
     {
       head: "jonas.becker 11",
       columns: [
-        { head: "To Do 11", cards: 8, more: "Show 3 more" },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 11", cards: 8, more: "Show 3 more" },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
     {
       head: "Unassigned 5",
       columns: [
-        { head: "To Do 0", cards: 0, more: null },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 0", cards: 0, more: null },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 5", cards: 3, more: "Show 2 more done" },
       ],
     },
     {
       head: "mara.lindqvist 2",
       columns: [
-        { head: "To Do 1", cards: 1, more: null },
-        { head: "In Progress 1", cards: 1, more: null },
+        { head: "To do 1", cards: 1, more: null },
+        { head: "In progress 1", cards: 1, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
@@ -703,7 +823,6 @@ test("j/k and the arrows move the selection through the visible cards in reading
   field().focus();
   press("j");
   expect(selectedKey()).toBe("PAY-52");
-  expect(preview().textContent).toContain("PAY-52");
 });
 
 test("j/k walk the list's rows in their sorted order, and a double click opens the ticket page", async () => {
@@ -769,7 +888,9 @@ test("the Board / List and Lanes switches hold for the session only: nothing is 
     expect(lanesSelect()!.value).toBe("epic");
     layoutButton("List").click();
     await settle();
-    expect(lanesSelect()).toBeNull();
+    // The list keeps the select's room, unseen and out of reach (the nothing-moves pass): the bar does not reflow.
+    expect(lanesSelect()!.closest("label")!.classList.contains("tf-hidden")).toBe(true);
+    expect(lanesSelect()!.closest("label")!.inert).toBe(true);
     // Away and back within the session: both switches held.
     unmount(page!);
     page = null;
@@ -809,12 +930,11 @@ test("signals are drawn on the card and in the list's Signals column, each a ton
   ]);
 });
 
-test("a card counts its comments above zero and names its epic, as the preview's Epic row does", async () => {
+test("a card counts its comments above zero and names its epic", async () => {
   await open(harness());
   const mine = target.querySelector('.tf-tcard[data-entity="jira:PAY-1"]')!;
   expect(mine.querySelector(".tf-comments")!.textContent).toBe("3 comments");
-  const epicRow = () => [...preview().querySelectorAll("dt")].find((dt) => dt.textContent === "Epic")!;
-  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-200 Payout reliability");
+  expect(mine.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 
   // A count of none draws nothing, nor does a count that never answered,
   // and an epic the mirror does not hold is its key alone (ADR-0007).
@@ -822,9 +942,6 @@ test("a card counts its comments above zero and names its epic, as the preview's
   expect(other.querySelector(".tf-comments")).toBeNull();
   expect(target.querySelector('.tf-tcard[data-entity="jira:PAY-2"] .tf-comments')).toBeNull();
   expect(other.querySelector(".tf-cep")!.textContent).toBe("PAY-300");
-  other.click();
-  await settle();
-  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-300");
 });
 
 test("a view whose cards leave the comment count out draws none", async () => {
@@ -849,6 +966,7 @@ function view(id: string, name: string, group: string, position: number, extra: 
     card_fields: ["type", "signals", "comments", "assignee"],
     list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"],
     list_sort: null,
+    show_all: false,
     saved_view: null,
     count: 3,
     unreadable: null,
@@ -906,6 +1024,20 @@ test("the marks are what the server read: a phrase whole, never an or, a -word o
   expect(marked).toEqual(["failed SEPA"]);
 });
 
+test("a key typed with a space marks the card's key whole, as PAY-7 typed with its - does (ux26)", async () => {
+  const h = harness();
+  await open(h);
+  for (const typed of ["pay 7", "PAY-7"]) {
+    const input = field();
+    input.value = "";
+    type(input, typed);
+    await settle();
+    const keyed = [...target.querySelectorAll<HTMLElement>(".tf-tcard")].find((card) => card.querySelector(".tf-k")?.textContent === "PAY-7");
+    expect(keyed, typed).toBeDefined();
+    expect([...keyed!.querySelectorAll(".tf-k mark")].map((mark) => mark.textContent), typed).toEqual(["PAY-7"]);
+  }
+});
+
 test("Find a view narrows the pane by name and by query, and marks the name", async () => {
   await open(harness([], VIEWS));
   const find = target.querySelector<HTMLInputElement>('input[aria-label="Find a view"]')!;
@@ -925,7 +1057,7 @@ test("Find a view narrows the pane by name and by query, and marks the name", as
 test("the board head is the canonical header: title left, one group right with the switch, the actions at default size, Sync now last (#2293)", async () => {
   const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug" })]);
   const sync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket: null, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
+  page = mount(TicketsPage, { target, props: { ready: true, ports: h.ports, viewId: "mine", typingPause: 0, sync } });
   await settle();
   const head = target.querySelector<HTMLElement>(".tf-board-head")!;
   expect(head.matches("header.tf-fhead")).toBe(true);
@@ -936,19 +1068,14 @@ test("the board head is the canonical header: title left, one group right with t
   expect(acts!.matches(".tf-acts")).toBe(true);
   expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
   const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
-  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view", "⋯", "Sync now"]);
+  // The view's More is its drawn ⋯ (`TfMoreIcon`), named by its label.
+  expect(buttons.map((b) => b.textContent!.trim() || b.getAttribute("aria-label"))).toEqual(["Edit view…", "More for this view", "Sync now"]);
+  expect(buttons[1]!.querySelector("svg.tf-moreicon")).not.toBeNull();
   for (const b of buttons) {
     expect(b.classList.contains("tf-btn")).toBe(true);
     expect(b.classList.contains("tf-sm")).toBe(false);
   }
   expect(acts!.lastElementChild!.textContent).toBe("Sync now");
-});
-
-test("the preview's go button is the large decision (#2293)", async () => {
-  await open(harness());
-  const go = preview().querySelector(".tf-go .tf-primary")!;
-  expect(go.classList.contains("tf-btn")).toBe(true);
-  expect(go.classList.contains("tf-lg")).toBe(true);
 });
 
 test("a view opens with its text as the filter bar's base, its name and text in the header, and its own layout", async () => {
@@ -990,8 +1117,19 @@ test("a view whose text the grammar cannot read opens as text with a line naming
   expect(target.querySelector(".tf-vw-warn")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "The search cannot read sprint:next in this view, so it shows no tickets.",
   );
-  expect(target.querySelector("input[data-filter]")).toBeNull();
+  expect(target.querySelector(".tf-fbar input[data-filter]")).toBeNull();
   expect(target.querySelector(".tf-views .tf-vw-row .tf-count")).toBeNull();
+});
+
+test("Save as a view stands in the header, and only while a filter is on: with none there is nothing to save", async () => {
+  const h = harness([], [view("pay", "Payments (PAY)", "Projects", 0, { query: "project:PAY" })]);
+  await open(h, null, "pay");
+  const offered = () => [...target.querySelectorAll(".tf-board-head .tf-acts button")].some((b) => b.textContent === "Save as a view…");
+  expect(offered()).toBe(false);
+  type(field(), "r");
+  await settle();
+  expect(offered()).toBe(true);
+  expect(target.querySelector(".tf-fbar")!.textContent).not.toContain("Save as a view");
 });
 
 test("Save as a view saves the view's text plus the chips, dropdowns and words, with how the tickets show", async () => {
@@ -1001,7 +1139,7 @@ test("Save as a view saves the view's text plus the chips, dropdowns and words, 
   type(field(), "r");
   target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button:last-child')!.click();
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector("code")!.textContent).toBe("project:PAY issuetype:Story r");
@@ -1052,7 +1190,7 @@ test("Duplicate opens New view on a copy called Copy of …, with the view's tex
   await open(harness([], VIEWS));
   menuOf("My work").click();
   await settle();
-  menuItem("Duplicate").click();
+  menuItem("Duplicate…").click();
   await settle();
   expect(dialog()!.querySelector<HTMLInputElement>("input")!.value).toBe("Copy of My work");
   expect(dialog()!.querySelector("code")!.textContent).toBe("assignee:@me");
@@ -1092,7 +1230,7 @@ test("a view's list columns and card fields are what it was saved with", async (
 test("an address naming no view says so and offers All tickets", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "gone");
-  expect(target.querySelector(".tf-empty")!.textContent).toContain("No view is called gone.");
+  expect(target.querySelector(".tf-empty")!.textContent).toContain("This view does not exist.");
   expect(h.reads).toEqual([]);
 });
 
@@ -1125,7 +1263,7 @@ function input(element: HTMLInputElement | HTMLSelectElement, value: string) {
 test("+ New view opens the editor: conditions write the search line, the preview counts and draws, Create view saves it", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
@@ -1133,10 +1271,10 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(searchLine().textContent).toBe("every synced ticket");
   // Every ticket, one column per status of the board.
   expect(dialog()!.querySelector(".tf-vw-n b")!.textContent).toBe("18");
-  expect(previewCols()).toEqual(["To Do12", "In Progress1", "Done5"]);
+  expect(previewCols()).toEqual(["To do12", "In progress1", "Done5"]);
   expect(inDialog("Create view").disabled).toBe(true);
 
-  inDialog("+ Add a condition").click();
+  inDialog("Add a condition").click();
   await settle();
   // The first field is Project; pick Issue type, Bug, then is not.
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
@@ -1161,10 +1299,140 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(location.hash).toBe("#/tickets/payout-work");
 });
 
+/** A source with more projects than a row of toggles reads well with. */
+const MANY_PROJECTS: [string, string][] = [
+  ["PLY", "Platform Analytics Yearly"],
+  ["LAP", "Laptops"],
+  ["PAY", "Payments"],
+  ["TPY", "Team Pay"],
+  ["OPS", "Operations"],
+  ["CUS", "Customs"],
+  ["TRK", "Tracking"],
+  ["WEB", "Website"],
+  ["HR", "People"],
+  ["FIN", "Finance"],
+  ["LEG", "Legal"],
+  ["SEC", "Security"],
+];
+
+/** *New view…* with one Project condition, over a source that has {@link MANY_PROJECTS}. */
+async function projectCondition(): Promise<Harness> {
+  const h = harness();
+  h.ports = {
+    ...h.ports,
+    suggestions: () =>
+      Promise.resolve({ fields: MANY_PROJECTS.map(([value, detail]) => ({ key: "project", value, detail })), parents: [] }),
+  };
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
+  await previewed(h);
+  inDialog("Add a condition").click();
+  await settle();
+  return h;
+}
+const valueSearch = () => dialog()!.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+const offered = () => [...dialog()!.querySelectorAll<HTMLElement>('.tf-vw-rule [role="option"]')];
+const offeredNames = () => offered().map((option) => option.textContent!.trim());
+const pickedNames = () =>
+  [...dialog()!.querySelectorAll<HTMLElement>('.tf-vw-rule .tf-vw-val[aria-pressed="true"]')].map((chip) => chip.textContent!.trim());
+function key(element: HTMLElement, name: string): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+  element.dispatchEvent(event);
+  return event;
+}
+
+test("a condition with many values is a list to search: typed letters find a value, a click picks it, the picked stay in sight", async () => {
+  await projectCondition();
+  expect(valueSearch().getAttribute("aria-label")).toBe("Search 12 projects");
+  expect(valueSearch().placeholder).toBe("Search 12 projects");
+  // Nothing typed: every value, as the source gave them, none as a toggle.
+  expect(offeredNames()).toEqual(MANY_PROJECTS.map(([value, detail]) => `${detail} (${value})`));
+  expect(pickedNames()).toEqual([]);
+
+  input(valueSearch(), "pay");
+  await settle();
+  expect(offeredNames()).toEqual(["Payments (PAY)", "Team Pay (TPY)", "Platform Analytics Yearly (PLY)"]);
+  expect([...offered()[0]!.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["Pay"]);
+  offered()[0]!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:PAY");
+  expect(offered()[0]!.getAttribute("aria-selected")).toBe("true");
+  expect(pickedNames()).toEqual(["Payments (PAY)"]);
+
+  // Another search hides the picked value from the list, not from the condition.
+  input(valueSearch(), "trk");
+  await settle();
+  expect(offeredNames()).toEqual(["Tracking (TRK)"]);
+  expect(pickedNames()).toEqual(["Payments (PAY)"]);
+  offered()[0]!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:PAY project:TRK");
+
+  // A picked value comes off at its chip.
+  [...dialog()!.querySelectorAll<HTMLButtonElement>(".tf-vw-rule .tf-vw-val")].find((chip) => chip.textContent!.trim() === "Payments (PAY)")!.click();
+  await settle();
+  expect(searchLine().textContent).toBe("project:TRK");
+
+  input(valueSearch(), "zq");
+  await settle();
+  expect(offeredNames()).toEqual([]);
+  expect(dialog()!.querySelector(".tf-vw-rule")!.textContent).toContain("No match for zq.");
+});
+
+test("the value search is worked from the keys: arrows move, Enter picks without saving, Esc clears the search before it closes the editor", async () => {
+  const h = await projectCondition();
+  input(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, "Ops work");
+  const current = () => offered().find((option) => option.id === valueSearch().getAttribute("aria-activedescendant"))?.textContent!.trim();
+
+  input(valueSearch(), "ops");
+  await settle();
+  expect(offeredNames()).toEqual(["Operations (OPS)", "Laptops (LAP)"]);
+  expect(current()).toBe("Operations (OPS)");
+  key(valueSearch(), "ArrowDown");
+  await settle();
+  expect(current()).toBe("Laptops (LAP)");
+  // The list ends: one more step stays on the last.
+  key(valueSearch(), "ArrowDown");
+  key(valueSearch(), "ArrowUp");
+  await settle();
+  expect(current()).toBe("Operations (OPS)");
+
+  // Enter in a form's field would save the view; here it picks, and the field is ready for the next search.
+  expect(key(valueSearch(), "Enter").defaultPrevented).toBe(true);
+  await settle();
+  expect(searchLine().textContent).toBe("project:OPS");
+  expect(valueSearch().value).toBe("");
+  expect(h.saved).toEqual([]);
+
+  input(valueSearch(), "pay");
+  await settle();
+  key(valueSearch(), "Escape");
+  await settle();
+  expect(valueSearch().value).toBe("");
+  expect(offeredNames()).toHaveLength(12);
+  key(valueSearch(), "Escape");
+  await settle();
+  expect(dialog()).toBeNull();
+});
+
+test("a condition with few values stays a row of toggles, with no search", async () => {
+  const h = harness();
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
+  await previewed(h);
+  inDialog("Add a condition").click();
+  await settle();
+  input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
+  await settle();
+  expect(valueSearch()).toBeNull();
+  expect(offered()).toEqual([]);
+  expect([...dialog()!.querySelectorAll(".tf-vw-rule .tf-vw-val")].map((chip) => chip.textContent)).toEqual(["Story", "Bug"]);
+});
+
 test("Edit view opens the text as conditions, saves over the view under its id, and keeps a text left alone as typed", async () => {
   const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
   await open(h, null, "bugs");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("Edit Bugs");
   const fields = [...dialog()!.querySelectorAll<HTMLSelectElement>('select[aria-label="Field"]')].map((s) => s.value);
@@ -1182,7 +1450,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
   // Changed, it writes new text.
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   inDialog("Story").click();
   await settle();
@@ -1194,27 +1462,27 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
 test("each status sits on one column, an over-limit column is err, tickets on no column are called out, and One column per status resets", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
   const pressed = (col: HTMLElement) =>
-    [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+    [...col.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
   // In Progress onto the first column leaves its own.
-  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In Progress")!.click();
+  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "In progress")!.click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do", "In Progress"], [], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do", "In progress"], [], ["Done"]]);
   input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
   // Done off its column: on no column.
-  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
+  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Done")!.click();
   // Columns and limits redraw the answer already read; only the query reads again.
   await settle();
   expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
-  expect(previewCols()).toEqual(["To Do13 of 10", "In Progress0", "Done0"]);
+  expect(previewCols()).toEqual(["To do13 of 10", "In progress0", "Done0"]);
   expect(dialog()!.querySelector(".tf-vw-mcol")!.classList.contains("tf-vw-over")).toBe(true);
   expect(dialog()!.textContent).toContain("5 of them sit in a status on no column.");
   inDialog("One column per status").click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do"], ["In Progress"], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do"], ["In progress"], ["Done"]]);
   expect(dialog()!.textContent).not.toContain("on no column");
 });
 
@@ -1223,7 +1491,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect([...searchLine().querySelectorAll(".tf-vw-newq")].map((s) => s.textContent)).toEqual(["sprint:next", "-under:PAY-200"]);
   expect(searchLine().textContent).toBe("sprint:next -under:PAY-200 label:sepa");
@@ -1243,7 +1511,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect(options()).toContain("Signal");
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "signal");
@@ -1256,10 +1524,10 @@ test("the search line underlines what the grammar does not read, and Signal is a
 test("Delete view in the editor deletes it, with Undo in the toast", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "backlog");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
-  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
+  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger tf-first");
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();
@@ -1364,7 +1632,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   ]);
   expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
   const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
-    (b) => b.textContent === "View settings",
+    (b) => b.textContent === "View settings…",
   );
   expect(settings).toBeDefined();
 
@@ -1372,20 +1640,17 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
-    "Make an editable copyyour own view, starting from this board",
+    "View settings…lanes, cards and list columns",
+    "Make an editable copy…your own view, starting from this board",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
 });
 
-test("on a Jira view the preview and the list read the ticket's status, the column its view's name (#1423)", async () => {
+test("on a Jira view the list reads the ticket's status, the column its view's name (#1423)", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
   // PAY-1 is To Do and mine, under *Ready*.
   expect(columns()[0]!.head).toBe("Ready 12");
-  const facts = [...preview().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
-  expect(facts).toContainEqual(["Status", "To Do"]);
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Start work");
 
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
   await settle();
@@ -1393,7 +1658,7 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   const status = (key: string) =>
     [...target.querySelectorAll(".tf-tbl tbody tr")].find((tr) => tr.querySelector("td")!.textContent === key)!.children[statusAt]!
       .textContent;
-  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To Do", "In Progress", "Done"]);
+  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To do", "In progress", "Done"]);
 });
 
 test("two sources holding PAY-1: each card and row names its source and opens by it; a unique key names none (#1476)", async () => {
@@ -1428,6 +1693,138 @@ test("two sources holding PAY-1: each card and row names its source and opens by
   } finally {
     sourceRoles.forget();
   }
+});
+
+test("a drawn card keeps whether it names its source until the person's next read: a read that only adds its twin grows no card under the pointer (the ux13-overs pass)", async () => {
+  const twin = { status: "To Do", card: card("PAY-1", "Retry failed SEPA payouts", { entity_id: "gitea:PAY-1", source_id: "gitea" }) };
+  sourceRoles.take([
+    { id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [] },
+    { id: "gitea", display_name: "Tidewater Gitea", roles: [], role_misses: [] },
+  ]);
+  const corpus = [...CORPUS];
+  const revision = $state({ n: 0 });
+  try {
+    const h = harness([], [], corpus);
+    page = mount(TicketsPage, {
+      target,
+      props: { ready: true, ports: h.ports, viewId: null, typingPause: 0, get syncRevision() { return revision.n; } },
+    });
+    await settle();
+    const named = (id: string) => target.querySelector(`.tf-tcard[data-entity="${CSS.escape(id)}"]`)?.querySelector(".tf-tsrc")?.textContent ?? null;
+    expect(named("jira:PAY-1"), "a unique key names none").toBeNull();
+    // A sync brings Gitea's PAY-1 (held behind *Show N new*, as a card that sorts above drawn ones is): the card drawn
+    // keeps its height.
+    corpus.unshift(twin);
+    revision.n += 1;
+    flushSync();
+    await settle();
+    expect(named("jira:PAY-1"), "drawn before its twin came: no line added under the pointer").toBeNull();
+    // The person's own read draws both as the key's twins.
+    for (const char of "PAY") type(field(), char);
+    await settle();
+    expect(named("jira:PAY-1")).toBe("Tidewater Jira");
+    expect(named("gitea:PAY-1")).toBe("Tidewater Gitea");
+  } finally {
+    sourceRoles.forget();
+  }
+});
+
+test("the person's own Sync now draws what its runs brought where it sorts; another source's run still waits behind Show N new (the ux30 end gate)", async () => {
+  // The gate's real app: a filter typed, a new Forgejo issue, *Sync now*. The run brought it, the board read it, and the
+  // hold kept it behind a *Show 1 new* the person never saw, until a reload.
+  const corpus = [...CORPUS];
+  const frame = $state({ revision: 0, asked: 0 });
+  const h = harness([], [], corpus);
+  page = mount(TicketsPage, {
+    target,
+    props: {
+      ready: true,
+      ports: h.ports,
+      viewId: null,
+      typingPause: 0,
+      get syncRevision() {
+        return frame.revision;
+      },
+      get syncAsked() {
+        return frame.asked;
+      },
+    },
+  });
+  await settle();
+  for (const char of "ticket") type(field(), char);
+  await settle();
+  const todo = () => [...target.querySelectorAll<HTMLElement>(".tf-col")][0]!;
+  const inTodo = () => [...todo().querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  const held = () => target.querySelector(".tf-fheld")?.textContent ?? null;
+  const inProgress = () => [...[...target.querySelectorAll<HTMLElement>(".tf-col")][1]!.querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  expect(inTodo()[0]).toBe("jira:PAY-2");
+
+  // A run nobody here pressed (a scheduled sync) brings a ticket that sorts on top, and moves PAY-3 to In Progress: the
+  // new one waits, and says so; PAY-3 stays where it drew.
+  corpus.unshift({ status: "To Do", card: card("PAY-98", "Ticket made elsewhere", { source_id: "forgejo", entity_id: "forgejo:PAY-98" }) });
+  const moved = corpus.findIndex((entry) => entry.card.key === "PAY-3");
+  corpus[moved] = { ...corpus[moved]!, status: "In Progress" };
+  frame.revision += 1;
+  flushSync();
+  await settle();
+  expect(inTodo()).not.toContain("forgejo:PAY-98");
+  expect(inTodo()).toContain("jira:PAY-3");
+  expect(held()).toBe("Show 1 new");
+
+  // The person presses *Sync now*; its runs end with another new ticket. Their press sorts the board again: both draw on top.
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "Ticket synced on the press", { source_id: "forgejo", entity_id: "forgejo:PAY-99" }) });
+  frame.revision += 1;
+  frame.asked += 1;
+  flushSync();
+  await settle();
+  expect(inTodo().slice(0, 3)).toEqual(["forgejo:PAY-99", "forgejo:PAY-98", "jira:PAY-2"]);
+  expect(inTodo(), "a ticket the sync moved leaves its old column").not.toContain("jira:PAY-3");
+  expect(inProgress()).toContain("jira:PAY-3");
+  expect(held(), "nothing left waiting").toBeNull();
+  expect(field().value, "the filter stays").toBe("ticket");
+});
+
+test("a key changes nothing drawn until its answer lands: no card a sync held back, no mark, no column grown (the ux19 overs pass)", async () => {
+  const corpus = [...CORPUS];
+  const revision = $state({ n: 0 });
+  const h = harness([], [], corpus);
+  const answer = h.ports.board;
+  /** While set, each board read waits here for the test to answer it. */
+  let held: (() => void)[] | null = null;
+  h.ports.board = (...args) => {
+    if (held === null) return answer(...args);
+    const waiting = held;
+    return new Promise((resolve) => waiting.push(() => resolve(answer(...args))));
+  };
+  page = mount(TicketsPage, {
+    target,
+    props: { ready: true, ports: h.ports, viewId: null, typingPause: 0, get syncRevision() { return revision.n; } },
+  });
+  await settle();
+  const drawn = () => [...target.querySelectorAll<HTMLElement>(".tf-tcard")].map((card) => card.dataset.entity);
+  // A sync brings a To Do ticket that sorts above the drawn eight: it waits behind *Show N new*.
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "SEPA retries synced") });
+  revision.n += 1;
+  flushSync();
+  await settle();
+  const before = drawn();
+  expect(before).not.toContain("jira:PAY-99");
+  expect(before.filter((id) => /^jira:PAY-5\d$/.test(id!))).toHaveLength(3);
+  held = [];
+  type(field(), "sepa");
+  flushSync();
+  await nextFrame();
+  expect(held).toHaveLength(1);
+  // The key's own frames: the board it answered, in its order, unmarked, Done still three.
+  expect(drawn()).toEqual(before);
+  expect(target.querySelectorAll(".tf-tcard mark")).toHaveLength(0);
+  const release = held;
+  held = null;
+  release.forEach((go) => go());
+  await settle();
+  await nextFrame();
+  expect(drawn()).toContain("jira:PAY-99");
+  expect(target.querySelectorAll(".tf-tcard mark").length).toBeGreaterThan(0);
 });
 
 // ---- Make an editable copy (#880) ----
@@ -1478,12 +1875,12 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
 test("View settings on a Jira view says how much a copy keeps and offers Make an editable copy", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain(
     "To change which tickets it holds, change it in Jira, or make your own copy. A copy keeps 1 of 2 parts of the query.",
   );
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(fromLine()).toBe(COPIED);
@@ -1499,19 +1896,19 @@ test("a saved view from a source without translate_query offers no editable copy
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
+    "View settings…lanes, cards and list columns",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
   menuOf("Payments and Ops flow").click();
   flushSync();
-  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view")).toBe(false);
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view…")).toBe(false);
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const text = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(text).toContain("To change which tickets it holds, change it in Jira.");
   expect(text).not.toContain("copy");
-  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy")).toBe(false);
+  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy…")).toBe(false);
   expect(h.translated).toEqual([]);
 });
 
@@ -1537,7 +1934,7 @@ test("Save as a view on a Jira view is a copy too: the JQL it could test, then t
   [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Story")!.click();
   type(field(), "r");
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("");
@@ -1617,7 +2014,7 @@ test("Hide from the list moves a Jira view to one hidden line, with Undo, and Sh
 test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const box = target.querySelector<HTMLElement>(".tf-vw-dialog")!;
   expect(box.querySelector("h2")!.textContent).toBe("Settings for Payments and Ops flow");
@@ -1650,12 +2047,26 @@ test("a Jira view's header says where it comes from: board and type, JQL, last r
     opened.push(url);
     return Promise.resolve();
   };
+  // Before the source list is read, the view's ticket system names it.
+  sourceRoles.forget();
   await open(h, null, "jira-board-21");
   expect(srcLines()).toEqual([
     "Jira decides which tickets, from the Kanban board Payments and Ops flow: project in (PAY, OPS) ORDER BY Rank ASC and fixVersion is EMPTY. Read again at every sync, last 4 min ago. Open in Jira",
   ]);
   [...target.querySelectorAll<HTMLAnchorElement>(".tf-vw-srcline a")].find((a) => a.textContent === "Open in Jira")!.click();
   expect(opened).toEqual(["https://jira.example/secure/RapidBoard.jspa?rapidView=21"]);
+  // Once it is, *Open in* names the view's own source as Settings › Sources does (the build-header pass, 2026-11-20): with
+  // two Jira sources, "Open in Jira" would not say which. What decides the tickets stays the ticket system's word.
+  try {
+    sourceRoles.take([
+      { id: "jira", display_name: "Jira (payments)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+      { id: "jira-oss", display_name: "Jira (open source)", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+    ]);
+    flushSync();
+    expect(srcLines()[0]).toMatch(/^Jira decides which tickets, .* Open in Jira \(payments\)$/);
+  } finally {
+    sourceRoles.forget();
+  }
 });
 
 test("a Scrum view names its active sprint and when it ends", async () => {
@@ -1734,14 +2145,14 @@ test("a second ticket system's view says where it comes from, what decides it, a
   const h = kestrelHarness();
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9: project = CUS. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9: project = CUS. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
     "2 tickets on it are in WEB, which the Kestrel source does not sync, so they are missing here. Sync WEB too",
   ]);
   // The tickets are the corpus's, mirrored from `jira`; the words about the view are what may not say so.
   noJira(target.querySelector(".tf-board-head")!.textContent);
   noJira(srcLines().join(" "));
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1752,7 +2163,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   expect(settings).toContain("Only how it looks here. Kestrel still decides which tickets.");
   noJira(settings);
 
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(fromLine()).toBe(
     "Copied from the Kestrel board Customs flow. It no longer follows Kestrel. Left out, because knobas cannot test it: fixVersion is EMPTY (knobas does not sync fix versions).",
@@ -1767,11 +2178,11 @@ test("a saved view with no query says what decides it with no dangling query, in
   h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "", unsynced: [] };
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow, active sprint Sprint 9. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
   ]);
   expect(target.querySelector(".tf-vw-srcline code")).toBeNull();
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1785,9 +2196,9 @@ test("a saved view's own query and sub-query show in its source line and View se
   h.views[1]!.saved_view_source = { ...h.views[1]!.saved_view_source!, source_query: "is:open milestone:train", sub_query: "label:ops", sprint: null, unsynced: [] };
   await open(h, null, "kestrel-board-7");
   expect(srcLines()).toEqual([
-    "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Kestrel",
+    "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Tidewater Kestrel",
   ]);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.querySelector(".tf-vw-source-query")!.textContent).toBe("is:open milestone:train\nlabel:ops");
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain("knobas runs its query at every sync and keeps Kestrel's order.");
@@ -1800,7 +2211,7 @@ test("with two ticket systems the list's foot and a view of your own name both",
   expect(target.querySelector(".tf-vw-foot")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "Boards and favourite filters come in with the Jira and Kestrel sources at every sync. Choose which",
   );
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await settle();
   expect(dialog()!.textContent).toContain("Kept in knobas. Jira and Kestrel never see it.");
 });
@@ -1809,7 +2220,7 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
   const h = harness([], [], [CORPUS[0]!]);
   await open(h);
   expect(count()).toBe("1 ticket");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
   await previewed(h);
@@ -1910,7 +2321,7 @@ test("a source of any adapter kind that fills the ticket system has its tickets 
   expect(listed.map((cells) => cells[0]).sort()).toEqual(["TRK-1", "TRK-2"]);
   const bare = listed.find((cells) => cells[0] === "TRK-2")!;
   // Key, Summary, Status, Priority, Signals, Assignee, Updated: nothing declared, nothing drawn.
-  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In Progress", "", "", "Unassigned", "never"]);
+  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In progress", "", "", "Unassigned", "never"]);
 });
 
 test("every board read asks for the ticket system, and the shell's source list answering reads nothing again (#1299)", async () => {
@@ -1935,9 +2346,25 @@ test("with no source filling the ticket system the board is read, empty, and say
   const { h, roles } = trackerHarness([]);
   await open(h);
   expect(roles[0]).toBe("ticket-system");
-  expect(target.querySelector(".tf-empty")!.textContent).toBe(
-    "No tickets synced yet. Add a ticket system in Settings and they appear here.",
-  );
+  expect(target.querySelector(".tf-empty p")!.textContent).toBe("No tickets synced yet. Add a ticket system in Settings and they appear here.");
+});
+
+test("a list of 60 rows draws those near the viewport, not all 60: a typed word narrows the list into that range (the ux13-overs pass)", async () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => ({
+    status: "To Do",
+    card: card(`PAY-${String(i + 1).padStart(4, "0")}`, `Ticket ${i + 1}`),
+  }));
+  await open(harness([], [], sixty));
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-list-more")?.click();
+  await settle();
+  expect(target.querySelector(".tf-list-more"), "every row is the list's").toBeNull();
+  // At the default 300 a narrowed list drew every match whole, a key of 145 ms at CPU 4x on Björn's PC.
+  const shown = target.querySelectorAll(".tf-tbl tbody tr[data-entity]").length;
+  expect(shown).toBeGreaterThan(5);
+  expect(shown).toBeLessThan(60);
+  expect(target.querySelectorAll(".tf-tbl tbody tr.tf-wgap").length).toBeGreaterThan(0);
 });
 
 test("a long list draws the rows near the viewport, and j/k walk past them, drawing and focusing each row they reach (#2209)", async () => {
@@ -1966,9 +2393,6 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(document.activeElement?.getAttribute("data-entity")).toBe(`jira:${at}`);
   expect(drawn()).not.toContain("jira:PAY-0001");
   expect(gaps()).toHaveLength(2);
-  // The preview follows the selection to a row that was not drawn.
-  await settle();
-  expect(preview().textContent).toContain(at);
 
   // And back to the top.
   for (let step = 0; step < first.length + 20; step += 1) press("k");
@@ -1976,3 +2400,625 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-0001");
   expect(drawn()[0]).toBe("jira:PAY-0001");
 });
+
+test("*Back to All tickets* is a link that does what Esc does (F-153)", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  const link = target.querySelector<HTMLAnchorElement>("a.tf-esc")!;
+  expect(link.textContent).toContain("Back to All tickets");
+  const press = new MouseEvent("click", { bubbles: true, cancelable: true });
+  link.dispatchEvent(press);
+  flushSync();
+  await settle();
+  expect(press.defaultPrevented, "it has no address of its own to go to").toBe(true);
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
+});
+
+test("a Sub-tasks narrowing made where the page stands is undone by Esc, with the bar saying so", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  expect(target.querySelector("h1")!.textContent).toContain("Sub-tasks of");
+  expect(target.querySelector(".tf-esc")!.textContent).toContain("Back to All tickets");
+  const layer = layers.open.at(-1)!;
+  expect(layer.kind).toBe("panel");
+  layer.close();
+  flushSync();
+  await settle();
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
+  expect(layers.open, "the way out goes with the narrowing").not.toContain(layer);
+});
+
+// -- Show every ticket when the view opens (ux18, Björn: "a toggle in the edit view page of the tickets to always show
+// all the tickets on open, so I don't have to show them myself") --
+
+const showAllBox = () =>
+  [...dialog()!.querySelectorAll<HTMLLabelElement>("label")]
+    .find((label) => label.textContent!.trim() === "Show every ticket when the view opens")!
+    .querySelector<HTMLInputElement>("input[type=checkbox]")!;
+
+test("the view editor's Show every ticket when the view opens is off by default, says what it does, and is stored with the view", async () => {
+  const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: "issuetype:Bug" })]);
+  await open(h, null, "bugs");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
+  await previewed(h);
+  const box = showAllBox();
+  expect(box.checked).toBe(false);
+  expect(box.closest(".tf-vw-all")!.textContent).toContain("Every column and lane runs to its last ticket as you scroll, Done too.");
+  box.click();
+  flushSync();
+  inDialog("Save view").click();
+  await settle();
+  expect(h.saved.at(-1)).toMatchObject({ id: "bugs", show_all: true });
+
+  // Saved, it opens checked; the list's words say what it does there.
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
+  await previewed(h);
+  expect(showAllBox().checked).toBe(true);
+  inDialog("List").click();
+  flushSync();
+  expect(showAllBox().closest(".tf-vw-all")!.textContent).toContain("The list runs to its last ticket as you scroll.");
+});
+
+test("a view stored with Show every ticket opens on fifty a column and draws them all, Done too, with no Show more; off, as before", async () => {
+  const off = harness([], [view("v", "Payments", "Mine", 0)]);
+  await open(off, null, "v");
+  expect(off.reads[0]!.perColumn).toBe(8);
+  expect(columns().map(({ cards, more }) => [cards, more])).toEqual([[8, "Show 4 more"], [1, null], [3, "Show 2 more done"]]);
+  page && unmount(page);
+  forgetTicketsSession();
+
+  const on = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })]);
+  await open(on, null, "v");
+  // The frame after the board lands, which draws the rest of each column's cards.
+  await nextFrame();
+  expect(on.reads[0]!.perColumn).toBe(50);
+  expect(columns().map(({ cards, more }) => [cards, more])).toEqual([[12, null], [1, null], [5, null]]);
+  expect(target.querySelectorAll(".tf-more")).toHaveLength(0);
+});
+
+test("a column of a view that shows every ticket past its first fifty offers no Show more: its foot reads the next page", async () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({ status: "To Do", card: card(`PAY-${i + 1}`, `Ticket ${i + 1}`) }));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], many);
+  await open(h, null, "v");
+  expect(h.reads[0]!.perColumn).toBe(50);
+  expect(columns()[0]!.head).toBe("To do 60");
+  expect(target.querySelectorAll(".tf-more")).toHaveLength(0);
+  expect(target.querySelectorAll(".tf-col .tf-near")).toHaveLength(1);
+});
+
+test("a view stored with Show every ticket draws its list in the server's order of the sort, with no Show N more", async () => {
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true, layout: "list" })]);
+  const board = h.ports.board;
+  const pages: (BoardPage | null | undefined)[] = [];
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) => {
+    pages.push(page);
+    return board(perColumn, query, savedView, lanes, role).then((answer) => {
+      if (!page?.sort) return answer;
+      // The server's order: by key, highest first.
+      const keyed = answer.columns.flatMap((column) => column.cards).sort((a, b) => Number(b.key.split("-")[1]) - Number(a.key.split("-")[1]));
+      return { ...answer, order: keyed.map((card) => card.entity_id) };
+    });
+  };
+  // Its counts' read answers before its first page: the list draws none of that read's rows meanwhile.
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  const sorted = h.ports.board;
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) =>
+    page?.sort ? held.then(() => sorted(perColumn, query, savedView, lanes, role, page)) : sorted(perColumn, query, savedView, lanes, role, page);
+  await open(h, null, "v");
+  expect(target.querySelectorAll(".tf-tbl tbody tr[data-entity]")).toHaveLength(0);
+  expect(target.querySelector(".tf-empty[aria-busy='true']")).not.toBeNull();
+  release();
+  await settle();
+  expect(pages.map((page) => page?.sort ?? null)).toEqual([null, "updated"]);
+  const keys = [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
+  expect(keys.slice(0, 3)).toEqual(["PAY-54", "PAY-53", "PAY-52"]);
+  expect(target.querySelector(".tf-list-more")).toBeNull();
+});
+
+test("a list that shows every ticket sorts again on the person's own Sync now, at the depth it read; another run's ticket waits (the ux30 end gate)", async () => {
+  const corpus = [...CORPUS];
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true, layout: "list" })], corpus);
+  const board = h.ports.board;
+  const pages: (BoardPage | null | undefined)[] = [];
+  h.ports.board = (perColumn, query, savedView, lanes, role, page) => {
+    pages.push(page);
+    return board(perColumn, query, savedView, lanes, role).then((answer) => {
+      if (!page?.sort) return answer;
+      // The server's order: by key, highest first.
+      const keyed = answer.columns.flatMap((column) => column.cards).sort((a, b) => Number(b.key.split("-")[1]) - Number(a.key.split("-")[1]));
+      return { ...answer, order: keyed.map((card) => card.entity_id) };
+    });
+  };
+  const frame = $state({ revision: 0, asked: 0 });
+  page = mount(TicketsPage, {
+    target,
+    props: {
+      ready: true,
+      ports: h.ports,
+      viewId: "v",
+      typingPause: 0,
+      get syncRevision() {
+        return frame.revision;
+      },
+      get syncAsked() {
+        return frame.asked;
+      },
+    },
+  });
+  await settle();
+  const keys = () => [...target.querySelectorAll(".tf-tbl tbody tr[data-entity]")].map((row) => row.querySelector("td")!.textContent);
+  expect(keys()[0]).toBe("PAY-54");
+  corpus.unshift({ status: "To Do", card: card("PAY-98", "Ticket made elsewhere") });
+  frame.revision += 1;
+  flushSync();
+  await settle();
+  expect(keys(), "a run nobody here pressed: it waits").not.toContain("PAY-98");
+  corpus.unshift({ status: "To Do", card: card("PAY-99", "Ticket synced on the press") });
+  pages.length = 0;
+  frame.revision += 1;
+  frame.asked += 1;
+  flushSync();
+  await settle();
+  expect(keys().slice(0, 3)).toEqual(["PAY-99", "PAY-98", "PAY-54"]);
+  expect(keys(), "every row it drew").toHaveLength(20);
+  expect(pages.filter((one) => one?.sort).map((one) => one!.after), "the list's own first page, read again").toEqual([0]);
+});
+
+test("a Jira view's settings carry Show every ticket too, and it then opens on fifty a column", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  expect(h.reads[0]!.perColumn).toBe(8);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
+  await settle();
+  showAllBox().click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-vw-dialog button")].find((b) => b.textContent === "Save view")!.click();
+  await settle();
+  expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", saved_view: "jira:board-21", show_all: true });
+  await settle();
+  expect(h.reads.at(-1)!.perColumn).toBe(50);
+});
+
+test("a view that shows every ticket draws eight a column in the frame its board lands, and the screen's cards the frame after (ux18)", async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], bulk("To Do", 20, "Bulk"));
+  await open(h, null, "v");
+  expect(columns()).toEqual([{ head: "To do 20", cards: 8, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  // The eight drawn first stay where they drew.
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
+});
+
+test("a view that shows every ticket draws, in the frame its board lands, the cards the window's height holds and one more (ux30 end gate)", async () => {
+  // A window 300 px high holds three of these cards at their floor (84 px a one-line summary with an avatar, 6 px apart).
+  const height = vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameIds = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => (frames.set(++frameIds, callback), frameIds));
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void frames.delete(id));
+  const h = harness([], [view("v", "Payments", "Mine", 0, { show_all: true })], bulk("To Do", 20, "Bulk"));
+  await open(h, null, "v");
+  expect(columns()).toEqual([{ head: "To do 20", cards: 4, more: null }]);
+  const firstCards = [...target.querySelectorAll(".tf-tcard")];
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(performance.now());
+  await settle();
+  vi.mocked(window.requestAnimationFrame).mockRestore();
+  vi.mocked(window.cancelAnimationFrame).mockRestore();
+  height.mockRestore();
+  expect(columns()).toEqual([{ head: "To do 20", cards: 20, more: null }]);
+  expect(firstCards.every((card) => card.isConnected)).toBe(true);
+});
+
+// ---- moving a ticket (ADR-0054, ticket-edit decisions sections 3 to 12) ----
+
+/** The move ports a test drives: the writes queued, the follow's ears, and the events the page listens to. */
+function movable(h: Harness, reach: string[] = ["In Progress", "Done"], submit?: (payload: unknown) => Promise<unknown>) {
+  const sent: unknown[] = [];
+  const ears = new Map<number, ((row: unknown) => void)[]>();
+  const heard = new Map<string, (event: { payload: unknown }) => void>();
+  let id = 100;
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  onTestFinished(() => sourceRoles.forget());
+  h.ports.listen = (event, handler) => {
+    heard.set(event, handler);
+    return Promise.resolve(() => {});
+  };
+  h.ports.moves = {
+    submitWrite: (payload) => {
+      sent.push(payload);
+      if (submit) return submit(payload) as never;
+      return Promise.resolve({ id: id++, state: "pending", entity_id: (payload as { Transition: { entity: string } }).Transition.entity } as never);
+    },
+    discardWrite: () => Promise.resolve(),
+    reachableTransitions: () => Promise.resolve(reach),
+    follower: {
+      follow: (write, hear) => {
+        const all = ears.get(write) ?? [];
+        all.push(hear as (row: unknown) => void);
+        ears.set(write, all);
+        return () => ears.set(write, (ears.get(write) ?? []).filter((one) => one !== hear));
+      },
+    },
+    pendingWrites: () => Promise.resolve([]),
+    listen: () => Promise.resolve(() => {}),
+  };
+  return { sent, ears, heard };
+}
+
+/** The cards' keys in the board column headed `status`, top to bottom. */
+const inColumn = (status: string) => {
+  const col = [...target.querySelectorAll(".tf-col")].find((one) => one.querySelector("h3")!.textContent!.trim().startsWith(status));
+  return [...(col?.querySelectorAll<HTMLElement>(".tf-tcard") ?? [])].map((one) => one.dataset.entity!.replace("jira:", ""));
+};
+const chipOf = (key: string) => target.querySelector(`[data-entity="jira:${key}"] .tf-twrite .tf-won`)?.textContent ?? null;
+
+test("the list's Status cell opens the statuses the ticket can reach, and a pick queues the move, drawn at once", async () => {
+  const h = harness();
+  const { sent } = movable(h);
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const cell = target.querySelector<HTMLButtonElement>('[data-entity="jira:PAY-2"] .tf-statecell')!;
+  expect(cell.textContent).toBe("To do");
+  cell.click();
+  await settle();
+  const items = [...document.querySelectorAll<HTMLButtonElement>(".tf-move-m [role=menuitem]")];
+  expect(items.map((one) => one.textContent)).toEqual(["In progress1", "Done2"]);
+  items[1]!.click();
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-2"] .tf-statecell')!.textContent).toBe("Done");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  await settle();
+  expect(sent).toEqual([{ Transition: { entity: "jira:PAY-2", status: "Done" } }]);
+});
+
+test("a source that offers no moves draws the Status cell disabled with the reason, and a press queues nothing", async () => {
+  const h = harness();
+  const { sent } = movable(h);
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: [] }]);
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const cell = target.querySelector<HTMLButtonElement>('[data-entity="jira:PAY-2"] .tf-statecell')!;
+  expect(cell.getAttribute("aria-disabled")).toBe("true");
+  expect(cell.title).toBe("Tidewater Jira tickets cannot be moved from knobas: its adapter offers no moves.");
+  cell.click();
+  await settle();
+  expect(document.querySelector(".tf-move-m")).toBeNull();
+  expect(sent).toEqual([]);
+});
+
+test("a move from the card's menu stands the card at the top of its new column with Queued before the queue answers, and a read that shows it settles it in place", async () => {
+  const corpus = CORPUS.map((entry) => ({ ...entry }));
+  const h = harness([], [], corpus);
+  const { heard } = movable(h, ["In Progress", "Done"], () => new Promise(() => {}));
+  await open(h);
+  const { moveProvider } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "In Progress");
+  flushSync();
+  expect(inColumn("In progress")).toEqual(["PAY-3", "PAY-40"]);
+  expect(inColumn("To do")).not.toContain("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  // A board read that still says the old status keeps it where it was moved.
+  heard.get("sync:state")?.({ payload: { source_id: "jira", running: false } });
+  await settle();
+  expect(inColumn("In progress")).toEqual(["PAY-3", "PAY-40"]);
+  expect(chipOf("PAY-3")).toBe("Queued");
+  // The source moved it: the read shows it, the chip goes and nothing moves.
+  const box = target.querySelector('[data-entity="jira:PAY-3"]')!.getBoundingClientRect();
+  corpus.find((entry) => entry.card.key === "PAY-3")!.status = "In Progress";
+  heard.get("sync:state")?.({ payload: { source_id: "jira", running: false } });
+  await settle();
+  expect(chipOf("PAY-3")).toBeNull();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(target.querySelector('[data-entity="jira:PAY-3"]')!.getBoundingClientRect()).toEqual(box);
+});
+
+/**
+ * A move's write answered gives its echo an id, not a new status, and its chip is the card's own (`writeOf`): the board
+ * is not laid over its echoes again, which ran its whole read once more in the frame of a drop (a quarter of a laned
+ * drop at 4x in WebView2, the ux30 end gate, 2026-11-23).
+ */
+test("a move's write answering does not lay the board over its echoes again", async () => {
+  let answer: ((row: unknown) => void) | null = null;
+  const h = harness();
+  movable(h, ["In Progress", "Done"], () => new Promise((resolve) => (answer = resolve)));
+  await open(h);
+  const { moveProvider } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "In Progress");
+  flushSync();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  await until(() => answer !== null, "the move sent to the queue");
+  const laid = vi.mocked(withStatusEchoes).mock.calls.length;
+  answer!({ id: 7, state: "pending", entity_id: "jira:PAY-3", source_id: "jira" });
+  await settle();
+  expect(inColumn("In progress")[0]).toBe("PAY-3");
+  expect(chipOf("PAY-3")).toBe("Queued");
+  expect(vi.mocked(withStatusEchoes).mock.calls.length).toBe(laid);
+});
+
+/**
+ * A card carries the focus its press gave it, and its row in the column it leaves goes as it lands: the window's
+ * teardown of that row asked which rows it holds while Svelte destroyed effects, where a derived runs again over the
+ * batch's old values. That ran the board's whole read once more in the drop's task, and left the overlay's kept answer
+ * stale, so the next pass laid it over again: four passes for one drop, three of a laned drop's in knobas's WebView2
+ * window (the ux30 end gate, 2026-11-23). One pass, whatever has focus.
+ */
+test("a focused card dropped in another column lays the board over its echoes once", async () => {
+  const h = harness();
+  movable(h, ["In Progress"]);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS[1]!.card, status: "To Do" }, "press", h.ports.moves!.reachableTransitions);
+  target.querySelector<HTMLElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.focus();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+  const laid = vi.mocked(withStatusEchoes).mock.calls.length;
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  expect(inColumn("In progress")[0]).toBe("PAY-2");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-2");
+  expect(vi.mocked(withStatusEchoes).mock.calls.length - laid).toBe(1);
+});
+
+test("a refused move puts the card back in its column at its place, with the source's note", async () => {
+  const h = harness();
+  const { ears } = movable(h);
+  await open(h);
+  const before = inColumn("To do");
+  const { moveProvider, ticketNotes } = await import("./moves.svelte");
+  moveProvider()!.move("jira:PAY-3", "Done");
+  await settle();
+  expect(inColumn("To do")).not.toContain("PAY-3");
+  const write = [...ears.keys()].at(-1)!;
+  for (const hear of [...ears.get(write)!]) hear({ id: write, state: "refused", entity_id: "jira:PAY-3", detail: "No move from To Do to Done.", held_snapshot: null });
+  await settle();
+  expect(inColumn("To do")).toEqual(before);
+  expect(chipOf("PAY-3")).toBeNull();
+  ticketNotes["jira:PAY-3"] = { write, tone: "err", lead: "Not moved to Done.", words: "No move from To Do to Done." };
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-trefused')?.textContent).toContain("Not moved to Done. No move from To Do to Done.");
+});
+
+test("s on the board carries the selected card: Enter on a one-status column moves it there at the top, Queued, with no menu", async () => {
+  const h = harness();
+  const { sent } = movable(h, ["In Progress"]);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  // Asked where it can go as it was selected.
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS[1]!.card, status: "To Do" }, "press", h.ports.moves!.reachableTransitions);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(target.querySelector(".tf-board-wrap")!.hasAttribute("data-held")).toBe(true);
+  expect(target.querySelector(".tf-sr")!.textContent).toContain("PAY-2 picked up. PAY-2 over In progress.");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(target.querySelector(".tf-board-wrap")!.hasAttribute("data-held")).toBe(false);
+  expect(document.querySelector(".tf-move-m")).toBeNull();
+  expect(inColumn("In progress")[0]).toBe("PAY-2");
+  expect(chipOf("PAY-2")).toBe("Queued");
+  await settle();
+  expect(sent).toEqual([{ Transition: { entity: "jira:PAY-2", status: "In Progress" } }]);
+});
+
+// ---- a ticket's fields from its card (ADR-0054, ticket-edit decisions section 26) ----
+
+const PEOPLE = [
+  { value: "mara.lindqvist", label: "Mara Lindqvist" },
+  { value: "jonas.becker", label: "Jonas Becker" },
+];
+
+/** Moves and field edits on, every write into one list in the order queued; the ticket's fields as a Jira answers them. */
+function editable(h: Harness, reach: string[] = ["In Progress", "Done"]) {
+  const moving = movable(h, reach);
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition", "edit_ticket"] }]);
+  let id = 500;
+  const asked: string[] = [];
+  h.ports.fields = {
+    submitWrite: (payload) => {
+      moving.sent.push(payload);
+      return Promise.resolve({ id: id++, state: "pending" } as never);
+    },
+    refused: () => Promise.resolve([]),
+    fields: {
+      ticketFields: (entityId) => {
+        asked.push(entityId);
+        const one = CORPUS.find((entry) => entry.card.entity_id === entityId)?.card;
+        return Promise.resolve({
+          fields: [
+            { id: "assignee", label: "Assignee", kind: { type: "search", scope: "PAY", person: true }, value: one?.assignee ?? null, required: false },
+            { id: "priority", label: "Priority", kind: { type: "choice", options: [{ value: "High", label: "High" }, { value: "Low", label: "Low" }] }, value: one?.priority ?? null, required: true },
+          ],
+        });
+      },
+      fieldOptions: () => Promise.resolve({ options: PEOPLE, complete: true }),
+    },
+    follower: { follow: () => () => {} },
+  };
+  // The page's moves' writes are counted in the same list: `movable` pushes them.
+  return { ...moving, asked };
+}
+
+const avatarOf = (key: string) => target.querySelector<HTMLElement>(`[data-entity="jira:${key}"] .tf-av`)?.title ?? null;
+
+test("Assign to… on a card opens the people picker at it; a pick queues EditTicket and the card draws the person with Assigning, queued", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  const { fieldProvider } = await import("./card-fields.svelte");
+  fieldProvider()!.ask("jira:PAY-3");
+  await settle();
+  expect(fieldProvider()!.offer("jira:PAY-3")).toEqual({
+    assign: { disabled: null },
+    priority: { options: [{ value: "High", label: "High" }, { value: "Low", label: "Low" }], current: "High", asking: null, disabled: null },
+  });
+  fieldProvider()!.assign("jira:PAY-3");
+  await settle();
+  const options = [...document.querySelectorAll<HTMLElement>(".tf-fpick [role=option]")].map((one) => one.textContent!.trim());
+  expect(options.some((one) => one.includes("Mara Lindqvist"))).toBe(true);
+  const mara = [...document.querySelectorAll<HTMLElement>(".tf-fpick [role=option]")].find((one) => one.textContent!.includes("Mara Lindqvist"))!;
+  mara.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  mara.click();
+  flushSync();
+  expect(avatarOf("PAY-3")).toBe("Mara Lindqvist");
+  expect(chipOf("PAY-3")).toBe("Assigning, queued");
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-3", title: null, assignee: { account: "mara.lindqvist" }, priority: null, labels: null, fields: {} } }]);
+});
+
+test("Priority from a card's menu queues EditTicket with that priority alone, drawn on the card at once", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  const { fieldProvider } = await import("./card-fields.svelte");
+  fieldProvider()!.priority("jira:PAY-3", "Low", "Low");
+  flushSync();
+  expect(target.querySelector('[data-entity="jira:PAY-3"] .tf-tkind')?.textContent ?? "").not.toContain("High");
+  expect(chipOf("PAY-3")).toBe("Setting, queued");
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-3", title: null, assignee: null, priority: "Low", labels: null, fields: {} } }]);
+});
+
+test("a on the selected card opens the people picker; a source whose adapter offers no edits opens nothing and offers nothing", async () => {
+  const h = harness();
+  editable(h);
+  await open(h);
+  const { selectTicket } = await import("./TicketsPage.svelte");
+  selectTicket("jira:PAY-2");
+  flushSync();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+  await settle();
+  expect(document.querySelector(".tf-fpick")).not.toBeNull();
+  press("Escape");
+  press("Escape");
+  await settle();
+  sourceRoles.take([{ id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [], write_ops: ["transition"] }]);
+  flushSync();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+  await settle();
+  expect(document.querySelector(".tf-fpick")).toBeNull();
+  const { fieldProvider } = await import("./card-fields.svelte");
+  expect(fieldProvider()!.offer("jira:PAY-2")).toBeNull();
+});
+
+const rect = (left: number, top: number, width: number, height: number) =>
+  ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+const pointer = (type: string, x: number, y: number, on: EventTarget = window) =>
+  on.dispatchEvent(new PointerEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+
+/** Every drawn column side by side, 200 px wide and 10 apart, cards 80 px tall from y 100: the drag's arithmetic, in jsdom. */
+function laidOut() {
+  const cols = () => [...target.querySelectorAll<HTMLElement>(".tf-col[data-place]")];
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const col = this.closest<HTMLElement>(".tf-col[data-place]");
+    if (col === null) return rect(0, 0, 4000, 2000);
+    const left = cols().indexOf(col) * 210;
+    if (this.classList.contains("tf-tcard")) return rect(left + 5, 100 + [...col.querySelectorAll(".tf-tcard")].indexOf(this) * 86, 190, 80);
+    return rect(left, 90, 200, 400);
+  });
+  onTestFinished(() => vi.mocked(Element.prototype.getBoundingClientRect).mockRestore());
+  return cols;
+}
+
+/** Drag `key`'s card into the column at `place`, through the pointer. */
+async function dragTo(key: string, place: string) {
+  const node = target.querySelector<HTMLElement>(`.tf-tcard[data-entity="jira:${key}"]`)!;
+  const box = node.getBoundingClientRect();
+  pointer("pointerdown", box.left + 40, box.top + 20, node);
+  pointer("pointermove", box.left + 50, box.top + 20);
+  await settle();
+  const to = target.querySelector<HTMLElement>(`.tf-col[data-place="${CSS.escape(place)}"]`)!.querySelector(".tf-stack")!.getBoundingClientRect();
+  pointer("pointermove", to.left + 100, 300);
+  pointer("pointerup", to.left + 100, 300);
+  flushSync();
+}
+
+const laneCards = (lane: string) =>
+  [...target.querySelectorAll<HTMLElement>(".tf-lane")]
+    .find((one) => one.querySelector("h2")!.textContent!.trim().startsWith(lane))
+    ?.querySelectorAll<HTMLElement>(".tf-col") ?? [];
+const placeIn = (lane: string, status: string) =>
+  [...laneCards(lane)].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith(status))!.dataset.place!;
+const keysIn = (lane: string, status: string) =>
+  [...[...laneCards(lane)].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith(status))!.querySelectorAll<HTMLElement>(".tf-tcard")].map((one) =>
+    one.dataset.entity!.replace("jira:", ""),
+  );
+
+test("laned by assignee, a drop in another lane's other column queues the move, then the edit, and the card stands there at once", async () => {
+  const h = harness();
+  const { sent } = editable(h, ["Done"]);
+  await open(h);
+  chooseLanes("assignee");
+  await settle();
+  laidOut();
+  const { askReach } = await import("./reach.svelte");
+  await askReach({ ...CORPUS.find((entry) => entry.card.key === "PAY-40")!.card, status: "In Progress" }, "press", h.ports.moves!.reachableTransitions);
+  await dragTo("PAY-40", placeIn("jonas.becker", "Done"));
+  expect(keysIn("jonas.becker", "Done")).toEqual(["PAY-40"]);
+  await settle();
+  expect(sent).toEqual([
+    { Transition: { entity: "jira:PAY-40", status: "Done" } },
+    { EditTicket: { entity: "jira:PAY-40", title: null, assignee: { account: "jonas.becker" }, priority: null, labels: null, fields: {} } },
+  ]);
+});
+
+test("laned by assignee, a drop in another lane's column of its own status is the edit alone", async () => {
+  const h = harness();
+  const { sent } = editable(h, []);
+  await open(h);
+  chooseLanes("assignee");
+  await settle();
+  laidOut();
+  await dragTo("PAY-40", placeIn("jonas.becker", "In progress"));
+  expect(keysIn("jonas.becker", "In progress")).toEqual(["PAY-40"]);
+  await settle();
+  expect(sent).toEqual([{ EditTicket: { entity: "jira:PAY-40", title: null, assignee: { account: "jonas.becker" }, priority: null, labels: null, fields: {} } }]);
+});
+
+test("laned by issue type, a drop in another lane is refused with the sentence and queues nothing", async () => {
+  const h = harness();
+  const { sent } = editable(h);
+  await open(h);
+  chooseLanes("issuetype");
+  await settle();
+  laidOut();
+  const lanes = [...target.querySelectorAll<HTMLElement>(".tf-lane")];
+  expect(lanes.length).toBeGreaterThan(1);
+  // PAY-40 has no issue type: its lane is the second; the first is the stories'.
+  const other = [...lanes[0]!.querySelectorAll<HTMLElement>(".tf-col")].find((col) => col.querySelector("h3")!.textContent!.trim().startsWith("In progress"))!;
+  await dragTo("PAY-40", other.dataset.place!);
+  expect(target.querySelector(".tf-sr")!.textContent).toContain("knobas does not change a ticket's issue type. Drop it in its own lane.");
+  await settle();
+  expect(sent).toEqual([]);
+});
+

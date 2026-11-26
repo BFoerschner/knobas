@@ -72,6 +72,29 @@ fn searcher(pool: &sqlx::PgPool) -> Searcher {
 /// anywhere in this file would make `in:ji` plural and change what
 /// `filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them`
 /// asserts.
+/// The groups of a statement asked for a headline, over every corpus: the
+/// builder's `ts_headline`, which no command asks for since the launcher
+/// draws excerpts (`EffectiveFilters::headline`). What it quotes and how it
+/// marks a match is still the builder's to keep right.
+async fn headlined(pool: &sqlx::PgPool, raw: &str) -> Vec<knobas_search::ResultGroup> {
+    let built = knobas_search::sql::search_sql(
+        knobas_search::corpus::ALL,
+        Some(raw),
+        false,
+        &knobas_search::query::EffectiveFilters {
+            headline: true,
+            ..knobas_search::query::EffectiveFilters::default()
+        },
+        10,
+        30,
+    );
+    let rows: Vec<knobas_search::RawHit> = knobas_search::sql::query_as_with(built)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    knobas_search::group::group(rows, &KindCatalog::default())
+}
+
 async fn seed_sources(pool: &sqlx::PgPool) {
     for (id, kind, name, username) in [
         ("jira", "jira", "Jira", Some("mara.lindqvist")),
@@ -351,8 +374,8 @@ async fn the_snippet_is_segments_of_raw_text_with_the_match_flagged() {
     )
     .await;
 
-    let r = searcher(&pool).search(q(&t)).await.unwrap();
-    let hit = &r.groups[0].hits[0];
+    let groups = headlined(&pool, &t).await;
+    let hit = &groups[0].hits[0];
     assert!(
         hit.snippet
             .iter()
@@ -392,12 +415,62 @@ async fn the_snippet_is_segments_of_raw_text_with_the_match_flagged() {
     assert_eq!(flagged, [t.as_str()], "{:?}", hit.snippet);
 }
 
+/// The launcher's answer carries no headline (the query audit of
+/// 2026-11-12): nothing drew [`SearchHit::snippet`](knobas_search::SearchHit),
+/// and computing it was a quarter of a common word's keystroke. The field
+/// stays on the wire, empty. What a reader sees of the match is the
+/// excerpts, under *Everything*.
+#[tokio::test]
+async fn the_launchers_answer_carries_excerpts_and_no_headline() {
+    let pool = pool().await;
+    let t = token("nohead");
+    seed(
+        &pool,
+        &format!("jira:{t}"),
+        "ticket",
+        "jira",
+        "Retry the batch",
+        &format!("The {t} window closes at noon."),
+        None,
+        Utc::now(),
+    )
+    .await;
+
+    let everything = searcher(&pool).search(q(&t)).await.unwrap();
+    let hit = &everything.groups[0].hits[0];
+    assert!(hit.snippet.is_empty(), "{:?}", hit.snippet);
+    assert!(
+        hit.excerpts
+            .iter()
+            .flat_map(|e| &e.segments)
+            .any(|seg| seg.hit && seg.text.to_lowercase().contains(&t)),
+        "{:?}",
+        hit.excerpts
+    );
+
+    let titles = searcher(&pool)
+        .search(SearchQuery {
+            titles: true,
+            ..q("retry batch")
+        })
+        .await
+        .unwrap();
+    assert!(
+        titles
+            .groups
+            .iter()
+            .flat_map(|g| &g.hits)
+            .all(|h| h.snippet.is_empty() && h.excerpts.is_empty()),
+        "{titles:?}"
+    );
+}
+
 /// A page's `body_text` carries the Docs search's marks (#860): a heading's
-/// mark, a comment's author line and a line per linked page. The launcher's
-/// excerpt shows the words the page holds and none of the three: no mark, no
+/// mark, a comment's author line and a line per linked page. A headline
+/// shows the words the page holds and none of the three: no mark, no
 /// author line, no link line run together as `ENGRetry budget`.
 #[tokio::test]
-async fn a_pages_docs_marks_never_reach_the_launcher_excerpt() {
+async fn a_pages_docs_marks_never_reach_a_headline() {
     use knobas_source::docs::indexed::{comment_line, link_line, section_line};
     let pool = pool().await;
     let t = token("marks");
@@ -421,8 +494,8 @@ async fn a_pages_docs_marks_never_reach_the_launcher_excerpt() {
     )
     .await;
 
-    let r = searcher(&pool).search(q(&t)).await.unwrap();
-    let hit = &r.groups[0].hits[0];
+    let groups = headlined(&pool, &t).await;
+    let hit = &groups[0].hits[0];
     let joined: String = hit.snippet.iter().map(|s| s.text.as_str()).collect();
     assert!(joined.contains(&format!("Should {t} cap")), "{joined:?}");
     assert!(
@@ -1018,12 +1091,8 @@ async fn a_notes_snippet_is_segments_of_the_markdown_the_user_typed() {
         .await
         .unwrap();
 
-    let answer = searcher(&pool)
-        .search(q(&format!("{t} escalation")))
-        .await
-        .unwrap();
-    let hit = answer
-        .groups
+    let groups = headlined(&pool, &format!("{t} escalation")).await;
+    let hit = groups
         .iter()
         .flat_map(|group| &group.hits)
         .find(|hit| hit.row.entity_id == note.id)

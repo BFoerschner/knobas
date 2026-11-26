@@ -189,10 +189,12 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
 
     let report = demo::demo_load_inner(pool).await.unwrap();
     assert_eq!(
-        report.upserted, 33,
+        report.upserted, 38,
         "every item the Tidewater fixture holds: 7 tickets, 3 PRs, 3 builds, \
          6 pages, 3 commits, 3 repos and 3 branches (#537), and -- since #1240 -- \
-         3 pipelines and 2 monitors"
+         3 pipelines and 2 monitors, and since the fuzzy-search pass the two repos \
+         named as Björn's real misses were, and since the everything search's \
+         fixture (D16) the renamed repository and two default branches"
     );
 
     let response = knobas_search::Searcher::new(pool.clone())
@@ -535,7 +537,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 
     let report = demo::demo_load_inner(&pool).await.unwrap();
     assert_eq!(
-        report.upserted, 33,
+        report.upserted, 38,
         "the work half is the whole fixture: the estate rides beside it, not instead of it"
     );
 

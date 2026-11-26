@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>example.tidewater.procurement</groupId>
+  <artifactId>order-import</artifactId>
+  <version>2.4.1</version>
+  <packaging>jar</packaging>
+
+  <name>Order import</name>
+  <description>Reads openTRANS 2.1 orders into the procurement database.</description>
+  <url>https://wiki.tidewater.example/einkauf/order-import</url>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jackson.version>2.18.1</jackson.version>
+  </properties>
+
+  <!-- The schemas the importer checks against live beside the orders. -->
+  <build>
+    <resources>
+      <resource>
+        <directory>../schemas/opentrans</directory>
+        <includes>
+          <include>opentrans_2_1.xsd</include>
+          <include>bmecat_2005.xsd</include>
+        </includes>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <systemPropertyVariables>
+            <sample.order>../orders/order-4710.xml</sample.order>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-xml</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.4</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <scm>
+    <url>https://git.tidewater.example/tidewater/procurement-schemas</url>
+    <connection>scm:git:https://git.tidewater.example/tidewater/procurement-schemas.git</connection>
+  </scm>
+</project>

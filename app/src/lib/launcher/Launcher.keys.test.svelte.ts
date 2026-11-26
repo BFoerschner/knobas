@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ActionKey, LauncherHome, ListKey, SearchHit, SearchQuery, SearchResponse } from "../ipc";
 import type { CheckoutSettings, ViewAction } from "../ipc/entity";
+import { acks } from "../shell/ack.svelte";
 import { reset as resetToasts, toasts } from "../shell/toasts.svelte";
 import Launcher from "./Launcher.svelte";
 import { createKeys } from "./keys.svelte";
@@ -104,6 +105,8 @@ function mountIt(backend = keyBackend()) {
     target,
     props: {
       open: true,
+      // These tests type a kind's word to reach its row; *Go to* has its own.
+      places: [],
       onnavigate: calls.navigate,
       onclose: () => {},
       ontimer: vi.fn(),
@@ -112,7 +115,7 @@ function mountIt(backend = keyBackend()) {
       ports: { search: async (query: SearchQuery) => response(query.raw), launcherHome: async () => HOME },
       sheetPorts: {
         createLink: calls.createLink,
-        submitWrite: calls.submitWrite,
+        submitWrite: calls.submitWrite as never,
         copyText: vi.fn(async () => {}),
         openCheckout: calls.openCheckout,
         checkoutSettings: calls.checkoutSettings,
@@ -276,13 +279,28 @@ test("the box's own chords are refused with a message, and none of them does its
   press("?", { code: "Slash", metaKey: true, shiftKey: true });
   expect(refused()).toBe("⌘? is the launcher's own");
   // ⌘D did not switch to Everything, and ⌘? opened no filters.
-  expect(target.querySelector(".tf-ln-scope button")?.textContent).toBe("Titles");
+  expect(target.querySelector(".tf-launch-deep")).toBeNull();
   expect(modeLabel()).toBe("Keys");
   // A free chord is taken and the message goes.
   chord("o", { metaKey: true, shiftKey: true });
   expect(refused()).toBeNull();
   expect(bigKeys()).toEqual(["⌘", "⇧", "O"]);
   expect(calls.backend.bindActionKey).not.toHaveBeenCalled();
+});
+
+test("the Titles chip and ⌘D go where they change no results, and come back with a search (F-643)", async () => {
+  mountIt();
+  await settle();
+  await type("repo");
+  const chip = () => target.querySelector(".tf-ln-scope button");
+  const hint = () => [...target.querySelectorAll(".tf-launch > footer kbd")].some((kbd) => kbd.textContent === "⌘D");
+  expect(chip()?.textContent).toBe("Titles");
+  expect(hint()).toBe(true);
+  await sheetOn("repo");
+  expect(chip()).toBeNull();
+  expect(hint()).toBe(false);
+  expect(chord("d").defaultPrevented, "still not the webview's bookmark").toBe(true);
+  expect(target.querySelector(".tf-launch-deep"), "the sheet does not widen").toBeNull();
 });
 
 test("an action's chord runs it on the selected row of its kind without opening the sheet", async () => {
@@ -292,7 +310,37 @@ test("an action's chord runs it on the selected row of its kind without opening 
   expect(chord("o", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
   await settle();
   expect(calls.openCheckout).toHaveBeenCalledWith("gitea:acme/svc", { application: "code" });
-  expect(lastToast()).toBe("Started VS Code: code /src/svc");
+  expect(acks.item?.text).toBe("Opening in VS Code");
+  expect(lastToast()).toBeUndefined();
+});
+
+/**
+ * A chord bound to an action runs on the selected row, so pressed before the answer to the box's text lands it waits
+ * for it, as Enter does (2026-11-16): typed and pressed with no turn between, it runs on the row the word finds and
+ * not on whatever the list held.
+ */
+test("an action's chord pressed before the answer lands waits for it, and runs on the answer's row", async () => {
+  const calls = mountIt(keyBackend([], [{ kind: "repo", chord: "⌘⇧O", action_id: "open-code" }]));
+  await settle();
+  input().value = "repo";
+  input().dispatchEvent(new Event("input", { bubbles: true }));
+  expect(chord("o", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+  expect(calls.openCheckout, "the search is still out").not.toHaveBeenCalled();
+  await settle();
+  expect(calls.openCheckout).toHaveBeenCalledWith("gitea:acme/svc", { application: "code" });
+});
+
+/** Tab waits the same way, and opens the sheet on the row the word finds. */
+test("Tab pressed before the answer lands opens the sheet on the answer's row", async () => {
+  mountIt();
+  await settle();
+  input().value = "pr";
+  input().dispatchEvent(new Event("input", { bubbles: true }));
+  expect(press("Tab").defaultPrevented).toBe(true);
+  expect(sheet(), "no sheet while the search is out").toBeNull();
+  await settle();
+  expect(sheet()).not.toBeNull();
+  expect(target.querySelector(".tf-ln-pinned")?.textContent).toContain("#142");
 });
 
 test("one chord means another action on another kind, and nothing on a kind it is not bound on", async () => {

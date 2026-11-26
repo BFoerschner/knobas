@@ -12,9 +12,14 @@
  */
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 
+import type { EngineId } from "./roles";
 import { FRAME_SCHEME } from "./frame";
 
-/** A run of a line's text and its kind (`kw`, `str`, `num`, `com`, `fn`, `ty`; `""` is plain ink). */
+/**
+ * A run of a line's text and its role (`render/roles.ts`): one of the seventeen a theme colours (`com`, `kw`, `str`,
+ * `esc`, `num`, `con`, `fn`, `ty`, `prop`, `key`, `tag`, `attr`, `var`, `op`, `punct`, `head`, `link`), one of the two
+ * shapes (`strong`, `emph`), or `""`, plain ink. Never a colour, a scope or an engine's own name (ADR-0051).
+ */
 export type Token = readonly [text: string, kind: string];
 export type LineTokens = readonly Token[];
 
@@ -28,6 +33,11 @@ export interface HighlightRequest {
   focus?: [from: number, to: number];
 }
 
+/**
+ * A job's answers. `onLines` may come again for lines already answered, and after `onDone`: the pass from the top
+ * corrects the lines in view, and a change of highlighter replays every job the port holds (`rehighlight`), each line
+ * keeping its old tokens until its new ones land. A replay that ends `plain` says nothing, so what is drawn stays.
+ */
 export interface HighlightHandlers {
   onLines(from: number, lines: readonly LineTokens[]): void;
   onPlain?(): void;
@@ -131,6 +141,16 @@ export type PdfAnswer = { pdf: PdfDocument } | { error: string };
 export interface RenderPort {
   highlight(request: HighlightRequest, handlers: HighlightHandlers): HighlightJob;
   /**
+   * The highlighter changed: every job not cancelled is answered again by the engine of now, from its last focus
+   * (the highlighter re-ruling, 2026-11-21, section 4). Absent where nothing highlights.
+   */
+  rehighlight?(): void;
+  /**
+   * Starts the worker and imports the chosen engine, while the app is idle, so the first file pays neither. With
+   * `retry`, that engine's failure this session is forgotten and it is imported again.
+   */
+  warm?(retry?: EngineId): void;
+  /**
    * Draws a diagram (#2258). Absent where no engine runs (jsdom's
    * {@link plainPort}): the diagram's source stays as it is.
    */
@@ -213,7 +233,7 @@ export function frameWorker(src: string, doc: Document = document, limit = 30_00
   const view = doc.defaultView!;
   let held: unknown[] | null = [];
   const timer = setTimeout(() => {
-    events.dispatchEvent(Object.assign(new Event("error"), { message: `D2's frame did not load within ${limit / 1000} s.` }));
+    events.dispatchEvent(Object.assign(new Event("error"), { message: `D2's frame did not load within ${limit / 1000}s.` }));
   }, limit);
   const heard = (event: MessageEvent) => {
     if (event.source === null || event.source !== frame.contentWindow) return;
@@ -241,50 +261,113 @@ export function frameWorker(src: string, doc: Document = document, limit = 30_00
   };
 }
 
-/** What the port sends the worker. */
+/** What the port sends the worker. `open` names the engine the setting chose: a worker has no `localStorage`. */
 export type HighlightMessage =
-  | ({ type: "open"; id: number } & HighlightRequest)
+  | ({ type: "open"; id: number; engine?: EngineId } & HighlightRequest)
   | { type: "focus"; id: number; from: number; to: number }
-  | { type: "cancel"; id: number };
+  | { type: "cancel"; id: number }
+  | { type: "warm"; engine: EngineId; retry?: boolean };
 
-/** What the worker answers. */
+/** What the worker answers. `failed`: an engine could not be imported, said once a session. */
 export type HighlightReply =
   | { type: "lines"; id: number; from: number; lines: LineTokens[] }
   | { type: "plain"; id: number }
-  | { type: "done"; id: number };
+  | { type: "done"; id: number }
+  | { type: "failed"; engine: EngineId };
 
-/** A port over a worker that speaks `HighlightMessage`s, started on the first job. */
-export function workerPort(start: () => Pick<Worker, "postMessage" | "addEventListener">): RenderPort {
+/** Where the port reads the chosen engine and says an engine failed: `tf/highlighter.svelte.ts` sets it. */
+export interface EngineChoice {
+  engine(): EngineId;
+  failed(engine: EngineId): void;
+}
+
+const defaultChoice: EngineChoice = { engine: () => "pierre", failed: () => {} };
+let appChoice: EngineChoice = defaultChoice;
+
+/** The app's port reads the engine from `choice` (`tf/highlighter.svelte.ts`, at load). */
+export function useEngineChoice(choice: EngineChoice): void {
+  appChoice = choice;
+}
+
+/**
+ * A port over a worker that speaks `HighlightMessage`s, started on the first job. It holds every job not cancelled, its
+ * request, handlers and last focus, also once it is done, so `rehighlight` can answer it again with another engine; a
+ * view cancels its jobs when it goes, which is when the port lets them go.
+ */
+export function workerPort(
+  start: () => Pick<Worker, "postMessage" | "addEventListener">,
+  choice: () => EngineChoice = () => defaultChoice,
+): RenderPort & Required<Pick<RenderPort, "rehighlight" | "warm">> & { held(): number } {
+  interface Held {
+    request: HighlightRequest;
+    handlers: HighlightHandlers;
+    focus: [number, number] | undefined;
+    /** The worker's id for this job's latest run, and whether that run still answers. */
+    runId: number;
+    running: boolean;
+    replay: boolean;
+  }
   let worker: ReturnType<typeof start> | null = null;
   let next = 0;
-  const live = new Map<number, HighlightHandlers>();
+  const held = new Set<Held>();
+  const byRun = new Map<number, Held>();
   const send = (message: HighlightMessage) => worker!.postMessage(message);
+  const started = () => {
+    if (worker !== null) return;
+    worker = start();
+    worker.addEventListener("message", (event) => {
+      const reply = (event as MessageEvent<HighlightReply>).data;
+      if (reply.type === "failed") return choice().failed(reply.engine);
+      const job = byRun.get(reply.id);
+      if (!job) return;
+      if (reply.type === "lines") return job.handlers.onLines(reply.from, reply.lines);
+      byRun.delete(reply.id);
+      job.running = false;
+      if (reply.type === "done") job.handlers.onDone?.();
+      else if (!job.replay) job.handlers.onPlain?.();
+    });
+  };
+  const open = (job: Held) => {
+    job.runId = next += 1;
+    job.running = true;
+    byRun.set(job.runId, job);
+    send({ type: "open", id: job.runId, engine: choice().engine(), ...job.request, ...(job.focus ? { focus: job.focus } : {}) });
+  };
   return {
     highlight(request, handlers) {
-      if (worker === null) {
-        worker = start();
-        worker.addEventListener("message", (event) => {
-          const reply = (event as MessageEvent<HighlightReply>).data;
-          const to = live.get(reply.id);
-          if (!to) return;
-          if (reply.type === "lines") to.onLines(reply.from, reply.lines);
-          else {
-            live.delete(reply.id);
-            if (reply.type === "plain") to.onPlain?.();
-            else to.onDone?.();
-          }
-        });
-      }
-      const id = (next += 1);
-      live.set(id, handlers);
-      send({ type: "open", id, ...request });
+      started();
+      const job: Held = { request, handlers, focus: request.focus, runId: 0, running: false, replay: false };
+      held.add(job);
+      open(job);
       return {
-        focus: (from, to) => live.has(id) && send({ type: "focus", id, from, to }),
+        focus: (from, to) => {
+          if (!held.has(job)) return;
+          job.focus = [from, to];
+          if (job.running) send({ type: "focus", id: job.runId, from, to });
+        },
         cancel: () => {
-          if (live.delete(id)) send({ type: "cancel", id });
+          if (!held.delete(job)) return;
+          byRun.delete(job.runId);
+          if (job.running) send({ type: "cancel", id: job.runId });
+          job.running = false;
         },
       };
     },
+    rehighlight() {
+      for (const job of held) {
+        if (job.running) {
+          byRun.delete(job.runId);
+          send({ type: "cancel", id: job.runId });
+        }
+        job.replay = true;
+        open(job);
+      }
+    },
+    warm(retry) {
+      started();
+      send(retry === undefined ? { type: "warm", engine: choice().engine() } : { type: "warm", engine: retry, retry: true });
+    },
+    held: () => held.size,
   };
 }
 
@@ -298,6 +381,26 @@ export const plainPort: RenderPort = {
 };
 
 let shared: RenderPort | null = null;
+
+/** How many ms late the app's port asks its engines for a diagram: the fixture's `?fake-diagram-late`. */
+let diagramsLate = 0;
+
+/**
+ * The fixture's `?fake-diagram-late=<ms>` (`shell/dev/fake-tauri.ts`, #2510): every diagram the app's port draws is
+ * asked of its engine that much later, as a cold engine or a large diagram answers, so a probe can land a drawing after
+ * the text's hold.
+ */
+export function lateDiagrams(ms: number): void {
+  diagramsLate = ms;
+}
+
+/** `draw`, each diagram asked `ms()` later; at once where that is nothing. */
+export function lateBy(draw: (request: DiagramRequest) => Promise<DiagramAnswer>, ms: () => number): (request: DiagramRequest) => Promise<DiagramAnswer> {
+  return (request) => {
+    const late = ms();
+    return late > 0 ? new Promise<void>((resolve) => setTimeout(resolve, late)).then(() => draw(request)) : draw(request);
+  };
+}
 
 let wasm: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
 let d2: ((request: DiagramRequest) => Promise<DiagramAnswer>) | null = null;
@@ -340,30 +443,45 @@ export function enginePdf(bytes: Uint8Array): Promise<PdfAnswer> {
   return import("./pdf").then(({ renderPdf }) => renderPdf(bytes));
 }
 
-/** The app's port: Shiki in a module worker, the diagram engines and pdf.js, or {@link plainPort} where there is no `Worker`. */
+/** The app's port: the highlighters in a module worker, the diagram engines and pdf.js, or {@link plainPort} where there is no `Worker`. */
 export function renderPort(): RenderPort {
   shared ??=
     typeof Worker === "undefined"
       ? plainPort
       : {
-          ...workerPort(() => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" })),
-          diagram: engineDiagram,
+          ...workerPort(
+            () => new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module", name: "highlight" }),
+            () => appChoice,
+          ),
+          diagram: lateBy(engineDiagram, () => diagramsLate),
           pdf: enginePdf,
         };
   return shared;
 }
 
-/** One snippet's lines, highlighted, or `null` where its language is unknown (a Markdown fence, #2255). */
+/**
+ * One snippet's lines, highlighted, or `null` where its language is unknown (a Markdown fence, #2255). Answered once:
+ * the job is let go when it answers, so a change of highlighter does not colour it again. A view that must recolour
+ * holds its job (`render/markdown.ts`'s `highlightInto`, a Docs block).
+ */
 export function highlightSnippet(port: RenderPort, text: string, lang: string): Promise<LineTokens[] | null> {
   return new Promise((resolve) => {
     const lines: LineTokens[] = [];
-    port.highlight(
+    let job: HighlightJob | null = null;
+    let over = false;
+    const end = (answer: LineTokens[] | null) => {
+      over = true;
+      job?.cancel();
+      resolve(answer);
+    };
+    job = port.highlight(
       { text, lang },
       {
         onLines: (from, got) => got.forEach((line, i) => (lines[from + i] = line)),
-        onPlain: () => resolve(null),
-        onDone: () => resolve(lines),
+        onPlain: () => end(null),
+        onDone: () => end(lines),
       },
     );
+    if (over) job.cancel();
   });
 }

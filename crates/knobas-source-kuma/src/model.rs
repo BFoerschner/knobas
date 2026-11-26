@@ -234,15 +234,15 @@ mod tests {
 # TYPE monitor_uptime_ratio gauge
 monitor_uptime_ratio{monitor_id=\"7\",monitor_name=\"gitea\",monitor_type=\"http\",monitor_url=\"http://gitea:3000/api/healthz\",monitor_hostname=\"null\",monitor_port=\"null\",window=\"1d\"} 1
 monitor_uptime_ratio{monitor_id=\"7\",monitor_name=\"gitea\",monitor_type=\"http\",monitor_url=\"http://gitea:3000/api/healthz\",monitor_hostname=\"null\",monitor_port=\"null\",window=\"30d\"} 0.5
-monitor_uptime_ratio{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"46.224.117.158\",monitor_port=\"null\",window=\"1d\"} 1
+monitor_uptime_ratio{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"203.0.113.10\",monitor_port=\"null\",window=\"1d\"} 1
 # HELP monitor_response_time Monitor Response Time (ms)
 # TYPE monitor_response_time gauge
 monitor_response_time{monitor_id=\"7\",monitor_name=\"gitea\",monitor_type=\"http\",monitor_url=\"http://gitea:3000/api/healthz\",monitor_hostname=\"null\",monitor_port=\"null\"} 35
-monitor_response_time{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"46.224.117.158\",monitor_port=\"null\"} -1
+monitor_response_time{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"203.0.113.10\",monitor_port=\"null\"} -1
 # HELP monitor_status Monitor Status (1 = UP, 0= DOWN, 2= PENDING, 3= MAINTENANCE)
 # TYPE monitor_status gauge
 monitor_status{monitor_id=\"7\",monitor_name=\"gitea\",monitor_type=\"http\",monitor_url=\"http://gitea:3000/api/healthz\",monitor_hostname=\"null\",monitor_port=\"null\"} 1
-monitor_status{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"46.224.117.158\",monitor_port=\"null\"} 0
+monitor_status{monitor_id=\"1\",monitor_name=\"knobas-teamcity\",monitor_type=\"ping\",monitor_url=\"null\",monitor_hostname=\"203.0.113.10\",monitor_port=\"null\"} 0
 # HELP process_open_fds Number of open file descriptors.
 # TYPE process_open_fds gauge
 process_open_fds 23
@@ -274,7 +274,7 @@ process_open_fds 23
     #[test]
     fn kumas_literal_null_label_is_an_absence() {
         let ping = folded().into_iter().find(|m| m.id == "1").unwrap();
-        assert_eq!(ping.hostname.as_deref(), Some("46.224.117.158"));
+        assert_eq!(ping.hostname.as_deref(), Some("203.0.113.10"));
         assert_eq!(ping.url, None);
         assert_eq!(ping.port, None);
     }

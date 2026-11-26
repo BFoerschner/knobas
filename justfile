@@ -186,6 +186,9 @@ check:
 #
 # Its vitest run is the tests the change can reach, not the whole suite
 # (#920): `front-changed` below. `check` still runs every test.
+#
+# Vitest forks: `VITEST_WORKERS`, 4 when unset (the cap `app/vite.config.ts`
+# explains). On a loaded box pass fewer: `VITEST_WORKERS=2 just check-front`.
 check-front base="origin/main":
     python3 -I scripts/doc-lists.py
     just conflict-markers
@@ -232,12 +235,15 @@ docs-check:
 # by import or by reading files -- through a global a changed module sets up
 # at import time in some other test's graph, say. None is known (2026-10-15).
 # `check` runs every test, so the full gate still sees one.
+#
+# `VITEST_WORKERS` sets vitest's forks, 4 when unset (`check-front` above).
 front-changed base="origin/main": deps
     #!/usr/bin/env bash
     set -euo pipefail
+    workers=${VITEST_WORKERS:-4}
     mb=$(git merge-base "{{base}}" HEAD)
     cd app
-    npx svelte-check --tsconfig ./tsconfig.json
+    npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
     # Captured before the loop, not read from a process substitution, so a
     # failing git stops the recipe instead of leaving `changed` empty.
     # Untracked files count as added (`A`).
@@ -257,12 +263,22 @@ front-changed base="origin/main": deps
       < <(grep -rlE 'readFileSync|readdirSync|import\.meta\.glob|\?raw' src | grep -E '\.test\.(svelte\.)?ts$' | sort)
     if [ -n "$all" ] || [ ${#guards[@]} -eq 0 ]; then
         echo "front-changed: the whole vitest suite: ${all:-no fs-reading guard tests found}"
-        npx vitest run
+        npx vitest run --maxWorkers "$workers"
     else
         echo "front-changed: vitest related to ${#changed[@]} changed files, plus ${#guards[@]} fs-reading guard tests"
-        npx vitest related --run ${changed[@]+"${changed[@]}"} "${guards[@]}"
+        npx vitest related --run --maxWorkers "$workers" ${changed[@]+"${changed[@]}"} "${guards[@]}"
     fi
-    npm run build
+    # A Svelte compile warning in a `.svelte.ts` module fails the build step:
+    # svelte-check reads `.svelte` files and misses them (the final suite,
+    # 2026-11-22: two state_referenced_locally only the build printed).
+    build_log=$(mktemp)
+    npm run build 2>&1 | tee "$build_log"
+    if grep -q '\[vite-plugin-svelte\]' "$build_log"; then
+        rm -f "$build_log"
+        echo "front-changed: the build printed a Svelte warning (above)" >&2
+        exit 1
+    fi
+    rm -f "$build_log"
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
 # `just shot 3 shots time job/PAY-231`; the leading `#/` is optional but quote it
@@ -500,6 +516,7 @@ shell:
 # the run is refused, and a release's commit lands on a branch that moved under it,
 # against a local bare repository, about 6 s. And the README diagrams': a d2 with no
 # bundled TALA, a watermark or a failed render replaces nothing, against a stub `d2`.
+# And the press trips' time limit: a stuck trip fails by name and the run goes on.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
@@ -515,12 +532,16 @@ witness-unit:
     scripts/gate-slot-test.sh
     scripts/machine-load-test.sh
     scripts/docs-check-test.sh
+    scripts/update-artifacts-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh
     testenv/gitea-pr-state-test.sh
     testenv/live-lock-test.sh
     testenv/seed-teamcity-builds-test.sh
+    testenv/perf/watchdog-test.sh
+    testenv/pleasant/test.sh
+    testenv/ui-checks/trip-runner-test.sh
 
 # The step before every `just check` (issue #736): the mechanical misses that
 # failed gates in the #701 wave, found in about a minute instead of a gate's.
@@ -586,7 +607,7 @@ pre-gate:
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
     (cd app && npx vitest run src/lib/shell/a11y.test.ts)
     (cd app && npx vitest run src/lib/shell/browser-globals.test.ts)
-    (cd app && npx svelte-check --tsconfig ./tsconfig.json)
+    (cd app && npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings)
     echo
     if [ "$before" = "$(snapshot)" ]; then
         echo "pre-gate: green, nothing changed."
@@ -619,23 +640,46 @@ fmt:
 # pin. Release, because wasmtime compiles the component again on every load
 # and a smaller one compiles faster; `test` runs this first.
 #
-# Three times: first against the frozen 1.0.0 world (`--features v1_0`, kept
-# beside as `knobas_wasm_fixture_v1_0.wasm`, #1205), for the host's hold on
-# 1.0.0 components; then against the frozen 1.3.0 world (`--features v1_3`,
-# kept as `knobas_wasm_fixture_v1_3.wasm`, #2101), the minor before
-# `refresh`; then the current one.
+# Once against each frozen older world, kept beside the current one under its
+# feature's name (`knobas_wasm_fixture_v1_0.wasm`, #1205; `_v1_3`, #2101;
+# `_v1_5`, ADR-0054; `_v1_6`, ADR-0050), then the current one, with its
+# dep-info. What `build_fixture` in `knobas-wasm-host` does when a test finds
+# the fixture missing or stale, in the same order (its `FIXTURE_VARIANTS`) and
+# in the same target folder of its own, `target/wasm-fixture`, so the two share
+# a build. Never in `CARGO_TARGET_DIR`: the copies read from where the builds
+# land, and a build that went to another folder left them copying whatever was
+# there, the current component as `_v1_0` and the rest (2026-11-25).
 wasm-fixture:
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_0
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_0.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_3
-    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_3.wasm
-    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet
+    #!/usr/bin/env bash
+    set -euo pipefail
+    own=target/wasm-fixture
+    built=$own/wasm32-wasip2/release/knobas_wasm_fixture
+    out=target/wasm32-wasip2/release
+    mkdir -p "$out"
+    for feature in v1_0 v1_3 v1_5 v1_6 ""; do
+        env -u RUSTUP_TOOLCHAIN CARGO_TARGET_DIR="$own" cargo build -p knobas-wasm-fixture \
+            --target wasm32-wasip2 --release --quiet ${feature:+--features "$feature"}
+        cp "$built.wasm" "$out/knobas_wasm_fixture${feature:+_$feature}.wasm"
+    done
+    cp "$built.d" "$out/knobas_wasm_fixture.d"
 
 # The gate's lint pass. PKGS narrows it to the given cargo package selection
 # (`just clippy -p knobas-core`; `pre-gate` passes the crates a branch changed,
 # #972); with none it lints the whole workspace. The one place the flags live.
 clippy *PKGS:
     env -u RUSTUP_TOOLCHAIN cargo clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --all-targets -- -D warnings
+
+# The same lint pass for Windows, cross-checked with `cargo xwin` (on the Mac:
+# `cargo install cargo-xwin`, and the x86_64-pc-windows-msvc target). Code
+# behind `cfg(windows)` and Windows' own type sizes are seen by nothing else:
+# an error variant large only there passed every gate until the final suite
+# (2026-11-22). Its own target folder, so the host build stays warm. No CI job
+# runs it (a Windows build on every push); run it when a change touches
+# Windows code. The library and binaries only: the integration tests drive
+# `/bin/sh` stubs and Unix modes, and are built on macOS and Linux.
+# `just clippy-windows -p knobas-app`
+clippy-windows *PKGS:
+    env -u RUSTUP_TOOLCHAIN CARGO_TARGET_DIR=target/xwin cargo xwin clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --lib --bins --target x86_64-pc-windows-msvc -- -D warnings
 
 # The same lint pass over the libraries alone -- which is the only way to see
 # them the way something that merely *depends* on them does.
@@ -1331,6 +1375,66 @@ responsiveness-probe:
     fi
     exit "$status"
 
+# The frame budget (PR #2479, `testenv/perf/README.md`): builds the app as the probes measure it (`KNOBAS_PERF=1`: a
+# development build for `?fake-ipc`, with Svelte's runtime as released), drives it in a headless Chrome with the main
+# thread slowed 1x, 4x and 6x, and fails when a list scrolls, a filter key paints or a page switches slower than its line in
+# `testenv/perf/budget.json`, or when a box that scrolls has no opaque background. On the fixture at scale by default;
+# `--real <port>` runs it on the windowless backend over a saved database (`examples/headless_ipc.rs`).
+frame-budget *args:
+    testenv/perf/frame-budget.sh {{args}}
+
+# The open budget (the instant-open pass of PR #2479, 2026-11-12, `testenv/perf/README.md`): presses every page's nav
+# entry or row in a headless Chrome at 1x, 4x and 6x, on its first visit, its return, its return after every other section
+# and its return after a sync, and fails when its first useful frame or its settling is over its line in
+# `testenv/perf/budget-open.json`, or a row moved after it drew. On the windowless backend over the saved scale
+# database: `just open-budget --real <port>`. `--inner` presses a repository's tabs, files, a commit, Compare, a pull
+# request's tabs and a run's tabs against the live forge instead, and `--inner --forge <ms>` with every request held
+# that long (the inner-pages pass, 2026-11-12; the README's *The inner pages*). `--extremes` presses the worst shapes
+# a real team's data has, seeded on the live products for the run and removed after (the extremes pass, 2026-11-13;
+# the README's *The extremes*).
+open-budget *args:
+    testenv/perf/open-budget.sh {{args}}
+
+# The movement gate (the nothing-moves pass of PR #2479, 2026-11-17, `testenv/perf/README.md`, *Nothing moves*; Björn:
+# "Check if any other page moves after it's drawn. That's not good behavior."): opens every place a person can open in a
+# headless Chrome, first open and return, at 1x and 4x, at 1440x868@1 and 2560x1440@1.25, and fails when anything drawn
+# moves or changes size by more than 2 px in the 5 s after the place's first useful frame. On the fixture with every
+# read landing late; `--real <port>` adds the saved scale database, `--sync` a sync ending every 1.5 s while each records.
+moves *args:
+    testenv/perf/moves.sh {{args}}
+
+# The keys budget (the broad-filters pass of PR #2479, 2026-11-13, `testenv/perf/README.md`): presses the keys that keep
+# most of a page, Tickets' first letter, a `-project:` and a `-priority:`, and a single letter under Everything, as real
+# input in a headless Chrome at 1x, 4x and 6x, and fails when the rows a key asks for draw later than their line in
+# `testenv/perf/budget-keys.json` or anything drawn moves. On the saved scale database: `just keys-budget --real <port>`.
+keys-budget *args:
+    testenv/perf/keys-budget.sh {{args}}
+
+# The Monitors budget (the monitors-page pass of PR #2479, 2026-11-19, `testenv/perf/README.md`, *Monitors at 239 Hz*;
+# Björn: "it should be near 240 like everything else too"): Monitors' first open, a return, the page idle, a beat landing,
+# a scroll, a hover and a monitor opened, each under a Chrome trace at 1x, 4x and 6x at three window sizes, and fails
+# when a moment's main thread is over its line in `testenv/perf/budget-monitors.json`. `just monitors-budget --real <port>`.
+monitors-budget *args:
+    testenv/perf/monitors-budget.sh {{args}}
+
+# The soak (the hover-lag pass of PR #2479, 2026-11-16, `testenv/perf/README.md`): browses a repository's Code page in a
+# headless Chrome as a person does for ten minutes, opening folders and files, looking at its other tabs and at other
+# sections, while runs end, then visits every other page a few times, and fails when what a run's end or a return costs
+# a hover grows with the browsing, or the nodes, listeners or heap kept do (`testenv/perf/budget.json`'s `soak` and
+# `soak-tour` lines). On the windowless backend over a copy of the saved scale database with a cloned repository of
+# thousands of files: `just soak --real <port> --repo <entity id>`.
+soak *args:
+    testenv/perf/soak.sh {{args}}
+
+# The starts of git (the git-starts pass of PR #2479, 2026-11-16, `testenv/perf/README.md`): presses each action at a
+# cloned repository (its landing, a folder, a file, a branch switch, a commit, Compare, a pull request's *Files
+# changed*, *Local changes*, the launcher) as real input in a headless Chrome at 1x, 4x and 6x, counts the `git`
+# processes the backend started for each from a counting `git` first on its `PATH`, and fails when a press a person
+# waits on started one. On the saved scale database with its repositories cloned:
+# `just git-starts --real <port> --shim-log <file>`.
+git-starts *args:
+    testenv/perf/git-starts.sh {{args}}
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
@@ -1395,9 +1499,41 @@ live-sources app="":
 live-sources-remove app="":
     testenv/live-sources.sh remove {{ quote(app) }}
 
+# *Everything* finds a repository by its files on the live Gitea and Forgejo
+# (the everything-search decisions, D16): a scratch profile's first fill
+# finds `tidewater/ledger-gateway` by `settlebridge`, then a pushed word is
+# found and a changed one gone after a sync, each step timed.
+# testenv/README.md *Live products as sources*.
+# Witness the files index against the live forges.
+live-everything *args:
+    testenv/live-everything.sh {{ args }}
+
 # `just demo` with every live product as a source already in place.
 live-demo: (live-sources "")
     just demo
+
+# testenv/README.md, *Björn's scale*: `just seed-scale jira`, `... confluence`,
+# `... teamcity`, `... gitea`, `... forgejo`, `... kuma`, each with `--count N`
+# for another size or `--plan-only` for the plan's numbers without a server.
+# The product must be up (`just live-up <product>`). Idempotent: a rerun on a
+# filled product adds nothing.
+# Fill a live product to Björn's scale, beside the seed.
+seed-scale product *args:
+    testenv/seed-scale.sh {{ product }} {{ args }}
+
+# testenv/README.md, *The extremes*: `just seed-extremes jira`, `... confluence`,
+# `... gitea`, `... teamcity`, each under its own scope and the product's live
+# lock; `--remove` deletes the scope again. Idempotent.
+# Make the worst shapes a real team's data has on a live product, beside the seed.
+seed-extremes product *args:
+    testenv/seed-extremes.sh {{ product }} {{ args }}
+
+# testenv/scale-sync.sh: the debug app on a scratch profile under `root`, its
+# sources added with --scale, each source's first sync timed. *Björn's scale*
+# says how the saved database was made.
+# Sync the filled products into a database of its own.
+scale-sync root *ids:
+    testenv/scale-sync.sh {{ quote(root) }} {{ ids }}
 
 # For the milestone review's bundle, or the desktop witness's.
 # A built bundle on the demo profile with every live product as a source.
@@ -1797,6 +1933,28 @@ start-work-live:
 # is Gitea's, and a Kuma suite has no business starting and seeding Gitea
 # (testenv/README.md, "One environment, one owner at a time"). `--env-kuma` is
 # that half.
+pleasant_live_env := "the Pleasant VM on the WSL box (testenv/pleasant/README.md), started under a pc ticket:
+  ssh knobas-wsl '~/scratch-pleasant/vm.sh start'
+  set -a; . <(ssh knobas-wsl cat scratch-pleasant/credentials.env); set +a
+  ssh -fN -L 24801:127.0.0.1:24801 -L 24822:127.0.0.1:24822 knobas-wsl   # from the Mac"
+
+# Pleasant Password Server's stand-in against the REAL server (ADR-0013's
+# licence exception, testenv/pleasant/README.md): one request list sent to
+# both, each holding the same 20 entries, and any difference in shape, status,
+# headers or error body fails it. `record` rewrites testenv/pleasant/recorded/
+# from the real server instead (commit the change); `--recorded` checks the
+# stand-in against those recordings with no VM, as `witness-unit` does.
+pleasant-contract mode="--live":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ {{ quote(mode) }} != "--recorded" ]; then
+      just _require-live-env {{ quote(pleasant_live_env) }} KNOBAS_PLEASANT_URL KNOBAS_PLEASANT_USER \
+        KNOBAS_PLEASANT_PASSWORD KNOBAS_PLEASANT_WRITER_USER KNOBAS_PLEASANT_WRITER_PASSWORD \
+        KNOBAS_PLEASANT_READER_USER KNOBAS_PLEASANT_READER_PASSWORD KNOBAS_PLEASANT_EXPIRE_CMD \
+        KNOBAS_PLEASANT_RESTORE_CMD
+    fi
+    node testenv/pleasant/contract.mjs {{ mode }}
+
 kuma_live_env := "testenv/, which is what the lines above this one do:
   docker compose --env-file images.env up -d --wait uptime-kuma
   ./seed-kuma.sh

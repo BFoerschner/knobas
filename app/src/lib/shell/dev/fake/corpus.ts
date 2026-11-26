@@ -3,7 +3,7 @@
  * one link graph, and the reads that list it (`list_entities`, the mini
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
-import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
+import type { AttentionGroup, BoardPage, CodeFacts, ContextKind, ContextRow, LaneField, MiniBoardCard, Signal, SourceStatuses, StateChip } from "../../../ipc/entity";
 import type { StateValue } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -33,6 +33,20 @@ const FIXTURE_HOST = "http://127.0.0.1:5399";
 /** When the fixture claims it last synced. Fixed, so screenshots are stable. */
 export const SYNCED_AT = "2026-08-22T14:30:00Z";
 
+/** The names the fixture's accounts go by, what Jira's `displayName` says beside `name`. */
+const PEOPLE: Record<string, string> = {
+  mara: "Mara Lindqvist",
+  jonas: "Jonas Becker",
+  priya: "Priya Nair",
+  tomasz: "Tomasz Wójcik",
+  lena: "Lena Hoffmann",
+};
+
+/** What the declared `assignee_name` reads for an account (F-107); an account with no name stays the only name. */
+export function fakePersonName(account: string | null): string | null {
+  return account === null ? null : (PEOPLE[account] ?? null);
+}
+
 /** Code's repositories (#837): name, last push, and prototype-6's team and language (#966). */
 const CODE_REPOS: [name: string, updated: string, team: string, language: string][] = [
   ["psp-client", "2026-08-21T13:20:00Z", "Payments", "Rust"],
@@ -45,6 +59,10 @@ const CODE_REPOS: [name: string, updated: string, team: string, language: string
   ["booking-api", "2026-08-22T12:15:00Z", "Booking", "Kotlin"],
   ["tracking-events", "2026-08-12T11:00:00Z", "Tracking", "Go"],
   ["auth-gateway", "2026-08-17T14:20:00Z", "Platform", "Go"],
+  // Named as Björn's two real misses were (the fuzzy-search pass,
+  // 2026-11-19): `proxy` and `mapping service` find them by their parts.
+  ["ADProxy", "2026-08-16T09:00:00Z", "Platform", "Go"],
+  ["abcMappingService", "2026-08-15T09:00:00Z", "Payments", "Kotlin"],
 ];
 
 /** Code's pull requests (#837): repository, number, title, state, author, updated, reviewers asked. */
@@ -124,21 +142,12 @@ export const CORPUS: {
     // the four files the Tidewater fixture gives PAY-231, at the addresses
     // mockd serves them from. Only Jira declares attachments; the fake draws
     // them on the mock ticket so the page has them under `?fake-ipc`.
-    attachments: [
+    attachments: attachmentRows([
       ["50000", "psp-409-trace.png", "image/png", 186_368, "Lena Hoffmann", "2026-08-12T09:14:00Z"],
       ["50001", "retry-timeline.png", "image/png", 98_304, "Mara Lindqvist", "2026-08-19T15:02:00Z"],
       ["50002", "sepa-error-codes.pdf", "application/pdf", 1_258_291, "Priya Nair", "2026-08-12T11:30:00Z"],
       ["50003", "batch-13-failures.csv", "text/csv", 49_152, "Lena Hoffmann", "2026-08-14T08:45:00Z"],
-    ].map(([id, name, mime, size, author, created]) => ({
-      id,
-      name,
-      mime,
-      size,
-      author,
-      created,
-      content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
-      thumbnail_url: String(mime).startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
-    })),
+    ]),
   }),
   // Deliberately in **no** project, key prefix notwithstanding: the miss
   // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It
@@ -154,6 +163,12 @@ export const CORPUS: {
     reporter: "mara",
     time_spent_seconds: 13200,
     worklogs: [{ who: "mara", seconds: 13200 }],
+    // D1: a run's test report and the PSP's answer, which the file viewer
+    // folds as XML and JSON (`fake-doc-blocks.ts`'s texts).
+    attachments: attachmentRows([
+      ["50004", "junit.xml", "application/xml", 3_573, "Jonas Becker", "2026-08-21T15:40:00Z"],
+      ["50005", "psp-409-response.json", "application/json", 1_423, "Jonas Becker", "2026-08-21T15:42:00Z"],
+    ]),
   }),
   row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
     key: "OPS-77",
@@ -255,6 +270,7 @@ export const CORPUS: {
   },
   row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
     num: 142,
+    labels: ["payments", "needs-review"],
     repo: "payout-service",
     state: "open",
     approvals: "1/2",
@@ -414,6 +430,20 @@ function row(
   };
 }
 
+/** A ticket's attachments as `get_entity` answers them (#2404): id, name, type, size, who and when, at mockd's addresses. */
+function attachmentRows(files: [id: string, name: string, mime: string, size: number, author: string, created: string][]) {
+  return files.map(([id, name, mime, size, author, created]) => ({
+    id,
+    name,
+    mime,
+    size,
+    author,
+    created,
+    content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
+    thumbnail_url: mime.startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
+  }));
+}
+
 /** The stored contexts the fixture session holds. Starts with one unarchived
  * job context, PAY-231's (#1503: the *Open alerts on my jobs* smart list is
  * computed over the unarchived ones, and a fixture with none could not be
@@ -494,6 +524,8 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * in.
  */
 function miniBoard(args: Record<string, unknown>) {
+  // A fresh profile (`?fake-empty=sources`, ux31) holds no ticket.
+  if (fakeEmpty("sources")) return { columns: [], sources: [], lanes: [], more_lanes: 0 };
   // Asked for a role, the board is its fillers' (#1299), as the command's:
   // a role nobody fills is an empty board, never every source's. The
   // command takes no source list, so none is read off `args`.
@@ -509,6 +541,9 @@ function miniBoard(args: Record<string, unknown>) {
     typeof savedView === "string"
       ? fakeJiraBoard(savedView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
       : boardOf({ ...args, sources, perColumn: null });
+  // A page past the first cards (ux18): restated over the fixture, as the command reads it.
+  const page = (args["page"] as BoardPage | null | undefined) ?? null;
+  if (page !== null) return pageOf(whole, page, perColumn, lanes);
   // In lanes (#939): each lane's column capped, the first lanes sent.
   if (lanes !== null) {
     return fakeLanes(whole, lanes, perColumn, (args["lanesFirst"] as number | null | undefined) ?? null);
@@ -520,6 +555,62 @@ function miniBoard(args: Record<string, unknown>) {
     })),
     sources: whole.sources,
     lanes: [],
+    more_lanes: 0,
+  };
+}
+
+/**
+ * `mini_board`'s `page` (ux18), over the fixture: a column's next cards past `after` (the statuses it names ranked as
+ * one, newest first; in a lane, that lane's), or the list sorted by a header, its order in `order`. Restated, like the
+ * rest of this file: the command is the authority.
+ */
+function pageOf<C extends MiniBoardCard>(
+  whole: { columns: { status: string | null; cards: C[]; total: number }[]; sources: SourceStatuses[] },
+  page: BoardPage,
+  perColumn: number | null,
+  lanes: LaneField | null,
+) {
+  const take = (cards: C[]) => cards.slice(page.after, perColumn === null ? undefined : page.after + perColumn);
+  const grouped = (cards: C[]) =>
+    whole.columns
+      .map((column) => ({ ...column, cards: cards.filter((card) => column.cards.includes(card)) }))
+      .filter((column) => column.cards.length > 0);
+  if (page.sort) {
+    const sign = page.direction === "descending" ? -1 : 1;
+    const priority = (card: C) => (card.priority === null ? null : ((page.priority_order ?? []).indexOf(card.priority.toLowerCase()) + 1 || 1_000_000));
+    const value = (card: C): string | number | null => {
+      switch (page.sort) {
+        case "key": return card.key.toLowerCase();
+        case "summary": return card.title.toLowerCase();
+        case "status": return (page.status_order ?? []).indexOf(card.status) + 1 || null;
+        case "priority": return priority(card);
+        case "assignee": return card.assignee?.toLowerCase() ?? null;
+        default: return card.updated_at;
+      }
+    };
+    const all = whole.columns.flatMap((column) => column.cards).sort((a, b) => {
+      const [x, y] = [value(a), value(b)];
+      if (x === null || y === null) return x === y ? (b.updated_at ?? "").localeCompare(a.updated_at ?? "") : x === null ? 1 : -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * sign || (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+    });
+    const kept = take(all);
+    return { columns: grouped(kept), sources: whole.sources, lanes: [], more_lanes: 0, order: kept.map((card) => card.entity_id) };
+  }
+  const named = (status: string | null) => page.statuses === undefined || page.statuses.includes(status);
+  const ranked = whole.columns
+    .filter((column) => named(column.status))
+    .flatMap((column) => column.cards)
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+  if (lanes === null || page.lane === undefined) return { columns: grouped(take(ranked)), sources: whole.sources, lanes: [], more_lanes: 0 };
+  const laned = fakeLanes(whole, lanes, null, null);
+  const lane = laned.lanes.find((one) => one.key === page.lane);
+  const inLane = new Set(lane?.columns.flatMap((cell) => cell.ids) ?? []);
+  const kept = take(ranked.filter((card) => inLane.has(card.entity_id)));
+  const ids = new Set(kept.map((card) => card.entity_id));
+  return {
+    columns: grouped(kept),
+    sources: whole.sources,
+    lanes: lane ? [{ ...lane, columns: lane.columns.map((cell) => ({ ...cell, ids: cell.ids.filter((id) => ids.has(id)) })) }] : [],
     more_lanes: 0,
   };
 }
@@ -632,7 +723,42 @@ function listProjects() {
 }
 
 /** One card of the fixture's board. */
+/**
+ * One corpus row by its id, through an index rebuilt whenever the corpus grows or goes back to its seed: at
+ * `?fake-scale`'s 30,000 rows a `CORPUS.find` per inbox row or set member made the fixture, not the app, the slow part
+ * of every load.
+ */
+export function corpusRow(id: string | null | undefined): (typeof CORPUS)[number] | undefined {
+  if (id === null || id === undefined) return undefined;
+  if (byId === null || indexed !== CORPUS.length) {
+    // The first row under an id, as `CORPUS.find` read it.
+    byId = new Map();
+    for (const entry of CORPUS) if (!byId.has(entry.entity_id)) byId.set(entry.entity_id, entry);
+    indexed = CORPUS.length;
+  }
+  return byId.get(id);
+}
+let byId: Map<string, (typeof CORPUS)[number]> | null = null;
+let indexed = 0;
+onFakeReset(() => {
+  byId = null;
+  cards = new WeakMap();
+  lastParsed = null;
+});
+
+/**
+ * Cards kept per row once the corpus is past a bulk switch's size (`?fake-scale`, `?fake-tickets`): a board or a count
+ * makes one per ticket on every read. A demo-sized corpus makes them fresh, so a fake write to a payload shows at once.
+ */
+let cards = new WeakMap<(typeof CORPUS)[number], ReturnType<typeof makeCard>>();
 function boardCard(entry: (typeof CORPUS)[number]) {
+  if (CORPUS.length < 5_000) return makeCard(entry);
+  let card = cards.get(entry);
+  if (card === undefined) cards.set(entry, (card = makeCard(entry)));
+  return card;
+}
+
+function makeCard(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
   if (entry.entity_id.startsWith("gitea:")) return giteaCard(entry);
@@ -649,6 +775,7 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     // that is the shape this corpus is in.
     issue_type: text(entry.payload["type"]),
     assignee,
+    ...(fakePersonName(assignee) === null ? {} : { assignee_name: fakePersonName(assignee)! }),
     updated_at: entry.updated_at,
     path: text(entry.payload["epic"]),
     parent_title: FAKE_EPIC_TITLES[text(entry.payload["epic"]) ?? ""] ?? null,
@@ -810,7 +937,13 @@ export const FAKE_IDENTITY = "mara";
  * meaning any of them. A restatement, which certifies nothing: the real
  * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
  */
-function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+/**
+ * A query's keys and words, read once for a whole read rather than once per ticket: the words as the grammar reads
+ * them (#1889), where `or` separates alternatives, `-word` and `-"phrase"` are left out of the one they stand in, and
+ * a phrase is one needle.
+ */
+function parsedQuery(query: string) {
+  if (lastParsed?.query === query) return lastParsed;
   const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
   const keys = new Map<string, { negated: boolean; values: string[] }>();
   for (const [, minus, key, quoted, bare, word] of tokens) {
@@ -820,11 +953,15 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
     held.values.push((quoted ?? bare ?? "").toLowerCase());
     keys.set(name, held);
   }
+  lastParsed = { query, keys, alternatives: wordAlternatives(query) };
+  return lastParsed;
+}
+let lastParsed: { query: string; keys: Map<string, { negated: boolean; values: string[] }>; alternatives: ReturnType<typeof wordAlternatives> } | null = null;
+
+function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+  const { keys, alternatives } = parsedQuery(query);
   const card = boardCard(entry);
   const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
-  // The words as the grammar reads them (#1889): `or` separates alternatives,
-  // `-word` and `-"phrase"` are left out of the one they stand in, a phrase is one needle.
-  const alternatives = wordAlternatives(query);
   const admits = ({ holds, lacks }: { holds: string[]; lacks: string[] }) =>
     holds.every((word) => haystack.includes(word)) && !lacks.some((word) => haystack.includes(word));
   if (alternatives.length > 0 && !alternatives.some(admits)) return false;
@@ -886,6 +1023,16 @@ export interface FakeClaimer {
   role_misses: { role: string }[];
   kinds: { id: string }[];
   payload_paths: { kind: string; frame?: string | null }[];
+}
+
+/**
+ * `?fake-empty=docs,sets,assets,wiki,sources`: those areas answer with nothing, to draw their empty states. `wiki` is the
+ * one that takes a claim away: no source holds pages, as `sources.ts` answers it. `sources` is a fresh profile: no
+ * source and no ticket, which Tickets draws as its zero-source state (ux31). Read per answer, as the address can change
+ * under a dev server.
+ */
+export function fakeEmpty(area: string): boolean {
+  return (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes(area);
 }
 
 /**
@@ -1112,15 +1259,23 @@ export const CODE_FACTS: ((ids: ReadonlySet<string>) => CodeFacts[])[] = [];
 /**
  * `?fake-code-rows=<n>` (perf audit, #2200's class): `n` more pull requests
  * over `n / 10` more repositories, one in ten open, the rest merged. Added at
- * load, so they are part of the seed.
+ * load, so they are part of the seed. The repositories last pushed on four of
+ * the days have long names, two teams and a long language, so they stand
+ * together in the list by last push, as a real estate's long ones do: a table
+ * that sized its columns to the rows drawn took new widths as a window of
+ * them scrolled in (the code-list-columns pass, 2026-11-20, `columns.mjs`).
  */
 function bulkCode(n: number): (typeof CORPUS)[number][] {
   if (n <= 0) return [];
   const repos = Math.ceil(n / 10);
-  const name = (r: number) => `tidewater/bulk-${String(r).padStart(4, "0")}`;
+  const long = (r: number) => r % 28 >= 18 && r % 28 < 22;
+  const name = (r: number) => `tidewater/bulk-${String(r).padStart(4, "0")}${long(r) ? "-ledger-reconciliation-exporter" : ""}`;
   return [
     ...Array.from({ length: repos }, (_, r) =>
-      row(`mock:${name(r)}`, "repo", name(r), `2026-07-${String(1 + (r % 28)).padStart(2, "0")}T10:00:00Z`, "jonas", { teams: [`Team ${r % 12}`], language: r % 2 ? "Rust" : "Go" }),
+      row(`mock:${name(r)}`, "repo", name(r), `2026-07-${String(1 + (r % 28)).padStart(2, "0")}T10:00:00Z`, "jonas", {
+        teams: long(r) ? ["Payments platform", "Ledger reliability"] : [`Team ${r % 12}`],
+        language: long(r) ? "Jupyter Notebook" : r % 2 ? "Rust" : "Go",
+      }),
     ),
     ...Array.from({ length: n }, (_, i) =>
       row(`mock:bulk-${i % repos}#${i}`, "pr", `Bulk change ${i}`, `2026-0${1 + (i % 8)}-${String(1 + (i % 28)).padStart(2, "0")}T09:00:00Z`, i % 3 ? "jonas" : "mara", {

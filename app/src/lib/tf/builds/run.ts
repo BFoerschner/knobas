@@ -33,6 +33,12 @@ export function runTabOf(rest: readonly string[]): RunTab {
   return RUN_TABS.find((tab) => tab.id === asked)?.id ?? "overview";
 }
 
+/** Whether the address names a tab a run doesn't have: the page says so rather than drawing Overview as if it did. */
+export function noSuchRunTab(rest: readonly string[]): boolean {
+  const asked = rest[2];
+  return asked !== undefined && !RUN_TABS.some((tab) => tab.id === asked);
+}
+
 /** A tab's address. Overview is the run's own. */
 export function runTabHash(pipelineId: string, runId: string, tab: RunTab): string {
   const base = runHash(pipelineId, runId);

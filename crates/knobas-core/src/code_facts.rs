@@ -22,6 +22,13 @@ pub struct CodeFacts {
     /// login of a pull request's opener, of a commit's author, of a branch
     /// tip's author. `None` where the source named none.
     pub author: Option<String>,
+    /// The name to call [`author`](Self::author) by, through the kind's
+    /// declared `reporter_name` (F-107): Gitea's profile name of a pull
+    /// request's opener. Absent on the wire where the account is the only
+    /// name, and a reader then draws the account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author_name: Option<String>,
     /// Whether `author` is its own source's configured username, trimmed,
     /// compared as the attention read compares it (#712). `false` for a
     /// source with no username, whose rows are nobody's.
@@ -36,6 +43,9 @@ pub struct CodeFacts {
 const CODE_FACTS: &str = concat!(
     r#"
 select i.entity_id, i.author, coalesce(i.author = me.me, false) as mine,
+       "#,
+    crate::declared_string!("$2", "reporter_name"),
+    r#" as author_name,
        "#,
     crate::declared_string!("$2", "language"),
     r#" as language,
@@ -70,6 +80,7 @@ pub async fn read(
         .map(|row| CodeFacts {
             entity_id: row.get("entity_id"),
             author: row.get("author"),
+            author_name: row.get("author_name"),
             mine: row.get("mine"),
             language: row.get("language"),
             teams: row.get("teams"),

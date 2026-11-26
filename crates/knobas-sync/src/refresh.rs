@@ -11,7 +11,11 @@
 //!
 //! **Serialized, not versioned.** The read happens inside the lock, so a
 //! refresh that arrives while a run of its source is in flight waits for that
-//! run to commit and reads after it. A run fetches inside its transaction and
+//! run to commit and reads after it ([`Lock::Wait`], a landed write's read
+//! back), or reads nothing and says so ([`Lock::Try`], the reader's
+//! *Refresh*: a run holds the lock for the whole run, network included, 74 to
+//! 242 s in the scale database's log, and the button said *Refreshing…* all
+//! that while; the query audit of PR #2479, 2026-11-12). A run fetches inside its transaction and
 //! item writes overwrite unconditionally, so a run that began before a write
 //! could otherwise commit its older payload over what the refresh read.
 //!
@@ -19,7 +23,7 @@
 //! resolves them once a refresh ends, as it does once a run ends.
 
 use knobas_core::entity::EntityRef;
-use knobas_source::{RefreshAnswer, Sink, Source, SourceError};
+use knobas_source::{Cursor, RefreshAnswer, Sink, Source, SourceError, UnderAnswer};
 use sqlx::{Connection, PgConnection, Postgres, Transaction};
 
 use crate::scheduler::SchedulerDeps;
@@ -36,6 +40,28 @@ pub enum RefreshOutcome {
     /// The adapter does not read this item by id. Nothing was written; the
     /// caller runs the source instead.
     NotOffered,
+    /// Under [`Lock::Try`], a run of the source held its lock: nothing was
+    /// read or written. That run writes the item as the source holds it when
+    /// it ends, or, where the run started before what changed it, the next.
+    RunInFlight,
+    /// A walk under a parent (ADR-0047) emitted nothing: the mirror already
+    /// holds the parent and what stands under it as the source does. Nothing
+    /// was written, so nothing a page drew is out of date (the pr-state fix,
+    /// 2026-11-24: a page that walks its repository each time it is shown
+    /// must not drop every answer the window holds when nothing moved). Also
+    /// one item read by id that arrived as the mirror holds it, which was
+    /// only stamped (the TeamCity run fix, 2026-11-25).
+    Unchanged,
+}
+
+/// Whether a refresh waits for the source's run lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lock {
+    /// Wait for a run in flight to commit, then read after it.
+    Wait,
+    /// Take the lock only if no run holds it, else answer
+    /// [`RefreshOutcome::RunInFlight`] at once.
+    Try,
 }
 
 /// Why a refresh did not happen, or failed.
@@ -71,6 +97,7 @@ pub enum RefreshError {
 pub async fn of_entity(
     deps: &SchedulerDeps,
     entity_id: &str,
+    lock: Lock,
 ) -> Result<RefreshOutcome, RefreshError> {
     let entity =
         EntityRef::parse(entity_id).map_err(|_| RefreshError::NotAnEntity(entity_id.to_owned()))?;
@@ -88,7 +115,7 @@ pub async fn of_entity(
         return Ok(RefreshOutcome::NotOffered);
     }
     let mut conn = deps.connections.open().await.map_err(SyncError::Db)?;
-    let outcome = refresh_item(&mut conn, source.as_ref(), entity_id).await;
+    let outcome = refresh_item_under(&mut conn, source.as_ref(), entity_id, lock).await;
     if let Err(error) = Connection::close(conn).await {
         tracing::debug!(entity_id, %error, "closing the refresh's connection failed");
     }
@@ -117,6 +144,20 @@ pub async fn refresh_item(
     source: &dyn Source,
     entity: &str,
 ) -> Result<RefreshOutcome, SyncError> {
+    refresh_item_under(conn, source, entity, Lock::Wait).await
+}
+
+/// [`refresh_item`], waiting for the run lock or not as `lock` says.
+///
+/// # Errors
+///
+/// As [`refresh_item`].
+pub async fn refresh_item_under(
+    conn: &mut PgConnection,
+    source: &dyn Source,
+    entity: &str,
+    lock: Lock,
+) -> Result<RefreshOutcome, SyncError> {
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
     let (source_id, declared) = Declared::of(descriptor);
@@ -129,7 +170,7 @@ pub async fn refresh_item(
     let mut tx = conn.begin().await?;
     // The explicit rollback, for the reason `run_inner` gives: on a
     // connection of its own, a dropped transaction keeps the lock.
-    match refresh_locked(&mut tx, source, &source_id, declared, entity).await {
+    match refresh_locked(&mut tx, source, &source_id, declared, entity, lock).await {
         Ok(outcome) => {
             tx.commit().await?;
             Ok(outcome)
@@ -153,6 +194,7 @@ async fn refresh_locked(
     source_id: &str,
     declared: Declared,
     entity: &str,
+    lock: Lock,
 ) -> Result<RefreshOutcome, SyncError> {
     let Declared {
         kinds,
@@ -161,16 +203,81 @@ async fn refresh_locked(
         saved_views,
         role_check,
         payload_paths,
+        private_titles,
+        passwords: _,
     } = declared;
-    // The run's lock: waits for a run in flight to commit, and holds off the
-    // next one until this commits.
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(source_id)
-        .execute(&mut **tx)
-        .await?;
+    // The run's lock: waits for a run in flight to commit, or under
+    // `Lock::Try` reads nothing while one holds it; either way holds off the
+    // next run until this commits.
+    match lock {
+        Lock::Wait => {
+            sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+                .bind(source_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        Lock::Try => {
+            let taken: bool =
+                sqlx::query_scalar("select pg_try_advisory_xact_lock(hashtext($1::text))")
+                    .bind(source_id)
+                    .fetch_one(&mut **tx)
+                    .await?;
+            if !taken {
+                return Ok(RefreshOutcome::RunInFlight);
+            }
+        }
+    }
 
     let outcome = match source.refresh(entity).await? {
-        RefreshAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
+        RefreshAnswer::NotOffered => {
+            // The read of the item with what stands under it (ADR-0047),
+            // from the position the source stands at, read inside the lock
+            // as a run reads it: a run's end writes the whole cursor, and a
+            // position read before the lock could be one that run replaced.
+            let stored: Option<(Option<Cursor>,)> =
+                sqlx::query_as("select cursor from knobas.source_config where id = $1")
+                    .bind(source_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            let stored = stored.and_then(|(cursor,)| cursor);
+            let (items, cursor) = match source.refresh_under(entity, stored.as_deref()).await? {
+                UnderAnswer::NotOffered => return Ok(RefreshOutcome::NotOffered),
+                UnderAnswer::Walked { items, cursor } => (items, cursor),
+            };
+            if items.is_empty() {
+                // From the position a run just left, an unchanged source
+                // emits nothing (contract clause 13): nothing to write, and
+                // no per-item work for an item nothing touched.
+                if let Some(cursor) = cursor {
+                    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+                        .bind(&cursor)
+                        .bind(source_id)
+                        .execute(&mut **tx)
+                        .await?;
+                }
+                return Ok(RefreshOutcome::Unchanged);
+            }
+            let gone = items
+                .iter()
+                .any(|item| item.deleted && item.entity.to_string() == entity);
+            write_items(tx, source_id, kinds, &private_titles, role_check, items).await?;
+            // The parent's position moves with its rows, in this transaction:
+            // Gitea's change gates compare the forge with the position, so
+            // rows written past it would be judged against a forge that may
+            // since have gone back to it (ADR-0047).
+            if let Some(cursor) = cursor {
+                sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+                    .bind(&cursor)
+                    .bind(source_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            if gone {
+                RefreshOutcome::Gone
+            } else {
+                RefreshOutcome::Refreshed
+            }
+        }
         RefreshAnswer::Gone => {
             sqlx::query(TOMBSTONE)
                 .bind(entity)
@@ -185,27 +292,26 @@ async fn refresh_locked(
                     item.entity
                 ))));
             }
-            let outcome = if item.deleted {
+            let deleted = item.deleted;
+            let rewritten = write_items(
+                tx,
+                source_id,
+                kinds,
+                &private_titles,
+                role_check,
+                vec![item],
+            )
+            .await?;
+            if deleted {
                 RefreshOutcome::Gone
+            } else if rewritten == 0 {
+                // The item arrived as the mirror holds it (the TeamCity run
+                // fix, 2026-11-25): a run in flight read again while it waits
+                // for an agent tells nothing, as a walk with no news does.
+                RefreshOutcome::Unchanged
             } else {
                 RefreshOutcome::Refreshed
-            };
-            // Judged as a run judges, on what the refresh read: the same
-            // rule an incremental run's handful of records is held to.
-            let kept_roles = role_check::load(tx, source_id).await?;
-            let role_check = (!role_check.is_empty()
-                && role_check::wanted(&role_check, &kept_roles))
-            .then_some(role_check);
-            let roles = {
-                let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
-                sink.item(item).await?;
-                sink.flush().await?;
-                sink.roles
-            };
-            if let Some(check) = roles {
-                role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
             }
-            outcome
         }
     };
 
@@ -221,4 +327,109 @@ async fn refresh_locked(
     )
     .await?;
     Ok(outcome)
+}
+
+/// Write the item a **direct write** answered (ADR-0056) into the mirror, as
+/// a refresh writes the item it read: under the source's run lock, through
+/// the run's item write and its checks (the role's record, the title kept in
+/// the mirror), then the per-item work. No run follows: a source by hand is
+/// asked nothing more.
+///
+/// # Errors
+/// [`SyncError`] for an item of another source, or the database's.
+pub async fn write_direct(
+    conn: &mut PgConnection,
+    source: &dyn Source,
+    item: knobas_source::SyncItem,
+) -> Result<(), SyncError> {
+    let descriptor = source.descriptor();
+    check_source_id(&descriptor.id)?;
+    let (source_id, declared) = Declared::of(descriptor);
+    let entity = item.entity.to_string();
+    if item.entity.namespace != source_id {
+        return Err(SyncError::Source(SourceError::protocol(format!(
+            "{entity:?} is not an item of source {source_id:?}"
+        ))));
+    }
+    let Declared {
+        kinds,
+        exhaustive: _,
+        monitor_paths,
+        saved_views,
+        role_check,
+        payload_paths,
+        private_titles,
+        passwords: _,
+    } = declared;
+    let mut tx = conn.begin().await?;
+    let written = async {
+        sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+            .bind(&source_id)
+            .execute(&mut *tx)
+            .await?;
+        write_items(
+            &mut tx,
+            &source_id,
+            kinds,
+            &private_titles,
+            role_check,
+            vec![item],
+        )
+        .await?;
+        per_item_work(
+            &mut tx,
+            &source_id,
+            &PerItem {
+                monitor_paths,
+                saved_views,
+                payload_paths,
+            },
+            Some(&entity),
+        )
+        .await?;
+        Ok::<(), SyncError>(())
+    }
+    .await;
+    match written {
+        Ok(()) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(error) => {
+            if let Err(rollback) = tx.rollback().await {
+                tracing::warn!(source_id, %rollback, "rolling the direct write's item back failed");
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Write what a refresh read through the run's item write, judged as a run
+/// judges: the same role rule an incremental run's handful of records is
+/// held to. Answers how many rows the write rewrote: 0 when every item
+/// arrived as the mirror holds it and was only stamped.
+async fn write_items(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    kinds: std::collections::HashSet<String>,
+    private_titles: &std::collections::HashSet<String>,
+    role_check: knobas_source::role::data::DataCheck,
+    items: Vec<knobas_source::SyncItem>,
+) -> Result<u64, SyncError> {
+    let kept_roles = role_check::load(tx, source_id).await?;
+    let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
+        .then_some(role_check);
+    let (roles, rewritten) = {
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check)
+            .with_private_titles(private_titles.clone());
+        for item in items {
+            sink.item(item).await?;
+        }
+        sink.flush().await?;
+        (sink.roles, sink.rewritten)
+    };
+    if let Some(check) = roles {
+        role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
+    }
+    Ok(rewritten)
 }

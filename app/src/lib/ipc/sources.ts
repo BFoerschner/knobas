@@ -14,7 +14,8 @@
  * command behind one either — `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`
  * scans the Rust side to keep it that way.
  */
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AdapterPreview,
   AdapterStatus,
@@ -68,6 +69,8 @@ export type {
   PayloadPath,
   ProjectPath,
   PullRequestState,
+  Assignee,
+  LabelChange,
   QueueCounts,
   QueuedWrite,
   EntityRefresh,
@@ -265,38 +268,13 @@ export function credentialHealth(): Promise<CredentialHealth[]> {
  * `EVENTS.syncState` for that. Triggering a source that is already syncing
  * returns the run already in flight.
  *
- * Use {@link syncNowWithProgress} when you are drawing per-item progress.
- * There are two functions rather than one optional argument because
- * `Option<Channel<_>>` is not a valid Tauri command argument (`Channel` has no
- * `Deserialize` impl); the Rust side splits for the same reason, and the
- * evidence is in `crates/knobas-app/tests/it/ipc.rs`.
+ * Use {@link watchSync} when you are drawing per-item progress: it attaches a
+ * channel to the run in flight. No channel here because `Option<Channel<_>>`
+ * is not a valid Tauri command argument (`Channel` has no `Deserialize`
+ * impl); the evidence is in `crates/knobas-app/tests/it/ipc.rs`.
  */
 export function syncNow(sourceId: string): Promise<number> {
   return invoke<number>("sync_now", { sourceId });
-}
-
-/**
- * {@link syncNow}, reporting per-item progress on `progress`.
- *
- * The channel is required. A caller that only needs to know a run started
- * should call {@link syncNow} and listen to `EVENTS.syncState`: per-item
- * progress goes on the channel and nowhere else, and events carry coarse state
- * only.
- *
- * **This is the first-run wizard's command**, and it asks the scheduler for
- * *the source's first sync* rather than for a sync (ADR-0005). Adding a source
- * already wakes the scheduler, so on a fast source that first sync can be over
- * before this call lands; when it is, the run that already happened comes back
- * with its ending on the channel instead of a second run being started over a
- * corpus that is already mirrored. Calling it again — the wizard's *Retry* —
- * gets a run. Whatever happens, an ending arrives on the channel: there is no
- * interleaving in which it is safe to add a timeout here.
- */
-export function syncNowWithProgress(
-  sourceId: string,
-  progress: Channel<SyncProgress>,
-): Promise<number> {
-  return invoke<number>("sync_now_with_progress", { sourceId, progress });
 }
 
 /**
@@ -360,8 +338,9 @@ export function syncRole(role: string): Promise<RoleRun[]> {
  * resolve once the refresh has ended, with how it ended. A refresh that read
  * something also ends on `EVENTS.itemRefreshed` with no write.
  */
-export function refreshEntity(entityId: string): Promise<EntityRefresh> {
-  return invoke<EntityRefresh>("refresh_entity", { entityId });
+export function refreshEntity(entityId: string, behind = false): Promise<EntityRefresh> {
+  // `behind`: a page asks it by itself (the repository page's walk when shown), in the background lane.
+  return invoke<EntityRefresh>("refresh_entity", { entityId, behind });
 }
 
 /**

@@ -1336,3 +1336,138 @@ async fn a_mock_backed_run_colours_to_do_in_progress_and_done() {
         assert_eq!(drawn.get(status), Some(&tone), "{status} in {drawn:?}");
     }
 }
+
+// -- a ticket's fields (ADR-0054) ---------------------------------------------
+
+/// The fields' read, the assignable search and both edits, each a request
+/// the WADL declares (mockd records anything else): PAY-231 retitled, given
+/// a priority and a label, and assigned, each read back from mockd and from
+/// the adapter's own fields read; then put back. A user with *Assign
+/// Issues* alone would be refused an assignee carried in the issue's `PUT`,
+/// so it never rides there (mockd refuses a field it does not edit).
+#[tokio::test]
+async fn a_ticket_is_edited_field_by_field_and_reads_back() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let before = jira.state().issue("PAY-231").expect("in the fixture");
+
+    let fields = source
+        .ticket_fields("jira:PAY-231")
+        .await
+        .expect("the fields read")
+        .expect("a Jira issue edits");
+    assert_eq!(knobas_source::ticket::fault(&fields), None);
+    assert_eq!(
+        fields.get("title").unwrap().value,
+        serde_json::json!(before.summary)
+    );
+    assert!(fields.fields.iter().all(|f| f.readonly.is_none()));
+
+    let people = source
+        .field_options("jira:PAY-231", "assignee", "")
+        .await
+        .expect("the assignable search")
+        .expect("the assignee has a list");
+    assert!(people.complete);
+    // Typed words find a person by their username or by their name, either
+    // alone (the final suite's mutants in mockd's assignable search: either
+    // `||` turned into `&&` went unseen).
+    for typed in ["mara.lind", "mara lind"] {
+        let found = source
+            .field_options("jira:PAY-231", "assignee", typed)
+            .await
+            .expect("the assignable search")
+            .expect("the assignee has a list");
+        assert!(
+            found.options.iter().any(|o| o.value == "mara.lindqvist"),
+            "{typed:?} finds Mara: {:?}",
+            found.options.iter().map(|o| &o.value).collect::<Vec<_>>()
+        );
+    }
+    // A field whose options ride in the fields' answer has no list to ask
+    // for (the final suite's mutants: the custom-field test turned around
+    // sent the assignable search for every field).
+    assert_eq!(
+        source
+            .field_options("jira:PAY-231", "priority", "")
+            .await
+            .expect("no request to fail"),
+        None
+    );
+    let someone = people
+        .options
+        .iter()
+        .find(|o| Some(&o.value) != before.assignee.as_ref())
+        .expect("somebody else to assign")
+        .value
+        .clone();
+
+    let edit = |title: Option<&str>,
+                assignee: Option<knobas_source::Assignee>,
+                priority: Option<&str>,
+                labels: Option<knobas_source::LabelChange>| WriteOp::EditTicket {
+        entity: "jira:PAY-231".to_owned(),
+        title: title.map(str::to_owned),
+        assignee,
+        priority: priority.map(str::to_owned),
+        labels,
+        fields: std::collections::BTreeMap::new(),
+    };
+    source
+        .write(edit(
+            Some("Retry SEPA payouts three times"),
+            Some(knobas_source::Assignee::Account(someone.clone())),
+            Some("Highest"),
+            Some(knobas_source::LabelChange {
+                add: vec!["sepa".into()],
+                remove: vec![],
+            }),
+        ))
+        .await
+        .expect("mockd takes the edit");
+    let after = jira.state().issue("PAY-231").unwrap();
+    assert_eq!(after.summary, "Retry SEPA payouts three times");
+    assert_eq!(after.priority.as_deref(), Some("Highest"));
+    assert_eq!(after.labels, ["sepa"]);
+    assert_eq!(after.assignee.as_deref(), Some(someone.as_str()));
+    assert!(
+        after.updated > before.updated,
+        "a sync after it sees the change"
+    );
+    let read = source.ticket_fields("jira:PAY-231").await.unwrap().unwrap();
+    assert_eq!(
+        read.get("labels").unwrap().value,
+        serde_json::json!(["sepa"])
+    );
+    assert_eq!(
+        read.get("assignee").unwrap().value,
+        serde_json::json!(someone)
+    );
+
+    source
+        .write(edit(
+            Some(&before.summary),
+            Some(before.assignee.clone().map_or(
+                knobas_source::Assignee::Nobody,
+                knobas_source::Assignee::Account,
+            )),
+            None,
+            Some(knobas_source::LabelChange {
+                add: vec![],
+                remove: vec!["sepa".into()],
+            }),
+        ))
+        .await
+        .expect("mockd takes the edit back");
+    let back = jira.state().issue("PAY-231").unwrap();
+    assert_eq!(back.summary, before.summary);
+    assert_eq!(back.assignee, before.assignee);
+    assert!(back.labels.is_empty());
+
+    let refused = source.write(edit(None, None, Some("Urgent"), None)).await;
+    assert!(
+        matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.contains("Urgent")),
+        "Jira's own sentence names the priority: {refused:?}"
+    );
+    jira.assert_no_violations();
+}

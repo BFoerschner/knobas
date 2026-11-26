@@ -736,7 +736,8 @@ mkdir -p "$ca/made" "$ca/wide"
 _live_ca_generate "$ca/made" >/dev/null 2>&1 || fail "_live_ca_generate" "openssl failed"
 check_eq "the generated root is name-constrained to the loopback names" \
   ok "$(_live_ca_constrained "$ca/made/root.crt" && echo ok || echo wide)"
-check_eq "and keeps its key to its owner" 600 "$(stat -f %Lp "$ca/made/root.key")"
+# GNU stat first: on Linux `stat -f` reads the file system, not the file, and succeeds (the WSL box, 2026-11-21).
+check_eq "and keeps its key to its owner" 600 "$(stat -c %a "$ca/made/root.key" 2>/dev/null || stat -f %Lp "$ca/made/root.key")"
 sed '/nameConstraints/d' "$ca/made/ca.cnf" >"$ca/wide/ca.cnf"
 openssl req -x509 -new -key "$ca/made/root.key" -days 1 -config "$ca/wide/ca.cnf" -extensions ext -out "$ca/wide/root.crt" 2>/dev/null
 check_eq "a root with no name constraints is not taken" \

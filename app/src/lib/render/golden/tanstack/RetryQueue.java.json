@@ -1,0 +1,23 @@
+[
+  ["kw:package",": payout.retry;"],
+  [],
+  ["kw:import",": java.util.List;"],
+  [],
+  ["com:/** Retries a batch, then parks it. */"],
+  ["attr:@Service"],
+  ["kw:public",": ","kw:final",": ","kw:class",": ","ty:RetryQueue",": {"],
+  [":    ","kw:private",": ","kw:static",": ","kw:final",": ","ty:int",": MAX_TRIES ","op:=",": ","num:3",":;"],
+  [],
+  [":    ","attr:@Override"],
+  [":    ","kw:public",": ","ty:Receipt",": ","fn:settle",":(","ty:Batch",": batch) {"],
+  [":        ","ty:int",": tries ","op:=",": ","num:0",":;"],
+  [":        ","kw:while",": (tries","op:++",": ","op:<",": MAX_TRIES) {"],
+  [":            ","kw:var",": sent ","op:=",": gateway.","fn:send",":(batch.","fn:id",":());"],
+  [":            ","kw:if",": (sent.","fn:ok",":()) ","kw:return",": sent.","fn:receipt",":();"],
+  [":            log.","fn:warn",":(","str:\"retry {} of {}\\n\"",":, tries, MAX_TRIES);"],
+  [":        }"],
+  [":        ","kw:throw",": ","kw:new",": ","ty:ParkedException",":(batch, ","con:null",":, ","con:true",":);"],
+  [":    }"],
+  [":}"],
+  []
+]

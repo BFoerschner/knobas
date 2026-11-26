@@ -10,9 +10,10 @@
     the expiry the source reported (#1499); an adapter that takes a
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
-  - **What it syncs**: the schedule and the pause switch, each saved as it
-    changes, through `update_source`; then the adapter's own config,
-    generated from its `config_schema` (#904): for Jira, projects or a JQL
+  - **Schedule**: *Every* and the pause switch, each saved as it changes, through
+    `update_source`, in a group of their own (F-627): *Save sync settings* never covers them.
+  - **What it syncs**: the adapter's own config, generated from its
+    `config_schema` (#904), behind that *Save*: for Jira, projects or a JQL
     query, and the Sprint and Epic Link field ids the sync records (#1021).
     Every config save reads the stored config again and lays only the
     reader's changes over it (`source-config.ts`), so an id the sync recorded
@@ -34,6 +35,10 @@
     unreachable run's transport error sits behind *Details* (#1478).
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
+  - **A draft** (F-617, `source-drafts.svelte.ts`): what is typed in Connection and
+    in the adapter's config stays per source for the session, across a leave and a
+    return, with *Not saved* and *Reset* beside that section's *Save*. *Every* and
+    *Syncing* save as they change, so they are never part of one.
 
   The user is the config's `username`, the convention every adapter follows
   (`settings.ts`'s `IDENTITY_FIELD`), and the row is drawn only for an
@@ -53,14 +58,15 @@
     SyncProgress,
     SyncRunRow,
   } from "../../ipc/sources";
-  import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
   import { DEFAULT_MIN_SYNC_INTERVAL_SECS } from "../../sources/new-source";
   import { declaresSection, validate } from "../../sources/schema-form";
   import { BOARDS_SECTION, savedViewSystem } from "./boards";
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { createSourceSyncs } from "../role-sync.svelte";
   import type { Layers } from "../layers.svelte";
+  import { sourceDrafts } from "./source-drafts.svelte";
   import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
   import TfSchemaForm from "./TfSchemaForm.svelte";
   import { WIKI } from "../roles.svelte";
@@ -69,6 +75,10 @@
   import { storedWhere } from "../../shell/secret-store";
   import {
     BACKFILL_HINT,
+    BY_HAND,
+    byHandNote,
+    syncsPatch,
+    syncsWords,
     EXPIRY_CLASS,
     IDENTITY_FIELD,
     credentialAlert,
@@ -76,17 +86,22 @@
     declaresUser,
     intervalOptions,
     intervalWords,
-    reenterWords,
+    credentialFix,
     runProgressWords,
     runRow,
     secretWord,
     sourceLine,
+    sourceHash,
     sourceState,
     userOf,
     type ListAddition,
   } from "./settings";
+  import { replaceAddress } from "../opener";
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
+  import TfSiteSection from "../site/TfSiteSection.svelte";
+  import TfPasswordsSection from "./TfPasswordsSection.svelte";
+  import TfSecretPrompt from "./TfSecretPrompt.svelte";
 
   let {
     source,
@@ -103,6 +118,7 @@
     onstopped,
     onremoved,
     add,
+    reenter = false,
   }: {
     source: SourceSummary;
     /** The adapter's descriptor, or `null` until `list_adapters` answers. */
@@ -121,6 +137,8 @@
     onremoved: () => void;
     /** A value to add to a list field, unsaved: a Jira view's *Sync WEB too* (#879). */
     add?: ListAddition | undefined;
+    /** Open the credential's prompt on arrival: a raw `…/reenter` address. A press on one opens over the page you are on (`secret-prompt.svelte.ts`). */
+    reenter?: boolean;
   } = $props();
 
   const name = $derived(source.display_name || source.id);
@@ -173,7 +191,7 @@
     saving = true;
     try {
       embedsOn = await ports.setRunEmbeddedHtml(source.id, on);
-      push({ text: embedsOn ? `${name} pages run their embedded HTML.` : `${name} pages draw their embedded HTML as a placeholder.` });
+      push({ text: embedsOn ? `${name} pages run their embedded HTML.` : `${name} pages draw their embedded HTML as a placeholder.`, subject: `embeds:${source.id}` });
     } catch (cause) {
       push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
@@ -185,18 +203,51 @@
   // The adapter's floor (#1188); an adapter this build does not know offers the
   // 60 s every source had before adapters declared one.
   const floor = $derived(adapter?.min_sync_interval_secs ?? DEFAULT_MIN_SYNC_INTERVAL_SECS);
+  // A password manager says what it offers in its descriptor (ADR-0056); its page words by hand for one-time codes.
+  const isPasswordSource = $derived(adapter?.passwords !== undefined);
 
   // ---- Connection: what is typed, against what is stored ----
   // Read once: the page is keyed on the source, so a list re-read under the
   // reader's typing does not wipe it.
+  // What was typed here before and not saved comes back as it was left (F-617).
   // svelte-ignore state_referenced_locally
-  let address = $state(source.base_url);
+  const kept = sourceDrafts.get(source.id)?.connection;
   // svelte-ignore state_referenced_locally
-  let user = $state(userOf(source.config));
+  let address = $state(kept?.address ?? source.base_url);
+  // svelte-ignore state_referenced_locally
+  let user = $state(kept?.user ?? userOf(source.config));
   const addressChanged = $derived(address.trim() !== source.base_url);
   const userChanged = $derived(showsUser && user.trim() !== userOf(source.config));
   const dirty = $derived(addressChanged || userChanged);
   let saving = $state(false);
+
+  // Written whatever the adapter says: until `list_adapters` answers `userChanged` is false, and that isn't a reset.
+  $effect(() => {
+    const edited = addressChanged || user.trim() !== userOf(source.config);
+    const draft = edited ? { address, user } : null;
+    untrack(() => sourceDrafts.put(source.id, "connection", draft));
+  });
+
+  /** *Reset*: back to what is stored, with *Undo*, since what was typed may be long. */
+  function resetConnection() {
+    const was = { address, user };
+    address = source.base_url;
+    user = userOf(source.config);
+    report = null;
+    push({
+      text: `${name}'s connection is back to what is saved`,
+      action: {
+        label: "Undo",
+        run: () => {
+          // Into the store too: the toast outlives the page if the reader has left.
+          sourceDrafts.put(source.id, "connection", was);
+          address = was.address;
+          user = was.user;
+        },
+      },
+    });
+    void tick().then(() => document.getElementById("tf-src-address")?.focus());
+  }
 
   /**
    * The config as stored now, read again at the moment of saving: the sync
@@ -208,12 +259,12 @@
     return rows.find((row) => row.id === source.id)?.config ?? source.config;
   }
 
-  async function update(change: SourcePatch | (() => Promise<SourcePatch>), done: string): Promise<SourceSummary | null> {
+  async function update(change: SourcePatch | (() => Promise<SourcePatch>), done: string, subject?: string): Promise<SourceSummary | null> {
     saving = true;
     try {
       const next = await ports.updateSource(source.id, typeof change === "function" ? await change() : change);
       onchanged(next);
-      push({ text: done });
+      push(subject === undefined ? { text: done } : { text: done, subject });
       return next;
     } catch (cause) {
       push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -234,8 +285,15 @@
         });
       }
       return next;
-    }, "Saved");
+    }, `Saved ${name}'s connection`);
     if (saved !== null) report = null;
+  }
+
+  /** `Enter` in a Connection field saves it, as `Enter` in a dialog's field sends. */
+  function saveOnEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void save();
   }
 
   // ---- What it syncs: the adapter's own config, generated (#904) ----
@@ -283,12 +341,12 @@
     return JSON.stringify(value ?? null);
   }
 
-  /** Put a stored config in the form, as both what it shows and what it was read from. */
+  /** Put a stored config in the form, as both what it shows and what it was read from, with what the reader left unsaved over it. */
   function readForm(fields: typeof config.fields, stored: unknown) {
-    configValues = formValues(fields, stored);
-    configLoaded = validate(fields, configValues).config;
+    const values = formValues(fields, stored);
+    configLoaded = validate(fields, values).config;
     // A value the address adds (#879) is the reader's edit, offered unsaved.
-    const read = configValues;
+    const read = { ...values, ...sourceDrafts.get(source.id)?.config };
     configValues = withAdded(fields, read, add);
     if (add && configValues !== read) {
       added = { ...add, snapshot: snapshotOf(configValues[add.field]) };
@@ -305,11 +363,45 @@
     }
   }
 
+  // What the reader changed, by field, so a value the sync records meanwhile still shows (F-617, #1021). Not while no
+  // field is drawn: until the adapter answers nothing reads as changed, and that isn't a reset either.
+  $effect(() => {
+    if (config.fields.length === 0) return;
+    const changed = Object.keys(configChanged);
+    const draft = changed.length === 0 ? null : Object.fromEntries(changed.map((key) => [key, $state.snapshot(configValues[key])]));
+    untrack(() => sourceDrafts.put(source.id, "config", draft));
+  });
+
   async function saveConfig() {
     if (!configDirty || !configValid || saving) return;
     const changes = { ...configChanged };
-    const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), "Saved");
-    if (saved !== null) readForm(config.fields, saved.config);
+    const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), `Saved what ${name} syncs`);
+    if (saved !== null) {
+      sourceDrafts.put(source.id, "config", null);
+      readForm(config.fields, saved.config);
+    }
+  }
+
+  /** *Reset*: the form back to what is stored, with *Undo*. */
+  function resetConfig() {
+    const was = $state.snapshot(sourceDrafts.get(source.id)?.config) ?? {};
+    const read = formValues(config.fields, source.config);
+    sourceDrafts.put(source.id, "config", null);
+    configLoaded = validate(config.fields, read).config;
+    configValues = read;
+    added = null;
+    push({
+      text: `What ${name} syncs is back to what is saved`,
+      action: {
+        label: "Undo",
+        run: () => {
+          sourceDrafts.put(source.id, "config", was);
+          configValues = { ...configValues, ...was };
+        },
+      },
+    });
+    const first = config.fields[0];
+    if (first) void tick().then(() => document.getElementById(`tf-src-cfg-${first.key}`)?.focus());
   }
 
   // ---- Test connection: what is stored, never what is typed ----
@@ -334,14 +426,23 @@
   }
 
   // ---- syncing ----
+  /** Ends as every *Sync now* does, in one toast that takes *Syncing…*'s place, even if the reader has left the page (F-652). */
   async function syncNow() {
+    if (status?.running) return;
     onstarted();
-    try {
-      await ports.syncNow(source.id);
-      push({ text: `Syncing ${name}…` });
-    } catch (cause) {
+    const run = createSourceSyncs({
+      syncStatus: ports.syncStatus,
+      listen: ports.listen,
+      syncNow: async (id) => {
+        const started = await ports.syncNow(id);
+        push({ text: `Syncing ${name}…`, subject: `sync:${id}` });
+        return started;
+      },
+    }).of(source.id);
+    await run.start(name);
+    if (run.failed !== null) {
       onstopped();
-      push({ text: `${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      push({ text: `Could not sync ${name}: ${run.failed}`, tone: "err" });
     }
   }
 
@@ -451,49 +552,22 @@
 
   // ---- Re-enter the credential ----
   let reentering = $state(false);
-  let secret = $state("");
-  let accountUser = $state("");
-  let accountPassword = $state("");
-  let signingIn = $state(false);
-  let secretError = $state<string | null>(null);
-  const half = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
-  const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
-  const canSignIn = $derived(!signingIn && !half && (secret !== "" || account !== null));
+
+  /** Nothing is stored yet, so nothing here speaks of entering it again. */
+  const noneStored = $derived(health?.state === "missing_secret");
+
+  /** The prompt shuts; opened by its address (a raw `…/reenter`), the address goes back to the page's, so a reload does not ask again. */
+  function closeReenter() {
+    reentering = false;
+    if (reenter) replaceAddress(sourceHash(source.id));
+  }
 
   function openReenter() {
-    secret = "";
-    accountUser = "";
-    accountPassword = "";
-    secretError = null;
     reentering = true;
   }
-
-  async function signIn() {
-    if (!canSignIn) return;
-    signingIn = true;
-    secretError = null;
-    try {
-      const next = await ports.setSourceSecret(source.id, { value: secret === "" ? null : secret, account });
-      secret = "";
-      accountUser = "";
-      accountPassword = "";
-      onhealth(next);
-      if (next.state === "unauthorized") {
-        secretError = `${name} refused it${next.detail ? `: ${next.detail}` : ""}.`;
-        return;
-      }
-      reentering = false;
-      push({ text: `Signed in to ${name}. Syncing now.` });
-      onstarted();
-      // The sync is the follow-through, not the transaction: a disabled or
-      // running source refuses it, and the credential is stored either way.
-      await ports.syncNow(source.id).catch(() => onstopped());
-    } catch (cause) {
-      secretError = ipcErrorMessage(cause);
-    } finally {
-      signingIn = false;
-    }
-  }
+  $effect(() => {
+    if (reenter) untrack(openReenter);
+  });
 
   // ---- Remove… ----
   let removing = $state(false);
@@ -502,6 +576,7 @@
     removing = false;
     try {
       await ports.deleteSource(source.id, purge);
+      sourceDrafts.forget(source.id);
       push({ text: `Removed ${name}` });
       onremoved();
     } catch (cause) {
@@ -516,15 +591,16 @@
     <p>{sourceLine(source, adapter?.name ?? source.adapter_kind, status, now)}</p>
   </div>
   <div class="tf-acts">
-    <button class="tf-btn" disabled={status?.running === true} onclick={() => void syncNow()}>Sync now</button>
+    <!-- `aria-disabled`, as a view's *Sync now* and *Sync all* are: a press from the keyboard stays on the button while the run goes. -->
+    <button class="tf-btn" aria-disabled={status?.running ? "true" : undefined} title={status?.running ? `${name} is syncing` : undefined} onclick={() => void syncNow()}>Sync now</button>
   </div>
 </header>
 
 {#if live !== null}
   <div class="tf-stg-run" role="status">
     <!--
-      Two elements rather than one with an `undefined` value, as the wizard
-      draws it: a `<progress>` once given a value stays determinate.
+      Two elements rather than one with an `undefined` value: a `<progress>`
+      once given a value stays determinate.
     -->
     {#if walkOf === undefined}
       <progress></progress>
@@ -538,7 +614,7 @@
 {#if alert !== null}
   <div class="tf-stg-alert" role="alert">
     <span class="tf-dot tf-err"></span><span>{alert}</span>
-    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{reenterWords(source.auth_kind)}</button>
+    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{credentialFix(source.auth_kind, health?.state)}…</button>
   </div>
 {/if}
 {#each missLines as line (line)}
@@ -551,23 +627,24 @@
   <h2>Connection</h2>
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-src-address">Address</label>
-    <div class="tf-stg-c"><input id="tf-src-address" type="text" class="tf-stg-in" bind:value={address} /></div>
+    <div class="tf-stg-c"><input id="tf-src-address" type="text" class="tf-stg-in" bind:value={address} onkeydown={saveOnEnter} /></div>
   </div>
   {#if showsUser}
     <div class="tf-stg-row">
       <label class="tf-stg-l" for="tf-src-user">User</label>
-      <div class="tf-stg-c"><input id="tf-src-user" type="text" class="tf-stg-in" bind:value={user} /></div>
+      <div class="tf-stg-c"><input id="tf-src-user" type="text" class="tf-stg-in" bind:value={user} onkeydown={saveOnEnter} /></div>
     </div>
   {/if}
   {#if source.auth_kind !== null}
     <div class="tf-stg-row">
       <div class="tf-stg-l">{word}</div>
       <div class="tf-stg-c tf-stg-inl">
-        <span>{health?.state === "missing_secret" ? "None stored" : stored}</span>
+        <span>{noneStored ? "None stored" : stored}</span>
         {#if expiry !== null}
           <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">{expiry.text}</span>
         {/if}
-        <button class="tf-btn tf-sm" onclick={openReenter}>Re-enter…</button>
+        <!-- A password manager's credential is its master password: knobas is told a new one, it does not change it (ADR-0056). -->
+        <button class="tf-btn tf-sm" onclick={openReenter}>{noneStored ? "Enter…" : isPasswordSource ? "Change…" : "Re-enter…"}</button>
       </div>
     </div>
   {/if}
@@ -580,43 +657,59 @@
       </div>
     </div>
   {/if}
+  <div class="tf-stg-acts">
+    <button class="tf-btn tf-sm" disabled={testing} onclick={() => void test()}>Test connection</button>
+    <button class="tf-btn tf-sm tf-primary" disabled={!dirty || saving} onclick={() => void save()}>Save connection</button>
+    {#if dirty}
+      <span class="tf-stg-pend" role="status">Not saved</span>
+      <button class="tf-btn tf-sm tf-ghost" aria-label="Reset the connection" onclick={resetConnection}>Reset</button>
+    {/if}
+  </div>
+  <!-- Under the buttons, so what a test found doesn't move them from under the pointer that pressed one (F-658). -->
   {#if report !== null}
     {@const note = connectionNote(report)}
     <div class="tf-stg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
       <b>Found when tested:</b> {connectionLine(report)}{note ? `. ${note}` : ""}
     </div>
   {/if}
-  <div class="tf-stg-acts">
-    <button class="tf-btn tf-sm" disabled={testing} onclick={() => void test()}>Test connection</button>
-    <button class="tf-btn tf-sm tf-primary" disabled={!dirty || saving} onclick={() => void save()}>Save</button>
-  </div>
 </section>
 
+<!-- A source's own website inside knobas (ADR-0050), after Connection. -->
+<TfSiteSection source={source.id} {name} />
+
 <section class="tf-stg-sec">
-  <h2>What it syncs</h2>
+  <h2>Schedule</h2>
   <div class="tf-stg-row">
-    <label class="tf-stg-l" for="tf-src-every">Every</label>
+    <label class="tf-stg-l" for="tf-src-every">Syncs</label>
     <div class="tf-stg-c">
       <select
         id="tf-src-every"
-        class="tf-stg-in"
-        value={source.sync_interval_secs}
+        class="tf-stg-in tf-stg-syncs"
+        value={source.sync_by_hand ? BY_HAND : String(source.sync_interval_secs)}
         disabled={saving}
         onchange={async (event) => {
           const select = event.currentTarget;
-          const secs = Number(select.value);
+          const patch = syncsPatch(select.value);
+          const done = patch.sync_by_hand
+            ? `${name} syncs only when you press Sync now.`
+            : `${name} syncs every ${intervalWords(patch.sync_interval_secs ?? source.sync_interval_secs)}`;
           // A schedule the backend refused goes back to the stored one.
-          if (!(await update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`))) {
-            select.value = String(source.sync_interval_secs);
+          if (!(await update(patch, done, `every:${source.id}`))) {
+            select.value = source.sync_by_hand ? BY_HAND : String(source.sync_interval_secs);
           }
         }}
       >
         {#each intervalOptions(source.sync_interval_secs, floor) as secs (secs)}
-          <option value={secs}>{intervalWords(secs)}</option>
+          <option value={String(secs)}>{syncsWords(secs)}</option>
         {/each}
+        <option value={BY_HAND}>{syncsWords(BY_HAND)}</option>
       </select>
     </div>
   </div>
+  {#if source.sync_by_hand}
+    <p class="tf-stg-note tf-stg-byhand">{byHandNote(name, isPasswordSource)}</p>
+  {/if}
+
   <div class="tf-stg-row">
     <div class="tf-stg-l">Syncing</div>
     <div class="tf-stg-c">
@@ -631,12 +724,28 @@
             { enabled: !source.enabled },
             // A write is sent the moment it is queued, paused or not (#1438): the pause holds the sync, not what the reader sends.
             source.enabled ? "Paused. Nothing syncs until you turn it on; writes you make still go." : `${name} syncs again.`,
+            `syncing:${source.id}`,
           )}><i></i></button>
     </div>
   </div>
+</section>
+
+{#if isPasswordSource && adapter?.passwords}
+  <TfPasswordsSection
+    sourceId={source.id}
+    {name}
+    account={userOf(source.config) || null}
+    offers={adapter.passwords}
+    synced={source.last_run !== null}
+  />
+{/if}
+
+{#if config.error !== null || config.fields.length > 0}
+<section class="tf-stg-sec">
+  <h2>What it syncs</h2>
   {#if config.error !== null}
     <p class="tf-stg-note tf-stg-errt">{config.error}</p>
-  {:else if config.fields.length > 0}
+  {:else}
     <TfSchemaForm
       fields={config.fields}
       values={configValues}
@@ -647,12 +756,16 @@
     />
     <div class="tf-stg-acts" bind:this={configActs}>
       <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
-        >Save</button
+        >Save sync settings</button
       >
-      {#if addedNote !== null}<span class="tf-stg-pend" role="status">{addedNote}</span>{/if}
+      {#if configDirty}
+        <span class="tf-stg-pend" role="status">{addedNote ?? "Not saved"}</span>
+        <button class="tf-btn tf-sm tf-ghost" aria-label="Reset the sync settings" onclick={resetConfig}>Reset</button>
+      {/if}
     </div>
   {/if}
 </section>
+{/if}
 
 {#if wiki}
   <section class="tf-stg-sec">
@@ -688,7 +801,14 @@
 <section class="tf-stg-sec">
   <h2>Sync runs</h2>
   {#if runs !== null && runs.length === 0}
-    <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
+    {#if source.sync_by_hand && isPasswordSource}
+      <p class="tf-stg-p">Not synced yet. <b>Sync now</b> lists its entries and their folders. It reads no passwords.</p>
+    {:else if source.sync_by_hand}
+      <p class="tf-stg-p">No runs yet. It syncs when you press <b>Sync now</b>.</p>
+    {:else}
+      <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
+    {/if}
+
   {:else if runs !== null}
     <table class="tf-tbl tf-stg-runs">
       <thead><tr><th>Started</th><th>Took</th><th>Result</th></tr></thead>
@@ -722,7 +842,7 @@
     </div>
   </div>
   <div class="tf-stg-row">
-    <div class="tf-stg-l">Remove this source<small>Asks whether to keep what it synced.</small></div>
+    <div class="tf-stg-l">Remove this source<small>Asks whether to keep what it synced.{isPasswordSource ? " Its credential and its one-time code keys leave the keychain." : ""}</small></div>
     <div class="tf-stg-c">
       <button
         class="tf-btn tf-sm tf-danger"
@@ -735,38 +855,8 @@
 </section>
 
 {#if reentering}
-  <TfDialog title="Re-enter the {name} {word.toLowerCase()}" {layers} onclose={() => (reentering = false)}>
-    {#snippet body()}
-      <form
-        class="tf-formgrid"
-        id="tf-reenter"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void signIn();
-        }}
-      >
-        <label for="tf-reenter-secret">{word}</label>
-        <input id="tf-reenter-secret" type="password" autocomplete="off" placeholder={word} bind:value={secret} />
-        {#if acceptsAccount}
-          <label for="tf-reenter-user">Account</label>
-          <input id="tf-reenter-user" type="text" autocomplete="off" placeholder="Username" bind:value={accountUser} />
-          <label for="tf-reenter-pass">Account password</label>
-          <input id="tf-reenter-pass" type="password" autocomplete="off" placeholder="Password" bind:value={accountPassword} />
-        {/if}
-      </form>
-      {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
-      {#if secretError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{secretError}</p>{/if}
-      <p class="tf-dlg-note">
-        {stored}. Writes waiting for {name} go out once it signs in.{acceptsAccount
-          ? " A field left empty keeps what is stored."
-          : ""}
-      </p>
-    {/snippet}
-    {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={() => (reentering = false)}>Cancel</button>
-      <button class="tf-btn tf-primary" type="submit" form="tf-reenter" disabled={!canSignIn}>Sign in</button>
-    {/snippet}
-  </TfDialog>
+  <TfSecretPrompt {source} {health} {acceptsAccount} {stored} {ports} {layers} {onhealth} onclose={closeReenter} {onstarted} {onstopped} passwords={isPasswordSource} />
+
 {/if}
 
 {#if removing}
@@ -782,6 +872,9 @@
           <span>Delete what it synced<small>Links to those items go too. Your links between other items stay.</small></span>
         </label>
       </div>
+      {#if isPasswordSource}
+        <p class="tf-dlg-note">Either way its credential and its one-time code keys are deleted from the keychain, so kept entries can no longer show a password or a code.</p>
+      {/if}
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (removing = false)}>Cancel</button>

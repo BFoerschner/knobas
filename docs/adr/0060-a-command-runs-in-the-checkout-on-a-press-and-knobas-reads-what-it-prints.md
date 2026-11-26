@@ -1,0 +1,49 @@
+---
+status: accepted
+---
+
+# A command runs in the checkout on a press, and knobas reads what it prints
+
+Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md), [ADR-0033](0033-renderer-and-pipeline-commands-run-under-the-rules-of-open-in.md) and [ADR-0034](0034-open-in-passes-a-code-objects-git-names-once-checked.md), and stands beside [ADR-0044](0044-a-folder-renderer-is-given-a-copy-of-the-folder-knobas-wrote.md) and [ADR-0046](0046-a-folder-renderer-may-make-a-folder-of-files-knobas-keeps.md). Björn, on PR #2479: "I'd also like to be able to run an open in renderer/application in a way that it opens a modal with the html/image/code/text for like linters that i could run on demand or sth on the files or folders but that don't render them in a different way but just are like single off commands". Until now a program of the person's own was either started and let go (*Open in*) or run on a copy and drawn in the file's place (a renderer, a folder renderer). A linter fits neither: it needs the real checkout, and its answer is something to read once, not a drawing of the file. Decided 2026-11-24 (Fable, under Björn's standing instruction; `docs/decisions/2026-11-24-a-command-is-run-on-a-press-and-read-in-a-dialog.md`): **a command is set up and filled as an "Open in" application is, runs in the repository's checkout only when a person presses it, and knobas waits for it and reads its stdout and stderr as data it shows in a dialog and keeps in memory.**
+
+- **The person's own, by id.** The program and every argument are what the person typed in Settings › Commands, split as ADR-0033 splits them, no shell. The list is one `knobas.setting` row, `oneoff.commands`. The webview names a saved command by its id and a target, never a program or an argument.
+- **What reaches an argument.** A file or a folder inside the checkout on this disk, checked by its words and by its canonical path as *Open in* checks it, never git's own folder (`{file}`, `{relfile}`, `{files}`, `{dir}`, `{reldir}`, `{root}`, `{name}`). A line number from the page (`{line}`, `{endline}`). A git name held to ADR-0034's grammar (`{sha}`, `{base}`, `{head}`, `{branch}`). A path knobas made (`{out}`, `{outdir}`, as ADR-0044 and ADR-0046 make them). Every other `{name}` is refused by name, `{path}` among them, which means two different things elsewhere.
+- **A file's name is never shell text.** A placeholder that carries a path is refused in a word that holds whitespace and in the word after `-c`, `/c`, `/k` or `-Command`: such a word is a script a shell reads again. A relative path that starts with `-` is refused. `wsl` with a path is refused without `-e`. On Windows a path handed to `cmd` or a batch file is refused where it holds `%`, `!`, `^` or `"`.
+- **It runs in the checkout, as the person.** The working directory is the repository's top folder, or the folder it runs on where the command asks. It sees the working tree as it is and may write to it: that is the person's program and their press, as an editor opened by *Open in* is. knobas itself writes nothing in a working tree, as before. The environment is the app's less every `KNOBAS_*` variable, with the person's `PATH` folders and lines over it, the login shell's `PATH` where they asked for it, and the variables that ask a program for colour.
+- **Only on a press.** No open, hover, focus, sync, kept page or restored window starts a program. A batch says its count before its press. At most four run at once.
+- **Pipes, never a terminal.** Stdin is closed, or holds the file or the selection as the page shows it. Stdout and stderr are read in the backend into lines by knobas's own reader, which knows colours and a carriage return and drops every other escape.
+- **What it prints is untrusted**, as ADR-0033 says of a renderer's output. Text is text. A place in it is a link only where it names a file that exists inside the checkout. A page is sanitized and drawn in a frame with `sandbox=""` under the policy with no script and no request, an image is an `<img>`, a PDF has scripting off. What it writes into `{outdir}` is kept by ADR-0046's walk.
+- **Limits.** A timeout of 1 to 3,600 s, 120 s unless set. At the timeout, a stop or the app's quit the program is killed with everything it started: its process group on Unix, a job object on Windows. A run keeps 200,000 lines and 16 MiB of text, the first 2,000 lines and the newest; a result of 64 MiB; a folder of 5,000 files and 256 MiB.
+- **Nothing it printed rests.** A run's output is a live read in the app process (ADR-0032), bounded, dropped at quit: in no table, no index, no log and no backup. The list of runs, without output, is a file in the profile that no backup carries. A share export carries no command.
+- **A repository supplies no command that runs.** A list a repository holds may be shown and copied into the person's own list after they have read each line, from the checkout on disk and never from the mirror. It is theirs from then on, and a later change of the file changes nothing by itself.
+
+## Amended 2026-11-25: a generated folder
+
+Björn, on ux55: "The command run doesn't work on a rendered folder. I also can't right click those files inside". Decided by Fable (xhigh) under his standing instruction; `docs/decisions/2026-11-25-a-command-on-a-generated-folder-runs-in-the-folder-knobas-kept.md`. **On a file or a folder of a generated folder (ADR-0046) a command runs in the folder knobas kept, which stands in the checkout's place, as it does for *Open in*.**
+
+- **What reaches an argument there.** The kept folder's own paths, each one the manifest holds, with every folder on the way plain and nothing a link: `{file}`, `{dir}`, `{files}`, and `{root}` its top, `{name}` its name; `{relfile}` and `{reldir}` from its top. No git name: a command holding `{sha}`, `{base}`, `{head}` or `{branch}` is refused by name. *Add to PATH*'s `{root}` is the checkout where it is cloned, and is left out where it is not.
+- **Where it runs.** The kept folder's top, or the folder it runs on. Never the checkout, and no clone is needed.
+- **Places** are the kept folder's files only, opened as the generated file at its line.
+- **Writes.** A run that changed one of the kept files has the kept folder dropped once no run is in it, so it is rendered again; a file a program added is no change. The dialog says so.
+- **Identity.** The target names the renderer, the folder and the path; the kept folder's token is the run's own argument (`oneoff_run`'s `made_token`).
+- **Trust.** A program started in a kept folder reads what the renderer wrote there, which may be settings and code, from a repository that may not be cloned. The press is the consent, as above.
+
+## Rejected
+
+- **A copy of the file or folder, as a renderer gets.** A linter reads its settings, its plugins and the project around the file. On a copy it checks nothing, and a copy on every press is a write of the folder.
+- **A tick on a renderer or a sixth command on an application.** A renderer's rules are the opposite of a command's, and an application is a program a person goes to work in.
+- **A shell, with the path quoted.** No quoting holds for `sh`, `cmd` and PowerShell at once. A path as a word of its own needs none.
+- **A pseudo-terminal.** It merges the two streams, lets a program ask a question nobody answers, sends cursor addressing to emulate, and is a dependency with its own faults on Windows.
+- **A confirm the first time a command runs in a repository.** The press is the consent, as it is for *Open in Terminal*.
+- **A repository's commands run live behind a trust pin.** A pull would change what a menu row means.
+- **A run's output on disk across a restart.** A linter's output is source code, and now and then a secret.
+- **Scripts in a page a command made.** ADR-0044's rejection stands.
+
+## Consequences
+
+- One settings section, two settings rows (`oneoff.commands`, `oneoff.shell_path`), ten IPC commands and one event, all additive. One folder in the profile, `command-runs/`. No migration, no SPI method, no `WriteOp`, no WIT change, no new crate.
+- A program knobas started may now write to a working tree, where the person's command does. ADR-0016's sentence "nothing knobas spawns writes to a working tree" is about knobas's own git and the programs it runs on copies, and it stands for those.
+- Running a command in a checkout runs what was pushed to it: a linter's settings file is code, and a build tool runs the project's scripts. Settings says so in one paragraph. On Windows a program's children are looked for in the working directory before `PATH`, and the checkout is that directory.
+- The kill on Windows is a job object. The folder renderers' `taskkill /T` gap that ADR-0046 names is closed for commands, and can be closed there by the same call.
+- The witness is the real programs at the seam, `crates/knobas-app/tests/it/oneoff.rs`: a file whose name holds a space, a quote, `$(` and `;` read back whole by `printf`; a script with a path refused at save; `pwd` and `env` as the run sees them; `sleep` stopped at its timeout with its child; a fifth run refused; nothing under the profile after a quit. The reader and the place finder are witnessed by their unit tests over captured output of ESLint, xmllint, tsc, rustc, Ruff and ShellCheck, and the dialog in vitest (`TfRunDialog.test.svelte.ts`).
+- Owed on Windows until witnessed on the PC: the job object's kill of a tree under a batch file, `cmd`'s refusals, and `wsl.exe` ending its session's processes.

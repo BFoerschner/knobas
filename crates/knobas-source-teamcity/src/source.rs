@@ -286,7 +286,8 @@ impl Source for TeamCitySource {
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
-            | WriteOp::RequestReviewers { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),
@@ -313,6 +314,17 @@ impl Source for TeamCitySource {
             "the TeamCity adapter has no workflow, so there are no reachable transitions to read \
              for {entity:?}"
         )))
+    }
+
+    /// A credential's grants change when an administrator changes them,
+    /// rarely: kept, answered from memory, and asked again behind (ADR-0032's
+    /// moving reads, the second smoothness pass on PR #2479), as Gitea's are.
+    fn refusal_standing(
+        &self,
+        ask: &knobas_source::grants::WriteAsk,
+    ) -> knobas_source::view::Standing {
+        let _ = ask;
+        knobas_source::view::Standing::Moving
     }
 
     /// The asks the user's TeamCity permissions refuse (#2040), read from

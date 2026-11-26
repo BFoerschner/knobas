@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
+  import { aimed } from "./aim";
   import type { SheetMode } from "./sheet-mode.svelte";
 
   let {
@@ -43,7 +44,7 @@
           role="option"
           aria-selected={index === current.selected}
           onclick={() => sheet.pick(choice)}
-          onmouseenter={() => sheet.hover(index)}
+          onpointermove={aimed(() => sheet.hover(index))}
         >
           <span class="tf-ln-nm">{choice.label}</span>
           <span class="tf-ln-s">{choice.detail}</span>
@@ -66,7 +67,7 @@
           role="option"
           tabindex="-1"
           aria-selected={index === current.selected}
-          onmouseenter={() => sheet.hover(index)}
+          onpointermove={aimed(() => sheet.hover(index))}
         >
           <button type="button" class="tf-ln-nm" onclick={() => sheet.perform(action)}>{action.label}</button>
           <span class="tf-fchips" role="group" aria-label="Relation">
@@ -84,7 +85,7 @@
           role="option"
           aria-selected={index === current.selected}
           onclick={() => sheet.perform(action)}
-          onmouseenter={() => sheet.hover(index)}
+          onpointermove={aimed(() => sheet.hover(index))}
         >
           <span class="tf-ln-nm">{action.label}</span>
           <span class="tf-ln-s">{action.detail}</span>

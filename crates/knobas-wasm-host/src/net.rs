@@ -51,8 +51,11 @@
 //! waits on the same one, and where they ask for different quotas the
 //! stricter of those still held governs. So a naive adapter that pages as
 //! fast as it can sends no more than a built-in one would, and cannot lock
-//! the reader's account. The wait is bounded by the call's deadline and
-//! nothing shorter. A `Retry-After` is the component's to read (ruling A9 of
+//! the reader's account. The request waits in the lane of the call that
+//! sent it ([`knobas_http::Lane`]): a sync's yields to a person's live read
+//! on the same origin, built-in or external. The wait is bounded by the
+//! call's deadline and nothing shorter. A `Retry-After` is the component's
+//! to read (ruling A9 of
 //! #1618). A request for another declared host is not paced: it carries
 //! nothing of the reader's, and the instance's quota is not its to spend.
 //!
@@ -293,7 +296,13 @@ impl WasiHttpHooks for Hooks {
     ) -> Box<dyn Future<Output = SendResult> + Send> {
         let policy = Arc::clone(&self.policy);
         let bounds = Bounds::new(options.as_ref(), self.limits);
-        Box::new(async move { send(&policy, bounds, request).await })
+        // The lane of the call that asked, taken here, where the call is
+        // being polled: the future handed back may be driven on a task of
+        // its own, outside the call's lane (the priority lane, 2026-11-13).
+        let lane = knobas_http::current_lane();
+        Box::new(knobas_http::on_lane(lane, async move {
+            send(&policy, bounds, request).await
+        }))
     }
 }
 
@@ -366,15 +375,20 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
     let request = reqwest::Request::try_from(http::Request::from_parts(parts, body))
         .map_err(|_| HttpError::HttpRequestUriInvalid)?;
     // Last before the wire, so the quota is spent on a request that leaves.
-    if for_instance && let Some(limiter) = &policy.limiter {
-        limiter
-            .until_ready_within(bounds.pacing_wait)
-            .await
-            .map_err(|quota| {
-                tracing::warn!(source = %policy.source_id, "{quota}");
-                HttpError::ConnectionLimitReached
-            })?;
-    }
+    // A person's request keeps its place among the origin's until its head
+    // is in, so a sync stands aside for the whole of it (the priority lane).
+    let sending = match (&policy.limiter, for_instance) {
+        (Some(limiter), true) => Some(
+            limiter
+                .until_ready_sending(bounds.pacing_wait)
+                .await
+                .map_err(|quota| {
+                    tracing::warn!(source = %policy.source_id, "{quota}");
+                    HttpError::ConnectionLimitReached
+                })?,
+        ),
+        _ => None,
+    };
     let sent = client(guarded)?.execute(request);
     let sent = match bounds.head {
         None => sent.await,
@@ -382,6 +396,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
             .await
             .map_err(|_| HttpError::ConnectionReadTimeout)?,
     };
+    drop(sending);
     let response = sent.map_err(|error| {
         tracing::debug!(source = %policy.source_id, %error, "an external adapter's request failed");
         transport_error(&error)

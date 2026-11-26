@@ -161,8 +161,21 @@ impl SecretStore for KeyringStore {
             .map_err(map_error)
     }
 
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        match self.entry(account)?.get_password() {
+            Ok(raw) => Ok(Some(raw)),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(other) => Err(map_error(other)),
+        }
+    }
+
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        self.entry(account)?.set_password(text).map_err(map_error)
+    }
+
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         // Absent is success: `delete_source` runs this after the config row is
+
         // gone, and a source whose secret was already removed by hand must
         // still delete cleanly (interfaces §3, Delete).
         match self.entry(account)?.delete_credential() {
@@ -309,6 +322,25 @@ mod tests {
         )
     }
 
+    /// A text item is stored as it is and read back; an absent one is
+    /// `None`, not an error.
+    #[test]
+    fn a_text_item_is_kept_as_it_is_and_an_absent_one_is_none() {
+        let store = mock_backed();
+        let id = KeychainAccount::otp("pw", 0);
+        assert_eq!(store.get_text(&id).unwrap(), None);
+        store.put_text(&id, NEEDS_ESCAPING).unwrap();
+        assert_eq!(
+            store.get_text(&id).unwrap().as_deref(),
+            Some(NEEDS_ESCAPING)
+        );
+        assert_eq!(
+            store.entry(&id).unwrap().get_password().unwrap(),
+            NEEDS_ESCAPING,
+            "as it is: no envelope"
+        );
+    }
+
     /// `raw` placed in an item as the bytes a keychain holds, then read back
     /// through `get` -- for items no current `put` would write.
     fn read_stored(raw: &str) -> Secret {
@@ -354,6 +386,7 @@ mod tests {
                         username: user.into(),
                         password: NEEDS_ESCAPING.into(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();

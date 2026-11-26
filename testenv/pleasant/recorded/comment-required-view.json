@@ -1,0 +1,13 @@
+{
+ "name": "comment-required-view",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": false,
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v5/rest/IsCommentRequired/{entry:pl-payout-db}"
+ }
+}

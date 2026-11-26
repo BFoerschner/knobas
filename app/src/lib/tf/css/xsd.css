@@ -1,0 +1,209 @@
+/*
+  The schema explorer (`docs/decisions/2026-11-23-an-xml-schema-is-explored-across-its-files-and-an-example-is-made-from-it.md`).
+
+  It is drawn on the API explorer's own rules (`openapi.css`, the `tf-oas-` classes: the pane, the rail, the page, the
+  list of fields), which the two explorers share. What a schema adds is here, lifted from the design's clickdummy: the
+  app's tokens and steps only, no colour of its own (ADR-0055).
+
+  One thing is loud, as the method is in the API explorer: how often a thing may stand. `1`, `0..1`, `1..∞` is the
+  question a schema's reader asks of every row, so it takes the headings face's heaviest cut, in ink where the element
+  must stand and in second ink where it may be left out. It is not a state, so it has no tone. Tone is for what
+  happened: a file not found here, a departure in a checked document.
+*/
+/* The pane: the API explorer's columns, the rail its own width. */
+.tf-oas.tf-xsd { grid-template-columns: var(--side-xsd-rail, 300px) minmax(0, 1fr); }
+.tf-oas.tf-xsd.tf-oas-3 { grid-template-columns: var(--side-xsd-rail, 300px) minmax(0, 1fr) minmax(430px, 36%); }
+
+/* ---- NEW: how often ---- */
+.tf-xsd-occ { --fs: var(--size-head); font-family: var(--head); --optical: auto; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 800; font-stretch: 62%; font-variation-settings: "wdth" 62; letter-spacing: calc(.02em + var(--ls-head, 0em)); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink); }
+.tf-xsd-occ.tf-xsd-may { font-weight: 500; color: var(--ink-2); }
+.tf-oas-row[aria-current="true"] .tf-xsd-occ { color: inherit; }
+
+/* A tree row: caret, name, how often. A name from another file says its prefix, dim. */
+.tf-oas-row.tf-xsd-t { grid-template-columns: 14px minmax(0, 1fr) auto; }
+/* A document's outline goes deeper than an API's paths: the step by data-d past openapi.css's five. */
+.tf-oas-row[data-d="6"] { --d: 6; } .tf-oas-row[data-d="7"] { --d: 7; } .tf-oas-row[data-d="8"] { --d: 8; }
+.tf-oas-row[data-d="9"] { --d: 9; } .tf-oas-row[data-d="10"] { --d: 10; } .tf-oas-row[data-d="11"] { --d: 11; } .tf-oas-row[data-d="12"] { --d: 12; }
+.tf-oas-row.tf-xsd-n { grid-template-columns: minmax(0, 1fr) auto; }
+.tf-xsd-name { --fs: var(--size-code); font: calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tf-xsd-pre { color: var(--ink-2); }
+.tf-oas-row[aria-current="true"] .tf-xsd-pre { color: inherit; opacity: .7; }
+.tf-xsd-kind { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-oas-row[aria-current="true"] .tf-xsd-kind { color: inherit; opacity: .8; }
+.tf-xsd-leaf { width: 10px; }
+.tf-xsd-file { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* ---- NEW: a declaration's page ---- */
+.tf-xsd-h { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+/* Under 1,480 px the example takes the page's place: its switch stands at the name's end. */
+.tf-xsd-h > .tf-seg { margin-left: auto; align-self: center; font-weight: var(--wt-ui, 400); }
+.tf-oas.tf-oas-2 .tf-xsd-h > .tf-oas-pageseg { margin: 0 0 0 auto; }
+.tf-xsd-hname { --fs: var(--size-code); font: 600 calc(var(--t-xl) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-xsd-hname .tf-xsd-pre { font-weight: var(--wt-code, 400); }
+.tf-xsd-what { font-size: calc(var(--t-md) * var(--fs)); color: var(--ink-2); }
+/* The line a type derives along: its own name first, the built-in last. */
+.tf-xsd-chain { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-top: 8px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-chain .tf-xsd-step { color: var(--muted); }
+.tf-xsd-words { margin: 12px 0 0; max-width: 72ch; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.5; overflow-wrap: anywhere; }
+.tf-xsd-words p { margin: 0 0 6px; }
+.tf-xsd-lang { margin-right: 6px; }
+/* What an annotation holds besides its sentence (UBL's dictionary entries): quiet pairs. */
+.tf-xsd-facts2 { margin: 8px 0 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); max-width: 72ch; }
+.tf-xsd-facts2 dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+/* A row's name: an attribute says `@`, a name from another file its prefix. */
+.tf-oas-fname .tf-xsd-pre { font-weight: var(--wt-code, 400); }
+.tf-oas-fr > .tf-xsd-occ { grid-column: 5; grid-row: 1; padding-left: 14px; line-height: calc(20px * var(--fs)); text-align: right; }
+.tf-xsd-own { color: var(--ink-2); }
+/* A group of rows a model group makes: its line, then its rows one step in. */
+.tf-xsd-grp { grid-column: 1 / -1; min-width: 0; }
+.tf-xsd-grp + :is(.tf-oas-f, .tf-xsd-grp), .tf-oas-f + .tf-xsd-grp { border-top: 1px solid var(--rule-2); }
+.tf-xsd-gl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 32px; box-sizing: border-box; padding: 4px 6px 4px 20px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-gl b { font-weight: 600; color: var(--ink); }
+.tf-xsd-gl .tf-xsd-occ { margin-left: auto; }
+.tf-xsd-gl select { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 6px; max-width: 26ch; }
+.tf-xsd-grp > .tf-oas-in { margin-bottom: 0; }
+/* The values a simple type allows: the first few as code, the rest counted. */
+.tf-xsd-vals { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0 0; max-width: 84ch; }
+.tf-xsd-vals code, .tf-xsd-code { --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); padding: 0 4px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); overflow-wrap: anywhere; }
+.tf-xsd-pat { display: block; margin: 2px 0 0; padding: 6px 8px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; max-width: 84ch; }
+.tf-xsd-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-kv dt { color: var(--ink-2); }
+.tf-xsd-kv dd { margin: 0; min-width: 0; }
+/* Where a name lives when it is not this file's. */
+.tf-xsd-from { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+/* A name nothing here declares: said, never hidden. */
+.tf-xsd-lost { color: var(--warn); font-size: calc(var(--t-xs) * var(--fs)); white-space: nowrap; }
+.tf-xsd-lostname { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); text-decoration: underline dotted var(--warn); text-underline-offset: 3px; }
+
+/* ---- NEW: the overview's files ---- */
+/* A file's name and its namespace share the width two to three, and both break anywhere: CII's names are 75 letters long. */
+/* The three share the width by fixed parts, not by what they hold: a file whose read lands says how it was found, and
+   no column may widen then, or the namespaces beside it wrap and every row under them moves (section 30). */
+.tf-xsd-files { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) minmax(0, 1.5fr); column-gap: 16px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-frow { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; padding: 6px 4px; border-bottom: 1px solid var(--rule-2); min-width: 0; }
+.tf-xsd-frow > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.tf-xsd-frow .tf-oas-ref { text-align: left; overflow-wrap: anywhere; }
+.tf-xsd-frow[data-d="1"] > :first-child { padding-left: 16px; }
+.tf-xsd-frow[data-d="2"] > :first-child { padding-left: 32px; }
+.tf-xsd-frow[data-d="3"] > :first-child { padding-left: 48px; }
+.tf-xsd-ns { color: var(--ink-2); --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; min-width: 0; }
+.tf-xsd-how { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+/* A file a reference names and nothing here answers: the warn edge, the reason, and what to do. */
+.tf-xsd-frow.tf-xsd-nf { box-shadow: inset 3px 0 0 var(--warn); background: var(--warn-bg); padding-left: 10px; }
+.tf-xsd-nf .tf-xsd-how { color: var(--warn); font-weight: 600; }
+.tf-xsd-why { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 4px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-head { margin: 0; padding: 8px 10px; max-height: 190px; overflow: auto; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); white-space: pre-wrap; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xsd-head.tf-xsd-all { max-height: none; }
+.tf-xsd-roots { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 18px; }
+.tf-xsd-seen { margin: 0; padding-left: 18px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); display: grid; gap: 4px; max-width: 80ch; }
+
+/* The wait, inside the pane that already holds its height. */
+.tf-oas.tf-xsd > .tf-xsd-wait { grid-column: 1 / -1; align-self: start; padding: 12px; }
+/* The rail's list keeps its scrollbar's room: a tree that opens past a screenful must not narrow the rows drawn. */
+.tf-oas.tf-xsd .tf-oas-list { scrollbar-gutter: stable; }
+
+/* ---- Point to a file… (section 17): the repository's schema files, the wanted namespace first ---- */
+.tf-dialog.tf-xsd-point { width: min(720px, calc(100vw - 48px)); }
+.tf-xsd-pointwhy { margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); max-width: 72ch; }
+.tf-xsd-point .tf-minif { max-width: none; width: 100%; }
+.tf-xsd-pointlist { margin-top: 10px; max-height: min(420px, 50vh); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet); }
+.tf-xsd-pointrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; width: 100%; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--rule-2); background: none; color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+.tf-xsd-pointrow:hover:not(:disabled), .tf-xsd-pointrow:focus-visible { background: var(--sheet-2); }
+.tf-xsd-pointrow.tf-xsd-pointno { color: var(--ink-2); cursor: default; }
+.tf-xsd-pointname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-xsd-pointpath, .tf-xsd-pointns { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); overflow-wrap: anywhere; }
+/* Two repositories declare it (section 16): each of their files, picked once. */
+.tf-xsd-two { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---- The example (sections 19 to 23): beside the reference from 1,480 px, in its place under it ---- */
+.tf-oas-col.tf-xsd-excol { display: flex; flex-direction: column; min-height: 0; }
+.tf-xsd-ex { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 420px; box-sizing: border-box; }
+.tf-oas-page .tf-xsd-ex { padding: 14px 0 0; height: calc(var(--oas-h) - 120px); }
+.tf-xsd-exhead { display: flex; align-items: baseline; gap: 8px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+.tf-xsd-exhead b { font-weight: 600; color: var(--ink); }
+/* The controls: one grid, a label and its control a row, so nothing moves when a value changes. */
+.tf-xsd-ctl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-ctl > span:nth-child(even) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.tf-xsd-ctl select, .tf-xsd-seed { height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font: inherit; font-size: calc(var(--t-sm) * var(--fs)); padding: 0 6px; }
+.tf-xsd-seed { width: 9ch; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-variant-numeric: tabular-nums; }
+.tf-xsd-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--control-gap); min-height: var(--control-h); }
+/* The line count holds its room: "Making it…" and "1,784 lines" are as wide. */
+.tf-xsd-excount { min-width: 11ch; font-variant-numeric: tabular-nums; }
+/* What the check said. A verdict is something that happened, so it takes a tone; its line holds its room. */
+.tf-xsd-verdict { display: flex; align-items: baseline; gap: 2px 10px; font-size: calc(var(--t-sm) * var(--fs)); height: calc(20px * var(--fs)); overflow: hidden; white-space: nowrap; }
+.tf-xsd-verdict > span:not(.tf-dim) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-xsd-verdict.tf-ok b { color: var(--ok); } .tf-xsd-verdict.tf-err b { color: var(--err); } .tf-xsd-verdict.tf-warn b { color: var(--warn); }
+.tf-xsd-verdict .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
+/* The notes hold the room of two lines, so the document under them stands still when a setting changes. */
+.tf-xsd-notes { margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 3px; height: calc(2 * 1.4em + 3px); font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.4; color: var(--ink-2); }
+.tf-xsd-notes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The document: Source's lines in a box of their own that takes the rest of the column. */
+.tf-xsd-xml { flex: 1; min-height: 160px; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); overflow: hidden; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xsd-xml .tf-l { cursor: pointer; }
+
+/* ---- A tick on each optional row (S4b): a column of its own, after how often, its room held from the first frame ---- */
+/* The tick's column is as wide from the first frame as once its ticks are drawn: a check box and a count's room. */
+.tf-xsd .tf-oas-fs { --xsd-tick: calc(10px + 13px + 4px + 5ch + 8px); grid-template-columns: 20px fit-content(var(--oas-name)) minmax(0, 1fr) auto auto var(--xsd-tick) 6px; }
+.tf-oas-fr > .tf-xsd-tick { grid-column: 6; grid-row: 1; display: flex; align-items: center; gap: 4px; padding-left: 10px; height: calc(20px * var(--fs)); }
+.tf-xsd-tick input { margin: 0; }
+.tf-xsd-tick select { box-sizing: border-box; width: calc(5ch + 8px); height: calc(18px * var(--fs)); border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); font-size: calc(var(--t-xs) * var(--fs)); padding: 0 2px; }
+/* Unticked, the count's room: as wide as its select. */
+.tf-xsd-tickroom { display: inline-block; width: calc(5ch + 8px); height: calc(18px * var(--fs)); font-size: calc(var(--t-xs) * var(--fs)); }
+/* Beside an XML document no example is made: no tick. */
+.tf-xv .tf-xsd-tick { display: none; }
+
+/* An example opened in the XML view (E1): drawn over the explorer, which stays laid out under it, so going back moves
+   nothing. */
+.tf-xsd-stage { position: relative; min-width: 0; }
+.tf-oas.tf-xsd-under { visibility: hidden; }
+.tf-xsd-opened { position: absolute; inset: 0 0 auto; }
+
+/* ---- A schema in a comparison (S7, `TfXsdDiff`): one list as wide as the stage, a row a declaration ---- */
+.tf-xsd-cmp { display: flex; flex-direction: column; min-height: 100%; background: var(--sheet); }
+.tf-xsd-csum { padding: 8px 12px; border-bottom: 1px solid var(--rule-2); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-csum .tf-dim { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-cnot { color: var(--warn); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-clist { flex: 1; min-height: 0; }
+.tf-xsd-crow { border-bottom: 1px solid var(--rule-2); }
+.tf-xsd-cbtn { width: 100%; min-height: 34px; box-sizing: border-box; display: grid; grid-template-columns: 14px minmax(calc(120px * var(--fs)), max-content) minmax(0, max-content) minmax(0, 1fr) auto; align-items: center; column-gap: 10px; padding: 0 12px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); box-shadow: inset 3px 0 0 var(--mark-edge, transparent); }
+.tf-xsd-cbtn:hover { background: var(--sheet-2); }
+.tf-xsd-cbtn .tf-oas-caret { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: none; }
+.tf-xsd-cbtn[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
+.tf-xsd-crow.tf-xsd-cur > .tf-xsd-cbtn { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--mark-edge, transparent), inset 0 0 0 1px var(--focus); }
+.tf-xsd-crow[data-mark="added"] { --mark-edge: var(--ok); }
+.tf-xsd-crow[data-mark="removed"] { --mark-edge: var(--err); }
+.tf-xsd-crow[data-mark="changed"] { --mark-edge: var(--warn); }
+.tf-xsd-crow[data-mark="through"] { --mark-edge: var(--rule); }
+.tf-xsd-crow[data-mark="moved"] { --mark-edge: var(--info); }
+.tf-xsd-cmark { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; }
+.tf-xsd-cname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-xsd-cname .tf-xsd-pre { font-weight: var(--wt-code, 400); color: var(--ink-2); }
+.tf-xsd-csay { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+/* Which way a change goes, where XML Schema says: the word first, its tone second. */
+.tf-xsd-dirs { display: inline-flex; gap: 4px; }
+.tf-xsd-dir { font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.tf-xsd-dir[data-dir="stricter"] { color: var(--warn); background: var(--warn-bg); }
+.tf-xsd-dir[data-dir="looser"] { color: var(--ok); background: var(--ok-bg); }
+.tf-xsd-dir[data-dir="different"] { color: var(--ink-2); background: var(--sheet-2); }
+.tf-xsd-cfacts { margin: 0; padding: 4px 12px 10px 38px; list-style: none; display: grid; gap: 4px; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-cfacts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.tf-xsd-cplace { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xsd-cpair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--rule-2); background: var(--sheet); }
+.tf-xsd-cside { min-width: 0; max-height: 420px; overflow: auto; overscroll-behavior: contain; padding: 6px 0 12px; background: var(--sheet); }
+.tf-xsd-cmore { margin: 0; padding: 10px 12px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-cside + .tf-xsd-cside { border-left: 1px solid var(--rule); }
+.tf-xsd-cwhich { display: block; padding: 0 12px 4px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xsd-cside .tf-xsd-gone { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); padding: 8px 12px; }
+
+/* ---- A schema on a Docs page (D1, `TfXsdInline`): its declarations in a box that scrolls inside itself ---- */
+.tf-xsd-inline { height: 420px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+.tf-xsd-irow { border-bottom: 1px solid var(--rule-2); }
+.tf-xsd-ibtn { width: 100%; min-height: 32px; display: grid; grid-template-columns: 14px minmax(0, max-content) auto; align-items: center; column-gap: 10px; padding: 0 12px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xsd-ibtn:hover { background: var(--sheet-2); }
+.tf-xsd-ibtn .tf-oas-caret { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.tf-xsd-ibtn[aria-expanded="true"] .tf-oas-caret { transform: rotate(90deg); }
+.tf-xsd-ikind { color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xsd-iopen { border-top: 1px solid var(--rule-2); padding: 4px 0 8px; }
+.tf-xsd-iopen .tf-xsd-gone { margin: 0; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); padding: 8px 12px; }
+/* An XML or JSON block drawn by the XML view's document (D1): as tall as the block was, 420 px at most. */
+.tf-doc-xv { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--sheet); }

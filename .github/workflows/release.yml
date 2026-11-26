@@ -61,6 +61,7 @@ jobs:
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       matrix: ${{ steps.plan.outputs.matrix }}
+      signing: ${{ steps.signing.outputs.on }}
     steps:
       # `github.ref_name` is the *branch* this was dispatched from, never the
       # tag; the tag is only ever `inputs.tag`. Everything downstream reads this
@@ -85,6 +86,24 @@ jobs:
             *)       os='["macos-latest", "windows-latest", "ubuntu-latest"]' ;;
           esac
           echo "matrix={\"os\": $os}" >> "$GITHUB_OUTPUT"
+
+      # Whether this release carries update artifacts (ADR-0052,
+      # docs/decisions/2026-11-21-knobas-updates-itself.md): only when the
+      # repository has the signing secret. A `secrets` value cannot stand in an
+      # `if:`, so it is read here once and every update step and the manifest
+      # job ask this output. Without the secret the run builds and publishes
+      # exactly as before, and the release is never offered as an update.
+      - id: signing
+        name: Is the update signing key set?
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no TAURI_SIGNING_PRIVATE_KEY secret: this release carries no update artifacts and is never offered as an update (docs/development.md, Update signing)."
+          fi
 
       # The tag, not the default branch: a manual re-run must build the code the
       # release is of, not whatever `main` has drifted to since.
@@ -215,7 +234,9 @@ jobs:
       # left out: `tauri build` never runs here"). It does now, so they are here:
       # `librsvg2-dev` renders the icon, and `patchelf` is what the AppImage
       # bundler rewrites the interpreter path with. The `-dev` webkit and
-      # appindicator packages are what wry and the tray link against.
+      # appindicator packages are what wry and the tray link against. `rpm`
+      # and `cpio` build nothing: `scripts/check-bundled-postgres.sh` opens the
+      # `.rpm` with them, below.
       - name: Install Tauri's Linux bundling dependencies
         if: runner.os == 'Linux'
         run: |
@@ -225,7 +246,9 @@ jobs:
             libayatana-appindicator3-dev \
             libxdo-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            rpm \
+            cpio
 
       # `tauri build` runs `npm run build` itself (tauri.conf.json's
       # `beforeBuildCommand`), but nothing installs the modules that command and
@@ -233,6 +256,23 @@ jobs:
       - name: Install the frontend's dependencies
         shell: bash
         run: cd app && npm ci
+
+      # The PostgreSQL this platform's installers carry
+      # (docs/decisions/2026-11-14-knobas-ships-its-postgresql.md): the upstream
+      # archive, checked against the SHA-256 pinned in
+      # `crates/knobas-app/postgresql/archives.sha256` and put beside it, where
+      # `bundle.resources` picks the folder up. Before `tauri build`, which
+      # would bundle the folder without it and say nothing.
+      - name: Stage the PostgreSQL archive
+        shell: bash
+        run: scripts/fetch-postgres.sh
+
+      # The decompiler the JAR view's *Decompile* runs with a Java the machine
+      # has (docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md):
+      # Vineflower's jar, checked against `crates/knobas-app/decompiler/vineflower.sha256`.
+      - name: Stage the decompiler
+        shell: bash
+        run: scripts/fetch-vineflower.sh
 
       # The Tauri CLI is a devDependency of `app/` and has to run from the crate
       # that owns `tauri.conf.json`. `just dev` bridges that by putting
@@ -260,6 +300,44 @@ jobs:
           cd crates/knobas-app
           node ../../app/node_modules/@tauri-apps/cli/tauri.js build
 
+      # An installer without the archive installs and runs: it downloads
+      # PostgreSQL on a machine's first start, 15 s of it on Windows and no
+      # start at all without a network, and nothing else here would notice.
+      # So each bundle is opened with its own format's tool and the archive in
+      # it hashed against the pin, before anything is uploaded.
+      - name: Every bundle carries PostgreSQL
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/check-bundled-postgres.sh
+
+      # `msiexec /a` and 7-Zip, from PowerShell: a `/a` put through Git Bash
+      # arrives as a path.
+      - name: Both Windows installers carry PostgreSQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-bundled-postgres.ps1
+
+      # The Mac's update artifact (docs/decisions/2026-11-21-knobas-updates-itself.md): the bundle as a tar.gz,
+      # which a running knobas unpacks and swaps in. The script fails unless the archive holds the PostgreSQL
+      # archive too, as every other bundle is checked to. Only with the signing secret.
+      - name: Pack the app for updates
+        if: runner.os == 'macOS' && needs.draft.outputs.signing == 'true'
+        shell: bash
+        env:
+          TAG: ${{ needs.draft.outputs.tag }}
+        run: scripts/pack-mac-update.sh "${TAG#v}"
+
+      # One .sig beside every artifact, by the Tauri CLI's signer, then each checked by the verifier knobas
+      # itself uses against the two public keys in the tree; a build that trusts any other key fails here.
+      # Only with the signing secret.
+      - name: Sign the update artifacts
+        if: needs.draft.outputs.signing == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/sign-update-artifacts.sh
+
       # A `gh release upload` given a glob that matched nothing succeeds,
       # silently, and the release is short an installer nobody notices until
       # they go looking for it. Resolve the globs first and refuse an empty
@@ -270,15 +348,19 @@ jobs:
       # macOS; both installers on Windows -- NSIS (`-setup.exe`) and WiX
       # (`.msi`), whose toolchains the Tauri CLI downloads itself; and all three
       # Linux formats, the AppImage being the one that needs no package manager.
+      # With the signing secret, the Mac's `.app.tar.gz` and every listed file's
+      # `.sig` go too, and a list in which an artifact has no `.sig` is refused.
       - name: Upload the bundles
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.draft.outputs.tag }}
+          SIGNING: ${{ needs.draft.outputs.signing }}
         run: |
           shopt -s nullglob
           case "$RUNNER_OS" in
-            macOS)   files=(target/release/bundle/dmg/*.dmg) ;;
+            macOS)   files=(target/release/bundle/dmg/*.dmg)
+                     if [ "$SIGNING" = true ]; then files+=(target/release/bundle/macos/*.app.tar.gz); fi ;;
             Windows) files=(target/release/bundle/nsis/*.exe target/release/bundle/msi/*.msi) ;;
             Linux)   files=(target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm target/release/bundle/appimage/*.AppImage) ;;
             *)       echo "::error::no artifact patterns for $RUNNER_OS"; exit 1 ;;
@@ -288,8 +370,43 @@ jobs:
             find target/release/bundle -maxdepth 2 -type f 2>/dev/null || echo "  (no target/release/bundle at all)"
             exit 1
           fi
+          if [ "$SIGNING" = true ]; then
+            for f in "${files[@]}"; do
+              if [ ! -s "$f.sig" ]; then echo "::error::$f has no $f.sig"; exit 1; fi
+              files+=("$f.sig")
+            done
+          fi
           printf 'uploading %s\n' "${files[@]}"
           gh release upload "$TAG" "${files[@]}" --clobber
+
+  # One manifest for the release, in the official updater's static format, from the signatures the legs
+  # uploaded. Written into the draft: a draft's files answer 404 without a token, so the update is offered
+  # the moment the release is published and never before. A leg that failed has no entry, and its platform
+  # is not offered. A re-run of one leg writes it again from everything the release then holds. Only with
+  # the signing secret (the `draft` job's `signing` output).
+  manifest:
+    needs: [draft, bundle]
+    if: ${{ !cancelled() && needs.draft.result == 'success' && needs.draft.outputs.signing == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.draft.outputs.tag }}
+      - name: Write latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.draft.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sigs"
+          gh release download "$TAG" --pattern '*.sig' --dir "$RUNNER_TEMP/sigs" || true
+          gh release view "$TAG" --json assets > "$RUNNER_TEMP/assets.json"
+          if scripts/update-manifest.sh "$TAG" "$RUNNER_TEMP/sigs" "$RUNNER_TEMP/assets.json" > "$RUNNER_TEMP/latest.json"; then
+            gh release upload "$TAG" "$RUNNER_TEMP/latest.json" --clobber
+          else
+            echo "::warning::no signed artifact in $TAG: it carries no latest.json and is never offered as an update."
+            gh release delete-asset "$TAG" latest.json --yes || true
+          fi
 
   # The README's pictures, redrawn from the tag and committed to `main`
   # (docs/development.md, *README screenshots*). After the bundles, so a release

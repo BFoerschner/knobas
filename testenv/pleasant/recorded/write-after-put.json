@@ -1,0 +1,45 @@
+{
+ "name": "write-after-put",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {},
+  "CustomApplicationFields": {},
+  "Attachments": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": true,
+  "HasViewEntryContentsAccess": true,
+  "HasViewEntryPasswordAccess": true,
+  "HasViewTOTPAccess": true,
+  "HasModifyTOTPAccess": true,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{entry:pl-wifi}",
+  "Name": "Guest Wi-Fi",
+  "Username": "tidewater-guest",
+  "Password": null,
+  "Url": "",
+  "Notes": "",
+  "GroupId": "{folder:Tidewater/Office/Building}",
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null,
+  "TOTPIssuer": null,
+  "TOTPSecret": null,
+  "TOTPDigits": 0,
+  "TOTPPeriod": 0
+ },
+ "request": {
+  "as": "writer",
+  "method": "GET",
+  "path": "/api/v5/rest/entries/{entry:pl-wifi}"
+ }
+}

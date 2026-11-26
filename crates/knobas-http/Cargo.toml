@@ -13,16 +13,12 @@ license.workspace = true
 # the limiter and the retry budget. Tests need it to assert what a request
 # carries; adapters must never have it, so it is off in every build they
 # compile against (`cargo build`, and the `clippy --lib` half of the gate).
-#
-# It also carries the request counter (`counted`, #2239), whose task-local
-# needs tokio's `rt`.
 test-util = ["tokio/rt"]
 
 [dependencies]
 # For `Bytes`, the chunk type of a streamed body; already in the tree through
 # reqwest (issue #1012).
 bytes = "1"
-governor.workspace = true
 # The body cap (#1640): a response's body is re-wrapped through `http`'s
 # `Response` and read through an `http_body::Body` that counts it. Both are
 # the copies reqwest already resolves.
@@ -37,7 +33,10 @@ reqwest.workspace = true
 serde.workspace = true
 # The excerpting JSON read decodes a body it already holds as text (#1313).
 serde_json.workspace = true
-tokio = { workspace = true, features = ["time"] }
+# `sync` for the lane's hand-back to the sync once a person's requests
+# have gone (`limiter::Slot::yielded`).
+# `macros` for the person client's `select!` between an answer, its time and Stop (ux31).
+tokio = { workspace = true, features = ["time", "sync", "macros"] }
 tracing = "0.1"
 url = "2"
 

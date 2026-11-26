@@ -1,9 +1,10 @@
 /**
  * The ticket page card's width (spec #2396, #2402) through the app's own
- * mount over the whole fake IPC: a six-pixel separator on the card's right
- * edge drags the card's column between 240px and 720px, the width is browser
- * state read when the shell mounts, a double click fits the card to the width
- * at which nothing on it wraps, and below 900px the handle is not drawn.
+ * mount over the whole fake IPC: the page's sidebar edge (`TfSideEdge`) on the
+ * card's right drags the card's column between 240px and 720px, the width is
+ * browser state read when the shell mounts, a double click fits the card to
+ * the width at which nothing on it wraps, and below 900px the edge is not
+ * drawn.
  *
  * jsdom lays nothing out, so the fit's measure is stood in for: the card's
  * clone, laid out at its content's width with every line kept whole, answers
@@ -16,7 +17,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import App from "../../../App.svelte";
 import { chosenJob } from "../../tf/job/chosen.svelte";
-import { SIDE_KEY } from "../../tf/job/card-width.svelte";
+import { cssWidth, sideKey } from "../../tf/side-width.svelte";
 import { demoHandlers, installFakeTauri } from "./fake-tauri";
 import { until } from "../test-wait";
 
@@ -83,18 +84,25 @@ async function openPage(): Promise<HTMLElement> {
   return card()!;
 }
 
-/** The card's column as the page lays it out: `--tk-side` on the two columns. */
+const SIDE_KEY = sideKey("ticket-card");
+
+/** The card's column as the page lays it out: `--side-ticket-card` on the two columns, none at the default. */
 function side(): string {
-  return target.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-ws")!.style.getPropertyValue("--tk-side");
+  return target.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-ws")!.style.getPropertyValue("--side-ticket-card");
 }
 
-function handle(card: HTMLElement): HTMLElement | null {
-  return card.querySelector<HTMLElement>("[role='separator']");
+/** What the column's property holds at `px`. */
+const at = (px: number) => cssWidth("ticket-card", px);
+
+/** The edge on the card's line: a child of the two columns' grid, beside the card. */
+function handle(_card: HTMLElement): HTMLElement | null {
+  return target.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-ws > [role='separator']");
 }
 
-/** A drag from where the handle sits to `x`, the card's left edge at 0 as jsdom lays it. */
+/** A drag from where the handle sits (the column's width, the card's left edge at 0 as jsdom lays it) to `x`. */
 function drag(on: HTMLElement, x: number) {
-  on.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientX: 320, bubbles: true, cancelable: true }));
+  const from = Number(on.getAttribute("aria-valuenow"));
+  on.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientX: from, bubbles: true, cancelable: true }));
   window.dispatchEvent(new MouseEvent("pointermove", { clientX: x, bubbles: true }));
   window.dispatchEvent(new MouseEvent("pointerup", { clientX: x, bubbles: true }));
 }
@@ -104,54 +112,56 @@ test("the handle is a separator on the card's edge, named for what it does, the 
   const edge = handle(card)!;
   expect(edge).not.toBeNull();
   expect(edge.getAttribute("aria-orientation")).toBe("vertical");
-  expect(edge.getAttribute("aria-label")).toBe("Card width. Drag to resize, double-click to fit.");
+  expect(edge.getAttribute("aria-label")).toBe("Resize the card");
+  expect(edge.title).toBe("Drag to resize, double-click to fit");
   expect(edge.getAttribute("aria-valuemin")).toBe("240");
-  expect(edge.getAttribute("aria-valuemax")).toBe("720");
+  expect(edge.getAttribute("aria-valuemax")).toBe(String(Math.round(Math.min(720, 0.6 * window.innerWidth))));
   expect(edge.getAttribute("aria-valuenow")).toBe("320");
-  expect(side()).toBe("320px");
+  // Nothing kept: the page's CSS draws its default.
+  expect(side()).toBe("");
 });
 
 test("dragging the handle sets the column's width, and a width past either bound is clamped", async () => {
   const card = await openPage();
   drag(handle(card)!, 412);
-  await until(() => side() === "412px", `the drag left the column at ${side()}`);
+  await until(() => side() === at(412), `the drag left the column at ${side()}`);
   expect(handle(card)!.getAttribute("aria-valuenow")).toBe("412");
   drag(handle(card)!, 1200);
-  await until(() => side() === "720px", `past the cap the column is ${side()}`);
+  await until(() => side() === at(720), `past the cap the column is ${side()}`);
   drag(handle(card)!, 90);
-  await until(() => side() === "240px", `under the floor the column is ${side()}`);
+  await until(() => side() === at(240), `under the floor the column is ${side()}`);
 });
 
 test("a move after the pointer is up drags nothing", async () => {
   const card = await openPage();
   drag(handle(card)!, 500);
-  await until(() => side() === "500px", "the drag never landed");
+  await until(() => side() === at(500), "the drag never landed");
   window.dispatchEvent(new MouseEvent("pointermove", { clientX: 300, bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(side()).toBe("500px");
+  expect(side()).toBe(at(500));
 });
 
 test("the width survives a remount, as a restart reads it", async () => {
   const card = await openPage();
   drag(handle(card)!, 455);
-  await until(() => side() === "455px", "the drag never landed");
+  await until(() => side() === at(455), "the drag never landed");
   expect(storage.getItem(SIDE_KEY)).toBe("455");
   unmount(app!);
   app = undefined;
   const again = await openPage();
-  expect(side()).toBe("455px");
+  expect(side()).toBe(at(455));
   expect(handle(again)!.getAttribute("aria-valuenow")).toBe("455");
 });
 
 test("a kept width outside the bounds, or no number, is read clamped or as the default", async () => {
   storage.setItem(SIDE_KEY, "9000");
   await openPage();
-  expect(side()).toBe("720px");
+  expect(side()).toBe(at(720));
   unmount(app!);
   app = undefined;
   storage.setItem(SIDE_KEY, "wide");
   await openPage();
-  expect(side()).toBe("320px");
+  expect(side()).toBe("");
 });
 
 /**
@@ -174,7 +184,7 @@ test("a double click fits the card to the width at which nothing on it wraps, an
   const card = await openPage();
   layout(431.2);
   handle(card)!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  await until(() => side() === "433px", `the fit left the column at ${side()}`);
+  await until(() => side() === at(433), `the fit left the column at ${side()}`);
   expect(storage.getItem(SIDE_KEY)).toBe("433");
   expect(target.querySelectorAll("article.tf-ticketcard").length, "the measuring clone is removed").toBe(1);
 });
@@ -183,7 +193,7 @@ test("a fit is capped at 720px", async () => {
   const card = await openPage();
   layout(980);
   handle(card)!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  await until(() => side() === "720px", `the fit left the column at ${side()}`);
+  await until(() => side() === at(720), `the fit left the column at ${side()}`);
 });
 
 test("from the keyboard: the arrows step the width, Enter fits", async () => {
@@ -191,12 +201,12 @@ test("from the keyboard: the arrows step the width, Enter fits", async () => {
   const edge = handle(card)!;
   expect(edge.tabIndex).toBe(0);
   edge.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
-  await until(() => side() === "336px", `ArrowRight left ${side()}`);
+  await until(() => side() === at(336), `ArrowRight left ${side()}`);
   edge.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
-  await until(() => side() === "320px", `ArrowLeft left ${side()}`);
+  await until(() => side() === at(320), `ArrowLeft left ${side()}`);
   layout(500);
   edge.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  await until(() => side() === "501px", `Enter left ${side()}`);
+  await until(() => side() === at(501), `Enter left ${side()}`);
 });
 
 test("at 860px wide the handle is not drawn", async () => {

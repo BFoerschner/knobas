@@ -14,24 +14,69 @@ export type ActionKey = { kind: string, chord: string, action_id: string, };
 export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
 
 /**
+ * **What *Everything* matches** beyond names and keys, a box each in
+ * Settings › Search (the everything-search decisions, 2026-11-20, D13).
+ * *Titles* matches names and keys whatever this says. A box filters what
+ * the next key matches and changes nothing kept: everything stays synced
+ * and indexed. A field left out on the wire is `true`, so every box starts
+ * on and a later box reads as on from an older setting.
+ */
+export type EverythingMatches = { 
+/**
+ * A ticket's description and comments.
+ */
+ticket_text: boolean, 
+/**
+ * A pull request's description and comments.
+ */
+pr_text: boolean, 
+/**
+ * A Docs page's text and comments.
+ */
+page_text: boolean, 
+/**
+ * The end of each pipeline's last finished run's log.
+ */
+build_logs: boolean, 
+/**
+ * The names of a repository's files.
+ */
+file_names: boolean, 
+/**
+ * The text of a repository's files.
+ */
+file_text: boolean, };
+
+/**
  * One place the words appear in a hit's text (#2431).
  */
 export type Excerpt = { 
 /**
  * Where in the row it sits, as the reader finds it there: a page's
  * section heading, `Heading` for that heading's own words,
- * `Comment by <name>`, a run log's `line <n>`. `None` for text the index
- * keeps no place for (a page's lead, a ticket's, pull request's or note's
- * text), for a comment's author line, whose text says
- * `Comment by <name>` itself (#2481), and for a page link's line, whose
- * text says `Links to <title> in <space>` itself (#2491).
+ * `Comment by <name>`, a run log's `Log line <n>`, `Description` for a
+ * ticket's or a pull request's own text (the everything-search
+ * decisions, 2026-11-20, D10). `None` for text the index keeps no place
+ * for (a page's lead, a note's text), for a comment's author line, whose
+ * text says `Comment by <name>` itself (#2481), and for a page link's
+ * line, whose text says `Links to <title> in <space>` itself (#2491).
  */
 place: string | null, 
 /**
  * The text around the words, the words flagged (raw source text, as
  * [`Segment`] says).
  */
-segments: Array<Segment>, };
+segments: Array<Segment>, 
+/**
+ * The file it quotes, for a repository found by its files (the
+ * everything-search decisions, 2026-11-20, D10): `place` is then
+ * `<path>:<line>`, or the path where its name found it, and `segments`
+ * the line or the path, the matched letters flagged.
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * absent.
+ */
+file?: FileAt, };
 
 /**
  * What a favourite names: an entity (`knobas.entity.id`) or a saved list
@@ -57,6 +102,80 @@ value: string,
  * What is drawn beside it: a project's name, `you` for `@me`, or empty.
  */
 detail: string, };
+
+/**
+ * The file an excerpt quotes (D10, D11): its path in the repository, and
+ * where its text holds the words, the line and the lines around it. A file
+ * found by its name alone has no line.
+ */
+export type FileAt = { path: string, 
+/**
+ * The line's number, from 1.
+ */
+line: number | null, 
+/**
+ * The line before it, or empty.
+ */
+before: string, 
+/**
+ * The line after it, or empty.
+ */
+after: string, };
+
+/**
+ * How many of a repository's files hold the words (D10).
+ */
+export type FilesFound = { 
+/**
+ * Files whose text holds them.
+ */
+by_text: number, 
+/**
+ * Files whose path holds them.
+ */
+by_name: number, 
+/**
+ * The branch they are read on, the repository's default: what the pane
+ * names (D11). Empty where it is not known.
+ */
+branch: string, };
+
+/**
+ * What the pane draws of the repository it shows (D11, `search_files`):
+ * the first files the words find, each an excerpt as the answer's first is,
+ * and how many there are.
+ */
+export type FilesInRepo = { 
+/**
+ * Up to eight: those the path found first, then the shortest path.
+ */
+files: Array<Excerpt>, by_text: number, by_name: number, 
+/**
+ * More files than `files` hold the words.
+ */
+more: boolean, 
+/**
+ * The branch, as [`FilesFound::branch`].
+ */
+branch: string, };
+
+/**
+ * The progress the pass reports at each repository's end, as `code:files`
+ * carries it.
+ */
+export type FilesProgress = { source_id: string, 
+/**
+ * Repositories of the source whose files stand at their head.
+ */
+done: number, 
+/**
+ * Repositories of the source still owed a read.
+ */
+owed: number, 
+/**
+ * The file text kept, over every source, in bytes.
+ */
+text_bytes: number, };
 
 /**
  * Whether a source's corpus can answer a filter at all.
@@ -173,6 +292,14 @@ parents: Array<ParentSuggestion>,
  * opening, and empty from a parents-only read.
  */
 fields: Array<FieldSuggestion>, };
+
+/**
+ * One row of a list a page holds, as [`fuzzy_rank`] ranks it: its index in
+ * the list sent, whether it is held by its letters in order rather than in
+ * one piece, and its matched letters as pairs of start and end in UTF-16
+ * code units of the text sent.
+ */
+export type FuzzyRanked = { index: number, loose: boolean, marks: Array<number>, };
 
 /**
  * Every key bound: the lists' by chord, the actions' by kind then chord.
@@ -318,7 +445,15 @@ unknown_tokens: Array<string>,
  * (#2488, [`crate::frames`]). Not unknown, because the grammar and the
  * mirror both know them. Empty unless the launcher's answer is.
  */
-left_out_tokens: Array<string>, };
+left_out_tokens: Array<string>, 
+/**
+ * The text with a ticket key typed with a space or no separator read as
+ * the key (`pay 123` as `PAY-123`, [`crate::typed_key`]), whose answer
+ * leads: the launcher then lists the tickets first, as it does for a
+ * key typed with its `-`. Added to a frozen type (§10.8): optional on
+ * the wire and left out when nothing was read.
+ */
+keyed?: string, };
 
 /**
  * The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and
@@ -397,7 +532,10 @@ left_out: Array<LeftOut>, };
  */
 export type ResultGroup = { kind: string, label: string, plural: string, monogram: string, 
 /**
- * Matches of this kind, before `limit` was applied.
+ * Matches of this kind, before `limit` was applied. For one, two or
+ * three typed characters that names answer, and for a query more than
+ * 2,000 rows hold, at most the rows a kind may contribute: see
+ * [`SearchResponse::total`].
  */
 total: number, hits: Array<SearchHit>, };
 
@@ -504,9 +642,20 @@ export type SearchFilters = { sources: Array<string>, kinds: Array<string>, upda
 authors: Array<string>, };
 
 /**
- * One result: a row, its rank, and the excerpt with the match marked.
+ * One result: a row, its rank, and where the words appear in its text.
  */
-export type SearchHit = { rank: number, snippet: Array<Segment>, 
+export type SearchHit = { rank: number, 
+/**
+ * Empty from every command since 2026-11-12 (the query audit, PR
+ * #2479). It held a `ts_headline` of the row, which no screen drew and
+ * which cost a quarter of a common word's keystroke, so no command asks
+ * its statement for one any more
+ * ([`EffectiveFilters::headline`](crate::query::EffectiveFilters::headline)).
+ * The field keeps its place on the wire, so a reader written before that
+ * decodes a hit as it did. What a reader sees of the match is
+ * [`Self::excerpts`].
+ */
+snippet: Array<Segment>, 
 /**
  * Where the words appear in the row's text, each with its place
  * (#2431): what the launcher's preview draws under *Everything*, so the
@@ -518,7 +667,28 @@ export type SearchHit = { rank: number, snippet: Array<Segment>,
  * linked page that holds the words, a pipeline's stored latest run log
  * (migration `0067`), a ticket's, pull request's or note's text.
  */
-excerpts: Array<Excerpt>, entity_id: string, kind: string, source_id: string, title: string, 
+excerpts: Array<Excerpt>, 
+/**
+ * The letters of [`EntityRow::title`] what was typed matched (the
+ * fuzzy-search decisions, 2026-11-19, D9): pairs of start and end in
+ * UTF-16 code units, ascending and never overlapping, which the launcher
+ * paints over the title's text. Empty for a row only the words found,
+ * and from a searcher with no picker.
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * empty, so a reader written before it decodes a hit as it did.
+ */
+marks?: Array<number>, 
+/**
+ * Under *Everything*, a repository's files that hold the words (the
+ * everything-search decisions, 2026-11-20, D10): how many by their text
+ * and how many by their names. The file it is shown by is its first
+ * excerpt ([`Excerpt::file`]).
+ *
+ * Added to a frozen type (§10.8): optional on the wire and left out when
+ * absent.
+ */
+files?: FilesFound, entity_id: string, kind: string, source_id: string, title: string, 
 /**
  * When the source says the item changed, an RFC 3339 timestamp; `None`
  * if the source never dated the item.
@@ -605,7 +775,12 @@ titles: boolean, };
  */
 export type SearchResponse = { interpreted: ParsedQuery, groups: Array<ResultGroup>, 
 /**
- * Matches across every kind, before `limit` was applied.
+ * Matches across every kind, before `limit` was applied. For one, two
+ * or three typed characters that names answer, and for a query more
+ * than 2,000 rows hold, the rows the answer holds: such an answer reads
+ * each kind's first rows and counts no match (the one-letter pass,
+ * 2026-11-15, the two-letters pass and the long-words pass,
+ * 2026-11-16).
  */
 total: number, took_ms: number, 
 /**
@@ -628,6 +803,62 @@ total: number, took_ms: number,
  * and the backend always sends it.
  */
 coverage: Array<FilterCoverage>, };
+
+/**
+ * What Settings › Search draws: the boxes, and beside each how much of the
+ * mirror it covers.
+ */
+export type SearchSettings = { 
+/**
+ * The boxes.
+ */
+everything: EverythingMatches, 
+/**
+ * The tickets whose description and comments the first box covers.
+ */
+tickets: number, 
+/**
+ * The pull requests the second covers.
+ */
+pull_requests: number, 
+/**
+ * The Docs pages the third covers.
+ */
+pages: number, 
+/**
+ * The pipelines whose last finished run's log the fourth covers.
+ */
+pipelines: number, 
+/**
+ * The files the index holds, found by their names.
+ */
+files: number, 
+/**
+ * The files whose text it holds.
+ */
+text_files: number, 
+/**
+ * *Keep at most*: the file text kept on this computer, in MB; `0` is
+ * *None* (`knobas_sync::code_files::FILES_KEPT_KEY`).
+ */
+kept_mb: number, 
+/**
+ * The file text kept now, in bytes.
+ */
+text_bytes: number, 
+/**
+ * The mirrored repositories whose files stand at their head.
+ */
+repositories_read: number, 
+/**
+ * The mirrored repositories.
+ */
+repositories: number, 
+/**
+ * The files whose text is not read, by rule (`LeftOut::word`), over
+ * every repository.
+ */
+left_out: { [key in string]: number }, };
 
 /**
  * A run of excerpt text, and whether it is part of the match.
@@ -732,6 +963,12 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  */
 list_sort: ListSort | null, 
 /**
+ * *Show every ticket when the view opens* (ux18, migration `0097`): no
+ * column, lane or list cut. The reader's, a view from a ticket system's
+ * too.
+ */
+show_all: boolean, 
+/**
  * The saved view (a board or filter, `sync.saved_view`'s entity id) a
  * view from a ticket system shows (#877; named for the role by #1245);
  * `None` on a view somebody made.
@@ -751,7 +988,11 @@ id: string | null, name: string, group: string,
 /**
  * `None` keeps a saved view where it is and puts a new one last.
  */
-position: number | null, query: string, layout: "board" | "list", columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, list_columns: Array<ListColumn>, list_sort: ListSort | null, saved_view: string | null, };
+position: number | null, query: string, layout: "board" | "list", columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, list_columns: Array<ListColumn>, list_sort: ListSort | null, 
+/**
+ * *Show every ticket when the view opens* (ux18); off when left out.
+ */
+show_all: boolean, saved_view: string | null, };
 
 /**
  * One row of the views pane: the view, and what its text reads as today.
@@ -799,6 +1040,12 @@ columns: Array<ViewColumn>, lanes: ViewLanes, card_fields: Array<CardField>, lis
  * `None` is newest first.
  */
 list_sort: ListSort | null, 
+/**
+ * *Show every ticket when the view opens* (ux18, migration `0097`): no
+ * column, lane or list cut. The reader's, a view from a ticket system's
+ * too.
+ */
+show_all: boolean, 
 /**
  * The saved view (a board or filter, `sync.saved_view`'s entity id) a
  * view from a ticket system shows (#877; named for the role by #1245);

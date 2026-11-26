@@ -1,7 +1,7 @@
 /** The repository page's tabs kept for the visit (#2248): which it holds, where each was left, when each reads again. */
 import { expect, test } from "vitest";
 
-import { NO_TABS, readShown, tabHref, visit, type KeptTabs } from "./repo-tabs";
+import { holdSlot, NO_TABS, readShown, tabHref, visit, type KeptTabs } from "./repo-tabs";
 
 const R = "gitea:o/r";
 const OTHER = "gitea:o/other";
@@ -63,4 +63,29 @@ test("a tab of the row links where it was left, its own address before that", ()
   expect(tabHref(walk([[R]]), R, "files")).toBe("#/repo/gitea%3Ao%2Fr/files");
   // The Commits list shown after a commit: the list.
   expect(tabHref(walk([[R, "commits", "c1"], [R, "commits"]]), R, "commits")).toBe("#/repo/gitea%3Ao%2Fr/commits");
+});
+
+// The compare-first-open pass (2026-11-20, Fable's ruling): Compare built ahead of its press, hidden.
+test("a slot held ahead stands first, hidden, and its first show reads nothing again", () => {
+  const landing = walk([[R]]);
+  const held = holdSlot(landing, [R, "compare"]);
+  expect(held.order, "the slot shown stays shown").toEqual(["compare", "files"]);
+  expect(held.places.compare).toEqual([R, "compare"]);
+  expect(held.ahead).toEqual(["compare"]);
+  expect(holdSlot(held, [R, "compare"]), "held once").toBe(held);
+  expect(holdSlot(landing, [OTHER, "compare"]), "only this repository's").toBe(landing);
+  const pressed = visit(held, [R, "compare"], R);
+  expect(pressed.order).toEqual(["files", "compare"]);
+  expect(pressed.reads.compare, "its first show is no return").toBe(0);
+  expect(pressed.ahead).toBeUndefined();
+  // Shown and left, it is a kept tab like any other: back where it was left, it reads again.
+  const back = walk([[R], [R, "compare"]], R, pressed);
+  expect(back.reads.compare).toBe(1);
+});
+
+test("a slot held ahead goes with another branch, as every hidden slot does", () => {
+  const held = holdSlot(walk([[R]]), [R, "compare"]);
+  const branched = visit(held, [R], `${R}@dev`);
+  expect(branched.order).toEqual(["files"]);
+  expect(branched.ahead).toBeUndefined();
 });

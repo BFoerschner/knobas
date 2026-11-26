@@ -169,3 +169,40 @@ async fn ten_views_are_counted_in_one_statement() {
     assert_eq!(readings, vec![Reading::Count(2); 10]);
     assert_eq!(ten, one, "ten views take no more connections than one");
 }
+
+/// A text many views hold is counted once and read into each of their slots
+/// (the workers pass, 2026-11-16): the same text reads the same, between and
+/// beside others, unreadable ones too.
+#[tokio::test]
+async fn a_text_many_views_hold_reads_the_same_in_each_slot() {
+    let pool = pool().await;
+    let p = project();
+    store(&pool, &p, 1, "Bug").await;
+    store(&pool, &p, 2, "Story").await;
+    let searcher = searcher(&pool).await;
+    let bugs = format!("project:{p} issuetype:bug");
+    let all = format!("project:{p}");
+    let unknown = format!("project:{p} updated:soonish");
+    let texts = [
+        all.as_str(),
+        bugs.as_str(),
+        all.as_str(),
+        unknown.as_str(),
+        bugs.as_str(),
+        unknown.as_str(),
+        all.as_str(),
+    ];
+    let unreadable = Reading::Unreadable("updated:soonish".to_owned());
+    assert_eq!(
+        searcher.readings(&texts, "ticket").await.unwrap(),
+        [
+            Reading::Count(2),
+            Reading::Count(1),
+            Reading::Count(2),
+            unreadable.clone(),
+            Reading::Count(1),
+            unreadable,
+            Reading::Count(2),
+        ]
+    );
+}

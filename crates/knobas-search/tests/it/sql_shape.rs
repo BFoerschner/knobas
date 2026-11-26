@@ -196,6 +196,26 @@ async fn a_generated_query_runs_and_carries_every_column_the_launcher_draws() {
         "synced_at must be the seeded 90 minutes ago, not now() and not          item_updated_at: {ticket:?}"
     );
     assert!(ticket.rank.unwrap() > 0.0);
+    // No headline unless the statement was asked for one: nothing draws it
+    // (`EffectiveFilters::headline`).
+    assert!(rows.iter().all(|r| r.snippet.is_none()), "{rows:?}");
+
+    let headlined = run(
+        &pool,
+        search_sql(
+            &[&LIVE_ITEM],
+            Some(&tag),
+            false,
+            &EffectiveFilters {
+                headline: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        ),
+    )
+    .await;
+    let ticket = headlined.iter().find(|r| r.group_kind == "ticket").unwrap();
     // The excerpt is marked with the sentinel selectors, not with markup.
     let snippet = ticket.snippet.clone().unwrap();
     assert!(

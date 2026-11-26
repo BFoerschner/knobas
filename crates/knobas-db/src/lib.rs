@@ -9,7 +9,11 @@
 pub mod backup;
 pub mod console;
 pub mod embedded;
+pub mod install;
 pub mod migrate;
+pub mod report;
+pub mod socket;
+pub mod supervisor;
 
 #[cfg(feature = "test-util")]
 pub mod plan_shape;

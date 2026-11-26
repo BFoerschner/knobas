@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "knobas test estate",
-  "description": "The real test infrastructure knobas is developed against: this notebook, where `just check` and every live recipe run, and the Windows desktop whose WSL 2 VM holds the Docker engine and the containers testenv/docker-compose.yml runs there -- Gitea, Uptime Kuma and its read-only Docker API, and the real TeamCity, Jira and Confluence, up around the clock since 2026-11-01 (#2366) and reached from the notebook through an ssh tunnel. Data about an estate that exists -- nothing here is invented, and nothing Tidewater-shaped belongs in it. The `monitors` names are the names that Uptime Kuma actually holds, seeded from `monitors.json` (#441). Until 2026-10-12 three Hetzner servers held the JVM products; they were decommissioned (#634) and left this file with them. Until 2026-11-01 the containers ran on demand in a Linux VM on the notebook itself.",
+  "description": "The real test infrastructure knobas is developed against: this notebook, where `just check` and every live recipe run, and the Windows desktop whose WSL 2 VM holds the Docker engine and the containers testenv/docker-compose.yml runs there -- Gitea, Uptime Kuma and its read-only Docker API, and the real TeamCity, Jira and Confluence, up around the clock since 2026-11-01 (#2366) and reached from the notebook through an ssh tunnel. Data about an estate that exists -- nothing Tidewater-shaped belongs in it -- except the two machines' names, which stand in for the real ones (`test-notebook`, `TEST-PC`) since the repository is public. The `monitors` names are the names that Uptime Kuma actually holds, seeded from `monitors.json` (#441). Until 2026-10-12 three Hetzner servers held the JVM products; they were decommissioned (#634) and left this file with them. Until 2026-11-01 the containers ran on demand in a Linux VM on the notebook itself.",
   "assets": [
     {
       "id": "asset:knobas-estate",
@@ -14,14 +14,14 @@
     {
       "id": "asset:notebook",
       "type": "custom",
-      "name": "devs-MacBook-Pro",
+      "name": "test-notebook",
       "parent": "asset:knobas-estate",
-      "description": "The development notebook, and the machine `just check` and every live recipe run on. Since 2026-11-01 it runs no container: the live products are on the WSL box, and it reaches them through the ssh tunnel `testenv/live tunnel` opens. Typed custom because it holds nothing in this tree any more and the type table has no name for a workstation; `hypervisor` was honest only while it held the Linux VM the containers ran in. Its `ip` is its Tailscale address, the one the `notebook` ping watches from the Uptime Kuma on the WSL box.",
+      "description": "The development notebook, and the machine `just check` and every live recipe run on. Since 2026-11-01 it runs no container: the live products are on the WSL box, and it reaches them through the ssh tunnel `testenv/live tunnel` opens. Typed custom because it holds nothing in this tree any more and the type table has no name for a workstation; `hypervisor` was honest only while it held the Linux VM the containers ran in. Its `ip` stands in for its Tailscale address, the one the `notebook` ping watches from the Uptime Kuma on the WSL box: a documentation address here, the real one in `KNOBAS_LIVE_NOTEBOOK_IP` (testenv/live.env).",
       "properties": {
         "os": "macOS 26.5.2",
         "arch": "arm64",
         "role": "development notebook",
-        "ip": "100.92.199.117"
+        "ip": "192.0.2.10"
       },
       "monitors": [
         "notebook"
@@ -30,7 +30,7 @@
     {
       "id": "asset:desktop",
       "type": "hypervisor",
-      "name": "DESKTOP-QUUAHUB",
+      "name": "TEST-PC",
       "parent": "asset:knobas-estate",
       "description": "The Windows desktop that runs WSL 2, and with it the live products, 24/7 since 2026-11-01 (#2366). Typed hypervisor because what it holds here is the WSL 2 VM. Set up by `testenv/wsl/setup-windows.ps1` (testenv/README.md, \"Live products on a remote machine (WSL)\").",
       "properties": {
@@ -52,7 +52,7 @@
         "vcpu": 12,
         "memory_gb": 12,
         "ip": "172.17.0.1",
-        "tailscale_ip": "100.86.58.116",
+        "tailscale_ip": "192.0.2.20",
         "ssh": "knobas-wsl, port 2222"
       }
     },

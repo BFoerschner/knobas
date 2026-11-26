@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0041, ADR-0043 and ADR-0049
 ---
 
 # knobas reads any diff at a checkout that holds both commits
+
+*Amended by [ADR-0049](0049-a-comparison-may-end-at-the-working-tree.md) (2026-11-20): one end may be the working tree.*
 
 Amends [ADR-0026](0026-knobas-reads-a-checkouts-uncommitted-diff.md). Spec #2234 (step 6b) gives a diff between any two commits an address of its own, and asks that it come from local git when the repository's checkout holds both commits, and from the source's compare read otherwise; *Ignore whitespace* is offered when the diff is local. ADR-0026 lets knobas run `git diff` at a checkout for the uncommitted changes only, with no commit name as an argument. Decided 2026-10-30 (implementer on #2272, as the spec asks): **knobas may run read-only `git rev-parse` and `git diff` between two commits at a checkout, on ADR-0026's terms, with the two commits as arguments once checked.**
 

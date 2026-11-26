@@ -7,15 +7,20 @@
 
 pub mod crud;
 pub mod demo;
+pub mod files_on_sync;
+pub mod follow_run;
+pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
 pub mod paths;
+pub mod pick_on_sync;
 pub mod progress;
 pub mod refresh;
 pub mod registry;
 pub mod remote;
 pub mod state_colours;
+pub(crate) mod stored_tree;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
@@ -208,6 +213,11 @@ pub struct NewSource {
     pub config: serde_json::Value,
     pub secret: SecretInput,
     pub sync_interval_secs: u32,
+    /// Sync only when a person presses *Sync now* (ADR-0056). The form sends
+    /// the adapter's `by_hand_by_default`; absent means a schedule.
+    #[serde(default)]
+    #[ts(optional)]
+    pub sync_by_hand: Option<bool>,
     pub enabled: bool,
 }
 
@@ -227,6 +237,10 @@ pub struct SourcePatch {
     pub config: Option<serde_json::Value>,
     #[ts(optional = nullable)]
     pub sync_interval_secs: Option<u32>,
+    /// `true` takes the source out of the schedule; `false` puts it back on
+    /// its interval (ADR-0056).
+    #[ts(optional = nullable)]
+    pub sync_by_hand: Option<bool>,
     #[ts(optional = nullable)]
     pub enabled: Option<bool>,
 }
@@ -361,9 +375,13 @@ pub struct SourceSummary {
     pub base_url: String,
     pub enabled: bool,
     pub sync_interval_secs: u32,
+    /// The source syncs only when a person presses *Sync now* (ADR-0056); its
+    /// `next_run_at` is then `None`.
+    pub sync_by_hand: bool,
     #[ts(type = "unknown")]
     pub config: serde_json::Value,
     pub health: knobas_sync::config::CredentialHealth,
+
     pub last_run: Option<knobas_sync::run_log::SyncRunRow>,
     /// When the scheduler runs this source next; `None` when the source is
     /// disabled, running, or needs a human.
@@ -406,6 +424,15 @@ pub struct SourceSummary {
     /// roles still in [`roles`](Self::roles); empty when every claimed role
     /// is filled or not judged yet.
     pub role_misses: Vec<knobas_source::role::data::RoleMiss>,
+    /// The writes the adapter declares, from its descriptor template like
+    /// `kinds` (ADR-0054): the board asks a ticket where it can go, and
+    /// offers a move, only where its source declares `transition`. Empty for
+    /// a row whose adapter is no longer compiled in. Which of them this
+    /// instance's credential may make is `refused_writes`' answer. Off the
+    /// wire when empty, which the shell reads as none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub write_ops: Vec<String>,
 }
 
 /// What *Test connection* found.
@@ -611,9 +638,10 @@ pub struct BringUp {
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
-    /// The process's one suggestion pass, requested after every run that
-    /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
-    /// #1485): the one bring-up built, never one of the scheduler's own.
+    /// The process's one suggestion pass, requested after a run that ends
+    /// OK and wrote to the mirror
+    /// ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync), #1485):
+    /// the one bring-up built, never one of the scheduler's own.
     pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 
@@ -647,14 +675,68 @@ pub async fn bring_up<R: tauri::Runtime>(
             secrets: Arc::clone(&deps.secrets),
             // The owed links of #1050 resolved after every run (`ArrivalLinks`),
             // and a suggestion pass requested after every OK one (#1485).
-            events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
-                write_queue::ArrivalLinks::new(
-                    TauriEvents::new(app.clone()),
+            // And the state words a run's source shows counted again after
+            // a run that wrote (the state-colours bug, 2026-11-17).
+            // Outermost, the files pass's index and its progress (the
+            // everything-search decisions, D7): no pass for a test app that
+            // manages no lifecycle, or an index bring-up could not open.
+            events: Arc::new(files_on_sync::FilesOnSync::new(
+                pick_on_sync::PickOnSync::new(
+                    state_colours::CountOnSync::new(
+                        crate::suggestion_pass::SuggestOnSync::new(
+                            write_queue::ArrivalLinks::new(
+                                TauriEvents::new(app.clone()),
+                                deps.pool.clone(),
+                                Arc::clone(&registry),
+                                background.clone(),
+                            ),
+                            deps.suggestions,
+                        ),
+                        // The process's counter, which the read waits on; a test app
+                        // that manages no lifecycle counts on one of its own.
+                        {
+                            use tauri::Manager as _;
+                            app.try_state::<crate::Lifecycle>().map_or_else(
+                                || state_colours::SeenCounter::new(Arc::clone(&registry)),
+                                |lifecycle| lifecycle.seen_words().clone(),
+                            )
+                        },
+                        deps.pool.clone(),
+                    ),
+                    // And the launcher's names read again after a run that wrote, a
+                    // write that landed and an item's refresh (the fuzzy-search
+                    // decisions, 2026-11-19, D3); a test app with no lifecycle reads
+                    // into a picker nobody asks.
+                    {
+                        use tauri::Manager as _;
+                        app.try_state::<crate::Lifecycle>()
+                            .map_or_else(knobas_search::picker::Picker::default, |lifecycle| {
+                                lifecycle.picker().clone()
+                            })
+                    },
                     deps.pool.clone(),
-                    Arc::clone(&registry),
-                    background.clone(),
                 ),
-                deps.suggestions,
+                {
+                    use tauri::Manager as _;
+                    app.try_state::<crate::Lifecycle>()
+                        .map(|lifecycle| lifecycle.files())
+                        .filter(knobas_files::FileIndex::is_open)
+                        .map(|index| knobas_sync::code_files::Files {
+                            index,
+                            // A blob from a checkout here before the forge (D3).
+                            clones: Some(Arc::new(
+                                crate::checkout::files_from_clones::FromClones::new(
+                                    deps.pool.clone(),
+                                ),
+                            )),
+                        })
+                },
+                {
+                    let to = app.clone();
+                    move |progress: &knobas_sync::code_files::FilesProgress| {
+                        crate::events::emit(&to, None, crate::events::CODE_FILES, progress);
+                    }
+                },
             )),
             timing: SchedulerTiming::default(),
             quit: knobas_sync::scheduler::Quit::default(),
@@ -663,6 +745,8 @@ pub async fn bring_up<R: tauri::Runtime>(
     )
     .await?;
     let live = live::LiveSources::default();
+    // Pages show what knobas last read, from the session before too (ADR-0042).
+    live.hold_in(deps.pool.clone());
     let fresh_to = app.clone();
     live.on_fresh(move |fresh| {
         crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);
@@ -787,7 +871,21 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         return; // bring-up failed before the scheduler existed
     };
     tracing::info!("stopping the sync scheduler");
-    tauri::async_runtime::block_on(state.scheduler.shutdown());
+    // Spawned and waited for by the wall clock, never `block_on` here: see
+    // `knobas_sync::scheduler::finish_within`.
+    let scheduler = state.scheduler.clone();
+    let runtime = tauri::async_runtime::handle();
+    let stopped = knobas_sync::scheduler::finish_within(
+        runtime.inner(),
+        knobas_sync::scheduler::QUIT_BOUND,
+        async move { scheduler.shutdown().await },
+    );
+    if stopped.is_none() {
+        tracing::error!(
+            bound_s = knobas_sync::scheduler::QUIT_BOUND.as_secs(),
+            "the sync scheduler did not stop in time: quitting without it"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -847,6 +945,7 @@ mod tests {
             display_name: "S".into(),
             base_url: String::new(),
             enabled: true,
+            sync_by_hand: false,
             sync_interval_secs: 300,
             config: serde_json::json!({}),
             health: knobas_sync::config::CredentialHealth {
@@ -863,6 +962,7 @@ mod tests {
             kinds: Vec::new(),
             roles: Vec::new(),
             role_misses: Vec::new(),
+            write_ops: Vec::new(),
         })
         .unwrap();
         assert_eq!(summary["roles"], serde_json::json!([]), "{summary}");

@@ -114,7 +114,7 @@ test("with the setting off every diff is raw and nothing runs, and the per-diff 
   await settle();
   expect(asked).toEqual([]);
   expect(lines()).toEqual([`1− ${btoa(OLD_JSON)}`, `1+ ${btoa(NEW_JSON)}`]);
-  expect(target.querySelector(".tf-dtool button.tf-pill")?.getAttribute("aria-pressed")).toBe("false");
+  expect(target.querySelector(".tf-dtool .tf-fchips button:not(.tf-drendered)")?.getAttribute("aria-pressed")).toBe("false");
   button("Run pipeline")!.click();
   await settle();
   expect(asked).toHaveLength(2);
@@ -125,7 +125,7 @@ test("the toolbar's Run pipelines turns every file's pipeline on or off for this
   const { context } = reader();
   draw({ files: [B64], context, piping: storedSetting() });
   await settle();
-  const pill = target.querySelector<HTMLButtonElement>(".tf-dtool button.tf-pill")!;
+  const pill = target.querySelector<HTMLButtonElement>(".tf-dtool .tf-fchips button:not(.tf-drendered)")!;
   expect(squash(pill)).toBe("Run pipelines");
   expect(pill.getAttribute("aria-pressed")).toBe("true");
   pill.click();
@@ -149,7 +149,7 @@ test("a file with no default pipeline, or a diff whose caller runs none, is draw
   draw({ files: [{ ...B64, path: "src/plain.txt" }], context, piping: storedSetting() });
   await settle();
   expect(asked).toEqual([]);
-  expect(target.querySelector(".tf-dtool button.tf-pill")).toBeNull();
+  expect(target.querySelector(".tf-dtool .tf-fchips button:not(.tf-drendered)")).toBeNull();
   expect(button("Show raw")).toBeUndefined();
 });
 
@@ -195,4 +195,30 @@ test("two outputs too long to match line by line still diff, and the card says h
   expect(squash(target.querySelector(".tf-coarse"))).toBe("Too many changed lines to match one by one: the changed part is drawn removed whole, then added whole.");
   expect(squash(header().querySelector(".tf-add-n"))).toBe("+2100");
   expect(squash(header().querySelector(".tf-del-n"))).toBe("−2100");
+});
+
+// A pipeline's output, rendered (ux26, the decision list's section 19): `events.md.b64` decoded is Markdown, so its card
+// offers *Rendered*, which draws both outputs in the stage from the runs, reading no side's bytes.
+test("a decoded Markdown output offers Rendered and draws both outputs with no byte read", async () => {
+  const MD: DiffFile = { ...B64, path: "docs/events.md.b64" };
+  const asked: string[] = [];
+  const context = {
+    text: async () => null,
+    bytes: async (file: DiffFile, side: "old" | "new") => {
+      asked.push(`bytes ${side}:${file.path}`);
+      return new Uint8Array();
+    },
+    async piped(_file: DiffFile, side: "old" | "new"): Promise<PipeRun> {
+      return { outcome: "done", name: "events.md", output: { kind: "text", text: side === "old" ? "# Events\n\nOne a day.\n" : "# Events\n\nTwo a day.\n" } };
+    },
+  };
+  const md: DiffPipelines = { of: (path) => (path.endsWith(".md.b64") ? { name: null, pattern: "*.md.b64", steps: [{ step: "base64_decode" }] } : null) };
+  draw({ files: [MD], context, pipelines: md, piping: storedSetting() });
+  await settle();
+  const card = target.querySelector<HTMLElement>('.tf-diff[data-file="docs/events.md.b64"]')!;
+  const press = (name: string) => [...card.querySelectorAll<HTMLButtonElement>(".tf-fh .tf-seg button")].find((b) => b.textContent === name)!.click();
+  press("Rendered");
+  await settle();
+  expect([...card.querySelectorAll(".tf-rside-old .tf-md p, .tf-rside-new .tf-md p")].map((p) => p.textContent)).toEqual(["One a day.", "Two a day."]);
+  expect(asked, "the sides are the runs' outputs").toEqual([]);
 });

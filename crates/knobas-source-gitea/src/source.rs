@@ -23,13 +23,15 @@ pub struct GiteaSource {
     pub(crate) id: String,
     display_name: String,
     pub(crate) config: GiteaConfig,
-    pub(crate) client: GiteaClient,
+    /// Shared with the keeping read a pull request's first *Files* read
+    /// leaves behind it (`view::pr::diffs`), which outlives the read.
+    pub(crate) client: std::sync::Arc<GiteaClient>,
     /// Which token on which server this is, for [`Self::viewer`]'s cache: a
     /// hash of the instance id, the base URL and the secret, never the secret.
     viewer_key: u64,
     /// Pull requests' diffs at what they stand at, for this built
-    /// source's life (`view::pr::diffs`).
-    pub(crate) pull_diffs: crate::view::pr::diffs::PullDiffs,
+    /// source's life (`view::pr::diffs`); shared the same way.
+    pub(crate) pull_diffs: std::sync::Arc<crate::view::pr::diffs::PullDiffs>,
 }
 
 /// Who each token is, by [`GiteaSource::viewer_key`], for the life of the
@@ -102,13 +104,20 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         id: instance.id,
         display_name: instance.display_name,
         config,
-        client,
+        client: std::sync::Arc::new(client),
         viewer_key,
         pull_diffs: Default::default(),
     }))
 }
 
 impl GiteaSource {
+    /// Which token on which server this is (a hash, never the secret): what a
+    /// cache that outlives the built source keys its reads by, so one token's
+    /// answers are never handed to another's reads (`view::files`' whole trees).
+    pub(crate) fn viewer_key(&self) -> u64 {
+        self.viewer_key
+    }
+
     /// The login the token belongs to, or `None` where Gitea would not say.
     ///
     /// Asked once per token and server for the life of the process
@@ -245,6 +254,12 @@ impl GiteaSource {
         }
     }
 
+    /// What a person calls this instance (*Tidewater Gitea*), for a sentence
+    /// that tells them where to go (ADR-0054).
+    pub(crate) fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
     /// The issue a write or a read acts on (#1206).
     ///
     /// # Errors
@@ -338,6 +353,26 @@ impl Source for GiteaSource {
     /// `NotOffered` for the other kinds (`crate::refresh`, #2098).
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         crate::refresh::refresh(self, entity).await
+    }
+
+    /// A repository, a branch or a commit: its repository walked as a run
+    /// walks it, from where the position says it stood (`crate::sync::walk_one`,
+    /// ADR-0047). `NotOffered` for the kinds `refresh` reads by number.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        match self.key_of(entity)? {
+            crate::keys::GiteaKey::Repo { owner, repo }
+            | crate::keys::GiteaKey::Branch { owner, repo, .. }
+            | crate::keys::GiteaKey::Commit { owner, repo, .. } => {
+                crate::sync::walk_one(self, &owner, &repo, cursor).await
+            }
+            crate::keys::GiteaKey::Pr { .. } | crate::keys::GiteaKey::Issue { .. } => {
+                Ok(knobas_source::UnderAnswer::NotOffered)
+            }
+        }
     }
 
     /// Perform one of the four writes M2 ratified for Gitea, the merge the
@@ -522,6 +557,25 @@ impl Source for GiteaSource {
                 write::add_label(&self.client, &owner, &repo, index, label).await?;
                 Ok(WriteReceipt::none())
             }
+            WriteOp::EditTicket {
+                entity,
+                title,
+                assignee,
+                priority,
+                labels,
+                fields,
+            } => {
+                let (owner, repo, index) = self.issue_of(entity)?;
+                let edit = crate::tickets::Edit {
+                    title: title.as_deref(),
+                    assignee: assignee.as_ref(),
+                    priority: priority.as_deref(),
+                    labels: labels.as_ref(),
+                    fields,
+                };
+                crate::tickets::edit(self, &owner, &repo, index, &edit).await?;
+                Ok(WriteReceipt::none())
+            }
             WriteOp::Transition { entity, status } => {
                 let (owner, repo, index) = self.issue_of(entity)?;
                 write::transition(&self.client, &owner, &repo, index, status).await?;
@@ -582,6 +636,39 @@ impl Source for GiteaSource {
             .filter(|other| *other != state)
             .map(str::to_owned)
             .collect())
+    }
+
+    /// An issue's title, assignee and labels (ADR-0054), from the read
+    /// `reachable_transitions` makes; `None` for anything but an issue of
+    /// this source (a pull request is not a ticket).
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let Ok(crate::keys::GiteaKey::Issue {
+            owner,
+            repo,
+            number,
+        }) = self.key_of(entity)
+        else {
+            return Ok(None);
+        };
+        crate::tickets::fields(self, &owner, &repo, number)
+            .await
+            .map(Some)
+    }
+
+    /// The repository's assignees, or the labels it may use (ADR-0054).
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let Ok(crate::keys::GiteaKey::Issue { owner, repo, .. }) = self.key_of(entity) else {
+            return Ok(None);
+        };
+        crate::tickets::options(self, &owner, &repo, field, typed).await
     }
 
     /// The asks the token cannot make (#2054), from the empty-bodied probes a
@@ -648,6 +735,154 @@ impl Source for GiteaSource {
     /// [`crate::view::standing`].
     fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
         crate::view::standing(self, entity, section)
+    }
+
+    /// A pull request's whole view from the record the mirror holds (ADR-0042):
+    /// see [`crate::view::pr::from_record`].
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::view::SourceView> {
+        match (self.key_of(entity).ok()?, section) {
+            (crate::keys::GiteaKey::Pr { .. }, None) => crate::view::pr::from_record(payload),
+            _ => None,
+        }
+    }
+
+    /// A repository's branches and its last commit are drawn from the branch
+    /// records the sync wrote (the inner-pages pass, 2026-11-12): see
+    /// [`crate::view::from_branch_records`].
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { .. } => {
+                crate::view::listed_from_branches(section).then_some(crate::KIND_BRANCH)
+            }
+            _ => None,
+        }
+    }
+
+    /// Every branch's tree is stored (the stored-trees pass of PR #2479):
+    /// where the records keep the default branch, a branch's head and a
+    /// pull request's head branch.
+    /// Each open pull request's *Files* (the held-files pass, 2026-11-15):
+    /// the `.diff` is the head's tree against the merge base's, so those two
+    /// say when a held copy no longer stands, and the record's count of line
+    /// comments when its threads no longer do.
+    fn held_shape(&self) -> Option<knobas_source::held::HeldShape> {
+        Some(knobas_source::held::HeldShape {
+            kind: crate::KIND_PR,
+            section: "files",
+            state: &["state"],
+            open: "open",
+            base: &["merge_base"],
+            head: &["head", "sha"],
+            count: Some(&["review_comments"]),
+        })
+    }
+
+    fn tree_shape(&self) -> Option<knobas_source::tree::TreeShape> {
+        Some(knobas_source::tree::TreeShape {
+            repository: crate::KIND_REPO,
+            default_branch: &["default_branch"],
+            branch: crate::KIND_BRANCH,
+            branch_name: &["name"],
+            branch_commit: &["commit", "id"],
+            pull: Some(knobas_source::tree::PullShape {
+                kind: crate::KIND_PR,
+                head: &["head", "ref"],
+                state: &["state"],
+                open: "open",
+            }),
+        })
+    }
+
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn knobas_source::tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<knobas_source::tree::TreeRead>, SourceError> {
+        crate::view::read_tree(self, repository, commit, held, cap)
+            .await
+            .map(Some)
+    }
+
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::tree::TreeAsk> {
+        crate::view::tree_ask(self, entity, section, payload)
+    }
+
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &knobas_source::tree::StoredTree,
+    ) -> Option<knobas_source::view::SourceView> {
+        crate::view::tree_view(self, entity, section, payload, tree)
+    }
+
+    async fn read_blob(
+        &self,
+        repository: &str,
+        commit: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        crate::view::read_blob(self, repository, commit, path, cap).await
+    }
+
+    async fn read_archive(
+        &self,
+        repository: &str,
+        commit: &str,
+        wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+        each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+    ) -> Result<Option<u32>, SourceError> {
+        crate::view::read_archive(self, repository, commit, wanted, each)
+            .await
+            .map(Some)
+    }
+
+    fn tip_branch(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
+        crate::view::tip_branch(self, entity, section, payload)
+    }
+
+    async fn view_at_tip(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tip: &str,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        crate::view::at_tip(self, entity, section, payload, tip).await
+    }
+
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<knobas_source::view::SourceView> {
+        match self.key_of(entity).ok()? {
+            crate::keys::GiteaKey::Repo { owner, repo } => {
+                crate::view::from_branch_records(self, &owner, &repo, section, payload, under)
+            }
+            _ => None,
+        }
     }
 }
 

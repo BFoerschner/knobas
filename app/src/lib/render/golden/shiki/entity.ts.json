@@ -1,0 +1,21 @@
+[
+  ["kw:import",": ","punct:{",": invoke ","punct:}",": ","kw:from",": ","str:\"@tauri-apps/api/core\"","punct:;"],
+  [],
+  ["com:/** A source's item, as the mirror holds it. */"],
+  ["kw:export",": ","kw:interface",": ","ty:Entity","punct:<","ty:T",": ","op:=",": ","ty:unknown","punct:>",": ","punct:{"],
+  [":  id","op::",": ","ty:string","punct:;"],
+  [":  kind","op::",": ","str:\"ticket\"",": ","op:|",": ","str:\"pr\"","punct:;"],
+  [":  fields","op::",": ","ty:T","punct:;"],
+  ["punct:}"],
+  [],
+  ["kw:export",": ","kw:const",": ","con:RETRY",": ","op:=","esc: ","str:/","esc:retry-","punct:(","con:\\d","op:+","punct:)","str:/","kw:g","punct:;"],
+  [],
+  ["kw:export",": ","kw:async",": ","kw:function",": ","fn:read","punct:(","var:id","op::",": ","ty:string","punct:,",": ","var:tries",": ","op:=",": ","num:3","punct:)","op::",": ","ty:Promise","punct:<","ty:Entity",": ","op:|",": ","ty:null","punct:>",": ","punct:{"],
+  [":  ","kw:for",": ","punct:(","kw:let",": i ","op:=",": ","num:0","punct:;",": i ","op:<",": tries","punct:;",": i ","op:+=",": ","num:1","punct:)",": ","punct:{"],
+  [":    ","kw:const",": ","con:got",": ","op:=",": ","kw:await",": ","fn:invoke","punct:<","ty:Entity","punct:>(","str:\"get_entity\"","punct:,",": ","punct:{",": id ","punct:});"],
+  [":    ","kw:if",": ","punct:(",":got","punct:?.","prop:id","punct:)",": ","kw:return",": ","punct:{",": ","op:...",":got","punct:,",": ","prop:kind","op::",": got","punct:.","prop:kind",": ","op:??",": ","str:\"ticket\"",": ","punct:};"],
+  [":  ","punct:}"],
+  [":  ","kw:return",": ","con:null","punct:;",": ","com:// gave up"],
+  ["punct:}"],
+  []
+]

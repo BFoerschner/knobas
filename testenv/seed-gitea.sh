@@ -64,6 +64,13 @@ api() {  # api <user:pass> <METHOD> <path> [<json body>]
   API_STATUS=$(printf '%s' "$_raw" | tail -n 1)
   API_BODY=$(printf '%s' "$_raw" | sed '$d')
 }
+api_file() {  # api_file <user:pass> <METHOD> <path> <file holding the json body>: a body past one argument's length
+  _raw=$(curl -sS -u "$1" -X "$2" \
+              -H 'Content-Type: application/json' -H 'Accept: application/json' \
+              -w '\n%{http_code}' --data-binary @"$4" "$API$3")
+  API_STATUS=$(printf '%s' "$_raw" | tail -n 1)
+  API_BODY=$(printf '%s' "$_raw" | sed '$d')
+}
 
 # Accept the listed statuses, die on anything else with the server's message.
 expect() {  # expect <what> <status>...
@@ -190,6 +197,94 @@ jqf '.repos[] | [.name, .lang] | @tsv' | while IFS="$(printf '\t')" read -r repo
   expect "commit $repo:main $src_path" 201
   echo "seed-gitea: committed $repo:main $src_path ($lang)"
 done
+
+# --------------------------------------------------------------------------
+# 4c. The fixture repositories' files (the everything-search decisions,
+#    2026-11-20, D16): fixtures/tidewater/files/<owner>/<repo>/... onto each
+#    repository's main, so *Everything* finds `tidewater/ledger-gateway` by
+#    the old name its code still holds. One commit a repository, of the files
+#    that are missing or differ, compared by git's blob sha (`git
+#    hash-object`), so a re-run writes nothing and a changed fixture file is
+#    pushed again. A file the forge holds that the fixture does not is left
+#    alone (auto_init's README, 4a's source file). Before section 5, so on a
+#    fresh volume every branch cut afterwards already holds the files and no
+#    pull request's own commits or diff change. FIXTURE_FILES may name another
+#    folder of the same shape. The XML view's documents (fixtures/doc/files,
+#    `fixtures/doc/SOURCE.md`: two openTRANS orders, a POM, the image and the
+#    contract they name) go onto `ledger-api` the same way, from a folder of
+#    their own, so the mock corpus and its counts stay as they are.
+# --------------------------------------------------------------------------
+# push_files <repo> <dir/> <prefix>: every regular file under <dir/> onto <repo>'s main at <prefix><its path>, in
+# one commit of the files that are missing or differ (section 4c's way).
+push_files() {
+    repo=$1 dir=$2 prefix=$3
+    api "$ADMIN" GET "/repos/$ORG/$repo"
+    expect "read repo $repo for its fixture files" 200
+    changes=$(mktemp)
+    printf '[' >"$changes"
+    sep=''
+    # Every regular file, by its path in the repository; `find` is sorted so
+    # the commit lists them in one order on every machine. A SOURCE.md of a
+    # folder of other people's files stays in the fixtures.
+    ( cd "$dir" && find . -type f ! -name SOURCE.md | sed 's|^\./||' | LC_ALL=C sort ) >"$changes.list"
+    while IFS= read -r file; do
+      path="$prefix$file"
+      want=$(git hash-object --no-filters "$dir$file")
+      api "$ADMIN" GET "/repos/$ORG/$repo/contents/$(printf '%s' "$path" | jq -sRr @uri | sed 's|%2F|/|g')?ref=main"
+      case "$API_STATUS" in
+        200) have=$(printf '%s' "$API_BODY" | jq -r '.sha // empty')
+             [ "$have" = "$want" ] && continue
+             op=update ;;
+        404) have=''; op=create ;;
+        *)   expect "read $repo:main $path" 200 404 ;;
+      esac
+      # Through a file: a file's base64 past 128 KiB is longer than one argument may be (an XML order, 2026-11-23).
+      base64 <"$dir$file" | tr -d '\n' >"$changes.b64"
+      jq -n --arg op "$op" --arg p "$path" --arg sha "$have" --rawfile c "$changes.b64" \
+            '{operation:$op, path:$p, content:$c} + (if $sha == "" then {} else {sha:$sha} end)' >"$changes.one"
+      printf '%s' "$sep" >>"$changes"
+      cat "$changes.one" >>"$changes"
+      sep=','
+    done <"$changes.list"
+    printf ']' >>"$changes"
+    n=$(jq 'length' "$changes")
+    if [ "$n" -gt 0 ]; then
+      jq -n --slurpfile f "$changes" --arg m "Add the fixture's files ($n)" \
+             '{branch:"main", message:$m, files:$f[0]}' >"$changes.body"
+      api_file "$ADMIN" POST "/repos/$ORG/$repo/contents" "$changes.body"
+      expect "commit $repo:main the fixture's files" 201
+      say "committed $n fixture file(s) to $repo:main"
+    fi
+    rm -f "$changes" "$changes.list" "$changes.one" "$changes.b64" "$changes.body"
+}
+for FILES_DIR in "${FIXTURE_FILES:-../fixtures/tidewater/files}" ../fixtures/doc/files; do
+if [ -d "$FILES_DIR/$ORG" ]; then
+  for dir in "$FILES_DIR/$ORG"/*/; do
+    push_files "$(basename "$dir")" "$dir" ""
+  done
+fi
+done
+
+# --------------------------------------------------------------------------
+# 4d. The schema explorer's openTRANS (2026-11-24, `fixtures/xsd/opentrans-2.1/
+#    SOURCE.md`): its four files onto ledger-api's `schemas/opentrans/`, where
+#    the XML view's orders name them (`../schemas/opentrans/opentrans_2_1.xsd`),
+#    so an order opens checked. Byte for byte: git's blob sha decides, as in 4c.
+# --------------------------------------------------------------------------
+[ -d ../fixtures/xsd/opentrans-2.1 ] && push_files ledger-api ../fixtures/xsd/opentrans-2.1/ schemas/opentrans/
+
+# --------------------------------------------------------------------------
+# 4e. The schema checks' live files (2026-11-24, `fixtures/schema-live/
+#    SOURCE.md`): a partner's order whose schema another repository declares
+#    (ledger-gateway, alone), one that two declare (ledger-gateway and
+#    payout-service), and one at an address on this Gitea, each repository's
+#    folder onto its main. Byte for byte, as in 4c.
+# --------------------------------------------------------------------------
+if [ -d "../fixtures/schema-live/files/$ORG" ]; then
+  for dir in "../fixtures/schema-live/files/$ORG"/*/; do
+    push_files "$(basename "$dir")" "$dir" ""
+  done
+fi
 
 # --------------------------------------------------------------------------
 # Helpers used by the content sections below.

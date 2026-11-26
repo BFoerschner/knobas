@@ -8,9 +8,9 @@
     disabled with the source's sentence as its tooltip;
   - the style (merge commit, rebase, squash), from the action's `style`
     choice; *Squash* opens its commit message, prefilled by the source;
-  - *Delete <branch> after merging*, ticked where the source ticks it;
-  - where knobas holds a link to a ticket, the line that the merge follower
-    (`follow_merges`) moves it to In Review once the merge lands.
+  - *Delete <branch> after merging*, never ticked on arrival: it removes data;
+  - where knobas holds a link to a ticket, the line that it moves to In
+    Review once the merge lands (the merge follower, `follow_merges`).
 
   Queued as one `MergePullRequest` (`detail/view/actions.ts`).
 -->
@@ -22,6 +22,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfKey from "../TfKey.svelte";
   import { mergeReasons, type ReadyLine } from "./pr";
 
   let {
@@ -84,7 +85,7 @@
     busy = true;
     try {
       const write = await submitWrite(payload);
-      toastQueued(`merge ${name}`, source);
+      toastQueued(`merge ${name}`, source, { write });
       onqueued(write);
       onclose();
     } catch (cause) {
@@ -94,11 +95,12 @@
   }
 </script>
 
-<TfDialog title="Merge {name} into {into}" {onclose} className="tf-pr-dialog">
+<TfDialog {onclose} className="tf-pr-dialog">
+  {#snippet title()}Merge {name} into {#if base === null}{into}{:else}<TfKey value={base} />{/if}{/snippet}
   {#snippet body()}
     <form
       id="tf-prm-{uid}"
-      class="tf-pra"
+      class="tf-formgrid"
       onsubmit={(event) => {
         event.preventDefault();
         void send();
@@ -140,7 +142,7 @@
         >
       {/if}
       {#if ticket !== null}
-        <p class="tf-dim tf-prm-note">After the merge, {ticket} moves to In Review (the merge follower already does this).</p>
+        <p class="tf-dim tf-prm-note">After the merge, <TfKey value={ticket} /> moves to In review.</p>
       {/if}
     </form>
   {/snippet}
@@ -150,6 +152,7 @@
       type="submit"
       class="tf-btn tf-primary"
       form="tf-prm-{uid}"
+      data-no-enter
       aria-disabled={action.disabled !== null ? "true" : undefined}
       title={action.disabled ?? undefined}
       disabled={busy}>Merge</button

@@ -1,0 +1,297 @@
+{
+ "name": "folder-deep",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {},
+  "CustomApplicationFields": {},
+  "Children": [
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [
+     {
+      "CustomUserFields": {},
+      "CustomApplicationFields": {},
+      "Children": [
+       {
+        "CustomUserFields": {},
+        "CustomApplicationFields": {},
+        "Children": [
+         {
+          "CustomUserFields": {},
+          "CustomApplicationFields": {},
+          "Children": [
+           {
+            "CustomUserFields": {},
+            "CustomApplicationFields": {},
+            "Children": [
+             {
+              "CustomUserFields": {},
+              "CustomApplicationFields": {},
+              "Children": [],
+              "Credentials": [
+               {
+                "CustomUserFields": {},
+                "CustomApplicationFields": {},
+                "Attachments": [],
+                "Tags": [],
+                "HasModifyEntriesAccess": false,
+                "HasViewEntryContentsAccess": true,
+                "HasViewEntryPasswordAccess": true,
+                "HasViewTOTPAccess": true,
+                "HasModifyTOTPAccess": false,
+                "CommentPrompts": {
+                 "AskForCommentOnViewPassword": false,
+                 "AskForCommentOnViewOffline": false,
+                 "AskForCommentOnModifyEntries": false,
+                 "AskForCommentOnMoveEntries": false,
+                 "AskForCommentOnMoveFolders": false,
+                 "AskForCommentOnModifyFolders": false
+                },
+                "Id": "{entry:deep0}",
+                "Name": "ledger-prod database user",
+                "Username": "ledger_app",
+                "Password": null,
+                "Url": "postgres://ledger-prod-db.tidewater.internal:5432/ledger",
+                "Notes": "",
+                "GroupId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases}",
+                "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+                "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+                "Expires": null,
+                "TOTPIssuer": null,
+                "TOTPSecret": null,
+                "TOTPDigits": 0,
+                "TOTPPeriod": 0
+               }
+              ],
+              "Tags": [],
+              "HasModifyEntriesAccess": false,
+              "HasViewEntryContentsAccess": true,
+              "HasExportAccess": false,
+              "HasViewOfflineAccess": false,
+              "CommentPrompts": {
+               "AskForCommentOnViewPassword": false,
+               "AskForCommentOnViewOffline": false,
+               "AskForCommentOnModifyEntries": false,
+               "AskForCommentOnMoveEntries": false,
+               "AskForCommentOnMoveFolders": false,
+               "AskForCommentOnModifyFolders": false
+              },
+              "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Databases}",
+              "Name": "Databases",
+              "ParentId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod}",
+              "Notes": null,
+              "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+              "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+              "Expires": null
+             },
+             {
+              "CustomUserFields": {},
+              "CustomApplicationFields": {},
+              "Children": [],
+              "Credentials": [
+               {
+                "CustomUserFields": {
+                 "Key id": "ledger-prod-2026",
+                 "Algorithm": "RS256"
+                },
+                "CustomApplicationFields": {},
+                "Attachments": [],
+                "Tags": [],
+                "HasModifyEntriesAccess": false,
+                "HasViewEntryContentsAccess": true,
+                "HasViewEntryPasswordAccess": true,
+                "HasViewTOTPAccess": true,
+                "HasModifyTOTPAccess": false,
+                "CommentPrompts": {
+                 "AskForCommentOnViewPassword": false,
+                 "AskForCommentOnViewOffline": false,
+                 "AskForCommentOnModifyEntries": false,
+                 "AskForCommentOnMoveEntries": false,
+                 "AskForCommentOnMoveFolders": false,
+                 "AskForCommentOnModifyFolders": false
+                },
+                "Id": "{entry:deep1}",
+                "Name": "ledger-prod API signing key",
+                "Username": "",
+                "Password": null,
+                "Url": "",
+                "Notes": "",
+                "GroupId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Keys}",
+                "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+                "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+                "Expires": null,
+                "TOTPIssuer": null,
+                "TOTPSecret": null,
+                "TOTPDigits": 0,
+                "TOTPPeriod": 0
+               }
+              ],
+              "Tags": [],
+              "HasModifyEntriesAccess": false,
+              "HasViewEntryContentsAccess": true,
+              "HasExportAccess": false,
+              "HasViewOfflineAccess": false,
+              "CommentPrompts": {
+               "AskForCommentOnViewPassword": false,
+               "AskForCommentOnViewOffline": false,
+               "AskForCommentOnModifyEntries": false,
+               "AskForCommentOnMoveEntries": false,
+               "AskForCommentOnMoveFolders": false,
+               "AskForCommentOnModifyFolders": false
+              },
+              "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod/Keys}",
+              "Name": "Keys",
+              "ParentId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod}",
+              "Notes": null,
+              "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+              "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+              "Expires": null
+             }
+            ],
+            "Credentials": [],
+            "Tags": [],
+            "HasModifyEntriesAccess": false,
+            "HasViewEntryContentsAccess": true,
+            "HasExportAccess": false,
+            "HasViewOfflineAccess": false,
+            "CommentPrompts": {
+             "AskForCommentOnViewPassword": false,
+             "AskForCommentOnViewOffline": false,
+             "AskForCommentOnModifyEntries": false,
+             "AskForCommentOnMoveEntries": false,
+             "AskForCommentOnMoveFolders": false,
+             "AskForCommentOnModifyFolders": false
+            },
+            "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger/Prod}",
+            "Name": "Prod",
+            "ParentId": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger}",
+            "Notes": null,
+            "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+            "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+            "Expires": null
+           }
+          ],
+          "Credentials": [],
+          "Tags": [],
+          "HasModifyEntriesAccess": false,
+          "HasViewEntryContentsAccess": true,
+          "HasExportAccess": false,
+          "HasViewOfflineAccess": false,
+          "CommentPrompts": {
+           "AskForCommentOnViewPassword": false,
+           "AskForCommentOnViewOffline": false,
+           "AskForCommentOnModifyEntries": false,
+           "AskForCommentOnMoveEntries": false,
+           "AskForCommentOnMoveFolders": false,
+           "AskForCommentOnModifyFolders": false
+          },
+          "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services/ledger}",
+          "Name": "ledger",
+          "ParentId": "{folder:Tidewater/Engineering/Teams/Backend/Services}",
+          "Notes": null,
+          "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+          "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+          "Expires": null
+         }
+        ],
+        "Credentials": [],
+        "Tags": [],
+        "HasModifyEntriesAccess": false,
+        "HasViewEntryContentsAccess": true,
+        "HasExportAccess": false,
+        "HasViewOfflineAccess": false,
+        "CommentPrompts": {
+         "AskForCommentOnViewPassword": false,
+         "AskForCommentOnViewOffline": false,
+         "AskForCommentOnModifyEntries": false,
+         "AskForCommentOnMoveEntries": false,
+         "AskForCommentOnMoveFolders": false,
+         "AskForCommentOnModifyFolders": false
+        },
+        "Id": "{folder:Tidewater/Engineering/Teams/Backend/Services}",
+        "Name": "Services",
+        "ParentId": "{folder:Tidewater/Engineering/Teams/Backend}",
+        "Notes": null,
+        "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+        "Expires": null
+       }
+      ],
+      "Credentials": [],
+      "Tags": [],
+      "HasModifyEntriesAccess": false,
+      "HasViewEntryContentsAccess": true,
+      "HasExportAccess": false,
+      "HasViewOfflineAccess": false,
+      "CommentPrompts": {
+       "AskForCommentOnViewPassword": false,
+       "AskForCommentOnViewOffline": false,
+       "AskForCommentOnModifyEntries": false,
+       "AskForCommentOnMoveEntries": false,
+       "AskForCommentOnMoveFolders": false,
+       "AskForCommentOnModifyFolders": false
+      },
+      "Id": "{folder:Tidewater/Engineering/Teams/Backend}",
+      "Name": "Backend",
+      "ParentId": "{folder:Tidewater/Engineering/Teams}",
+      "Notes": null,
+      "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+      "Expires": null
+     }
+    ],
+    "Credentials": [],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Engineering/Teams}",
+    "Name": "Teams",
+    "ParentId": "{folder:Tidewater/Engineering}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   }
+  ],
+  "Credentials": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasExportAccess": false,
+  "HasViewOfflineAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{folder:Tidewater/Engineering}",
+  "Name": "Engineering",
+  "ParentId": "{folder:Tidewater}",
+  "Notes": null,
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/folders/{folder:Tidewater/Engineering}?recurseLevel=10"
+ }
+}

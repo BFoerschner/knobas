@@ -16,8 +16,9 @@
 //! ```
 //!
 //! So P3's documented escape hatch is the one in force: the surface is split
-//! into `sync_now` (no channel) and `sync_now_with_progress` (channel
-//! required). A compile error cannot itself be a `#[test]`, so the verdict is
+//! into `sync_now` (no channel) and a command whose channel is required
+//! (`sync_now_with_progress` until ux31 retired it with the first-run wizard,
+//! `watch_sync` today). A compile error cannot itself be a `#[test]`, so the verdict is
 //! pinned here three ways that *can* run:
 //!
 //! 1. [`the_optional_channel_is_not_a_decodable_argument`] asks the trait
@@ -27,8 +28,8 @@
 //! 2. [`the_two_argument_shapes_decode_as_the_split_needs`] drives both shapes
 //!    through the real IPC pipeline: `{ sourceId }` alone, and `{ sourceId }`
 //!    with and without a channel where one is required.
-//! 3. [`both_halves_of_sync_now_are_registered_and_reachable`] checks that the
-//!    app's own two commands are in the handler list and dispatch.
+//! 3. [`every_sources_command_is_registered_and_reachable`] checks that the
+//!    app's own commands of both shapes are in the handler list and dispatch.
 //!
 //! Why (2) and (3) are separate: a `#[tauri::command]` resolves its arguments
 //! in declaration order, and both real commands take `app: AppHandle<R>` and
@@ -132,7 +133,7 @@ fn the_optional_channel_is_not_a_decodable_argument() {
 /// them so that argument decoding is the only thing that can fail.
 ///
 /// They are not the app's commands -- those are exercised by
-/// [`both_halves_of_sync_now_are_registered_and_reachable`] -- but they are the
+/// [`every_sources_command_is_registered_and_reachable`] -- but they are the
 /// app's *signatures*, minus the state argument that would stop a mock call
 /// before `progress` is reached.
 mod shapes {
@@ -144,7 +145,7 @@ mod shapes {
         Ok(source_id)
     }
 
-    /// `sync_now_with_progress`'s shape: a channel, required.
+    /// `watch_sync`'s shape: a channel, required.
     ///
     /// It sends on the channel rather than only accepting one, so the test
     /// covers the whole round trip -- a `SyncProgress` that decoded as an
@@ -220,7 +221,6 @@ fn invoke_managing(
             knobas_app::commands::sources::test_source,
             knobas_app::commands::sources::credential_health,
             knobas_app::commands::sources::sync_now,
-            knobas_app::commands::sources::sync_now_with_progress,
             knobas_app::commands::sources::backfill_source,
             knobas_app::commands::sources::sync_all,
             knobas_app::commands::sources::sync_status,
@@ -369,10 +369,6 @@ fn every_sources_command_is_registered_and_reachable() {
         ("test_source", serde_json::json!({ "draft": draft })),
         ("credential_health", serde_json::json!({})),
         ("sync_now", serde_json::json!({ "sourceId": "mock" })),
-        (
-            "sync_now_with_progress",
-            serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
-        ),
         ("backfill_source", serde_json::json!({ "sourceId": "mock" })),
         ("sync_all", serde_json::json!({})),
         ("sync_status", serde_json::json!({})),
@@ -438,7 +434,11 @@ impl knobas_sync::scheduler::AdapterRegistry for ProbeRegistry {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: Vec::new(),
             config_schema: serde_json::json!({}),
@@ -1049,10 +1049,11 @@ fn app_status_answers_before_the_database_does() {
     );
     assert_eq!(status["demo"], serde_json::json!(true));
     assert_eq!(status["secrets_in_memory"], serde_json::json!(false));
-    // Not "0 sources": nothing has been counted, and claiming a count nobody
-    // took is how a first-run wizard fires at somebody's real corpus.
+    // Nothing has been counted yet, so the count says zero and the shell's
+    // pages read their own lists once the database is up.
     assert_eq!(status["source_count"], serde_json::json!(0));
-    assert_eq!(status["first_run"], serde_json::json!(false));
+    // The first-run wizard and its flag went in ux31: no key to branch on.
+    assert!(status.get("first_run").is_none(), "{status}");
     assert!(
         status["app_version"]
             .as_str()
@@ -1708,6 +1709,7 @@ async fn mock_source(pool: &sqlx::PgPool, id: &str, config: serde_json::Value, e
             config,
             sync_interval_secs: 86_400,
             enabled,
+            sync_by_hand: false,
         },
     )
     .await
@@ -1762,7 +1764,7 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
     let registry = state.registry.clone();
     app.manage(state);
     let refresh = |id: &str| {
-        knobas_app::commands::sources::refresh_entity(app.handle().clone(), id.to_owned())
+        knobas_app::commands::sources::refresh_entity(app.handle().clone(), id.to_owned(), None)
     };
 
     assert_eq!(
@@ -1775,6 +1777,17 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
             .await
             .unwrap();
     assert!(title.is_some(), "the refreshed item is in the mirror");
+    // A page's own ask (the repository page's walk, the pr-state fix) reads the same, in the background lane.
+    assert_eq!(
+        knobas_app::commands::sources::refresh_entity(
+            app.handle().clone(),
+            "mrf:PAY-231".to_owned(),
+            Some(true)
+        )
+        .await
+        .expect("answers"),
+        EntityRefresh::Refreshed
+    );
     assert_eq!(
         refresh("mrf:PAY-99999").await.expect("answers"),
         EntityRefresh::Gone
@@ -1889,4 +1902,20 @@ async fn a_tone_override_is_announced_on_the_activity_event() {
     let (answer, lines) = invoke_watching("state_colours", serde_json::json!({}));
     assert_eq!(failure(&answer)["origin"], "adapter", "{answer}");
     assert!(lines.is_empty(), "a read announces nothing");
+}
+
+/// The boot screen's count of sources is the table's (the ux30 end gate's mutants: a count fixed at one went
+/// unseen, since the status test runs before any database).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_source_count_is_how_many_sources_are_configured() {
+    let pool = knobas_db::test_util::scratch_database("source-count")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto this test's own database");
+    assert_eq!(knobas_app::settings::source_count(&pool).await.unwrap(), 0);
+    crate::support::source_config(&pool, "jira", "jira", "Jira", &serde_json::json!({})).await;
+    crate::support::source_config(&pool, "wiki", "confluence", "Wiki", &serde_json::json!({}))
+        .await;
+    assert_eq!(knobas_app::settings::source_count(&pool).await.unwrap(), 2);
 }

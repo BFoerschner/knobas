@@ -10,7 +10,7 @@ use chrono::Utc;
 use knobas_app::commands::entity::list_entities_inner;
 use knobas_app::link_sets::{self, LinkSetDraft, LinkSetMember, LinkSetRule};
 use knobas_app::sources::Registry;
-use knobas_app::sources::state_colours::{self, KindStateColours, ToneOrigin};
+use knobas_app::sources::state_colours::{self, KindStateColours, Owed, SeenCounter, ToneOrigin};
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_core::inbox::{Category, Shelf};
 use knobas_core::payload::StateChip;
@@ -114,6 +114,7 @@ fn filter(sources: &[&str], kinds: &[&str]) -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: None,
+        parent: None,
     }
 }
 
@@ -207,6 +208,11 @@ async fn set_dot(pool: &PgPool, pipeline: &str, on: &str) -> Option<Tone> {
     .await
     .unwrap();
     tone_of(saved.set.members[0].state.clone())
+}
+
+/// A counter of seen words of the test's own, as the lifecycle holds one.
+fn counter() -> SeenCounter {
+    SeenCounter::new(std::sync::Arc::new(Registry::for_process()))
 }
 
 async fn set(pool: &PgPool, kind: &str, word: &str, choice: ToneChoice) {
@@ -437,7 +443,7 @@ async fn the_read_offers_declared_then_seen_words_and_never_finished() {
     build(&pool, "Ledger_Build", 1, "finished", "SUCCESS").await;
     set(&pool, "build", "FAILURE", ToneChoice::Warn).await;
 
-    let kinds = state_colours::read(&pool, &Registry::for_process())
+    let kinds = state_colours::read(&pool, &Registry::for_process(), &counter())
         .await
         .unwrap();
 
@@ -530,7 +536,7 @@ async fn the_read_reports_a_seen_statuss_category_tone() {
     }
     set(&pool, "ticket", "Parked", ToneChoice::Err).await;
 
-    let kinds = state_colours::read(&pool, &Registry::for_process())
+    let kinds = state_colours::read(&pool, &Registry::for_process(), &counter())
         .await
         .unwrap();
     assert_eq!(
@@ -588,7 +594,7 @@ async fn the_read_reports_a_seen_statuss_category_tone() {
 #[tokio::test]
 async fn a_kind_reads_its_category_before_any_status_is_seen() {
     let pool = pool("state_colours_category_unseen").await;
-    let kinds = state_colours::read(&pool, &Registry::for_process())
+    let kinds = state_colours::read(&pool, &Registry::for_process(), &counter())
         .await
         .unwrap();
     let ticket = kinds.iter().find(|k| k.kind == "ticket").unwrap();
@@ -630,7 +636,7 @@ async fn a_seen_statuss_category_tone_counts_its_items_that_draw_none() {
         )
         .await;
     }
-    let kinds = state_colours::read(&pool, &Registry::for_process())
+    let kinds = state_colours::read(&pool, &Registry::for_process(), &counter())
         .await
         .unwrap();
     let ticket = &kinds.iter().find(|k| k.kind == "ticket").unwrap().words;
@@ -683,4 +689,246 @@ async fn search_tone_any(pool: &PgPool) {
     )
     .await
     .unwrap();
+}
+
+/// A Jira ticket with a status and, unless `None`, its category.
+async fn ticket(pool: &PgPool, source: &str, key: &str, status: &str, category: Option<&str>) {
+    let mut fields = serde_json::json!({ "status": { "name": status } });
+    if let Some(category) = category {
+        fields["status"]["statusCategory"] = serde_json::json!({ "key": category, "name": "x" });
+    }
+    mirrored(
+        pool,
+        source,
+        "ticket",
+        key,
+        key,
+        serde_json::json!({ "key": key, "fields": fields }),
+    )
+    .await;
+}
+
+/// Every configured Jira's counted words, read as the command reads them.
+fn jiras() -> Vec<knobas_core::state_colours::SourceWords> {
+    use knobas_sync::scheduler::AdapterRegistry as _;
+    let jira = Registry::for_process()
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == "jira")
+        .expect("the Jira adapter")
+        .payload_paths;
+    ["jira", "jira2"]
+        .iter()
+        .filter_map(|id| knobas_core::state_colours::SourceWords::of(id, &jira))
+        .collect()
+}
+
+/// The stored count answers what the walk over the mirror answered
+/// (`knobas_core::state_colours::seen_words`, the oracle, as the board's
+/// `OBSERVED_STATUSES` is held to its joined read): every word, padded or
+/// not, each with the most common fallback among its items across two
+/// Jiras, a tie going to no tone and then to the tone's word, a withdrawn
+/// ticket's status nowhere, a non-string status no word.
+#[tokio::test]
+async fn the_stored_words_are_what_the_walk_over_the_mirror_finds() {
+    use knobas_sync::scheduler::AdapterRegistry as _;
+    let pool = pool("state_colours_stored_oracle").await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira2', 'jira', 'jira2', 'http://y.example', 'Pat', '{}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (source, key, status, category) in [
+        ("jira", "A-1", "Review", Some("new")),
+        ("jira", "A-2", "Review", Some("new")),
+        ("jira2", "B-1", "Review", Some("indeterminate")),
+        ("jira", "A-3", "Testing", Some("indeterminate")),
+        ("jira2", "B-2", "Testing", Some("done")),
+        ("jira", "A-4", " Padded ", Some("done")),
+        ("jira2", "B-3", "Padded", None),
+        ("jira", "A-5", "Tied", Some("done")),
+        ("jira", "A-6", "Tied", Some("indeterminate")),
+        ("jira", "A-7", "Done", Some("done")),
+        ("jira", "A-8", "Gone", Some("done")),
+        ("jira2", "B-4", "Unknown", Some("weird")),
+    ] {
+        ticket(&pool, source, key, status, category).await;
+    }
+    mirrored(
+        &pool,
+        "jira",
+        "ticket",
+        "A-9",
+        "A-9",
+        serde_json::json!({ "key": "A-9", "fields": { "status": { "name": 7 } } }),
+    )
+    .await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = 'jira:A-8'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let sources = jiras();
+    let open: Vec<knobas_core::state_colours::OpenPath> = sources
+        .iter()
+        .flat_map(|s| {
+            s.kinds
+                .iter()
+                .map(|k| knobas_core::state_colours::OpenPath {
+                    source_id: s.source_id.clone(),
+                    kind: k.kind.clone(),
+                    at: k.at.clone(),
+                })
+        })
+        .collect();
+    let jira = Registry::for_process()
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == "jira")
+        .unwrap()
+        .payload_paths;
+    let fallback = ["jira", "jira2"]
+        .iter()
+        .fold(knobas_core::payload::Declarations::empty(), |d, id| {
+            d.with(*id, knobas_core::state_colours::fallback(&jira))
+        });
+    let walked = knobas_core::state_colours::seen_words(&pool, &open, &fallback)
+        .await
+        .unwrap();
+    for source in &sources {
+        knobas_core::state_colours::count_seen_words(&pool, source)
+            .await
+            .unwrap();
+    }
+    let stored = knobas_core::state_colours::stored_seen_words(&pool, &sources)
+        .await
+        .unwrap();
+    assert_eq!(stored, walked);
+    assert_eq!(
+        walked
+            .iter()
+            .map(|w| (w.word.as_str(), w.fallback))
+            .collect::<Vec<_>>(),
+        [
+            ("Done", Some(Tone::Ok)),
+            ("Padded", None),
+            ("Review", None),
+            ("Testing", Some(Tone::Info)),
+            ("Tied", Some(Tone::Info)),
+            ("Unknown", None),
+        ],
+        "the oracle itself: the cases above are the ones it decides"
+    );
+}
+
+/// **The read walks no item** (the state-colours bug, 2026-11-17: 2.5 s to
+/// 14 s over 20,007 Jira tickets, on every open and every move). Once a
+/// source is counted, the read answers from the count: a status written
+/// straight into the mirror since is not offered until a count of the source
+/// is asked for, as a run that wrote asks; a set answers from the count too.
+/// A source counted under other declarations is counted again.
+#[tokio::test]
+async fn the_read_answers_from_the_count_and_walks_no_item() {
+    let pool = pool("state_colours_read_plan").await;
+    let counter = counter();
+    ticket(&pool, "jira", "A-1", "Review", Some("new")).await;
+    let read = async |pool: &PgPool| {
+        words(
+            &state_colours::read(pool, &Registry::for_process(), &counter)
+                .await
+                .unwrap(),
+            "ticket",
+        )
+    };
+    assert!(
+        read(&pool).await.contains(&"Review".to_owned()),
+        "counted on the first read"
+    );
+
+    ticket(&pool, "jira", "A-2", "Shelved", Some("new")).await;
+    assert!(
+        !read(&pool).await.contains(&"Shelved".to_owned()),
+        "a counted source's read reads its count, not the mirror"
+    );
+
+    counter
+        .wait(counter.request(&pool, Owed::Source("jira".to_owned())))
+        .await;
+    assert!(
+        read(&pool).await.contains(&"Shelved".to_owned()),
+        "counted again on request"
+    );
+
+    ticket(&pool, "jira", "A-3", "Parked", Some("new")).await;
+    sqlx::query("update sync.state_word_source set paths = '[]'::jsonb where source_id = 'jira'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        read(&pool).await.contains(&"Parked".to_owned()),
+        "a count made under other declarations is made again"
+    );
+}
+
+/// A run that ends OK having written, or not saying, asks for its source's
+/// count; one that wrote nothing, a failed one, and one still running do
+/// not; a landed write asks for its source's.
+#[tokio::test]
+async fn a_run_that_wrote_counts_its_sources_words_again() {
+    use knobas_sync::scheduler::SyncEvents;
+    use knobas_sync::{SourceSyncStatus, SyncOutcome};
+
+    struct Quiet;
+    impl SyncEvents for Quiet {
+        fn sync_state(&self, _status: SourceSyncStatus) {}
+        fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+        fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    }
+    let pool = pool("state_colours_count_on_sync").await;
+    let counter = counter();
+    let events = state_colours::CountOnSync::new(Quiet, counter.clone(), pool.clone());
+    ticket(&pool, "jira", "A-1", "Review", Some("new")).await;
+    let seen = async |pool: &PgPool, counter: &SeenCounter| -> Vec<String> {
+        // Answered once every count asked before it has ended.
+        counter.wait(counter.request(pool, Owed::Stale)).await;
+        let stored: Vec<(String,)> = sqlx::query_as(
+            "select word from sync.state_word_seen where source_id = 'jira' order by 1",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        stored.into_iter().map(|(w,)| w).collect()
+    };
+    assert_eq!(seen(&pool, &counter).await, ["Review"]);
+
+    let ended = |wrote: Option<bool>, outcome: SyncOutcome| {
+        let mut status = SourceSyncStatus::finished("jira", 7, outcome);
+        status.last_changed = wrote;
+        status
+    };
+    ticket(&pool, "jira", "A-2", "Shelved", Some("new")).await;
+    events.sync_state(ended(Some(false), SyncOutcome::Ok));
+    events.sync_state(ended(Some(true), SyncOutcome::Error));
+    assert_eq!(
+        seen(&pool, &counter).await,
+        ["Review"],
+        "nothing written, or nothing kept"
+    );
+
+    events.sync_state(ended(Some(true), SyncOutcome::Ok));
+    assert_eq!(
+        seen(&pool, &counter).await,
+        ["Review", "Shelved"],
+        "a run that wrote"
+    );
+
+    ticket(&pool, "jira", "A-3", "Parked", Some("new")).await;
+    events.sync_state(ended(None, SyncOutcome::Ok));
+    assert_eq!(
+        seen(&pool, &counter).await,
+        ["Parked", "Review", "Shelved"],
+        "a run that cannot say"
+    );
 }

@@ -174,3 +174,146 @@ async fn an_author_is_mine_when_it_is_the_sources_configured_username() {
     assert!(of(&facts, &branch).mine);
     assert!(!of(&facts, &unconfigured).mine);
 }
+
+/// A pull request's opener is named as a ticket's people are (F-107): the
+/// profile's name Gitea keeps on the record, through the declared
+/// `reporter_name`, beside the account `mine` compares. A blank name, as
+/// Gitea writes for a profile with none, is no name, and the reader draws
+/// the account.
+#[tokio::test]
+async fn a_pull_requests_opener_is_named_by_the_profile() {
+    let pool = pool().await;
+    let src = gitea(&pool, "mara.lindqvist").await;
+    let pr = |login: &str, name: &str| serde_json::json!({ "state": "open", "user": { "login": login, "full_name": name } });
+    let named = item(
+        &pool,
+        &src,
+        "tidewater/payout-service#142",
+        "pr",
+        Some("jonas.becker"),
+        pr("jonas.becker", "Jonas Becker"),
+    )
+    .await;
+    let blank = item(
+        &pool,
+        &src,
+        "tidewater/payout-service#143",
+        "pr",
+        Some("tom"),
+        pr("tom", "  "),
+    )
+    .await;
+    let mine = item(
+        &pool,
+        &src,
+        "tidewater/payout-service#144",
+        "pr",
+        Some("mara.lindqvist"),
+        pr("mara.lindqvist", "Mara Lindqvist"),
+    )
+    .await;
+
+    let facts = code_facts_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &[named.clone(), blank.clone(), mine.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(of(&facts, &named).author.as_deref(), Some("jonas.becker"));
+    assert_eq!(
+        of(&facts, &named).author_name.as_deref(),
+        Some("Jonas Becker")
+    );
+    assert_eq!(of(&facts, &blank).author_name, None);
+    assert_eq!(
+        of(&facts, &mine).author_name.as_deref(),
+        Some("Mara Lindqvist")
+    );
+    assert!(of(&facts, &mine).mine, "mine still compares the account");
+}
+
+/// A pull request's labels reach its page as a ticket's reach its card
+/// (#2400): through the `labels` path Gitea now declares for a pull request
+/// too. On the live products *Kind/Bug* reached the mirror and `get_entity`
+/// answered `labels: null`.
+#[tokio::test]
+async fn a_pull_requests_detail_carries_its_labels() {
+    let pool = pool().await;
+    let src = gitea(&pool, "mara").await;
+    let labelled = item(
+        &pool,
+        &src,
+        "tidewater/ledger-api#139",
+        "pr",
+        Some("mara"),
+        serde_json::json!({ "state": "open", "labels": [{ "id": 3, "name": "Kind/Bug" }] }),
+    )
+    .await;
+    let detail = knobas_app::commands::entity::get_entity_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &labelled,
+    )
+    .await
+    .unwrap();
+    assert_eq!(detail.labels.as_deref(), Some(&["Kind/Bug".to_owned()][..]));
+}
+
+/// A branch's tip author is named by the name the branch record gives, the
+/// one git recorded, beside the login `mine` compares (F-107, after the live
+/// run on #2479: Branches drew *jonas.becker*). A record with no name keeps
+/// the account.
+#[tokio::test]
+async fn a_branch_tips_author_is_named_by_the_record() {
+    let pool = pool().await;
+    let src = gitea(&pool, "mara.lindqvist").await;
+    let tip = |username: &str, name: &str| {
+        serde_json::json!({ "name": "b", "commit": { "id": "c0ffee",
+            "author": { "username": username, "name": name, "email": "x@tidewater.test" } } })
+    };
+    let named = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/x",
+        "branch",
+        Some("jonas.becker"),
+        tip("jonas.becker", "Jonas Becker"),
+    )
+    .await;
+    let mine = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/y",
+        "branch",
+        Some("mara.lindqvist"),
+        tip("mara.lindqvist", "Mara Lindqvist"),
+    )
+    .await;
+    let bare = item(
+        &pool,
+        &src,
+        "tidewater/payout-service@refs/heads/feature/z",
+        "branch",
+        Some("tom"),
+        tip("tom", ""),
+    )
+    .await;
+    let facts = code_facts_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &[named.clone(), mine.clone(), bare.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        of(&facts, &named).author_name.as_deref(),
+        Some("Jonas Becker")
+    );
+    assert_eq!(
+        of(&facts, &mine).author_name.as_deref(),
+        Some("Mara Lindqvist")
+    );
+    assert!(of(&facts, &mine).mine, "mine still compares the login");
+    assert_eq!(of(&facts, &bare).author_name, None);
+}

@@ -57,3 +57,18 @@ test("a pipeline goes by its name, else by its steps", () => {
     "base64 decode → pretty-print JSON",
   );
 });
+
+test("an output of bytes a renderer draws is a binary diff of the two outputs, kept for the stage (ux26)", () => {
+  const png = (tag: number): PipeRun => ({ outcome: "done", name: "flow.png", output: { kind: "bytes", base64: btoa(String.fromCharCode(0x89, 0x50, tag)), size: 3 } });
+  const got = pipedDiff({ ...RAW, path: "img/flow.png.gz" }, png(1), png(2), (name) => name.endsWith(".png"));
+  expect(got.kind).toBe("diff");
+  if (got.kind !== "diff") return;
+  expect(got.name).toBe("flow.png");
+  expect(got.file.change).toBe("binary");
+  expect(got.file.hunks).toEqual([]);
+  expect([...(got.sides.old as Uint8Array)]).toEqual([0x89, 0x50, 1]);
+  expect([...(got.sides.new as Uint8Array)]).toEqual([0x89, 0x50, 2]);
+  // Text outputs keep their text for the stage too.
+  const text = pipedDiff(RAW, done("a\n"), done("b\n"));
+  expect(text.kind === "diff" && text.sides).toEqual({ old: "a", new: "b" });
+});

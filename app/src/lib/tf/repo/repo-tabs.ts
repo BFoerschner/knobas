@@ -20,7 +20,7 @@
  */
 import { litTab, readRepoRoute, repoHash, type RepoRoute, type RepoTabId } from "./repo";
 
-export const SLOTS = ["files", "commits", "commit", "branches", "compare", "prs", "local"] as const;
+export const SLOTS = ["files", "commits", "commit", "branches", "compare", "prs", "builds", "local"] as const;
 export type TabSlot = (typeof SLOTS)[number];
 
 /** The slot an address of the repository page draws. */
@@ -41,6 +41,8 @@ export interface KeptTabs {
   order: readonly TabSlot[];
   /** Each slot's re-read count; never reset inside one repository, so a count never moves back. */
   reads: Partial<Record<TabSlot, number>>;
+  /** Slots built ahead of their press ({@link holdSlot}) and not shown yet: the first show is their first read's, not a return. */
+  ahead?: readonly TabSlot[];
 }
 
 export const NO_TABS: KeptTabs = { repoId: null, at: null, places: {}, order: [], reads: {} };
@@ -59,10 +61,31 @@ export function visit(held: KeptTabs, rest: readonly string[], at: string | null
   const branched = at !== held.at;
   const places = branched ? {} : { ...held.places };
   const order = branched ? [] : held.order.filter((one) => one !== slot);
-  const back = !branched && shown !== slot && same(held.places[slot], rest);
+  // A slot built ahead has just read what it draws: its first show is not a return that reads again.
+  const early = !branched && (held.ahead ?? []).includes(slot);
+  const back = !branched && !early && shown !== slot && same(held.places[slot], rest);
   const reads = { ...held.reads, [slot]: (held.reads[slot] ?? 0) + (back ? 1 : 0) };
   places[slot] = rest;
-  return { repoId: held.repoId, at, places, order: [...order, slot], reads };
+  const ahead = branched ? [] : (held.ahead ?? []).filter((one) => one !== slot);
+  return { repoId: held.repoId, at, places, order: [...order, slot], reads, ...(ahead.length > 0 ? { ahead } : {}) };
+}
+
+/**
+ * The slot `rest` names built ahead of its press, hidden (Fable's ruling, the compare-first-open pass, 2026-11-20): first
+ * in `order`, so the slot shown stays shown, and marked {@link KeptTabs.ahead} until it is. Its press is then a return
+ * that reads nothing again: one style pass and one layout. A slot held already, or another repository's, stays as it is.
+ */
+export function holdSlot(held: KeptTabs, rest: readonly string[]): KeptTabs {
+  const route = readRepoRoute(rest);
+  const slot = slotOf(route);
+  if (route.repoId !== held.repoId || held.places[slot] !== undefined || held.order.length === 0) return held;
+  return {
+    ...held,
+    places: { ...held.places, [slot]: rest },
+    order: [slot, ...held.order],
+    reads: { ...held.reads, [slot]: held.reads[slot] ?? 0 },
+    ahead: [...(held.ahead ?? []), slot],
+  };
 }
 
 /** The shown slot reads again: the page's refresh, or the page shown again. */

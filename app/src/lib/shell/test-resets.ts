@@ -19,6 +19,40 @@
 
 /** `path under src/lib#exported name` -> the reset. */
 export const RESETS: Record<string, () => Promise<void>> = {
+  // The XML view's folds and what was asked, kept while the window lives (its design, sections 8 and 23): each test starts with none.
+  "tf/render/doc/doc.svelte.ts#kept": async () => (await import("../tf/render/doc/doc.svelte")).forgetFolds(),
+  "tf/render/doc/doc-check.svelte.ts#stopped": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetStopped(),
+  // What checks hold from one document to the next (the schema session cache, 2026-11-24): the Settings the next starts
+  // on, the asks seen whole (and with them the departures' lines). Each test reads its own.
+  "tf/render/doc/doc-check.svelte.ts#lastSettings": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
+  "tf/render/doc/doc-check.svelte.ts#seenWhole": async () => (await import("../tf/render/doc/doc-check.svelte")).forgetHeld(),
+  // An example's settings, held until knobas quits by schema (E1), and what the header says of an opened one.
+  "tf/render/xsd/example-held.svelte.ts#held": async () => (await import("../tf/render/xsd/example-held.svelte")).forgetHeld(),
+  // The hosts a change was confirmed for, until knobas quits (ux31, ADR-0057): each test asks afresh.
+  "tf/render/oas.svelte.ts#confirmedHosts": async () => (await import("../tf/render/oas.svelte")).confirmedHosts.clear(),
+  // The Passwords page's one read, the folds opened and what the clipboard holds (ADR-0056): each test starts with none.
+  "tf/passwords/held.svelte.ts#kept": async () => (await import("../tf/passwords/held.svelte")).forgetHeld(),
+  "tf/passwords/held.svelte.ts#folds": async () => (await import("../tf/passwords/held.svelte")).forgetHeld(),
+  "tf/passwords/clip.svelte.ts#held": async () => (await import("../tf/passwords/clip.svelte")).resetClip(),
+  "tf/passwords/clip.svelte.ts#started": async () => (await import("../tf/passwords/clip.svelte")).resetClip(),
+  // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
+  // A launcher row's hand-over to the page it opens (the everything-search decisions, D12): forgotten between tests.
+  "tf/arrival.svelte.ts#held": async () => (await import("../tf/arrival.svelte")).arrival.clear(),
+  "shell/windowed.svelte.ts#unplaced": async () => (await import("./windowed.svelte")).placeWindowsNow(),
+  // The lists waiting two frames to draw their overscan below the view (the sizes pass, 2026-11-15): grown now, and the
+  // wait for those frames let go, so the next test's lists wait for frames of their own.
+  "shell/windowed.svelte.ts#ungrown": async () => (await import("./windowed.svelte")).growWindowsNow(),
+  "shell/windowed.svelte.ts#growWait": async () => (await import("./windowed.svelte")).growWindowsNow(),
+  // The jump landing now (the compare-jump-speed pass, 2026-11-18): it ends with the grow, so the next test's lists are
+  // born in none.
+  "shell/windowed.svelte.ts#jumping": async () => (await import("./windowed.svelte")).growWindowsNow(),
+  // Each attached list's read of the view, for a landing (the compare-jump pass, 2026-11-17): a list leaves it as it is
+  // torn down; one a test left attached is let go, so the next test's landing reads none of it.
+  "shell/windowed.svelte.ts#viewReads": async () => (await import("./windowed.svelte")).forgetViewReads(),
+  // How many dialogs are open (PR #2479): a test that left one drawn would keep the toasts lowered for the next.
+  "tf/modals.svelte.ts#modals": async () => {
+    (await import("../tf/modals.svelte")).modals.open = 0;
+  },
   // The detail's session memory (#693): each test is a fresh session, or a
   // test would open on the entity the previous one left drawn.
   "detail/view-read.ts#viewMemory": async () => (await import("../detail/view-read")).viewMemory.clear(),
@@ -28,17 +62,86 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
   // Split or unified (#2266), stored in `localStorage`: each test starts unified.
   "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
+  // The band's *Rendered* and an image's mode in a rendered diff (ux26): off and side by side again.
+  "tf/diff/diff-rendered.svelte.ts#diffRendered": async () => (await import("../tf/diff/diff-rendered.svelte")).diffRendered.reset(),
+  "tf/repo/cloned-here.svelte.ts#known": async () => (await import("../tf/repo/cloned-here.svelte")).forgetCheckouts(),
+  "tf/diff/image-mode.svelte.ts#imageMode": async () => (await import("../tf/diff/image-mode.svelte")).imageMode.set("sides"),
+  // How a changed class in a JAR's comparison is diffed (2026-11-22), stored in `localStorage`: each test starts on Source.
+  "tf/diff/class-mode.svelte.ts#classMode": async () => (await import("../tf/diff/class-mode.svelte")).classMode.reset(),
+  // The decompiles waiting their turn: a test's held one never blocks the next test's.
+  "tf/diff/TfJarDiff.svelte#queue": async () => (await import("../tf/diff/TfJarDiff.svelte")).forgetDecompileQueue(),
+  // Each role's face and size, and code's ligatures (2026-11-16, 2026-11-18), stored in `localStorage` and written on
+  // <html>: each test starts on the bundled faces at 100 % with no ligatures, and reads the installed fonts afresh.
+  "tf/fonts.svelte.ts#fonts": async () => (await import("../tf/fonts.svelte")).fonts.reset(),
+  // The two slots' themes, a person's own, and how a diff's unchanged lines draw (ADR-0051), stored in `localStorage`
+  // and written on <html>: each test starts on the knobas pair with nothing kept.
+  // Settings' folded parents (the subtrees ruling, 2026-11-21), stored in `localStorage`: each test starts with all open.
+  "tf/settings/settings-folds.svelte.ts#settingsFolds": async () => (await import("../tf/settings/settings-folds.svelte")).settingsFolds.reset(),
+  // The highlighter chosen (the highlighter re-ruling, 2026-11-21), stored in `localStorage`: each test starts on Pierre.
+  "tf/highlighter.svelte.ts#highlighter": async () => (await import("../tf/highlighter.svelte")).highlighter.reset(),
+  "tf/themes.svelte.ts#themes": async () => (await import("../tf/themes.svelte")).themes.reset(),
+  // Colour-blind mode (2026-11-22), stored in `localStorage`: each test starts with it off.
+  "tf/colour-blind.svelte.ts#colourBlind": async () => (await import("../tf/colour-blind.svelte")).colourBlind.reset(),
+  "tf/settings/TfFontRole.svelte#asked": async () => (await import("../tf/settings/TfFontRole.svelte")).forgetInstalledFonts(),
+  // The menus standing (the stuck menu, ux27, 2026-11-21): a menu leaves as it is torn down; one a test left drawn is
+  // forgotten, so the next test's first menu closes none of it.
+  "tf/TfMenu.svelte#standing": async () => (await import("../tf/TfMenu.svelte")).forgetStandingMenus(),
+  // A ticket's moves and where tickets can go (ADR-0054).
+  "tf/tickets/moves.svelte.ts#ticketNotes": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#moveWaits": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#reading": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#again": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#notePorts": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#seeding": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  "tf/tickets/moves.svelte.ts#offered": async () => (await import("../tf/tickets/moves.svelte")).forgetMoves(),
+  // A ticket's fields and a field's choices, kept by the window (ADR-0054): forgotten between tests.
+  "tf/tickets/fields.svelte.ts#held": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#lastReady": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#inFlight": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#options": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/fields.svelte.ts#optionsInFlight": async () => (await import("../tf/tickets/fields.svelte")).forgetFields(),
+  "tf/tickets/card-fields.svelte.ts#offered": async () => (await import("../tf/tickets/card-fields.svelte")).forgetFieldProviders(),
+  "tf/tickets/reach.svelte.ts#observed": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#failures": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#flying": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#version": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#grants": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  "tf/tickets/reach.svelte.ts#grantsAsked": async () => (await import("../tf/tickets/reach.svelte")).forgetReach(),
+  // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), read from the backend: each test starts on Docs'
+  // own page with every space shown, over the real IPC.
+  "tf/docs/docs-choices.svelte.ts#docsChoices": async () => (await import("../tf/docs/docs-choices.svelte")).docsChoices.forget(),
+  // The window's zoom (2026-11-16), stored in `localStorage`: each test starts at 100 %, nothing kept.
+  "tf/zoom.svelte.ts#zoom": async () => (await import("../tf/zoom.svelte")).zoom.forget(),
+  // The device scale and who hears it change (the zoom, 2026-11-16): each test reads the ratio afresh, with nobody listening.
+  "shell/device-scale.svelte.ts#listeners": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#ratio": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#query": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#armed": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
+  "shell/device-scale.svelte.ts#subscribe": async () => (await import("./device-scale.svelte")).resetDeviceScale(),
   // Titles or Everything (#2430), stored in `localStorage`: each test starts on Titles.
   "launcher/scope.svelte.ts#launcherScope": async () => (await import("../launcher/scope.svelte")).launcherScope.reset(),
   // The keys bound (#2429), read from the backend: each test starts with none.
   "launcher/keys.svelte.ts#launcherKeys": async () => (await import("../launcher/keys.svelte")).launcherKeys.reset(),
   // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
+  "tf/settings/secret-prompt.svelte.ts#secretPrompt": async () => (await import("../tf/settings/secret-prompt.svelte")).resetSecretPrompt(),
+  "tf/drafts.svelte.ts#typed": async () => (await import("../tf/drafts.svelte")).drafts.reset(),
+  // The blocks a press hid for its toast's life (F-356): each test starts with none.
+  "tf/time/held-blocks.svelte.ts#held": async () => (await import("../tf/time/held-blocks.svelte")).resetHeldBlocks(),
+  "tf/time/held-blocks.svelte.ts#dismissals": async () => (await import("../tf/time/held-blocks.svelte")).resetHeldBlocks(),
+  "tf/docs/docs.ts#reading": async () => (await import("../tf/docs/docs")).forgetReading(),
+  // What was typed on a source's page and not saved (F-617): each test starts with none.
+  "tf/settings/source-drafts.svelte.ts#sourceDrafts": async () => (await import("../tf/settings/source-drafts.svelte")).sourceDrafts.reset(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
   // The stack and its dismiss timers, in one reset.
   "shell/toasts.svelte.ts#toasts": async () => (await import("./toasts.svelte")).reset(),
   "shell/toasts.svelte.ts#timers": async () => (await import("./toasts.svelte")).reset(),
+  "shell/toasts.svelte.ts#endings": async () => (await import("./toasts.svelte")).reset(),
+  // An opening's chip, the last press and the chip's timers (ux21), in one reset.
+  "shell/ack.svelte.ts#acks": async () => (await import("./ack.svelte")).resetAcks(),
+  "shell/ack.svelte.ts#last": async () => (await import("./ack.svelte")).resetAcks(),
+  "shell/ack.svelte.ts#timers": async () => (await import("./ack.svelte")).resetAcks(),
   // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
   "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),
@@ -56,7 +159,11 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "inbox/notify.svelte.ts#notifications": async () => (await import("../inbox/notify.svelte")).notifications.reset(),
   "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
   "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
+  // The updater's state in the window (ADR-0052): forgotten between tests.
+  "tf/update.svelte.ts#updates": async () => (await import("../tf/update.svelte")).updates.reset(),
   "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
+  // The sections asked to be held ahead and not yet taken (the ux13-overs pass): a test's asks go with it.
+  "tf/kept-pages.svelte.ts#aheadMoves": async () => void (await import("../tf/kept-pages.svelte")).takeAhead(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   // Two stores in one file, each cleared through its own public door.
@@ -64,31 +171,67 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
-  // The ticket page card's width (#2402), kept in `localStorage`: each test starts at the default.
-  "tf/job/card-width.svelte.ts#cardWidth": async () => (await import("../tf/job/card-width.svelte")).cardWidth.reset(),
+  // What a press elsewhere asked of a ticket's page, taken once it shows the ticket.
+  "tf/job/chosen.svelte.ts#asked": async () => (await import("../tf/job/chosen.svelte")).pageAsk.clear(),
+  // Every sidebar's width (the ticket card's among them, #2402), kept in `localStorage`: each test starts at the defaults.
+  "tf/side-width.svelte.ts#sideWidths": async () => (await import("../tf/side-width.svelte")).sideWidths.resetAll(),
   // A ticket a section view is narrowed to without choosing it (#2401): each test starts with none.
   "tf/job/scoped.svelte.ts#held": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
+  "tf/job/scoped.svelte.ts#before": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
+  "tf/page-open.svelte.ts#pageOpen": async () => (await import("../tf/page-open.svelte")).pageOpen.reset(),
+  "tf/site/site.svelte.ts#siteStore": async () => (await import("../tf/site/site.svelte")).siteStore.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
   "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
+  // *Clone all*'s run and its listener (PR #2479).
+  "tf/openin/clone-all.svelte.ts#cloneAllStore": async () => (await import("../tf/openin/clone-all.svelte")).cloneAllStore.reset(),
   // `forgetEchoes` also stops the follows an echo started.
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
+  // A pull request's state as a write this session queued leaves it (the pr-state fix), and its withdrawal listeners.
+  "tf/pr/pr-state.svelte.ts#moves": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
+  "tf/pr/pr-state.svelte.ts#stops": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
+  "tf/pr/pr-state.svelte.ts#listening": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
   // The default renderer per file pattern (#2263), as the backend answered it.
   "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
   "render/pipelines.svelte.ts#namedPipelines": async () => (await import("../render/pipelines.svelte")).namedPipelines.reset(),
   "render/pipelines.svelte.ts#commandSteps": async () => (await import("../render/pipelines.svelte")).commandSteps.reset(),
+  "render/folders.svelte.ts#folderRenderers": async () => (await import("../render/folders.svelte")).folderRenderers.reset(),
+  "render/folder-picks.svelte.ts#folderPicks": async () => (await import("../render/folder-picks.svelte")).folderPicks.reset(),
+  "render/folders.svelte.ts#marksSeen": async () => (await import("../render/folders.svelte")).resetMarks(),
   "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
   // Each view's filter and fold, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/filter/filter-state.svelte.ts#folds": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
+  "tf/filter/filter-state.svelte.ts#values": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/sets/hints.svelte.ts#putAway": async () => (await import("../tf/sets/hints.svelte")).forgetHints(),
   // A page's session memory, held in its component's `<script module>` (#1983).
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
+  "tf/builds/TfRecent.svelte#kept": async () => (await import("../tf/builds/TfRecent.svelte")).forgetRecent(),
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
+  // Which repositories' headers have looked for a branch to propose (the inner-pages pass).
+  "tf/repo/TfRepo.svelte#searched": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderSearches(),
+  // Each branch's standing the header's looks read, kept for the next look (the inner-6x pass).
+  "tf/repo/TfRepo.svelte#standings": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderLooks(),
+  // The branches' views a look is reading now, shared by a look started again (the ux13 forge-load pass).
+  "tf/repo/TfRepo.svelte#looking": async () => (await import("../tf/repo/TfRepo.svelte")).forgetHeaderReads(),
+  // The commit picker's width as last measured (the inner-6x pass).
+  "tf/pr/TfPrFiles.svelte#pickWidth": async () => (await import("../tf/pr/TfPrFiles.svelte")).forgetPickWidth(),
+  // In plain `.ts` files ({@link UNSCANNED}): the files Files drew, and the views read ahead of a press.
+  "tf/repo/drawn-files.ts#kept": async () => (await import("../tf/repo/drawn-files")).forgetAllDrawnFiles(),
+  "ipc/entity.ts#readsAhead": async () => (await import("../ipc/entity")).forgetReadsAhead(),
+  // The checkouts and a ticket page's reads asked at a press (the ux30 end gate, Windows).
+  "ipc/entity.ts#checkoutsAhead": async () => (await import("../ipc/entity")).forgetCheckoutsAhead(),
+  "tf/job/press-reads.ts#asked": async () => (await import("../tf/job/press-reads")).forgetTicketReads(),
+  // The window's one listener per event (the ux30 end gate, Windows).
+  "ipc/shared-listen.ts#windowListeners": async () => (await import("../ipc/shared-listen")).forgetWindowListeners(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
+  "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
+  "tf/openin/app-drafts.svelte.ts#typedDrafts": async () => (await import("../tf/openin/app-drafts.svelte")).forgetAppDrafts(),
+  "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
@@ -111,7 +254,11 @@ export const NOT_YET_RESET: readonly string[] = [];
  * `view-read.ts`) and components, not other plain `.ts` files. Each must still
  * be a key of {@link RESETS}.
  */
-export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
+export const UNSCANNED: readonly string[] = [
+  // Made by a generic factory and held in a plain `.ts`: the scan reads neither.
+  "tf/drafts.svelte.ts#typed",
+  "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens",
+  "tf/repo/drawn-files.ts#kept", "ipc/entity.ts#readsAhead", "ipc/entity.ts#checkoutsAhead", "tf/job/press-reads.ts#asked", "ipc/shared-listen.ts#windowListeners"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

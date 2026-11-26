@@ -404,7 +404,8 @@ pub(crate) async fn append(
     Ok(written)
 }
 
-/// Delete every sample older than the retention setting reaches back to.
+/// Delete every sample older than the retention setting reaches back to, and
+/// every Monitors half-hour (`0099`) older than two days.
 ///
 /// `now` is a parameter and not a clock, so a fixture can place the horizon --
 /// the shape `knobas_app::time::passive::prune` has, and for its reason.
@@ -424,6 +425,12 @@ pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, sqlx::Error
         .execute(pool)
         .await?
         .rows_affected();
+    // The Monitors tab's half-hours (`0099`) draw the last day only: two days
+    // are kept, whatever the samples' retention.
+    sqlx::query("delete from knobas.monitor_half_hour where at < $1")
+        .bind(now - Duration::days(2))
+        .execute(pool)
+        .await?;
     Ok(taken)
 }
 
@@ -731,7 +738,11 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![knobas_source::KindInfo {
                 id: "ticket".into(),
@@ -740,6 +751,7 @@ mod tests {
                 monogram: "TI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({}),
             payload_paths: Vec::new(),
@@ -753,6 +765,7 @@ mod tests {
             monogram: "MO".into(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         });
         assert_eq!(
             monitor_paths(&descriptor),

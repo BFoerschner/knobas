@@ -206,8 +206,12 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
         // Gitea writes `merged_at` on every pull request, `null` until it is
         // merged; the pull-request view reads its merge time from there.
         "draft": false, "merged": false, "merged_at": null, "comments": comments,
-        "requested_reviewers": [{ "login": "tom", "id": 8 }],
-        "user": { "login": "mara", "id": 7 },
+        "requested_reviewers": [{ "login": "tom", "id": 8, "full_name": "" }],
+        // Gitea's `User` always carries `full_name`, blank where the profile
+        // has none; the descriptor names a pull request's opener by it.
+        "user": { "login": "mara", "id": 7, "full_name": "Mara Lindqvist" },
+        // A pull request's labels, as an issue's (`[]` for none).
+        "labels": [],
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
         // `sha` is the head commit, where the descriptor declares a pull
         // request's commit (#710).
@@ -240,7 +244,8 @@ pub fn issue(number: u64, title: &str, state: &str, labels: &[&str], updated: &s
     json!({
         "id": 100 + number, "number": number, "title": title, "body": "",
         "state": state, "comments": 0, "is_locked": false, "pull_request": null,
-        "user": { "login": "mara", "id": 7 }, "assignee": null, "assignees": null,
+        "user": { "login": "mara", "id": 7, "full_name": "Mara Lindqvist" },
+        "assignee": null, "assignees": null,
         "labels": labels.iter().map(|name| json!({ "id": 1, "name": name, "exclusive": true })).collect::<Vec<_>>(),
         "milestone": null,
         "html_url": format!("https://gitea.example/tidewater/payout-service/issues/{number}"),
@@ -1210,6 +1215,7 @@ pub fn source(base_url: String, config: Value) -> Box<dyn Source> {
 pub struct InFlight {
     delay: Duration,
     arrivals: Mutex<Vec<Instant>>,
+    every: Mutex<Vec<(Instant, String)>>,
     most: AtomicUsize,
 }
 
@@ -1218,6 +1224,7 @@ impl InFlight {
         Arc::new(Self {
             delay,
             arrivals: Mutex::new(Vec::new()),
+            every: Mutex::new(Vec::new()),
             most: AtomicUsize::new(0),
         })
     }
@@ -1232,13 +1239,32 @@ impl InFlight {
         self.most.load(Ordering::SeqCst)
     }
 
+    /// The requests in the rounds they came in, each round's paths in arrival order: a request that arrives more
+    /// than half a held answer after the one before it starts a new round. Read from the arrivals themselves, so a
+    /// loaded machine that stretches the wall clock does not change it.
+    pub fn rounds(&self) -> Vec<Vec<String>> {
+        let mut every = self.every.lock().expect("not poisoned").clone();
+        every.sort();
+        let gap = self.delay / 2;
+        let mut rounds: Vec<Vec<String>> = Vec::new();
+        let mut last: Option<Instant> = None;
+        for (at, path) in every {
+            if last.is_none_or(|before| at.duration_since(before) > gap) {
+                rounds.push(Vec::new());
+            }
+            rounds.last_mut().expect("pushed").push(path);
+            last = Some(at);
+        }
+        rounds
+    }
+
     /// Watch every request `server` gets. Mounted before the fake's own mocks:
     /// it is the first one wiremock asks, once per request, and it never
     /// answers.
     pub async fn watch(self: &Arc<Self>, server: &MockServer) {
         let flight = Arc::clone(self);
-        Mock::given(move |_: &wiremock::Request| {
-            flight.arrive();
+        Mock::given(move |request: &wiremock::Request| {
+            flight.arrive(request.url.path());
             false
         })
         .respond_with(ResponseTemplate::new(500))
@@ -1247,11 +1273,15 @@ impl InFlight {
         .await;
     }
 
-    fn arrive(&self) {
+    fn arrive(&self, path: &str) {
         let now = Instant::now();
         let mut arrivals = self.arrivals.lock().expect("not poisoned");
         arrivals.retain(|at| now.duration_since(*at) < self.delay / 2);
         arrivals.push(now);
         self.most.fetch_max(arrivals.len(), Ordering::SeqCst);
+        self.every
+            .lock()
+            .expect("not poisoned")
+            .push((now, path.to_owned()));
     }
 }

@@ -1,0 +1,15 @@
+{
+ "name": "write-over-limit",
+ "status": 403,
+ "headers": {
+  "content-type": "text/plain; charset=utf-8"
+ },
+ "body": {
+  "error_message": "Access denied. The 20 entry limit in trial mode has been reached. Please register to remove this limit."
+ },
+ "request": {
+  "as": "writer",
+  "method": "POST",
+  "path": "/api/v5/rest/entries"
+ }
+}

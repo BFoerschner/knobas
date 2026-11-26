@@ -9,6 +9,7 @@
 import type { EntityRow } from "../ipc/entity";
 import type { TimerTarget } from "../ipc/time";
 import { keyOf } from "../time/format";
+import { isPasswordKind } from "../tf/passwords/kinds";
 
 /**
  * The one word this module refuses on — both the entity namespace stored
@@ -49,6 +50,9 @@ const CONTEXT_NAMESPACE = "ctx";
  */
 export function canBeTarget(candidate: { entityId: string; kind?: string }): boolean {
   if (candidate.kind?.toLowerCase() === CONTEXT_NAMESPACE) return false;
+  // A password entry or folder is timed against nothing (ADR-0056): the
+  // timer's target names its title, which stays in the mirror.
+  if (candidate.kind !== undefined && isPasswordKind(candidate.kind)) return false;
   return namespaceOf(candidate.entityId) !== null &&
     namespaceOf(candidate.entityId) !== CONTEXT_NAMESPACE;
 }

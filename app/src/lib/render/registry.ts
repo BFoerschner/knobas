@@ -17,11 +17,16 @@
  * the worker's tokens, never markup from outside, so nothing needs the
  * sanitizer or the sandboxed frame that HTML and SVG output go through.
  *
- * The engines behind a renderer (Shiki, Mermaid, D2, Graphviz, pdf.js)
+ * The engines behind a renderer (the highlighters, Mermaid, D2, Graphviz, pdf.js)
  * sit behind the one renderer port (`port.ts`), so jsdom tests use a fake.
  * How to add one: `notes/renderer-registry.md` on the spec's branch, and
  * `register` below.
  */
+
+import { isOpenApi } from "./openapi-sniff";
+import { isXmlFile } from "./xml-sniff";
+import { isJsonFile } from "./json-sniff";
+import { isXsd } from "./xsd-sniff";
 
 export type RendererInput = "text" | "bytes";
 export type RendererOutput = "svg" | "html" | "image" | "lines";
@@ -36,6 +41,13 @@ export interface Renderer {
   readonly input: RendererInput;
   readonly output: RendererOutput;
   readonly diff: boolean;
+  /**
+   * What the file must hold besides a name its patterns take (ux18): a renderer that recognises its files by content
+   * (an OpenAPI spec is any YAML or JSON with a top-level `openapi` key) takes a file only when this answers `true`
+   * for its text, and never where no text is at hand (a binary file, a diff's file list). It is handed the file's path
+   * too (the XML view's design, section 4): an XML ending and a start tag make an XML file, a start tag alone does not.
+   */
+  readonly sniff?: (text: string, path: string) => boolean;
 }
 
 /** Image: drawn from the file's bytes as an `<img>`, which runs no script even for SVG. */
@@ -124,6 +136,99 @@ export const PDF: Renderer = {
   diff: true,
 };
 
+/**
+ * OpenAPI (ux18, `docs/decisions/2026-11-17-an-api-spec-is-drawn-as-its-endpoints.md`): an OpenAPI 3.0 or 3.1 or
+ * Swagger 2.0 spec, YAML or JSON, at any path and name, recognised by its top-level `openapi` or `swagger` key
+ * (`openapi-sniff.ts`). Drawn by knobas's own view (`tf/render/TfOpenApi.svelte`), its parse in a worker; both load
+ * with the first spec opened.
+ */
+export const OPENAPI: Renderer = {
+  id: "openapi",
+  name: "API",
+  patterns: ["*"],
+  fences: [],
+  input: "text",
+  output: "html",
+  // A comparison draws the explorer's marked inline form on each side (`TfOasDiff`), planned by `rendered.ts`' `specHint`
+  // and, for a drawn card it cannot tell, its side read at the checkout (2026-11-22, the JAR note's ruling 9 amended).
+  diff: true,
+  sniff: isOpenApi,
+};
+
+/**
+ * JAR (ux19, `docs/decisions/2026-11-18-a-jar-is-drawn-as-its-contents.md`): a Java archive drawn as what it holds,
+ * its manifest, its Maven coordinates, its classes outlined and its nested JARs (`tf/render/TfJar.svelte`). It reads
+ * no bytes here: the backend reads and lists the archive (`archive_open`) and hands the view one entry at a time. A
+ * binary file, so *Source* is not offered; the view offers *Save to Downloads*. In a comparison it is the entries
+ * that differ (`render/jar-diff.ts`, `tf/diff/TfJarDiff.svelte`; Fable's ruling of 2026-11-22), each side listed by
+ * the backend as the view lists it.
+ */
+export const JAR: Renderer = {
+  id: "jar",
+  name: "JAR",
+  patterns: ["*.jar", "*.war", "*.ear", "*.aar"],
+  fences: [],
+  input: "bytes",
+  output: "html",
+  diff: true,
+};
+
+/**
+ * The schema explorer (`docs/decisions/2026-11-23-an-xml-schema-is-explored-across-its-files-and-an-example-is-made-
+ * from-it.md`): a `*.xsd` whose first element is an XML Schema's `schema` (`xsd-sniff.ts`), drawn with every file it
+ * reaches as one set (`tf/render/xsd/TfXsd.svelte`, its model in the schema worker). Ahead of the XML view, so a
+ * schema opens as Schema and *Render as* offers the XML view and Source; a `.xsd` that is no schema opens as before.
+ * In a comparison it is compared by what it declares (S7, `tf/render/xsd/TfXsdDiff.svelte`).
+ */
+export const XSD: Renderer = {
+  id: "xsd",
+  name: "Schema",
+  patterns: ["*.xsd"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: true,
+  sniff: (text) => isXsd(text),
+};
+
+/**
+ * The XML view (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`): an XML file drawn as a document, its
+ * own lines in the explorers' pane with folds, the way down to a line, and a query (`tf/render/doc/TfDocView.svelte`).
+ * It takes a file whose text starts with an XML declaration, at any name, or one with an XML ending whose first thing
+ * is a start tag (`xml-sniff.ts`). After the renderers that come first for their files (an `.svg` opens as Image), so
+ * it is the next pick there; ahead of Source, so it is the default for every other XML file. Its outline is read in
+ * the document worker; the view, its CSS and the worker load with the first document opened.
+ */
+export const XML: Renderer = {
+  id: "xml",
+  name: "XML view",
+  patterns: ["*"],
+  fences: [],
+  input: "text",
+  output: "html",
+  // Compared by element (C1, `tf/render/doc/TfDocDiff.svelte`).
+  diff: true,
+  sniff: isXmlFile,
+};
+
+/**
+ * JSON view (the XML view's design, 2026-11-23, section 25): a JSON file drawn as a document in the XML view's pane,
+ * its objects and arrays folding, the way down a jq path, its strings' values looked at through a pipeline. It takes
+ * a `.json`, `.geojson`, `.webmanifest`, `.har`, `.ipynb`, `.jsonl` or `.ndjson` whose text starts with `{` or `[`
+ * (`json-sniff.ts`). After the API explorer, so an OpenAPI spec in JSON opens as API with the JSON view next; ahead of
+ * Source, so it is the default for every other JSON file.
+ */
+export const JSON_VIEW: Renderer = {
+  id: "json",
+  name: "JSON view",
+  patterns: ["*.json", "*.geojson", "*.webmanifest", "*.har", "*.ipynb", "*.jsonl", "*.ndjson"],
+  fences: [],
+  input: "text",
+  output: "html",
+  diff: true,
+  sniff: isJsonFile,
+};
+
 /** The most a byte read hands a renderer (`view::BYTES_CAP`, #2256): past it the read is refused, never cut. */
 export const BYTES_CAP = 50 * 1024 * 1024;
 
@@ -138,8 +243,16 @@ export const SOURCE: Renderer = {
   diff: true,
 };
 
-/** Built-ins first, in the order that makes the first that accepts the default; Source last. */
-const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, SOURCE];
+/**
+ * Page (ADR-0046): an HTML file drawn as `TfHtmlPage` draws a folder renderer's page, sanitized, in a frame that runs no
+ * script and makes no request. After Source, so a repository's own `.html` opens as Source and *Render as* offers
+ * Page; in a generated folder it is the default (two default rows the Code page appends there). A comparison draws it on
+ * both sides, two such frames (ux26, the stage pass).
+ */
+export const HTML: Renderer = { id: "html", name: "Page", patterns: ["*.html", "*.htm"], fences: [], input: "text", output: "html", diff: true };
+
+/** Built-ins first, in the order that makes the first that accepts the default; Source, then Page. */
+const renderers: Renderer[] = [IMAGE, MARKDOWN, MERMAID, D2, GRAPHVIZ, PDF, OPENAPI, JAR, XSD, XML, JSON_VIEW, SOURCE, HTML];
 
 /**
  * Adds a renderer ahead of Source, so it becomes the default for what it
@@ -167,13 +280,20 @@ export function accepts(pattern: string, path: string): boolean {
 }
 
 /**
+ * Whether `renderer` can draw `file` by what it holds: a binary file only by a renderer that reads bytes, and a
+ * renderer with a `sniff` only a text file whose text it recognises.
+ */
+export function fits(renderer: Renderer, file: { path?: string; binary: boolean; text?: string }): boolean {
+  if (file.binary && renderer.input !== "bytes") return false;
+  return renderer.sniff === undefined || (!file.binary && file.text !== undefined && renderer.sniff(file.text, file.path ?? ""));
+}
+
+/**
  * Every renderer that accepts the file, the default first. A binary file
  * (no text) is accepted only by renderers that read bytes.
  */
-export function renderersFor(file: { path: string; binary: boolean }): Renderer[] {
-  return renderers.filter(
-    (r) => (!file.binary || r.input === "bytes") && r.patterns.some((pattern) => accepts(pattern, file.path)),
-  );
+export function renderersFor(file: { path: string; binary: boolean; text?: string }): Renderer[] {
+  return renderers.filter((r) => fits(r, file) && r.patterns.some((pattern) => accepts(pattern, file.path)));
 }
 
 /** Every renderer registered, in the default order (the switcher's and Settings' list, #2263). */

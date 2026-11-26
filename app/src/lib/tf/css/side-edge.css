@@ -1,0 +1,43 @@
+/* ---------- A sidebar's edge (`TfSideEdge.svelte`, `side-width.svelte.ts`; the sidebar-resize pass, PR #2479) ---------- */
+/* Each sidebar's width is one custom property on its grid, read by its `grid-template-columns` with the default as the
+   fallback. Not inherited: a drag sets it every frame, and an inherited property would restyle every row under the grid. */
+@property --side-tickets-views { syntax: "*"; inherits: false; }
+@property --side-ticket-card { syntax: "*"; inherits: false; }
+@property --side-builds { syntax: "*"; inherits: false; }
+@property --side-repo-tree { syntax: "*"; inherits: false; }
+@property --side-repo-builds { syntax: "*"; inherits: false; }
+@property --side-compare { syntax: "*"; inherits: false; }
+@property --side-diff-files { syntax: "*"; inherits: false; }
+@property --side-docs-tree { syntax: "*"; inherits: false; }
+@property --side-docs-outline { syntax: "*"; inherits: false; }
+@property --side-settings { syntax: "*"; inherits: false; }
+@property --side-pr { syntax: "*"; inherits: false; }
+@property --side-set { syntax: "*"; inherits: false; }
+@property --side-assets { syntax: "*"; inherits: false; }
+@property --side-monitor { syntax: "*"; inherits: false; }
+@property --side-oas-rail { syntax: "*"; inherits: false; }
+@property --side-doc-rail { syntax: "*"; inherits: false; }
+@property --side-xsd-rail { syntax: "*"; inherits: false; }
+
+/* The edge stands out of flow on the line between the sidebar and the main column: a grid's absolutely placed child
+   takes its grid area as its box, so `grid-column` puts it at the start of the column after a left rail (`start`) or
+   of a right column (`end`), and it spans the grid's height. 8 px to grab, centred on the line, or on the middle of the
+   gap where the grid has one (`--tf-sedge-gap`, set beside each grid's own rules). It takes no cell and no room. */
+.tf-sedge {
+  position: absolute; top: 0; bottom: 0; grid-column: 2; left: calc(-4px - var(--tf-sedge-gap, 0px) / 2); width: 8px;
+  z-index: 3; cursor: col-resize; touch-action: none;
+}
+.tf-sedge[data-at="end"] { grid-column: -2; }
+/* At rest nothing is drawn: the sidebar's own rule is its edge. Under the pointer a 2 px line in `--ink-2` says the
+   edge can be held, after a beat, so a pointer crossing the line on its way elsewhere draws nothing. Held, it is the
+   ink; focused from the keyboard, the focus colour, as every focus ring is. */
+.tf-sedge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; pointer-events: none; }
+.tf-sedge:hover::after { background: var(--ink-2); transition: background-color 0s .12s; }
+.tf .tf-sedge:focus-visible { outline: none; }
+.tf-sedge:focus-visible::after { background: var(--focus); transition: none; }
+/* Held wins over focused: a press focuses the edge (for the keys after it), and after a key elsewhere WebKit and
+   Chromium count that focus as the keyboard's. A ghost's line (`side-pace.ts`) is this one, moved. */
+.tf-sedge.tf-sedge-on::after { background: var(--ink); transition: none; }
+/* While a drag holds the pointer, a cover over the window keeps the resize cursor wherever it goes and takes the
+   hover from what is under it, so the page restyles nothing as the pointer passes over it and no text is selected. */
+.tf-sdrag-cover { position: fixed; inset: 0; z-index: 2147483000; cursor: col-resize; user-select: none; -webkit-user-select: none; }

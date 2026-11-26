@@ -18,10 +18,10 @@ const LABEL_PAGES: u32 = 20;
 /// One label as Gitea lists it: a repository's, an organisation's or a
 /// pull request's.
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(super) struct Label {
-    pub(super) id: u64,
+pub(crate) struct Label {
+    pub(crate) id: u64,
     #[serde(default)]
-    pub(super) name: String,
+    pub(crate) name: String,
     /// Whether it is the organisation's, not the repository's (set by
     /// [`read`], not by Gitea).
     #[serde(skip)]
@@ -35,7 +35,7 @@ pub(super) struct Label {
 /// naming the scope where Gitea refused the token for it (#2042): the
 /// repository's labels ask for `read:issue`, the organisation's for
 /// `read:organization`.
-pub(super) async fn read(
+pub(crate) async fn read(
     source: &GiteaSource,
     owner: &str,
     repo: &str,

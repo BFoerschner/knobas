@@ -88,7 +88,7 @@ impl Stored {
         self
     }
 
-    fn by_id(&self, id: &str) -> Option<&Application> {
+    pub(crate) fn by_id(&self, id: &str) -> Option<&Application> {
         self.applications.iter().find(|app| app.id == id)
     }
 }
@@ -134,7 +134,7 @@ async fn load_with(pool: &PgPool, shipped: Vec<Application>) -> Result<Stored, I
     .settle_default())
 }
 
-async fn load(pool: &PgPool) -> Result<Stored, IpcError> {
+pub(crate) async fn load(pool: &PgPool) -> Result<Stored, IpcError> {
     load_with(pool, rules::shipped()).await
 }
 
@@ -318,6 +318,157 @@ pub async fn open_object_admitting(
     object: &Object,
     protocols: &[&str],
 ) -> Result<Vec<String>, IpcError> {
+    run_at(
+        pool,
+        registry,
+        entity_id,
+        application,
+        object,
+        None,
+        protocols,
+    )
+    .await
+}
+
+/// Run a saved application on a folder of this entity's repository, as it
+/// runs on the repository (2026-11-16, a right-click's *Open in…* on a
+/// folder): the application's own command, with the folder in the checkout's
+/// place, so `{path}`, `{file}` and `{name}` are the folder's and `{url}` the
+/// repository's page. `folder` is relative to the checkout and must be a
+/// folder inside it on disk, never git's own. Answers the argument vector it
+/// started.
+///
+/// # Errors
+///
+/// As [`open_object`], and [`Invalid`](crate::IpcErrorCode::Invalid) for a
+/// folder that is not inside the checkout.
+pub async fn open_folder(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    folder: &str,
+) -> Result<Vec<String>, IpcError> {
+    run_at(
+        pool,
+        registry,
+        entity_id,
+        application,
+        &Object::Repository,
+        Some(folder),
+        &knobas_core::checkout::clone::PROTOCOLS,
+    )
+    .await
+}
+
+/// Run a saved application on a generated folder (ADR-0046), or a file in it:
+/// the application's command, filled by the same code [`run_at`] uses, with
+/// the kept folder in the checkout's place. `{path}` is the kept folder,
+/// `{file}` the absolute path of a file its manifest holds (else the folder),
+/// `{line}` the line, `{name}` the leaf's name. Answers the argument vector it
+/// started. Works with no checkout.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown application, a
+/// file the manifest does not hold, a command holding `{url}` (a generated
+/// folder has no page on the source), one that cannot be run, or a program
+/// that would not start; [`Internal`](crate::IpcErrorCode::Internal) for a
+/// query failure.
+pub async fn open_made(
+    pool: &PgPool,
+    application: Option<&str>,
+    made: &crate::folder_render::keep::Made,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let stored = load(pool).await?;
+    let wanted = application
+        .map(str::to_owned)
+        .or_else(|| stored.default.clone());
+    let app = wanted
+        .as_deref()
+        .and_then(|id| stored.by_id(id))
+        .ok_or_else(|| match &wanted {
+            Some(id) => IpcError::invalid(format!(
+                "'{id}' is not one of your applications: see Settings › Checkouts"
+            )),
+            None => IpcError::invalid(
+                "there is no application to open a folder with: add one in Settings › Checkouts",
+            ),
+        })?;
+    let argv = made_argv(app, made, file, line)?;
+    let to_run = argv.clone();
+    tokio::task::spawn_blocking(move || spawn(&to_run))
+        .await
+        .map_err(IpcError::internal)?
+        .map_err(|error| IpcError::invalid(format!("{} could not be run: {error}", app.name)))?;
+    Ok(argv)
+}
+
+/// [`open_made`]'s argument vector: every argument a path knobas made, or a
+/// name inside it the manifest holds, passed absolute (ADR-0016).
+///
+/// # Errors
+///
+/// As [`open_made`].
+pub fn made_argv(
+    app: &Application,
+    made: &crate::folder_render::keep::Made,
+    file: Option<&str>,
+    line: Option<u32>,
+) -> Result<Vec<String>, IpcError> {
+    let file = file.map(str::trim).filter(|file| !file.is_empty());
+    let on_disk = match file {
+        Some(rel) => Some(made.path_of(rel).ok_or_else(|| {
+            IpcError::invalid(format!("the generated folder holds no file {rel}"))
+        })?),
+        None => None,
+    };
+    let object = match file {
+        Some(rel) => Object::File {
+            path: rel.to_owned(),
+            line,
+            at: None,
+        },
+        None => Object::Repository,
+    };
+    let kind = object.kind();
+    let template = app
+        .command_for(kind)
+        .ok_or_else(|| IpcError::invalid(format!("{} opens no folder", app.name)))?
+        .to_owned();
+    if template.contains("{url}") {
+        return Err(IpcError::invalid(format!(
+            "{}'s command needs a page on the source, and a generated folder has none",
+            app.name
+        )));
+    }
+    rules::check_for(&template, kind)
+        .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    let code = Code::of(&object, None);
+    rules::fill(
+        &template,
+        &Fill {
+            checkout: &made.dir,
+            file: on_disk.as_deref(),
+            line,
+            code: &code,
+        },
+    )
+    .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))
+}
+
+/// The one runner: `object` at the checkout, or at `folder` inside it.
+async fn run_at(
+    pool: &PgPool,
+    registry: Option<&dyn AdapterRegistry>,
+    entity_id: &str,
+    application: Option<&str>,
+    object: &Object,
+    folder: Option<&str>,
+    protocols: &[&str],
+) -> Result<Vec<String>, IpcError> {
     let checkout = super::resolve(pool, entity_id).await?;
     let path = checkout.path.ok_or_else(|| {
         IpcError::not_found(format!(
@@ -328,6 +479,12 @@ pub async fn open_object_admitting(
     let (file, line) = match object {
         Object::File { path, line, .. } => (Some(file_inside(&checkout, path).await?), *line),
         _ => (None, None),
+    };
+    // A folder stands in the checkout's place (2026-11-16): the repository's
+    // command runs as it does there, with the folder's `{path}` and `{name}`.
+    let folder = match folder {
+        Some(path) => Some(folder_inside(&checkout, path).await?),
+        None => None,
     };
     let stored = load(pool).await?;
     let wanted = application
@@ -384,7 +541,7 @@ pub async fn open_object_admitting(
                 "a pull request opens in its worktree, which needs the source's address",
             ));
         }
-        _ => checkout,
+        _ => folder.unwrap_or(checkout),
     };
     let code = Code::of(object, url);
     let argv = rules::fill(
@@ -519,20 +676,57 @@ pub async fn page(
 }
 
 /// `relative` inside `checkout`, as a file that is there.
-async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+pub(crate) async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+    inside_on_disk(checkout, relative, Entry::File).await
+}
+
+/// [`file_inside`] for a folder: a folder inside the checkout on disk, by its
+/// words and by where it really is, never the checkout's `.git`.
+pub(crate) async fn folder_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcError> {
+    inside_on_disk(checkout, relative, Entry::Folder).await
+}
+
+/// What [`inside_on_disk`] must find.
+#[derive(Clone, Copy)]
+enum Entry {
+    File,
+    Folder,
+}
+
+async fn inside_on_disk(
+    checkout: &Path,
+    relative: &str,
+    entry: Entry,
+) -> Result<PathBuf, IpcError> {
+    let word = match entry {
+        Entry::File => "file",
+        Entry::Folder => "folder",
+    };
     let refuse = || {
         IpcError::invalid(format!(
-            "{relative} is not a file inside the checkout at {}",
+            "{relative} is not a {word} inside the checkout at {}",
             checkout.display()
         ))
     };
     let joined = rules::inside(checkout, relative).ok_or_else(refuse)?;
+    // Git's own folder is no folder of the repository: the tree never draws it.
+    if matches!(entry, Entry::Folder)
+        && Path::new(relative)
+            .components()
+            .any(|part| part.as_os_str() == ".git")
+    {
+        return Err(refuse());
+    }
     let root = checkout.to_path_buf();
     let probe = joined.clone();
     let inside = tokio::task::spawn_blocking(move || {
         let root = std::fs::canonicalize(root).ok()?;
         let real = std::fs::canonicalize(probe).ok()?;
-        (real.starts_with(&root) && real.is_file()).then_some(())
+        let kind = match entry {
+            Entry::File => real.is_file(),
+            Entry::Folder => real.is_dir() && real != root,
+        };
+        (real.starts_with(&root) && kind).then_some(())
     })
     .await
     .ok()
@@ -551,17 +745,63 @@ async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcErro
 /// fills a pipe nobody reads blocks for ever. A thread reaps it, because an
 /// editor outlives the click that started it and a dropped `Child` that is
 /// never waited on is a zombie for the life of the process.
-fn spawn(argv: &[String]) -> std::io::Result<()> {
-    let child = scrubbed_command(argv, std::env::vars_os())?
+pub(crate) fn spawn(argv: &[String]) -> std::io::Result<()> {
+    spawn_within(argv, FAILS_WITHIN)
+}
+
+/// How soon a program must fail for its open to count as failed (ux31, section 27). Found while reading the code:
+/// on macOS the shipped commands are `open -a <Application> …`, and where the application is missing `open` starts
+/// fine and exits 1, which knobas never read, so *Open in › Fork* without Fork did nothing and said nothing.
+pub const FAILS_WITHIN: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// [`spawn`], failing where the program exits with an error within `within`: the error then carries the first 4 KiB
+/// of what it wrote to stderr (`Unable to find application named 'Fork'`). stderr goes to a file in the temp
+/// folder, removed either way; a program still running after `within` is a success and is reaped by a thread.
+pub(crate) fn spawn_within(argv: &[String], within: std::time::Duration) -> std::io::Result<()> {
+    use std::io::Read as _;
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let err_path = std::env::temp_dir().join(format!("knobas-open-{}-{n}.err", std::process::id()));
+    let err_file = std::fs::File::create(&err_path)?;
+    let spawned = scrubbed_command(argv, std::env::vars_os())?
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-    });
-    Ok(())
+        .stderr(err_file)
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_file(&err_path);
+            return Err(error);
+        }
+    };
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let mut words = String::new();
+            if let Ok(file) = std::fs::File::open(&err_path) {
+                let _ = file.take(4096).read_to_string(&mut words);
+            }
+            let _ = std::fs::remove_file(&err_path);
+            if status.success() {
+                return Ok(());
+            }
+            let words = words.trim();
+            return Err(std::io::Error::other(if words.is_empty() {
+                format!("it ended with {status}")
+            } else {
+                words.to_owned()
+            }));
+        }
+        if std::time::Instant::now() >= deadline {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&err_path);
+            });
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 }
 
 /// `argv[0]` with the rest as its arguments, in `parent`'s environment less
@@ -583,6 +823,79 @@ fn scrubbed_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app(command: &str, file_command: Option<&str>) -> Application {
+        Application {
+            id: "ed".to_owned(),
+            name: "Editor".to_owned(),
+            command: command.to_owned(),
+            file_command: file_command.map(str::to_owned),
+            commit_command: None,
+            range_command: None,
+            pull_request_command: None,
+            api_command: None,
+        }
+    }
+
+    fn made() -> (tempfile::TempDir, crate::folder_render::keep::Made) {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(out.join("docs")).unwrap();
+        std::fs::write(out.join("docs").join("index.md"), "# i").unwrap();
+        let progress: crate::folder_render::keep::Progress = std::sync::Arc::new(|_, _| {});
+        let kept = crate::folder_render::keep::keep(
+            &out,
+            &dir.path().join("flows.site.0123abcd"),
+            &progress,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .unwrap();
+        (dir, kept)
+    }
+
+    /// A generated folder opens with its own path: `{path}` the kept folder,
+    /// `{file}` a file its manifest holds, absolute, `{name}` the leaf's.
+    #[test]
+    fn a_generated_folder_opens_with_its_own_path() {
+        let (_dir, made) = made();
+        let folder = made.dir.to_string_lossy().into_owned();
+        let editor = app("ed {path} --title {name}", Some("ed {file}:{line}"));
+        let argv = made_argv(&editor, &made, None, None).unwrap();
+        assert_eq!(argv, ["ed", &folder, "--title", "flows.site.0123abcd"]);
+        let argv = made_argv(&editor, &made, Some("docs/index.md"), Some(3)).unwrap();
+        let file = made.dir.join("docs").join("index.md");
+        assert_eq!(argv, ["ed".to_owned(), format!("{}:3", file.display())]);
+        // An application with no file command opens the folder's command on a file.
+        let plain = app("ed {path}", None);
+        assert_eq!(
+            made_argv(&plain, &made, Some("docs/index.md"), None).unwrap(),
+            ["ed", &folder]
+        );
+    }
+
+    #[test]
+    fn a_file_the_manifest_does_not_hold_is_refused() {
+        let (_dir, made) = made();
+        let editor = app("ed {path}", Some("ed {file}"));
+        for outside in ["../secret", "docs", "/etc/hosts", "docs/../docs/index.md"] {
+            let error = made_argv(&editor, &made, Some(outside), None).unwrap_err();
+            assert!(
+                error.message.contains("holds no file"),
+                "{outside}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_with_url_is_refused() {
+        let (_dir, made) = made();
+        let browser = app("open {url}", None);
+        let error = made_argv(&browser, &made, None, None).unwrap_err();
+        assert_eq!(
+            error.message,
+            "Editor's command needs a page on the source, and a generated folder has none"
+        );
+    }
 
     /// A default that names no entry is the first one, and an empty list has
     /// none.
@@ -670,5 +983,35 @@ mod tests {
         );
         assert!(!legacy.contains(&APPLICATIONS_KEY.to_owned()));
         assert_ne!(APPLICATIONS_KEY, super::super::CLONES_ROOT_KEY);
+    }
+}
+
+#[cfg(test)]
+mod fails_within_tests {
+    use super::spawn_within;
+    use std::time::{Duration, Instant};
+
+    fn sh(script: &str) -> Vec<String> {
+        vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_fails_at_once_is_a_failed_open_with_its_words() {
+        let error = spawn_within(
+            &sh("echo no such app >&2; exit 1"),
+            Duration::from_millis(1500),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "no such app");
+        assert!(spawn_within(&sh("exit 0"), Duration::from_millis(1500)).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_still_running_after_the_window_is_a_success() {
+        let t0 = Instant::now();
+        assert!(spawn_within(&sh("sleep 3; exit 1"), Duration::from_millis(300)).is_ok());
+        assert!(t0.elapsed() < Duration::from_secs(2));
     }
 }

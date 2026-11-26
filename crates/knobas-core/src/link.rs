@@ -352,6 +352,15 @@ pub struct LinkEnd {
     /// RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
     /// so a link never dangles, and the panel marks it instead.
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The state dot on its row in the Connections drawer (F-036): what the far
+    /// end's own declared state says, or an asset's health. Not read here,
+    /// because [`entries_of`] binds no declarations and most of its readers
+    /// draw no dot; `get_entity` fills it for a ticket. Absent on the wire
+    /// otherwise, and where the far end declares no state.
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub state: Option<crate::payload::StateChip>,
 }
 
 /// One link, as a detail view draws it: the record, and its other end.

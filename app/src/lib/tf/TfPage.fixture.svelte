@@ -11,6 +11,10 @@
   export interface PageLog {
     mounts: string[];
     reads: string[];
+    /** Each time anything reading `syncRevision` ran again, moved or not: a page's read effect waking. */
+    wakes?: string[];
+    /** Each time `syncAsked` moved: the person's own *Sync now* ended, which sorts a held list again. */
+    asks?: string[];
   }
 </script>
 
@@ -23,7 +27,8 @@
     visible,
     log,
     syncRevision = 0,
-  }: { name: string; visible: boolean; log: PageLog; syncRevision?: number } = $props();
+    syncAsked = 0,
+  }: { name: string; visible: boolean; log: PageLog; syncRevision?: number; syncAsked?: number } = $props();
 
   const shown = pageVisible();
   const born = untrack(() => name);
@@ -34,9 +39,17 @@
   let seen = untrack(() => syncRevision);
   $effect(() => {
     const at = syncRevision;
+    pages.wakes?.push(born);
     if (at === seen) return;
     seen = at;
     pages.reads.push(born);
+  });
+  let asked = untrack(() => syncAsked);
+  $effect(() => {
+    const at = syncAsked;
+    if (at === asked) return;
+    asked = at;
+    pages.asks?.push(born);
   });
 </script>
 

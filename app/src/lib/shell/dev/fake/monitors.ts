@@ -4,6 +4,8 @@
  */
 // The monitors the seeded Uptime Kuma holds -- the roster's rows. See
 // `fakeMonitorRoster`.
+import { fakeMove } from "./moves";
+import { fakeEdit, keepRefused } from "./ticket-fields";
 import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
 import type { OpenAlert } from "../../../ipc/assets";
 import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
@@ -98,7 +100,7 @@ export function fakeOpenAlerts(): OpenAlert[] {
       state: row.state as OpenAlert["state"],
       opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
       acked_at:
-        index === 0 || FIXTURE_ACKED.has(row.entity_id)
+        (index === 0 && !FIXTURE_UNACKED.has(row.entity_id)) || FIXTURE_ACKED.has(row.entity_id)
           ? new Date(now - 12 * 60_000).toISOString()
           : null,
       assets: row.assets,
@@ -114,7 +116,12 @@ export function fakeOpenAlerts(): OpenAlert[] {
  * would look like.
  */
 function fakeQueuedWrite(args: Record<string, unknown>): QueuedWrite {
-  const row = queuedRow(args);
+  const queued = queuedRow(args);
+  // A ticket's move is `moves.ts`'s: a queued row that settles a moment later (ADR-0054).
+  if (queued.op === "transition") return fakeMove(queued);
+  // A ticket's edit (ADR-0054) changes the fixture's ticket, or is refused under `?fake-refuse-edits`.
+  const row = { ...queued, ...fakeEdit(queued.payload) };
+  keepRefused(row);
   if (row.op === "create_monitor") FIXTURE_CREATES.push(row);
   return row;
 }
@@ -183,6 +190,8 @@ const FIXTURE_OPS: Record<string, string> = {
  * here. Cleared by a reload, which is what a fixture is.
  */
 const FIXTURE_ACKED = new Set<string>();
+/** The seed's acked alert once taken back. */
+const FIXTURE_UNACKED = new Set<string>();
 
 /**
  * `ack_alert`: mark one monitor's open alert seen, and answer with it.
@@ -199,7 +208,20 @@ function fakeAck(args: Record<string, unknown>) {
     throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
   }
   FIXTURE_ACKED.add(monitorId);
+  FIXTURE_UNACKED.delete(monitorId);
   return { ...alert, acked_at: new Date().toISOString() };
+}
+
+/** `unack_alert`: the alert asks again; `not_found` for a monitor with nothing open, as the real command answers. */
+function fakeUnack(args: Record<string, unknown>) {
+  const monitorId = typeof args.monitorId === "string" ? args.monitorId : "";
+  const alert = fakeOpenAlerts().find((row) => row.monitor_id === monitorId);
+  if (!alert) {
+    throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
+  }
+  FIXTURE_ACKED.delete(monitorId);
+  FIXTURE_UNACKED.add(monitorId);
+  return { ...alert, acked_at: null };
 }
 
 /** The monitors a reader hid this session (`set_monitor_hidden`); a reload clears it. */
@@ -313,15 +335,72 @@ const FIXTURE_PORT_CHECKS = new Set(["teamcity", "jira", "confluence"]);
  * would make the tab look right while hiding the one thing that could be
  * wrong.
  */
-export function fakeMonitorRoster() {
+/** Monitors a still-rows trip took down, by index: a sync that saw a check fail. */
+const FORCED_DOWN = new Set<number>();
+
+/**
+ * `?fake-hooks`' `monitorDown` (the still-rows trips, 2026-11-11): the monitor that is up and first by name goes down, so
+ * it sorts to the roster's top, where the reader is.
+ */
+export function downFakeMonitor(): void {
+  const up = SEEDED_MONITORS.map((monitor, index) => ({ name: monitor.name, index })).filter(
+    ({ index }) => !FORCED_DOWN.has(index) && (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up") === "up" && SEEDED_MONITORS[index]!.name !== FIXTURE_PAUSED,
+  );
+  const first = up.sort((a, b) => a.name.localeCompare(b.name))[0];
+  if (first) FORCED_DOWN.add(first.index);
+}
+
+/** The ranks `0099` keeps a half-hour's worst state by, and each one's letter in a roster row's `bar`. */
+const RANK: Record<string, number> = { down: 0, warn: 1, pending: 2, maintenance: 3, up: 4 };
+const LETTERS = ["d", "w", "p", "m", "u"];
+const HALF_HOUR = 30 * 60_000;
+
+/**
+ * A row's `bar` and `down_since` from its samples, as `assets::monitor_roster` reads them out of
+ * `knobas.monitor_half_hour`: 48 half-hours on the UTC grid ending with the one now is in, each the worst state
+ * sampled in it (`-` for none, or only misses); and the first sample of the newest run of `down`, misses skipped.
+ */
+export function fakeBar(samples: readonly { taken_at: string; state: string | null }[], now: number): { bar: string; down_since: string | null } {
+  const first = Math.floor(now / HALF_HOUR) * HALF_HOUR - 47 * HALF_HOUR;
+  const worst: number[] = Array.from({ length: 48 }, () => 9);
+  for (const sample of samples) {
+    const index = Math.floor((Date.parse(sample.taken_at) - first) / HALF_HOUR);
+    if (index < 0 || index >= 48) continue;
+    worst[index] = Math.min(worst[index]!, RANK[sample.state ?? ""] ?? 9);
+  }
+  let since: string | null = null;
+  for (let at = samples.length - 1; at >= 0; at -= 1) {
+    const sample = samples[at]!;
+    if (sample.state === null) continue;
+    if (sample.state !== "down") break;
+    since = sample.taken_at;
+  }
+  return { bar: worst.map((rank) => LETTERS[rank] ?? "-").join(""), down_since: since };
+}
+
+/**
+ * The `monitored-by` links this session made (an open monitor's *Link an asset…* and *New asset for it…*, 2026-11-19),
+ * by `create_link` in `entity.ts`: the roster reads them beside the names the estate file gave, as the real roster reads
+ * every confirmed link.
+ */
+export const FAKE_ATTACHED: { asset: string; monitor: string }[] = [];
+
+/** Whether `id` is one of the roster's monitors, so `create_link` takes it as a link's end. */
+export function isFakeMonitor(id: string): boolean {
+  return /^kuma:\d+$/.test(id) && Number(id.slice(5)) <= SEEDED_MONITORS.length;
+}
+
+export function fakeMonitorRoster(withSamples = true) {
   const now = Date.now();
-  const named = SEEDED_MONITORS.map(({ name, type }) => ({
+  const named = SEEDED_MONITORS.map(({ name, type }, index) => ({
     name,
     type,
-    watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
+    watching: FIXTURE_ESTATE.filter(
+      (asset) => asset.monitors.includes(name) || FAKE_ATTACHED.some((made) => made.asset === asset.id && made.monitor === `kuma:${index + 1}`),
+    ),
   }));
   return named.map((entry, index) => {
-    const state = FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up";
+    const state = FORCED_DOWN.has(index) ? "down" : (FIXTURE_MONITOR_STATES[index % FIXTURE_MONITOR_STATES.length] ?? "up");
     const samples = fakeSamples(state, index, now);
     // The last one, for the reason above.
     const last = samples.at(-1);
@@ -363,7 +442,9 @@ export function fakeMonitorRoster() {
       actions: [tombstoned ? "resume_monitor" : "pause_monitor"],
       // Uptime Kuma reads one monitor (#2100), so every row draws *Refresh* (#2138).
       refreshes: true,
-      samples,
+      // The page asks for none (`withSamples: false`): it draws the bar.
+      samples: withSamples ? samples : [],
+      ...fakeBar(samples, now),
     };
   });
 }
@@ -372,8 +453,8 @@ export function fakeMonitorRoster() {
  * `?fake-monitors=<n>` (perf audit, #2200's class): the roster's monitors
  * repeated to `n` rows, each under its own id and name.
  */
-function bulkRoster(n: number): ReturnType<typeof fakeMonitorRoster> {
-  const base = fakeMonitorRoster();
+function bulkRoster(n: number, withSamples = true): ReturnType<typeof fakeMonitorRoster> {
+  const base = fakeMonitorRoster(withSamples);
   return Array.from({ length: n }, (_, i) => {
     const row = base[i % base.length]!;
     return { ...row, entity_id: `kuma:bulk-${i}`, name: `${row.name} ${i}` };
@@ -390,9 +471,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // invented on top.
     // Monitoring's read by definition, so it narrows itself to the role's
     // fillers by source, tombstones kept, as the server's does (#1297).
-    monitor_roster: () => {
+    monitor_roster: (args: Record<string, unknown>) => {
       const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
-      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id));
+      const withSamples = args["withSamples"] !== false;
+      return (bulk > 0 ? bulkRoster(bulk, withSamples) : fakeMonitorRoster(withSamples)).filter((row) => fillers.has(row.source_id));
+    },
+    // The nav's badge (PR #2479): the roster's down rows, as the server counts them.
+    monitors_down: () => {
+      const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
+      return (bulk > 0 ? bulkRoster(bulk) : fakeMonitorRoster()).filter((row) => fillers.has(row.source_id) && row.state === "down" && !row.tombstoned && !row.hidden).length;
     },
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
@@ -413,6 +500,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // reader makes themselves — a fixture that answered the same list after
     // the click would make the button look broken.
     ack_alert: (args) => fakeAck(args),
+    unack_alert: (args) => fakeUnack(args),
     // The row's *Hide* / *Unhide*: knobas-local, so remembered here.
     set_monitor_hidden: (args) => fakeSetHidden(args),
     // The Monitors tab's *Not monitored* roster (#449), derived from the same
@@ -422,4 +510,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_HIDDEN);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN, FORCED_DOWN, FAKE_ATTACHED);

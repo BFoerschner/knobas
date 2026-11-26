@@ -100,17 +100,17 @@ test("a branch or commit with no declared parent draws a plain not-found with it
   expect(replace).not.toHaveBeenCalled();
   expect(listEntities).not.toHaveBeenCalled();
   expect(target.querySelector(".tf-empty")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "payout: key the retry on the mandate id is not under a repository in the mirror. Go to Code",
+    "payout: key the retry on the mandate id is under no repository knobas holds yet. All repositories",
   );
   expect(target.querySelector(".tf-empty a")?.getAttribute("href")).toBe("#/code");
 });
 
-test("an id the mirror does not hold reads Nothing lives at, as every other entity page does", async () => {
+test("an id the mirror does not hold says so, as every other entity page does", async () => {
   const { answer, replace } = ports({ code: "not_found", message: "gone" });
   open("branch", "gitea:nope", answer);
   await settle();
   expect(replace).not.toHaveBeenCalled();
-  expect(target.textContent).toContain("Nothing lives at");
+  expect(target.textContent).toContain("knobas does not hold this.");
 });
 
 test("a failed read says so, with the address's id", async () => {
@@ -118,7 +118,7 @@ test("a failed read says so, with the address's id", async () => {
   open("commit", COMMIT_ID, answer);
   await settle();
   expect(replace).not.toHaveBeenCalled();
-  expect(target.textContent).toContain(`Could not read ${COMMIT_ID}: database is down`);
+  expect(target.textContent).toContain("This could not be read: database is down");
 });
 
 test("nothing is read before the database answers", async () => {

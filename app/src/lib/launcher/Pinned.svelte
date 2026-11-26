@@ -8,10 +8,11 @@
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { clockLabel } from "../time/format";
   import Row from "./Row.svelte";
+  import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
   import type { LauncherRow } from "./rows";
 
-  let { row, id, now }: { row: LauncherRow; id: string; now?: Date | undefined } = $props();
+  let { row, id, now, source = null }: { row: LauncherRow; id: string; now?: Date | undefined; source?: string | null } = $props();
 
   const face = $derived.by(() => {
     if (row.kind === "inbox") {
@@ -26,7 +27,7 @@
     return {
       monogram,
       tone: item.state?.tone ?? null,
-      kindName: item.state ? `${word}: ${item.state.text}` : word,
+      kindName: item.state ? `${word}: ${stateWord(item.state.text)}` : word,
       cell: cells.cell,
       mono: cells.mono,
       title: cells.title,
@@ -36,6 +37,6 @@
 
 {#if face}
   <div class="tf-ln-pinned" role="listbox" aria-label="The row the actions act on">
-    <Row {...face} {id} selected={false} onopen={() => {}} onhover={() => {}} />
+    <Row {...face} {source} {id} selected={false} onopen={() => {}} onhover={() => {}} />
   </div>
 {/if}

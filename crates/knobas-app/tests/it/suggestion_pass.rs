@@ -6,8 +6,9 @@
 //! requests coalesce, a pass takes no UI connection, and a statement that runs
 //! past the pass's limit is cancelled and reported rather than waited out.
 //!
-//! And since #1485, who asks: the sync scheduler, after every run that ends
-//! OK, on the one pass bring-up built, without waiting for it.
+//! And since #1485, who asks: the sync scheduler, after a run that ends OK
+//! with something for a pass to read, on the one pass bring-up built,
+//! without waiting for it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -494,4 +495,108 @@ async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
         5,
         "every event is passed on"
     );
+}
+
+/// **A run that wrote nothing asks for no pass** (the query audit of
+/// 2026-11-12), once one has been asked for: the first run to end OK asks
+/// whatever it wrote, a run that wrote asks, and so does the run after a
+/// refresh or a write landed, the run after a pass that failed, and the run
+/// that finds the last request older than the quiet wait.
+#[tokio::test]
+async fn a_run_that_wrote_nothing_asks_for_no_pass() {
+    use knobas_app::suggestion_pass::SuggestOnSync;
+    use knobas_sync::scheduler::{RefreshEnd, RefreshEnded, SyncEvents};
+    use knobas_sync::{SourceSyncStatus, SyncOutcome};
+
+    struct Quiet;
+    impl SyncEvents for Quiet {
+        fn sync_state(&self, _status: SourceSyncStatus) {}
+        fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+        fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    }
+    /// Fails to open while told to, the way an unreachable server would.
+    struct Flaky {
+        connector: knobas_db::embedded::Connector,
+        down: std::sync::atomic::AtomicBool,
+    }
+    #[async_trait::async_trait]
+    impl RunConnections for Flaky {
+        async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
+            if self.down.load(Ordering::SeqCst) {
+                return Err(sqlx::Error::PoolClosed);
+            }
+            self.connector.connect().await
+        }
+    }
+    let ended = |wrote: Option<bool>| {
+        let mut status = SourceSyncStatus::finished("jira", 7, SyncOutcome::Ok);
+        status.last_changed = wrote;
+        status
+    };
+
+    let (connector, _pool) = scratch("pass_only_after_a_write", 1).await;
+    let flaky = Arc::new(Flaky {
+        connector,
+        down: std::sync::atomic::AtomicBool::new(false),
+    });
+    let pass = SuggestionPass::new(flaky.clone(), Duration::from_secs(60));
+    let events = SuggestOnSync::new(Quiet, pass.clone()).quiet_every(Duration::from_secs(3600));
+
+    // The first run to end OK asks, though it wrote nothing.
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 1, "the first run of the process");
+    pass.idle().await;
+
+    // Then a run that wrote nothing asks for nothing, however many end.
+    for _ in 0..3 {
+        events.sync_state(ended(Some(false)));
+    }
+    assert_eq!(pass.requested(), 1, "runs that wrote nothing");
+
+    // A run that wrote, and one that cannot say, each ask.
+    events.sync_state(ended(Some(true)));
+    assert_eq!(pass.requested(), 2, "a run that wrote");
+    events.sync_state(ended(None));
+    assert_eq!(pass.requested(), 3, "a run that cannot say");
+    pass.idle().await;
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 3);
+
+    // A refresh rewrote an item outside any run: the next run asks, once.
+    events.refresh_ended(&RefreshEnded {
+        entity_id: "jira:PAY-1".to_owned(),
+        write_id: None,
+        ended: RefreshEnd::Refreshed,
+    });
+    assert_eq!(pass.requested(), 3, "the refresh itself asks for nothing");
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 4, "the run after a refresh");
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 4);
+    pass.idle().await;
+
+    // A pass that failed is owed: the next run asks though it wrote nothing,
+    // and goes on asking until one finishes.
+    flaky.down.store(true, Ordering::SeqCst);
+    events.sync_state(ended(Some(true)));
+    pass.idle().await;
+    assert!(pass.failed(), "the pass could not open its connection");
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 6, "the run after a failed pass");
+    pass.idle().await;
+    flaky.down.store(false, Ordering::SeqCst);
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 7);
+    pass.idle().await;
+    assert!(!pass.failed());
+    events.sync_state(ended(Some(false)));
+    assert_eq!(pass.requested(), 7, "and none once one has finished");
+
+    // A mirror no run writes to still gets a pass once the wait is over.
+    let impatient = SuggestOnSync::new(Quiet, pass.clone()).quiet_every(Duration::ZERO);
+    for _ in 0..2 {
+        impatient.sync_state(ended(Some(false)));
+    }
+    assert_eq!(pass.requested(), 9, "the quiet wait, over at once here");
+    pass.idle().await;
 }

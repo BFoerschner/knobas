@@ -33,6 +33,7 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
             monogram: "XX".to_owned(),
             full_sync_exhaustive: true,
             refreshes: true,
+            title_stays_in_mirror: false,
         };
         all.push(SourceDescriptor {
             id: CUSTOM.to_owned(),
@@ -54,7 +55,11 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![kind("ticket"), kind("pipeline"), kind("survey")],
             config_schema: serde_json::json!({}),
@@ -144,6 +149,7 @@ fn asking(role: &str) -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: Some(role.to_owned()),
+        parent: None,
     }
 }
 
@@ -208,6 +214,7 @@ async fn a_role_reads_its_fillers_and_its_kinds_and_nothing_else() {
     // Every one of them is live: absent a role, the read draws them all.
     let unscoped = EntityFilter {
         role: None,
+        parent: None,
         ..asking(knobas_source::role::CI)
     };
     assert_eq!(read(&pool, &unscoped, &all).await.len(), 15);

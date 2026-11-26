@@ -1,0 +1,21 @@
+[
+  ["str:\"\"\"Retry a batch, then park it.\"\"\""],
+  ["kw:from",": dataclasses ","kw:import",": dataclass"],
+  [],
+  [":MAX_TRIES = ","num:3"],
+  [],
+  [],
+  ["fn:@dataclass"],
+  ["kw:class",": Batch:"],
+  [":    id: ","ty:str"],
+  [":    tries: ","ty:int",": = ","num:0"],
+  [],
+  [":    ","kw:def",": ","fn:settle",":(self, gateway) -> ","ty:bool","::"],
+  [":        ","kw:while",": self.tries < MAX_TRIES:"],
+  [":            self.tries += ","num:1"],
+  [":            ","kw:if",": gateway.send(self.id):"],
+  [":                ","kw:return",": ","con:True"],
+  [":        print(","str:f\"parked {self.id!r}\\n\"",":)"],
+  [":        ","kw:return",": ","con:False"],
+  []
+]

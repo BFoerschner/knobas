@@ -29,6 +29,7 @@ export const PLACEHOLDERS: readonly { name: string; says: string }[] = [
   { name: "{pr}", says: "the pull request’s number" },
   { name: "{branch}", says: "the pull request’s branch" },
   { name: "{url}", says: "its page at the source" },
+  { name: "{collection}", says: "for an API spec: a folder of Bruno requests knobas writes" },
 ];
 
 /** A checkout the dialog's preview fills from and *Try it* runs at. */
@@ -52,10 +53,23 @@ export interface FillContext {
   line: number | null;
 }
 
-/** The last part of a path: what `{name}` is, the checkout folder's own name. */
+/** The last part of a path: what `{name}` is, the checkout folder's own name. A Windows path's `\\` counts as `/`. */
 export function folderName(path: string): string {
-  const parts = path.split("/").filter((part) => part !== "");
+  const parts = path.split(/[\\/]/).filter((part) => part !== "");
   return parts[parts.length - 1] ?? "";
+}
+
+/**
+ * `relative` (a path inside a checkout, `/`-separated as git and the source
+ * give it) joined onto `checkout` with the checkout's own separator, so a
+ * Windows checkout reads `C:\\src\\knobas\\src\\lib.rs` as the backend's `Path::join`
+ * gives it.
+ */
+export function joinInside(checkout: string, relative: string): string {
+  const windows = /^[A-Za-z]:\\|^\\\\/.test(checkout) || (checkout.includes("\\") && !checkout.includes("/"));
+  const sep = windows ? "\\" : "/";
+  const base = checkout.replace(/[\\/]+$/, "");
+  return `${base}${sep}${windows ? relative.replace(/\//g, "\\") : relative}`;
 }
 
 /** A command with its placeholders drawn in, as prototype-6's `fill`. */
@@ -67,9 +81,57 @@ export function fill(command: string, at: FillContext): string {
     .replace(/\{name\}/g, folderName(at.path));
 }
 
-/** A word with a space in it, quoted as a person would type it. */
+/**
+ * A word with a space in it, quoted as a person would type it: in double
+ * quotes, which the command's own splitting takes on every platform and a
+ * Windows path can't hold. An empty word is `""`.
+ */
 export function quoteIfSpace(word: string): string {
-  return /\s/.test(word) ? `'${word}'` : word;
+  return word === "" || /\s/.test(word) ? `"${word}"` : word;
+}
+
+/**
+ * A command split into words as the backend splits it
+ * (`knobas_core::checkout::open::split_words`): `"` and `'` group, and are not
+ * passed on; nothing else is special, so a `\\` in a Windows path is a
+ * character. `null` for a quote that never closes, which the backend refuses.
+ */
+export function splitWords(command: string): string[] | null {
+  const words: string[] = [];
+  let current = "";
+  let started = false;
+  let quote: string | null = null;
+  for (const ch of command) {
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      else current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true;
+    } else if (/\s/.test(ch)) {
+      if (started) words.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += ch;
+      started = true;
+    }
+  }
+  if (quote !== null) return null;
+  if (started) words.push(current);
+  return words;
+}
+
+/**
+ * *It will run*: `command` split as the backend splits it, each word filled
+ * for the object, and the words read as one line, so a path with a space is
+ * one quoted argument as it will be one argument. `null` where the command
+ * can't be split.
+ */
+export function runPreview(command: string, at: ObjectFill): string | null {
+  const words = splitWords(command);
+  if (words === null) return null;
+  return argvText(words.map((word) => fillObject(word, at)));
 }
 
 /** An argument vector as one line, for *Started VS Code: …*. */
@@ -84,7 +146,8 @@ export function commandFor(app: CheckoutApplication, file: string | null): strin
 
 /** The menu's entries: the default first, then the rest in the list's order (R-8.22). */
 export function menuOrder(settings: CheckoutSettings): { app: CheckoutApplication; isDefault: boolean }[] {
-  const rows = settings.applications.map((app) => ({ app, isDefault: app.id === settings.default_application }));
+  // An API client with no repository command (Bruno) opens no checkout: it stands only on a spec's menu.
+  const rows = settings.applications.filter((app) => app.command.trim() !== "").map((app) => ({ app, isDefault: app.id === settings.default_application }));
   return [...rows.filter((row) => row.isDefault), ...rows.filter((row) => !row.isDefault)];
 }
 
@@ -163,6 +226,7 @@ export const OBJECT_PLACEHOLDERS: Readonly<Record<OpenObjectKind, readonly strin
   commit: ["{path}", "{name}", "{sha}", "{url}"],
   range: ["{path}", "{name}", "{base}", "{head}", "{url}"],
   pull_request: ["{path}", "{name}", "{pr}", "{base}", "{head}", "{branch}", "{url}"],
+  api_spec: ["{file}", "{collection}", "{name}"],
 };
 
 /** The command an application runs for an object of `kind`, or `null` when it does not accept one. */
@@ -178,7 +242,19 @@ export function objectCommand(app: CheckoutApplication, kind: OpenObjectKind): s
       return app.range_command ?? null;
     case "pull_request":
       return app.pull_request_command ?? null;
+    case "api_spec":
+      return app.api_command ?? null;
   }
+}
+
+/**
+ * An API spec command filled against a sample folder (ux31): what *It will run* says on the application page, since
+ * the real folder is written only when a spec is opened.
+ */
+export function apiPreview(command: string, scratch = "~/knobas/api-clients/Pet-Store-1a2b3c4d"): string | null {
+  const words = splitWords(command);
+  if (words === null) return null;
+  return argvText(words.map((w) => w.replaceAll("{file}", `${scratch}/openapi.yaml`).replaceAll("{collection}", scratch).replaceAll("{name}", "Pet Store")));
 }
 
 /** The menu for an object: the applications that accept it, the default first (R-8.22). */
@@ -196,7 +272,7 @@ export interface ObjectFill {
 /** A command with its placeholders drawn in for an object, as the backend fills them. */
 export function fillObject(command: string, at: ObjectFill): string {
   const { object } = at;
-  const file = object.kind === "file" ? `${at.path}/${object.path}` : null;
+  const file = object.kind === "file" ? joinInside(at.path, object.path) : null;
   const line = object.kind === "file" ? object.line : null;
   let out = fill(command, { path: at.path, file, line });
   const value = (name: string, given: string | number | null | undefined) => {
@@ -233,10 +309,24 @@ export function worktreeOf(clonesRoot: string | null, repoEntityId: string | nul
   if (clonesRoot === null || repoEntityId === null) return null;
   const [owner, repo, ...rest] = keyOf(repoEntityId).split("/");
   if (!owner || !repo || rest.length > 0) return null;
-  return `${clonesRoot.replace(/\/+$/, "")}/pull-requests/${owner}/${repo}-${number}`;
+  return joinInside(clonesRoot, `pull-requests/${owner}/${repo}-${number}`);
 }
 
 /** Whether `end` is a sha the Diff tool takes: 7 to 64 hex digits, a base with one `^` allowed. */
 export function isDiffEnd(end: string, base: boolean): boolean {
   return isSha(base ? caretOf(end)[0] : end);
+}
+
+/** The id of the shipped Bruno entry, the one application knobas knows by its id (`knobas_core::checkout::open::BRUNO`). */
+export const BRUNO = "bruno";
+
+/**
+ * A spec's *As requests, in an API client* entries (ux31, section 23): every application with an API spec command,
+ * the shipped Bruno only where it is on this computer (Björn: hide it otherwise). `found` is `null` until the look
+ * answers, which the explorer asks for when it opens, long before a menu is: Bruno waits for it, so a menu never
+ * shrinks under the pointer.
+ */
+export function apiClients(settings: CheckoutSettings | null, found: { bruno: boolean } | null): CheckoutApplication[] {
+  if (settings === null) return [];
+  return settings.applications.filter((app) => (app.api_command ?? "").trim() !== "" && !(app.id === BRUNO && found?.bruno !== true));
 }

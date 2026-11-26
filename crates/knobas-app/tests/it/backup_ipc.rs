@@ -782,6 +782,7 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
                 column: "priority".to_owned(),
                 direction: "descending".to_owned(),
             }),
+            show_all: false,
             saved_view: None,
         },
     )
@@ -857,9 +858,13 @@ const SEEDED_TONES: [(&str, ToneChoice); 2] =
 /// so a row that arrived is also a row the far machine applies: the restored
 /// Jira source config is what puts `ticket` in the answer.
 async fn yours(pool: &sqlx::PgPool) -> Vec<(String, ToneChoice, ToneOrigin)> {
-    let kinds = knobas_app::sources::state_colours::read(pool, &Registry::for_process())
-        .await
-        .expect("read the state colours");
+    let kinds = knobas_app::sources::state_colours::read(
+        pool,
+        &Registry::for_process(),
+        &knobas_app::sources::state_colours::SeenCounter::new(Arc::new(Registry::for_process())),
+    )
+    .await
+    .expect("read the state colours");
     kinds
         .iter()
         .filter(|kind| kind.kind == "ticket")
@@ -1154,7 +1159,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
     // row as the far machine lists it is the row the sharer saved, and the
     // text the grammar cannot read is still that text, read as unreadable.
-    let views = knobas_app::ticket_views::list(there, &Registry::for_process())
+    let views = knobas_app::ticket_views::list(there, &Registry::for_process(), None)
         .await
         .expect("the colleague's ticket views");
     assert_eq!(views.len(), 1, "{views:?}");

@@ -38,3 +38,15 @@ test("a word that is not a date after standup is today's Standup", () => {
   expect(target.querySelector(".tf-tabs [aria-current='page']")?.textContent).toBe("Standup");
   expect(target.querySelector(".tf-su-day")?.textContent).not.toBe("Thursday 3 September");
 });
+
+test("a day opened to come back from names itself on the path, and a day with no way back draws no bar (F-354)", () => {
+  view = mount(TfTime, { target, props: { ready: false, rest: ["2026-09-03"], timer: { current: null }, ontimer: undefined, back: { hash: "#/time/week", name: "Week" } } });
+  flushSync();
+  const crumbs = target.querySelector(".tf-crumbs")!;
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Thursday 3 September 2026");
+  expect(crumbs.textContent).toContain("Back to Week");
+  unmount(view);
+  view = null;
+  open(["2026-09-03"]);
+  expect(target.querySelector(".tf-crumbs")).toBeNull();
+});

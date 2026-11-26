@@ -110,6 +110,15 @@ mod glue;
 pub use knobas_source as spi;
 pub use knobas_source::docs::html;
 pub use knobas_source::docs::html::{Hook, Hooked, Reading};
+/// Where the source's own website shows an item of a kind, and its front
+/// page: the descriptor's `web_links`, read by the host from 1.7.0 on (ux30).
+/// The host builds each address from the typed base URL and these.
+pub use knobas_source::web_links::WebLinks;
+/// Where the source's own website shows its sign-in form: the descriptor's
+/// `web_sign_in`, read by the host from 1.7.0 on (ADR-0050). The host types a
+/// saved web sign-in into that form in its own web view; the adapter never
+/// sees one.
+pub use knobas_source::web_sign_in::WebSignInPages;
 pub use knobas_source::{
     ConnectionInfo, Cursor, RefreshAnswer, SourceDescriptor, SourceError, SyncItem, WriteOp,
     WriteReceipt,
@@ -119,8 +128,19 @@ use knobas_source::{pipeline, run, view};
 
 /// The `knobas:adapter` version this SDK builds against: its WIT package's,
 /// and this crate's own version.
-#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+#[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
 pub const INTERFACE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The `knobas:adapter` version this SDK builds against: the frozen 1.6.0
+/// world, under the `v1_6` feature.
+#[cfg(all(
+    feature = "v1_6",
+    not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+))]
+pub const INTERFACE_VERSION: &str = "1.6.0";
+/// The `knobas:adapter` version this SDK builds against: the frozen 1.5.0
+/// world, under the `v1_5` feature.
+#[cfg(all(feature = "v1_5", not(any(feature = "v1_0", feature = "v1_3"))))]
+pub const INTERFACE_VERSION: &str = "1.5.0";
 /// The `knobas:adapter` version this SDK builds against: the frozen 1.3.0
 /// world, under the `v1_3` feature.
 #[cfg(all(feature = "v1_3", not(feature = "v1_0")))]
@@ -134,10 +154,33 @@ pub const INTERFACE_VERSION: &str = "1.0.0";
 /// adapter's to name: the SDK's own types stand for every one.
 #[doc(hidden)]
 pub mod bindings {
-    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
     wit_bindgen::generate!({
         world: "adapter",
         path: "../knobas-wasm-host/wit",
+        pub_export_macro: true,
+        export_macro_name: "export_world",
+        default_bindings_module: "knobas_adapter_sdk::bindings",
+        runtime_path: "knobas_adapter_sdk::__private::wit_bindgen::rt",
+    });
+
+    #[cfg(all(
+        feature = "v1_6",
+        not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+    ))]
+    wit_bindgen::generate!({
+        world: "adapter",
+        path: "wit-1.6.0",
+        pub_export_macro: true,
+        export_macro_name: "export_world",
+        default_bindings_module: "knobas_adapter_sdk::bindings",
+        runtime_path: "knobas_adapter_sdk::__private::wit_bindgen::rt",
+    });
+
+    #[cfg(all(feature = "v1_5", not(any(feature = "v1_0", feature = "v1_3"))))]
+    wit_bindgen::generate!({
+        world: "adapter",
+        path: "wit-1.5.0",
         pub_export_macro: true,
         export_macro_name: "export_world",
         default_bindings_module: "knobas_adapter_sdk::bindings",
@@ -399,6 +442,39 @@ pub trait Adapter: Sized + 'static {
         html_from_text(text)
     }
 
+    /// What a person may change on `entity` besides its status (1.6.0,
+    /// ADR-0054), as the source says now: `knobas_source::Source::ticket_fields`.
+    /// `None`, the default, is an adapter that offers no edits, or an entity
+    /// that is not a ticket. An adapter that declares `edit_ticket` answers
+    /// `Some` for every ticket it emits (battery clause 15), and its `write`
+    /// refuses by name, at write time, a field it cannot set. Built against
+    /// 1.5.0 or earlier, which has no `tickets`, it is never called, and its
+    /// tickets' fields are read only in knobas. `export!` exports `tickets`
+    /// for every adapter; the host calls it only for one that declares
+    /// `edit_ticket`.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+    fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let _ = entity;
+        Ok(None)
+    }
+
+    /// The choices of `field` on `entity` that match `typed` (1.6.0,
+    /// ADR-0054): `knobas_source::Source::field_options`. `None`, the
+    /// default, is a field with no list.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5")))]
+    fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let _ = (entity, field, typed);
+        Ok(None)
+    }
+
     /// Read one item by id (ADR-0031): `entity` is an entity ref in string
     /// form, in this instance's namespace. [`RefreshAnswer::Item`] is the
     /// item as `sync` hands it to the sink for that id, [`RefreshAnswer::Gone`]
@@ -531,8 +607,21 @@ mod tests {
     fn the_crate_version_is_the_interface_version_it_binds() {
         let wit = include_str!("../../knobas-wasm-host/wit/adapter.wit");
         assert_eq!(env!("CARGO_PKG_VERSION"), wit_version(wit));
-        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5", feature = "v1_6")))]
         assert_eq!(super::INTERFACE_VERSION, wit_version(wit));
+        #[cfg(all(
+            feature = "v1_6",
+            not(any(feature = "v1_0", feature = "v1_3", feature = "v1_5"))
+        ))]
+        assert_eq!(
+            super::INTERFACE_VERSION,
+            wit_version(include_str!("../wit-1.6.0/adapter.wit"))
+        );
+        #[cfg(all(feature = "v1_5", not(any(feature = "v1_0", feature = "v1_3"))))]
+        assert_eq!(
+            super::INTERFACE_VERSION,
+            wit_version(include_str!("../wit-1.5.0/adapter.wit"))
+        );
         #[cfg(all(feature = "v1_3", not(feature = "v1_0")))]
         assert_eq!(
             super::INTERFACE_VERSION,

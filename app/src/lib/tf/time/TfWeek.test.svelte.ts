@@ -104,11 +104,8 @@ async function render(over: { week?: string | null; running?: RunningTimer | nul
           return answer(days);
         },
         pendingWrites: async () => over.writes ?? [],
-        getEntity: async (id: string) => {
-          const kind = KINDS[id];
-          if (kind === undefined) throw { code: "not_found", message: "no", source_id: null };
-          return { row: { entity_id: id, kind } } as never;
-        },
+        entityBriefs: async (ids: string[]) =>
+          ids.flatMap((id) => (KINDS[id] === undefined ? [] : [{ entity_id: id, kind: KINDS[id]!, source_id: "jira", title: id, state: null }])),
       },
     },
   });
@@ -132,7 +129,7 @@ test("reads this week, Monday first, and names it", async () => {
   ]);
   expect(text(target.querySelector("h2"))).toBe("Week of 17 August 2026");
   const heads = [...target.querySelectorAll("thead th")].map(text);
-  expect(heads).toEqual(["On", "Mon 17", "Tue 18", "Wed 19", "Thu 20", "Fri 21", "Sat 22", "Sun 23", "Week"]);
+  expect(heads).toEqual(["Ticket or label", "Mon 17", "Tue 18", "Wed 19", "Thu 20", "Fri 21", "Sat 22", "Sun 23", "Week"]);
 });
 
 test("the address's date reads that date's week, and the week after is a step forward", async () => {
@@ -161,6 +158,17 @@ test("a cell links to its day and says what is left; weekend columns are shaded"
   const row = [...target.querySelectorAll("tbody tr")].find((tr) => text(tr).includes("PAY-228"))!;
   const cells = [...row.querySelectorAll("td")];
   expect(cells[4]!.querySelector("a")?.getAttribute("href")).toBe("#/time/2026-08-20");
+  // A press opens the day to come back from (F-345); ⌘-click stays the browser's.
+  const cell = cells[4]!.querySelector("a")!;
+  const plain = new MouseEvent("click", { bubbles: true, cancelable: true });
+  cell.dispatchEvent(plain);
+  expect(plain.defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/time/2026-08-20");
+  location.hash = "";
+  const modified = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+  cell.addEventListener("click", (event) => event.preventDefault(), { once: true });
+  cell.dispatchEvent(modified);
+  expect(location.hash).toBe("");
   expect(text(cells[4])).toBe("2h 40m 1h held");
   expect(cells[4]!.querySelector("svg.tf-tm-bar")).not.toBeNull();
   expect(cells[6]!.querySelector("svg")).toBeNull();
@@ -196,7 +204,7 @@ test("the total row adds every row per day", async () => {
   await render();
   const total = [...target.querySelectorAll("tbody tr")].at(-1)!;
   expect([...total.querySelectorAll("td")].map(text)).toEqual([
-    "Every day",
+    "Total",
     "2h 48m",
     "1h 42m",
     "2h 36m",

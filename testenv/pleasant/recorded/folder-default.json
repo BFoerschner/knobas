@@ -1,0 +1,91 @@
+{
+ "name": "folder-default",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "CustomUserFields": {},
+  "CustomApplicationFields": {},
+  "Children": [
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [],
+    "Credentials": [],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Payments/Prod}",
+    "Name": "Prod",
+    "ParentId": "{folder:Tidewater/Payments}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   },
+   {
+    "CustomUserFields": {},
+    "CustomApplicationFields": {},
+    "Children": [],
+    "Credentials": [],
+    "Tags": [],
+    "HasModifyEntriesAccess": false,
+    "HasViewEntryContentsAccess": true,
+    "HasExportAccess": false,
+    "HasViewOfflineAccess": false,
+    "CommentPrompts": {
+     "AskForCommentOnViewPassword": false,
+     "AskForCommentOnViewOffline": false,
+     "AskForCommentOnModifyEntries": false,
+     "AskForCommentOnMoveEntries": false,
+     "AskForCommentOnMoveFolders": false,
+     "AskForCommentOnModifyFolders": false
+    },
+    "Id": "{folder:Tidewater/Payments/Stage}",
+    "Name": "Stage",
+    "ParentId": "{folder:Tidewater/Payments}",
+    "Notes": null,
+    "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+    "Expires": null
+   }
+  ],
+  "Credentials": [],
+  "Tags": [],
+  "HasModifyEntriesAccess": false,
+  "HasViewEntryContentsAccess": true,
+  "HasExportAccess": false,
+  "HasViewOfflineAccess": false,
+  "CommentPrompts": {
+   "AskForCommentOnViewPassword": false,
+   "AskForCommentOnViewOffline": false,
+   "AskForCommentOnModifyEntries": false,
+   "AskForCommentOnMoveEntries": false,
+   "AskForCommentOnMoveFolders": false,
+   "AskForCommentOnModifyFolders": false
+  },
+  "Id": "{folder:Tidewater/Payments}",
+  "Name": "Payments",
+  "ParentId": "{folder:Tidewater}",
+  "Notes": null,
+  "Created": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Modified": "<time dddd-dd-ddTdd:dd:dd±dd:dd>",
+  "Expires": null
+ },
+ "request": {
+  "as": "reader",
+  "method": "GET",
+  "path": "/api/v5/rest/folders/{folder:Tidewater/Payments}"
+ }
+}

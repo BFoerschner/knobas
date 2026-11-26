@@ -13,6 +13,8 @@ import { expect, test } from "vitest";
 import type { AssetProperty, AssetType, PropertyKind } from "../ipc/assets";
 import {
   defaultTypeId,
+  proseParts,
+  readsWide,
   draftOf,
   inputTypeFor,
   kindFor,
@@ -83,7 +85,10 @@ test("a parent's conventions order the list without shortening it", () => {
   expect(choices.rest.map((type) => type.id)).toEqual(["vm", "custom"]);
   expect([...choices.usual, ...choices.rest]).toHaveLength(TABLE.length);
   expect(usualHere(choices)).toBe("Usual here: Container engine, Service");
-  expect(defaultTypeId(choices)).toBe("container_engine");
+  // Two usual types are a choice, so neither is picked for the reader.
+  expect(defaultTypeId(choices)).toBeNull();
+  // One is what goes here, and the dialog stays one field and `Enter`.
+  expect(defaultTypeId({ usual: [SERVICE], rest: [VM, CUSTOM] })).toBe("service");
 });
 
 /**
@@ -120,7 +125,9 @@ test("nothing is usual at the top of the estate and everything is offered", () =
   expect(choices.usual).toEqual([]);
   expect(choices.rest).toEqual(TABLE);
   expect(usualHere(choices)).toBeNull();
-  expect(defaultTypeId(choices)).toBe("vm");
+  expect(defaultTypeId(choices)).toBeNull();
+  // A table with one type has nothing to choose.
+  expect(defaultTypeId({ usual: [], rest: [VM] })).toBe("vm");
 });
 
 /**
@@ -269,4 +276,23 @@ test("a value only the backend can judge is sent for it to judge", () => {
   expect(parseProperty("url", "localhost:3001")).toEqual({
     value: { kind: "url", value: "localhost:3001" },
   });
+});
+
+test("a sentence or a long code value takes the pane's width; a short value and a number do not", () => {
+  const text = (value: string) => ({ value: { kind: "text" as const, value } });
+  expect(readsWide(text("Gitea: a real product, the Gitea adapter's witness and the VCS"))).toBe(true);
+  expect(readsWide(text("testenv/docker-compose.yml/and-more"))).toBe(true);
+  expect(readsWide(text("on-failure"))).toBe(false);
+  expect(readsWide(text("restart when it stops"))).toBe(false);
+  expect(readsWide({ value: null })).toBe(false);
+});
+
+test("backticks mark a code value, and one left open is only a character", () => {
+  expect(proseParts("the `wsl` context")).toEqual([
+    { text: "the ", code: false },
+    { text: "wsl", code: true },
+    { text: " context", code: false },
+  ]);
+  expect(proseParts("a ` left open")).toEqual([{ text: "a ` left open", code: false }]);
+  expect(proseParts("none")).toEqual([{ text: "none", code: false }]);
 });

@@ -8,9 +8,11 @@ import { beforeEach, expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth } from "./health.svelte";
-import { toastQueued, toastStarted } from "./queued-toast";
-import { toasts } from "./toasts.svelte";
-import { writeQueuePanel } from "./write-queue.svelte";
+import type { Hear, WriteFollower } from "./follow-write";
+import type { QueuedWrite } from "../ipc/sources";
+import { reviewSubject, toastQueued, toastStarted } from "./queued-toast";
+import { push, toasts } from "./toasts.svelte";
+import { noteWithdrawn, reset as resetQueue, writeQueuePanel } from "./write-queue.svelte";
 
 const TEAMCITY = { id: "teamcity", display_name: "TeamCity" };
 
@@ -29,8 +31,75 @@ beforeEach(() => {
   writeQueuePanel.open = false;
 });
 
+/** A follower the test speaks for: `hear(row)` is the queue's next read of the write. */
+function heardFollower(): { follower: WriteFollower; hear: Hear; follows: () => number } {
+  let heard: Hear = () => {};
+  let open = 0;
+  return {
+    follower: {
+      follow: (_id, hear) => {
+        heard = hear;
+        open += 1;
+        return () => {
+          open -= 1;
+          heard = () => {};
+        };
+      },
+    },
+    hear: (row) => heard(row),
+    follows: () => open,
+  };
+}
+
+const HELD = { id: 7, state: "held", held_snapshot: null, detail: "changed at the source" } as unknown as QueuedWrite;
+
+test("a queued toast says Sent in place once its write left the queue, and offers no queue that no longer holds it", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  expect(toasts.items.at(-1)!.text).toBe("Queued: comment on Payout design.");
+  expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
+  hear(undefined);
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.text).toBe("Sent: comment on Payout design.");
+  expect(toasts.items[0]!.action).toBeUndefined();
+  expect(follows()).toBe(0);
+});
+
+test("a write already sent as it answers says Sent at once, with nothing to follow", () => {
+  const { follower, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7, state: "sent" }, follower });
+  expect(toasts.items.at(-1)!.text).toBe("Sent: comment on Payout design.");
+  expect(follows()).toBe(0);
+});
+
+test("a write withdrawn in the queue takes its toast with it, because nothing was sent", () => {
+  resetQueue();
+  const { follower, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  noteWithdrawn(7);
+  expect(toasts.items).toHaveLength(0);
+  expect(follows()).toBe(0);
+});
+
+test("a held write keeps saying Queued and offering the queue, which is where it is", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  hear(HELD);
+  expect(toasts.items.at(-1)!.text).toBe("Queued: comment on Payout design.");
+  expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
+  expect(follows()).toBe(0);
+});
+
+test("a toast that has gone stops following its write", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  toasts.items.length = 0;
+  hear({ ...HELD, state: "pending" } as QueuedWrite);
+  expect(follows()).toBe(0);
+});
+
 test("a healthy source's write says what was queued, and Show queue opens the queue", () => {
-  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, storeWith("ok"));
+  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, { store: storeWith("ok") });
   const toast = toasts.items.at(-1)!;
   expect(toast.text).toBe("Queued: re-run Payout_IntegrationTests #1187.");
   expect(toast.action?.label).toBe("Show queue");
@@ -39,14 +108,14 @@ test("a healthy source's write says what was queued, and Show queue opens the qu
 });
 
 test("a rejected credential says the write waits for the sign-in", () => {
-  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, storeWith("unauthorized"));
+  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, { store: storeWith("unauthorized") });
   expect(toasts.items.at(-1)!.text).toBe(
     "Queued: re-run Payout_IntegrationTests #1187. TeamCity sign-in is failing, so it waits there.",
   );
 });
 
 test("no stored secret is a failing sign-in too", () => {
-  toastQueued("set env on Payout_IntegrationTests", TEAMCITY, storeWith("missing_secret"));
+  toastQueued("set env on Payout_IntegrationTests", TEAMCITY, { store: storeWith("missing_secret") });
   expect(toasts.items.at(-1)!.text).toBe(
     "Queued: set env on Payout_IntegrationTests. TeamCity sign-in is failing, so it waits there.",
   );
@@ -54,19 +123,19 @@ test("no stored secret is a failing sign-in too", () => {
 
 test("an unreachable server, an untested credential, or no reading at all names no sign-in", () => {
   for (const state of ["unreachable", "unknown", null] as const) {
-    toastQueued("PAY-231 to Done", TEAMCITY, storeWith(state));
+    toastQueued("PAY-231 to Done", TEAMCITY, { store: storeWith(state) });
     expect(toasts.items.at(-1)!.text).toBe("Queued: PAY-231 to Done.");
   }
 });
 
 test("a write whose source the page does not know says what was queued and nothing more", () => {
-  toastQueued("comment on PAY-231", null, storeWith("unauthorized"));
+  toastQueued("comment on PAY-231", null, { store: storeWith("unauthorized") });
   expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PAY-231.");
 });
 
 test("no toast promises the next sync", () => {
   for (const state of ["ok", "unknown", "unauthorized", "missing_secret", "unreachable", null] as const) {
-    toastQueued("merge PR #142", TEAMCITY, storeWith(state));
+    toastQueued("merge PR #142", TEAMCITY, { store: storeWith(state) });
   }
   expect(toasts.items.every((toast) => !toast.text.includes("next sync"))).toBe(true);
 });
@@ -76,4 +145,54 @@ test("Start work's toast adds the sign-in sentence only when something waits (#1
   expect(toasts.items.at(-1)!.text).toBe("Started work on PAY-240. 2 writes queued. TeamCity sign-in is failing, so it waits there.");
   toastStarted("PAY-240", 0, TEAMCITY, storeWith("unauthorized"));
   expect(toasts.items.at(-1)!.text).toBe("Started work on PAY-240.");
+});
+
+test("once the write has gone, a toast given a where offers it in place of the queue (F-350)", () => {
+  let hear: Hear = () => {};
+  const follower: WriteFollower = { follow: (_id, heard) => ((hear = heard), () => {}) };
+  const shown: string[] = [];
+  toastQueued("re-run Payout_Lint #4811", null, { write: { id: 7 }, follower, where: { label: "Show in runs", run: () => shown.push("runs") } });
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show queue");
+
+  hear(undefined);
+  expect(toasts.items.at(-1)!.text).toBe("Sent: re-run Payout_Lint #4811.");
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show in runs");
+  toasts.items.at(-1)!.action!.run();
+  expect(shown).toEqual(["runs"]);
+});
+
+test("a write already sent offers its where straight away", () => {
+  toastQueued("re-run Payout_Lint #4811", null, { write: { id: 7, state: "sent" }, where: { label: "Show in runs", run: () => {} } });
+  expect(toasts.items.at(-1)!.text).toBe("Sent: re-run Payout_Lint #4811.");
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show in runs");
+});
+
+test("a write about the same subject takes the toast's place, and the older write can't change its words (F-360)", () => {
+  const older = heardFollower();
+  const newer = heardFollower();
+  const one = toastQueued("publish the protocol", TEAMCITY, { store: storeWith(null), write: { id: 1 }, follower: older.follower, subject: "standup" });
+  older.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Sent: publish the protocol."]);
+  const twoStore = storeWith(null);
+  const two = toastQueued("publish it again", TEAMCITY, { store: twoStore, write: { id: 2 }, follower: newer.follower, subject: "standup" });
+  expect(two).toBe(one);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: publish it again."]);
+  newer.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Sent: publish it again."]);
+});
+
+test("a write still going stops being followed once a toast took its place (F-360)", () => {
+  const older = heardFollower();
+  const newer = heardFollower();
+  toastQueued("publish the protocol", TEAMCITY, { store: storeWith(null), write: { id: 1 }, follower: older.follower, subject: "standup" });
+  toastQueued("publish it again", TEAMCITY, { store: storeWith(null), write: { id: 2 }, follower: newer.follower, subject: "standup" });
+  expect(older.follows()).toBe(0);
+  older.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: publish it again."]);
+});
+
+test("submitting a review takes the place of the toast that said nothing was sent (F-260)", () => {
+  push({ text: "Added to your review. Nothing is sent until you submit it.", subject: reviewSubject("pr") });
+  toastQueued("submit review on PR #142", TEAMCITY, { store: storeWith(null), subject: reviewSubject("pr") });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: submit review on PR #142."]);
 });

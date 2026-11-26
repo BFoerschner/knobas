@@ -1,0 +1,5 @@
+[1mscripts/report.py[0m[36m:[0m1[36m:[0m1[36m:[0m [1m[31mI001[0m [[36m*[0m] Import block is un-sorted or un-formatted
+[1mscripts/report.py[0m[36m:[0m1[36m:[0m8[36m:[0m [1m[31mF401[0m [[36m*[0m] `os` imported but unused
+[1mscripts/report.py[0m[36m:[0m2[36m:[0m8[36m:[0m [1m[31mF401[0m [[36m*[0m] `sys` imported but unused
+Found 3 errors.
+[[36m*[0m] 3 fixable with `--fix`.

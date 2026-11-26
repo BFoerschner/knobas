@@ -9,12 +9,14 @@
  * as one on this disk. Section ids are the source's and never taken apart.
  */
 import type {
+  BranchPull,
   CheckoutView,
   ChoiceOption,
   CodeFacts,
   DiffFile,
   DiffRead,
   EntityDetail,
+  EntityFilter,
   EntityPage,
   EntityRow,
   SourceView,
@@ -24,12 +26,14 @@ import type {
   ViewRow,
   ViewSection,
   RefusedWrite,
+  Unsynced,
   WriteAsk,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
 import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
 import type { DrawnFile } from "../diff/diff";
+import { WORKING_TREE } from "../diff/address";
 import { matchesAll } from "../filter/filter";
 
 /**
@@ -56,6 +60,10 @@ export function headLine(
  * file until the source holds a newer blob.
  */
 export const MADE = "branch";
+/** A pull request this session queued, on the repository's entity with its title as the text (F-242) and the branch it proposes as its `base` (F-257). */
+export const MADE_PR = "pull request";
+/** The surface those echoes are tagged with, so the repository's *Pull requests* reads again for them. */
+export const REPO_PRS = "repo-prs";
 export const DELETED = "delete";
 export const commitKind = (branch: string, path: string) => `commit ${branch}\u0000${path}`;
 /** The surfaces they are tagged with, whose re-reads settle them. */
@@ -77,6 +85,8 @@ export const REPO_TABS = [
   { id: "branches", label: "Branches", group: "ref" },
   { id: "compare", label: "Compare", group: "ref" },
   { id: "prs", label: "Pull requests", group: "work" },
+  // The pipelines that build the repository, branch by branch (the repo-builds pass).
+  { id: "builds", label: "Builds", group: "work" },
   { id: "local", label: "Local changes", group: "work" },
 ] as const;
 
@@ -102,10 +112,31 @@ export interface RepoRoute {
   line: number | null;
   /** Commits: the commit's entity id, whose diff opens. */
   commit: string | null;
-  /** Compare: the branch proposed (#837's `compare/<branch>`). */
+  /** Compare: the branch proposed (#837's `compare/<branch>`). Builds: the branch shown (`builds/<branch>`). */
   branch: string | null;
   /** Compare: the branch it goes into, where the address names one (`compare/<base>...<head>`, #2427). */
   base: string | null;
+  /** Builds: the pipeline whose runs open inside the tab (`builds/<branch>/<pipeline id>`, each encoded whole). */
+  pipeline: string | null;
+  /** Files: a folder drawn by a folder renderer (`render/<renderer id>/<folder>`, ADR-0044); absent for none. */
+  render?: FolderRenderAt;
+  /**
+   * Files: inside a folder's generated folder (`rendered/<renderer>/<folder>/…`, ADR-0046); absent for none. With it
+   * set, `path`, `line` and `place` are the generated file's, its path from the generated folder's top.
+   */
+  rendered?: FolderRenderAt;
+  /**
+   * Files: a place inside a rendered file (`at/<place>/<path>`, ux18): an OpenAPI spec's operation (`get /pets/{id}`)
+   * or schema (`schemas/Pet`), encoded whole; absent for none.
+   */
+  place?: string;
+}
+
+/** A folder and the folder renderer that draws it (ADR-0044). */
+export interface FolderRenderAt {
+  renderer: string;
+  /** The folder's path from the top, `""` the top itself. */
+  folder: string;
 }
 
 /** Between the base and the head in a compare address: git's own, and never part of a ref name. */
@@ -120,23 +151,50 @@ const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
  */
 export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
+  if (rest[1] === RENDERED) {
+    const landing: RepoRoute = { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null };
+    // `rendered/<renderer>` with no folder is the Files landing.
+    if (!rest[2] || !rest[3]) return landing;
+    const rendered = { renderer: rest[2], folder: rest[3] === "." ? "" : rest[3] };
+    // The normal Files tails under it; anything else, or a rendering inside it, is the generated folder's landing.
+    const inner = readRepoRoute([rest[0] ?? "", ...rest.slice(4)]);
+    if (inner.tab !== "files" || inner.render !== undefined || inner.rendered !== undefined) return { ...landing, rendered };
+    const at: RepoRoute = { ...landing, path: inner.path, line: inner.line, rendered };
+    return inner.place === undefined ? at : { ...at, place: inner.place };
+  }
+  if (rest[1] === RENDER && rest[2]) {
+    const render = { renderer: rest[2], folder: rest.slice(3).join("/") };
+    return { repoId, tab: "files", path: null, line: null, commit: null, branch: null, base: null, pipeline: null, render };
+  }
+  if (rest[1] === AT && rest[2]) {
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: null, commit: null, branch: null, base: null, pipeline: null, place: rest[2] };
+  }
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
-    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null };
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null, pipeline: null };
   }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
   const cut = tab === "compare" && tail !== null ? tail.indexOf(BASE_HEAD) : -1;
   const compared = cut > 0 ? { branch: tail!.slice(cut + BASE_HEAD.length) || null, base: tail!.slice(0, cut) } : { branch: tail, base: null };
+  // The working tree is a head only (ux26): as a base it reads as no base, *Into* the default branch.
+  const base = compared.base === WORKING_TREE ? null : compared.base;
   return {
     repoId,
     tab,
     path: tab === "files" || tab === "edit" ? tail : null,
     line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
-    branch: tab === "compare" ? compared.branch : null,
-    base: tab === "compare" ? compared.base : null,
+    // Builds' branch and pipeline are each one segment, encoded whole (`buildsHash`).
+    branch: tab === "compare" ? compared.branch : tab === "builds" ? (rest[2] ?? null) : null,
+    base: tab === "compare" ? base : null,
+    pipeline: tab === "builds" ? (rest[3] ?? null) : null,
   };
+}
+
+/** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
+export function knowsRepoTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || rest[1] === LINE || ((rest[1] === RENDER || rest[1] === RENDERED || rest[1] === AT) && !!rest[2]) || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -146,6 +204,11 @@ export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): stri
   return parts.join("/");
 }
 
+/** The Builds tab at `branch`, and inside it `pipeline`'s runs where given; each encoded whole. */
+export function buildsHash(repoId: string, branch: string, pipeline?: string): string {
+  return repoHash(repoId, "builds", encodeURIComponent(branch), ...(pipeline === undefined ? [] : [encodeURIComponent(pipeline)]));
+}
+
 /** The Files tab with `path` open; each segment encoded, the slashes kept. */
 export function fileHash(repoId: string, path: string): string {
   return repoHash(repoId, "files", ...path.split("/").map(encodeURIComponent));
@@ -153,6 +216,35 @@ export function fileHash(repoId: string, path: string): string {
 
 /** The segment a line link starts with: not a tab, the Files tab lit. */
 const LINE = "line";
+/** The segment a folder render starts with (ADR-0044): not a tab, the Files tab lit. */
+const RENDER = "render";
+/** The segment a place inside a rendered file starts with (ux18): not a tab, the Files tab lit. */
+const AT = "at";
+/** The segment a generated folder starts with (ADR-0046): not a tab, the Files tab lit. */
+const RENDERED = "rendered";
+
+/**
+ * The Files tab inside `folder`'s generated folder made by folder renderer `renderer` (ADR-0046): its landing, or the
+ * generated file at `path` (from the generated folder's top), at a line or a place where given. The folder is one
+ * segment encoded whole, `.` the top, so the address says where the folder stops and the file starts.
+ */
+export function renderedHash(repoId: string, renderer: string, folder: string, path?: string | null, at?: { line: number } | { place: string }): string {
+  const head = [repoHash(repoId), RENDERED, encodeURIComponent(renderer), folder === "" ? "." : encodeURIComponent(folder)];
+  if (path === undefined || path === null || path === "") return head.join("/");
+  const segments = path.split("/").map(encodeURIComponent);
+  if (at !== undefined && "line" in at) return [...head, LINE, String(at.line), ...segments].join("/");
+  if (at !== undefined && "place" in at) return [...head, AT, encodeURIComponent(at.place), ...segments].join("/");
+  return [...head, "files", ...segments].join("/");
+}
+
+/**
+ * The Files tab with `folder` drawn by folder renderer `renderer` (ADR-0044). The renderer comes before the folder,
+ * as a line link's line does: a path's segments are any names a tree holds.
+ */
+export function folderRenderHash(repoId: string, renderer: string, folder: string): string {
+  const tail = folder === "" ? [] : folder.split("/").map(encodeURIComponent);
+  return [repoHash(repoId), RENDER, encodeURIComponent(renderer), ...tail].join("/");
+}
 
 /**
  * The Files tab with `path` open at `line` (from 1), marked (#2251). The line
@@ -160,6 +252,14 @@ const LINE = "line";
  */
 export function lineHash(repoId: string, path: string, line: number): string {
   return [repoHash(repoId), LINE, String(line), ...path.split("/").map(encodeURIComponent)].join("/");
+}
+
+/**
+ * The Files tab with `path` open at `place` inside it (ux18): an OpenAPI spec's operation or schema. The place comes
+ * before the path, encoded whole, as a line link's line does.
+ */
+export function placeHash(repoId: string, path: string, place: string): string {
+  return [repoHash(repoId), AT, encodeURIComponent(place), ...path.split("/").map(encodeURIComponent)].join("/");
 }
 
 /** A commit's diff under the Commits tab. */
@@ -176,6 +276,29 @@ export function commitHash(repoId: string, commitId: string): string {
 export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: readonly EntityRow[]): EntityRow | null {
   if (row.path === null) return null;
   return repos.find((repo) => repo.kind === "repo" && repo.source_id === row.source_id && repo.title === row.path) ?? null;
+}
+
+/** How many pull requests a repository's read asks for: every one the mirror holds. */
+export const REPO_PRS_LIMIT = 1000;
+
+/**
+ * The read of a repository's pull requests (`TfRepo.svelte`'s `readRow`), and the one a press on its link asks ahead
+ * (`hover-reads.ts`), the same filter so the page's ask joins the press's in the answer cache. Its own pull requests,
+ * not its source's every one (the query audit, 2026-11-12: 1,710 rows in four reads, 700 ms, for the repository's few
+ * dozen); `repoPrs` still keeps the rows whose path line is this repository.
+ */
+export function repoPrsFilter(row: Pick<EntityRow, "source_id" | "title">): EntityFilter {
+  return {
+    sources: [row.source_id],
+    kinds: ["pr"],
+    updated_within_days: null,
+    order: "updated_desc",
+    context: null,
+    project: null,
+    include_deleted: false,
+    reach: null,
+    parent: row.title,
+  };
 }
 
 /**
@@ -219,32 +342,61 @@ export function underRepoHash(kind: UnderRepoKind, entityId: string, repoId: str
 export interface BranchOption {
   name: string;
   /**
-   * The branch's entity id, which its files and commits are read at; `null`
-   * only for the default branch where the mirror does not hold it, which is
-   * read at the repository instead.
+   * The branch's entity id, which its files and commits are read at: the
+   * mirror's, or for a branch the source lists and the mirror has not synced
+   * yet the id its adapter named (`ShownView.unsynced`), read through the
+   * source. `null` for the default branch where the mirror does not hold it,
+   * which is read at the repository instead, and for a branch this session
+   * made that no read holds yet (`made`).
    */
   entityId: string | null;
   isDefault: boolean;
+  /** Not in the mirror yet: read through the source, linked nowhere. */
+  unsynced?: boolean;
+  /** Made by knobas this session and not in any read yet: its write's word, *queued* or *sent*. */
+  made?: "queued" | "sent";
 }
 
 /**
  * The branches the dropdown offers, from the view's *Branches* section, in
- * its order (the default branch first). Only a branch the mirror holds has an
- * id to read at; the view cleared the others' (ADR-0020 rule 7), and the note
- * a cut list ends on has none either. The default branch is offered either
- * way: it is read at the repository.
+ * its order (the default branch first). A branch the mirror holds has its
+ * id; one the source lists and the mirror has not synced yet has the id its
+ * adapter named, which the view moved to `unsynced` (ADR-0020 rule 7), so a
+ * branch made on the forge since the last sync is offered as soon as the
+ * listing names it. The note a cut list ends on has no id either way. The
+ * default branch is offered either way: it is read at the repository.
  */
-export function branchOptions(section: ViewSection | null): BranchOption[] {
+export function branchOptions(section: ViewSection | null, unsynced: readonly Unsynced[] = []): BranchOption[] {
   const options: BranchOption[] = [];
+  const named = new Map(unsynced.filter((row) => section === null || row.section === section.id).map((row) => [row.title, row.entity_id]));
   for (const block of section?.blocks ?? []) {
     if (block.type !== "entities") continue;
     for (const row of block.rows) {
       const isDefault = row.chip === "default";
-      if (row.entity_id === null && !isDefault) continue;
-      options.push({ name: row.title, entityId: row.entity_id, isDefault });
+      const readAt = row.entity_id ?? named.get(row.title) ?? null;
+      if (readAt === null && !isDefault) continue;
+      options.push({ name: row.title, entityId: readAt, isDefault, ...(row.entity_id === null && readAt !== null ? { unsynced: true } : {}) });
     }
   }
   return options;
+}
+
+/**
+ * The branches with each one this session made (`MADE` echoes) that the
+ * listing does not hold yet, after the listed ones: a branch knobas made is
+ * offered at once, without waiting for a read, and goes from here when a
+ * read lists it.
+ */
+export function withMade(listed: readonly BranchOption[], made: readonly { text: string; state: "queued" | "sent" }[]): BranchOption[] {
+  const names = new Set(listed.map((option) => option.name));
+  const extra: BranchOption[] = [];
+  // Two echoes of one name (a commit to a new branch, then *New branch…* of it) are one branch: the list is keyed by name.
+  for (const echo of made) {
+    if (names.has(echo.text)) continue;
+    names.add(echo.text);
+    extra.push({ name: echo.text, entityId: null, isDefault: false, made: echo.state });
+  }
+  return extra.length === 0 ? [...listed] : [...listed, ...extra];
 }
 
 /**
@@ -301,9 +453,10 @@ const CHANGE_WORD: Record<DiffFile["change"], string> = {
 export function localFiles(read: DiffRead | null): DrawnFile[] {
   if (read === null || read.status !== "read") return [];
   // A label, not the path: the path's name picks the highlighting's language.
-  const marked = (file: DiffFile, how: string): DrawnFile => ({
+  const marked = (file: DiffFile, how: "not staged" | "staged"): DrawnFile => ({
     ...file,
     label: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
+    half: how === "staged" ? "staged" : "unstaged",
   });
   return [
     ...read.unstaged.files.map((file) => marked(file, "not staged")),
@@ -316,6 +469,13 @@ export function fileLines(text: string): string[] {
   const lines = text.split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;
+}
+
+/** How many lines {@link fileLines} makes of `text`, counted without making them. */
+export function countLines(text: string): number {
+  let n = 1;
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) n++;
+  return n > 1 && text.endsWith("\n") ? n - 1 : n;
 }
 
 /** A place in a file's text: a line (from 0) and a character in it. */
@@ -378,6 +538,21 @@ export function pickDefaultFile(entries: readonly TreeEntry[]): string | null {
     if (best === null || (markdown && !/\.(md|markdown|mdown|mkd)$/.test(best.toLowerCase()))) best = entry.name;
   }
   return best;
+}
+
+/**
+ * The file a generated folder's landing opens (ADR-0046): its README as `pickDefaultFile` picks one; else an
+ * `index.md` (or `.markdown`, `.mdown`, `.mkd`); else `index.html` or `index.htm`; else its one entry when that is a
+ * file; else none.
+ */
+export function pickMadeDefault(entries: readonly TreeEntry[]): string | null {
+  const readme = pickDefaultFile(entries);
+  if (readme !== null) return readme;
+  const files = entries.filter((e) => e.kind === "file");
+  const named = (re: RegExp) => files.find((e) => re.test(e.name.toLowerCase()))?.name ?? null;
+  const index = named(/^index\.(md|markdown|mdown|mkd)$/) ?? named(/^index\.html?$/);
+  if (index !== null) return index;
+  return entries.length === 1 && entries[0]?.kind === "file" ? entries[0].name : null;
 }
 
 /**
@@ -555,6 +730,25 @@ export function branchStanding(view: SourceView | null): BranchStanding {
   };
 }
 
+/** What the header's look over the branches reads of a standing: the pull request open from it, and whether one is offered. */
+export type LookStanding = Pick<BranchStanding, "pr" | "canOpenPr">;
+
+/**
+ * A branch's standing for the header's *New pull request* as the mirror holds it (`repo_branch_pulls`, the forge-rounds
+ * pass, 2026-11-15), with no read of the branch's view: the pull request open from it, and a pull request offered where
+ * none is and its tip is not the default branch's (a branch at that tip has nothing ahead). `undefined` for a branch the
+ * mirror does not hold, which the look reads as before. Ahead of a default branch it is behind on, or merged by a merge
+ * commit, a branch is offered still: what Compare says when the button is pressed, as for a pull request someone opened
+ * since the sync.
+ */
+export function mirrorStanding(pulls: readonly BranchPull[], name: string): LookStanding | undefined {
+  const row = pulls.find((candidate) => candidate.name === name);
+  if (row === undefined) return undefined;
+  const defaultTip = pulls.find((candidate) => candidate.is_default)?.tip ?? null;
+  const pr = row.pull === null ? null : { entityId: row.pull.entity_id, number: prNumber(row.pull.entity_id), state: "open", tone: null };
+  return { pr, canOpenPr: pr === null && !row.is_default && row.tip !== null && row.tip !== defaultTip };
+}
+
 /** One row of the *Branches* tab. */
 export interface BranchRow {
   name: string;
@@ -565,7 +759,7 @@ export interface BranchRow {
   meta: string | null;
   /** `null` until its view answers, and for a branch with no id to read at. */
   standing: BranchStanding | null;
-  /** Its tip's author as the source spells the account (`code_facts`, #986), or `null`. */
+  /** Its tip's author by the name the record gives (`code_facts`' `author_name`, F-107), else as the source spells the account (#986), or `null`. */
   author: string | null;
   /** Whether that author is mine. */
   mine: boolean;
@@ -608,6 +802,26 @@ export function proposal(head: string, ticket: ProposedFrom | null): { title: st
   };
 }
 
+/**
+ * What git would refuse in a branch's name (`git check-ref-format`), in words, or `null` for one it takes. The dialog
+ * says so while typing, so the refusal isn't a queued write that comes back (F-247).
+ */
+export function branchNameProblem(name: string): string | null {
+  const it = name.trim();
+  if (it === "") return "Name the branch.";
+  if (/\s/.test(it)) return "A branch name can’t have spaces in it.";
+  if (it.endsWith("/")) return "A branch name can’t end in /.";
+  if (it.startsWith("/") || it.startsWith("-")) return `A branch name can’t start with ${it[0]}.`;
+  if (it.includes("//")) return "A branch name can’t have // in it.";
+  if (it.includes("..")) return "A branch name can’t have .. in it.";
+  if (it.includes("@{")) return "A branch name can’t have @{ in it.";
+  const bad = /[~^:?*[\\\x00-\x1f\x7f]/.exec(it);
+  if (bad !== null) return `A branch name can’t have ${bad[0]} in it.`;
+  if (it.endsWith(".") || it.endsWith(".lock")) return `A branch name can’t end in ${it.endsWith(".") ? "." : ".lock"}.`;
+  if (it.split("/").some((part) => part.startsWith("."))) return "A part of a branch name can’t start with a dot.";
+  return null;
+}
+
 /** *New branch…*'s name, prefilled with the job's key (R-8.8). */
 export function newBranchName(job: string | null): string {
   return job === null ? "feature/" : `feature/${job}-`;
@@ -626,4 +840,69 @@ export function commitPrefill(job: string | null, path: string): { message: stri
 /** What the repository page calls its source in a sentence: the display name, else the id, else a role word ("the code host", lower case; a sentence that opens with it spells its own capital). */
 export function sourceName(source: WriteSource | null | undefined): string {
   return source?.display_name || source?.id || "the code host";
+}
+
+// ---- The working tree in the branch box (2026-11-21, `docs/decisions/2026-11-21-the-working-tree-is-a-choice-in-the-branch-box.md`) ----
+
+/** How a path of the working tree differs from the checkout's `HEAD`: modified, added (or untracked), deleted. */
+export type WorkingMark = "M" | "A" | "D";
+
+/**
+ * Every path the checkout's uncommitted diff (ADR-0026) names, with how it stands against `HEAD`: the staged half first
+ * and the unstaged over it, so a file staged as added and then changed on disk is still added, and one staged and then
+ * deleted on disk is deleted. A rename is its old path deleted and its new one added; an untracked file is added. A
+ * folder git lists as untracked whole (`dir/`) holds files Files can't name one by one, so it is left out.
+ */
+export function workingChanges(read: DiffRead | null): Map<string, WorkingMark> {
+  const marks = new Map<string, WorkingMark>();
+  if (read === null || read.status !== "read") return marks;
+  const lay = (file: DiffFile) => {
+    if (file.change === "renamed") {
+      if (file.old_path !== null && file.old_path !== file.path) marks.set(file.old_path, "D");
+      marks.set(file.path, "A");
+      return;
+    }
+    const was = marks.get(file.path);
+    if (file.change === "deleted") marks.set(file.path, "D");
+    else if (file.change === "added") marks.set(file.path, "A");
+    else marks.set(file.path, was === "A" ? "A" : "M");
+  };
+  for (const file of read.staged.files) lay(file);
+  for (const file of read.unstaged.files) {
+    // A file staged as added and then deleted on disk is gone from the working tree, and `HEAD` never had it.
+    if (file.change === "deleted" && marks.get(file.path) === "A") {
+      marks.delete(file.path);
+      continue;
+    }
+    lay(file);
+  }
+  for (const path of read.untracked) if (!path.endsWith("/")) marks.set(path, "A");
+  return marks;
+}
+
+/**
+ * Why the working tree can't be chosen, or `null` where it can: the checkout's tree read, and a commit at `HEAD` for
+ * Files to lay the changes over.
+ */
+export function workingWhy(checkout: CheckoutView | undefined): string | null {
+  const tree = checkout?.tree;
+  if (checkout === undefined || checkout.path === null || tree == null) return "its checkout is being read";
+  if (tree.status === "no_git") return "git was not found";
+  if (tree.status === "not_a_repo") return "its folder is not a git checkout any more";
+  if (tree.status === "failed") return "git could not read it";
+  if (tree.head === null) return "no commit yet";
+  return null;
+}
+
+/**
+ * A list read again while it stays shown (the pr-state fix, 2026-11-24, Fable's ruling 2): each row drawn keeps its
+ * place and takes its new state and time; a row the list did not hold goes in above the first; a row it no longer
+ * holds goes. The list sorts afresh only when it is drawn anew (the page opened, the tab shown again, the filter
+ * changed). `held` is `null` before a first read, which is the read as it came.
+ */
+export function inPlaces<R extends { entity_id: string }>(held: readonly R[] | null, next: R[]): R[] {
+  if (held === null) return next;
+  const byId = new Map(next.map((row) => [row.entity_id, row]));
+  const known = new Set(held.map((row) => row.entity_id));
+  return [...next.filter((row) => !known.has(row.entity_id)), ...held.flatMap((row) => byId.get(row.entity_id) ?? [])];
 }

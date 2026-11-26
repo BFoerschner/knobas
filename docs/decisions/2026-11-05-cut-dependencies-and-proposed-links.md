@@ -25,3 +25,10 @@ Björn: "I want to concentrate on the core of knobas and what it does well." Bj�
 ## Cost of reversing
 
 Reverting this PR's squash commit brings back the pages, their tests and their styles, and needs no migration. The risk grows with time: while no page calls these commands, only `crates/knobas-app/tests/it/` exercises them (`dependencies_ipc.rs`, `suggestions_ipc.rs`), so a later backend change could leave the restored pages needing repair.
+
+## Amended 2026-11-19: Assets has a nav entry again
+
+Björn ruled on 2026-11-19, for ux21, that the asset tree gets a nav entry again ("can you enable assets again in ux21?"),
+after asking what the empty *Watches* section on Monitors was. This overrides the sentence above that left the tree with
+no entry and the PR's ruling that kept it so. Dependencies and Proposed links stay cut, and Monitors stays the page it is.
+The tree is *Assets* in the top bar, after Monitors: `docs/decisions/2026-11-19-assets-has-a-nav-entry-again.md`.

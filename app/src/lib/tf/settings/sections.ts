@@ -7,6 +7,7 @@
 import type { BackupRecord, BackupSchedule, ShareParts } from "../../ipc/backup";
 import type { InboxCategory } from "../../ipc/entity";
 import type { DbStats } from "../../ipc/sources";
+import { ZEN_KEY_LABEL } from "../zen.svelte";
 import { formatBytes } from "../../sources/diagnostics";
 import { stampLabel } from "../../time/format";
 
@@ -79,6 +80,16 @@ export function boundedNumber(value: string, min: number, max: number, fallback:
   return Math.min(max, Math.max(min, parsed));
 }
 
+/**
+ * Why a number field holds something other than what was typed, naming both, since what stands in the field is a valid
+ * value (F-613); `null` when it holds what was typed.
+ */
+export function clampNote(typed: string, min: number, max: number, value: number): string | null {
+  const parsed = Number.parseInt(typed, 10);
+  if (Number.isNaN(parsed)) return `Takes ${min} to ${max}, so this stays ${value}.`;
+  return parsed >= min && parsed <= max ? null : `Takes ${min} to ${max}, so ${parsed} became ${value}.`;
+}
+
 /** Prototype-6 groups thousands with a space: *18 400*. */
 const grouped = (n: number) => n.toLocaleString("en-GB").replace(/,/g, " ");
 
@@ -102,17 +113,68 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
   { id: "alert", label: "A monitor goes down" },
 ];
 
-/** Keyboard: requirements §14, in prototype-6's words. Fixed in this version. */
+/**
+ * Keyboard: requirements §14, in prototype-6's words, and what has joined since (F-062, F-633). Written as the Mac
+ * spells them, ⌘ for ⌘ or Ctrl; `keyHint` writes them as the platform does (the Windows pass, 2026-11-14).
+ */
 export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: string])[] = [
-  ["⌘K", "Anywhere", "Search everything, from an empty box"],
+  ["⌘K", "Anywhere", "Search, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
   ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],
+  ["⌘F", "Anywhere", "Find on this page: its find bar or filter box, else the section's search"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
-  ["J K ↑ ↓", "Tickets", "Move the selection"],
+  ["⌘D", "Search box", "Titles only, or everything"],
+  ["Tab", "Search box", "The actions on the selected result"],
+  ["⌘S", "Search box", "Save the search as a list"],
+  ["⌘?", "Search box", "The filters, and the keys it answers"],
+  ["⌘B", "Search box, on an action", "Bind a key of your own to it"],
+  ["⌘Enter", "A composer or a dialog", "Send, or press its primary button"],
+  ["J K ↑ ↓", "Tickets and the Inbox", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],
+  ["S", "Tickets and a ticket", "Move the ticket: carry its card on the board, or its status menu (ADR-0054)"],
+  ["⌘Z", "Tickets and a ticket", "Undo the last move while its toast stands"],
   ["L", "Job", "Connections"],
+  ["A", "A ticket's page, Tickets", "Assign it: the people picker (ADR-0054)"],
+  ["E", "A ticket's page", "Edit the summary (ADR-0054)"],
+  [ZEN_KEY_LABEL, "Any page in Code", "Zen mode: the page alone, its header, tabs and rail hidden; Esc leaves it"],
+  ["J K", "A diff", "Next and previous file"],
+  ["N P", "A diff", "Next and previous change"],
+  ["V", "A diff", "Mark the file viewed"],
+  ["C", "A diff", "Comment on the line"],
+  ["S", "A diff", "Split or unified"],
+  ["O", "A page with Open in ⟨source⟩", "Open it in its source: its site here, or the browser"],
+  ["Shift O", "A page with Open in ⟨source⟩", "Open it in the browser"],
+  ["Esc Esc", "A site", "Back to where you opened it from; one Esc is the site's"],
+  ["⌘W", "A site", "Close it"],
+  ["⌘R", "A site", "Reload it"],
+  ["⌘[ ⌘]", "A site", "Back and forward in the site, then in knobas"],
+  ["⌘L", "A site", "The keyboard to knobas's bar, and back"],
+  // The Passwords page (ADR-0056). `R` does nothing there: a sync is something a password manager logs, so it is a button.
+  ["/", "Passwords", "Filter every folder"],
+  ["J K ↑ ↓", "Passwords", "Move the selection; the entry follows"],
+  ["→ ←", "Passwords, the folder tree", "Open a fold and step in; close it and step out"],
+  ["C", "Passwords", "Copy the open entry's password"],
+  ["S", "Passwords", "Show or hide it"],
+  ["U", "Passwords", "Copy the username"],
+  ["O", "Passwords", "Copy the one-time code"],
+  ["A", "Passwords", "Open or copy the address"],
+  ["E", "Passwords", "Edit the open entry, where its source lets you"],
+  ["N", "Passwords", "A new entry in the folder you are in"],
+  ["W", "Passwords", "Open the entry or folder in the password manager's web interface"],
+  ["Shift W", "Passwords", "Open it in the browser"],
+  ["Esc", "Passwords", "Clear the filter, else up one folder"],
+  ["X", "Any page in Code", "Run…: your commands for the file, folder or repository shown; Enter runs the first"],
+  ["Shift X", "Any page in Code", "Run the last command again on what it ran on"],
+  ["R", "A command's run", "Run it again"],
+  ["⌘.", "A command's run", "Stop it and everything it started"],
+  ["N, P", "A command's run", "The next and the previous place it named"],
+  ["1, 2", "A command's run", "Output, Problems"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];
+
+
+/** Keys only the Mac has: history's arrows go with ⌘ alone (`historyStep`), which off the Mac is the Windows key's. */
+export const MAC_ONLY: ReadonlySet<string> = new Set(["⌘←", "⌘→"]);

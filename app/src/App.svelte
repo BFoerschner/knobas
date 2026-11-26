@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { goWithoutOpener } from "./lib/tf/opener";
+  import { goLaunched, goVisiting, goWithoutOpener } from "./lib/tf/opener";
+  import { askForSecret, reenterSourceOf } from "./lib/tf/settings/secret-prompt.svelte";
   import { listen } from "@tauri-apps/api/event";
 
   import { alerts } from "./lib/assets/alerts.svelte";
@@ -16,11 +17,13 @@
   import { assetTargetId, targetReading } from "./lib/shell/timer";
   import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
-  import { push } from "./lib/shell/toasts.svelte";
+  import { dismiss, push, undoable } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
-  import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
+  import { cacheEvents, enableAnswerCache, warm } from "./lib/ipc/answer-cache";
+  import { installHoverReads } from "./lib/tf/repo/hover-reads";
+  import { installDocsPressReads } from "./lib/tf/docs/press-reads";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { getEntity, recordCaptureContext } from "./lib/ipc/entity";
   import { chosenJob } from "./lib/tf/job/chosen.svelte";
@@ -28,8 +31,9 @@
   import { homeIfBlank } from "./lib/tf/home";
   import { breadcrumbJob, currentJob } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { parseTfHash, sectionHash } from "./lib/tf/route";
+  import { parseTfHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
+  import { updates } from "./lib/tf/update.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
   import { readerDay } from "./lib/time/day";
@@ -41,13 +45,24 @@
    * keeps what is the whole app's: the bring-up, the session-wide stores, the
    * launcher, the timer verb and the dialogs it opens.
    *
-   * A window opened on no address lands on Tickets, at `#/tickets`.
+   * A window opened on no address lands on home (`home.ts`): the chosen job's
+   * page at `#/job`, or with none chosen *All tickets* at `#/tickets`, decided
+   * here, before the shell mounts, so its first frame is home's. A fresh
+   * profile lands there too: there is no first-run screen since ux31, and
+   * Tickets with no source says how to add one or restore a backup.
    */
-  homeIfBlank(location);
+  homeIfBlank(location, chosenJob.id);
 
-  /** Go to an address the launcher or the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
+  /** Go to an address the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {
     goWithoutOpener(hash);
+  }
+
+  /** A row the launcher opened: a jump that says where it came from (F-047), or the credential prompt over the page, as a press on its link gives. */
+  function launched(hash: string) {
+    const source = reenterSourceOf(hash);
+    if (source === null) goLaunched(hash);
+    else askForSecret(source);
   }
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
@@ -114,8 +129,13 @@
     worklogDraft: (entityId, when) => worklogDraft(entityId, when),
     onadhoc: (block, offer) => (adHoc = { block, offer }),
     push,
+    dismiss,
+    undoable,
     complain,
-    onday: () => (location.hash = "#/time"),
+    // A top page opened from somewhere to come back from: *Back to* and `Esc` return to where the stop was (F-140).
+    onday: () => {
+      if (location.hash !== "#/time") goVisiting("#/time");
+    },
   });
 
   /**
@@ -139,7 +159,7 @@
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     // A worklog carries no source to name (`Worklog` has its entity only), so no sign-in sentence.
-    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null);
+    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null, { write: logged.write_queue_id === null ? null : { id: logged.write_queue_id } });
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 
@@ -161,8 +181,8 @@
   }
 
   /** *Start timer* on a ticket: the running ticket's draft first (R-13.2). */
-  function startTimerOn(entityId: string, title: string) {
-    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
+  function startTimerOn(entityId: string, title: string, quiet = false) {
+    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title, quiet);
   }
 
   // ⌘T with nothing in front starts on the page's job (#1435): on the Job page the job on screen, else the chosen job (spec #2227);
@@ -213,15 +233,60 @@
       }
       bridgeReady = true;
       if (disposed) return;
+      // The updater needs no database (ADR-0052): its state is read now, so the start screen's line and the cog's dot
+      // are right from their first frame.
+      stops.push(updates.start());
+      // The answer cache (the instant-open pass, 2026-11-12, `ipc/answer-cache.ts`), in front of the bridge before anything
+      // reads, and its ears first, so a run's end drops what it changed before a page that hears it reads again.
+      // Guarded: nothing here may stop the lifecycle below from starting. v3.2.9-ux7 assigned to Tauri's read-only
+      // `invoke` here, the throw ended this block, and the window stayed on *Starting the local database*.
+      if (import.meta.env.MODE !== "test") {
+        try {
+          enableAnswerCache();
+        } catch (error) {
+          console.error("knobas: the answer cache did not start; every read goes to the backend", error);
+        }
+        // A repository's or a pull request's first read past the mirror, started while the pointer rests on its link.
+        // Guarded as the cache is: nothing here may stop the lifecycle below from starting.
+        try {
+          stops.push(installHoverReads());
+          // A Docs page's text and row, asked at the press on its link (2026-11-25).
+          stops.push(installDocsPressReads());
+        } catch (error) {
+          console.error("knobas: reads ahead of a press did not start; each page reads on its press", error);
+        }
+        for (const [event, hear] of [
+          [EVENTS.syncState, (payload: unknown) => cacheEvents.syncState(payload as Parameters<typeof cacheEvents.syncState>[0])],
+          [EVENTS.itemRefreshed, (payload: unknown) => cacheEvents.refreshed(payload as Parameters<typeof cacheEvents.refreshed>[0])],
+          [EVENTS.viewFresh, () => cacheEvents.moved()],
+          [EVENTS.checkoutFetched, () => cacheEvents.moved()],
+          [EVENTS.dbState, () => cacheEvents.moved()],
+          [EVENTS.sourceHealth, () => cacheEvents.health()],
+        ] as const) {
+          void listen(event, ({ payload }) => hear(payload)).then((off) => {
+            if (disposed) off();
+            else stops.push(off);
+          });
+        }
+      }
 
       // Subscribed for the whole session; each is seeded below once the
-      // database can answer.
-      stops.push(health.start());
-      stops.push(startFollowingMerges());
-      stops.push(inbox.start());
-      stops.push(alerts.start());
-      stops.push(timer.begin());
-      stops.push(notifications.start());
+      // database can answer. Each on its own guard, so one that throws costs
+      // its own feature and never the lifecycle below.
+      for (const [name, start] of [
+        ["health", () => health.start()],
+        ["merge follower", () => startFollowingMerges()],
+        ["inbox", () => inbox.start()],
+        ["alerts", () => alerts.start()],
+        ["timer", () => timer.begin()],
+        ["notifications", () => notifications.start()],
+      ] as const) {
+        try {
+          stops.push(start());
+        } catch (error) {
+          console.error(`knobas: the ${name} did not start`, error);
+        }
+      }
       // The capture window's *Open in knobas* (#503). Not awaited: an awaited
       // listen here would push the lifecycle's own subscription past a
       // teardown (measured 2026-09-08, `residue`). The note opens on its own
@@ -234,7 +299,7 @@
         else stops.push(off);
       });
       // Static per build, and answers before the database is up.
-      void kindRegistry.load();
+      void kindRegistry.load().catch((error: unknown) => console.error("knobas: the kind registry did not load", error));
 
       await lifecycle.start();
     })();
@@ -252,6 +317,13 @@
   // happens to read never re-runs another.
   $effect(() => {
     if (lifecycle.ready) void health.reseed();
+  });
+  // Once the first page has drawn, the reads the last session made are asked again in the background, so each page's
+  // first open draws from memory (the instant-open pass, 2026-11-12).
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const later = setTimeout(() => void warm(), 2500);
+    return () => clearTimeout(later);
   });
   $effect(() => {
     if (lifecycle.ready) void inbox.refresh();
@@ -285,34 +357,6 @@
     launcherOpen = true;
   }
 
-  /**
-   * Whether this session has finished the §14a wizard. `first_run` is read
-   * once at boot, so without this every change after the wizard would put the
-   * reader back into it.
-   */
-  let completedFirstRun = $state(false);
-  const firstRun = $derived(!completedFirstRun && (lifecycle.status?.first_run ?? false));
-
-  /**
-   * §14a's landing: Tickets, with the launcher open over it; not home (`#/job`,
-   * spec #2227), which with no job chosen yet would only point at Tickets. A reader who set
-   * up later (#1399) lands on Settings › Sources instead, where adding a
-   * source lives, and one who restores first (#1469) on Settings › Backup and
-   * export; neither with anything over it.
-   */
-  function onFirstRunDone(landing: FirstRunLanding) {
-    completedFirstRun = true;
-    // The wizard added a source, and neither `add_source` nor `demo_load`
-    // emits `source:health`.
-    void health.reseed();
-    if (landing === "sources" || landing === "backup") {
-      location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
-      return;
-    }
-    location.hash = sectionHash("tickets");
-    openLauncher("");
-  }
-
   async function onRetry() {
     try {
       await lifecycle.retry();
@@ -324,9 +368,7 @@
 
 <svelte:window onhashchange={() => (hash = location.hash)} />
 
-{#if lifecycle.ready && firstRun}
-  <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
-{:else if lifecycle.ready}
+{#if lifecycle.ready}
   <TfShell
     {lifecycle}
     onsearch={openLauncher}
@@ -380,7 +422,7 @@
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item), actions: Object.fromEntries(inbox.stream.map((entry) => [entry.item.key, entry.actions])) }}
         openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
         ontimer={startTimerOn}
-        onnavigate={navigate}
+        onnavigate={launched}
         onclose={() => {}}
       />
     {/snippet}
@@ -391,5 +433,6 @@
     version={lifecycle.status?.app_version ?? ""}
     demo={lifecycle.status?.demo ?? false}
     onretry={() => void onRetry()}
+    update={updates}
   />
 {/if}

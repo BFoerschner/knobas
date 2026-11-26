@@ -7,11 +7,12 @@
 //! # http, admitted on purpose
 //!
 //! The testenv Gitea speaks plain http and has ssh off
-//! (`testenv/docker-compose.yml`), and ADR-0023 clones over https and ssh only.
-//! So the clones here go through `start_admitting(.., &["http"])`, the
-//! test-only door, and
-//! [`the_app_itself_refuses_the_testenv_address`] shows the production entry
-//! point refusing this very source. The production flags are pinned by
+//! (`testenv/docker-compose.yml`). ADR-0023 as amended (the ux19 overs pass)
+//! clones from an address typed as http over http, so the production entry
+//! point clones this very source
+//! ([`the_app_itself_clones_the_testenv_http_address`]); the other clones here
+//! go through `start_admitting(.., &["http"])`, the test-only door, as before.
+//! The production flags are pinned by
 //! `knobas_core`'s `the_argument_list_is_the_adrs`, and git's refusal of a
 //! protocol outside them by `clone_ipc.rs`'s
 //! `git_refuses_any_other_protocol_given_the_production_flags`.
@@ -184,22 +185,28 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
 
 #[tokio::test]
 #[ignore = "needs the testenv Gitea: just gitea-live"]
-async fn the_app_itself_refuses_the_testenv_address() {
+async fn the_app_itself_clones_the_testenv_http_address() {
     let (pool, id, _dir, root) = fixture(SEEDED).await;
+    let seen = Arc::new(Seen::default());
 
-    let error = start(
+    let answer = start(
         &pool,
         &Registry::for_process(),
         &Clones::global(),
-        Arc::new(Seen::default()),
+        seen.clone(),
         &id,
     )
     .await
-    .expect_err("the testenv Gitea is http");
+    .expect("an address typed as http clones over http");
 
-    assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains("https or ssh"), "{}", error.message);
-    assert!(!root.exists());
+    assert_eq!(
+        answer,
+        CloneAnswer::Cloning {
+            path: shown(&root.join("payout-service"))
+        }
+    );
+    let end = seen.end().await;
+    assert_eq!(end.state, CloneState::Done, "{:?}", seen.all());
 }
 
 #[tokio::test]

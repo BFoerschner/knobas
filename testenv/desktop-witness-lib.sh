@@ -796,10 +796,12 @@ key_code() {
 # --- the window's size, before any driver or steps file (#2056) --------------
 
 # The narrowest window, in points, that the drivers and live-shot run in.
-# Tickets hides its preview at 1240 px and below (`@media (max-width: 1240px)`
-# in `app/src/lib/tf/css/tickets.css`, pinned by `desktop-witness-test.sh`),
-# and the capture driver opens its job from that preview. A window is as wide
-# as its web view on macOS, so points here are CSS pixels there.
+# At 1240 px and below the app's side rails close and the nav gives up its
+# words (`@media (max-width: 1240px) and (min-width: 901px)` in
+# `app/src/lib/tf/css/narrow.css`, pinned by `desktop-witness-test.sh`); the
+# drivers were written against the wide layout. Tickets' preview, which set the
+# line before, is gone (ux18). A window is as wide as its web view on macOS, so
+# points here are CSS pixels there.
 readonly WITNESS_MIN_WIDTH=1241
 
 # window_width_verdict <width> <height> <minimum width>
@@ -816,7 +818,7 @@ window_width_verdict() {
         printf 'ok\n'
         return 0
     fi
-    printf '%s\n' "the window is $1x$2 points, narrower than the $3 the drivers need: below it Tickets hides its preview. Give it more room (an empty workspace, or a wider screen) and run again."
+    printf '%s\n' "the window is $1x$2 points, narrower than the $3 the drivers need: below it the side rails close. Give it more room (an empty workspace, or a wider screen) and run again."
     return 1
 }
 

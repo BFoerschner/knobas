@@ -1,0 +1,184 @@
+/*
+  The XML view (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`): a file's own lines, as Source draws
+  them, in the explorers' pane (`openapi.css`'s `tf-oas-` grid, rail and columns). The app's tokens and steps only, no
+  colour of its own (ADR-0055).
+
+  Everything the view adds stands in room that was held from the first frame: the caret's column beside the line
+  number, the end of a line, the rail's head. So nothing moves when the outline, the check or a query lands: they are
+  paint on lines that already stand. Two things take a tone, each for something that happened: a departure (the error
+  edge and ground, its sentence at the line's end) and a query's match (the mark ground). What a fold hides is counted
+  loud, in the headings face, as *how often* is in the schema explorer.
+*/
+
+.tf-fileview.tf-fv-doc { overflow: clip; }
+.tf-oas.tf-xv { grid-template-columns: var(--side-doc-rail, 300px) minmax(0, 1fr); }
+.tf-oas.tf-xv.tf-oas-3 { grid-template-columns: var(--side-doc-rail, 300px) minmax(0, 1fr) minmax(430px, 36%); }
+
+/* ---- the rail: the head holds its room, a verdict line and two lines under it ---- */
+.tf-xv-head { min-height: 96px; box-sizing: border-box; padding: 10px 12px 8px; display: grid; align-content: start; gap: 2px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xv-head p { margin: 0; overflow-wrap: anywhere; }
+.tf-xv-verdict { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: calc(var(--t-md) * var(--fs)); color: var(--ink); }
+.tf-xv-verdict.tf-xv-bad b { color: var(--err); font-weight: 600; }
+.tf-xv-quiet { color: var(--ink-2); font-weight: 600; }
+.tf-xv-head .tf-oas-ref { --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); letter-spacing: var(--ls-ui); }
+.tf-xv-rail > .tf-oas-modes { padding: 6px 10px; border-bottom: 1px solid var(--rule-2); min-height: 28px; box-sizing: content-box; }
+.tf-xv-rail > .tf-oas-modes > .tf-btn { margin-left: auto; }
+.tf-oas-row.tf-xv-frow { height: 74px; grid-template-columns: 5ch minmax(0, 1fr); align-items: start; padding-top: 8px; padding-bottom: 6px; }
+.tf-xv-fline { color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xv-ftext { display: grid; gap: 2px; min-width: 0; }
+.tf-xv-fname { --fs: var(--size-code); font: 600 calc(var(--t-sm) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-xv-fsay { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-oas-row[aria-selected="true"] { background: var(--sel-row); color: var(--on-sel-row); }
+.tf-oas-row[aria-selected="true"] :is(.tf-xv-fline, .tf-xv-fsay) { color: inherit; }
+.tf-xv-code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); overflow-wrap: anywhere; }
+
+/* ---- the document: two bars that hold their room, and the lines under them ---- */
+.tf-xv-doc { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+/* The way down to the line picked, and how many levels are shown. One line. */
+.tf-xv-bar { flex: none; display: flex; align-items: center; gap: 12px; height: 32px; box-sizing: border-box; padding: 0 10px 0 12px; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-xv-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-crumbs > * { flex: none; }
+.tf-xv-crumbs button { border: 0; background: none; padding: 2px 3px; border-radius: 3px; color: var(--ink-2); font: inherit; cursor: pointer; }
+.tf-xv-crumbs button:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-xv-crumbs button:last-of-type { color: var(--ink); font-weight: 600; }
+.tf-xv-crumbs .tf-sep { color: var(--muted); }
+.tf-xv-crumbs .tf-dim { --fs: var(--size-ui); font-family: var(--sans); letter-spacing: var(--ls-ui); }
+.tf-xv-lv { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+/* Levels is a stepper: fewer, how many are open everywhere, more. It goes as deep as the document does. */
+.tf-xv-step button { min-width: 26px; padding: 0 7px; }
+.tf-xv-step .tf-xv-stepn { min-width: 34px; border-left: 1px solid var(--rule); border-right: 1px solid var(--rule); color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tf-xv-step button:disabled { opacity: .45; cursor: default; }
+
+/* The lines scroll in a box of their own; every row is as wide as the longest line drawn, so a line's end can hold to
+   the pane's edge. */
+.tf-xv-lines { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--sheet); }
+.tf-xv-lines > .tf-code.tf-lscroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; position: relative; padding: 6px 0 12px; --under: var(--sheet); background: var(--sheet); }
+/* The miniature form (step E1): the document alone, as tall as the box it is put in, drawn as the view draws it. */
+.tf-xv-inline { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tf-xv-inline > .tf-xv-doc { flex: 1; min-height: 0; }
+.tf-code.tf-lines .tf-l { --row-bg: var(--under); background: var(--row-bg); }
+.tf-code.tf-lines .tf-l:hover { --row-bg: var(--sheet-2); }
+.tf-code.tf-lines .tf-l.tf-at { --row-bg: var(--warn-bg); }
+/* A row is its number, the caret's column, its text, and what is said of it at its end. */
+.tf-code.tf-lines .tf-l.tf-xv-l { height: var(--tf-row, 22px); line-height: var(--tf-row, 22px); box-sizing: border-box; grid-template-columns: calc(48px * var(--size-code)) 18px max-content minmax(0, 1fr); align-items: center; min-width: calc(var(--xv-longest, 0ch) + 48px * var(--size-code) + 260px); cursor: default; }
+.tf-code.tf-lines .tf-l.tf-xv-cur { --row-bg: var(--sheet-2); box-shadow: inset 2px 0 0 var(--ink); }
+.tf-code.tf-lines .tf-l.tf-xv-hit, .tf-code.tf-lines .tf-l.tf-xv-hit:hover { --row-bg: var(--mark); }
+.tf-code.tf-lines .tf-l.tf-xv-hit.tf-xv-cur { box-shadow: inset 2px 0 0 var(--ink); }
+.tf-code.tf-lines .tf-l.tf-xv-bad, .tf-code.tf-lines .tf-l.tf-xv-bad:hover { --row-bg: var(--err-bg); box-shadow: inset 3px 0 0 var(--err); }
+.tf-xv-lt, .tf-code.tf-lines .tf-lt { min-width: 0; }
+.tf-xv-cc { display: block; width: 18px; }
+.tf-xv-caret { width: 18px; height: var(--tf-row, 22px); padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+/* The chevron is the button's own border, not an SVG: a level's worth of folded rows each draws one. */
+.tf-xv-caret::before { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1.6px 1.6px 0; border-radius: 1px; transform: translateX(-1px) rotate(-45deg); }
+.tf-xv-caret[aria-expanded="true"]::before { transform: translateY(-1px) rotate(45deg); }
+.tf-xv-caret:hover, .tf-xv-l:hover .tf-xv-caret { color: var(--ink); }
+/* What a fold hides: the count loud, the closing tag dim. */
+.tf-xv-fold { display: inline-flex; align-items: center; gap: 4px; height: 18px; line-height: 18px; white-space: nowrap; margin: 0 6px; padding: 0 7px; border: 0; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); cursor: pointer; vertical-align: middle; position: relative; top: -1px; }
+.tf-xv-l:hover .tf-xv-fold, .tf-xv-cur .tf-xv-fold { background: var(--sheet); box-shadow: inset 0 0 0 1px var(--rule-2); }
+.tf-xv-occ { --fs: var(--size-head); font-family: var(--head); --optical: auto; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 800; font-stretch: 62%; font-variation-settings: "wdth" 62; letter-spacing: calc(.02em + var(--ls-head, 0em)); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink); }
+.tf-xv-in { padding-left: 6px; border-left: 1px solid var(--rule); font-weight: 600; }
+.tf-xv-inhit { color: var(--ink); }
+.tf-xv-inbad { color: var(--err); }
+.tf-xv-shut { color: var(--muted); }
+/* A line too long to read at its end: its start, and how much more. */
+.tf-xv-more { margin-left: 6px; padding: 0 6px; height: 16px; border: 0; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); cursor: pointer; vertical-align: 1px; }
+/* The app gives every button its holder's face; these sit among code and speak in the interface's. */
+.tf-lines :is(.tf-xv-chip, .tf-xv-fold, .tf-xv-more) { --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-2xs) * var(--fs)); letter-spacing: var(--ls-ui); line-height: 16px; }
+/* What is said of a line stands at its end and stays in sight: where the line is longer than the pane, it holds to the
+   pane's edge, over the line's own text. That text fades out under it over 24 px, so no letter is cut in half. The gap
+   before it is the same 24 px, so on a line that fits, the fade lies over nothing. */
+.tf-xv-end { position: sticky; right: 0; justify-self: start; display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: min(720px, 100%); margin-left: 24px; padding: 0 12px 0 4px; height: var(--tf-row, 22px); box-sizing: border-box; background: var(--row-bg); }
+.tf-xv-end::before { content: ""; position: absolute; right: 100%; top: 0; bottom: 0; width: 24px; pointer-events: none; background: linear-gradient(to right, color-mix(in srgb, var(--row-bg) 0%, transparent), var(--row-bg)); }
+/* Find in file: no box until ⌘F, then a bar at the top of the lines that takes no room (as a page with no box). */
+.tf-lscroll > .tf-findhold { position: sticky; top: 0; left: 0; z-index: 3; height: 0; display: flex; justify-content: flex-end; }
+
+/* ---- the element picked, beside the document ---- */
+.tf-xv-h { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.tf-xv-hname { --fs: var(--size-code); font: 600 calc(var(--t-xl) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-xv-what { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
+.tf-xv-kv { margin-top: 12px; }
+.tf-xv-val { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); overflow-wrap: anywhere; }
+.tf-xv-pre { color: var(--ink-2); }
+
+/* ---- the query (section 22): its own bar under the way down, as wide as the document, so a query is read on one
+   line; beside the field a slot that holds its room for the answer, two lines for an error's sentence. Björn,
+   2026-11-23: the field stood in the rail first, where 300 px cut every query. ---- */
+.tf-xv-qbar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 38%); align-items: center; column-gap: 14px; height: 42px; box-sizing: border-box; padding: 0 12px; border-bottom: 1px solid var(--rule-2); background: var(--sheet); }
+.tf-xv-qbar .tf-minif.tf-xv-qfield { max-width: none; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 6px 0 9px; gap: 8px; cursor: text; }
+.tf-xv-qfield:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.tf-xv-qfield input { min-width: 0; flex: 1; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-lang { flex: none; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 700; color: var(--ink-2); letter-spacing: .02em; }
+.tf-xv-qsay { min-width: 0; height: 32px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: calc(var(--t-xs) * var(--fs)); line-height: 16px; color: var(--ink-2); }
+.tf-xv-qsay b { color: var(--ink); font-weight: 600; }
+.tf-xv-qsay code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-xv-warn { color: var(--warn); }
+
+/* ---- the rail's list: the results scroll in a window of their own ---- */
+.tf-oas-list.tf-xv-list { padding: 0; overflow: hidden; }
+.tf-xv-rlist { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 6px; display: flex; flex-direction: column; background: var(--sheet); }
+.tf-xv-list > :is(.tf-xv-try, .tf-oas-none, .tf-xv-one, .tf-oas-row) { margin-left: 6px; margin-right: 6px; }
+.tf-xv-list > .tf-oas-row.tf-xv-frow { width: auto; margin-top: 4px; }
+.tf-oas-row.tf-xv-rrow { flex: none; grid-template-columns: 5ch max-content minmax(0, 1fr); }
+.tf-xv-rval, .tf-xv-rkind { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.tf-xv-rval { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-rkind { --fs: var(--size-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); letter-spacing: var(--ls-ui); }
+.tf-oas-row[aria-selected="true"] :is(.tf-xv-rval, .tf-xv-rkind) { color: inherit; opacity: .8; }
+.tf-xv-one { padding: 18px 10px; display: grid; gap: 4px; }
+.tf-xv-one .tf-xv-occ { --fs: var(--size-head); font-size: calc(var(--t-3xl) * var(--fs)); letter-spacing: calc(.02em + var(--ls-head, 0em)); overflow-wrap: anywhere; white-space: normal; }
+/* Nothing asked yet: queries to press, made from the document's own names. */
+.tf-xv-try { padding: 4px 0 10px; display: grid; gap: 2px; overflow: auto; background: var(--sheet); }
+.tf-xv-try h4 { margin: 10px 6px 4px; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); }
+.tf-xv-try .tf-xv-ex { text-align: left; border: 0; background: none; padding: 5px 6px; border-radius: 4px; color: var(--ink); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-try .tf-xv-ex:hover { background: var(--sheet-2); }
+
+/* ---- values (sections 15 to 18): what knobas takes a value for, at the value's end; a press looks at it ---- */
+.tf-xv-chip { display: inline-flex; align-items: center; gap: 5px; height: 18px; box-sizing: border-box; white-space: nowrap; padding: 0 7px; border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); color: var(--ink-2); cursor: pointer; flex: none; }
+.tf-xv-chip b { font-weight: 600; color: var(--ink); }
+.tf-xv-chip:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-xv-chip.tf-xv-kept { border-color: var(--info); color: var(--info); background: var(--info-bg); font-weight: 600; }
+
+/* ---- the value viewer: the file viewer's dialog with the pipeline bar on top ---- */
+.tf-viewer.tf-xv-dialog { width: min(1100px, calc(100vw - 32px)); }
+.tf-xv-dialog .tf-pipe { flex: none; }
+.tf-xv-dialog .tf-prenderer { padding: 0; }
+.tf-xv-dialog .tf-prenderer select { height: 100%; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; padding: 0 6px; cursor: pointer; }
+.tf-xv-short { width: 9ch; }
+/* What went in and what came out, in sizes: one line under the bar that holds its room. */
+.tf-xv-flow { flex: none; display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); min-height: 30px; box-sizing: border-box; }
+.tf-xv-flow > span:first-child { flex: 1; min-width: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-xv-inline { background: var(--sheet); flex: 1; min-height: 0; overflow: auto; align-self: stretch; width: 100%; }
+.tf-xv-dialog .tf-vstage[data-shows="text"], .tf-xv-dialog .tf-vstage[data-shows="xml"], .tf-xv-dialog .tf-vstage[data-shows="json"], .tf-xv-dialog .tf-vstage[data-shows="hex"] { align-items: stretch; }
+.tf-xv-dialog .tf-stepfail { border-bottom: 0; }
+
+/* ---- links (section 13): underlined in the rule's colour, so a page of them stays quiet ---- */
+.tf-xv-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.tf-xv-link:hover { text-decoration-color: currentColor; }
+.tf-xv-link.tf-xv-namespace { text-decoration-style: dotted; }
+/* An image at an address, offered in the file viewer: nothing is fetched until the press. */
+.tf-xv-offerbox p { max-width: 76ch; }
+.tf-xv-offerbox .tf-xv-code { overflow-wrap: anywhere; }
+.tf-xv-offer { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+/* A file written on one line, laid out by knobas (section 6): the bar says so. */
+.tf-xv-laid { flex: none; color: var(--ink-2); font-style: italic; }
+.tf-xv-laying { margin: 16px 20px; color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); }
+
+/* ---- the schema check (X2, sections 11 and 12) ---- */
+.tf-xv-verdict.tf-xv-ok b { color: var(--ok); font-weight: 600; }
+.tf-xv-warn { color: var(--warn); font-weight: 600; }
+.tf-xv-verdict > .tf-xv-schema { margin-left: auto; }
+/* A departure at the end of its line: in the interface's face and the error ink, paint on a line that stands. */
+.tf-xv-depend .tf-xv-say { --fs: var(--size-ui); font-family: var(--sans); letter-spacing: var(--ls-ui); font-size: calc(var(--t-xs) * var(--fs)); color: var(--err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-xv-depend .tf-xv-say code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-xv-saymore { color: var(--ink-2); }
+/* Beside the document: the departure whole, then the declaration of the element. */
+.tf-xv-sidecol { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.tf-xv-sidecol > .tf-oas-page { flex: 1; min-height: 0; }
+.tf-xv-depfull { flex: none; padding: 10px 16px; border-bottom: 1px solid var(--rule-2); box-shadow: inset 3px 0 0 var(--err); background: var(--err-bg); font-size: calc(var(--t-sm) * var(--fs)); }
+.tf-xv-depfull p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.tf-xv-depfull code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+/* The head holds the tallest of its states from the first frame (a verdict and two lines of two each), so the list
+   under it never moves when the check's longer words land (`moves`, 2026-11-24: 5 px). */
+.tf-xv-rail > .tf-xv-head { min-height: calc(26px + 4 * 1.35em + 4px + 18px + 6px); }
+.tf-xv-rail > .tf-xv-head p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+/* *Findings*' count holds its room, so the switch does not widen when the check's count lands. */
+.tf-xv-fcount { display: inline-block; min-width: 3ch; text-align: left; font-variant-numeric: tabular-nums; }

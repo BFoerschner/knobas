@@ -6,7 +6,7 @@
 //! membership, never absolute row totals.
 
 use knobas_app::commands::entity::{
-    DEFAULT_RELATION, create_link_inner, get_entity_inner, list_entities_inner,
+    DEFAULT_RELATION, create_link_inner, entity_head_inner, get_entity_inner, list_entities_inner,
     list_projects_inner, unlink_inner,
 };
 use knobas_app::sources::Registry;
@@ -116,6 +116,7 @@ fn all() -> EntityFilter {
         include_deleted: false,
         reach: None,
         role: None,
+        parent: None,
     }
 }
 
@@ -183,14 +184,30 @@ async fn an_empty_filter_list_means_unfiltered_not_empty() {
 
     assert_eq!(page.rows.len(), 5);
     assert!(page.total > 5, "the whole corpus, not one kind of it");
+    // More rows than the newest row's kind has: the read spans kinds. Counted,
+    // not read off the five newest, which another test of this binary can
+    // fill with one kind (the pull requests `a_plain_page_is_cut_before_its_
+    // rows_are_read_and_answers_as_before` writes, dated now).
+    let one_kind = EntityFilter {
+        kinds: vec![page.rows[0].kind.clone()],
+        ..all()
+    };
+    let of_one_kind = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &one_kind,
+        5,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert!(
-        page.rows
-            .iter()
-            .map(|r| &r.kind)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            > 1,
-        "an unfiltered read spans more than one kind"
+        page.total > of_one_kind.total,
+        "an unfiltered read spans more than one kind: {} rows, {} of them {}",
+        page.total,
+        of_one_kind.total,
+        page.rows[0].kind
     );
 }
 
@@ -969,6 +986,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
                 include_deleted: true,
                 reach: None,
                 role: None,
+                parent: None,
                 order,
                 ..all()
             },
@@ -1024,6 +1042,29 @@ async fn the_source_filter_selects_a_room() {
 }
 
 // -- get_entity -------------------------------------------------------------
+
+/// `entity_head` is `get_entity` less the item's text (the extremes pass, PR
+/// #2479, 2026-11-13): the same row, source, links and banners field for
+/// field, with `body_text` empty and `payload` null, so Docs reads the open
+/// page's row without carrying its body twice.
+#[tokio::test]
+async fn the_head_is_the_entity_less_its_text() {
+    let pool = seeded().await;
+    let registry = Registry::for_process();
+    let whole = get_entity_inner(&pool, &registry, "mock:PAY-231")
+        .await
+        .unwrap();
+    let head = entity_head_inner(&pool, &registry, "mock:PAY-231")
+        .await
+        .unwrap();
+    assert!(!whole.body_text.is_empty() && !whole.payload.is_null());
+    assert_eq!(head.body_text, "");
+    assert!(head.payload.is_null());
+    let mut expected = serde_json::to_value(&whole).unwrap();
+    expected["body_text"] = serde_json::json!("");
+    expected["payload"] = serde_json::Value::Null;
+    assert_eq!(serde_json::to_value(&head).unwrap(), expected);
+}
 
 #[tokio::test]
 async fn returns_the_row_its_source_and_the_raw_payload() {
@@ -1869,6 +1910,122 @@ async fn code_room(
     .await
     .unwrap();
     (gitea, page)
+}
+
+/// **A list answers the same from its stored rows and from the payloads**
+/// (`sync.item_row`, migration `0081`; the query audit of 2026-11-12). The
+/// Code room's pull requests and branches, read under every order: Code's
+/// attention groups, the plain pages newest first and by title, with the
+/// withdrawn and without, and the builds tile's order. Each read is taken
+/// with every item's row stored, with some of them gone, with none, and
+/// after the fill wrote them back, and is the same page each time: the same
+/// rows in the same order with the same path, state, total, tally and
+/// groups.
+#[tokio::test]
+async fn a_list_answers_the_same_from_its_stored_rows_and_from_the_payloads() {
+    let (gitea, _) = code_room(Some("björn"), &["pr", "branch"]).await;
+    let pool = seeded().await;
+    // A repository's default branch, which the attention order leaves out.
+    let main = format!("{gitea}:tidewater/payout-service@refs/heads/main");
+    mirrored(
+        &pool,
+        &gitea,
+        "branch",
+        "tidewater/payout-service@refs/heads/main",
+        serde_json::json!({ "repository": {
+            "full_name": "tidewater/payout-service", "name": "payout-service",
+            "default_branch": "main",
+        } }),
+    )
+    .await;
+    sqlx::query("update sync.item set title = 'main', author = 'björn' where entity_id = $1")
+        .bind(&main)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let declarations = builtin_declarations(&pool).await;
+
+    let stored = async || -> i64 {
+        sqlx::query_scalar(
+            "select count(*) from sync.item_row r join sync.item i using (entity_id)
+              where i.source_id = $1",
+        )
+        .bind(&gitea)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let pages = async || -> Vec<serde_json::Value> {
+        let mut pages = Vec::new();
+        for (order, kinds, include_deleted) in [
+            (EntityOrder::Attention, &["pr", "branch"][..], false),
+            (EntityOrder::Attention, &["pr"][..], false),
+            (EntityOrder::LatestPerParent, &[][..], false),
+            (EntityOrder::UpdatedDesc, &[][..], false),
+            (EntityOrder::TitleAsc, &[][..], false),
+            (EntityOrder::UpdatedDesc, &[][..], true),
+            (EntityOrder::TitleAsc, &["branch"][..], true),
+        ] {
+            let page = list_entities_inner(
+                &pool,
+                &Registry::for_process(),
+                &EntityFilter {
+                    sources: vec![gitea.clone()],
+                    kinds: kinds.iter().map(|&k| k.to_owned()).collect(),
+                    order,
+                    include_deleted,
+                    ..all()
+                },
+                50,
+                0,
+                &declarations,
+            )
+            .await
+            .unwrap();
+            pages.push(serde_json::to_value(&page).unwrap());
+        }
+        pages
+    };
+
+    assert_eq!(stored().await, 13, "every item of the room has its row");
+    let from_rows = pages().await;
+    // The fixture is the one the group tests read: its groups, a state on
+    // every pull request and a path on every row that names a repository.
+    assert!(
+        from_rows[0]["groups"]
+            .as_array()
+            .is_some_and(|groups| groups.len() >= 4)
+    );
+    assert!(from_rows[3]["rows"].as_array().unwrap().len() >= 13);
+
+    sqlx::query(
+        "delete from sync.item_row r using sync.item i
+          where i.entity_id = r.entity_id and i.source_id = $1 and i.kind = 'pr'",
+    )
+    .bind(&gitea)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        pages().await,
+        from_rows,
+        "with the pull requests' rows gone"
+    );
+
+    sqlx::query(
+        "delete from sync.item_row r using sync.item i
+          where i.entity_id = r.entity_id and i.source_id = $1",
+    )
+    .bind(&gitea)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored().await, 0);
+    assert_eq!(pages().await, from_rows, "with no row stored");
+
+    knobas_core::item_row::fill(&pool).await.unwrap();
+    assert_eq!(stored().await, 13, "the fill wrote them back");
+    assert_eq!(pages().await, from_rows, "from the filled rows");
 }
 
 /// The Code tile answers "what needs me" first (#712): pull requests asking
@@ -4548,4 +4705,275 @@ async fn a_limit_past_the_ceiling_reads_five_hundred_rows() {
 
     assert_eq!(page.rows.len(), 500);
     assert_eq!(page.total, 501);
+}
+
+// -- a plain order's page is cut before its rows are read (#2479's query audit)
+
+/// A plain order's statement as it was before the page was cut first: the
+/// path line and the state chip over every row of the set, then the limit.
+/// What the cut statements must answer, row for row.
+macro_rules! read_whole_then_cut {
+    ($from:literal, $order:literal) => {
+        concat!(
+            "select i.entity_id, ",
+            knobas_core::path_line_read!("$3"),
+            " as path, ",
+            knobas_core::declared_state!("$3"),
+            " as state, count(*) over () as total from ",
+            $from,
+            " where i.source_id = any($4) order by ",
+            $order,
+            " limit $1 offset $2"
+        )
+    };
+}
+
+/// Code's 1,710 pull requests walked 4,710 payloads in four pages, because
+/// each page computed its path line and state chip for every row it skipped
+/// too (711 ms). The four plain statements now cut the page first and read
+/// the two for its rows alone: every page of every order, live or with the
+/// withdrawn, answers what the old shape answered, the same rows in the same
+/// order with the same path, state and total. The rows tie on dates and
+/// titles, one is undated, one is withdrawn and three repositories hold them,
+/// so an order or a join that drifted would show.
+#[tokio::test]
+async fn a_plain_page_is_cut_before_its_rows_are_read_and_answers_as_before() {
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let repos = [
+        "tidewater/payout-service",
+        "tidewater/ledger",
+        "harbor/ledger",
+    ];
+    let mut ids = Vec::new();
+    for n in 0..23u32 {
+        let base = repos[(n % 3) as usize];
+        let (state, merged) = match n % 4 {
+            0 => ("open", false),
+            1 => ("closed", true),
+            2 => ("closed", false),
+            _ => ("open", false),
+        };
+        let key = format!("{base}#{n}");
+        let entity = format!("{gitea}:{key}");
+        mirrored(
+            &pool,
+            &gitea,
+            "pr",
+            &key,
+            serde_json::json!({
+                "state": state,
+                "merged": merged,
+                "base": { "ref": "main", "repo": { "full_name": base, "name": base.rsplit('/').next().unwrap() } },
+            }),
+        )
+        .await;
+        // Five rows a minute, so the dates tie; three titles, so the titles do.
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(&entity)
+            .bind(format!("Change {}", n % 3))
+            .execute(&pool)
+            .await
+            .unwrap();
+        if n != 7 {
+            dated(&pool, &entity, i32::try_from(n / 5).unwrap()).await;
+        }
+        ids.push(entity);
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[11])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let declarations = builtin_declarations(&pool).await;
+    let sources = vec![gitea.clone()];
+    let cases = [
+        (
+            EntityOrder::UpdatedDesc,
+            false,
+            read_whole_then_cut!(
+                "sync.live_item i",
+                "i.item_updated_at desc nulls last, i.entity_id"
+            ),
+        ),
+        (
+            EntityOrder::TitleAsc,
+            false,
+            read_whole_then_cut!("sync.live_item i", "i.title asc, i.entity_id"),
+        ),
+        (
+            EntityOrder::UpdatedDesc,
+            true,
+            read_whole_then_cut!(
+                "sync.item i join knobas.entity e on e.id = i.entity_id",
+                "i.item_updated_at desc nulls last, i.entity_id"
+            ),
+        ),
+        (
+            EntityOrder::TitleAsc,
+            true,
+            read_whole_then_cut!(
+                "sync.item i join knobas.entity e on e.id = i.entity_id",
+                "i.title asc, i.entity_id"
+            ),
+        ),
+    ];
+    for (order, include_deleted, before) in cases {
+        for limit in [4u32, 500] {
+            let mut offset = 0u32;
+            loop {
+                let page = list_entities_inner(
+                    &pool,
+                    &Registry::for_process(),
+                    &EntityFilter {
+                        sources: sources.clone(),
+                        order,
+                        include_deleted,
+                        ..all()
+                    },
+                    limit,
+                    offset,
+                    &declarations,
+                )
+                .await
+                .unwrap();
+                let old = sqlx::query(before)
+                    .bind(i64::from(limit))
+                    .bind(i64::from(offset))
+                    .bind(declarations.as_param())
+                    .bind(&sources)
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+                let was: Vec<_> = old
+                    .iter()
+                    .map(|row| {
+                        use sqlx::Row as _;
+                        (
+                            row.get::<String, _>("entity_id"),
+                            row.get::<Option<String>, _>("path"),
+                            knobas_core::entity_list::state_of(row).unwrap(),
+                        )
+                    })
+                    .collect();
+                let is: Vec<_> = page
+                    .rows
+                    .iter()
+                    .map(|row| (row.entity_id.clone(), row.path.clone(), row.state.clone()))
+                    .collect();
+                assert_eq!(
+                    is, was,
+                    "{order:?}, withdrawn {include_deleted}, {limit} from {offset}"
+                );
+                let total = old.first().map_or(0, |row| {
+                    use sqlx::Row as _;
+                    row.get::<i64, _>("total")
+                });
+                assert_eq!(
+                    page.total, total,
+                    "{order:?}, withdrawn {include_deleted}: the total"
+                );
+                assert!(
+                    is.iter().all(|(_, path, _)| path.is_some()),
+                    "every row has its path"
+                );
+                if page.rows.is_empty() {
+                    break;
+                }
+                offset += limit;
+            }
+            assert!(offset >= 20, "the walk read every page");
+        }
+    }
+}
+
+/// A repository page asks for its own pull requests by the repository's name
+/// (#2479's query audit: it read every pull request of its source, 700 ms,
+/// to keep a few dozen). The parent filter answers the rows whose path line
+/// is that name and no others, under every order, so a repository whose
+/// bare name another owner shares keeps its own; compared without regard to
+/// case, as the stored parents are indexed.
+#[tokio::test]
+async fn a_parent_narrows_a_room_to_the_rows_that_name_it() {
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    for (n, base) in [
+        "tidewater/ledger",
+        "harbor/ledger",
+        "tidewater/ledger",
+        "tidewater/payout-service",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        mirrored(
+            &pool,
+            &gitea,
+            "pr",
+            &format!("{base}#{n}"),
+            serde_json::json!({
+                "state": "open",
+                "merged": false,
+                "base": { "ref": "main", "repo": { "full_name": base, "name": base.rsplit('/').next().unwrap() } },
+            }),
+        )
+        .await;
+    }
+    let declarations = builtin_declarations(&pool).await;
+    let filter = |parent: Option<&str>, order: EntityOrder| EntityFilter {
+        sources: vec![gitea.clone()],
+        kinds: vec!["pr".to_owned()],
+        order,
+        parent: parent.map(str::to_owned),
+        ..all()
+    };
+    for order in [
+        EntityOrder::UpdatedDesc,
+        EntityOrder::TitleAsc,
+        EntityOrder::Attention,
+    ] {
+        let every = list_entities_inner(
+            &pool,
+            &Registry::for_process(),
+            &filter(None, order),
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap();
+        for name in ["tidewater/ledger", "harbor/ledger", "TIDEWATER/LEDGER"] {
+            let own = list_entities_inner(
+                &pool,
+                &Registry::for_process(),
+                &filter(Some(name), order),
+                500,
+                0,
+                &declarations,
+            )
+            .await
+            .unwrap();
+            let expected: Vec<_> = every
+                .rows
+                .iter()
+                .filter(|row| {
+                    row.path
+                        .as_deref()
+                        .is_some_and(|path| path.eq_ignore_ascii_case(name))
+                })
+                .map(|row| row.entity_id.clone())
+                .collect();
+            assert!(!expected.is_empty(), "{name} holds pull requests");
+            assert_eq!(
+                own.rows
+                    .iter()
+                    .map(|row| row.entity_id.clone())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{order:?}: {name}"
+            );
+            assert_eq!(own.total, i64::try_from(expected.len()).unwrap());
+        }
+    }
 }

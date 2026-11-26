@@ -10,7 +10,7 @@ import type { Hear, WriteFollower } from "../shell/follow-write";
 import { noteWithdrawn } from "../shell/write-queue.svelte";
 import { toasts } from "../shell/toasts.svelte";
 import { EVENTS } from "../ipc";
-import { askAgain, forgetEchoes, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes } from "./queued.svelte";
+import { askAgain, forgetEchoes, echoedEntities, echoWrite, echoOn, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes } from "./queued.svelte";
 
 /** A follower the test speaks for: `hear(id, row)` is the queue's next read of write `id`. */
 function fakeFollower() {
@@ -260,4 +260,13 @@ test("a surface that re-reads on its own source's run ends hears only the refres
   expect(reads).toBe(0);
   bridge.emit(EVENTS.itemRefreshed, refreshed("tc:bt/1", 50));
   expect(reads).toBe(1);
+});
+
+test("the entities with an echo are one read: each with any echo, none once its last is settled", () => {
+  expect(echoedEntities()).toEqual(new Set());
+  echoWrite("jira:PAY-231", "status", "In Review", { base: "In Progress" });
+  echoWrite("jira:PAY-7", "field:priority", "High");
+  expect(echoedEntities()).toEqual(new Set(["jira:PAY-231", "jira:PAY-7"]));
+  settleEchoes("jira:PAY-231", (echo) => echo.text === "In Review");
+  expect(echoedEntities()).toEqual(new Set(["jira:PAY-7"]));
 });

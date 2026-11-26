@@ -157,10 +157,10 @@ afterEach(() => {
   target.remove();
 });
 
-test("the empty box's placeholder reads only ⌘? for help, and no label stands in front of it", async () => {
+test("the empty box's placeholder says what the box does, and no label stands in front of it", async () => {
   open();
   await settle();
-  expect(input().placeholder).toBe("⌘? for help");
+  expect(input().placeholder).toBe("Search tickets, code, builds and docs");
   expect(label()).toBeNull();
 });
 

@@ -6,10 +6,13 @@
  * Pure. The components hand in what the IPC answered and draw what comes
  * back, so every sentence on these pages can be tested as a string.
  */
+import { appPagePlace } from "../openin/app-page";
+import { folderPagePlace } from "./folder-page";
+import { commandPagePlace } from "./command-page";
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
-import { secondsLabel, stampLabel } from "../../time/format";
+import { clockLabel, secondsLabel, stampLabel } from "../../time/format";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 import type { Walk } from "../../sources/walk";
@@ -18,39 +21,103 @@ import type { Walk } from "../../sources/walk";
 export type SettingsSection =
   | "sources"
   | "checkouts"
+  | "commands"
   | "time"
   | "notifications"
   | "standup"
   | "monitoring"
+  | "docs"
+  | "search"
   | "notes"
   | "backup"
   | "appearance"
+  | "theme"
+  | "code-colours"
+  | "fonts"
   | "performance"
   | "renderers"
+  | "api-servers"
   | "keyboard"
-  | "logs";
+  | "logs"
+  | "updates";
 
-/** The left-hand navigation, top to bottom, with prototype-6's names. */
-export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = [
-  ["sources", "Sources"],
-  ["checkouts", "Checkouts and Open in…"],
-  ["time", "Time"],
-  ["notifications", "Desktop notifications"],
-  ["standup", "Standup"],
-  ["monitoring", "Monitoring"],
-  ["notes", "Notes and capture"],
-  ["backup", "Backup and export"],
-  ["appearance", "Appearance"],
-  ["performance", "Performance"],
-  ["renderers", "Renderers"],
-  ["keyboard", "Keyboard"],
-  ["logs", "Logs and database"],
+/** A row of the navigation: a section, and the sections under it. */
+export interface SettingsNode {
+  key: SettingsSection;
+  name: string;
+  children?: readonly SettingsNode[];
+}
+
+/**
+ * The left-hand navigation, top to bottom, with prototype-6's names, as a tree fixed in code (the subtrees ruling,
+ * 2026-11-21, `docs/decisions/2026-11-21-settings-has-subtrees.md`). A row is a section, and a parent is a section with a
+ * page of its own. What a person makes (a source, an application, a folder renderer, a theme) is never a row: its page
+ * lights its section's row and the crumbs carry its name. Child keys are unique across the tree.
+ */
+export const SETTINGS_TREE: readonly SettingsNode[] = [
+  { key: "sources", name: "Sources" },
+  { key: "checkouts", name: "Checkouts and Open in" },
+  // A person's own programs, run on a press and read in a dialog (ADR-0060).
+  { key: "commands", name: "Commands" },
+  { key: "time", name: "Time" },
+  { key: "notifications", name: "Desktop notifications" },
+  { key: "standup", name: "Standup" },
+  { key: "monitoring", name: "Monitoring" },
+  { key: "docs", name: "Docs" },
+  { key: "search", name: "Search" },
+  { key: "notes", name: "Notes and capture" },
+  { key: "backup", name: "Backup and export" },
+  {
+    key: "appearance",
+    name: "Appearance",
+    children: [
+      // The whole window's colours (ADR-0055), the first child, as the subtrees ruling reserved it.
+      { key: "theme", name: "Theme" },
+      { key: "code-colours", name: "Code colours" },
+      { key: "fonts", name: "Fonts" },
+    ],
+  },
+  { key: "performance", name: "Performance" },
+  { key: "renderers", name: "Renderers" },
+  // The API explorer's servers (ux31): a name and an address, no secret.
+  { key: "api-servers", name: "API servers" },
+  { key: "keyboard", name: "Keyboard" },
+  { key: "logs", name: "Logs and database" },
+  // knobas updates itself (ADR-0052): last, at the top level; it needs no database.
+  { key: "updates", name: "Updates" },
 ];
+
+/** Every section in the navigation's order, a parent before its children, with its name. */
+export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = SETTINGS_TREE.flatMap((node) => [
+  [node.key, node.name] as const,
+  ...(node.children ?? []).map((child) => [child.key, child.name] as const),
+]);
+
+/** The section a section sits under, or `null` for one at the top. */
+export function settingsParent(section: SettingsSection): SettingsSection | null {
+  return SETTINGS_TREE.find((node) => node.children?.some((child) => child.key === section))?.key ?? null;
+}
+
+/** A section's name. */
+export function settingsName(section: SettingsSection): string {
+  return SETTINGS_SECTIONS.find(([key]) => key === section)?.[1] ?? "Sources";
+}
+
+/** The child of `parent` that `key` names, or `null`. */
+function childOf(parent: string, key: string | undefined): SettingsSection | null {
+  return SETTINGS_TREE.find((node) => node.key === parent)?.children?.find((child) => child.key === key)?.key ?? null;
+}
+
+/** A section at the top of the tree that `key` names, or `null`. Fonts' address from before it had a parent still lands. */
+function topOf(key: string | undefined): SettingsSection | null {
+  if (key === "fonts") return "fonts";
+  return SETTINGS_TREE.find((node) => node.key === key)?.key ?? null;
+}
 
 /** Where in Settings the reader is: a section, or one source's page. */
 export type SettingsPlace =
   | { section: SettingsSection }
-  | { section: "sources"; source: string; add?: ListAddition };
+  | { section: "sources"; source: string; add?: ListAddition; reenter?: boolean };
 
 /** A value an address adds to a list field of a source's config, unsaved (#879). */
 export interface ListAddition {
@@ -69,14 +136,46 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   const [head, arg, verb, field, value] = rest;
   if (head === "source" && arg && verb === "add" && field && value)
     return { section: "sources", source: arg, add: { field, value } };
+  // The status bar's *Re-enter password*: the page with its prompt already open.
+  if (head === "source" && arg && verb === "reenter") return { section: "sources", source: arg, reenter: true };
   if (head === "source" && arg) return { section: "sources", source: arg };
-  const known = SETTINGS_SECTIONS.find(([key]) => key === head);
-  return { section: known ? known[0] : "sources" };
+  const child = head === undefined ? null : childOf(head, arg);
+  if (child !== null) return { section: child };
+  return { section: topOf(head) ?? "sources" };
 }
 
-/** The address of a section of Settings. */
+/**
+ * `#/settings/sources/add`: Settings › Sources with *Add a source* already open (ux31), the address Tickets' empty
+ * state sends a fresh profile to. Closing the dialog replaces it with `#/settings/sources`, so the dialog keeps one host.
+ */
+export const ADD_SOURCE_HASH = "#/settings/sources/add";
+
+/** Whether what follows `#/settings` is {@link ADD_SOURCE_HASH}. */
+export function addsSource(rest: readonly string[]): boolean {
+  return rest.length === 2 && rest[0] === "sources" && rest[1] === "add";
+}
+
+/** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
+export function settingsKnows(rest: readonly string[]): boolean {
+  const [head, arg] = rest;
+  if (addsSource(rest)) return true;
+  // Checkouts' application page (PR #2479, 2026-11-13); anything else under it names nothing.
+  if (head === "checkouts" && rest.length > 1) return appPagePlace(rest) !== null;
+  // A command's page (ADR-0060); anything else under Commands names nothing.
+  if (head === "commands" && rest.length > 1) return commandPagePlace(rest) !== null;
+  // A folder renderer's page (ADR-0044); anything else under Renderers names nothing.
+  if (head === "renderers" && rest.length > 1) return folderPagePlace(rest) !== null;
+  if (head === undefined) return true;
+  if (head === "source") return !!arg;
+  // A child's page (the subtrees ruling, 2026-11-21); anything else under a section names nothing.
+  if (rest.length > 1) return rest.length === 2 && childOf(head, arg) !== null;
+  return topOf(head) !== null;
+}
+
+/** The address of a section of Settings: a child's under its parent's (`#/settings/appearance/fonts`). */
 export function settingsHash(section: SettingsSection): string {
-  return `#/settings/${section}`;
+  const parent = settingsParent(section);
+  return parent === null ? `#/settings/${section}` : `#/settings/${parent}/${section}`;
 }
 
 /** The address of a source's page; with `add`, the page with that value added to a list field (#879). */
@@ -240,11 +339,46 @@ export function intervalOptions(current: number, floor: number): number[] {
 }
 
 /**
+ * The value *Syncs* stores for *Only when I press Sync now* (ADR-0056): not
+ * an interval, so the stored interval survives and a source set back to a
+ * schedule returns to it.
+ */
+export const BY_HAND = "hand";
+
+/** One of *Syncs*'s options: *Every 5 min*, or *Only when I press Sync now*. */
+export function syncsWords(value: number | typeof BY_HAND): string {
+  return value === BY_HAND ? "Only when I press Sync now" : `Every ${intervalWords(value)}`;
+}
+
+/**
+ * What choosing an option of *Syncs* sends: a source on a schedule sends its
+ * interval and `sync_by_hand: false`, by hand sends `sync_by_hand: true` and
+ * leaves the interval as stored.
+ */
+export function syncsPatch(value: string): { sync_interval_secs?: number; sync_by_hand: boolean } {
+  return value === BY_HAND ? { sync_by_hand: true } : { sync_interval_secs: Number(value), sync_by_hand: false };
+}
+
+/**
+ * The note under *Syncs* while a source syncs only by hand. The second and
+ * third sentences are for a password source (one that fills the Passwords
+ * role), where the codes are made on this machine.
+ */
+export function byHandNote(name: string, passwords: boolean): string {
+  const first = `Nothing is read from ${name} in the background.`;
+  return passwords
+    ? `${first} It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.`
+    : `${first} It syncs when you press Sync now.`;
+}
+
+/**
  * The line under a source's name: *Jira Data Center, 177 tickets. Syncs every
- * 5 min, last 4 min ago.*
+ * 5 min, last 4 min ago.* A source by hand: *Syncs only when you press Sync
+ * now, last at 10:22.*
  */
 export function sourceLine(
-  source: Pick<SourceSummary, "item_count" | "kinds" | "enabled" | "sync_interval_secs" | "last_run">,
+  source: Pick<SourceSummary, "item_count" | "kinds" | "enabled" | "sync_interval_secs" | "last_run"> &
+    Partial<Pick<SourceSummary, "sync_by_hand">>,
   adapterName: string,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
@@ -253,8 +387,13 @@ export function sourceLine(
   const finished = status?.last_finished_at ?? source.last_run?.finished_at ?? null;
   const last = finished ? `last ${ago(finished, now)}` : "not synced yet";
   if (!source.enabled) return `${head} Paused, ${last}.`;
+  if (source.sync_by_hand) {
+    const at = finished ? `last at ${clockLabel(finished, now, true)}` : "not synced yet";
+    return `${head} Syncs only when you press Sync now, ${at}.`;
+  }
   return `${head} Syncs every ${intervalWords(source.sync_interval_secs)}, ${last}.`;
 }
+
 
 /** The alert on top of a source's page, or `null` when its credential works. */
 export function credentialAlert(
@@ -292,6 +431,14 @@ export function reenterWords(auth: AuthMethod | null | undefined): string {
   return `Re-enter ${secretNoun(auth)}`;
 }
 
+/**
+ * The fix for a credential, by whether one is stored: *Enter token* where none
+ * is, so nothing claims there was one to re-enter; else {@link reenterWords}.
+ */
+export function credentialFix(auth: AuthMethod | null | undefined, state: CredentialHealth["state"] | undefined): string {
+  return state === "missing_secret" ? `Enter ${secretNoun(auth)}` : reenterWords(auth);
+}
+
 /** One row of *Sync runs*. */
 export interface RunRow {
   id: number;
@@ -309,12 +456,12 @@ export function startedWords(iso: string, now: Date = new Date()): string {
 }
 
 /**
- * A watched run's line (#1384), the wizard's reading on a source's page:
- * *120 of 300 repositories · 1,240 items · 83 s*, without the walk until the
+ * A watched run's line (#1384), the reading on a source's page (once the first-run wizard's too):
+ * *120 of 300 repositories · 1,240 items · 1m 23s*, without the walk until the
  * run reports one and without the total when the adapter has none.
  */
 export function runProgressWords(items: number, elapsedMs: number, walk: Walk | null): string {
-  const parts = [`${items.toLocaleString("en-GB")} items`, `${Math.round(elapsedMs / 1000)} s`];
+  const parts = [`${items.toLocaleString("en-GB")} items`, secondsLabel(Math.round(elapsedMs / 1000))];
   if (walk !== null) {
     const of = walk.of === undefined ? "" : ` of ${walk.of.toLocaleString("en-GB")}`;
     parts.unshift(`${walk.walked.toLocaleString("en-GB")}${of} ${walk.unit}`.trimEnd());

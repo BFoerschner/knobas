@@ -141,7 +141,11 @@ impl Source for FakeSource {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),
@@ -152,6 +156,7 @@ impl Source for FakeSource {
                 // tombstone what it stops emitting.
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to

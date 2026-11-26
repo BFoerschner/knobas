@@ -81,6 +81,63 @@ pub async fn read(path: &Path) -> TreeRead {
     read_with(&search, path).await
 }
 
+/// [`read`], unless nothing in the checkout changed since the last answer
+/// there: then that answer, and no git (the scale pass, 2026-11-10). Each
+/// answer git gave is kept with the checkout's [stamp](super::stamp), taken
+/// before git ran, so a change made while it ran is read next time; a stamp
+/// that differs, or none, runs [`read`]. Only a [`TreeRead::Read`] is kept: a
+/// failure or a missing git is asked again.
+pub async fn read_known(path: &Path) -> TreeRead {
+    read_known_with(path, read).await
+}
+
+/// [`read_known`], with the read it makes when the stamp moved passed in, so
+/// a test can count them.
+async fn read_known_with(path: &Path, read: impl AsyncFnOnce(&Path) -> TreeRead) -> TreeRead {
+    let at = path.to_path_buf();
+    let stamp = tokio::task::spawn_blocking(move || super::stamp::of(&at))
+        .await
+        .ok()
+        .flatten();
+    if let Some(stamp) = stamp
+        && let Some(tree) = known()
+            .get(path)
+            .filter(|(kept, _)| *kept == stamp)
+            .map(|(_, tree)| tree.clone())
+    {
+        return tree;
+    }
+    let tree = read(path).await;
+    let mut known = known();
+    match (stamp, &tree) {
+        (Some(stamp), TreeRead::Read(_)) => {
+            if known.len() >= KNOWN_BOUND {
+                known.clear();
+            }
+            known.insert(path.to_path_buf(), (stamp, tree.clone()));
+        }
+        _ => {
+            known.remove(path);
+        }
+    }
+    tree
+}
+
+/// How many checkouts [`read_known`] keeps an answer for; past it they are
+/// all dropped and read again.
+const KNOWN_BOUND: usize = 4096;
+
+/// [`read_known`]'s answers, by checkout path.
+fn known() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, (u64, TreeRead)>> {
+    static KNOWN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, (u64, TreeRead)>>,
+    > = std::sync::OnceLock::new();
+    KNOWN
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// [`read`], with the `PATH` to look for `git` on passed in.
 ///
 /// An argument so "git is not installed" is reachable from a test on a machine
@@ -348,6 +405,26 @@ async fn find_off_runtime(search: &OsStr, name: &str) -> Result<Option<PathBuf>,
         })
 }
 
+/// Where the system-wide git configuration of the `git` on `search` is,
+/// told from where that git is and without running it (the git-starts pass,
+/// 2026-11-16): `etc/gitconfig` beside the folder git sits in, or up to two
+/// folders above it. Git for Windows keeps it at `<install>\etc\gitconfig`
+/// with `git.exe` in `<install>\cmd` and `<install>\mingw64\bin`; a git
+/// built under a prefix (Homebrew's `/opt/homebrew/bin/git`) reads
+/// `<prefix>/etc/gitconfig`. `None` where no such file is, which on Unix
+/// leaves the default `/etc/gitconfig`.
+///
+/// What knobas's own reader ([`super::reader`]) reads `diff.*` and
+/// `core.quotePath` from, beside the user's and the repository's files.
+pub(super) fn system_config_beside(search: &OsStr) -> Option<PathBuf> {
+    let git = find_on(search, "git")?;
+    git.parent()?
+        .ancestors()
+        .take(3)
+        .map(|above| above.join("etc").join("gitconfig"))
+        .find(|candidate| candidate.is_file())
+}
+
 /// The first executable called `name` in a `PATH`-style list.
 fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
     let file: OsString = if cfg!(windows) {
@@ -409,6 +486,36 @@ mod tests {
     const IMPATIENT: Duration = Duration::from_millis(100);
 
     /// A header git may add later, and an ignored entry, change nothing.
+    /// The system configuration is found beside the git on the path: in
+    /// its prefix (Homebrew, a git built under `/usr/local`) or two folders
+    /// up (Git for Windows's `mingw64/bin`), and nowhere for a git with none.
+    #[test]
+    fn the_system_configuration_is_found_beside_git() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = if cfg!(windows) { "git.exe" } else { "git" };
+        let place = |bin: &str| {
+            let dir = root.path().join(bin);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(exe), "").unwrap();
+            dir
+        };
+        let (prefixed, nested, bare) = (place("a/bin"), place("b/mingw64/bin"), place("c/bin"));
+        for etc in ["a/etc", "b/etc"] {
+            std::fs::create_dir_all(root.path().join(etc)).unwrap();
+            std::fs::write(root.path().join(etc).join("gitconfig"), "").unwrap();
+        }
+        assert_eq!(
+            system_config_beside(prefixed.as_os_str()),
+            Some(root.path().join("a/etc/gitconfig"))
+        );
+        assert_eq!(
+            system_config_beside(nested.as_os_str()),
+            Some(root.path().join("b/etc/gitconfig"))
+        );
+        assert_eq!(system_config_beside(bare.as_os_str()), None);
+        assert_eq!(system_config_beside(OsStr::new("")), None);
+    }
+
     #[test]
     fn what_the_reader_does_not_know_is_skipped() {
         let state = parse("# branch.oid abc\n# branch.head main\n# stash 3\n! ignored.log\n");
@@ -495,5 +602,85 @@ mod tests {
         // `PATH=":"` names the working directory twice in a shell; here it
         // names nothing, so a `git` in the process's cwd is never run.
         assert_eq!(find_on(OsStr::new(":"), "git"), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod known_tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = knobas_db::console::command("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Asked again with nothing changed, the checkout answers what git said
+    /// without git; a commit made in a terminal since is read, and so is an
+    /// edit nobody committed.
+    #[tokio::test]
+    async fn a_checkout_nothing_touched_is_not_read_again_and_a_terminal_commit_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        std::fs::write(p.join("a.txt"), "a\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "one"]);
+        let reads = std::sync::atomic::AtomicU32::new(0);
+        let counted = async |path: &Path| {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            read(path).await
+        };
+        let head = |tree: &TreeRead| match tree {
+            TreeRead::Read(state) => state.head.clone(),
+            other => panic!("git did not answer: {other:?}"),
+        };
+        let first = read_known_with(p, counted).await;
+        let again = read_known_with(p, counted).await;
+        assert_eq!(again, first, "the same answer");
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "git ran once"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "b\n").unwrap();
+        git(p, &["commit", "-q", "-am", "two"]);
+        let after = read_known_with(p, counted).await;
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a commit is read"
+        );
+        assert_ne!(head(&after), head(&first), "the new head");
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(p.join("a.txt"), "c\n").unwrap();
+        let edited = read_known_with(p, counted).await;
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "an edit is read"
+        );
+        assert!(
+            matches!(edited, TreeRead::Read(WorkingTreeState { changed: 1, .. })),
+            "{edited:?}"
+        );
     }
 }

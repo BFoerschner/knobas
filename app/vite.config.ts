@@ -1,21 +1,44 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { searchForWorkspaceRoot, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 import { HOOK_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/lib/shell/test-budget";
+import { FIRST_OPENS, FIRST_OPENS_MODULES } from "./src/lib/shell/compile-hints";
+import { compileHints } from "./vite-compile-hints";
 import { pdfjsAssets } from "./vite-pdfjs-assets";
 
 // Tauri owns this dev server: `tauri.conf.json`'s `devUrl` points at the port
 // below, so it is fixed and `strictPort` makes a clash a hard error rather
 // than a silent move to 1421 that the window would then fail to load.
+// `KNOBAS_PERF=1` (`testenv/perf`, PR #2479): a development build, so `?fake-ipc` is there, whose Svelte is compiled
+// and resolved as the release's. Svelte's development mode records a stack trace on every state write, which made a
+// filter key in the measured app cost several times what it costs in the shipped one.
+const perf = process.env.KNOBAS_PERF === "1";
+
+/** Svelte's runtime asks `esm-env/development` whether it runs in development; in a measured build it does not. */
+function releaseRuntime(): Plugin {
+  return {
+    name: "knobas-perf-release-runtime",
+    enforce: "pre",
+    resolveId: (id) => (id === "esm-env/development" ? "\0knobas-perf-dev" : null),
+    load: (id) => (id === "\0knobas-perf-dev" ? "export default false;" : null),
+  };
+}
+
 export default defineConfig(({ mode }) => ({
   // `pdfjsAssets`: pdf.js's decoders, fonts and CMaps under `/pdfjs/` (#2313).
-  plugins: [svelte(), pdfjsAssets()],
+  // `compileHints` (the ux30 Windows pass): the start's chunks compiled whole when they load, so the code cache holds
+  // every page's code (`src/lib/shell/compile-hints.ts`).
+  plugins: [svelte(perf ? { compilerOptions: { dev: false } } : {}), pdfjsAssets(), compileHints(), ...(perf ? [releaseRuntime()] : [])],
   // Tauri's CLI prints the Rust build output into the same terminal; letting
   // Vite clear the screen would eat compiler errors.
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
+    // The browser's fake reads the fixture repositories' files (`fake/launcher.ts`), which live beside `app/`, and the
+    // published schemas (`?fake-xsd`, and the Docs page whose code block is one, `fake/doc-blocks.ts`).
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../fixtures/tidewater/files", "../fixtures/doc", "../fixtures/xsd"] },
   },
   build: {
     // **Three documents, not one** (#503, #2381). `index.html` is the shell; the second
@@ -32,6 +55,12 @@ export default defineConfig(({ mode }) => ({
         // D2's frame (#2381): D2 on a main thread of its own, served on the backend's `knobas-render` scheme.
         "d2-frame": "d2-frame.html",
       },
+      // The pages whose first open compiled the most, a chunk of their own the start still loads, so only it carries
+      // the compile hint (`compileHints`, `src/lib/shell/compile-hints.ts`; the ux30 Windows pass). Without their
+      // dependencies, or the chunk is most of the start; so modules run in source order whatever chunk holds them
+      // (`strictExecutionOrder`): split without it, the fonts module ran before `filter-keys` had made its map and the
+      // shell never drew.
+      output: { strictExecutionOrder: true, codeSplitting: { groups: [{ name: FIRST_OPENS, test: FIRST_OPENS_MODULES, includeDependenciesRecursively: false }] } },
     },
     // The only consumer is the WebView bundled with the app, so there is no
     // legacy browser to down-level for.

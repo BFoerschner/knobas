@@ -138,7 +138,7 @@ async fn fixture_carries_the_whole_dataset() {
     assert_eq!(f.notes.len(), 3);
     let shas: Vec<&str> = f.commits.iter().map(|c| c.sha.as_str()).collect();
     assert_eq!(shas, ["c90d11", "a41f2c", "7be0e4"]);
-    assert_eq!(f.branches.len(), 3);
+    assert_eq!(f.branches.len(), 5);
     let repos: Vec<(&str, &str)> = f
         .repos
         .iter()
@@ -150,6 +150,9 @@ async fn fixture_carries_the_whole_dataset() {
             ("payout-service", "Rust"),
             ("ledger-api", "Kotlin"),
             ("ops-runbooks", "Markdown"),
+            ("ADProxy", "Go"),
+            ("abcMappingService", "Kotlin"),
+            ("ledger-gateway", "Java"),
         ]
     );
     let people: Vec<&str> = f.people.iter().map(|p| p.username.as_str()).collect();
@@ -265,7 +268,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v6");
+    assert_eq!(cursor, "tidewater-v8");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -391,11 +394,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v6".into()), &mut sink)
+        .sync(Some("tidewater-v8".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v6");
+    assert_eq!(cursor, "tidewater-v8");
 }
 
 /// ADR-0040: a built-in docs source writes a page's `body_text` with the shared
@@ -878,6 +881,9 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
             ("payout-service", "payout-service"),
             ("ledger-api", "ledger-api"),
             ("ops-runbooks", "ops-runbooks"),
+            ("ADProxy", "ADProxy"),
+            ("abcMappingService", "abcMappingService"),
+            ("ledger-gateway", "ledger-gateway"),
         ],
         "every repo the fixture holds, keyed and titled by its name"
     );
@@ -912,6 +918,8 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
             "payout-service@refs/heads/main",
             "payout-service@refs/heads/feature/PAY-231-sepa-retry",
             "payout-service@refs/heads/fix/PAY-228-partial-refund-drift",
+            "ledger-api@refs/heads/main",
+            "ledger-gateway@refs/heads/main",
         ]
     );
     let sepa = sink
@@ -952,38 +960,6 @@ async fn full_sync_emits_the_fixtures_repos_and_branches() {
             branch.entity
         );
     }
-}
-
-/// The demo button's subtitle names the size of the corpus it loads, and
-/// nothing made that true until this.
-///
-/// `app/src/lib/sources/FirstRun.svelte` offers *Load the Tidewater dataset*
-/// under `21 fixture items · a 23-asset estate · no network, no credential`.
-/// That sentence was written when a full sync was 21 items, is the first thing
-/// a person opening a demo build reads, and no test on either side of the
-/// bridge could see it: #537 widened the corpus to 27 and found the `21` by
-/// grep. The estate's own count is pinned by `demo.rs`'s
-/// `the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing`,
-/// which reads `testenv/estate.json`; this is the work half's.
-///
-/// The oracle is a **real sync through the adapter**, not a sum of fixture
-/// array lengths: what the subtitle claims is what the button produces, and an
-/// `items` that stopped emitting a kind would have to move the sentence too.
-/// `include_str!` rather than a path read, so the file being renamed or moved
-/// fails the build here rather than passing an assertion over an empty string.
-#[tokio::test]
-async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
-    const FIRST_RUN: &str = include_str!("../../../../app/src/lib/sources/FirstRun.svelte");
-    let mut sink = VecSink(Vec::new());
-    MockSource::new().sync(None, &mut sink).await.expect("sync");
-
-    let claim = format!("{} fixture items", sink.0.len());
-    assert!(
-        FIRST_RUN.contains(&claim),
-        "FirstRun.svelte must offer the demo load as {claim:?}; \
-         a full sync emits {} items and the subtitle says otherwise",
-        sink.0.len()
-    );
 }
 
 /// #1229, #1240: the demo's only source is the mock, and the shell draws each

@@ -1,0 +1,20 @@
+[
+  ["com:# The payout bucket."],
+  ["kw:terraform ","punct:{"],
+  ["punct:  ","prop:required_version ","op:= ","str:\">= 1.6\""],
+  ["punct:}"],
+  [],
+  ["kw:variable ","str:\"retries\" ","punct:{"],
+  ["punct:  ","prop:type    ","op:= ","ty:number"],
+  ["ty:  ","prop:default ","op:= ","num:3"],
+  ["punct:}"],
+  [],
+  ["kw:resource ","str:\"aws_s3_bucket\" \"payouts\" ","punct:{"],
+  ["punct:  ","prop:bucket ","op:= ","str:\"payouts-","esc:${","kw:var","punct:.","prop:env","esc:}","str:\""],
+  ["str:  ","prop:tags ","op:= ","punct:{"],
+  ["punct:    ","prop:Owner   ","op:= ","str:\"payments\""],
+  ["str:    ","prop:Enabled ","op:= ","con:true"],
+  ["con:  ","punct:}"],
+  ["punct:}"],
+  []
+]

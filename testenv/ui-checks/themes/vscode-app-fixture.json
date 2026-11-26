@@ -1,0 +1,23 @@
+{
+  "name": "Trip Harbour Night",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1B2230",
+    "editor.foreground": "#D8DEE9",
+    "sideBar.background": "#161C28",
+    "list.hoverBackground": "#232B3B",
+    "input.background": "#141A25",
+    "button.background": "#6CB6FF",
+    "button.foreground": "#0B1220",
+    "focusBorder": "#6CB6FF",
+    "textLink.foreground": "#8CC8FF",
+    "terminal.ansiGreen": "#7BD88F",
+    "terminal.ansiYellow": "#F2C66D",
+    "terminal.ansiRed": "#FF7A85",
+    "terminal.ansiBlue": "#6CB6FF"
+  },
+  "tokenColors": [
+    { "scope": "keyword", "settings": { "foreground": "#C792EA" } },
+    { "scope": "string", "settings": { "foreground": "#A5E075" } }
+  ]
+}

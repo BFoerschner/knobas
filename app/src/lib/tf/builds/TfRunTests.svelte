@@ -9,17 +9,23 @@
   only the rows near the viewport (`shell/windowed.svelte.ts`, #2210).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { RunTest, RunTests, TestOutcome } from "../../ipc/entity";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import type { RunPorts } from "./pipeline-ports";
+  import { stateWord } from "../state-word";
+  import { jumpAcross } from "../opener";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
+  import { menuThing } from "../context/thing";
+  import { thousands } from "../counted";
 
   let {
     runId,
@@ -149,7 +155,7 @@
       {#if !entry.detail}
         {@const open = isOpen(test)}
         {@const time = testTime(test.duration_ms)}
-        <div class="tf-trow" {@attach win.row(entryKey(entry))}>
+        <div class="tf-trow" {@attach win.row(entryKey(entry))} {@attach menuThing(() => ({ kind: "test", name: test.name }))}>
           <span class={`tf-dot ${test.status === "failed" ? "tf-err" : test.status === "passed" ? "tf-ok" : ""}`}></span>
           <span class="tf-nm"
             >{#if test.status === "failed"}<button type="button" aria-label={test.name} aria-expanded={open} onclick={() => (opened[test.name] = !open)}
@@ -158,8 +164,7 @@
           >
           <span class="tf-dim">{time ?? ""}</span>
           <span
-            >{#if test.status === "failed"}<span class="tf-chip tf-err">{test.muted ? "failed, muted" : "failed"}</span
-              >{:else}<span class="tf-dim">{test.status}</span>{/if}</span
+            >{#if test.status === "failed"}<TfStateChip text={test.muted ? "failed, muted" : "failed"} tone="err" />{:else}<span class="tf-dim">{stateWord(test.status)}</span>{/if}</span
           >
         </div>
       {:else}
@@ -167,16 +172,17 @@
         <div class="tf-tdetail" {@attach win.row(entryKey(entry))}>
           {#if test.details !== null}<pre>{test.details.trimEnd()}</pre>{/if}
           <div class="tf-tacts">
-            <a class="tf-btn tf-sm" href={logHref}>Show in log</a>
+            <a class="tf-btn tf-sm" href={logHref} onclick={(event) => jumpAcross(event, "Tests")}>Show in log</a>
             {#if line !== null}<span class="tf-dim">{line}</span>{/if}
           </div>
         </div>
       {/if}
     {:else}
-      <div class="tf-empty"><p>{tests.length === 0 ? "This run reported no tests." : "No test matches."}</p></div>
+      {#if tests.length === 0}<div class="tf-empty"><p>This run reported no tests.</p></div>
+      {:else}<TfNoMatch noun="tests" {filter} />{/if}
     {/each}
   </div>
   {#if read.truncated}
-    <p class="tf-dim tf-logfoot">The first {tests.length.toLocaleString("en-US")} tests, failed ones first. The run has more.</p>
+    <p class="tf-dim tf-logfoot">The first {thousands(tests.length)} tests, failed ones first. The run has more.</p>
   {/if}
 {/if}

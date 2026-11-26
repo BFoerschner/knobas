@@ -111,6 +111,12 @@ pub struct LineThread {
     /// the wire reads as `None`.
     #[serde(default)]
     pub resolved_by: Option<String>,
+    /// The name to call [`resolved_by`](Self::resolved_by) by, as
+    /// [`LineComment::author_name`] is the author's (F-107). Absent on the
+    /// wire where the login is the only name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolved_by_name: Option<String>,
     /// Whether the source takes a reply on this thread (#2277): Gitea places
     /// a reply by line on the current head, so an outdated thread takes none.
     /// Absent on the wire reads as `false`.
@@ -149,8 +155,15 @@ pub struct FileThread {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LineComment {
-    /// Who wrote it, as the source names them (a login).
+    /// Who wrote it, as the source names them (a login): what the app
+    /// compares with the source's configured username.
     pub author: String,
+    /// The name to call [`author`](Self::author) by, the profile's name where
+    /// the source keeps one (F-107); absent on the wire where the login is
+    /// the only name, and the shell then draws the login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author_name: Option<String>,
     pub body: String,
     /// When, as the source's RFC 3339 instant; `None` where it sent none.
     pub at: Option<String>,

@@ -14,8 +14,9 @@ knobas_core::closed_vocabulary! {
     ///
     /// - `schedule`: the scheduler's interval elapsed.
     /// - `manual`: the user's *Sync now*.
-    /// - `first_run`: the first sync after a source was added, the one the
-    ///   first-run wizard draws a progress bar for.
+    /// - `first_run`: the first sync after a source was added (the wake
+    ///   after *Add a source*). The first-run wizard that drew a progress bar
+    ///   over it went in ux31; a source's page watches it with `watch_sync`.
     /// - `backfill`: a deliberate cursor-less run that widens the payload of
     ///   items an incremental would never re-fetch (#32), and is **forbidden
     ///   to reconcile**: ratified non-sweeping by Björn 2026-08-28, because
@@ -261,6 +262,13 @@ pub struct RunResult {
 /// how the diagnostics view names the run. It stays an `error` there.
 pub const CANCELLED_MESSAGE: &str = "cancelled: knobas is shutting down";
 
+/// What a run that stood aside for a landed write's read-back is logged with,
+/// ahead of the write's id (ADR-0031 as amended 2026-11-24, the pr-state
+/// fix): knobas stopped it so the write's item is read back at once, and the
+/// run after the write starts again from the same position. Like
+/// [`CANCELLED_MESSAGE`], it says nothing about the source.
+pub const STOOD_ASIDE_PREFIX: &str = "stood aside: a landed write's read-back went first, write ";
+
 /// What a run knobas' own rate limit stopped is logged with, ahead of the
 /// failure's own message, and the one thing that tells its row from a
 /// failure the source caused (#1980).
@@ -288,12 +296,27 @@ impl RunResult {
         }
     }
 
-    /// Whether this is [`cancelled`](Self::cancelled)'s verdict: a run the
-    /// reader stopped, which says nothing about the source (spec #1618,
-    /// ruling A8).
+    /// The verdict for a run that stood aside for write `write_id`'s
+    /// read-back ([`STOOD_ASIDE_PREFIX`]).
+    #[must_use]
+    pub fn stood_aside(write_id: i64) -> RunResult {
+        RunResult {
+            outcome: SyncOutcome::Error,
+            counts: RunCounts::default(),
+            error: Some(format!("{STOOD_ASIDE_PREFIX}{write_id}")),
+            left_out: None,
+        }
+    }
+
+    /// Whether this is [`cancelled`](Self::cancelled)'s verdict, or
+    /// [`stood_aside`](Self::stood_aside)'s: a run knobas or the reader
+    /// stopped, which says nothing about the source (spec #1618, ruling A8).
     #[must_use]
     pub fn was_cancelled(&self) -> bool {
-        self.outcome == SyncOutcome::Error && self.error.as_deref() == Some(CANCELLED_MESSAGE)
+        self.outcome == SyncOutcome::Error
+            && self.error.as_deref().is_some_and(|error| {
+                error == CANCELLED_MESSAGE || error.starts_with(STOOD_ASIDE_PREFIX)
+            })
     }
 
     /// Whether knobas' own rate limit stopped this run
@@ -552,6 +575,34 @@ pub async fn last_finished(
     Ok(row.map(Into::into))
 }
 
+/// [`last_finished`] for each of `source_ids`, in one statement: the rows of
+/// the sources that have a finished run, in no order.
+///
+/// The sources list asked [`last_finished`] once per source, a round trip
+/// each on every read of the list (the query audit of 2026-11-12). The
+/// statement is that read's, run per id inside one, so each row is the row
+/// the single read answers: `tests/it/run_log.rs` holds the two together.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn last_finished_of(
+    pool: &sqlx::PgPool,
+    source_ids: &[String],
+) -> Result<Vec<SyncRunRow>, sqlx::Error> {
+    let sql = format!(
+        "select r.* from unnest($1::text[]) as s(id)
+          cross join lateral (
+            select {RUN_COLUMNS} from knobas.sync_run
+             where source_id = s.id and finished_at is not null
+             order by started_at desc, id desc limit 1) r"
+    );
+    let rows: Vec<RawRun> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(source_ids)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 /// How many **finished** runs there have been since the last successful one --
 /// the rung of P7's backoff ladder, derived rather than stored.
 ///
@@ -563,6 +614,8 @@ pub async fn last_finished(
 /// So is a run the quit cancelled ([`CANCELLED_MESSAGE`], #1629): the reader
 /// stopped it, and a large first sync quit twice would otherwise climb the
 /// ladder for nothing the source did.
+///
+/// So is a run that stood aside for a landed write ([`STOOD_ASIDE_PREFIX`]).
 ///
 /// And so is a run knobas' own rate limit stopped ([`LOCAL_QUOTA_PREFIX`],
 /// #1980): the source was not asked, so the next failure it does cause
@@ -581,12 +634,14 @@ pub async fn failures_since_last_ok(
             and finished_at is not null
             and error is distinct from $2
             and not coalesce(starts_with(error, $3), false)
+            and not coalesce(starts_with(error, $4), false)
             and id > coalesce((select max(id) from knobas.sync_run
                                 where source_id = $1 and outcome = 'ok'), 0)",
     )
     .bind(source_id)
     .bind(CANCELLED_MESSAGE)
     .bind(LOCAL_QUOTA_PREFIX)
+    .bind(STOOD_ASIDE_PREFIX)
     .fetch_one(pool)
     .await?;
     Ok(n)
@@ -854,6 +909,7 @@ mod tests {
             swept: 7,
             cursor: r#"{"v":1,"n":9}"#.to_owned(),
             left_out: None,
+            otp_keys: crate::RunOtpKeys::default(),
         });
         assert_eq!(counts.upserted, 21);
         assert_eq!(counts.deleted, 4);
@@ -877,6 +933,7 @@ mod tests {
             swept: 0,
             cursor: String::new(),
             left_out: None,
+            otp_keys: crate::RunOtpKeys::default(),
         });
         assert_eq!(counts.upserted, i64::MAX);
         assert!(counts.touched() >= 0, "a count never reads as negative");

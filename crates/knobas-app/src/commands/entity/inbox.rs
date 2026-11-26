@@ -67,6 +67,40 @@ pub async fn inbox_items(
     inbox_items_inner(&pool, lifecycle.registry(), Utc::now(), shelf).await
 }
 
+/// The stream, the snoozed shelf and the count, from **one run** of the
+/// derivation: what the window's inbox store asks, where it asked
+/// `inbox_items` twice and `inbox_count` once and two of the three ran every
+/// rule (the query audit of 2026-11-12). Each half is what `inbox_items`
+/// answers for that shelf, and `count` is what `inbox_count` answers.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database or the sync engine is still coming up, `internal` for a read
+/// failure.
+#[tauri::command]
+pub async fn inbox_shelves(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::inbox::InboxShelves, IpcError> {
+    let pool = lifecycle.pool()?;
+    inbox_shelves_inner(&pool, lifecycle.registry(), Utc::now()).await
+}
+
+/// [`inbox_shelves`], against a pool and a clock.
+///
+/// # Errors
+///
+/// `internal` if the derivation, the identity read or the source listing
+/// fails.
+pub async fn inbox_shelves_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    now: DateTime<Utc>,
+) -> Result<crate::inbox::InboxShelves, IpcError> {
+    let identity = identity_of(pool).await?;
+    crate::inbox::shelves(pool, registry, &identity, now).await
+}
+
 /// How many items need you now -- the number the top strip shows.
 ///
 /// **Snoozed items are not in it**, because the number means "needs me now";

@@ -32,6 +32,10 @@
     the Log tab; a run in flight is read again when the Log tab opens. No
     log, or a log without steps, draws no bar.
 
+  - **In flight** (the TeamCity run fix, 2026-11-25, `runs-in-flight.ts`): a refresh with no write that moved the run
+    reads its row and item again, and the whole page when it went from queued to running or to finished; the run is
+    refreshed at the source once it drew, when shown again and when the window comes back, at most once in 5 s.
+
   - **Refresh** (#2137, after #2107): the run as `get_entity` reads it draws
     *Refresh* or *Sync now* at the end of the header's actions
     (`TfDetailRefresh`), and the withdrawn and turned-off banners under the
@@ -41,21 +45,37 @@
     button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel, secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { EntityDetail, PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
+  import type { EntityDetail, PipelineRow, PipelineSettings, RunLog, RunRow, ShownView, SourceView } from "../../ipc/entity";
+  import TfHeldNote from "../TfHeldNote.svelte";
+  import { onViewFresh } from "../repo/view-fresh.svelte";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
+  import { acknowledged, openingWords } from "../../shell/ack.svelte";
+  import { webPlaceName } from "../../shell/open-web";
   import { settleEchoes } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
+  import { heldHead } from "../held-head.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import { jumpAcross } from "../opener";
+  import { parentPage } from "../page-name.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
-  import { pipelineHash, runTone } from "./builds";
+  import { fitLabel } from "../time/day-view";
+  import { RunHold } from "./run-hold.svelte";
+  import { failedRun, pipelineHash, runTone, stateWord } from "./builds";
+  import { runsRead } from "./runs-read.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
+  import { IN_FLIGHT_AFTER_MS, InFlightReads, hearRuns, inFlight as runInFlight, phase } from "./runs-in-flight";
+  import { inTextField } from "../../shell/keys";
   import {
     chipTone,
     defaultBranch,
@@ -78,12 +98,15 @@
   import TfRunChain from "./TfRunChain.svelte";
   import TfRunArtifacts from "./TfRunArtifacts.svelte";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import { takeRunAgain } from "./run-again";
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
   import TfRunTicket from "./TfRunTicket.svelte";
-  import { downloadAndSay, stepSegments } from "./run-reads";
+  import { downloadAndSay, fitSteps, isCommand, stepSegments } from "./run-reads";
+  import { fonts } from "../fonts.svelte";
   import {
     RUN_TABS,
+    noSuchRunTab,
     artifactsOf,
     builtCommit,
     repositoryOfCommit,
@@ -127,13 +150,16 @@
   const pipelineId = $derived(pipeline.entity_id);
   const runId = $derived(rest[1] ?? "");
   const tab = $derived(runTabOf(rest));
+  const noTab = $derived(noSuchRunTab(rest));
 
   /** How many older pages a run not among the latest is looked for in. */
   const OLDER_PAGES = 5;
 
   let held = $state<RunRow[] | null>(null);
   let runsFailed = $state<string | null>(null);
-  let view = $state<SourceView | null>(null);
+  let view = $state<ShownView | SourceView | null>(null);
+  /** Why the source did not answer the read behind a view drawn from what knobas held (ADR-0042). */
+  let heldFailed = $state<string | null>(null);
   let viewRead = $state(false);
   let viewFailed = $state<string | null>(null);
   let failure = $state<FirstFailure | null>(null);
@@ -145,6 +171,8 @@
   /** The run's one log read: the steps bar draws over it, and the Log tab is handed it. */
   let logRead: Promise<RunLog | null> | null = null;
   let logSettled = false;
+  /** Whether the run's log read has answered: the steps bar's room says what it found, once it has. Apart from `logSettled`, which the Log tab's port reads inside its effect. */
+  let logAnswered = $state(false);
   /** The step a click on the bar opens the Log tab at; `seq` tells two clicks on one step apart. */
   let openStep = $state<{ step: number; seq: number } | null>(null);
   let openSeq = 0;
@@ -153,6 +181,8 @@
   let rereads = $state(0);
   /** The run as `get_entity` reads it (#2137): what its *Refresh* and banners draw over; `null` until read. */
   let detail = $state<EntityDetail | null>(null);
+  /** Whether `get_entity` has answered for the run, found or not: the header's *Refresh* or *Sync now* waits on it. */
+  let detailRead = $state(false);
   /** The header's *Refresh* or *Sync now* (#2107). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -160,6 +190,16 @@
     const wanted = { pipelineId, runId };
     untrack(() => open(wanted.pipelineId, wanted.runId));
   });
+  /**
+   * The header draws once, whole (`held-head.svelte.ts`): *Re-run* is the view's and *Refresh* or *Sync now* the item's, which
+   * landed after the header and pushed *Re-run* and *Open in TeamCity* 105 px left. The tabs under it wait with it: their counts are the view's.
+   * So does the rest of the page (`tf-heldbelow` on each part under it): *Refresh run* wraps the actions under the title at 1440 px, and the header
+   * growing a line while it was held pushed the panels 29 px down.
+   */
+  const drawnHead = heldHead(
+    () => runId,
+    () => detailRead && viewRead,
+  );
 
   /**
    * What the source's credential cannot write on the run's pipeline (#2040), and the run's fields
@@ -179,6 +219,8 @@
 
   function open(pipe: string, id: string) {
     const mine = ++token;
+    // *Run again…* pressed in Builds' *Recent* opens this page with its dialog (2026-11-25).
+    if (takeRunAgain(id)) dialog = true;
     held = null;
     runsFailed = null;
     view = null;
@@ -187,9 +229,20 @@
     failure = null;
     settings = null;
     log = null;
+    logAnswered = false;
     detail = null;
+    detailRead = false;
     refresh.reset();
-    void findRun(pipe, id, mine);
+    clearTimeout(inFlightSoon);
+    inFlightReads.reset();
+    void findRun(pipe, id, mine).then(() => {
+      // Once the run has drawn, one in flight is read at the source: started or finished since the last run of the
+      // source, it says so now (the TeamCity run fix, 2026-11-25). A page left meanwhile sets nothing.
+      if (mine !== token) return;
+      inFlightSoon = setTimeout(() => {
+        if (mine === token) readInFlight();
+      }, IN_FLIGHT_AFTER_MS);
+    });
     void readLog(id, mine);
     void readView(id, mine);
     void readDetail(id, mine);
@@ -200,9 +253,13 @@
   function readDetail(id: string, mine: number): Promise<void> {
     return ports.getEntity(id).then(
       (answer) => {
-        if (mine === token) detail = answer;
+        if (mine !== token) return;
+        detail = answer;
+        detailRead = true;
       },
-      () => {},
+      () => {
+        if (mine === token) detailRead = true;
+      },
     );
   }
 
@@ -214,6 +271,7 @@
         view = answer;
         viewRead = true;
         viewFailed = null;
+        heldFailed = null;
         if ((sectionOf(answer, "tests")?.count ?? 0) > 0) readFailure(id, mine);
         else failure = null;
       },
@@ -224,6 +282,26 @@
       },
     );
   }
+
+  // The run's view knobas held, read again behind it (ADR-0042).
+  onViewFresh(
+    () => runId,
+    null,
+    () => {
+      const id = runId;
+      if (view !== null) void readView(id, token);
+    },
+    untrack(() => ports.listen),
+    (why) => (heldFailed = why),
+  );
+
+  // The pipeline's settings knobas held, read again behind them (ADR-0042).
+  onViewFresh(
+    () => pipelineId,
+    "settings",
+    () => readSettings(pipelineId, token),
+    untrack(() => ports.listen),
+  );
 
   function readSettings(pipe: string, mine: number) {
     ports.settings(pipe).then(
@@ -291,9 +369,12 @@
         if (mine !== token) return;
         log = answer;
         logSettled = true;
+        logAnswered = true;
       },
       () => {
-        if (mine === token) logSettled = true;
+        if (mine !== token) return;
+        logSettled = true;
+        logAnswered = true;
       },
     );
     return read;
@@ -341,9 +422,60 @@
 
   onDestroy(() => {
     token += 1;
+    clearTimeout(inFlightSoon);
   });
 
   const run = $derived(held?.find((r) => r.entity_id === runId) ?? null);
+
+  /** The run, refreshed by id when the page is shown while it is in flight (the TeamCity run fix). */
+  const inFlightReads = new InFlightReads(untrack(() => ports.follow));
+  let inFlightSoon: ReturnType<typeof setTimeout> | undefined;
+  function readInFlight() {
+    const now = held?.find((r) => r.entity_id === runId) ?? null;
+    if (now !== null && runInFlight(now)) inFlightReads.read([now.entity_id]);
+  }
+
+  // The run moved at the source (a run started in knobas is read to its end, or this page read it): its row and item
+  // again from the mirror, and, where it went from queued to running or to finished, the whole page as a sync's end
+  // reads it (its view, log and open tab).
+  $effect(() => {
+    const wanted = { pipelineId, runId };
+    return untrack(() =>
+      hearRuns(
+        ports.listen,
+        (entity) => entity === wanted.runId,
+        () => {
+          const mine = token;
+          const was = phase(held?.find((r) => r.entity_id === wanted.runId) ?? null);
+          void Promise.all([findRun(wanted.pipelineId, wanted.runId, mine), readDetail(wanted.runId, mine)]).then(() => {
+            if (mine !== token) return;
+            const is = phase(held?.find((r) => r.entity_id === wanted.runId) ?? null);
+            if (is !== was) void reread(wanted.pipelineId, wanted.runId);
+          });
+        },
+      ),
+    );
+  });
+
+  /**
+   * `m` on the run page (ux18): *Mark as read* or *Mark as unread* on this run, when it finished failed. Opening it
+   * reads nothing: only a mark does. Not in a field, a dialog, or a page a keep-alive holds hidden.
+   */
+  const runShown = pageVisible();
+  // Shown again or the window back: a run in flight read at the source, at most once in 5 s.
+  onFocusWhileShown(runShown, readInFlight);
+  onMount(() => {
+    const onkey = (event: KeyboardEvent) => {
+      if (event.key !== "m" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.defaultPrevented) return;
+      if (!runShown() || run === null || !failedRun(run)) return;
+      const at = document.activeElement;
+      if (at instanceof HTMLElement && (inTextField(at) || at.closest(".tf-dialog, select, [role='menu']") !== null)) return;
+      event.preventDefault();
+      void runsRead.toggle(run);
+    };
+    window.addEventListener("keydown", onkey);
+    return () => window.removeEventListener("keydown", onkey);
+  });
   const previous = $derived(run === null || held === null ? null : previousOnBranch(held, run));
   const mainBranch = $derived(defaultBranch(settings));
   const startedBy = $derived(run === null ? null : triggerLabel(run) || null);
@@ -366,11 +498,51 @@
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
-  const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
+  const read = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
+  /** A step's name at what its segment holds: whole, or ended with an ellipsis, never cut mid-letter. */
+  let barPx = $state(0);
+  let pen: CanvasRenderingContext2D | null = null;
+  function measureBar(bar: HTMLElement) {
+    // Read now, before the bar first paints: the observer's first answer came a frame late, and the steps fitted to no width
+    // drew once and then moved by a few pixels (the nothing-moves pass).
+    barPx = bar.clientWidth;
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => (barPx = bar.clientWidth));
+    seen.observe(bar);
+    return () => seen.disconnect();
+  }
+  /**
+   * A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code, times the role's size (Settings › Fonts,
+   * read here so the bar is fitted again when a size or a face changes); 0 with no canvas to measure on. A step's name
+   * is the interface's text, so its weight and letter spacing are the interface's too (2026-11-21): the tracking comes
+   * after every character, as the browser draws it. A command keeps its face's own spacing.
+   */
+  function nameWidth(name: string, text = name): number {
+    const command = isCommand(name);
+    const role = command ? "code" : "ui";
+    const px = ((command ? 11 : 12) * fonts.size(role)) / 100;
+    void fonts.family(role);
+    const weight = command ? 400 : fonts.knob("ui", "wt");
+    const track = command ? 0 : (fonts.knob("ui", "ls") / 100) * px;
+    pen ??= document.createElement("canvas").getContext("2d");
+    if (pen === null) return 0;
+    const face = command ? "--mono" : "--sans";
+    pen.font = `${weight} ${px}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
+    return pen.measureText(text).width + [...text].length * track;
+  }
+  /** What a label's inset takes from its segment: 10 px before it, 8 px after. */
+  const STEP_INSET = 18;
+  /** A px over its measure, so percentages rounding on the way back cannot cost a name its end. */
+  const segments = $derived(fitSteps(read, barPx, (name) => nameWidth(name) + STEP_INSET + 1));
+  function stepLabel(name: string, widthPct: number): string | null {
+    if (barPx === 0) return name;
+    return fitLabel(name, (widthPct / 100) * barPx - STEP_INSET, (text) => nameWidth(name, text));
+  }
+
   function chipWord(r: RunRow): string {
-    return r.finished === null ? resultWord(r) : (r.state?.text ?? "");
+    return stateWord(r.finished === null ? resultWord(r) : (r.state?.text ?? ""));
   }
 
   // -- the writes ---------------------------------------------------------------
@@ -380,21 +552,25 @@
    * The page draws no queued row of its own (#853); the pipeline page draws
    * it at the top of its runs until a read holds it (#1449).
    */
-  async function queue(request: RunRequest) {
+  async function queue(request: RunRequest): Promise<number | null> {
+    let id: number;
     try {
       const write = await ports.submitWrite(request.payload);
+      id = write.id;
       echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
+      // Once sent, the way to the run it started: the page's own runs, where it is drawn (F-338, F-350).
+      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write, where: { label: "Show in runs", run: () => (location.hash = pipelineHash(pipelineId)) } });
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return;
+      return null;
     }
-    if (request.preset === null) return;
+    if (request.preset === null) return id;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
       push({ text: `Could not save the preset: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
+    return id;
   }
 
   /**
@@ -409,9 +585,12 @@
         ? fieldRefusals.cannotOverride
         : null),
   );
+  /** *Re-run* holds as what its write is doing for about two seconds, so a second press can't queue a second run (F-338). */
+  const rerunHold = new RunHold(() => pipelineId);
   function rerun() {
     if (rerunning === null || cannotRerun !== null) return;
-    void queue(rerunning);
+    const request = rerunning;
+    void rerunHold.press(() => queue(request));
   }
 
   let dialog = $state(false);
@@ -421,12 +600,15 @@
     void queue(request);
   }
 
+  // A run sits under its pipeline, by the name its crumb gives it.
+  parentPage(() => ({ hash: pipelineHash(pipelineId), name: pipeline.name }));
+
   /** A top-level artifact file into the downloads folder (D8, #856). */
   const downloadFile = (name: string) => downloadAndSay(ports.download, runId, { kind: "file", path: name }, name);
 
   function openExternal(url: string | null) {
     if (url === null) return;
-    void ports.openExternal(url).catch((cause: unknown) => {
+    void acknowledged(openingWords(webPlaceName(url)), () => ports.openExternal(url)).catch((cause: unknown) => {
       push({ text: `Could not open ${pipeline.source_name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }
@@ -434,27 +616,25 @@
 </script>
 
 {@render crumbs([
-  { name: "Builds", href: "#/builds" },
+  { name: "Builds" },
+  ...(pipeline.group !== null ? [{ name: pipeline.group }] : []),
   { name: pipeline.name, href: pipelineHash(pipelineId) },
   { name: run?.number != null ? `#${run.number}` : "Run" },
 ])}
 
 {#if runsFailed !== null && held === null}
-  <div class="tf-empty"><p>Runs could not be read: {runsFailed}</p></div>
+  <TfNothingHere message="This pipeline's runs could not be read: {runsFailed}" />
 {:else if held === null}
   <p class="tf-dim tf-runs">Reading the run…</p>
 {:else if run === null}
-  <div class="tf-empty">
-    <p>No run of {pipeline.name} at this address.</p>
-    <a class="tf-btn" href={pipelineHash(pipelineId)}>Back to the pipeline</a>
-  </div>
+  <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
-  <header class="tf-fhead tf-bhead">
+  <header class="tf-fhead tf-bhead tf-holds" class:tf-unread={!drawnHead.shown}>
     <div>
-      <h1>
+      <h1 data-failed={failedRun(run) ? "" : undefined}>
         {pipeline.name} #{run.number ?? ""}
-        {#if run.state !== null}<span class={`tf-chip tf-run-chip ${chipTone(run)}`}>{chipWord(run)}</span>{/if}
+        {#if run.state !== null}<TfStateChip text={chipWord(run)} class={`tf-run-chip ${chipTone(run)}`} />{/if}
       </h1>
       <div class="tf-sub">
         {#if run.branch !== null}<span class="tf-mono">{run.branch}</span>{/if}{startedBy !== null ? `, started by ${startedBy}` : ""}{at !== null
@@ -468,29 +648,35 @@
           type="button"
           class="tf-btn tf-primary"
           disabled={view === null}
-          aria-disabled={cannotRerun !== null ? "true" : undefined}
+          aria-disabled={cannotRerun !== null || rerunHold.word !== null ? "true" : undefined}
           title={cannotRerun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
-          onclick={rerun}>Re-run</button
+          onclick={rerun}><span class="tf-keepw" data-keep="Queued"><span>{rerunHold.word ?? "Re-run"}</span></span></button
         >
         <button
           type="button"
           class="tf-btn"
           {...refusedAttrs(cannotRun)}
-          onclick={runAgain}>Run again with changes…</button
+          onclick={runAgain}><span>Run again<span class="tf-wide">{" "}with changes</span>…</span></button
         >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
-      {#if run.web_url !== null}
-        <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
+      {#if failedRun(run)}
+        {@const unread = runsRead.unread(run)}
+        <button type="button" class="tf-btn tf-ghost" title={`${unread ? "Mark as read" : "Mark as unread"} (M)`} onclick={() => void runsRead.toggle(run)}
+          >{unread ? "Mark as read" : "Mark as unread"}</button
+        >
       {/if}
-      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} />
+      {#if run.web_url !== null}
+        <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span class="tf-wide tf-cut">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
+      {/if}
+      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} noun="run" />
     </div>
   </header>
-  {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+  {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={rereadRun} held={!drawnHead.shown} />{/if}
 
   {#if segments.length > 0}
-    <div class="tf-stepsbar">
+    <div class="tf-stepsbar" class:tf-heldbelow={!drawnHead.shown} {@attach measureBar}>
       <svg role="group" aria-label="Steps" width="100%" height="30">
         {#each segments as segment (segment.index)}
           <a
@@ -502,45 +688,52 @@
             <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
-              <text x="10" y="19">{segment.name}</text>
+              {#if stepLabel(segment.name, segment.width) !== null}<text class:tf-sbcmd={isCommand(segment.name)} x="10" y="19">{stepLabel(segment.name, segment.width)}</text>{/if}
             </svg>
           </a>
         {/each}
       </svg>
     </div>
+  {:else}
+    <!-- The bar's room from the first frame (the nothing-moves pass, 2026-11-17): the log is read live from the source, and the bar
+         landing with it pushed the run's panels 29 px down. An empty track while it reads, then what it found. -->
+    <div class="tf-stepsbar tf-sbnone" class:tf-heldbelow={!drawnHead.shown}>{#if logAnswered}<span>{log === null ? "No log" : "No steps in the log"}</span>{/if}</div>
   {/if}
 
   {#if stale !== null}
-    <div class="tf-stale tf-bstale">
+    <div class="tf-stale tf-bstale" class:tf-heldbelow={!drawnHead.shown}>
       {stale.text}
       {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
   {#if runsFailed !== null}
-    <p class="tf-dim tf-runs">Runs could not be read: {runsFailed}</p>
+    <p class="tf-dim tf-runs" class:tf-heldbelow={!drawnHead.shown}>Runs could not be read: {runsFailed}</p>
   {/if}
 
-  <nav class="tf-tabs" aria-label="Run">
+  <nav class="tf-tabs" class:tf-unread={!drawnHead.shown} aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
-      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab ? "page" : undefined}
+      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab && !noTab ? "page" : undefined}
         >{entry.name}{#if entry.id === "tests" && testsCount > 0}{" "}<span class="tf-count tf-err">{testsCount} failed</span
           >{:else if entry.id === "artifacts" && artifacts.total > 0}{" "}<span class="tf-count">{artifacts.total}</span>{/if}</a
       >
     {/each}
   </nav>
 
-  <div class="tf-runbody">
-    {#if viewFailed !== null && (tab === "overview" || tab === "changes" || tab === "params")}
+  <div class="tf-runbody" class:tf-heldbelow={!drawnHead.shown}>
+    {#if view !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}<TfHeldNote heldAt={"held_at" in view ? view.held_at : null} source={pipeline.source_name} failed={heldFailed} />{/if}
+    {#if viewFailed !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}
       <p class="tf-dim">The run could not be read from {pipeline.source_name}: {viewFailed}</p>
     {/if}
-    {#if tab === "overview"}
+    {#if noTab}
+      <TfNothingHere message="A run has no such tab." href={runTabHash(pipelineId, runId, "overview")} action="Overview" />
+    {:else if tab === "overview"}
       <div class="tf-runov">
         {#if failed && failure !== null}
           <div class="tf-problem">
             <h3>{failureHeading(failure)}</h3>
             {#if failure.details !== null}<pre>{failure.details}</pre>{/if}
             <div class="tf-acts">
-              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")}>Show it in the log</a>
+              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")} onclick={(event) => jumpAcross(event, "Overview")}>Show in log</a>
               {#if failure.location !== null && repoId !== null}
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}
@@ -560,7 +753,7 @@
           <div class="tf-callout tf-info">{now}</div>
         {/if}
         <div class="tf-grid">
-          <section class="tf-panel" aria-label="Run">
+          <section class="tf-panel tf-headed" aria-label="Run">
             <header><h3>Run</h3></header>
             <dl class="tf-facts tf-runfacts">
               <dt>Branch</dt>
@@ -582,19 +775,19 @@
             </dl>
           </section>
           <TfRunChain {runId} branch={run.branch} {rereads} />
-          <section class="tf-panel" aria-label="Artifacts">
+          <section class="tf-panel tf-headed" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
-              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All {artifacts.total}</a>{/if}
+              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All artifacts</a>{/if}
             </header>
             <div class="tf-rows">
               {#each artifacts.first as artifact, i (i)}
                 <div class="tf-r">
                   <span class="tf-t tf-mono">{artifact.title}</span>
                   <span class="tf-rend">
-                    {#if artifact.meta !== null}<span class="tf-dim">{artifact.meta}</span>{/if}
+                    {#if artifact.meta !== null}<span class="tf-dim tf-rowval">{artifact.meta}</span>{/if}
                     {#if artifact.url !== null}
-                      <button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button>
+                      <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button></span></span>
                     {/if}
                   </span>
                 </div>

@@ -230,7 +230,7 @@ pg_data=$(demo_data_dir)
 pg_before=$(profile_postmaster "$pg_data")
 # Its own process group, so the dev server and cargo go with it at the end.
 set -m
-env -C "$repo" KNOBAS_SECRET_STORE=memory just demo >"$out/demo.log" 2>&1 &
+env -C "$repo" KNOBAS_UPDATE=off KNOBAS_SECRET_STORE=memory just demo >"$out/demo.log" 2>&1 &
 demo_pid=$!
 set +m
 for _ in $(seq 1 1800); do

@@ -1416,6 +1416,32 @@ fn a_json_body_and_its_content_type_both_reach_the_request() {
     );
 }
 
+/// A form body (Pleasant's OAuth2 token grant, ADR-0056): the pairs arrive
+/// percent-encoded under the form's content type. Without them the token
+/// request is a 400 that reads as a wrong password.
+#[test]
+fn a_form_body_and_its_content_type_both_reach_the_request() {
+    let client = HttpClient::new(config("https://vault.example".to_owned())).expect("client");
+    let request = client
+        .request(Method::POST, "/OAuth2/Token")
+        .form(&[("grant_type", "password"), ("username", "mara & co")])
+        .build()
+        .expect("a form body builds");
+
+    assert_eq!(
+        request
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/x-www-form-urlencoded"),
+    );
+    let body = request
+        .body()
+        .and_then(reqwest::Body::as_bytes)
+        .expect("a buffered body");
+    assert_eq!(body, b"grant_type=password&username=mara+%26+co");
+}
+
 /// The body is buffered rather than streamed, which is what lets `send` retry
 /// it: `try_clone` answers `None` for a streaming body, and a write that
 /// silently got one attempt where every read gets three would fail on the first
@@ -3069,4 +3095,147 @@ mod hung_up {
         );
         assert_eq!(server.count("GET /second HTTP/1.1"), 1);
     }
+}
+
+/// **A sync's request stands aside until a person's is answered** (the
+/// priority lane, 2026-11-13), not only until it passed the quota.
+///
+/// The quota has room for both. A person's read the server takes 400 ms to
+/// answer goes first; a sync request sent 50 ms later through another client
+/// for the same instance reaches the server only once that answer is in, so
+/// a busy server is not handed the sync's work while a person waits on it.
+/// On the wall clock: the server's delay is a real one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_request_waits_for_a_persons_answer() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!("http://{}", listener.local_addr().expect("addr"));
+    let arrivals = Arc::new(std::sync::Mutex::new(
+        Vec::<(String, std::time::Instant)>::new(),
+    ));
+    let seen = Arc::clone(&arrivals);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(mut socket) = socket else { return };
+            let seen = Arc::clone(&seen);
+            std::thread::spawn(move || {
+                let mut buffer = [0u8; 2048];
+                let read = socket.read(&mut buffer).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buffer[..read]).to_string();
+                let path = head.split(' ').nth(1).unwrap_or_default().to_owned();
+                seen.lock()
+                    .unwrap()
+                    .push((path.clone(), std::time::Instant::now()));
+                if path == "/slow" {
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+                let _ = socket.write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+            });
+        }
+    });
+    let client = |url: &str| {
+        HttpClient::new(HttpConfig {
+            requests_per_second: 10,
+            burst: 10,
+            ..config(url.to_owned())
+        })
+        .expect("client")
+    };
+    let (person, sync) = (client(&url), client(&url));
+
+    let started = std::time::Instant::now();
+    let read = async {
+        person
+            .send(person.request(Method::GET, "/slow"))
+            .await
+            .map(|_| std::time::Instant::now())
+    };
+    let synced = knobas_http::on_lane(knobas_http::Lane::Background, async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        sync.send(sync.request(Method::GET, "/sync"))
+            .await
+            .map(|_| ())
+    });
+    let (answered, synced) = tokio::join!(read, synced);
+    let answered = answered.expect("the person's read");
+    synced.expect("the sync's request");
+
+    let arrivals = arrivals.lock().unwrap().clone();
+    let at = |path: &str| {
+        arrivals
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, at)| *at)
+            .unwrap_or_else(|| panic!("{path} never arrived: {arrivals:?}"))
+    };
+    assert!(
+        at("/sync") >= answered - Duration::from_millis(20),
+        "the sync's request arrived {:?} after the start, the person's answer {:?}",
+        at("/sync") - started,
+        answered - started
+    );
+}
+
+/// **A sync's request does not spend its budget standing aside** (the ux12
+/// Windows pass, 2026-11-15).
+///
+/// A Gitea run stopped on knobas' own quota after 45 s while a person's
+/// reads filled it: the time a sync request stood aside counted against its
+/// [`SEND_BUDGET`](knobas_http::SEND_BUDGET). Here a person's read the
+/// server takes 800 ms to answer holds a sync request that has a budget of
+/// 300 ms; the sync's request still goes, once the answer is in. Counted
+/// against the budget, it stops on the quota at 300 ms without being sent.
+/// On the wall clock, as the test above: the server's delay is a real one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_request_standing_aside_keeps_its_budget() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!("http://{}", listener.local_addr().expect("addr"));
+    let synced = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&synced);
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(mut socket) = socket else { return };
+            let seen = Arc::clone(&seen);
+            std::thread::spawn(move || {
+                let mut buffer = [0u8; 2048];
+                let read = socket.read(&mut buffer).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buffer[..read]).to_string();
+                if head.starts_with("GET /slow ") {
+                    std::thread::sleep(Duration::from_millis(800));
+                } else {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                }
+                let _ = socket.write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+            });
+        }
+    });
+    let client = |url: &str| {
+        HttpClient::new(HttpConfig {
+            requests_per_second: 10,
+            burst: 10,
+            ..config(url.to_owned())
+        })
+        .expect("client")
+    };
+    let person = client(&url);
+    let sync = client(&url).with_send_budget(Duration::from_millis(300));
+
+    let read = person.send(person.request(Method::GET, "/slow"));
+    let synced_call = knobas_http::on_lane(knobas_http::Lane::Background, async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        sync.send(sync.request(Method::GET, "/sync"))
+            .await
+            .map(|_| ())
+    });
+    let (answered, sent) = tokio::join!(read, synced_call);
+    answered.expect("the person's read");
+    sent.expect("the sync's request, sent once the person's answer was in");
+    assert_eq!(synced.load(Ordering::SeqCst), 1, "it reached the server");
 }

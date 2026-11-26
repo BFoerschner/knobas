@@ -3,8 +3,8 @@
 //! Ruling P3 and roadmap §4: **events carry coarse state, at most a handful
 //! per run; per-item progress goes on a `tauri::ipc::Channel` and nowhere
 //! else.** A scheduled run emits `sync:state` and nothing per item unless
-//! somebody is watching; the first-run wizard watches because it draws a
-//! progress bar.
+//! somebody is watching; a source's settings page watches (`watch_sync`)
+//! because it draws the run's walk.
 //!
 //! Every run holds a [`Watchers`] regardless, and that is ADR-0005: a caller
 //! can be handed the id of a run the scheduler started on its own -- the wake
@@ -20,8 +20,9 @@
 //! **The channel is not optional on the bridge.** `Option<Channel<_>>` is not
 //! a `#[tauri::command]` argument in Tauri 2.11 -- `Channel` has no
 //! `Deserialize` impl, so the `Option` has no route to `CommandArg` -- which
-//! is why the command is split into `sync_now` and `sync_now_with_progress`
-//! rather than taking an omittable channel. The verdict and its evidence are
+//! is why `sync_now` takes no channel and `watch_sync` takes a required one
+//! (`sync_now_with_progress` was the other half until ux31) rather than one
+//! command taking an omittable channel. The verdict and its evidence are
 //! pinned in `crates/knobas-app/tests/it/ipc.rs`. On *this* side of the bridge
 //! the sink is an ordinary `Option<&dyn ProgressSink>`, so the engine has one
 //! code path either way.
@@ -418,6 +419,16 @@ impl Source for Observed<'_> {
         self.inner.refresh(entity).await
     }
 
+    /// Delegated, and unreported, as [`refresh`](Self::refresh): a walk of
+    /// one parent is a refresh, not a run (ADR-0047).
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        self.inner.refresh_under(entity, cursor).await
+    }
+
     /// Delegated, and deliberately unreported: this decorator narrates a *sync
     /// run* -- a run id, a phase, a growing item count -- and the workflow read
     /// belongs to a detail somebody opened, which has no run and no progress
@@ -514,5 +525,17 @@ impl Sink for Counting<'_> {
     /// Handed on: the scheduler reads it from the engine's sink (#2374).
     async fn left_out(&mut self, why: &str) {
         self.inner.left_out(why).await;
+    }
+
+    /// Handed on: the scheduler keeps the run's code keys from the engine's
+    /// sink once the run commits (ADR-0056). The trait's default drops a key,
+    /// so a wrapper that forgot this lost every key of every run the app
+    /// reported progress for (seen in the real app on WSL, 2026-11-22).
+    async fn otp_key(
+        &mut self,
+        entity: &knobas_core::entity::EntityRef,
+        key: knobas_source::passwords::OtpKey,
+    ) {
+        self.inner.otp_key(entity, key).await;
     }
 }

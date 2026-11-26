@@ -137,8 +137,20 @@ impl SecretStore for FileStore {
         })
     }
 
+    fn get_text(&self, account: &KeychainAccount) -> Result<Option<String>, SecretError> {
+        Ok(self.read()?.get(account.as_str()).cloned())
+    }
+
+    fn put_text(&self, account: &KeychainAccount, text: &str) -> Result<(), SecretError> {
+        self.update(|items| {
+            items.insert(account.as_str().to_owned(), text.to_owned());
+            Ok(())
+        })
+    }
+
     fn delete(&self, account: &KeychainAccount) -> Result<(), SecretError> {
         // Absent is success, as for every store; no file is not created for it.
+
         if !self.path.exists() {
             return Ok(());
         }
@@ -176,6 +188,7 @@ mod tests {
                         username: "admin".into(),
                         password: "pw".into(),
                     }),
+                    web: None,
                 },
             )
             .unwrap();
@@ -195,6 +208,25 @@ mod tests {
             (AuthMethod::ApiToken, "tok\"en")
         );
         assert_eq!(got.account.expect("account kept").username, "admin");
+    }
+
+    /// A text item (a code key chunk, ADR-0056) is kept as it is and read
+    /// back by a second store over the file; an absent one is `None`.
+    #[test]
+    fn a_text_item_is_kept_as_it_is_and_an_absent_one_is_none() {
+        let path = scratch("text");
+        let id = KeychainAccount::otp("pw", 0);
+        assert_eq!(FileStore::new(&path).get_text(&id).unwrap(), None);
+        FileStore::new(&path).put_text(&id, "k1 w 0/1\n{}").unwrap();
+        assert_eq!(
+            FileStore::new(&path).get_text(&id).unwrap().as_deref(),
+            Some("k1 w 0/1\n{}")
+        );
+        FileStore::new(&path).put_text(&id, "again").unwrap();
+        assert_eq!(
+            FileStore::new(&path).get_text(&id).unwrap().as_deref(),
+            Some("again")
+        );
     }
 
     #[test]

@@ -42,14 +42,27 @@
 //! `acquire` fails with `PoolTimedOut`. Each call therefore opens its own pool
 //! against the shared server, and the caller drops it with its runtime.
 //!
-//! # Why there is a reaper in here
+//! # Why a supervisor stops the server
 //!
 //! The instance lives in a `static`, and Rust never drops statics -- so
-//! `EmbeddedDb`'s shutdown never runs and the server outlives the test
-//! binary. Left alone, every `cargo test` run would abandon another postgres
-//! on the developer's machine. Instead each run takes an OS-level lock
-//! (released by the kernel when the process dies, however it dies) and sweeps
-//! the scratch directories of runs whose lock is free.
+//! `EmbeddedDb`'s shutdown never runs, and a postmaster `pg_ctl` started is
+//! nobody's child: left alone it outlives the test binary, however that
+//! binary ends. On Unix the binary therefore starts a small supervisor
+//! ([`supervise`]) beside its server, a `/bin/sh` whose stdin is a pipe from
+//! this process. The kernel closes that pipe when the binary exits, returns
+//! from a panic, aborts, is killed with `SIGKILL` or is stopped by a harness
+//! timeout; the supervisor reads end-of-file, stops the server with `pg_ctl
+//! stop -m immediate` and removes the scratch root. It is the by-hand
+//! counterpart of [`serve_until_closed`], whose server goes when `just
+//! test` closes its stdin.
+//!
+//! # Why there is a reaper in here as well
+//!
+//! The second line of defence, and the only one on Windows: each run takes
+//! an OS-level lock (released by the kernel when the process dies, however it
+//! dies) and sweeps the scratch directories of runs whose lock is free. It
+//! catches what the supervisor cannot: a supervisor killed itself, or the
+//! moment between the server's start and the supervisor's.
 //!
 //! # Layout
 //!
@@ -75,6 +88,7 @@ use std::fs::{File, TryLockError};
 use std::io::{Read, Write};
 use std::panic::Location;
 use std::path::{Path, PathBuf};
+use std::process::ChildStdin;
 #[cfg(unix)]
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -221,29 +235,40 @@ struct Server {
     /// stop the server -- never runs; statics are never dropped. `None` when
     /// the server is the gate's, which is nobody's to keep alive from here.
     _own_server: Option<EmbeddedDb>,
+    /// The write end of the [supervisor](supervise)'s stdin, never written
+    /// to and never closed by this process: the kernel closes it when the
+    /// process ends, and that end-of-file is what stops the server. `None`
+    /// for the gate's server, and wherever no supervisor could be started.
+    _supervisor: Option<ChildStdin>,
 }
 
 impl Server {
     /// The zero-config path: a server of this binary's own in its scratch
-    /// root.
+    /// root, under a supervisor that stops it when this process ends.
     async fn of_its_own() -> Server {
         let root_dir = scratch_root();
         let first = root_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            claim(&first);
+        let lock = tokio::task::spawn_blocking(move || {
+            let lock = claim(&first);
             reap_abandoned(&first);
+            lock
         })
         .await
         .expect("claim the scratch root");
         let db = EmbeddedDb::start(DbConfig {
-            root_dir,
+            root_dir: root_dir.clone(),
             existing_url: None,
         })
         .await
         .expect("start embedded postgres for tests");
+        // After the start, not before: `pg_ctl` is found under the
+        // installation the start unpacked, and a postmaster started before
+        // the pipe exists cannot have inherited its write end.
+        let supervisor = supervise(&root_dir, lock);
         Server {
             connector: db.connector(),
             _own_server: Some(db),
+            _supervisor: supervisor,
         }
     }
 
@@ -270,8 +295,102 @@ impl Server {
         Server {
             connector,
             _own_server: None,
+            _supervisor: None,
         }
     }
+}
+
+/// What the supervisor runs, with `$1` the `pg_ctl` binary, `$2` the scratch
+/// root and `$3` its ownership lock.
+///
+/// Hang-up, interrupt and terminate are ignored, by `cat` too (an ignored
+/// signal stays ignored across `exec`): the supervisor's job is to outlive
+/// whatever ends the binary, a Ctrl-C at the terminal included. Its stdout is
+/// the ownership lock (see [`supervise`]), so nothing in here may write to it,
+/// and nothing may close it before `rm` is done.
+///
+/// An immediate stop rather than a fast one, as [`EmbeddedDb::discard`]
+/// stops the gate's server: the data directory goes next, so the checkpoint a
+/// fast stop writes is wasted. `-w` waits until `postmaster.pid` is gone, and
+/// `-t 30` bounds that wait.
+#[cfg(unix)]
+const SUPERVISOR_SCRIPT: &str = r#"trap '' HUP INT TERM
+cat >/dev/null 2>&1
+"$1" stop -D "$2/data" -m immediate -w -t 30 >/dev/null 2>&1
+rm -rf "$2" "$3" >/dev/null 2>&1
+"#;
+
+/// Start the process that stops this binary's server, and removes its
+/// scratch root, once this process is gone -- however it goes. Returns the
+/// write end of its stdin, for the caller to keep open for the life of the
+/// process; `None`, with the reason printed, if it could not be started, and
+/// the [reaper](reap_abandoned) is then the only clean-up.
+///
+/// **The pipe.** The supervisor's stdin is a pipe whose only write end is
+/// this process's, opened close-on-exec, so no server, `git` or `pg_ctl` this
+/// process starts holds a copy. End-of-file on it therefore means exactly that
+/// this process has ended: the kernel closes the descriptor of a process that
+/// exits, panics out of `main`, aborts or is killed. (Where there is no
+/// `pipe2`, macOS among them, the flag is set just after the pipe is made: a
+/// process another thread spawns in that instant holds a copy, and the
+/// supervisor waits for that one to end as well.)
+///
+/// **The lock.** Its stdout is a duplicate of the scratch root's ownership
+/// lock -- `lock`, the held lock file -- the way [`spawn_holding`] hands the
+/// lock to `rm`. A `flock` belongs to the open file description, which the
+/// supervisor shares from the moment it starts, so the lock passes from this
+/// process to it with no instant in which it is free. No reaper takes the
+/// root for abandoned while the server is being stopped, and a claimant that
+/// was handed this pid again waits for the `rm` instead of having its fresh
+/// root deleted by it.
+///
+/// **Its own process group**, so the Ctrl-C a terminal sends to the
+/// foreground group (and a hang-up) never reaches it.
+#[cfg(unix)]
+fn supervise(root: &Path, lock: &File) -> Option<ChildStdin> {
+    use std::os::unix::process::CommandExt;
+
+    let Some(pg_ctl) = crate::embedded::find_tool(
+        &crate::embedded::installation_dir(),
+        crate::embedded::PG_CTL,
+    ) else {
+        eprintln!("test_util: no pg_ctl under the installation; the server has no supervisor");
+        return None;
+    };
+    let held = match lock.try_clone() {
+        Ok(held) => held,
+        Err(error) => {
+            eprintln!("test_util: the server has no supervisor: {error}");
+            return None;
+        }
+    };
+    let mut sh = Command::new("/bin/sh");
+    sh.arg("-c")
+        .arg(SUPERVISOR_SCRIPT)
+        .arg("knobas-test-supervisor")
+        .arg(pg_ctl)
+        .arg(root)
+        .arg(lock_path(root))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(held))
+        .stderr(Stdio::null())
+        .process_group(0);
+    match sh.spawn() {
+        // Not waited for: it ends after this process, and is then init's.
+        Ok(mut child) => child.stdin.take(),
+        Err(error) => {
+            eprintln!("test_util: the server has no supervisor: {error}");
+            None
+        }
+    }
+}
+
+/// No `/bin/sh`, and a Windows file lock dies with the process that took it,
+/// so the hand-off the supervisor's `rm` rests on does not hold: the reaper
+/// alone cleans up after a Windows run, as it always has.
+#[cfg(not(unix))]
+fn supervise(_root: &Path, _lock: &File) -> Option<ChildStdin> {
+    None
 }
 
 /// A database of its own on this binary's shared server, migrated and in the
@@ -310,11 +429,10 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static SHELF: recycle::Shelf = recycle::Shelf::new();
 
     let next_name = || {
-        format!(
-            "knobas_scratch_{}_{}_{}",
-            identifier_slug(label),
+        scratch_name(
+            label,
             std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         )
     };
     let server = &shared_server().await.connector;
@@ -336,6 +454,26 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     let name = next_name();
     create_database(server, &name, Some(&template.name)).await;
     recycle::lease(&SHELF, server, name, template.snapshot.clone())
+}
+
+/// The longest name PostgreSQL keeps: `NAMEDATALEN` less its terminator. It
+/// truncates a longer one silently.
+const NAME_MAX: usize = 63;
+
+/// A scratch database's name: `label`'s slug, the pid and the counter, with
+/// the slug shortened so the whole name stays within [`NAME_MAX`].
+///
+/// PostgreSQL truncates a longer name silently, so a long label's counter 140
+/// met its counter 14 on one database (the final suite, 2026-11-22:
+/// `knobas_scratch_background_write_quit_cut_inbackground_605729_14 already
+/// exists`). The pid and the counter are what keep two names apart, so they
+/// are the part that is always kept whole.
+fn scratch_name(label: &str, pid: u32, counter: u32) -> String {
+    const PREFIX: &str = "knobas_scratch_";
+    let suffix = format!("_{pid}_{counter}");
+    let mut slug = identifier_slug(label);
+    slug.truncate(NAME_MAX.saturating_sub(PREFIX.len() + suffix.len()));
+    format!("{PREFIX}{slug}{suffix}")
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:
@@ -916,6 +1054,27 @@ pub fn kill_server(root_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A long label's names stay within what PostgreSQL keeps, and the
+    /// counters that a truncation used to merge (14 and 140) stay apart.
+    #[test]
+    fn a_long_labels_scratch_names_fit_and_keep_their_counters_apart() {
+        let label = "background_write_quit_cut_inbackground";
+        let fourteen = scratch_name(label, 605_729, 14);
+        let hundred_forty = scratch_name(label, 605_729, 140);
+        for name in [&fourteen, &hundred_forty] {
+            assert!(name.len() <= NAME_MAX, "{name} is {} bytes", name.len());
+        }
+        assert_ne!(fourteen, hundred_forty);
+        assert!(hundred_forty.ends_with("_605729_140"), "{hundred_forty}");
+        let short = scratch_name("files", 7, 3);
+        assert_eq!(
+            short, "knobas_scratch_files_7_3",
+            "a short label is kept whole"
+        );
+        let huge = scratch_name(&"x".repeat(200), u32::MAX, u32::MAX);
+        assert!(huge.len() <= NAME_MAX && huge.ends_with(&format!("_{}_{}", u32::MAX, u32::MAX)));
+    }
 
     /// A scratch directory under `parent`, stamped with `nonce` if given.
     ///

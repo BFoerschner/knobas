@@ -15,7 +15,13 @@
  * between ancestors), as a view's is. A kind whose path misses falls back to
  * its word, as ADR-0007's miss fails toward a row that says less, not
  * something wrong.
+ *
+ * A pull request's title starts with its number, read off its id, so `#142`
+ * finds a row that says it found it (F-654): *payout-service*, then *#142
+ * Idempotent retry window*. Not in the key cell, whose 118 px would then cut
+ * the repository's name.
  */
+import type { Excerpt, FilesFound, Segment } from "../ipc";
 import { keyOf } from "../time/format";
 
 export interface Cells {
@@ -47,6 +53,12 @@ const parts = (path: string, sep: string) =>
 
 /** The row's cells; `singular` is its kind's word, *Pull request*, drawn lower-case where nothing better is known. */
 export function cellsOf(row: CellSource, singular: string): Cells {
+  const cells = placeOf(row, singular);
+  const number = row.kind === "pr" ? /#\d+$/.exec(row.entity_id)?.[0] : undefined;
+  return number === undefined ? cells : { ...cells, title: `${number} ${cells.title}` };
+}
+
+function placeOf(row: CellSource, singular: string): Cells {
   const { kind, entity_id: entityId, title, path, cell } = row;
   const word: Cells = { cell: singular.toLowerCase(), mono: false, title };
   const sent = cell?.trim();
@@ -82,4 +94,131 @@ export function cellsOf(row: CellSource, singular: string): Cells {
     default:
       return word;
   }
+}
+
+/**
+ * **The evidence line** (the everything-search decisions, 2026-11-20, D10): where the words are, for a row its name does
+ * not explain. Drawn under the title only where the hit has an excerpt and its title no mark: a row found by its name
+ * says so with its marks, and one found by its key or a stem the excerpts miss has neither and stays one line.
+ */
+export interface Why {
+  /** Where it matched: *Description*, *Comment by Jonas Becker*, a section, *Log line 212*; `null` where the passage says it itself. */
+  place: string | null;
+  /** The passage, cut so its first mark sits in the line's first third. */
+  segments: Segment[];
+  /** Whether it is drawn in the mono face: a log's line. */
+  code: boolean;
+  /** What closes a file's line (*4 files*), `null` for everything else. */
+  count: string | null;
+  /**
+   * A file its name found: `segments` cut at its last `/`, the folders (`head`, which gives way) and the file's name
+   * (`tail`, kept whole), drawn as `TfPath` draws a path. `null` for every other line.
+   */
+  path: { head: Segment[]; tail: Segment[] } | null;
+  /** The excerpt it quotes, which says where the row opens. */
+  excerpt: Excerpt;
+}
+
+/** What `whyOf` reads of a hit. */
+export interface WhySource {
+  /** Absent from an answer written before #2431. */
+  excerpts?: readonly Excerpt[] | undefined;
+  marks?: readonly number[] | undefined;
+  /** A repository's files that hold the words (D10), where its files found it. */
+  files?: FilesFound | undefined;
+}
+
+/** The longest unmarked run a passage may open with before it is cut. */
+const LEAD_MOST = 18;
+/** What a cut lead keeps of its end. */
+const LEAD_KEPT = 16;
+
+const wordChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}_]/u.test(c);
+
+/**
+ * A passage's leading unmarked run of more than {@link LEAD_MOST} characters, cut to `…` and its last
+ * {@link LEAD_KEPT}, from a word's start where one is in them.
+ */
+export function cutLead(segments: readonly Segment[]): Segment[] {
+  const first = segments[0];
+  if (first === undefined || first.hit) return [...segments];
+  const chars = Array.from(first.text);
+  if (chars.length <= LEAD_MOST) return [...segments];
+  let from = chars.length - LEAD_KEPT;
+  for (let i = from; i < chars.length; i++) {
+    if (wordChar(chars[i]) && !wordChar(chars[i - 1])) {
+      from = i;
+      break;
+    }
+  }
+  return [{ text: `…${chars.slice(from).join("")}`, hit: false }, ...segments.slice(1)];
+}
+
+/** *4 files*, *1 file name*. */
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * A repository its files found (D10): the file's name and line, then the line, both mono, then how many files hold the
+ * words by their text; or, where its name alone found it, the path with the letters marked, then how many files' names.
+ */
+function fileWhy(excerpt: Excerpt, file: NonNullable<Excerpt["file"]>, files: FilesFound | undefined): Why {
+  const name = file.path.slice(file.path.lastIndexOf("/") + 1);
+  if (file.line != null) {
+    const by = files?.by_text ?? 0;
+    // The line's indent is the pane's to share with the lines around it; the row starts at its first letter.
+    const [first, ...rest] = excerpt.segments;
+    const segments = first && !first.hit ? [{ text: first.text.trimStart(), hit: false }, ...rest].filter((seg) => seg.text !== "") : [...excerpt.segments];
+    return { place: `${name}:${file.line}`, segments: cutLead(segments), code: true, count: by > 0 ? counted(by, "file", "files") : null, excerpt, path: null };
+  }
+  const by = files?.by_name ?? 0;
+  const segments = excerpt.segments.map((seg) => ({ ...seg }));
+  return { place: null, segments, code: true, count: by > 0 ? counted(by, "file name", "file names") : null, excerpt, path: cutAtName(segments) };
+}
+
+/** A path's segments cut at its last `/`: the folders, that `/` with them, and the file's name. */
+export function cutAtName(segments: readonly Segment[]): { head: Segment[]; tail: Segment[] } {
+  const cut = segments.map((seg) => seg.text).join("").lastIndexOf("/") + 1;
+  const head: Segment[] = [];
+  const tail: Segment[] = [];
+  let at = 0;
+  for (const seg of segments) {
+    const end = at + seg.text.length;
+    if (end <= cut) head.push({ ...seg });
+    else if (at >= cut) tail.push({ ...seg });
+    else {
+      head.push({ text: seg.text.slice(0, cut - at), hit: seg.hit });
+      tail.push({ text: seg.text.slice(cut - at), hit: seg.hit });
+    }
+    at = end;
+  }
+  return { head, tail };
+}
+
+/** A run log's line, which the line names by its number. */
+const LOG_LINE = /^Log line \d+$/;
+
+/**
+ * The row's evidence line, or `null` where its name explains it or nothing is quoted. `cell` is the row's key cell: a
+ * row whose quoted words all stand in it (`PAY-231` typed, its body saying it too) was found by its key, which is its own
+ * reason (D9's table, row 18).
+ */
+export function whyOf(hit: WhySource, cell: string | null = null): Why | null {
+  const excerpt = hit.excerpts?.[0];
+  if (excerpt === undefined || (hit.marks?.length ?? 0) > 0) return null;
+  const file = excerpt.file;
+  if (file) return fileWhy(excerpt, file, hit.files);
+  const key = cell?.toLowerCase() ?? "";
+  const words = excerpt.segments.filter((seg) => seg.hit).map((seg) => seg.text.trim().toLowerCase());
+  if (key !== "" && words.length > 0 && words.every((word) => key.includes(word))) return null;
+  const place = excerpt.place ?? null;
+  const code = place !== null && LOG_LINE.test(place);
+  return {
+    // A heading's own words say where they are.
+    place: place === "Heading" ? null : place,
+    segments: cutLead(excerpt.segments),
+    code,
+    count: null,
+    excerpt,
+    path: null,
+  };
 }

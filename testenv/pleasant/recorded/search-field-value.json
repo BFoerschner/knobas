@@ -1,0 +1,27 @@
+{
+ "name": "search-field-value",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8"
+ },
+ "body": {
+  "Credentials": [
+   {
+    "Id": "{entry:pl-ledger-key}",
+    "Name": "ledger-api signing key",
+    "Username": "",
+    "Url": "",
+    "Notes": "The password is the PEM's passphrase.",
+    "Tags": "",
+    "GroupId": "{folder:Tidewater/Payments/Prod/Keys}",
+    "Path": "Root/Tidewater/Payments/Prod/Keys/"
+   }
+  ],
+  "Groups": []
+ },
+ "request": {
+  "as": "reader",
+  "method": "POST",
+  "path": "/api/v5/rest/search"
+ }
+}

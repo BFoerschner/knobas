@@ -55,7 +55,7 @@ check_contains() {
 
 # --- normalise_app_path -----------------------------------------------------
 
-built=/Users/dev/knobas/target/debug/bundle/macos/knobas.app
+built=/Users/tester/knobas/target/debug/bundle/macos/knobas.app
 
 check "a plain bundle path is left alone" \
     "$built" "$(normalise_app_path "$built")"
@@ -64,7 +64,7 @@ check "Launch Services' trailing slash is dropped" \
 check "several trailing slashes are dropped" \
     "$built" "$(normalise_app_path "$built///")"
 check "doubled separators collapse" \
-    "$built" "$(normalise_app_path "/Users/dev//knobas/target/debug//bundle/macos/knobas.app")"
+    "$built" "$(normalise_app_path "/Users/tester//knobas/target/debug//bundle/macos/knobas.app")"
 check "a root path survives" "/" "$(normalise_app_path /)"
 
 # --- paths_match ------------------------------------------------------------
@@ -83,7 +83,7 @@ check_matches "an installed copy does not match the built bundle" no \
 # Two worktrees build the same bundle name at two paths, and the difference is
 # in the middle of the string rather than at either end.
 check_matches "another worktree's bundle does not match" no \
-    "$built" "/Users/dev/knobas/.worktrees/issue-500/target/debug/bundle/macos/knobas.app"
+    "$built" "/Users/tester/knobas/.worktrees/issue-500/target/debug/bundle/macos/knobas.app"
 
 # A prefix is not a match: `.../knobas.app` and `.../knobas.app.old` differ by
 # a suffix that a `case`-style prefix test would swallow.
@@ -93,7 +93,7 @@ check_matches "a longer path with the same prefix does not match" no \
 # `*` is legal in a filename, and an unquoted `[[ == ]]` right-hand side would
 # read it as a glob that matches the built path.
 check_matches "a wildcard in a path is compared literally, not matched" no \
-    "$built" "/Users/dev/knobas/target/debug/bundle/macos/*"
+    "$built" "/Users/tester/knobas/target/debug/bundle/macos/*"
 
 # --- the copies the opt-in step unregisters (#1176) -------------------------
 #
@@ -102,7 +102,7 @@ check_matches "a wildcard in a path is compared literally, not matched" no \
 # path), with: the bundle under test, the root checkout's debug and release
 # bundles, a sibling worktree, an installed copy, a lookalike directory that
 # merely shares the root's name as a prefix, and a record of another app.
-root=/Users/dev/knobas
+root=/Users/tester/knobas
 under_test=$root/.worktrees/issue-1176/target/debug/bundle/macos/knobas.app
 fake_dump="--------------------------------------------------------------------------------
 bundle id:                  knobas (0x1)
@@ -648,39 +648,37 @@ pin_label() {
     fi
 }
 
-# Ported to the ticket-first shell by #1084: Settings › Checkouts and Open in…
+# Ported to the ticket-first shell by #1084: Settings › Checkouts and Open in
 # (ADR-0023's clones root and the reader's own applications) and the job's
 # Code section with its *Open in…* menu. The new shell uppercases none of these,
 # so each is pinned as the driver spells it.
 tf=../app/src/lib/tf
 pin_label $tf/TfTopBar.svelte 'aria-label="Settings"' \
     "the top bar's Settings button still has the name both drivers press"
-pin_label $tf/settings/settings.ts '"Checkouts and Open in…"' \
+pin_label $tf/settings/settings.ts '"Checkouts and Open in"' \
     "Settings still lists the section the open-in-editor driver opens"
 pin_label $tf/settings/TfCheckoutsSection.svelte '>Change…</button>' \
     "the clones root row still offers Change…"
 pin_label $tf/settings/TfCheckoutsSection.svelte 'aria-label="Clones root"' \
     "the clones root field still has its accessible name"
-pin_label $tf/settings/TfCheckoutsSection.svelte 'onclick={() => void saveTyped()}>Save</button>' \
+pin_label $tf/settings/TfCheckoutsSection.svelte 'form="tf-stg-root" disabled={rootUnchanged || savingRoot}>Save</button>' \
     "the clones root field is still stored by a button called Save"
-pin_label $tf/settings/TfCheckoutsSection.svelte '>Edit applications…</button>' \
-    "the Open in… table still offers Edit applications…"
-pin_label $tf/openin/TfAppsManage.svelte '>Add an application…</button>' \
-    "the applications dialog still offers Add an application…"
-pin_label $tf/openin/TfAppsManage.svelte 'onclick={onclose}>Done</button>' \
-    "the applications dialog still closes on Done"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-name">Name</label>' \
-    "the application dialog's name field is still labelled Name"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-command">Command</label>' \
-    "the application dialog's command field is still labelled Command"
-pin_label $tf/openin/TfAppDialog.svelte '"Add application"' \
-    "the application dialog still adds with a button called Add application"
-pin_label $tf/openin/TfOpenIn.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+pin_label $tf/settings/TfCheckoutsSection.svelte 'href={appPageHash()}>Add an application</a>' \
+    "the Open in… table still offers Add an application"
+pin_label $tf/openin/TfAppPage.svelte 'id="tf-app-name" aria-label="Name"' \
+    "the application page's name field is still labelled Name"
+pin_label $tf/openin/TfAppPage.svelte '{ field: "command", kind: "repository", label: "Command",' \
+    "the application page's command field is still labelled Command"
+pin_label $tf/openin/TfAppPage.svelte 'aria-label={row.label}' \
+    "the application page's command fields are still named by their labels"
+pin_label $tf/openin/TfAppPage.svelte '"Save" : "Add application"' \
+    "the application page still adds with a button called Add application"
+pin_label $tf/openin/TfOpenIn.svelte '}}>Open in…<svg class="tf-caret"' \
     "the checkout's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
     "the menu's applications are still menu items, which the driver walks to"
-pin_label $tf/repo/TfRepo.svelte 'Cloned at <span class="tf-mono">{sentence.path}</span>' \
-    "the repository page still draws the clone's path as a reading of its own"
+pin_label $tf/repo/TfCloneSign.svelte '<span class="tf-sr" id="{uid}-desc">{path}</span>' \
+    "the repository page's clone's sign still holds the clone's path as a reading of its own"
 pin_label $tf/repo/TfRepo.svelte '<TfOpenIn entityId={repoId}' \
     "the repository page still offers the Open in… the driver presses"
 # **What a pin cannot say, which is #547's whole finding.** A pin of a source
@@ -698,12 +696,15 @@ pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
 # the pull request header's *Open in…* menu.
 pin_label $tf/settings/settings.ts '["sources", "Sources"]' \
     "Settings still lists the Sources section pull-request-open-in opens"
-pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>+ Add a source</button>' \
-    "Sources still offers + Add a source"
+pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>Add a source…</button>' \
+    "Sources still offers Add a source…"
 pin_label ../crates/knobas-source-gitea/src/lib.rs 'name: "Gitea".to_owned()' \
     "the Gitea adapter is still called Gitea, the radio the driver clicks"
-pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-address">Address</label>' \
-    "Add a source's address field is still labelled Address"
+# The label also says *required*, and a driver matches a name whole, so the field names itself.
+pin_label $tf/settings/TfAddSource.svelte '<input id="tf-add-address" aria-label="Address"' \
+    "Add a source's address field is still named Address"
+pin_label $tf/settings/TfAddSource.svelte '<input id="tf-add-secret" aria-label={secretWord}' \
+    "Add a source's secret field is still named for what it holds"
 pin_label $tf/settings/TfAddSource.svelte '"Password" : "Token"' \
     "Add a source still labels a token field Token"
 pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-name">Name</label>' \
@@ -720,13 +721,13 @@ pin_label $tf/settings/TfSourcePage.svelte '<span>Delete what it synced<small>' 
     "removing a source still offers Delete what it synced"
 pin_label $tf/settings/TfSourcePage.svelte 'onclick={() => void remove()}>Remove</button>' \
     "removing a source is still confirmed with Remove"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-pr">For a pull request</label>' \
-    "the application dialog's pull-request command is still labelled For a pull request"
-pin_label $tf/openin/TfOpenObject.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+pin_label $tf/openin/TfAppPage.svelte '{ field: "pr", kind: "pull_request", label: "For a pull request",' \
+    "the application page's pull-request command is still labelled For a pull request"
+pin_label $tf/openin/TfOpenObject.svelte '}}>Open in…<svg class="tf-caret"' \
     "the pull request's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \
     "the menu's Diff tool item still starts Diff tool"
-pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{page}</span>' \
+pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono" title={page}>{page}</span>' \
     "the menu's Browser item still starts Browser and names the page"
 pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
     "the pull request header draws Open in… once the source view names both branches"
@@ -989,18 +990,18 @@ pin_label $tf/job/TfConversation.svelte 'aria-label="Comment on {jobKey}"' \
     "the ticket page's compose box still has the name the capture driver knows the page by"
 # The shortcut field is found by the focus, because the dialog and its heading
 # answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
-pin_label $tf/settings/TfDialog.svelte 'querySelector<HTMLElement>("input:not(\[disabled\]):not(\[type=radio\])")' \
+# shellcheck disable=SC2016 # the template literal is the text pinned, not an expansion
+pin_label $tf/settings/TfDialog.svelte 'reachable(`.tf-body :is(${FIELD})`)\[0\]' \
     "a dialog still puts the caret in its first field, where the capture driver types"
 # The way to a job the capture driver takes, from Tickets (the demo profile's
 # launcher found no ticket on 2026-10-18).
 pin_label $tf/route.ts 'tickets: "Tickets"' "the top bar's Tickets link keeps its name"
-pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter by key, summary, epic or person"' \
+pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter tickets"' \
     "the Tickets filter keeps the name the capture driver fills"
-for go in 'label: "Start work"' 'label: "Open job"' 'label: "Resume work"'; do
-    pin_label $tf/tickets/tickets.ts "$go" "the ticket preview still words its job link $go"
-done
-pin_label $tf/tickets/TicketPreview.svelte 'href={action.chooses ? jobHash(card.entity_id) : ticketHash(card.entity_id)}>{action.label}</a>' \
-    "the ticket preview's button is still a link to the ticket's page, by the job's address or the ticket's"
+pin_label $tf/tickets/TicketsPage.svelte 'onselect={() => openTicket(card)}' \
+    "a click on a Tickets card still opens its ticket's page, where the capture driver clicks"
+pin_label $tf/tickets/TicketCard.svelte '<span class="tf-s"><Marked text={card.title} {needles} /></span>' \
+    "the card still draws its summary as words of their own, which the capture driver clicks"
 pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
     "the demo's PAY-231 still has the summary the capture driver waits for"
 
@@ -1225,17 +1226,18 @@ fi
 # --- the window's size, before any driver or steps file (#2056) --------------
 #
 # A tiling window manager hands a new window whatever share of the screen is
-# left, and below Tickets' 1240 px breakpoint the preview the capture driver
-# opens its job from is never drawn. `witness_window_size` is the one step the
+# left, and below the app's 1240 px breakpoint the side rails close and the
+# nav gives up its words (`narrow.css`). `witness_window_size` is the one step the
 # harness and live-shot run before their driver: fullscreen under AeroSpace,
 # widen by accessibility elsewhere, then refuse below the minimum, naming both.
 # Against a stub `ax` and a stub `aerospace` on a PATH that holds no real one.
 
-# The minimum is the breakpoint's, read from the stylesheet that hides the
-# preview, so moving the breakpoint without the minimum turns this red.
-breakpoint=$(awk '/@media \(max-width: [0-9]+px\)/ { match($0, /[0-9]+/); w = substr($0, RSTART, RLENGTH) }
-    /\.tf-tickets \.tf-preview \{ display: none; \}/ { print w; exit }' ../app/src/lib/tf/css/tickets.css)
-check "the minimum width is one past the breakpoint that hides Tickets' preview" \
+# The minimum is the breakpoint's, read from the stylesheet where the nav gives
+# up its words (Tickets' preview, which set it before, is gone: ux18), so moving
+# the breakpoint without the minimum turns this red.
+breakpoint=$(awk '/@media \(max-width: [0-9]+px\) and \(min-width: 901px\)/ { match($0, /[0-9]+/); w = substr($0, RSTART, RLENGTH) }
+    /\.tf-search \.tf-label, \.tf-search kbd \{ display: none; \}/ && w { print w; exit }' ../app/src/lib/tf/css/narrow.css)
+check "the minimum width is one past the app's narrow breakpoint" \
     "$((breakpoint + 1))" "$WITNESS_MIN_WIDTH"
 
 check "window_width_verdict: a window at the minimum is ok" ok \

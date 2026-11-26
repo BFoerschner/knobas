@@ -1,5 +1,6 @@
 // Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
 import type { KindInfo, Tone } from "./entity";
+import type { Offers } from "./passwords";
 
 /**
  * The limits every call into the adapter is held to (#1204): what the
@@ -74,6 +75,13 @@ refused: string | null,
  * The last update check; `None` before one ran.
  */
 update: UpdateCheck | null, };
+
+/**
+ * Whom an [`EditTicket`](WriteOp::EditTicket) assigns: `"nobody"`, or
+ * `{"account": "mara"}`, the account as the source names it (the value
+ * `ticket_fields`' assignee options carry).
+ */
+export type Assignee = "nobody" | { "account": string };
 
 /**
  * Where a record keeps **the files attached to it**, and where each file's
@@ -284,7 +292,7 @@ export type DbStats = { db_bytes: number, entity_count: number, item_count: numb
  * carrying the source's reason, which the detail draws as *Couldn't
  * refresh: <reason>*.
  */
-export type EntityRefresh = { "outcome": "refreshed" } | { "outcome": "gone" } | { "outcome": "not_offered" } | { "outcome": "turned_off" } | { "outcome": "failed", 
+export type EntityRefresh = { "outcome": "refreshed" } | { "outcome": "gone" } | { "outcome": "not_offered" } | { "outcome": "turned_off" } | { "outcome": "run_in_flight" } | { "outcome": "failed", 
 /**
  * The source's own reason.
  */
@@ -391,6 +399,17 @@ priority: Array<PayloadPath>,
  * rule that never fires.
  */
 assignee: Array<PayloadPath>, 
+/**
+ * The name to call that account by, where the source keeps one beside it
+ * (F-107): Jira's `fields.assignee.displayName`. Only ever drawn, and
+ * never matched against an identity. Empty where the account is the only
+ * name a source has, and the account is drawn.
+ *
+ * Off the wire when empty, so a source that declares none stores the
+ * declaration it stored before (`sync.parent_declaration`), and nothing of
+ * its is recomputed.
+ */
+assignee_name?: Array<PayloadPath>, 
 /**
  * The accounts a review has been requested from.
  */
@@ -531,6 +550,12 @@ estimate: Array<PayloadPath>,
  * every kind with no reporter, and a miss draws no row.
  */
 reporter: Array<PayloadPath>, 
+/**
+ * The name to call the reporter by, as [`assignee_name`](Self::assignee_name)
+ * is the assignee's: Jira's `fields.reporter.displayName`. Off the wire
+ * when empty, for the same reason.
+ */
+reporter_name?: Array<PayloadPath>, 
 /**
  * When a ticket was filed (#2403), an ISO 8601 instant as
  * [`started`](Self::started) is written: Jira's `fields.created`,
@@ -793,6 +818,13 @@ export type KindStateColours = { kind: string, words: Array<StateWordColour>,
 has_category: boolean, };
 
 /**
+ * The labels an [`EditTicket`](WriteOp::EditTicket) adds and removes, by
+ * name. Adding one already there and removing one not there change nothing,
+ * so a label somebody else added a second ago is never lost.
+ */
+export type LabelChange = { add: Array<string>, remove: Array<string>, };
+
+/**
  * Where a **list** of strings lives: the array, and where the string sits
  * inside each element.
  *
@@ -860,7 +892,12 @@ export type MonitorKind = "http" | "tcp" | "ping" | "docker";
  * What the Add-source form submits. Carries the typed secret, which goes to
  * the keychain and never to Postgres (§14).
  */
-export type NewSource = { id: string, adapter_kind: string, display_name: string, base_url: string, auth_kind: AuthMethod, config: unknown, secret: SecretInput, sync_interval_secs: number, enabled: boolean, };
+export type NewSource = { id: string, adapter_kind: string, display_name: string, base_url: string, auth_kind: AuthMethod, config: unknown, secret: SecretInput, sync_interval_secs: number, 
+/**
+ * Sync only when a person presses *Sync now* (ADR-0056). The form sends
+ * the adapter's `by_hand_by_default`; absent means a schedule.
+ */
+sync_by_hand?: boolean, enabled: boolean, };
 
 /**
  * Where an item's **parent** sits in its payload, and the names that parent
@@ -1394,7 +1431,50 @@ url_forms: Array<UrlForm>,
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as a source with no code pages: *Browser* is then not offered.
  */
-code_pages?: CodePages, };
+code_pages?: CodePages, 
+/**
+ * A new source of this adapter syncs **only by hand** until its page
+ * says otherwise (ADR-0056): the Add-source form sends `sync_by_hand`
+ * from it. A password manager sets it, because each read it answers may
+ * be a line in its audit log under the person's name.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as an adapter whose sources start on a schedule.
+ */
+by_hand_by_default: boolean, 
+/**
+ * What a password source offers beyond the role's minimum (ADR-0056):
+ * present exactly when the descriptor claims [`passwords::PASSWORDS`],
+ * which [`role::check`] holds.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * decodes as a source that is no password manager.
+ */
+passwords?: Offers, 
+/**
+ * Where the source's own website shows its sign-in form (ADR-0050,
+ * ux29, [`web_sign_in`]): a saved web sign-in is filled there by itself
+ * once per landing. [`web_sign_in::check`] holds it to its rules
+ * (contract battery clause 16). Read on the Rust side; the shell never
+ * does.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this --
+ * an external adapter's JSON among them -- decodes as a source whose
+ * saved sign-in is filled on a press alone.
+ */
+web_sign_in?: WebSignInPages, 
+/**
+ * Where the source's own website shows one item of a kind, and its
+ * front page (ux30, [`web_links`]): the Passwords page's *Open web
+ * interface* builds its address from the typed base URL and these,
+ * never from a mirrored value. [`web_links::check`] holds it to its
+ * rules (contract battery clause 18). Read on the Rust side.
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * -- an external adapter's JSON among them -- decodes as a source whose
+ * site opens at its base URL.
+ */
+web_links?: WebLinks, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -1428,12 +1508,22 @@ auth_kind: AuthMethod, config: unknown, secret: SecretInput | null, };
  * entity namespace, baked into every entity id, link and activity row, and is
  * therefore immutable (P10). `display_name` is the renameable one.
  */
-export type SourcePatch = { display_name?: string | null, base_url?: string | null, config?: unknown, sync_interval_secs?: number | null, enabled?: boolean | null, };
+export type SourcePatch = { display_name?: string | null, base_url?: string | null, config?: unknown, sync_interval_secs?: number | null, 
+/**
+ * `true` takes the source out of the schedule; `false` puts it back on
+ * its interval (ADR-0056).
+ */
+sync_by_hand?: boolean | null, enabled?: boolean | null, };
 
 /**
  * One row of the sources view.
  */
-export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, 
+export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, 
+/**
+ * The source syncs only when a person presses *Sync now* (ADR-0056); its
+ * `next_run_at` is then `None`.
+ */
+sync_by_hand: boolean, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, 
 /**
  * When the scheduler runs this source next; `None` when the source is
  * disabled, running, or needs a human.
@@ -1483,7 +1573,16 @@ roles: Array<RoleClaim>,
  * roles still in [`roles`](Self::roles); empty when every claimed role
  * is filled or not judged yet.
  */
-role_misses: Array<RoleMiss>, };
+role_misses: Array<RoleMiss>, 
+/**
+ * The writes the adapter declares, from its descriptor template like
+ * `kinds` (ADR-0054): the board asks a ticket where it can go, and
+ * offers a move, only where its source declares `transition`. Empty for
+ * a row whose adapter is no longer compiled in. Which of them this
+ * instance's credential may make is `refused_writes`' answer. Off the
+ * wire when empty, which the shell reads as none.
+ */
+write_ops?: Array<string>, };
 
 /**
  * The coarse state one source's syncing is in -- the `sync:state` payload
@@ -1758,8 +1857,9 @@ swept: number, error: string | null, cursor_after: string | null, };
  *
  * - `schedule`: the scheduler's interval elapsed.
  * - `manual`: the user's *Sync now*.
- * - `first_run`: the first sync after a source was added, the one the
- *   first-run wizard draws a progress bar for.
+ * - `first_run`: the first sync after a source was added (the wake
+ *   after *Add a source*). The first-run wizard that drew a progress bar
+ *   over it went in ux31; a source's page watches it with `watch_sync`.
  * - `backfill`: a deliberate cursor-less run that widens the payload of
  *   items an incremental would never re-fetch (#32), and is **forbidden
  *   to reconcile**: ratified non-sweeping by Björn 2026-08-28, because
@@ -1943,6 +2043,39 @@ fields: Array<PayloadPath>, };
 export type WaitReason = "unreachable" | "unauthorized";
 
 /**
+ * Where the site shows an item of each kind, and its front page.
+ */
+export type WebLinks = { 
+/**
+ * The front page, after the base URL. `None`: the base URL is it.
+ */
+home?: string, 
+/**
+ * Kind id to the template of its page, after the base URL.
+ */
+pages: { [key in string]: string }, };
+
+/**
+ * Where the site shows its sign-in form.
+ */
+export type WebSignInPages = { 
+/**
+ * Paths after the base URL, each starting with `/`, with no query, no
+ * fragment and no `.` or `..` segment.
+ */
+paths: Array<string>, 
+/**
+ * The form can stand on any page of the site's own origin.
+ */
+any_page: boolean, 
+/**
+ * The site signs in with the source's own username and password, so
+ * that credential is filled unless another sign-in is saved for the site
+ * or the person turned the fill off (ux30).
+ */
+uses_credential?: boolean, };
+
+/**
  * Where a ticket's **worklog** is, and what each entry says (#2403): who
  * logged it and how long, in seconds.
  *
@@ -2000,6 +2133,7 @@ seconds: Array<PayloadPath>, };
  * | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
  * | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
  * | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
+ * | [`EditTicket`](Self::EditTicket) | `"edit_ticket"` | ticket fields, ADR-0054 (Jira, Gitea) |
  *
  * The enum grows per milestone and **each growth is a §10.8 ratified
  * exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -2197,7 +2331,34 @@ entity: string, } } | { "EditPullRequest": {
  * The **pull request** (#706). A field below left `null` is not
  * written, so only what the reader changed reaches the source.
  */
-entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "UpdatePullRequestBranch": { 
+entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "EditTicket": { 
+/**
+ * The **ticket**. A field below left `null` is not written.
+ */
+entity: string, 
+/**
+ * The new summary.
+ */
+title: string | null, 
+/**
+ * Whom it is assigned to: `"nobody"`, or `{"account": "mara"}`.
+ */
+assignee: Assignee | null, 
+/**
+ * The priority's name in the source's spelling, one `ticket_fields`
+ * offered.
+ */
+priority: string | null, 
+/**
+ * The labels added and removed, by name.
+ */
+labels: LabelChange | null, 
+/**
+ * The source's own fields, by the id `ticket_fields` named, each in
+ * the form its kind takes; `null` clears one. The shell copies them
+ * from the control the adapter declared and never reads them.
+ */
+fields: Record<string, unknown>, } } | { "UpdatePullRequestBranch": { 
 /**
  * The **pull request** (#708).
  */

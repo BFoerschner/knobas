@@ -474,6 +474,12 @@ pub const EMBED_CSP: &str = "default-src 'none'; \
                              media-src data: blob: http: https:; frame-src http: https:; \
                              connect-src http: https:; form-action http: https:; object-src 'none'";
 
+/// Where a folder render's page is served (ADR-0044): `folder.` and the
+/// token `folder_render_frame` answered for the shell's sanitized document.
+/// The token is a UUID without dashes: no base64url document starts with
+/// `folder.`, since a `.` is in none.
+pub const FOLDER_PREFIX: &str = "folder.";
+
 /// D2's frame page (#2381), an entry of the app's build (`app/d2-frame.html`).
 pub const D2_FRAME_PAGE: &str = "d2-frame.html";
 
@@ -515,7 +521,22 @@ pub fn frame_response(
     asset: impl FnOnce(&str) -> Option<(Vec<u8>, String)>,
 ) -> tauri::http::Response<Vec<u8>> {
     let path = path.trim_start_matches('/');
-    let built = if let Some(embed) = path.strip_prefix(EMBED_PREFIX) {
+    let built = if let Some(token) = path.strip_prefix(FOLDER_PREFIX) {
+        // A folder render's page (ADR-0044), sanitized by the shell and kept
+        // by its token: under the file renderers' own policy, no script.
+        match crate::folder_render::runs::Runs::global().framed(token) {
+            Some(body) => tauri::http::Response::builder()
+                .status(200)
+                .header("content-type", "text/html; charset=utf-8")
+                .header("content-security-policy", FRAME_CSP)
+                .header("x-content-type-options", "nosniff")
+                .header("cache-control", "no-store")
+                .body(body.as_ref().clone()),
+            None => tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new()),
+        }
+    } else if let Some(embed) = path.strip_prefix(EMBED_PREFIX) {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         match URL_SAFE_NO_PAD
             .decode(embed)
@@ -698,10 +719,12 @@ pub(crate) async fn run_argv(
     }
 }
 
-/// Kill a run that is still going: on Unix its whole process group (it leads
-/// one, `process_group(0)`), then the child itself, reaped. Windows kills the
-/// child alone.
-async fn stop(child: &mut tokio::process::Child) {
+/// Kill a run that is still going with everything it started, then the
+/// child itself, reaped: on Unix its whole process group (it leads one,
+/// `process_group(0)`); on Windows its process tree, by `taskkill /T /F`
+/// (ADR-0044: a ten-minute generator's `java` or `node` must not outlive it,
+/// nor hold its scratch folder open).
+pub(crate) async fn stop(child: &mut tokio::process::Child) {
     #[cfg(unix)]
     if let Some(pid) = child
         .id()
@@ -712,13 +735,32 @@ async fn stop(child: &mut tokio::process::Child) {
         // still the group's id and not anyone else's.
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
     }
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        kill_tree(pid).await;
+    }
     let _ = child.kill().await;
+}
+
+/// `taskkill /T /F /PID <pid>`: the process and every process it started,
+/// with no console window, waited for at most two seconds.
+#[cfg(windows)]
+pub(crate) async fn kill_tree(pid: u32) {
+    let mut built = knobas_db::console::command("taskkill");
+    built
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Ok(mut killing) = tokio::process::Command::from(built).spawn() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), killing.wait()).await;
+    }
 }
 
 /// Everything `reader` writes up to `cap` bytes. Past the cap: `None` when
 /// `refuse`, else the first `cap` bytes, the rest read and dropped so the
 /// writer never blocks.
-async fn read_capped(
+pub(crate) async fn read_capped(
     mut reader: impl AsyncRead + Unpin,
     cap: usize,
     refuse: bool,
@@ -792,6 +834,33 @@ mod tests {
         for bad in ["/not base64!", "/", "/%2F%2F"] {
             let refused = frame_response(bad, |_| None);
             assert_eq!(refused.status(), 400, "{bad}");
+            assert!(refused.body().is_empty());
+        }
+    }
+
+    /// A folder render's page (ADR-0044) is served by its token under the
+    /// file renderers' policy, no script and no request, and a token nothing
+    /// was kept under is a 404 with nothing in it.
+    #[test]
+    fn a_folder_render_page_is_served_by_its_token_under_the_frame_policy() {
+        let doc = b"<!doctype html><p style=\"color: red\">drawn</p>".to_vec();
+        let token = crate::folder_render::runs::Runs::global().frame(doc.clone());
+        let answer = frame_response(&format!("/folder.{token}"), |_| {
+            panic!("a page is no asset")
+        });
+        assert_eq!(answer.status(), 200);
+        assert_eq!(answer.body(), &doc);
+        assert_eq!(
+            answer
+                .headers()
+                .get("content-security-policy")
+                .and_then(|v| v.to_str().ok()),
+            Some(FRAME_CSP)
+        );
+        assert!(!FRAME_CSP.contains("script") && FRAME_CSP.starts_with("default-src 'none'"));
+        for unknown in ["/folder.0123", "/folder.", "/folder.../index.html"] {
+            let refused = frame_response(unknown, |_| None);
+            assert_eq!(refused.status(), 404, "{unknown}");
             assert!(refused.body().is_empty());
         }
     }

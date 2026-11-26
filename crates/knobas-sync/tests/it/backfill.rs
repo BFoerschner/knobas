@@ -76,7 +76,11 @@ impl Source for Widening {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: Vec::new(),
             // Jira's `ticket` declares `true`, which is exactly what makes a
             // cursor-less run over this source a sweeping one.
@@ -87,6 +91,7 @@ impl Source for Widening {
                 monogram: "WI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             // Nothing declared: this stand-in has no payload shapes to

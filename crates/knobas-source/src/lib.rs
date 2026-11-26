@@ -29,16 +29,23 @@ pub mod code_pages;
 pub mod contract;
 pub mod diff;
 pub mod docs;
+pub mod file_text;
 pub mod fingerprint;
 pub mod grants;
+pub mod held;
 pub mod instance;
+pub mod passwords;
 pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod ticket;
+pub mod tree;
 pub mod url_forms;
 pub mod view;
 pub mod watermark;
+pub mod web_links;
+pub mod web_sign_in;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
 /// the one a descriptor without [`SourceDescriptor::min_sync_interval_secs`]
@@ -240,6 +247,48 @@ pub struct SourceDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub code_pages: Option<code_pages::CodePages>,
+    /// A new source of this adapter syncs **only by hand** until its page
+    /// says otherwise (ADR-0056): the Add-source form sends `sync_by_hand`
+    /// from it. A password manager sets it, because each read it answers may
+    /// be a line in its audit log under the person's name.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as an adapter whose sources start on a schedule.
+    #[serde(default)]
+    pub by_hand_by_default: bool,
+    /// What a password source offers beyond the role's minimum (ADR-0056):
+    /// present exactly when the descriptor claims [`passwords::PASSWORDS`],
+    /// which [`role::check`] holds.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as a source that is no password manager.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub passwords: Option<passwords::Offers>,
+    /// Where the source's own website shows its sign-in form (ADR-0050,
+    /// ux29, [`web_sign_in`]): a saved web sign-in is filled there by itself
+    /// once per landing. [`web_sign_in::check`] holds it to its rules
+    /// (contract battery clause 16). Read on the Rust side; the shell never
+    /// does.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this --
+    /// an external adapter's JSON among them -- decodes as a source whose
+    /// saved sign-in is filled on a press alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_sign_in: Option<web_sign_in::WebSignInPages>,
+    /// Where the source's own website shows one item of a kind, and its
+    /// front page (ux30, [`web_links`]): the Passwords page's *Open web
+    /// interface* builds its address from the typed base URL and these,
+    /// never from a mirrored value. [`web_links::check`] holds it to its
+    /// rules (contract battery clause 18). Read on the Rust side.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// -- an external adapter's JSON among them -- decodes as a source whose
+    /// site opens at its base URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_links: Option<web_links::WebLinks>,
 }
 
 impl SourceDescriptor {
@@ -431,6 +480,16 @@ pub struct KindInfo {
     #[serde(default = "every_kind_refreshes")]
     #[ts(skip)]
     pub refreshes: bool,
+    /// The kind's title stays in the mirror (ADR-0056): the engine writes an
+    /// empty title into `knobas.entity` for its items, so no backup and no
+    /// share export carries it. The Passwords role's two kinds set it.
+    ///
+    /// `#[serde(default)]`, so a descriptor that predates this reads as one
+    /// whose titles reach `knobas.entity` as they always did. Left out of the
+    /// TypeScript mirror, as `refreshes` is.
+    #[serde(default)]
+    #[ts(skip)]
+    pub title_stays_in_mirror: bool,
 }
 
 /// [`KindInfo::refreshes`]' default: a kind is refreshed unless its
@@ -684,6 +743,7 @@ impl SourceError {
 /// | [`ReplyToThread`](Self::ReplyToThread) | `"reply_to_thread"` | code area, spec #2234 (Gitea, #2277) |
 /// | [`ResolveThread`](Self::ResolveThread) | `"resolve_thread"` | code area, spec #2234 (Gitea, #2277) |
 /// | [`RequestReviewers`](Self::RequestReviewers) | `"request_reviewers"` | code area, spec #2234 (Gitea, #2303) |
+/// | [`EditTicket`](Self::EditTicket) | `"edit_ticket"` | ticket fields, ADR-0054 (Jira, Gitea) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -1171,6 +1231,47 @@ pub enum WriteOp {
         #[serde(default)]
         state: Option<PullRequestState>,
     },
+    /// Identifier `"edit_ticket"`. Change a ticket's summary, assignee,
+    /// priority, labels, or one of its source's own fields (ADR-0054).
+    /// `entity` is the **ticket**.
+    ///
+    /// **Only what is set is written** (as `EditPullRequest`): a field left
+    /// `null` is not sent, so an edit of the assignee never sends a stale copy
+    /// of a summary somebody else changed. An edit with nothing in it is
+    /// refused before a request leaves.
+    ///
+    /// The status is not here: a status is reached through the workflow, by
+    /// [`Transition`](WriteOp::Transition). Which fields a ticket lets a
+    /// person change, and the values each takes, is
+    /// [`Source::ticket_fields`]' answer; the write is not bound by it, and an
+    /// adapter refuses by name, at write time, a field it cannot set.
+    ///
+    /// Hold detection is per field: a queued edit is compared only on the
+    /// title, assignee and priority it writes, never on its labels or a
+    /// source's own field (`knobas_core::write_queue::project`).
+    EditTicket {
+        /// The **ticket**. A field below left `null` is not written.
+        entity: String,
+        /// The new summary.
+        #[serde(default)]
+        title: Option<String>,
+        /// Whom it is assigned to: `"nobody"`, or `{"account": "mara"}`.
+        #[serde(default)]
+        assignee: Option<Assignee>,
+        /// The priority's name in the source's spelling, one `ticket_fields`
+        /// offered.
+        #[serde(default)]
+        priority: Option<String>,
+        /// The labels added and removed, by name.
+        #[serde(default)]
+        labels: Option<LabelChange>,
+        /// The source's own fields, by the id `ticket_fields` named, each in
+        /// the form its kind takes; `null` clears one. The shell copies them
+        /// from the control the adapter declared and never reads them.
+        #[serde(default)]
+        #[ts(type = "Record<string, unknown>")]
+        fields: std::collections::BTreeMap<String, serde_json::Value>,
+    },
     /// Identifier `"update_pull_request_branch"`. Bring a pull request's head
     /// branch up to date with its base (spec #701 workflow 9, issue #708):
     /// the base merged into the head, or the head rebased onto the base, as
@@ -1370,6 +1471,65 @@ impl PullRequestState {
             PullRequestState::Closed => "closed",
         }
     }
+}
+
+/// Whom an [`EditTicket`](WriteOp::EditTicket) assigns: `"nobody"`, or
+/// `{"account": "mara"}`, the account as the source names it (the value
+/// `ticket_fields`' assignee options carry).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum Assignee {
+    Nobody,
+    Account(String),
+}
+
+impl Assignee {
+    /// The account, or `None` for nobody.
+    #[must_use]
+    pub fn account(&self) -> Option<&str> {
+        match self {
+            Assignee::Nobody => None,
+            Assignee::Account(a) => Some(a),
+        }
+    }
+}
+
+/// The labels an [`EditTicket`](WriteOp::EditTicket) adds and removes, by
+/// name. Adding one already there and removing one not there change nothing,
+/// so a label somebody else added a second ago is never lost.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct LabelChange {
+    #[serde(default)]
+    pub add: Vec<String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
+impl LabelChange {
+    /// Neither adds nor removes anything.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.add.is_empty() && self.remove.is_empty()
+    }
+}
+
+/// The edit `op` carries is empty: nothing set, or only empty label changes.
+/// An adapter refuses one before a request leaves (battery clause 15).
+#[must_use]
+pub fn edit_is_empty(
+    title: Option<&String>,
+    assignee: Option<&Assignee>,
+    priority: Option<&String>,
+    labels: Option<&LabelChange>,
+    fields: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    title.is_none()
+        && assignee.is_none()
+        && priority.is_none()
+        && labels.is_none_or(LabelChange::is_empty)
+        && fields.is_empty()
 }
 
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
@@ -1611,6 +1771,7 @@ impl WriteOp {
             WriteOp::ReplyToThread { .. } => "reply_to_thread",
             WriteOp::ResolveThread { .. } => "resolve_thread",
             WriteOp::RequestReviewers { .. } => "request_reviewers",
+            WriteOp::EditTicket { .. } => "edit_ticket",
         }
     }
 
@@ -1660,9 +1821,12 @@ impl WriteOp {
                 can_leave_unclaimed: false,
                 ..conservative
             },
-            // A judgement on the target's current state; a second arrival is
-            // a second move.
+            // A judgement on the target's current status, so only the status
+            // moving holds it (ADR-0054): a comment does not, and neither does
+            // a status an earlier open move of the same ticket was going to
+            // set. A second arrival is a second move.
             WriteOp::Transition { .. } => Delivery {
+                projection: Projection::Status,
                 can_leave_unclaimed: false,
                 ..conservative
             },
@@ -1677,8 +1841,9 @@ impl WriteOp {
                 can_leave_unclaimed: false,
                 ..conservative
             },
-            // Overwrites only the fields it carries (#706).
-            WriteOp::EditPullRequest { .. } => Delivery {
+            // Overwrites only the fields it carries (#706); a ticket's edit
+            // too, and a second arrival sets what is already set (ADR-0054).
+            WriteOp::EditPullRequest { .. } | WriteOp::EditTicket { .. } => Delivery {
                 projection: Projection::Whole { per_field: true },
                 resend_harmless: true,
                 can_leave_unclaimed: false,
@@ -1790,7 +1955,8 @@ impl WriteOp {
                 | WriteOp::SourceAction { entity, .. }
                 | WriteOp::ReplyToThread { entity, .. }
                 | WriteOp::ResolveThread { entity, .. }
-                | WriteOp::RequestReviewers { entity, .. } => Some(entity),
+                | WriteOp::RequestReviewers { entity, .. }
+                | WriteOp::EditTicket { entity, .. } => Some(entity),
                 WriteOp::CreatePage { .. } | WriteOp::CommitFile { .. } => None,
             },
         };
@@ -1876,6 +2042,28 @@ pub enum RefreshAnswer {
     NotOffered,
 }
 
+/// What a source answers when asked to read an item **and what stands under
+/// it** ([`Source::refresh_under`], ADR-0047): a repository, its branches, its
+/// pull requests, its issues and the commits of the branches that moved.
+#[derive(Debug, Clone)]
+pub enum UnderAnswer {
+    /// The walk ran: the items a run would have emitted for this one parent
+    /// from where it stood, the asked item's tombstone among them when the
+    /// source no longer has it, and the parent's own position moved where
+    /// the run would have left it. `cursor: None` leaves the stored position
+    /// as it is (the walk emitted nothing); `Some` replaces it whole, every
+    /// other parent's position kept as it was.
+    Walked {
+        /// What the walk emitted, in the order it emitted them.
+        items: Vec<SyncItem>,
+        /// The stored position with this parent's part moved, or `None`.
+        cursor: Option<Cursor>,
+    },
+    /// This adapter does not read this item's kind with what stands under
+    /// it, or holds no position to walk from: the app runs the source.
+    NotOffered,
+}
+
 impl WriteOp {
     /// Whether a [`WriteReceipt::remote_id`] for this op is the **local part
     /// of an entity id**: the item the write made, which `<source_id>:<remote_id>`
@@ -1914,7 +2102,8 @@ impl WriteOp {
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
-            | WriteOp::RequestReviewers { .. } => false,
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => false,
         }
     }
 }
@@ -2004,6 +2193,34 @@ pub trait Source: Send + Sync {
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         let _ = entity;
         Ok(RefreshAnswer::NotOffered)
+    }
+    /// Read one item and what stands under it, from where the source's
+    /// stored position (`cursor`) says this parent stood: a **refresh under a
+    /// parent** (`CONTEXT.md` *Refresh*, ADR-0047). Asked by the engine when
+    /// [`refresh`](Source::refresh) answers [`RefreshAnswer::NotOffered`] for
+    /// `entity`, inside the same lock and transaction, so it never overlaps a
+    /// run of the source.
+    ///
+    /// It is a run's walk of one parent and nothing more: the items a run
+    /// would emit for that parent ([`UnderAnswer::Walked`]), the parent's
+    /// part of the position moved as the run would move it, every other
+    /// part untouched. No sweep and no [`Sink::walked_whole`]: a walk of one
+    /// parent never licenses one. A parent the source no longer has comes
+    /// back as its tombstone item. [`UnderAnswer::NotOffered`], the default,
+    /// is a kind this adapter does not walk this way, or a `cursor` that holds
+    /// no position (a full sync is owed, which a refresh may not cancel).
+    ///
+    /// A kind answered here counts as refreshed for
+    /// [`KindInfo::refreshes`], and [`contract::battery`] clause 13 holds it:
+    /// asked right after a run of an unchanged source, the walk emits
+    /// nothing and leaves the position.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<UnderAnswer, SourceError> {
+        let _ = (entity, cursor);
+        Ok(UnderAnswer::NotOffered)
     }
     /// Why this source does not declare `op`, in words a person can act on,
     /// when the adapter knows more than that it does not. An Uptime Kuma with
@@ -2095,6 +2312,69 @@ pub trait Source: Send + Sync {
     ///
     /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
+    /// Read one secret of a password entry **live** (ADR-0056): its
+    /// password, a custom field the mirror holds no value for, or an earlier
+    /// password. The answer is held by the app for at most
+    /// [`passwords::HOLD_SECS`] and written nowhere.
+    ///
+    /// One call is at most one request to the source, and so at most one
+    /// line in its audit log: an adapter sends the read without retrying it.
+    ///
+    /// [`passwords::SecretAnswer::NotOffered`], the default, is an adapter
+    /// that fills no Passwords role, or an entity that is not an entry
+    /// (battery clause 16).
+    async fn read_secret(
+        &self,
+        ask: &passwords::SecretAsk,
+    ) -> Result<passwords::SecretAnswer, SourceError> {
+        let _ = ask;
+        Ok(passwords::SecretAnswer::NotOffered)
+    }
+    /// Send a **direct write** to a password source (ADR-0056): at once,
+    /// never queued, answered when the source has. A write whose kind the
+    /// descriptor's [`passwords::Offers::writes`] does not list is refused
+    /// with [`SourceError::Protocol`] and no status, so nothing was sent.
+    ///
+    /// The default refuses every write by name.
+    async fn passwords_write(
+        &self,
+        write: passwords::Write,
+    ) -> Result<passwords::Written, SourceError> {
+        Err(passwords::undeclared(&self.descriptor().id, write.kind()))
+    }
+
+    /// What a person may change on `entity` besides its status, as the
+    /// source says **now** (ADR-0054): each field with its kind, the value
+    /// the source holds, and why not where it cannot be changed. Read when a
+    /// ticket's page opens and when a surface is about to offer an edit;
+    /// never stored.
+    ///
+    /// `Ok(None)`, the default, is an adapter that offers no edits, or an
+    /// entity that is not a ticket. An adapter that declares `edit_ticket`
+    /// answers `Some` for every ticket it emits, and one that does not
+    /// answers `None` (battery clause 15). The write is not bound by this
+    /// answer: the adapter refuses by name, at write time, a field it cannot
+    /// set.
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<ticket::TicketFields>, SourceError> {
+        let _ = entity;
+        Ok(None)
+    }
+    /// The choices of `field` (an id [`ticket_fields`](Source::ticket_fields)
+    /// named, of kind `search`, or `labels` with a scope) on `entity` that
+    /// match `typed`; with `typed` empty, the first of them. `Ok(None)`, the
+    /// default, is a field with no list.
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<ticket::FieldOptions>, SourceError> {
+        let _ = (entity, field, typed);
+        Ok(None)
+    }
     /// The **source view** this adapter draws for one of its own entities
     /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
     /// the fixed vocabulary in [`view`], read live when a detail opens and
@@ -2142,6 +2422,185 @@ pub trait Source: Send + Sync {
     fn view_standing(&self, entity: &str, section: Option<&str>) -> view::Standing {
         let _ = (entity, section);
         view::Standing::Live
+    }
+    /// The view of `entity` at `section` as far as the mirror's own record of
+    /// it can draw it, reading nothing (ADR-0042, the second smoothness pass
+    /// on PR #2479): what a page shows the first time it is opened, before
+    /// the source's read lands over it, said to be from the last sync. Only
+    /// what the record holds is drawn; a section it cannot fill says so in a
+    /// muted line, and no action is offered.
+    ///
+    /// `payload` is the record the mirror holds for `entity`, as the sync
+    /// wrote it. `None`, the default, is a source that draws nothing from it:
+    /// the page waits for the source, as before. Pure.
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// The kind of the entities under `entity` whose mirror records
+    /// [`mirror_listing`](Source::mirror_listing) draws `section` from, where
+    /// it draws one (the inner-pages pass on PR #2479, 2026-11-12): a
+    /// repository's branches, from the branch records the sync wrote. `None`,
+    /// the default, draws no listing, and the app asks for none. Pure.
+    fn mirror_listing_kind(&self, entity: &str, section: Option<&str>) -> Option<&'static str> {
+        let _ = (entity, section);
+        None
+    }
+    /// The view of `entity` at `section` as far as the mirror's records of
+    /// it and of the entities under it can draw it, reading nothing: what
+    /// [`mirror_view`](Source::mirror_view) is for a section the entity's own
+    /// record cannot fill, such as its list of branches (ADR-0042, as amended
+    /// 2026-11-12). `payload` is the entity's record; `under` the records of
+    /// every entity of [`mirror_listing_kind`](Source::mirror_listing_kind)
+    /// the mirror holds under it, as the sync wrote them, in no order. Drawn
+    /// with the same rows the source's read draws, so where nothing moved
+    /// since the sync the source's answer lands on the same view. `None`, the
+    /// default, is the page waiting for the source, as before. Pure.
+    fn mirror_listing(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        under: &[serde_json::Value],
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, under);
+        None
+    }
+    /// Where this adapter's mirror records keep what the sync's held-sections
+    /// pass plans from ([`held`], the held-files pass of PR #2479): the kind
+    /// and section it holds, the state that is open, and the two commits the
+    /// section stands at. `None`, the default, is an adapter of which the
+    /// sync holds nothing, and the pass asks it nothing. Pure.
+    fn held_shape(&self) -> Option<held::HeldShape> {
+        None
+    }
+    /// Where this adapter's mirror records keep what the sync's tree pass
+    /// plans from ([`tree`], the stored-trees pass of PR #2479): its
+    /// repositories' default branches, its branches' heads, its pull
+    /// requests' head branches. `None`, the default, is an adapter that
+    /// stores no tree, and the pass asks it nothing. Pure.
+    fn tree_shape(&self) -> Option<tree::TreeShape> {
+        None
+    }
+    /// The levels of the tree at `commit` in `repository` (an entity id of
+    /// [`tree_shape`](Source::tree_shape)'s repository kind) that `held`
+    /// does not hold, read from the source: the root's sha, and every level
+    /// under it not held, each in git's order. A tree of more than `cap`
+    /// entries in all is [`tree::TreeRead::TooLarge`], read no further.
+    /// Called by the tree pass after a run, on the background lane.
+    ///
+    /// `Ok(None)` is **this adapter reads no tree**, and is the default.
+    async fn read_tree(
+        &self,
+        repository: &str,
+        commit: &str,
+        held: &dyn tree::HeldTrees,
+        cap: u64,
+    ) -> Result<Option<tree::TreeRead>, SourceError> {
+        let _ = (repository, commit, held, cap);
+        Ok(None)
+    }
+    /// What `section` of `entity`'s view draws from a stored tree, where it
+    /// draws one: the branch, the commit the section names, the place.
+    /// `payload` is the entity's mirror record (a repository's names its
+    /// default branch). `None`, the default, reads no stored tree. Pure.
+    fn tree_ask(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<tree::TreeAsk> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// `section` of `entity`'s view drawn from `tree`, the stored levels
+    /// [`tree_ask`](Source::tree_ask) named, as the source's own read at the
+    /// same commit draws it: the same entries, ids, trail and page. `None`
+    /// where the levels do not hold the place. Pure.
+    fn tree_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tree: &tree::StoredTree,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload, tree);
+        None
+    }
+    /// The bytes of the file at `path` of `repository`'s tree at `commit`
+    /// (`repository` an entity id of [`tree_shape`](Source::tree_shape)'s
+    /// repository kind), read whole the way the source's own read of the
+    /// file reads them, for the store (the forge-rounds pass, 2026-11-15: a
+    /// default branch's README). `Ok(None)` where the file is larger than
+    /// `cap`, and, the default, from a source that stores no file.
+    async fn read_blob(
+        &self,
+        repository: &str,
+        commit: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<Vec<u8>>, SourceError> {
+        let _ = (repository, commit, path, cap);
+        Ok(None)
+    }
+    /// Every file of `repository`'s tree at `commit` that `wanted` names,
+    /// handed to `each` as it is read (the everything-search decisions,
+    /// 2026-11-20, D3: the files pass reads a repository's files for
+    /// *Everything*): one request where the source has an archive of a
+    /// commit. A file `wanted` refuses is skipped unread. Answers the
+    /// requests it sent.
+    ///
+    /// `Ok(None)` is **this source has no archive**, and is the default: the
+    /// pass then reads the files one at a time through
+    /// [`read_blob`](Source::read_blob).
+    async fn read_archive(
+        &self,
+        repository: &str,
+        commit: &str,
+        wanted: &(dyn for<'p> Fn(&'p str) -> bool + Sync),
+        each: &mut (dyn FnMut(String, Vec<u8>) + Send),
+    ) -> Result<Option<u32>, SourceError> {
+        let _ = (repository, commit, wanted, each);
+        Ok(None)
+    }
+    /// The entity id of the branch whose head `section` of `entity`'s view
+    /// reads, where the section reads a branch's head and names no commit
+    /// (the forge-rounds pass, 2026-11-15): a branch's or repository's tree
+    /// section, a folder or a file by its path. `payload` is the entity's
+    /// mirror record (a repository's names its default branch). The app
+    /// looks up the commit the mirror holds at that branch's head and hands
+    /// it to [`view_at_tip`](Source::view_at_tip). `None`, the default, is a
+    /// section read only through [`view`](Source::view). Pure.
+    fn tip_branch(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<String> {
+        let _ = (entity, section, payload);
+        None
+    }
+    /// `section` of `entity`'s view read at `tip`, the commit the mirror holds
+    /// at the head of the branch [`tip_branch`](Source::tip_branch) named
+    /// (the forge-rounds pass, 2026-11-15): what [`view`](Source::view) draws
+    /// while the branch stands at `tip`, without the reads that learn the
+    /// tip. The app draws it as of the sync that read the tip and reads
+    /// [`view`](Source::view) behind it (ADR-0042). `Ok(None)`, the default,
+    /// is a section this source does not read so.
+    async fn view_at_tip(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+        tip: &str,
+    ) -> Result<Option<view::SourceView>, SourceError> {
+        let _ = (entity, section, payload, tip);
+        Ok(None)
     }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
     /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
@@ -2420,6 +2879,18 @@ pub trait Sink {
         let _ = kind;
     }
 
+    /// Hand the host the one-time-code key of `entity` (ADR-0056). It is kept
+    /// in the OS keychain and **never in the mirror**: the one way a key
+    /// leaves an adapter. A key inside an item would be one `payload`
+    /// assignment from the mirror, and an external adapter has no keychain
+    /// (ADR-0028), so the host does the keeping.
+    ///
+    /// The default drops it, so a sink that keeps no keys -- a test's, a
+    /// backfill's preview -- compiles unchanged.
+    async fn otp_key(&mut self, entity: &EntityRef, key: passwords::OtpKey) {
+        let _ = (entity, key);
+    }
+
     /// Say that this run left part of the source out because the source
     /// would not serve it, and why, in one line the source's row shows
     /// beside its last sync: *boards unavailable: Jira Software is unlicensed
@@ -2458,7 +2929,11 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
+            by_hand_by_default: false,
+            passwords: None,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -2467,6 +2942,7 @@ mod tests {
                 monogram: "JI".into(),
                 full_sync_exhaustive: true,
                 refreshes: true,
+                title_stays_in_mirror: false,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             payload_paths: vec![KindPaths {
@@ -2515,6 +2991,8 @@ mod tests {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             url_forms: Vec::new(),
+            web_sign_in: None,
+            web_links: None,
             code_pages: None,
             ..a_descriptor()
         };
@@ -2878,6 +3356,21 @@ mod tests {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 reviewers: vec!["olu".into(), "kai".into()],
             },
+            WriteOp::EditTicket {
+                entity: "jira:PAY-231".into(),
+                title: Some("SEPA payouts retry three times".into()),
+                assignee: Some(Assignee::Account("mara".into())),
+                priority: Some("High".into()),
+                labels: Some(LabelChange {
+                    add: vec!["sepa".into()],
+                    remove: vec!["triage".into()],
+                }),
+                fields: [(
+                    "customfield_10010".to_owned(),
+                    serde_json::json!("2026-12-01"),
+                )]
+                .into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -2906,7 +3399,8 @@ mod tests {
                 | WriteOp::SourceAction { .. }
                 | WriteOp::ReplyToThread { .. }
                 | WriteOp::ResolveThread { .. }
-                | WriteOp::RequestReviewers { .. } => {}
+                | WriteOp::RequestReviewers { .. }
+                | WriteOp::EditTicket { .. } => {}
             }
         }
         probes
@@ -2972,6 +3466,93 @@ mod tests {
             panic!("{bare:?}")
         };
         assert!(fields.is_empty());
+    }
+
+    /// A label change is nothing only when it neither adds nor removes a name
+    /// (the adapters refuse an edit with nothing in it by this).
+    #[test]
+    fn a_label_change_is_empty_only_when_it_neither_adds_nor_removes() {
+        let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(LabelChange::default().is_empty());
+        for (add, remove) in [(names(&["sepa"]), vec![]), (vec![], names(&["triage"]))] {
+            assert!(!LabelChange { add, remove }.is_empty());
+        }
+    }
+
+    /// An `EditTicket` (ADR-0054) carries only what is set: the assignee as
+    /// `"nobody"` or `{"account": …}`, the labels as names added and removed,
+    /// and an absent field reads as not written.
+    #[test]
+    fn an_edit_ticket_carries_only_what_is_set() {
+        let op: WriteOp = serde_json::from_value(serde_json::json!({
+            "EditTicket": { "entity": "jira:PAY-231", "assignee": "nobody" }
+        }))
+        .unwrap();
+        assert_eq!(op.identifier(), "edit_ticket");
+        assert_eq!(op.target(), "jira:PAY-231");
+        assert!(!op.receipt_names_an_entity());
+        // A create's receipt names what it made (the final suite's mutants:
+        // the whole answer replaced by `false` went unseen).
+        let create: WriteOp = serde_json::from_value(serde_json::json!({
+            "CreateTicket": { "entity": "jira:PAY", "title": "t", "body": "", "ticket_type": "Task" }
+        }))
+        .unwrap();
+        assert!(create.receipt_names_an_entity());
+        let WriteOp::EditTicket {
+            title,
+            assignee,
+            priority,
+            labels,
+            fields,
+            ..
+        } = &op
+        else {
+            panic!("{op:?}")
+        };
+        assert_eq!(assignee, &Some(Assignee::Nobody));
+        assert!(title.is_none() && priority.is_none() && labels.is_none() && fields.is_empty());
+        assert!(!edit_is_empty(
+            title.as_ref(),
+            assignee.as_ref(),
+            priority.as_ref(),
+            labels.as_ref(),
+            fields
+        ));
+
+        let wire = serde_json::to_value(WriteOp::EditTicket {
+            entity: "gitea:o/r#4".into(),
+            title: None,
+            assignee: Some(Assignee::Account("mara".into())),
+            priority: None,
+            labels: Some(LabelChange {
+                add: vec!["sepa".into()],
+                remove: vec![],
+            }),
+            fields: std::collections::BTreeMap::new(),
+        })
+        .unwrap();
+        assert_eq!(
+            wire["EditTicket"]["assignee"],
+            serde_json::json!({ "account": "mara" })
+        );
+        assert_eq!(
+            wire["EditTicket"]["labels"],
+            serde_json::json!({ "add": ["sepa"], "remove": [] })
+        );
+        assert!(wire["EditTicket"]["title"].is_null());
+
+        let bare: LabelChange =
+            serde_json::from_value(serde_json::json!({ "add": ["x"] })).unwrap();
+        assert!(bare.remove.is_empty());
+        assert!(edit_is_empty(
+            None,
+            None,
+            None,
+            Some(&LabelChange::default()),
+            &std::collections::BTreeMap::new()
+        ));
+        assert_eq!(Assignee::Nobody.account(), None);
+        assert_eq!(Assignee::Account("a".into()).account(), Some("a"));
     }
 
     /// A descriptor's source actions (#1194) cross the hop as declared, and
@@ -3363,6 +3944,30 @@ mod tests {
         }
     }
 
+    /// Every op's delivery table, by the projection a hold compares: a
+    /// `transition` compares the ticket's declared status (ADR-0054), and is
+    /// the only op that does.
+    #[test]
+    fn only_a_transition_compares_on_the_status() {
+        use knobas_spi_types::delivery::Projection;
+        for op in every_write_op() {
+            let status = op.delivery().projection == Projection::Status;
+            assert_eq!(
+                status,
+                op.identifier() == "transition",
+                "{}: projection {:?}",
+                op.identifier(),
+                op.delivery().projection
+            );
+            assert_eq!(
+                op.delivery().projection.reads_declared_status(),
+                status,
+                "{}",
+                op.identifier()
+            );
+        }
+    }
+
     /// The identifier is what a descriptor lists, what the queue stores in its
     /// `op` column and what hold detection dispatches on. Two variants sharing
     /// one would make a descriptor's declaration ambiguous and a queued row
@@ -3381,7 +3986,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 26, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 27, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

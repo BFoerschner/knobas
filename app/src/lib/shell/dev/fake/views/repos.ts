@@ -15,10 +15,16 @@
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
+import { keepSeed } from "../../fake-seed";
+import { JAR_FILES, jarSize } from "../jar";
+import { ASCII_AFTER, asciiArt } from "../../fake-ascii";
+import type { BranchPull, DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
-import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
+import { ago, agoStamp } from "../../../time";
+import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
+import { DEEP_30_JSON, ITEMS_YAML, MODEL_31_JSON, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
+import { fakePage } from "../folder-render";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -350,6 +356,67 @@ const pdfDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fa
 const pdfDiffFiles = (): DiffFile[] =>
   Object.keys(PDF_DIFF).map((path) => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }));
 
+/**
+ * `?fake-xsd-diff` (S7, with `?fake-xsd`): the newest commit also edits openTRANS's main schema: a length narrowed and
+ * one widened, an optional element made required, two elements swapped, a value added, and an element written again
+ * with other spacing, which is no change. The set's other files read the same at both commits.
+ */
+const XSD_DIFF_PATH = "schemas/opentrans/opentrans_2_1.xsd";
+const XSD_EDITS: readonly [string, string][] = [
+  ['<xsd:simpleType name="typePAYMENT_TERM">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="250"/>', '<xsd:simpleType name="typePAYMENT_TERM">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="100"/>'],
+  ['<xsd:simpleType name="typePHONE">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="50"/>', '<xsd:simpleType name="typePHONE">\n\t\t<xsd:restriction base="bmecat:dtSTRING">\n\t\t\t<xsd:maxLength value="64"/>'],
+  ['<xsd:enumeration value="2.1"/>', '<xsd:enumeration value="2.1"/>\n\t\t\t<xsd:enumeration value="2.2"/>'],
+  ['<xsd:element ref="BANK_CODE" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_NAME" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_COUNTRY" minOccurs="0"/>', '<xsd:element ref="BANK_CODE"/>\n\t\t\t\t<xsd:element ref="BANK_COUNTRY" minOccurs="0"/>\n\t\t\t\t<xsd:element ref="BANK_NAME" minOccurs="0"/>'],
+  ['<xsd:element name="ACCOUNT">', '<xsd:element   name="ACCOUNT" >'],
+];
+const xsdDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xsd-diff");
+/** The schema before and after the edits; `null` until `?fake-xsd`'s texts are read. */
+function xsdDiffSides(): [string, string] | null {
+  const before = xsdFiles()[XSD_DIFF_PATH];
+  if (before === undefined) return null;
+  return [before, XSD_EDITS.reduce((text, [from, to]) => text.replace(from, to), before)];
+}
+/** A `?fake-xsd-diff` file at the newest commit (`at` 0) or its parent (`at` 1): the schema's side, else the set's file. */
+function xsdDiffSide(at: number, path: string): string | undefined {
+  if (!xsdDiffOn() || (at !== 0 && at !== 1)) return undefined;
+  if (path === XSD_DIFF_PATH) return xsdDiffSides()?.[at === 0 ? 1 : 0];
+  return xsdFiles()[path];
+}
+function xsdDiffFiles(): DiffFile[] {
+  const sides = xsdDiffSides();
+  return sides === null ? [] : [lineDiff(XSD_DIFF_PATH, sides[0], sides[1]) as DiffFile];
+}
+
+/**
+ * `?fake-doc-diff` (C1, with `?fake-xml`): the newest commit also changes an order (a quantity, an item's text), lays
+ * the POM out again with deeper indentation (no change by element), and in the export changes a total and moves an
+ * order to the front.
+ */
+const DOC_DIFF: Record<string, (text: string) => string> = {
+  "orders/order-4711.xml": (t) => t.replace("<QUANTITY>8</QUANTITY>", "<QUANTITY>10</QUANTITY>").replace("<QUANTITY>16</QUANTITY>", "<QUANTITY>20</QUANTITY>"),
+  "build/pom.xml": (t) => t.replace(/\n( +)</g, "\n$1$1<"),
+  "exports/orders-2026-11.json": (t) => {
+    const doc = JSON.parse(t) as { orders: { total: number }[] };
+    doc.orders[0]!.total += 1;
+    doc.orders.unshift(doc.orders.splice(3, 1)[0]!);
+    return `${JSON.stringify(doc, null, 2)}\n`;
+  },
+};
+const docDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-doc-diff");
+/** A `?fake-doc-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before). */
+function docDiffSide(at: number, path: string): string | undefined {
+  const edit = DOC_DIFF[path];
+  if (!docDiffOn() || edit === undefined || (at !== 0 && at !== 1)) return undefined;
+  const before = xmlFiles()[path];
+  return before === undefined ? undefined : at === 0 ? edit(before) : before;
+}
+function docDiffFiles(): DiffFile[] {
+  return Object.keys(DOC_DIFF).flatMap((path) => {
+    const [a, b] = [docDiffSide(1, path), docDiffSide(0, path)];
+    return a === undefined || b === undefined ? [] : [lineDiff(path, a, b) as DiffFile];
+  });
+}
+
 /** A `?fake-rendered-diff` file at the newest commit (`at` 0, after) or its parent (`at` 1, before); `undefined` for none. */
 function renderedDiffSide(at: number, path: string): string | null | undefined {
   if (!renderedDiffOn() || (at !== 0 && at !== 1)) return undefined;
@@ -418,6 +485,106 @@ const BINARY: Record<string, () => Uint8Array> = {
   "docs/scan.pdf": SCAN_PDF,
   "docs/img/logo.png": () => PAYOUT_IMAGES["docs/img/logo.png"]!(),
 };
+/**
+ * `?fake-openapi` (ux18; ux31 added today's failures): a spec of the pet store, one with refs into other files, one
+ * of 5,000 operations, one whose every path starts `/v1` with no tags and with `allOf` and `oneOf` three deep (as
+ * Stripe's), one of servers, schemes, links and webhooks, and TeamCity's real 1.2 MB. Built once, when first asked:
+ * constants, so nothing here goes back to a seed.
+ */
+const openapiFiles: () => Record<string, string> = (() => {
+  let specs: Record<string, string> | null = null;
+  // The repository's own TeamCity spec (1.2 MB, real), read only under `?fake-openapi` and only once: the fake's chunk
+  // ships with the app, and the spec stays a chunk of its own. It is the file's text, which no handler changes.
+  let teamcitySpec: string | null = null;
+  if (new URLSearchParams(globalThis.location?.search).has("fake-openapi")) {
+    void import("../../../../../../../testenv/specs/teamcity.json?raw").then((m: { default: string }) => (teamcitySpec = m.default));
+  }
+  return () => {
+    specs ??= {
+      "api/openapi.yaml": PETS_30_YAML,
+      "api/split.yaml": SPLIT_31_YAML,
+      "api/schemas/order.yaml": ORDER_YAML,
+      "api/paths/items.yaml": ITEMS_YAML,
+      "api/big.yaml": bigSpec(5000),
+      "api/payments.json": DEEP_30_JSON,
+      "api/model.json": MODEL_31_JSON,
+    };
+    if (teamcitySpec !== null && specs["api/teamcity.json"] === undefined) specs["api/teamcity.json"] = teamcitySpec;
+    return specs;
+  };
+})();
+
+/**
+ * `?fake-xml` (the XML view, 2026-11-23): the two openTRANS orders, the POM, the JSON view's export, the image and the
+ * contract the orders name, from `fixtures/doc/files/tidewater/ledger-api/`, as the seed pushes them (made by the clickdummy's data script,
+ * `fixtures/doc/SOURCE.md`).
+ */
+const XML_ROOT = "../../../../../../../fixtures/doc/files/tidewater/ledger-api/";
+const XML_TEXT = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.{xml,json}", { query: "?raw", import: "default", eager: true });
+const XML_BYTES = import.meta.glob<string>("../../../../../../../fixtures/doc/files/tidewater/ledger-api/**/*.{png,pdf}", { query: "?url", import: "default", eager: true });
+const xmlOn = () => new URLSearchParams(globalThis.location?.search).has("fake-xml");
+/**
+ * What `?fake-xml` holds once read: the fixture's binary files, by path, and `?fake-xml-big`'s order, the first item
+ * repeated to about 50 MB (the design's section 3), made once. Kept as a seed is, so a test starts with neither.
+ */
+const xmlHeld: { binary: Map<string, Uint8Array>; big: string | null } = { binary: new Map(), big: null };
+keepSeed(xmlHeld);
+function madeBig(order: string): string {
+  if (xmlHeld.big !== null) return xmlHeld.big;
+  const from = order.indexOf("<ORDER_ITEM>");
+  const to = order.indexOf("</ORDER_ITEM>", from) + "</ORDER_ITEM>".length;
+  const item = order.slice(from, to);
+  const times = Math.max(1, Math.floor((50 * 1024 * 1024 - order.length) / (item.length + 5)));
+  xmlHeld.big = order.slice(0, to) + `\n    ${item}`.repeat(times) + order.slice(to);
+  return xmlHeld.big;
+}
+function xmlFiles(): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (new URLSearchParams(globalThis.location?.search).has("fake-xml-big")) {
+    const order = Object.entries(XML_TEXT).find(([f]) => f.endsWith("order-4710.xml"))?.[1];
+    if (order !== undefined) out["orders/order-big.xml"] = madeBig(order);
+  }
+  for (const [file, text] of Object.entries(XML_TEXT)) out[file.slice(XML_ROOT.length)] = text;
+  out["media/kugellager-6204-2rs.png"] = "";
+  out["contracts/rahmenvertrag-2026.pdf"] = "";
+  return out;
+}
+if (xmlOn()) {
+  for (const [file, url] of Object.entries(XML_BYTES)) {
+    const at = file.slice(XML_ROOT.length);
+    void fetch(url).then((r) => r.arrayBuffer()).then((b) => xmlHeld.binary.set(at, new Uint8Array(b)), () => {});
+  }
+}
+
+/**
+ * `?fake-xsd` (the schema explorer, 2026-11-23): the four schema families of `fixtures/xsd/`, as a repository would
+ * hold them. openTRANS stands where `?fake-xml`'s orders name it (`schemas/opentrans/`); `schemas/mixed/` is the same
+ * set with BME's own `bmecat_2005.xsd` beside it, which declares another namespace (the design's section 2, item 2).
+ */
+const XSD_ROOT = "../../../../../../../fixtures/xsd/";
+const XSD_TEXT = import.meta.glob<string>("../../../../../../../fixtures/xsd/**/*.xsd", { query: "?raw", import: "default" });
+/** The families' texts, read once `?fake-xsd` is asked for, never otherwise: 3.9 MB the other fakes do without. */
+const xsdHeld = new Map<string, string>();
+keepSeed(xsdHeld);
+if (new URLSearchParams(globalThis.location?.search).has("fake-xsd")) {
+  for (const [file, load] of Object.entries(XSD_TEXT)) void load().then((text) => xsdHeld.set(file, text), () => {});
+}
+function xsdFiles(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [file, text] of xsdHeld) {
+    const rel = file.slice(XSD_ROOT.length);
+    const [family, ...rest] = rel.split("/");
+    const at = rest.join("/");
+    if (family === "opentrans-2.1") {
+      out[`schemas/opentrans/${at}`] = text;
+      if (at !== "bmecat_2005.xsd") out[`schemas/mixed/${at}`] = text;
+    } else if (family === "bmecat-2005fd") out[`schemas/mixed/${at}`] = text;
+    else if (family === "ubl-2.1") out[`ubl/${at}`] = text;
+    else if (family === "cii-d16b") out[`cii/${at}`] = text;
+  }
+  return out;
+}
+
 const binaryOf = (path: string) => (new URLSearchParams(globalThis.location?.search).has("fake-binary") ? BINARY[path] : undefined);
 
 function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
@@ -435,6 +602,16 @@ function filesOf(repoId: string, branch: string | null): Record<string, string> 
       ...(query.has("fake-pipeline") ? Object.fromEntries(Object.keys(WRAPPED).map((path) => [path, ""])) : {}),
       // `?fake-binary` (#2260): binary files; the text here is a stand-in, `binaryOf` has their bytes.
       ...(query.has("fake-binary") ? Object.fromEntries(Object.keys(BINARY).map((path) => [path, ""])) : {}),
+      ...(query.has("fake-openapi") ? openapiFiles() : {}),
+      ...(query.has("fake-xml") ? xmlFiles() : {}),
+      ...(query.has("fake-xsd") ? xsdFiles() : {}),
+      // `?fake-ascii` (2026-11-21): ASCII art, box drawing and arrows, for the code face (`../../fake-ascii.ts`).
+      ...(asciiArt() ? { "docs/states.txt": ASCII_AFTER } : {}),
+      // `?fake-jar` (ux19): a library JAR and a Spring Boot fat JAR; `fake/jar.ts` answers the archive reads.
+      ...(query.has("fake-jar") ? Object.fromEntries(Object.keys(JAR_FILES).map((path) => [path, ""])) : {}),
+      // `?fake-render-page=<words>` (2026-11-17): a long page the saved *Cat* renderer draws as HTML, shaped by the words
+      // as a folder renderer's `page` is (`fakePage`: `hidden`, `vh`, `wide`, `fixed`, `inner`).
+      ...(query.has("fake-render-page") ? { "docs/report.cat.html": fakePage("docs/report.cat.html", `page ${query.get("fake-render-page") ?? ""}`) } : {}),
     };
     // `?fake-file-lines=<n>` (perf audit, #2200's class): one file of `n` lines.
     const n = Number(query.get("fake-file-lines") ?? 0) || 0;
@@ -466,7 +643,7 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
     if (!path.startsWith(prefix)) continue;
     const rest = path.slice(prefix.length);
     if (rest.includes("/")) dirs.add(rest.slice(0, rest.indexOf("/")));
-    else entries.push({ name: rest, kind: "file", size: binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
+    else entries.push({ name: rest, kind: "file", size: jarSize(path) ?? binaryOf(path)?.().length ?? text.length, section: `file:${path}` });
   }
   return [
     ...[...dirs].sort().map((name): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${prefix}${name}` })),
@@ -474,12 +651,11 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
   ];
 }
 
-const age = (at: string) => {
-  const days = Math.max(0, Math.round((Date.parse("2026-08-22T14:30:00Z") - Date.parse(at)) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
-};
+/** An age in the words the adapters write (`knobas_source::view::ago`), against the fixture's clock: an ISO date past a day, which the read turns into words. */
+const age = (at: string) => (agoStamp(at, new Date(SYNCED_AT)) ?? ago(at, new Date(SYNCED_AT)));
 
-function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
+/** A commit row, the same in every list, as the adapter's `commit_row` is. */
+export function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
   return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null, author };
 }
 
@@ -523,6 +699,26 @@ const PAYOUT_BRANCHES: {
   { name: "chore/bump-tokio", ahead: 0, behind: 6, pr: null, tip: ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-17T10:15:00Z"] },
 ];
 
+/**
+ * `?fake-branch-pulls` (the compare-first-open pass, 2026-11-20): the mirror's `repo_branch_pulls` of `payout-service`,
+ * from the branches above, as the real mirror answers it: each branch with its tip and the pull request open from it. By
+ * default the fixture's mirror lists none, so the header reads each branch's view; Compare pressed before its standing
+ * lands then draws *New pull request* over a branch whose standing says a pull request is open.
+ */
+export function payoutBranchPulls(repoId: string): BranchPull[] {
+  if (repoId !== PAYOUT) return [];
+  return [
+    { entity_id: `${PAYOUT}@refs/heads/main`, name: "main", tip: "5d77e1a2c3b4", is_default: true, pull: null },
+    ...PAYOUT_BRANCHES.map(({ name, pr, tip }) => ({
+      entity_id: `${PAYOUT}@refs/heads/${name}`,
+      name,
+      tip: tip[0],
+      is_default: false,
+      pull: pr === null ? null : { branch: name, entity_id: pr, cell: `#${pr.slice(pr.lastIndexOf("#") + 1)}` },
+    })),
+  ];
+}
+
 // `code_facts` for the branches above and `main` (#986): the mirror holds every
 // branch, its author its tip's.
 CODE_FACTS.push((ids) =>
@@ -531,6 +727,13 @@ CODE_FACTS.push((ids) =>
     ...PAYOUT_BRANCHES.map(({ name, tip }) => ({ name, author: tip[2] })),
   ]
     .map(({ name, author }) => ({ entity_id: `${PAYOUT}@refs/heads/${name}`, author }))
+    .filter(({ entity_id }) => ids.has(entity_id))
+    .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
+);
+
+// The branch's commits, whose author the mirror holds as the adapter's rows name it.
+CODE_FACTS.push((ids) =>
+  PAYOUT_COMMITS.map(([sha, , author]) => ({ entity_id: payoutCommitId(sha), author }))
     .filter(({ entity_id }) => ids.has(entity_id))
     .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
 );
@@ -642,6 +845,11 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
       { type: "file", trail: [], path, text: "", language: null, size: wrapped.size, truncated: false, binary: true, url: null, sha: blobOf(wrapped.inner), commit: ref },
     ]);
   }
+  const jar = jarSize(path);
+  if (jar !== undefined)
+    return section(id, "Files", [
+      { type: "file", trail: [], path, text: "", language: null, size: jar, truncated: false, binary: true, url: null, sha: blobOf(path), commit: ref },
+    ]);
   const bytes = binaryOf(path)?.();
   if (bytes !== undefined)
     return section(id, "Files", [
@@ -677,8 +885,15 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   const commitAt = PAYOUT_COMMITS.findIndex(([sha]) => payoutCommitId(sha) === entityId);
   const pdf = PDF_DIFF[path];
   if (commitAt !== -1 && commitAt <= 1 && pdf !== undefined && pdfDiffOn()) return pdf[commitAt === 0 ? 1 : 0]();
+  if (commitAt !== -1) {
+    const schema = xsdDiffSide(commitAt, path) ?? docDiffSide(commitAt, path);
+    if (schema !== undefined) return new TextEncoder().encode(schema);
+  }
   if (commitAt !== -1 && renderedDiffOn()) {
     if (path === "docs/img/logo.png" && commitAt <= 1) return commitAt === 0 ? bytesOf(LOGO_AFTER) : PAYOUT_IMAGES[path]!();
+    // A text side as bytes, as the app reads every rendered side (the stage pass, 2026-11-20).
+    const text = renderedDiffSide(commitAt, path);
+    if (typeof text === "string") return new TextEncoder().encode(text);
     throw { code: "not_found", message: `gitea: no file ${path} at this commit`, source_id: null };
   }
   const branchAt = entityId.indexOf("@refs/heads/");
@@ -688,6 +903,8 @@ export function repoFileBytes(entityId: string, path: string): Uint8Array | unde
   if (files === null) return undefined;
   // A wrapped fixture's bytes start as gzip's do, so the viewer offers its unwrap (#2265).
   if (WRAPPED[path] !== undefined) return Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0x03);
+  const held = repoId === PAYOUT ? xmlHeld.binary.get(path) : undefined;
+  if (held !== undefined) return held;
   const image = repoId === PAYOUT ? (binaryOf(path) ?? PAYOUT_IMAGES[path]) : undefined;
   const text = files[path];
   if (image === undefined && text === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
@@ -742,7 +959,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
     // `?fake-diff-lines=<n>` (#2269): forty more files of n/40 added lines each.
     const bulk = Number(new URLSearchParams(globalThis.location?.search).get("fake-diff-lines") ?? 0) || 0;
     const more = bulk === 0 ? [] : Array.from({ length: 40 }, (_, f) => diffOf(`bulk/f${String(f).padStart(2, "0")}.rs`, "", Array.from({ length: Math.ceil(bulk / 40) }, (_, i) => `let v${f}_${i} = ${i};`).join("\n")));
-    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
+    const diff = section("diff", "Diff", [{ type: "diff", files: [...(at === 0 && xsdDiffOn() ? xsdDiffFiles() : []), ...(at === 0 && docDiffOn() ? docDiffFiles() : []), diffOf(path, before, after), ...(at === 0 && renderedDiffOn() ? renderedDiffFiles() : []), ...(at === 0 && pdfDiffOn() ? pdfDiffFiles() : []), ...(at === 0 && diffPipelineOn() ? diffPipelineFiles() : []), ...more], truncated: false, commentable: null, gone: [] }], 1 + more.length);
     // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
     const from = { value: commit[0], label: commit[0].slice(0, 10) };
     const actions =
@@ -782,8 +999,15 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
       sides.set(path, [sides.get(path)?.[0] ?? before, after]);
     }
     const diffs = [...sides].map(([path, [before, after]]) => diffOf(path, before, after));
-    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest.
-    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits: [] };
+    // What it is between (#2310): the commit before the oldest (main's tip below the first), and the newest; and the
+    // commits it carries, newest first, as Gitea's compare lists them (2026-11-13: Compare draws them from the default branch).
+    // A head named by another branch than the job's lists that branch's own commits, as its view does: Compare draws the
+    // compare's commits wherever it lists them (the compare pass, 2026-11-13).
+    const other = at(head) === -1 && head !== FEATURE_NAME ? (PAYOUT_BRANCHES.find((b) => b.name === head) ?? BULK_BRANCHES.find((b) => b.name === head)) : undefined;
+    const listed: (readonly [string, string, string, string])[] =
+      other !== undefined ? (other.ahead === 0 ? [] : [other.tip]) : PAYOUT_COMMITS.slice(newest, oldest + 1).map(([sha, subject, author, at]) => [sha, subject, author, at] as const);
+    const commits = listed.map(([sha, subject, author, at]) => ({ sha, title: subject, meta: `${author} · ${age(at)}` }));
+    const range = { repository: PAYOUT, base: PAYOUT_COMMITS[oldest + 1]?.[0] ?? PAYOUT_MAIN_SHA, head: PAYOUT_COMMITS[newest]![0], commits };
     return one(section(sectionId, "Diff", [{ type: "diff", files: diffs, truncated: false, commentable: null, gone: [], range }], diffs.length));
   }
   // A file whole at one of the branch's commits or main's tip (#2310): `file@<sha>:<path>`.
@@ -798,7 +1022,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   }
   if (sectionId === "branches") {
     const rows: ViewRow[] = [
-      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
+      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 2026-08-21", tone: "muted", chip: "default", url: null },
       ...(repoId === PAYOUT
         ? [...PAYOUT_BRANCHES, ...BULK_BRANCHES].map(({ name, tip }) => ({
             entity_id: `${PAYOUT}@refs/heads/${name}`,
@@ -875,6 +1099,8 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
   const files = filesOf(repoId, branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length));
   if (files === null) return undefined;
+  // A value pipeline (ADR-0059): its value taken out of the file, then the steps a value is wrapped in.
+  if (steps[0]?.step === "take" && files[path] !== undefined) return fakeValuePiped(files[path], steps);
   let gz = WRAPPED[path];
   const read = gz === undefined ? files[path] : "";
   if (read === undefined) throw { code: "not_found", message: `gitea: no file ${path}`, source_id: null };
@@ -911,4 +1137,46 @@ export function repoFilePiped(entityId: string, path: string, steps: PipeStep[])
   }
   if (gz !== undefined) return { outcome: "done", name, output: { kind: "bytes", base64: "H4sIAAAAAAAAAw==", size: gz.size } };
   return { outcome: "done", name, output: { kind: "text", text } };
+}
+
+/** A value pipeline in the dev fake: `take` and the steps that need no decompressor, on the file's text. */
+export function fakeValuePiped(text: string, steps: PipeStep[]): PipeRun {
+  let bytes = new TextEncoder().encode(text.replace(/^\uFEFF/, ""));
+  const decode = (b: Uint8Array) => new TextDecoder().decode(b);
+  const named: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+  const refs = (s: string) =>
+    s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (whole, n: string) => named[n] ?? (n.startsWith("#x") || n.startsWith("#X") ? String.fromCodePoint(parseInt(n.slice(2), 16)) : n.startsWith("#") ? String.fromCodePoint(Number(n.slice(1))) : whole));
+  for (const [index, step] of steps.entries()) {
+    const fail = (error: string): PipeRun => ({ outcome: "failed", failure: { index, name: step.step, why: "error", error, input: { size: bytes.length, head: decode(bytes.subarray(0, 256)), binary: false } } });
+    try {
+      if (step.step === "take") {
+        if (step.to > bytes.length || step.from > step.to) return fail(`the value's place, bytes ${step.from} to ${step.to}, is not in the file`);
+        const cut = decode(bytes.subarray(step.from, step.to));
+        bytes = new TextEncoder().encode(step.read === "xml_text" ? refs(cut.replace(/<!\[CDATA\[|\]\]>/g, "")) : step.read === "xml_attribute" ? refs(cut) : cut);
+      } else if (step.step === "base64_decode") {
+        const raw = atob(decode(bytes).replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/"));
+        bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+      } else if (step.step === "url_decode") {
+        bytes = new TextEncoder().encode(decodeURIComponent(decode(bytes)));
+      } else if (step.step === "unescape") {
+        bytes = new TextEncoder().encode(refs(decode(bytes)));
+      } else if (step.step === "json_string") {
+        const t = decode(bytes).trim();
+        bytes = new TextEncoder().encode(JSON.parse(t.startsWith('"') ? t : `"${t}"`) as string);
+      } else if (step.step === "jwt") {
+        const [h, p] = decode(bytes).trim().split(".");
+        const part = (x: string | undefined) => JSON.parse(atob((x ?? "").replace(/-/g, "+").replace(/_/g, "/"))) as unknown;
+        bytes = new TextEncoder().encode(`${JSON.stringify({ header: part(h), payload: part(p), signature: "not checked: knobas has no key to check it with" }, null, 2)}\n`);
+      } else return fail(`the dev fake does not run ${step.step} on a value`);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+  try {
+    return { outcome: "done", name: "value", output: { kind: "text", text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) } };
+  } catch {
+    let raw = "";
+    for (const b of bytes) raw += String.fromCharCode(b);
+    return { outcome: "done", name: "value", output: { kind: "bytes", base64: btoa(raw), size: bytes.length } };
+  }
 }

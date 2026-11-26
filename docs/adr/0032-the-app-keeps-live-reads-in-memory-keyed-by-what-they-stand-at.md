@@ -4,6 +4,8 @@ status: accepted
 
 # The app keeps live reads in memory, keyed by what they stand at
 
+*Amended 2026-11-09 by [ADR-0042](0042-a-page-shows-what-knobas-last-read-and-reads-the-source-behind-it.md): a page's reads are also held between sessions in `sync.held_read`, never in the mirror's tables, and a page's read of a live view is kept and read again behind as a moving one is. "Never in the database or on disk" below reads "never in the mirror's tables".*
+
 A [source view](../../CONTEXT.md#source-view) was a live read that was never stored: opening a file twice at one commit cost Gitea the same round trips twice. Decided 2026-10-30 (Björn, Code-area speed grilling, spec #2234 *Step 1*): **the app process keeps live reads in memory, never in the database or on disk, keyed by what they stand at.**
 
 - **Fixed reads are kept for the session.** A read that names a whole commit sha (a file or a directory at the commit, a commit's diff, later a compare between two shas and a pull request's diff at its head) cannot change, so the same ask is answered from memory with no request to the source. A pull request's *Files* carries its reviews' threads, which move, so it cannot be a fixed view: its diff is kept by the built source instead, bounded by bytes and dropped with the source, keyed by what the `.diff` stands at, not by the record's head: the merge base the record names and the newest commit of the pull request's commits listing, which follows `refs/pull/N/head` as the `.diff` does. Forgejo's record names a pushed head seconds before its queue moves that ref, so a diff is kept only when the listing's head is the record's head before and after the `.diff` is read (amended 2026-10-30, #2321, measured on Gitea 1.27 and Forgejo 17; Gitea's `view::pr::diffs`).

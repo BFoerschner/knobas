@@ -5,7 +5,7 @@
 import { expect, test } from "vitest";
 
 import type { ChainStep, ChainStepRow, RunRow } from "../../ipc/entity";
-import { chainBox, chainSentence } from "./chain";
+import { chainBox, chainPlace, chainSentence, chainWindow, repositoryShortName } from "./chain";
 
 const P = (id: string) => `teamcity:buildType:Payout_${id}`;
 const CHAIN: ChainStep[] = [
@@ -77,4 +77,32 @@ test("a step that has not run on the branch opens its pipeline", () => {
     tone: "none",
     here: false,
   });
+});
+
+test("the header's sign says the step and how many there are, nothing outside a chain", () => {
+  expect(chainPlace(CHAIN, P("Docker"))).toEqual({ step: 2, of: 3 });
+  expect(chainPlace(CHAIN, P("Elsewhere"))).toBeNull();
+  expect(chainPlace([CHAIN[1]!], P("Docker"))).toBeNull();
+});
+
+test("a chain of up to seven steps draws every box; a longer one folds its middle around the run's own", () => {
+  expect(chainWindow(7, 3)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  // Step 64 of 70: the first, 62 to 66 around it, the last.
+  expect(chainWindow(70, 63)).toEqual([0, null, 61, 62, 63, 64, 65, null, 69]);
+  // Near an end, a gap of one step draws the step, not a fold.
+  expect(chainWindow(10, 3)).toEqual([0, 1, 2, 3, 4, 5, null, 9]);
+  expect(chainWindow(10, 0)).toEqual([0, 1, 2, null, 9]);
+  expect(chainWindow(10, 9)).toEqual([0, null, 7, 8, 9]);
+  // No step of the run's own: the first steps and the last.
+  expect(chainWindow(10, -1)).toEqual([0, 1, 2, 3, 4, null, 9]);
+});
+
+test("a repository named by its address is its own name; any other name is itself", () => {
+  expect(repositoryShortName("https://git.example.com/org/very-long-repo.git#refs/heads/main")).toBe("very-long-repo");
+  expect(repositoryShortName("ssh://git@git.example.com:7999/team/sub/repo.git")).toBe("repo");
+  expect(repositoryShortName("git@github.com:acme/widgets.git")).toBe("widgets");
+  expect(repositoryShortName("http://gitea.example/tidewater/payout-service/")).toBe("payout-service");
+  expect(repositoryShortName("https://git.example.com/")).toBe("https://git.example.com/");
+  expect(repositoryShortName("payout-service")).toBe("payout-service");
+  expect(repositoryShortName("Payouts / main repo")).toBe("Payouts / main repo");
 });

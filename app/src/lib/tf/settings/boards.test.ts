@@ -35,6 +35,7 @@ function view(id: string, position: number, ref: string | null, source: SavedVie
     card_fields: [],
     list_columns: ["key"],
     list_sort: null,
+    show_all: false,
     saved_view: ref,
     count: 0,
     unreadable: null,

@@ -1,0 +1,11 @@
+[
+  ["com:# The payout service's settings."],
+  ["key:payout.retry.limit",":=","str:3"],
+  ["key:payout.retry.backoff",": =","str: 250ms"],
+  ["key:payout.gateway.url",":=","str:http://localhost:8080/api"],
+  ["com:! a bang comment"],
+  ["key:spring.datasource.password",":=","str:${DB_PASSWORD}"],
+  ["key:multi.line",":=","str:first \\"],
+  [":  second"],
+  []
+]

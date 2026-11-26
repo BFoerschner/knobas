@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
-use tauri::{Assets, Context, Runtime};
+use tauri::{Assets, Context, Manager, Runtime};
 
 /// The response a webview's `tauri://` handler may rewrite.
 pub type AssetResponse = Response<Cow<'static, [u8]>>;
@@ -127,6 +127,8 @@ impl<R: Runtime> BundleAssets<R> {
 pub fn open_main_window<R: Runtime>(
     app: &tauri::App<R>,
     bundle: &BundleAssets<R>,
+    demo: bool,
+    default_theme: bool,
 ) -> tauri::Result<()> {
     let main = app
         .config()
@@ -136,15 +138,166 @@ pub fn open_main_window<R: Runtime>(
         .find(|window| window.label == "main")
         .expect("tauri.conf.json declares the main window")
         .clone();
-    tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
-        .on_web_resource_request(bundle.answer_missing_with_404())
-        .build()?;
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+        .on_web_resource_request(bundle.answer_missing_with_404());
+    // `knobas --default-theme` (ADR-0055): the page reads it before anything it kept.
+    for script in crate::window_look::init_scripts(default_theme) {
+        builder = builder.initialization_script(script);
+    }
+    // The look the page last kept, or knobas's own themes before it has kept one: the window and its web view are
+    // built with the title bar's side and the page colour of the side drawn, so every frame before the page paints
+    // is the theme's. Where the look follows the system, its side is read before the window is built where the
+    // platform says it (Windows: WebView2 takes its colour only when it is made, and one given later shows only after
+    // the page's first paint); elsewhere the colour is set again once the window exists. Not built hidden and shown
+    // after: on macOS a web view made hidden never loaded its page once shown (the real window, 2026-11-22). On macOS
+    // the web view draws no white of its own, so the window's colour is what shows until the page's first paint;
+    // there a profile with no kept look keeps the system's window colour, as before (not checked in a Mac window).
+    #[cfg(target_os = "macos")]
+    {
+        builder = crate::window_look::without_white(builder);
+    }
+    let kept =
+        app.path().app_data_dir().ok().and_then(|data| {
+            crate::window_look::read(&crate::profile::Profile::new(demo, &data).dir)
+        });
+    let look = kept.or_else(|| {
+        cfg!(not(target_os = "macos")).then(crate::window_look::WindowLook::knobas_own)
+    });
+    let start = look
+        .as_ref()
+        .map(|look| look_for_window(look, crate::window_look::system_dark()));
+    if let Some(start) = &start {
+        builder = builder.theme(start.theme).background_color(start.colour);
+    }
+    let window = builder.build()?;
+    if let (Some(look), Some(start)) = (&look, &start)
+        && start.side_after_build
+    {
+        let system_dark = matches!(window.theme(), Ok(tauri::Theme::Dark));
+        let _ = window.set_background_color(Some(look.colour(system_dark)));
+    }
+    crate::webview_menu::trim(&window);
     Ok(())
+}
+
+/// How the main window starts from a look.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowStart {
+    /// The title bar's side: `None` follows the system.
+    pub theme: Option<tauri::Theme>,
+    /// The page colour the window and its web view are built with.
+    pub colour: tauri::window::Color,
+    /// The look follows the system and its side was not known before the window existed: the colour is set again
+    /// for the window's side once it is built.
+    pub side_after_build: bool,
+}
+
+/// What a window is given from a look: the title bar's side and the page colour of the side drawn, `system_dark`
+/// the system's side where it is known before the window is built (light until the window says otherwise).
+#[must_use]
+pub fn look_for_window(
+    look: &crate::window_look::WindowLook,
+    system_dark: Option<bool>,
+) -> WindowStart {
+    WindowStart {
+        theme: look.theme(),
+        colour: look.colour(system_dark.unwrap_or(false)),
+        side_after_build: look.theme().is_none() && system_dark.is_none(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With a kept look the window is given the title bar's side and the page colour; the mode decides the side.
+    #[test]
+    fn a_kept_look_gives_the_window_its_side_and_colour() {
+        let dark = crate::window_look::WindowLook::new("dark", "#E4E8EC", "#21222C").expect("look");
+        assert_eq!(
+            look_for_window(&dark, Some(false)),
+            WindowStart {
+                theme: Some(tauri::Theme::Dark),
+                colour: tauri::window::Color(0x21, 0x22, 0x2C, 255),
+                side_after_build: false,
+            }
+        );
+        let light =
+            crate::window_look::WindowLook::new("light", "#E4E8EC", "#21222C").expect("look");
+        assert_eq!(
+            look_for_window(&light, Some(true)),
+            WindowStart {
+                theme: Some(tauri::Theme::Light),
+                colour: tauri::window::Color(0xE4, 0xE8, 0xEC, 255),
+                side_after_build: false,
+            }
+        );
+        // A fixed side needs no system side, known or not.
+        assert!(!look_for_window(&dark, None).side_after_build);
+        assert_eq!(
+            look_for_window(&dark, None).colour,
+            tauri::window::Color(0x21, 0x22, 0x2C, 255)
+        );
+    }
+
+    /// Following the system, the window is built with the system's side where it is known before the window exists
+    /// (Windows, where WebView2 takes its colour only when it is made): the boot check saw the light colour until the
+    /// page's first paint on a dark system when the dark one came only after the build. Where it is not known, the
+    /// light side is built and the colour is set again once the window says its side.
+    #[test]
+    fn following_the_system_the_window_is_built_in_the_side_known_before_it_exists() {
+        let system =
+            crate::window_look::WindowLook::new("system", "#E4E8EC", "#12171C").expect("look");
+        assert_eq!(
+            look_for_window(&system, Some(true)),
+            WindowStart {
+                theme: None,
+                colour: tauri::window::Color(0x12, 0x17, 0x1C, 255),
+                side_after_build: false,
+            }
+        );
+        assert_eq!(
+            look_for_window(&system, Some(false)),
+            WindowStart {
+                theme: None,
+                colour: tauri::window::Color(0xE4, 0xE8, 0xEC, 255),
+                side_after_build: false,
+            }
+        );
+        assert_eq!(
+            look_for_window(&system, None),
+            WindowStart {
+                theme: None,
+                colour: tauri::window::Color(0xE4, 0xE8, 0xEC, 255),
+                side_after_build: true,
+            }
+        );
+    }
+
+    /// A profile with no kept look starts on knobas's own themes: knobas Dark's page on a dark system, not white.
+    #[test]
+    fn with_no_kept_look_the_window_is_knobas_s_own_page_colour_of_the_system_s_side() {
+        let own = crate::window_look::WindowLook::knobas_own();
+        assert_eq!(
+            look_for_window(
+                &own,
+                crate::window_look::dark_from_apps_use_light_theme(Some(0))
+            ),
+            WindowStart {
+                theme: None,
+                colour: tauri::window::Color(0x12, 0x17, 0x1C, 255),
+                side_after_build: false,
+            }
+        );
+        assert_eq!(
+            look_for_window(
+                &own,
+                crate::window_look::dark_from_apps_use_light_theme(Some(1))
+            )
+            .colour,
+            tauri::window::Color(0xE4, 0xE8, 0xEC, 255)
+        );
+    }
 
     /// What the bundle holds in the test below.
     struct Dist;

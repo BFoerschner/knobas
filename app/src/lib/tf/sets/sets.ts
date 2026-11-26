@@ -8,6 +8,8 @@
 import { counted } from "../counted";
 import { keyOf } from "../job/job";
 import type {
+  LinkSetDetail,
+  LinkSetDraft,
   LinkSetHint,
   LinkSetMemberKind,
   LinkSetMemberRow,
@@ -16,6 +18,31 @@ import type {
   LinkSetRuleRow,
 } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
+
+/**
+ * An asset member's line in words. The read sends *type id, environment* (`link_sets::line_of`): `container_engine, dev`
+ * draws as *Container engine, dev*. A type the estate no longer names reads with its underscores gone.
+ */
+export function assetLine(line: string, names: Readonly<Record<string, string>>): string {
+  const [type = "", ...rest] = line.split(", ");
+  const word = names[type] ?? (type.charAt(0).toUpperCase() + type.slice(1)).replaceAll("_", " ");
+  return [word, ...rest].join(", ");
+}
+
+/**
+ * Where *New link set* opens: a set nothing has been saved for yet. A slug has no
+ * `~`, so no real set can be called this. The first change saves it (`TfSetEditor`),
+ * and leaving before one leaves no row behind (F-527).
+ */
+export const NEW_SET = "~new";
+
+/** The name a set has until the reader gives it one. */
+export const NEW_SET_NAME = "New link set";
+
+/** What the editor draws at {@link NEW_SET}: `id` is empty until the first save answers with one. */
+export function blankSet(): LinkSetDetail {
+  return { id: "", name: NEW_SET_NAME, description: "", members: [], patterns: [], rules: [], shows_on: [], tickets: 0, mine: 0 };
+}
 
 /** The editor's panels, in prototype-6's order (R-7.7). */
 export const MEMBER_KINDS: readonly LinkSetMemberKind[] = ["repo", "pipeline", "page", "asset", "monitor"];
@@ -42,6 +69,12 @@ const KIND_ONE: Record<LinkSetMemberKind, string> = {
   monitor: "monitor",
 };
 
+/** A member's kind as a row's own word: *Repository*, *Page*. */
+export function kindOne(kind: LinkSetMemberKind): string {
+  const word = KIND_ONE[kind];
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 /** The rule kinds as the *Applies to* dropdown names them (prototype-6's `ruleRow`). */
 export const RULE_KINDS: readonly { kind: LinkSetRuleKind; label: string }[] = [
   { kind: "epic", label: "Every ticket under epic" },
@@ -64,6 +97,49 @@ export const APPLIES_BY: readonly { value: LinkSetRuleKind; label: string }[] = 
  * *Every sub-task of PAY-231*, *PAY-231, applied by hand*. The epic's title
  * follows its key only when the source gave it one of its own.
  */
+/** One row a ticket: two sources holding one key are one ticket. A row that is the reader's wins. */
+export function onePerKey<Row extends { entity_id: string; mine: boolean }>(rows: readonly Row[]): Row[] {
+  const seen = new Map<string, Row>();
+  for (const row of rows) {
+    const key = keyOf(row.entity_id);
+    const had = seen.get(key);
+    if (had === undefined || (!had.mine && row.mine)) seen.set(key, row);
+  }
+  return [...seen.values()];
+}
+
+/** A sentence in parts, its ticket keys apart: a key is mono wherever it appears. */
+export function keyWords(sentence: string): { text: string; key: boolean }[] {
+  return sentence
+    .split(/([A-Z][A-Z0-9]+-\d+)/)
+    .filter((text) => text !== "")
+    .map((text) => ({ text, key: /^[A-Z][A-Z0-9]+-\d+$/.test(text) }));
+}
+
+/** A rule's label in parts, its ticket key apart. */
+export function ruleWords(rule: LinkSetRuleRow): { text: string; key: boolean }[] {
+  return keyWords(ruleLabel(rule));
+}
+
+/** One thing the editor removed at once, enough to put it back where it stood. */
+export type Removed =
+  | { list: "members"; at: number; item: LinkSetDraft["members"][number] }
+  | { list: "patterns"; at: number; item: LinkSetDraft["patterns"][number] }
+  | { list: "rules"; at: number; item: LinkSetDraft["rules"][number] };
+
+/** *Undo*: each removed thing back at its place, newest first, unless the set holds it again already. */
+export function putBack(draft: LinkSetDraft, removed: readonly Removed[]): void {
+  for (const gone of [...removed].reverse()) {
+    if (gone.list === "members") {
+      if (!draft.members.some((held) => held.entity_id === gone.item.entity_id)) draft.members.splice(gone.at, 0, gone.item);
+    } else if (gone.list === "patterns") {
+      if (!draft.patterns.some((held) => held.kind === gone.item.kind && held.query === gone.item.query)) draft.patterns.splice(gone.at, 0, gone.item);
+    } else if (!draft.rules.some((held) => held.kind === gone.item.kind && held.value === gone.item.value)) {
+      draft.rules.splice(gone.at, 0, gone.item);
+    }
+  }
+}
+
 export function ruleLabel(rule: LinkSetRuleRow): string {
   // The value is an entity id or `<source>:<project key>`: either way, its key half.
   const key = keyOf(rule.value);
@@ -132,6 +208,14 @@ export function patternQuery(kind: LinkSetMemberKind, project: string, text: str
   if (kind === "pipeline") parts.push(`name:${grammarValue(typed || "*")}`);
   else if (typed) parts.push(`under:${grammarValue(typed)}`);
   return parts.join(" ");
+}
+
+/**
+ * A pattern as the reader reads it: a page's `project:` is the *Space* its dialog
+ * asked for, one word for one thing. The stored query stays as the backend reads it.
+ */
+export function patternShown(kind: LinkSetMemberKind, query: string): string {
+  return kind === "page" ? query.replace(/(^|\s)project:/, "$1space:") : query;
 }
 
 /**

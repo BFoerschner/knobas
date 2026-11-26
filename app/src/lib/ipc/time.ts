@@ -20,7 +20,7 @@
  * from {@link RunningTimer.started_at}. Adding a channel would be a second
  * thing to keep in step with the first.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type {
   AdHocBlock,
   Block,

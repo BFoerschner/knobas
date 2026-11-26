@@ -1,0 +1,21 @@
+[
+  ["kw:import",": { invoke } ","kw:from",": ","str:\"@tauri-apps/api/core\"",":;"],
+  [],
+  ["com:/** A source's item, as the mirror holds it. */"],
+  ["kw:export",": ","kw:interface",": ","ty:Entity",":<","ty:T",": = ","ty:unknown",":> {"],
+  [":  id: ","ty:string",":;"],
+  [":  kind: ","str:\"ticket\"",": | ","str:\"pr\"",":;"],
+  [":  fields: ","ty:T",":;"],
+  [":}"],
+  [],
+  ["kw:export",": ","kw:const",": ","ty:RETRY",": = ","con:/retry-(\\d+)/g",":;"],
+  [],
+  ["kw:export",": ","kw:async",": ","kw:function",": ","fn:read",":(id: ","ty:string",":, tries = ","num:3",":): ","ty:Promise",":<","ty:Entity",": | ","con:null",":> {"],
+  [":  ","kw:for",": (","kw:let",": i = ","num:0",":; i < tries; i += ","num:1",":) {"],
+  [":    ","kw:const",": got = ","kw:await",": invoke<","ty:Entity",":>(","str:\"get_entity\"",":, { id });"],
+  [":    ","kw:if",": (got?.","prop:id",":) ","kw:return",": { ...got, ","prop:kind",":: got.","prop:kind",": ?? ","str:\"ticket\"",": };"],
+  [":  }"],
+  [":  ","kw:return",": ","con:null",":; ","com:// gave up"],
+  [":}"],
+  []
+]

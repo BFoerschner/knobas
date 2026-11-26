@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { parseTfHash, sectionOf } from "../tf/route";
 import { settingsPlace } from "../tf/settings/settings";
-import { filterActions, navigationActions } from "./actions";
+import { filterActions, matchingPlaces, navigationActions, placeActions } from "./actions";
 
 /**
  * #1417: `>` with an empty query is the app's navigation menu (spec §4): the
@@ -15,24 +15,36 @@ test("the palette lists every section the shell has an address for, in the top b
     "Inbox",
     "Code",
     "Builds",
+    "Builds › Recent runs",
     "Docs",
+    "Passwords",
     "Monitors",
+    "Assets",
     "Link sets",
     "Time",
     "Settings",
     "Settings › Sources",
-    "Settings › Checkouts and Open in…",
+    "Settings › Checkouts and Open in",
+    "Settings › Commands",
     "Settings › Time",
     "Settings › Desktop notifications",
     "Settings › Standup",
     "Settings › Monitoring",
+    "Settings › Docs",
+    "Settings › Search",
     "Settings › Notes and capture",
     "Settings › Backup and export",
     "Settings › Appearance",
+    "Settings › Appearance › Theme",
+    "Settings › Appearance › Code colours",
+    "Settings › Appearance › Fonts",
     "Settings › Performance",
     "Settings › Renderers",
+    "Settings › API servers",
     "Settings › Keyboard",
     "Settings › Logs and database",
+    "Settings › Updates",
+    "Put knobas's themes back",
   ]);
 });
 
@@ -54,24 +66,37 @@ test("every row's address parses back to the section it names", () => {
     ["Inbox", "inbox"],
     ["Code", "code"],
     ["Builds", "builds"],
+    ["Builds › Recent runs", "builds"],
     ["Docs", "docs"],
+    ["Passwords", "passwords"],
     ["Monitors", "monitors"],
+    ["Assets", "assets"],
     ["Link sets", "sets"],
     ["Time", "time"],
     ["Settings", "settings"],
     ["Settings › Sources", "settings/sources"],
-    ["Settings › Checkouts and Open in…", "settings/checkouts"],
+    ["Settings › Checkouts and Open in", "settings/checkouts"],
+    ["Settings › Commands", "settings/commands"],
     ["Settings › Time", "settings/time"],
     ["Settings › Desktop notifications", "settings/notifications"],
     ["Settings › Standup", "settings/standup"],
     ["Settings › Monitoring", "settings/monitoring"],
+    ["Settings › Docs", "settings/docs"],
+    ["Settings › Search", "settings/search"],
     ["Settings › Notes and capture", "settings/notes"],
     ["Settings › Backup and export", "settings/backup"],
     ["Settings › Appearance", "settings/appearance"],
+    ["Settings › Appearance › Theme", "settings/theme"],
+    ["Settings › Appearance › Code colours", "settings/code-colours"],
+    ["Settings › Appearance › Fonts", "settings/fonts"],
     ["Settings › Performance", "settings/performance"],
     ["Settings › Renderers", "settings/renderers"],
+    ["Settings › API servers", "settings/api-servers"],
     ["Settings › Keyboard", "settings/keyboard"],
     ["Settings › Logs and database", "settings/logs"],
+    ["Settings › Updates", "settings/updates"],
+    // The one action that does something: its address is the page it acts on (ADR-0055).
+    ["Put knobas's themes back", "settings/theme"],
   ]);
 });
 
@@ -101,5 +126,51 @@ test("typing after > narrows the menu", () => {
     ...navigationActions()
       .map((action) => action.label)
       .filter((label) => label.startsWith("Settings")),
+    // Only inside its name: after every name a word of which starts with it (2026-11-19).
+    "Assets",
   ]);
+});
+
+test("a name ranks above what a place holds, so > and a plain word agree (F-058)", () => {
+  const labels = (text: string) => filterActions(navigationActions(), text).map((action) => action.label);
+  expect(labels("builds")[0]).toBe("Builds");
+  expect(labels("recent")).toEqual(["Builds › Recent runs"]);
+  expect(labels("builds")).toContain("Inbox");
+  expect(labels("time").slice(0, 2)).toEqual(["Time", "Settings › Time"]);
+  expect(labels("time")).toContain("Monitors");
+});
+
+const PLACES = placeActions();
+const names = (typed: string, andDetails = false) => matchingPlaces(PLACES, typed, andDetails).map((place) => place.label);
+
+test("a place matches at the start of a word of its name, and a settings section by its own name (F-603)", () => {
+  expect(names("sett")).toEqual(["Settings"]);
+  expect(names("asse")).toEqual(["Assets"]);
+  // The tree by what it is, where nothing else answered.
+  expect(names("tree")).toEqual([]);
+  expect(names("tree", true)).toEqual(["Assets"]);
+  expect(names("appearance")).toEqual(["Settings › Appearance"]);
+  expect(names("time")).toEqual(["Time", "Settings › Time"]);
+  // Not fourteen rows for one word, and not the inside of a word.
+  expect(names("settings")).toEqual(["Settings"]);
+  expect(names("ettings")).toEqual([]);
+  expect(names("s")).toEqual([]);
+});
+
+test("where nothing else answered, what a place holds counts too, after the names", () => {
+  expect(names("theme")).toEqual(["Settings › Appearance › Theme", "Put knobas's themes back"]);
+  expect(names("theme", true)).toEqual(["Settings › Appearance › Theme", "Put knobas's themes back", "Settings › Appearance › Code colours"]);
+  // A child of a section is found by its own name (the subtrees ruling, 2026-11-21).
+  expect(names("fon")).toEqual(["Settings › Appearance › Fonts"]);
+  expect(names("code col")).toEqual(["Settings › Appearance › Code colours"]);
+});
+
+test("the Docs row opens where Docs opens: Docs' home when one is chosen (PR #2479, 2026-11-17)", async () => {
+  const { docsChoices } = await import("../tf/docs/docs-choices.svelte");
+  const docs = () => navigationActions().find((row) => row.id === "docs")!.hash;
+  expect(docs()).toBe("#/docs");
+  docsChoices.hold({ home: { kind: "space", id: "confluence/ENG", title: "Engineering" }, hidden: [] });
+  expect(docs()).toBe("#/docs/space/confluence%3AENG");
+  docsChoices.hold({ home: { kind: "page", id: "confluence:9", title: "Eng home" }, hidden: [] });
+  expect(docs()).toBe("#/page/confluence%3A9");
 });

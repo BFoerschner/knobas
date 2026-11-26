@@ -265,6 +265,19 @@ macro_rules! call {
     };
 }
 
+/// A typed function's one-element result tuple, taken apart.
+trait OneResult {
+    type Ok;
+    fn one(self) -> Self::Ok;
+}
+
+impl<T> OneResult for (T,) {
+    type Ok = T;
+    fn one(self) -> T {
+        self.0
+    }
+}
+
 /// `downloads.download`'s parameters and results, as the host calls it.
 type DownloadParams<'a> = (&'a wit::Instance, &'a str, &'a str);
 type DownloadResults = (Result<bool, wit::SourceError>,);
@@ -710,7 +723,8 @@ pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> 
 /// [`Capability::Refresh`] whatever its JSON says: the app reads the
 /// declaration to choose between *Refresh* and *Sync now*, and between a
 /// refresh and the run alone after a landed write, and the host would answer
-/// *not offered* to every refresh of it (#2101).
+/// *not offered* to every refresh of it (#2101). One built against 1.6.0 or
+/// earlier declares no `web_sign_in` and no `web_links` (ux30).
 pub(crate) async fn descriptor(
     adapter: &WasmAdapter,
     instance: wit::Instance,
@@ -730,6 +744,16 @@ pub(crate) async fn descriptor(
             descriptor
                 .capabilities
                 .retain(|c| *c != Capability::Refresh);
+        }
+        // A sign-in page is read from 1.7.0 on: an older component keeps
+        // *Fill sign-in* alone, whatever its JSON says (ADR-0050).
+        if !adapter.declares_web_sign_in() {
+            descriptor.web_sign_in = None;
+        }
+        // So are its web links (ux30): an older component's site opens at
+        // its base URL.
+        if !adapter.declares_web_links() {
+            descriptor.web_links = None;
         }
         Ok(descriptor)
     })
@@ -785,6 +809,60 @@ impl WasmSource {
             None => item.title.trim().to_owned(),
         };
         item
+    }
+
+    /// One call of an optional export at `index` on a fresh instance of the
+    /// component, within the adapter's deadline and memory cap and with its
+    /// HTTP allowance: the reads of `tickets` (1.6.0), typed `P` to `R`,
+    /// `params` building the arguments from the instance record.
+    async fn optional_read<P, R>(
+        &self,
+        index: ComponentExportIndex,
+        params: impl FnOnce(wit::Instance) -> P,
+    ) -> Result<R::Ok, SourceError>
+    where
+        P: ComponentNamedList + Lower + Send + Sync + 'static,
+        R: ComponentNamedList + Lift + Send + Sync + OneResult + 'static,
+        R::Ok: Send,
+    {
+        let params = params(self.instance.clone());
+        limits::bounded(&self.adapter, async {
+            let mut store = new_store(
+                &self.adapter,
+                &self.instance.id,
+                SinkSlot::none(),
+                Arc::clone(&self.policy),
+            );
+            let instance = self
+                .adapter
+                .inner
+                .pre
+                .instance_pre()
+                .instantiate_async(&mut store)
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let func = instance
+                .get_typed_func::<P, R>(&mut store, index)
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let answer = func
+                .call_async(&mut store, params)
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            Ok(answer.one())
+        })
+        .await
+    }
+
+    /// A `tickets` answer decoded as the SPI type `what` names, a failure to
+    /// decode naming the adapter (ADR-0054).
+    fn decode_named<T: serde::de::DeserializeOwned>(
+        &self,
+        answer: Option<String>,
+        what: &str,
+    ) -> Result<Option<T>, SourceError> {
+        Self::decode(answer, what).map_err(|error| {
+            SourceError::protocol(format!("{} adapter: {error}", self.adapter.kind()))
+        })
     }
 
     /// The JSON answer of a read, decoded as the SPI type `what` names.
@@ -1024,6 +1102,52 @@ impl Source for WasmSource {
         })
         .await?;
         Self::decode(answer, "query translation")
+    }
+
+    /// `tickets.ticket-fields` where the component exports it (1.6.0,
+    /// ADR-0054), and the trait's default, `None`, where it does not: a
+    /// component built against 1.5.0 or earlier offers no edits. Within the
+    /// adapter's deadline and memory cap, with its HTTP allowance (it reads
+    /// the source). An answer that does not decode as `TicketFields` fails
+    /// the read, naming the adapter.
+    async fn ticket_fields(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::ticket::TicketFields>, SourceError> {
+        let Some(index) = self.adapter.inner.ticket_fields else {
+            return Ok(None);
+        };
+        type Answer = (Result<Option<String>, wit::SourceError>,);
+        let answer = self
+            .optional_read::<(wit::Instance, String), Answer>(index, |instance| {
+                (instance, entity.to_owned())
+            })
+            .await?;
+        self.decode_named(answer.map_err(convert::error)?, "ticket fields")
+    }
+
+    /// `tickets.field-options`, as [`Self::ticket_fields`] calls its twin.
+    async fn field_options(
+        &self,
+        entity: &str,
+        field: &str,
+        typed: &str,
+    ) -> Result<Option<knobas_source::ticket::FieldOptions>, SourceError> {
+        let Some(index) = self.adapter.inner.field_options else {
+            return Ok(None);
+        };
+        type Answer = (Result<Option<String>, wit::SourceError>,);
+        let answer = self
+            .optional_read::<(wit::Instance, String, String, String), Answer>(index, |instance| {
+                (
+                    instance,
+                    entity.to_owned(),
+                    field.to_owned(),
+                    typed.to_owned(),
+                )
+            })
+            .await?;
+        self.decode_named(answer.map_err(convert::error)?, "field options")
     }
 
     async fn artifact_preview(

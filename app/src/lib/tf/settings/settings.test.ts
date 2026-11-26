@@ -2,8 +2,12 @@ import { expect, test } from "vitest";
 
 import type { CredentialHealth, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import {
+  ADD_SOURCE_HASH,
+  addsSource,
   BACKFILL_HINT,
+  BY_HAND,
   bareAddress,
+  byHandNote,
   credentialAlert,
   declaresUser,
   holdings,
@@ -12,9 +16,15 @@ import {
   reenterWords,
   roleMissLines,
   runRow,
+  SETTINGS_SECTIONS,
+  settingsHash,
+  settingsKnows,
+  settingsParent,
   settingsPlace,
   sourceLine,
   sourceState,
+  syncsPatch,
+  syncsWords,
   userOf,
 } from "./settings";
 
@@ -50,6 +60,9 @@ test("a source's page lights Sources; an unknown section is Sources, as in the p
   expect(settingsPlace(["source", "jira"])).toEqual({ section: "sources", source: "jira" });
   expect(settingsPlace(["standup"])).toEqual({ section: "standup" });
   expect(settingsPlace(["nonsense"])).toEqual({ section: "sources" });
+  // A child's page sits under its parent's address (the subtrees ruling, 2026-11-21).
+  expect(settingsPlace(["appearance", "code-colours"])).toEqual({ section: "code-colours" });
+  expect(settingsPlace(["appearance", "fonts"])).toEqual({ section: "fonts" });
   // *Sync WEB too* on a Jira view (#879): the page with a value added to a list field.
   expect(settingsPlace(["source", "jira", "add", "projects", "WEB"])).toEqual({
     section: "sources",
@@ -135,6 +148,36 @@ test("the line under the name says what it is, what it holds and when it syncs",
   );
 });
 
+test("Syncs offers the intervals and by hand, and by hand keeps the interval it had (ADR-0056)", () => {
+  expect(syncsWords(300)).toBe("Every 5 min");
+  expect(syncsWords(20)).toBe("Every 20 s");
+  expect(syncsWords(3600)).toBe("Every 1 hour");
+  expect(syncsWords(BY_HAND)).toBe("Only when I press Sync now");
+  // By hand sends no interval, so the stored one survives; an interval turns by hand off.
+  expect(syncsPatch(BY_HAND)).toEqual({ sync_by_hand: true });
+  expect(syncsPatch("900")).toEqual({ sync_interval_secs: 900, sync_by_hand: false });
+});
+
+test("a source by hand says so under its name and under Syncs", () => {
+  const source = { item_count: 177, kinds: [ticket], enabled: true, sync_interval_secs: 300, last_run: null, sync_by_hand: true };
+  const finished = new Date(NOW.getTime() - 4 * 60_000);
+  const clock = `${String(finished.getHours()).padStart(2, "0")}:${String(finished.getMinutes()).padStart(2, "0")}`;
+  expect(sourceLine(source, "Pleasant Password Server", status(), NOW)).toBe(
+    `Pleasant Password Server, 177 tickets. Syncs only when you press Sync now, last at ${clock}.`,
+  );
+  expect(sourceLine(source, "Pleasant Password Server", null, NOW)).toBe(
+    "Pleasant Password Server, 177 tickets. Syncs only when you press Sync now, not synced yet.",
+  );
+  expect(sourceLine({ ...source, enabled: false }, "Pleasant Password Server", null, NOW)).toBe(
+    "Pleasant Password Server, 177 tickets. Paused, not synced yet.",
+  );
+  expect(byHandNote("Team passwords", true)).toBe(
+    "Nothing is read from Team passwords in the background. It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.",
+  );
+  expect(byHandNote("Tidewater Jira", false)).toBe("Nothing is read from Tidewater Jira in the background. It syncs when you press Sync now.");
+});
+
+
 test("a credential failure is said on top with what waits for it; a working one says nothing", () => {
   expect(credentialAlert("TeamCity", "Password", health("unauthorized"), null, NOW)).toBe(
     "Sign-in failed 38 min ago (401). Writes to TeamCity wait in the queue until you re-enter the password.",
@@ -164,9 +207,9 @@ const JIRA = { id: "jira", display_name: "Jira", auth_kind: "UserPassword" as co
 test("a sync run reads as started, took and what it did", () => {
   const run = RUN;
   // The suite runs in Europe/Berlin (vite.config.ts), two hours ahead in October.
-  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", detail: null, tone: "ok" });
+  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4s", result: "12 updated", detail: null, tone: "ok" });
   expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, JIRA, NOW)).toMatchObject({
-    took: "3 m 12 s",
+    took: "3m 12s",
     result: "12 updated, backfill",
   });
   expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, JIRA, NOW)).toMatchObject({
@@ -175,7 +218,7 @@ test("a sync run reads as started, took and what it did", () => {
   });
   expect(runRow({ ...run, finished_at: null, outcome: null }, JIRA, NOW)).toMatchObject({ result: "Running…", tone: "run" });
   // CHANGED (#1986): an older run read "12 Oct 10:00" and yesterday's "14 Oct 10:00"; they read as the backup line does.
-  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("2026-10-12 10:00");
+  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("Mon 10:00");
   expect(runRow({ ...run, started_at: "2026-10-14T08:00:00Z" }, JIRA, NOW).started).toBe("yesterday 10:00");
   expect(runRow({ ...run, started_at: "not a date" }, JIRA, NOW).started).toBe("—");
 });
@@ -262,4 +305,40 @@ test("the Backfill line says it forgets where the last sync stopped, and when to
   expect(BACKFILL_HINT).toBe(
     "Reads everything again and forgets where the last sync stopped: after a knobas update reads more fields, or when a sync stopped and names Backfill. Takes a few minutes; the app stays usable.",
   );
+});
+
+test("a child's page sits under its parent's address, Fonts' old address still lands, and nothing else nests (2026-11-21)", () => {
+  expect(settingsHash("code-colours")).toBe("#/settings/appearance/code-colours");
+  expect(settingsHash("fonts")).toBe("#/settings/appearance/fonts");
+  expect(settingsHash("appearance")).toBe("#/settings/appearance");
+  expect(settingsHash("sources")).toBe("#/settings/sources");
+  expect(settingsKnows(["appearance", "code-colours"])).toBe(true);
+  expect(settingsKnows(["appearance", "fonts"])).toBe(true);
+  // Fonts' address from before it had a parent is the same place, drawn in place.
+  expect(settingsKnows(["fonts"])).toBe(true);
+  expect(settingsPlace(["fonts"])).toEqual({ section: "fonts" });
+  // The page was planned as *Themes* and never shipped there: unknown.
+  expect(settingsKnows(["themes"])).toBe(false);
+  expect(settingsKnows(["code-colours"])).toBe(false);
+  // The whole window's theme (ADR-0055): the first child, where the subtrees ruling reserved it.
+  expect(settingsKnows(["appearance", "theme"])).toBe(true);
+  expect(settingsHash("theme")).toBe("#/settings/appearance/theme");
+  expect(settingsKnows(["appearance", "nonsense"])).toBe(false);
+  expect(settingsKnows(["appearance", "fonts", "more"])).toBe(false);
+  expect(settingsKnows(["time", "fonts"])).toBe(false);
+  expect(settingsParent("fonts")).toBe("appearance");
+  expect(settingsParent("appearance")).toBeNull();
+  // The tree's order: a parent, then its children.
+  const keys = SETTINGS_SECTIONS.map(([key]) => key);
+  expect(keys.slice(keys.indexOf("appearance"), keys.indexOf("appearance") + 4)).toEqual(["appearance", "theme", "code-colours", "fonts"]);
+  expect(new Set(keys).size).toBe(keys.length);
+});
+
+test("#/settings/sources/add is Sources with Add a source open, a page Settings knows (ux31)", () => {
+  expect(ADD_SOURCE_HASH).toBe("#/settings/sources/add");
+  expect(addsSource(["sources", "add"])).toBe(true);
+  for (const rest of [["sources"], ["sources", "add", "x"], ["source", "add"], ["add"], []]) expect(addsSource(rest), rest.join("/")).toBe(false);
+  expect(settingsKnows(["sources", "add"])).toBe(true);
+  expect(settingsKnows(["sources", "other"])).toBe(false);
+  expect(settingsPlace(["sources", "add"])).toEqual({ section: "sources" });
 });

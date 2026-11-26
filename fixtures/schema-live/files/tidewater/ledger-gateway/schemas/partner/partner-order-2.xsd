@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A partner's order, version 2: made for knobas's schema checks against the live suite (one of two repositories that declare version 2). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:tidewater:partner-order:2" targetNamespace="urn:tidewater:partner-order:2" elementFormDefault="qualified">
+  <xs:element name="PartnerOrder">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="OrderId" type="xs:string"/>
+        <xs:element name="Partner" type="xs:string"/>
+        <xs:element name="Line" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Article" type="xs:string"/>
+              <xs:element name="Quantity" type="xs:positiveInteger"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

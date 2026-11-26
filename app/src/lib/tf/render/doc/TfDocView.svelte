@@ -1,0 +1,1177 @@
+<!--
+  **The XML view** (`docs/decisions/2026-11-23-an-xml-file-is-read-as-a-document.md`): an XML file drawn as a document.
+  Its own lines, as Source draws them, in the explorers' pane, with what a document has that text has not.
+
+  - **The pane** fits the window, as the API explorer's does: the rail (the head, *Findings* and *Results*, the keys),
+    the document (the way down and *Levels*, the query, the lines), and from 1,480 px the element picked.
+  - **The first frame is the file's lines**, drawn from the text at hand with every column held: the caret's column
+    beside the number, the line's end, the rail's head. The outline is read in the document worker
+    (`render/doc-port.ts`) and lands as paint: carets, the way down, the fold counts. Nothing moves when it does.
+  - **Folding** by the caret (Alt for everything under), `←` `→` (`Shift` for everything under), the digit keys and the
+    *Levels* stepper (`-` `+`). A fold is one line: its first line, what it hides counted, its closing tag dim.
+  - **Find in file** is Source's, through `TfLines`: no box until ⌘F, then a bar at the top of the lines that takes no
+    room (Fable, 2026-11-23).
+
+  The view, its CSS and the worker load with the first document opened, never at start-up (`doc-module.ts`).
+-->
+<script lang="ts">
+  import "../../css/openapi.css";
+  import "../../css/xml.css";
+
+  import { tick, untrack } from "svelte";
+
+  import TfLines from "../../code/TfLines.svelte";
+  import TfSideEdge from "../../TfSideEdge.svelte";
+  import { sideWidth } from "../../side-width.svelte";
+  import { zen } from "../../zen.svelte";
+  import { columnsSeen, paneHeight } from "../explorer/layout";
+  import TfDocRail from "./TfDocRail.svelte";
+  import TfDocPicked from "./TfDocPicked.svelte";
+  import TfDocQuery from "./TfDocQuery.svelte";
+  import TfDocResults from "./TfDocResults.svelte";
+  import TfMenu from "../../TfMenu.svelte";
+  import { DocState, contentOf, remember } from "./doc.svelte";
+  import { documentOpened } from "./doc-module";
+  import { UNITS, countInside } from "../../../render/doc-folds";
+  import type { CopyWhat, ValueAt } from "../../../render/doc-model";
+  import TfValueViewer, { type LookedAt } from "../TfValueViewer.svelte";
+  import { guess as guessOf, type End, type Guess } from "../../../render/value-guess";
+  import { keptFor } from "../../../render/value-kept";
+  import { namedPipelines, commandSteps } from "../../../render/pipelines.svelte";
+  import type { NamedPipeline } from "../../../ipc/app";
+  import type { PipeRun, PipeStep } from "../../../ipc/entity";
+  import { menuThing } from "../../context/thing";
+  import TfFileViewer, { type ViewerContent } from "../TfFileViewer.svelte";
+  import { linksIn, type Link } from "../../../render/doc-links";
+  import { openWeb, pressElsewhere } from "../../../shell/open-web";
+  import { imageFetch, imageHosts, setImageHosts } from "../../../ipc/api";
+  import { ipcErrorMessage } from "../../../ipc";
+  import { KEPT_HOSTS_LOAD_BY_ITSELF } from "./doc-keys";
+  import { wantsLayout } from "../../../render/doc-line";
+  import type { DocKind } from "../../../render/doc-model";
+  import { DocSession, docEngine, type DocEngine } from "../../../render/doc-port";
+  import { languageOf } from "../../../render/engines";
+  import type { RenderPort } from "../../../render/port";
+  import { push } from "../../../shell/toasts.svelte";
+  import { jsonQuery, jsonQueryClose } from "../../../ipc/api";
+  import { DOC_KEYS, isKey } from "./doc-keys";
+  import { DocCheck, heldSettings, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
+  import TfXsdPage from "../xsd/TfXsdPage.svelte";
+  import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
+  import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
+  import { XsdState } from "../xsd/xsd.svelte";
+  import { XsdPort } from "../../../render/xsd-port";
+  import type { Checked } from "../../../render/xsd-answer";
+  import type { Elsewhere, Pointed } from "../../../render/xsd-locate";
+  import { gatherCandidates, keepDownload, keepPick, readDownloaded, splitAway, type Candidate } from "../xsd/xsd-point";
+  import { heldIndex } from "../../../render/xsd-index";
+
+  let {
+    text,
+    path,
+    repo = "",
+    sha = null,
+    render,
+    line = null,
+    engine = null,
+    values = null,
+    pipelines = null,
+    files = null,
+    images = null,
+    schema = null,
+    kind = "xml",
+    jq = null,
+    onpipeline = null,
+    inline = false,
+    verdict = undefined,
+    against = null,
+    warming = false,
+  }: {
+    text: string;
+    /** The file's path from the repository's top. */
+    path: string;
+    /** The repository: with the path, what folds are kept by. */
+    repo?: string;
+    /** The file's blob, where the source said: what tells the same content from another. */
+    sha?: string | null;
+    render: RenderPort;
+    /** The line a link names. */
+    line?: number | null;
+    /** Where the outline is read: the worker when left out. */
+    engine?: DocEngine | null;
+    /**
+     * The schema check (X2): the repository's files as text and its paths at the commit shown, what was pointed to,
+     * whether checking is on, and what opens a schema or points a reference; `null` where nothing is checked.
+     */
+    /** The reader: the XML view's, the JSON view's, or a value a line (`.jsonl`, `.ndjson`). */
+    kind?: DocKind;
+    /** jq for a JSON document (section 26): opens the document's session, kept running while the view lives. */
+    jq?: { open: () => Promise<number> } | null;
+    /** *Use as this file's pipeline*: the filter as a jq step on the file. */
+    onpipeline?: ((filter: string) => void) | null;
+    /**
+     * The miniature form (step E1): the document alone, in its box's height, with no rail, no query and no side column.
+     * Folds and their keys, *Levels*, values and links are the view's own.
+     */
+    inline?: boolean;
+    /**
+     * A verdict made elsewhere (the example column's *Check*): its departures stand at their lines' ends. Left out, the
+     * document's own schema is looked for (`schema`).
+     */
+    verdict?: Checked | "checking" | null | undefined;
+    /**
+     * The schema set the document is checked against, as it is open elsewhere (an example opened from its schema): no
+     * schema is looked for. `name` is the schema's file as the head says it. With `verdict`, the verdict is that set's.
+     */
+    against?: { port: XsdPort; name: string; path: string } | null;
+    schema?: {
+      read: (path: string) => Promise<string | null>;
+      paths: () => Promise<readonly string[]>;
+      pointed: () => Promise<readonly Pointed[]>;
+      on: () => Promise<boolean>;
+      open?: (path: string, place: string | null) => void;
+      point?: (namespace: string | null, location: string | null) => void;
+      engine?: import("../../../render/xsd-port").XsdEngine;
+      /** Another synced repository's file at its branch's tip: a schema found or pointed to there. */
+      readOther?: (repo: string, path: string) => Promise<string | null>;
+      /** The other synced repositories' `.xsd` files that declare a namespace (the order's step 6). */
+      elsewhere?: (namespace: string) => Promise<Elsewhere[]>;
+      /** What `read` stands on where it does not move: the check's set is kept whole by it (`xsd-kept.ts`). */
+      keep?: import("../../../render/xsd-kept").KeepAt | null;
+    } | null;
+    /** The view drawn hidden at idle to warm its code (`doc-warm.ts`): not a document opened. */
+    warming?: boolean;
+    /** How a value pipeline runs and saves over this file; `null` where no pipeline can run (no value is looked at). */
+    values?: { run: (steps: PipeStep[]) => Promise<PipeRun>; save: (steps: PipeStep[], name: string) => Promise<string> } | null;
+    /**
+     * The repository's files: whether one is there (`null` until its paths are read), a read of its paths, opening one,
+     * and its bytes. `null` where none is known: no path is a link.
+     */
+    files?: { has: (path: string) => boolean | null; ask: () => void; open: (path: string) => void; bytes: (path: string) => Promise<Uint8Array> } | null;
+    /** How an image at an address is loaded and which hosts are kept: the app's when left out. */
+    images?: { fetch: typeof imageFetch; hosts: typeof imageHosts; setHosts: typeof setImageHosts } | null;
+    /** The named pipelines, kept chains among them: the app's when left out. */
+    pipelines?: { list: readonly NamedPipeline[]; save: (list: never) => Promise<unknown> } | null;
+  } = $props();
+
+  const kept = $derived(pipelines ?? namedPipelines);
+  // A document opened for real: what is still to warm is left (`doc-warm.ts`).
+  if (!untrack(() => warming)) documentOpened();
+
+  /**
+   * The lines of a document a row is, at code's size of 100 %: one height for every row, so a windowed list of 800,000
+   * rows holds it; `TfLines` scales it with code's size.
+   */
+  const ROW = 22;
+  /** The departures one line's side column says whole: a line holds a handful at most. */
+  const DEPARTURES_SHOWN = 20;
+  /** A line longer than this is drawn as its first {@link KEEP} characters and a count (section 6). */
+  const CLIP = { over: 400, keep: 320 };
+
+  let st = $state<DocState | null>(null);
+  /** *As written*, pressed on a document knobas laid out. */
+  let asWritten = $state(false);
+  /** A file written on one line is laid out (section 6): decided from the text at hand, before the first frame. */
+  const layout = $derived(!asWritten && wantsLayout(text));
+  /** The layout, once the worker made it. */
+  let laid = $state<string | null>(null);
+  /** The text the lines draw: the file's, or its layout. */
+  const shownText = $derived(layout ? laid : text);
+  $effect(() => {
+    const source = text;
+    const at = path;
+    const laying = layout;
+    laid = null;
+    const lines = laying ? 1 : countLines(source);
+    const session = new DocSession(untrack(() => engine) ?? docEngine());
+    const state = new DocState(session, `${untrack(() => repo)}\n${at}${laying ? "\nlaid" : ""}`, contentOf(source, untrack(() => sha)), lines);
+    // The outline's landing, for the check that starts beside it: true where the document is well formed.
+    let landed: (ok: boolean) => void = () => {};
+    if (!laying) outlines.set(state, new Promise<boolean>((done) => (landed = done)));
+    st = state;
+    let live = true;
+    // jq, for a JSON document: its session opened with the first filter, closed with the view.
+    let jqSession: Promise<number> | null = null;
+    const opener = untrack(() => jq);
+    if (untrack(() => kind) !== "xml" && opener !== null)
+      state.jq = (filter) => {
+        jqSession ??= opener.open();
+        return jqSession.then((id) => jsonQuery(id, filter));
+      };
+    void session.open(source, untrack(() => kind)).then(async (answer) => {
+      // A worker that failed answers no table: the lines stay as drawn, unfolding nothing.
+      if (!live || answer === null || typeof answer !== "object" || !("folds" in answer)) return landed(false);
+      if (!laying) {
+        state.take(answer);
+        landed(state.opened?.error == null);
+        return;
+      }
+      const made = await session.layout();
+      if (!live || made === null || typeof made !== "object" || !("text" in made)) return;
+      laid = made.text;
+      state.take(made.opened);
+    });
+    return () => {
+      live = false;
+      landed(false);
+      state.close();
+      if (jqSession !== null) void jqSession.then((id) => jsonQueryClose(id), () => {});
+    };
+  });
+
+  // ---- The schema check (X2, sections 10 to 12): run when the outline lands, by itself ----
+  let check = $state<DocCheck | null>(null);
+  $effect(() => {
+    const state = st;
+    // JSON has no check (section 25): JSON Schema is not in this pass.
+    // A verdict given is read untracked: each new one is placed by the check made here, not a new check.
+    const checks = kind === "xml" && (schema !== null || untrack(() => verdict) !== undefined || against !== null);
+    if (state === null || !checks) {
+      check = null;
+      return;
+    }
+    const c = new DocCheck(`${untrack(() => repo)}\n${untrack(() => path)}`, schema?.engine ?? null);
+    check = c;
+    return () => c.close();
+  });
+  // The check is handed the view's start, what the root says read from its first tag, and the outline's landing. A check
+  // likely answered by a set the worker kept whole (`xsd-kept.ts`) reads nothing, so it runs beside the outline and its
+  // verdict lands with it; any other waits for the outline (`runCheck`): started beside it, its reads and their copies
+  // to the worker slowed the outline's own paint by a fifth at 6x on 2560 x 1440 at 1.25 (269 to 317 ms to the
+  // carets). A laid-out document is checked once its layout has landed.
+  /** Each document's outline landing (not a laid-out one's): true where it is well formed. */
+  const outlines = new WeakMap<DocState, Promise<boolean>>();
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const port = schema;
+    const outline = state === null ? undefined : outlines.get(state);
+    // A verdict or a set given from elsewhere (an example, E1) is checked by its own effects below.
+    if (c === null || state === null || port === null || against !== null || verdict !== undefined || outline === undefined) return;
+    untrack(() => {
+      const root = rootSays(text);
+      void runCheck(c, state, root, port, outline);
+      // The outline reads the root whole; where it reads it otherwise than the first tag did, the check starts again.
+      void outline.then((ok) => {
+        const said = state.opened?.root ?? null;
+        if (ok && check === c && said !== null && !sameAsk(path, said, root)) void runCheck(c, state, said, port);
+      });
+    });
+  });
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const port = schema;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || port === null || against !== null || verdict !== undefined || landed === null || landed.error !== null || outlines.has(state)) return;
+    untrack(() => void runCheck(c, state, landed.root ?? rootSays(text), port));
+  });
+  // A verdict made elsewhere: placed on its lines once the outline has landed, and again with each new one.
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const said = verdict;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || said === undefined || landed === null || landed.error !== null) return;
+    untrack(() => void c.take(said, state.session, against));
+  });
+  // The set it came from: the document checked against it, once the outline has landed.
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const set = against;
+    const landed = state?.opened ?? null;
+    if (c === null || state === null || set === null || verdict !== undefined || landed === null || landed.error !== null) return;
+    untrack(() => void c.runOn(set, shownText ?? text, state.session));
+  });
+  // A document that is not well formed has no check: the head is the outline's, and no mark stands.
+  $effect(() => {
+    const c = check;
+    if (c !== null && (st?.opened?.error ?? null) !== null) untrack(() => c.clear());
+  });
+  async function runCheck(c: DocCheck, state: DocState, root: RootSays | null, port: NonNullable<typeof schema>, landed: Promise<boolean> = Promise.resolve(true)) {
+    const go = ({ pointed, on }: CheckSettings, shown: Promise<boolean>) =>
+      c.run(path, root, untrack(() => shownText) ?? text, state.session, {
+        read: port.read,
+        paths: port.paths,
+        pointed,
+        index: (from, list) => heldIndex(repo, list, from, port.read),
+        readAway: (p) => {
+          const away = splitAway(p);
+          if (away === null) return readDownloaded(p) ?? Promise.resolve(null);
+          return away.repo === repo ? port.read(away.path) : (port.readOther?.(away.repo, away.path) ?? Promise.resolve(null));
+        },
+        ...(port.elsewhere !== undefined ? { elsewhere: port.elsewhere } : {}),
+        keep: port.keep ?? null,
+      }, on, shown);
+    const read = () => Promise.all([port.pointed().catch(() => [] as readonly Pointed[]), port.on().catch(() => true)]).then(([pointed, on]) => ({ pointed, on }));
+    // With no Settings held, a check starts once the outline has landed, on the Settings it reads then: their reads would
+    // slow the outline's paint (a first open's carets, 523 to 569 ms at 6x on 2560 x 1440 at 1.25).
+    const last = heldSettings();
+    if (last === null || !last.on) {
+      if (!(await landed) || check !== c) return;
+      const fresh = await settingsFor(read).fresh;
+      if (check === c) await go(fresh, landed);
+      return;
+    }
+    // With Settings held (the last check's, or those read at idle by the warm-up, `doc-warm.ts`), it starts now on them:
+    // drawn only where they read the same again, else started again on them. It reads no file before the outline has
+    // landed (`DocCheck.run`).
+    const settings = settingsFor(read);
+    void settings.same.then((same) => {
+      if (!same && check === c) void settings.fresh.then((fresh) => (check === c ? go(fresh, landed) : undefined));
+    });
+    await go(last, Promise.all([landed, settings.same]).then(([a, b]) => a && b));
+  }
+
+  // ---- *Point to a file…* (the XSD design, section 17): the document's schema answered by a file the person picks ----
+  let pointing = $state.raw<{ namespace: string; location: string | null } | null>(null);
+  let candidates = $state.raw<readonly Candidate[] | null>(null);
+  function point() {
+    const s = schema;
+    const root = st?.opened?.root ?? rootSays(text);
+    if (s === null || root === null) return;
+    if (s.point !== undefined) {
+      s.point(root.namespace || null, root.location);
+      return;
+    }
+    const at = { namespace: root.namespace, location: root.location };
+    pointing = at;
+    candidates = null;
+    void gatherCandidates(repo, path, at.namespace, { paths: s.paths, read: s.read, elsewhere: s.elsewhere ?? null }).then((list) => {
+      if (pointing === at) candidates = list;
+    });
+  }
+  /** The repository's schemas read while the person reaches for *Point to another file…*: the picker then opens on them. */
+  function warmPoint() {
+    const s = schema;
+    if (s !== null) void s.paths().then((list) => heldIndex(repo, list, path, s.read), () => null);
+  }
+  async function pickFile(c: Candidate) {
+    const at = pointing;
+    const s = schema;
+    const state = st;
+    const ch = check;
+    pointing = null;
+    if (at === null || s === null || state === null || ch === null) return;
+    try {
+      await keepPick(at.namespace, at.location, c);
+    } catch (cause) {
+      push({ text: `Could not keep it: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    push({ text: `${c.repoName === null ? c.path : `${c.repoName}: ${c.path}`} answers ${at.location ?? at.namespace} from now on.` });
+    // Checked again through the pick: the set is read as the explorer reads it, step 1 first.
+    ch.resume();
+    void runCheck(ch, state, state.opened?.root ?? rootSays(text), s);
+  }
+  /**
+   * *Download it*: a schema at an address the set names (the document's own, or one its schema imports), downloaded on
+   * the press and kept for that reference (its namespace, the address as its location), and the document checked.
+   */
+  async function download(namespace: string | null, address: string) {
+    const s = schema;
+    const state = st;
+    const ch = check;
+    const root = state?.opened?.root ?? rootSays(text);
+    if (s === null || state === null || ch === null || root === null) return;
+    try {
+      await keepDownload(namespace, address, address);
+    } catch (cause) {
+      push({ text: `Could not download it: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    push({ text: `Downloaded ${address}. It answers it from now on.` });
+    ch.resume();
+    void runCheck(ch, state, root, s);
+  }
+  /** The declaration beside the document, for the line picked (section 26). */
+  let declared = $state<XsdState | null>(null);
+  $effect(() => {
+    const c = check;
+    const state = st;
+    const n = state?.cursor ?? 0;
+    if (c === null || state === null || n <= 0 || c.head.k !== "checked") {
+      declared = null;
+      return;
+    }
+    let live = true;
+    void c.declarationOf(n, state.session).then((page) => {
+      if (!live) return;
+      if (page === null) {
+        declared = null;
+        return;
+      }
+      const shown = new XsdState(c.port ?? new XsdPort(() => Promise.resolve(null)));
+      shown.page = page;
+      declared = shown;
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  function countLines(s: string): number {
+    let n = 1;
+    for (let i = s.indexOf("\n"); i !== -1; i = s.indexOf("\n", i + 1)) n += 1;
+    return n > 1 && s.endsWith("\n") ? n - 1 : n;
+  }
+
+  /** The path the highlighter reads: the file's own where it names XML, else an XML file's. */
+  const colourAs = $derived(kind !== "xml" ? (languageOf(path) === "json" ? path : "document.json") : languageOf(path) === "xml" || languageOf(path) === "xsl" ? path : "document.xml");
+
+  /** The longest line as drawn, in characters: every row is as wide, so a line's end holds to the pane's edge. */
+  const longest = $derived.by(() => {
+    const drawn = shownText ?? "";
+    let most = 0;
+    let from = 0;
+    for (let i = drawn.indexOf("\n"); ; i = drawn.indexOf("\n", i + 1)) {
+      const len = (i === -1 ? drawn.length : i) - from;
+      if (len > most) most = len;
+      if (i === -1) break;
+      from = i + 1;
+    }
+    return Math.min(most, CLIP.keep + 16);
+  });
+
+  // ---- The pane: its height set once at mount and on resize, its columns by the file view's width ----
+  let cols = $state<2 | 3 | 4>(2);
+  function pane(el: HTMLElement) {
+    const fit = () => {
+      const scroller = scrollerOf(el);
+      const status = document.querySelector<HTMLElement>(".tf-status")?.offsetHeight ?? 0;
+      const top = el.getBoundingClientRect().top + (scroller?.scrollTop ?? 0);
+      el.style.setProperty("--oas-h", `${paneHeight(window.innerHeight, top, status)}px`);
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    $effect(() => {
+      void zen.shown;
+      const frame = requestAnimationFrame(fit);
+      return () => cancelAnimationFrame(frame);
+    });
+    const view = el.closest<HTMLElement>(".tf-fileview") ?? el;
+    // The columns from the first frame: an observer answers a frame late.
+    const first = columnsSeen(view.getBoundingClientRect().width);
+    if (first !== null && first !== cols) cols = first;
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver((entries) => {
+        const next = columnsSeen(entries[0]?.contentRect.width ?? 0);
+        if (next !== null && next !== cols) cols = next;
+      });
+      ro.observe(view);
+    }
+    return () => {
+      window.removeEventListener("resize", fit);
+      ro?.disconnect();
+    };
+  }
+  function scrollerOf(el: HTMLElement): HTMLElement | null {
+    for (let up = el.parentElement; up !== null; up = up.parentElement) {
+      const y = getComputedStyle(up).overflowY;
+      if (y === "auto" || y === "scroll") return up;
+    }
+    return null;
+  }
+  function wide(el: HTMLElement) {
+    $effect(() => {
+      el.style.setProperty("--xv-longest", `${longest}ch`);
+    });
+  }
+
+  // ---- The lines ----
+  let lines = $state<ReturnType<typeof TfLines> | null>(null);
+  let code = $state<HTMLElement | null>(null);
+  let mode = $state<"findings" | "results">("results");
+
+  /** Goes to a line, opening what hides it, picks it and scrolls it into view. */
+  async function go(n: number, centre = true) {
+    const state = st;
+    if (state === null) return;
+    state.pick(n);
+    await tick();
+    lines?.reveal(n, centre);
+  }
+
+  // A line link picks its line.
+  $effect(() => {
+    const at = line;
+    const state = st;
+    if (at === null || state === null) return;
+    untrack(() => {
+      state.cursor = at;
+      state.ask(at);
+    });
+  });
+
+  function rowClass(n: number): string {
+    if (st === null) return "tf-xv-l";
+    return `tf-xv-l${n === st.cursor ? " tf-xv-cur" : ""}${st.hits.has(n) ? " tf-xv-hit" : ""}${check?.byLine.has(n) === true ? " tf-xv-bad" : ""}`;
+  }
+
+  // ---- Values (sections 15 to 18) ----
+  /** What a line's value is taken for: the first of its values with a chain kept for its field, or a guess. */
+  function chipOf(n: number): { value: ValueAt; guess: Guess | null; kept: { pipeline: NamedPipeline; end: string } | null } | null {
+    const list = st?.values.get(n);
+    if (list === undefined) return null;
+    for (const v of list) {
+      const k = keptFor(v.field, path, kept.list);
+      const g = guessOf(v.head, v.said, { length: v.length, bare: v.bare });
+      if (k !== null || g !== null) return { value: v, guess: g, kept: k === null ? null : { pipeline: k.pipeline, end: k.kept.end } };
+    }
+    return null;
+  }
+
+  /** The lines drawn moved: their values are read. */
+  function drawnLines(from: number, to: number) {
+    const state = st;
+    if (state === null) return;
+    const vis = state.visible;
+    const out: number[] = [];
+    let lo = 0;
+    let hi = vis.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (vis[mid]! < from) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < vis.length && vis[i]! <= to; i += 1) out.push(vis[i]!);
+    state.readValues(out);
+  }
+
+  let looking = $state<{ value: LookedAt; guess: Guess | null; kept: { pipeline: NamedPipeline; end: string } | null; first: { steps: PipeStep[]; end: End | null } | null } | null>(null);
+
+  const lookedAt = (v: ValueAt): LookedAt => ({ from: v.from, to: v.to, read: v.read, name: v.name, field: v.field, length: v.length, fileName: v.fileName, line: v.line });
+
+  /** Opens the value viewer on line `n`'s value: knobas's guess or the kept chain, or `step` first, or none. */
+  async function lookAt(n: number, through: PipeStep | "none" | null = null) {
+    const state = st;
+    if (state === null || values === null || n < 1) return;
+    const shown = chipOf(n);
+    let v: ValueAt | undefined = shown?.value;
+    if (v === undefined || through !== null) {
+      const got = await state.session.values([n], true);
+      v = shown?.value ?? got[n]?.[0];
+    }
+    if (v === undefined) {
+      push({ text: "This line holds no value to look at." });
+      return;
+    }
+    const g = guessOf(v.head, v.said, { length: v.length, bare: v.bare });
+    const k = keptFor(v.field, path, kept.list);
+    looking = {
+      value: lookedAt(v),
+      guess: through === null ? g : null,
+      kept: through === null && k !== null ? { pipeline: k.pipeline, end: k.kept.end } : null,
+      first: through === null ? null : { steps: through === "none" ? [] : [through], end: through === "none" ? "text" : null },
+    };
+  }
+
+  /** A row's right-click: the line's own rows and its value's. */
+  function rowThing(n: number) {
+    return menuThing(() =>
+      st === null
+        ? null
+        : {
+            kind: "value",
+            repoId: repo,
+            path,
+            line: n,
+            // A document held in memory (an example) is at no address: no line of it is linked.
+            link: !layout && files !== null,
+            does: {
+              look: () => void lookAt(n),
+              through: (step) => void lookAt(n, step === null ? "none" : ({ step } as PipeStep)),
+              copyXPath: () => {
+                const state = st;
+                if (state === null) return;
+                state.ask(n);
+                void state.session.at(n).then((a) => (a.picked === null ? undefined : copied(a.picked.path, "the XPath")));
+              },
+              like: () => {
+                const state = st;
+                if (state === null) return;
+                void state.session.like(n).then((q) => {
+                  if (q !== null) ask(q);
+                });
+              },
+            },
+          },
+    );
+  }
+
+  // ---- Links and images (sections 13 and 14) ----
+  const imagePort = $derived(images ?? { fetch: imageFetch, hosts: imageHosts, setHosts: setImageHosts });
+  /** Each drawn line's links, by line: read once a line is drawn, again when the repository's paths come in. */
+  let linkCache = new Map<number, readonly Link[]>();
+  let linkKey = "";
+  let pathsKnown = $state(false);
+  function linksOf(n: number, shown: string): readonly Link[] {
+    // Read again when the text drawn or the repository's paths change; `pathsKnown` is read so a line draws again then.
+    const key = `${shownText?.length ?? 0}:${layout}:${pathsKnown}`;
+    if (key !== linkKey) {
+      linkKey = key;
+      linkCache = new Map();
+    }
+    const held = linkCache.get(n);
+    if (held !== undefined) return held;
+    const has = files === null ? null : (p: string) => files.has(p) === true;
+    // The first line that holds something path-like asks for the repository's paths: after the draw, since this runs
+    // while the lines render and the ask writes the repository's state.
+    if (files !== null && pathsTimer === null && files.has("") === null && /[\w)]\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(shown)) {
+      const asked = files;
+      if (alive) queueMicrotask(() => asked.ask());
+      waitForPaths();
+    }
+    const links = linksIn(shown, path, files === null || files.has("") === null ? null : has);
+    linkCache.set(n, links);
+    return links;
+  }
+  let pathsTimer: ReturnType<typeof setInterval> | null = null;
+  /** The repository's paths are read once; when they land, the lines drawn are read for paths again. */
+  /** Cleared when the view goes: the window draws its rows below the view two frames late, maybe after that. */
+  let alive = true;
+  function waitForPaths() {
+    if (!alive || pathsTimer !== null || files === null) return;
+    pathsTimer = setInterval(() => {
+      if (files?.has("") !== null) {
+        if (pathsTimer !== null) clearInterval(pathsTimer);
+        pathsTimer = null;
+        pathsKnown = true;
+      }
+    }, 100);
+  }
+  $effect(() => () => {
+    alive = false;
+    if (pathsTimer !== null) clearInterval(pathsTimer);
+    pathsTimer = null;
+  });
+
+  /** What the image dialog shows: an image of the repository, or one at an address. */
+  let imaging = $state<{ name: string; line: string; content: ViewerContent; bytes: Uint8Array | null } | null>(null);
+  let imageUrl: string | null = null;
+  function showImage(name: string, line: string, bytes: Uint8Array, mime: string) {
+    if (imageUrl !== null) URL.revokeObjectURL(imageUrl);
+    imageUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+    imaging = { name, line, content: { kind: "image", src: imageUrl }, bytes };
+  }
+  function closeImage() {
+    if (imageUrl !== null) URL.revokeObjectURL(imageUrl);
+    imageUrl = null;
+    imaging = null;
+  }
+  $effect(() => () => {
+    if (imageUrl !== null) URL.revokeObjectURL(imageUrl);
+  });
+
+  /** An image of the repository: in the file viewer, as a ticket's attachment opens. */
+  function openRepoImage(to: string) {
+    if (files === null) return;
+    const name = to.slice(to.lastIndexOf("/") + 1);
+    imaging = { name, line: to, content: { kind: "reading" }, bytes: null };
+    files.bytes(to).then(
+      (bytes) => {
+        if (imaging?.line !== to) return;
+        const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+        showImage(name, to, bytes, ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`);
+      },
+      (cause) => {
+        if (imaging?.line === to) imaging = { name, line: to, content: { kind: "missing", why: ipcErrorMessage(cause), retry: () => openRepoImage(to) }, bytes: null };
+      },
+    );
+  }
+
+  /** An image at an address: offered, or loaded at once where its host is kept. Never without the press that opened it. */
+  async function openWebImage(url: string) {
+    let host = "";
+    try {
+      host = new URL(url).host.toLowerCase();
+    } catch {
+      return;
+    }
+    const name = url.slice(url.lastIndexOf("/") + 1).replace(/[?#].*$/, "") || host;
+    const load = (always: boolean) => {
+      imaging = { name, line: url, content: { kind: "offer", url, host, load, browser: () => openWeb(url, { elsewhere: true }), loading: true, why: null }, bytes: null };
+      if (always) void imagePort.hosts().then((kept) => imagePort.setHosts({ hosts: [...kept.hosts, host] })).catch(() => {});
+      imagePort.fetch(url).then(
+        (got) => {
+          if (imaging?.line !== url) return;
+          const raw = atob(got.base64);
+          const bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+          showImage(name, url, bytes, got.mime);
+        },
+        (cause) => {
+          if (imaging?.line === url && imaging.content.kind === "offer") imaging = { ...imaging, content: { ...imaging.content, loading: false, why: ipcErrorMessage(cause) } };
+        },
+      );
+    };
+    imaging = { name, line: url, content: { kind: "offer", url, host, load, browser: () => openWeb(url, { elsewhere: true }), loading: false, why: null }, bytes: null };
+    const kept = await imagePort.hosts().catch(() => ({ hosts: [] as string[] }));
+    if (KEPT_HOSTS_LOAD_BY_ITSELF && kept.hosts.includes(host) && imaging?.line === url) load(false);
+  }
+
+  /** A link pressed, or a line's link by key: where it goes. `elsewhere` asks for the browser. */
+  function follow(link: Link, elsewhere: boolean) {
+    if (link.kind === "web") {
+      if (link.image && !elsewhere) void openWebImage(link.to);
+      else openWeb(link.to, { elsewhere });
+    } else if (link.kind === "path") {
+      if (link.image) openRepoImage(link.to);
+      else files?.open(link.to);
+    } else if (link.kind === "schema") {
+      const there = files === null ? null : linksIn(`<a>${link.to}</a>`, path, (p) => files.has(p) === true).find((l) => l.kind === "path");
+      if (there !== undefined && there !== null) files?.open(there.to);
+      else if (/^https?:/.test(link.to)) openWeb(link.to, { elsewhere });
+      else push({ text: `No file is at ${link.to} in this repository.` });
+    } else {
+      // A namespace is a name, not a page: the schema that declares it, where one is read, comes with the check.
+      push({ text: `${link.to} is a namespace's name, not a page. Right-click to open it in the browser all the same.` });
+    }
+  }
+
+  function linkPressed(target: Element, event: MouseEvent): boolean {
+    const a = target.closest<HTMLElement>("[data-xv-link]");
+    if (a === null) return false;
+    const [n, i] = (a.dataset["xvLink"] ?? "").split(":").map(Number);
+    const link = linkCache.get(n!)?.[i!];
+    if (link === undefined) return false;
+    event.preventDefault();
+    follow(link, pressElsewhere(event));
+    return true;
+  }
+
+  /** `W`: the picked line's address; several open a menu of them. `Shift W` asks for the browser. */
+  let webMenu = $state<{ links: Link[]; elsewhere: boolean; opener: HTMLElement } | null>(null);
+  function web(elsewhere: boolean) {
+    const state = st;
+    if (state === null || state.cursor === 0) return;
+    const row = code?.querySelector<HTMLElement>(`.tf-l[data-n="${state.cursor}"]`);
+    const links = (linkCache.get(state.cursor) ?? []).filter((l) => l.kind === "web" || l.kind === "path" || l.kind === "schema");
+    if (links.length === 0) {
+      push({ text: "This line holds no address." });
+      return;
+    }
+    if (links.length === 1 || row === null || row === undefined) follow(links[0]!, elsewhere);
+    else {
+      webMenu = { links, elsewhere, opener: row };
+      webMenuOpen = true;
+    }
+  }
+  let webMenuOpen = $state(false);
+  $effect(() => {
+    if (!webMenuOpen) webMenu = null;
+  });
+
+  // ---- The query (section 22) ----
+  let field = $state<HTMLInputElement | null>(null);
+  let resultList = $state<HTMLElement | null>(null);
+  let copyOpen = $state(false);
+  let copyButton = $state<HTMLButtonElement | null>(null);
+
+  /** The lines of what the rail lists, in its order: the break of a broken file, or the matches. */
+  function listed(state: DocState): number[] {
+    if (mode === "findings") return state.opened?.error ? [state.opened.error.line] : [...new Set((check?.found ?? []).map((d) => d.line))];
+    return state.rows.map((r) => r.line);
+  }
+
+  /** `N` and `P`, `Enter` in the field: the next or the one before of what the rail lists. */
+  function step(by: 1 | -1) {
+    const state = st;
+    if (state === null) return;
+    const lines = listed(state);
+    if (lines.length === 0) return;
+    const at = state.cur < 0 ? (by > 0 ? 0 : lines.length - 1) : (state.cur + by + lines.length) % lines.length;
+    state.cur = at;
+    if (mode === "results") {
+      remember(state.source);
+      if (at >= lines.length - 40) state.more();
+    }
+    void go(lines[at]!);
+    void tick().then(() => resultList?.querySelector(`[data-xv-res="${at}"]`)?.scrollIntoView?.({ block: "nearest" }));
+  }
+
+  /** A press on a result. */
+  function goResult(i: number) {
+    const state = st;
+    const row = state?.rows[i];
+    if (state === null || row === undefined) return;
+    state.cur = i;
+    remember(state.source);
+    void go(row.line);
+  }
+
+  /** Types a query into the field, as a press on an offered one does. */
+  function ask(source: string) {
+    const state = st;
+    if (state === null) return;
+    mode = "results";
+    state.queryTyped(source, text.length);
+    if (field !== null) field.value = source;
+    field?.focus();
+  }
+
+  async function copyResults(what: CopyWhat | "xpath") {
+    const state = st;
+    copyOpen = false;
+    if (state === null) return;
+    remember(state.source);
+    const words = kind === "xml" ? { written: "the nodes as written", values: "the values", lines: "the lines", xpath: "the XPath" }[what] : { written: "the values as written", values: "the values", lines: "the lines", xpath: "the filter" }[what];
+    if (what === "xpath") return copied(state.source, words);
+    // A filter that makes values: what it answered is the copy, one a line.
+    if (state.q.state === "values") return copied(state.q.values.join("\n"), words);
+    copied(await state.session.copy(what), words);
+  }
+
+  /** A press on a line picks it; a press on a caret, a count or a link is its own, and a drag selects text. */
+  function onpress(event: MouseEvent) {
+    const target = event.target as Element | null;
+    if (target === null || st === null) return;
+    const caret = target.closest<HTMLElement>("[data-xv-caret]");
+    if (caret !== null) {
+      st.toggle(Number(caret.dataset["xvCaret"]), event.altKey);
+      return;
+    }
+    const fold = target.closest<HTMLElement>("[data-xv-fold]");
+    if (fold !== null) {
+      st.toggle(Number(fold.dataset["xvFold"]), false, false);
+      return;
+    }
+    if (linkPressed(target, event)) return;
+    const chip = target.closest<HTMLElement>("[data-xv-value]");
+    if (chip !== null) {
+      const n = Number(chip.dataset["xvValue"]);
+      st.pick(n);
+      void lookAt(n);
+      return;
+    }
+    const more = target.closest<HTMLElement>(".tf-xv-more");
+    if (more !== null) {
+      const n = Number(more.closest<HTMLElement>(".tf-l[data-n]")?.dataset["n"] ?? 0);
+      st.pick(n);
+      void lookAt(n);
+      return;
+    }
+    if (target.closest("button, a") !== null) return;
+    if (!(getSelection()?.isCollapsed ?? true)) return;
+    const row = target.closest<HTMLElement>(".tf-l[data-n]");
+    if (row !== null) st.pick(Number(row.dataset["n"]));
+  }
+
+  /** The keys (section 7, 9): on the picked line, from anywhere in the view outside a field. */
+  function keys(event: KeyboardEvent) {
+    const state = st;
+    if (state === null || event.defaultPrevented || event.metaKey || event.ctrlKey) return;
+    const target = event.target as Element | null;
+    if (target?.closest("input, textarea, select, [contenteditable]") != null) return;
+    const done = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const key = event.key;
+    if (key === "ArrowDown" || key === "ArrowUp") {
+      if (event.altKey) return;
+      done();
+      state.move(key === "ArrowDown" ? 1 : -1, firstInView());
+      void tick().then(() => lines?.reveal(state.cursor, false));
+      return;
+    }
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      if (event.altKey) return;
+      done();
+      if (key === "ArrowLeft") state.left(event.shiftKey);
+      else state.right(event.shiftKey);
+      void tick().then(() => lines?.reveal(state.cursor, false));
+      return;
+    }
+    if (event.altKey) return;
+    if (isKey(DOC_KEYS.web, key)) {
+      done();
+      web(event.shiftKey);
+      return;
+    }
+    if (isKey(DOC_KEYS.look, key) && state.cursor > 0) {
+      done();
+      void lookAt(state.cursor);
+      return;
+    }
+    // The miniature form has no query and no list to step through: those keys are its host's.
+    if (inline && (isKey(DOC_KEYS.query, key) || isKey(DOC_KEYS.next, key) || isKey(DOC_KEYS.previous, key))) return;
+    if (isKey(DOC_KEYS.query, key) && !event.shiftKey) {
+      done();
+      field?.focus();
+      field?.select();
+      return;
+    }
+    if (isKey(DOC_KEYS.next, key) || isKey(DOC_KEYS.previous, key)) {
+      done();
+      step(isKey(DOC_KEYS.next, key) ? 1 : -1);
+      return;
+    }
+    if (isKey(DOC_KEYS.fewer, key)) {
+      done();
+      state.stepLevel(-1);
+      void tick().then(() => (state.cursor > 0 ? lines?.reveal(state.cursor, false) : undefined));
+      return;
+    }
+    if (isKey(DOC_KEYS.more, key)) {
+      done();
+      state.stepLevel(1);
+      void tick().then(() => (state.cursor > 0 ? lines?.reveal(state.cursor, false) : undefined));
+      return;
+    }
+    if (/^[0-9]$/.test(key) && !event.shiftKey) {
+      done();
+      state.toLevel(Number(key));
+      void tick().then(() => (state.cursor > 0 ? lines?.reveal(state.cursor, false) : undefined));
+      return;
+    }
+    if (key === "Enter" && state.cursor > 0) {
+      // What the line holds: its address or path, else its value, else its fold.
+      const links = (linkCache.get(state.cursor) ?? []).filter((l) => l.kind !== "namespace");
+      done();
+      if (links.length > 0) follow(links[0]!, false);
+      else if (chipOf(state.cursor) !== null) void lookAt(state.cursor);
+      else if ((state.folds.byLine[state.cursor] ?? -1) !== -1) state.toggle(state.cursor);
+    }
+  }
+
+  /** The first line in the lines' view: where `↓` starts with nothing picked. */
+  function firstInView(): number {
+    const box = code;
+    if (box === null) return 1;
+    const top = box.getBoundingClientRect().top;
+    for (const row of box.querySelectorAll<HTMLElement>(".tf-l[data-n]")) if (row.getBoundingClientRect().bottom > top + 1) return Number(row.dataset["n"]);
+    return 1;
+  }
+
+  function copied(value: string, what: string) {
+    void navigator.clipboard.writeText(value).then(
+      () => push({ text: `Copied ${what}.` }),
+      () => push({ text: `Could not copy ${what}.`, tone: "err" }),
+    );
+  }
+
+  /** The count of what a shut fold hides: its number loud, its word quiet. */
+  /**
+   * The lines are drawn whole up to about a screenful at the largest window, and windowed past it: a fold makes a long
+   * document short, and Source's 300 drew all 96 rows of the order's three levels in the key's frame (the probes,
+   * 2026-11-24: 106 ms at 4x on the PC, 46 after).
+   */
+  const DRAWN_WHOLE = 64;
+  /** One formatter for the counts every folded row says: `toLocaleString` builds one a call, a cost on each row drawn. */
+  const NUM = new Intl.NumberFormat("en");
+  function countOf(state: DocState, n: number): { count: string; word: string } | null {
+    const f = state.folds.byLine[n] ?? -1;
+    if (f === -1) return null;
+    const c = state.folds.count[f]!;
+    const unit = UNITS[state.folds.unit[f]!]!;
+    return { count: NUM.format(c), word: c === 1 ? unit[0] : unit[1] };
+  }
+</script>
+
+{#snippet caret(n: number)}{#if st !== null && (st.folds.byLine[n] ?? -1) !== -1}{@const shut = st.folded.has(n)}<button type="button" class="tf-xv-caret" data-xv-caret={n} aria-expanded={!shut} aria-label={shut ? "Unfold" : "Fold"} tabindex="-1"></button>{:else}<span class="tf-xv-cc"></span>{/if}{/snippet}
+
+{#snippet end(n: number)}{@const c = chipOf(n)}{@const dep = check?.byLine.get(n)}{#if dep !== undefined}<span class="tf-xv-end tf-xv-depend"><span class="tf-xv-say" title={dep.map((d) => d.raw).join("\n")}><TfXsdRuns runs={dep[0]!.words.text} cls="tf-xv-code" />{#if dep.length > 1}{" "}<span class="tf-xv-saymore">and {dep.length - 1} more</span>{/if}</span></span>{:else if c !== null}<span class="tf-xv-end">{#if c.kept !== null}<button type="button" class="tf-xv-chip tf-xv-kept" data-xv-value={n} title="Kept as {c.kept.pipeline.name}. Space looks at it.">{c.kept.pipeline.name}</button>{:else if c.guess !== null}<button type="button" class="tf-xv-chip" data-xv-value={n} title="knobas takes this for {c.guess.why}. Space looks at it.">{#if c.guess.chip.lead !== ""}<span>{c.guess.chip.lead}</span>{/if}<b>{c.guess.chip.bold}</b>{#if c.guess.chip.tail !== ""}<span>{c.guess.chip.tail}</span>{/if}</button>{/if}</span>{/if}{/snippet}
+
+{#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {NUM.format(len)} characters long.">{NUM.format(len - CLIP.keep)} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{NUM.format(st.folds.end[f]! - n)} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{NUM.format(inside)} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class={inline ? "tf-xv tf-xv-inline" : `tf-oas tf-xv tf-oas-${cols >= 3 ? 3 : 2}`} data-cols={inline ? undefined : cols} onkeydown={keys} {@attach inline ? null : pane} {@attach inline ? null : sideWidth("doc-rail")}>
+  {#if st !== null}
+    {@const state = st}
+    {#if !inline}
+    <TfDocRail
+      st={state}
+      json={kind !== "xml"}
+      bind:mode
+      ongo={(n) => void go(n)}
+      {check}
+      onstop={check === null ? null : () => check?.stop()}
+      oncheck={check === null || schema === null
+        ? null
+        : () => {
+            const c = check;
+            const s = schema;
+            if (c === null || s === null) return;
+            c.resume();
+            void runCheck(c, state, state.opened?.root ?? rootSays(text), s);
+          }}
+      onschema={check === null || schema?.open === undefined ? null : () => (check?.schema != null ? schema?.open?.(check.schema, null) : undefined)}
+      onpoint={schema === null ? null : point}
+      ondownload={schema === null ? null : download}
+      onschemamenu={schema === null ? null : warmPoint}
+    >
+      {#snippet results()}<TfDocResults st={state} ongo={goResult} onask={ask} bind:list={resultList} />{/snippet}
+      {#snippet copy()}
+        {#if (state.q.state === "nodes" || state.q.state === "values") && state.q.count > 0}
+          <button type="button" class="tf-btn tf-sm tf-ghost" bind:this={copyButton} aria-haspopup="menu" aria-expanded={copyOpen} onclick={() => (copyOpen = !copyOpen)}>Copy ▾</button>
+        {/if}
+      {/snippet}
+    </TfDocRail>
+    <TfSideEdge side="doc-rail" />
+    {/if}
+    <div class="tf-oas-col tf-xv-doc">
+      <div class="tf-xv-bar">
+        <span class="tf-xv-crumbs">
+          {#if state.crumbs.length === 0}
+            <span class="tf-dim">Pick a line: the way down to it stands here.</span>
+          {:else}
+            {@const all = state.crumbs}
+            {@const shown = all.length > 6 ? [all[0]!, null, ...all.slice(-4)] : all}
+            {#each shown as crumb, i (i)}
+              {#if i > 0}<span class="tf-sep" aria-hidden="true">›</span>{/if}
+              {#if crumb === null}<span class="tf-dim">…</span>{:else}<button type="button" title="Line {crumb.line.toLocaleString('en')}" onclick={() => void go(crumb.line)}>{crumb.name}</button>{/if}
+            {/each}
+          {/if}
+        </span>
+        {#if layout}
+          <span class="tf-xv-laid">Laid out by knobas</span>
+          <button type="button" class="tf-btn tf-sm tf-ghost" title="Draw the file as it is written, on its own lines" onclick={() => (asWritten = true)}>As written</button>
+        {:else if asWritten}
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (asWritten = false)}>Lay it out</button>
+        {/if}
+        {#if state.before !== null}
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => state.foldAsBefore()}>Fold as before ({state.before.length})</button>
+        {/if}
+        <span class="tf-xv-lv">
+          <span>Levels</span>
+          <span class="tf-seg tf-xv-step" role="group" aria-label="Levels shown">
+            <button type="button" aria-label="Show one level fewer" title="Fold the deepest level that is open (-)" disabled={state.depth === 0 || state.levels <= 1} onclick={() => state.stepLevel(-1)}>−</button>
+            <button
+              type="button"
+              class="tf-xv-stepn"
+              aria-label="{state.levels} of {state.depth} levels shown"
+              title={state.levels >= state.depth ? `All ${state.depth} levels are shown` : `${state.levels} of ${state.depth} levels are shown. Press to unfold everything (0)`}
+              onclick={() => state.toLevel(0)}>{state.depth === 0 ? "–" : state.levels}</button
+            >
+            <button type="button" aria-label="Show one level more" title="Unfold one more level (+)" disabled={state.levels >= state.depth} onclick={() => state.stepLevel(1)}>+</button>
+          </span>
+        </span>
+      </div>
+      <!-- The query is XPath; the JSON view asks with jq, where a session can be opened (section 26). -->
+      {#if !inline && (kind === "xml" || jq !== null)}
+      <TfDocQuery
+        st={state}
+        lang={kind === "xml" ? "XPath" : "jq"}
+        size={text.length}
+        bind:field
+        onstep={step}
+        onlist={() => {
+          mode = "results";
+          void tick().then(() => resultList?.querySelector<HTMLElement>(".tf-oas-row")?.focus());
+        }}
+        onleave={() => code?.focus()}
+      />
+      {/if}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      {#if shownText === null}
+        <div class="tf-xv-lines"><p class="tf-xv-laying" role="status">Laying out…</p></div>
+      {:else}
+      <div class="tf-xv-lines" onclick={onpress} onauxclick={(event) => event.button === 1 && event.target instanceof Element && linkPressed(event.target, event)} {@attach wide}>
+        <TfLines
+          bind:this={lines}
+          bind:code
+          text={shownText}
+          path={colourAs}
+          wholeUpTo={DRAWN_WHOLE}
+          {render}
+          line={layout ? null : line}
+          find="overlay"
+          rows={state.visible}
+          scrolls
+          clip={CLIP}
+          rowHeight={ROW}
+          label={path}
+          {rowClass}
+          {caret}
+          {tail}
+          {end}
+          reach={(n) => state.reach(n)}
+          onwindow={drawnLines}
+          {linksOf}
+          rowAttach={rowThing}
+        />
+      </div>
+      {/if}
+    </div>
+    {#if !inline && cols >= 3}
+      {@const here = check?.byLine.get(state.cursor)}
+      <!-- One column, whatever it holds: a stepped-to departure whole, over what the schema says of the element. -->
+      <div class="tf-xv-sidecol">
+        {#if here !== undefined}
+          <div class="tf-xv-depfull" role="status">
+            {#each here.slice(0, DEPARTURES_SHOWN) as d, i (i)}<p><TfXsdRuns runs={d.words.text} cls="tf-xv-code" /></p>{/each}
+          </div>
+        {/if}
+        {#if declared !== null}
+          <TfXsdPage st={declared} ongo={(key) => (check?.schema != null ? schema?.open?.(check.schema, key) : undefined)} onback={() => {}} onfile={(p) => schema?.open?.(p, null)} />
+        {:else}
+          <TfDocPicked picked={state.picked} oncopy={copied} />
+        {/if}
+      </div>
+    {/if}
+  {/if}
+</div>
+
+{#if looking !== null && values !== null}
+  {@const ports = values}
+  <TfValueViewer
+    value={looking.value}
+    {path}
+    guess={looking.guess}
+    kept={looking.kept}
+    first={looking.first}
+    pipelines={kept.list}
+    commands={commandSteps.list}
+    run={ports.run}
+    save={ports.save}
+    keep={(list) => kept.save(list as never)}
+    {render}
+    onclose={() => {
+      looking = null;
+      void tick().then(() => code?.focus());
+    }}
+  />
+{/if}
+
+{#if imaging !== null}
+  {@const shown = imaging}
+  <TfFileViewer
+    name={shown.name}
+    line={shown.line}
+    kind="Image"
+    content={shown.content}
+    download={() => (shown.bytes !== null && /^https?:/.test(shown.line) ? openWeb(shown.line, { elsewhere: true }) : files?.open(shown.line))}
+    downloadWaits={shown.bytes === null ? "Nothing is loaded yet" : null}
+    onclose={closeImage}
+  />
+{/if}
+
+{#if webMenu !== null}
+  {@const menu = webMenu}
+  <TfMenu bind:open={webMenuOpen} opener={menu.opener} label="Open an address" className="tf-pmenu-m">
+    {#each menu.links as l (l.at)}
+      <button type="button" role="menuitem" onclick={() => ((webMenuOpen = false), follow(l, menu.elsewhere))}>{l.to}</button>
+    {/each}
+  </TfMenu>
+{/if}
+
+{#if copyOpen && copyButton !== null}
+  <TfMenu bind:open={copyOpen} opener={copyButton} label="Copy the results" className="tf-pmenu-m">
+    <button type="button" role="menuitem" onclick={() => void copyResults("written")}>Copy as written</button>
+    {#if st?.q.state === "nodes"}
+      <button type="button" role="menuitem" onclick={() => void copyResults("values")}>Copy the values</button>
+      <button type="button" role="menuitem" onclick={() => void copyResults("lines")}>Copy the lines</button>
+    {/if}
+    <button type="button" role="menuitem" onclick={() => void copyResults("xpath")}>{kind === "xml" ? "Copy the XPath" : "Copy the filter"}</button>
+    {#if kind !== "xml" && onpipeline !== null}
+      <button type="button" role="menuitem" onclick={() => ((copyOpen = false), st !== null && onpipeline?.(st.source.trim()))}>Use as this file's pipeline</button>
+    {/if}
+  </TfMenu>
+{/if}
+
+{#if pointing !== null}
+  <TfXsdPoint namespace={pointing.namespace} location={pointing.location} {candidates} onpick={(c) => void pickFile(c)} onclose={() => (pointing = null)} />
+{/if}

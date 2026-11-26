@@ -50,11 +50,20 @@ pub use crate::run_log::SourceSyncStatus;
 /// a compiled-in adapter's plain [`DocProjection`](knobas_source::docs::DocProjection),
 /// or an external adapter's call into its component. Cheap to clone.
 #[derive(Clone)]
-pub struct Projection(Arc<ProjectFn>);
+pub struct Projection {
+    project: Arc<ProjectFn>,
+    /// The adapter's own read of a page's editor, where it gives one
+    /// ([`Projection::naming_editors_by`]).
+    editor: Option<EditorFn>,
+}
 
 /// What a [`Projection`] calls.
 type ProjectFn =
     dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync;
+
+/// An adapter's read of a page's editor alone: a plain function, as a
+/// compiled-in adapter's projection is.
+type EditorFn = fn(kind: &str, payload: &serde_json::Value) -> Option<String>;
 
 impl Projection {
     /// A projection that calls `project`.
@@ -64,7 +73,19 @@ impl Projection {
         + Sync
         + 'static,
     ) -> Self {
-        Self(Arc::new(project))
+        Self {
+            project: Arc::new(project),
+            editor: None,
+        }
+    }
+
+    /// This projection, with [`Projection::editor_name`] answered by
+    /// `editor`: the adapter's own read of that one field, which must answer
+    /// what its projection's `editor_name` does for every record.
+    #[must_use]
+    pub fn naming_editors_by(mut self, editor: EditorFn) -> Self {
+        self.editor = Some(editor);
+        self
     }
 
     /// The record of entity kind `kind` whose payload is `payload`, drawn:
@@ -76,7 +97,26 @@ impl Projection {
         kind: &str,
         payload: &serde_json::Value,
     ) -> Option<knobas_source::docs::DocContent> {
-        (self.0)(kind, payload)
+        (self.project)(kind, payload)
+    }
+
+    /// The display name of who made the record's revision:
+    /// [`Projection::project`]'s `editor_name`, read without drawing the
+    /// page where the adapter gives a read of its own
+    /// ([`Projection::naming_editors_by`]), and off the drawn page where it
+    /// gives none (an external adapter's component draws the whole page
+    /// either way).
+    ///
+    /// The Docs search names fifty hits' editors a keystroke. Drawn, each
+    /// was a whole page read into blocks for one string: about 400 of a
+    /// keystroke's 470 ms on a mirror of 5,000 Confluence pages
+    /// (2026-11-12, a debug build).
+    #[must_use]
+    pub fn editor_name(&self, kind: &str, payload: &serde_json::Value) -> Option<String> {
+        match self.editor {
+            Some(editor) => editor(kind, payload),
+            None => self.project(kind, payload).and_then(|c| c.editor_name),
+        }
     }
 }
 
@@ -315,6 +355,16 @@ pub trait SyncEvents: Send + Sync + 'static {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         None
     }
+    /// The files index and the checkouts' reader the files pass writes
+    /// through after each run (the everything-search decisions, 2026-11-20,
+    /// D7; [`crate::code_files`]). `None`, the default: no pass, as for every
+    /// scheduler but the app's.
+    fn files(&self) -> Option<crate::code_files::Files> {
+        None
+    }
+    /// `code:files`, at each repository's end of a files pass: how far the
+    /// source's repositories are read. The default hears nothing.
+    fn code_files(&self, _progress: &crate::code_files::FilesProgress) {}
 }
 
 /// The payload of the shell's `item:refreshed` event: a refresh of one item
@@ -484,7 +534,9 @@ select c.id as source_id,
        case
          when r.id is not null then null
          when not c.enabled then null
+         when c.sync_by_hand then null
          when c.auth_state in ('unauthorized', 'missing_secret') then null
+
          else coalesce(
                 greatest(
                   f.finished_at + make_interval(secs => c.sync_interval_secs::double precision),
@@ -739,9 +791,14 @@ pub async fn execute_run(
     progress: Option<Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> RunResult {
-    run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started)
-        .await
-        .0
+    // A run, so in the background lane as a scheduled one is
+    // ([`Inner::run_task_in_background`]).
+    knobas_http::on_lane(
+        knobas_http::Lane::Background,
+        run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started),
+    )
+    .await
+    .0
 }
 
 /// [`execute_run`], handing back the adapter of a run that committed, for
@@ -1187,13 +1244,50 @@ async fn attempt(
     }
     // The same test as `write_queue::retryable`'s: change the two together.
     match report {
-        Ok(report) => Ok((report, source)),
+        Ok(mut report) => {
+            keep_otp_keys(deps, source_id, &mut report).await;
+            Ok((report, source))
+        }
+
         Err(error @ SyncError::Source(SourceError::Protocol { status: None, .. }))
             if held_on.is_some() =>
         {
             Err(RunFailure::LocalQuota(error))
         }
         Err(error) => Err(RunFailure::Sync(error)),
+    }
+}
+
+/// Keep the code keys a run that **committed** handed over (ADR-0056), in
+/// the OS keychain beside the source's credential: a run that walked every
+/// entry replaces the stored set, any other adds to it and removes nothing.
+/// A failed run never reaches here, so the keys of the last good run keep
+/// working. The keys leave the report either way; they are in no log line.
+///
+/// A store that refuses is warned about and does not fail the run: the
+/// mirror is right, and the entries say *Sync now to make codes here*.
+async fn keep_otp_keys(deps: &SchedulerDeps, source_id: &str, report: &mut crate::SyncReport) {
+    let run = std::mem::take(&mut report.otp_keys);
+    if !run.applies {
+        return;
+    }
+    let count = run.keys.len();
+    let keys: knobas_secrets::otp::OtpKeys = run.keys.into_iter().collect();
+    let kept = if run.whole {
+        knobas_secrets::otp::spawn::replace(&deps.secrets, source_id, keys).await
+    } else {
+        knobas_secrets::otp::spawn::merge(&deps.secrets, source_id, keys).await
+    };
+    match kept {
+        Ok(chunks) => tracing::debug!(
+            source_id,
+            count,
+            chunks,
+            "kept the run's one-time-code keys"
+        ),
+        Err(error) => {
+            tracing::warn!(source_id, count, %error, "the run's one-time-code keys could not be kept")
+        }
     }
 }
 
@@ -1605,6 +1699,48 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 /// already cancelled by the time this is reached.
 const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How long the quit waits for an aborted run to be gone. An abort takes
+/// effect at the run's next await; a run stuck in a call that never returns
+/// to its executor takes none. On Windows a run reporting its end through an
+/// event to the page waited on the main thread, which was the quit waiting
+/// for the run: knobas never quit (the final suite, 2026-11-22). Past this the
+/// quit goes on without it; the next start's `reconcile_abandoned` closes its
+/// row.
+pub(crate) const ABORTED_GONE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The most a quit waits for [`Scheduler::shutdown`] by the wall clock
+/// ([`finish_within`]): its grace, the wait for aborted runs, the pool's
+/// close twice over (the cut writes' hold and the close itself), and a second.
+/// Past it the quit goes on to the database without the scheduler.
+pub const QUIT_BOUND: Duration = Duration::from_secs(
+    SHUTDOWN_GRACE.as_secs()
+        + ABORTED_GONE_TIMEOUT.as_secs()
+        + 2 * POOL_CLOSE_TIMEOUT.as_secs()
+        + 1,
+);
+
+/// Run `future` as a task on `runtime` and wait for its answer by the wall
+/// clock, at most `bound`: `None` past it, and the task is left to the
+/// process's end.
+///
+/// For a caller on a thread that is not one of the runtime's (the quit, on the
+/// main thread). Not a `block_on`: while a worker is stuck in a call that never
+/// returns to its executor, the runtime's timers can stop firing for a
+/// `block_on` thread (it never drives them), and every timeout inside the
+/// future with them (the final suite, 2026-11-22). A spawned task wakes a
+/// worker, which drives them; and a `recv_timeout` needs none of them.
+pub fn finish_within<T: Send + 'static>(
+    runtime: &tokio::runtime::Handle,
+    bound: Duration,
+    future: impl std::future::Future<Output = T> + Send + 'static,
+) -> Option<T> {
+    let (answer, answered) = std::sync::mpsc::channel();
+    runtime.spawn(async move {
+        let _ = answer.send(future.await);
+    });
+    answered.recv_timeout(bound).ok()
+}
+
 /// What `delete_source` asked to happen to a deleted source's mirror.
 ///
 /// Carried into the scheduler rather than staying in `delete_source`, because
@@ -1677,8 +1813,9 @@ impl WeakScheduler {
 ///
 /// The flag is the *claim on the source's first sync*, and it is what makes
 /// **spent when taken** true wherever the taking happened. A caller that asks
-/// for [`SyncTrigger::FirstRun`] with a channel of its own -- in practice the
-/// first-run wizard, the only caller of `sync_now_with_progress` -- is asking
+/// for [`SyncTrigger::FirstRun`] with a channel of its own -- the first-run
+/// wizard's `sync_now_with_progress` until ux31 removed both; no app command
+/// asks this way today, and the rule stays for the engine's API -- is asking
 /// about *the source's first sync*, and it is entitled to that answer once.
 /// Being enrolled in the run while it is still going is that answer just as
 /// much as being served the run's recorded ending afterwards is, so both spend
@@ -1695,6 +1832,21 @@ impl WeakScheduler {
 struct RunEntry {
     watchers: Arc<Watchers>,
     first_run_claimed: bool,
+    /// How the run may be stopped so a landed write's read-back goes first
+    /// ([`Scheduler::stand_aside`]); `None` for a run a person pressed or
+    /// joined, a first sync or a backfill, which never stand aside.
+    aside: Option<StandAside>,
+}
+
+/// A run's stop for a landed write's read-back (ADR-0031 as amended
+/// 2026-11-24, the pr-state fix): cancelled by [`Scheduler::stand_aside`],
+/// selected beside the quit's around the locked run only, so dropping the
+/// run rolls its transaction back and the waiting refresh gets the lock.
+#[derive(Clone, Default)]
+struct StandAside {
+    token: CancellationToken,
+    /// The write it stood aside for, which its row names.
+    write: Arc<std::sync::Mutex<Option<i64>>>,
 }
 
 /// Everything this scheduler remembers about a source *id*, under one lock.
@@ -1997,33 +2149,114 @@ impl Scheduler {
     /// [`trigger`](Self::trigger) and nothing else: the **wait**, and that
     /// what it waits for is a run **after the write** (#375).
     ///
-    /// Answers the id of the run it waited on last.
+    /// Answers the id of the run it waited on last, or `None` for a source
+    /// that syncs **only by hand** (ADR-0056): a write is not a press, so it
+    /// starts no run there. The landed write's refresh still reads its item
+    /// back; whatever else the write changed waits for the next *Sync now*.
     ///
     /// # Errors
-    /// [`TriggerError`], from either trigger.
-    pub async fn sync_after_write(&self, source_id: &str) -> Result<i64, TriggerError> {
+    /// [`TriggerError`], from either trigger, or reading whether the source
+    /// syncs by hand.
+    pub async fn sync_after_write(&self, source_id: &str) -> Result<Option<i64>, TriggerError> {
+        if config::syncs_by_hand(&self.deps().pool, source_id).await? {
+            return Ok(None);
+        }
         match self.trigger_and_wait(source_id).await? {
-            Triggered::Started(run_id) => Ok(run_id),
+            Triggered::Started(run_id) => Ok(Some(run_id)),
             Triggered::Existing(_) => self
                 .trigger_and_wait(source_id)
                 .await
-                .map(Triggered::run_id),
+                .map(|t| Some(t.run_id())),
         }
     }
 
     /// Refresh one item from its source (ADR-0031): [`crate::refresh::of_entity`]
     /// over this scheduler's deps. Waits behind a run of the source in
-    /// flight, and holds off the next until it commits. Tells no one: the
-    /// caller tells [`SyncEvents::refresh_ended`] once what follows the
-    /// refresh is written.
+    /// flight under [`crate::refresh::Lock::Wait`], or answers
+    /// [`crate::refresh::RefreshOutcome::RunInFlight`] at once under
+    /// [`crate::refresh::Lock::Try`]; holds off the next run until it
+    /// commits. Tells no one: the caller tells [`SyncEvents::refresh_ended`]
+    /// once what follows the refresh is written.
     ///
     /// # Errors
     /// [`crate::refresh::RefreshError`].
     pub async fn refresh(
         &self,
         entity_id: &str,
+        lock: crate::refresh::Lock,
     ) -> Result<crate::refresh::RefreshOutcome, crate::refresh::RefreshError> {
-        crate::refresh::of_entity(self.deps(), entity_id).await
+        crate::refresh::of_entity(self.deps(), entity_id, lock).await
+    }
+
+    /// **Stop the run of `source_id` in flight so write `write_id`'s
+    /// read-back goes first** (ADR-0031 as amended 2026-11-24, the pr-state
+    /// fix; Fable's ruling 1). A run holds the source's lock for its whole
+    /// walk of the forge, and every landed write starts one, so a second
+    /// write's read-back waited out the first's whole run (3.5 s at seed
+    /// size, minutes at Björn's). Answers whether a run was stopped.
+    ///
+    /// The stopped run ends as a quit-cancelled one does: its transaction
+    /// rolled back, its row closed with [`RunResult::stood_aside`]'s
+    /// verdict, its watchers told once, no verdict on the credential and the
+    /// backoff untouched. The run after the write
+    /// ([`sync_after_write`](Self::sync_after_write)) starts again from the
+    /// same stored position.
+    ///
+    /// **Not stopped**, and the read-back waits as before: a run a person
+    /// pressed or joined, a first sync or a backfill (no leave, see
+    /// [`RunEntry::aside`]); a source with no stored position, whose run owes
+    /// a full sync and its sweep; and a source with no run that ended `ok`
+    /// within max(10 min, twice its interval), which a stream of writes
+    /// would otherwise never let sync.
+    pub async fn stand_aside(&self, source_id: &str, write_id: i64) -> bool {
+        let aside = {
+            let claims = self.inner.claims.lock().await;
+            // The entry outlives its run (ADR-0005): only a run still going is
+            // stopped. `attach(None)` asks without enrolling anyone.
+            claims
+                .runs
+                .get(source_id)
+                .filter(|entry| entry.watchers.attach(None) == Attach::Joined)
+                .and_then(|entry| entry.aside.clone())
+        };
+        let Some(aside) = aside else {
+            return false;
+        };
+        let may: Result<Option<bool>, sqlx::Error> = sqlx::query_scalar(
+            "select c.cursor is not null
+                    and coalesce(max(r.finished_at) > now() - make_interval(
+                            secs => greatest(600, 2 * c.sync_interval_secs)::double precision),
+                        false)
+               from knobas.source_config c
+               left join knobas.sync_run r
+                 on r.source_id = c.id and r.finished_at is not null and r.outcome = 'ok'
+              where c.id = $1
+              group by c.cursor, c.sync_interval_secs",
+        )
+        .bind(source_id)
+        .fetch_optional(&self.deps().pool)
+        .await;
+        if !matches!(may, Ok(Some(true))) {
+            return false;
+        }
+        *aside
+            .write
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(write_id);
+        aside.token.cancel();
+        true
+    }
+
+    /// Whether a run of `source_id` that may stand aside is in flight.
+    pub async fn may_stand_aside(&self, source_id: &str) -> bool {
+        let claims = self.inner.claims.lock().await;
+        claims.runs.get(source_id).is_some_and(|entry| {
+            entry.watchers.attach(None) == Attach::Joined
+                && entry
+                    .aside
+                    .as_ref()
+                    .is_some_and(|aside| !aside.token.is_cancelled())
+        })
     }
 
     /// Ask for a manual sync, wait for its ending, and say whether the run was
@@ -2033,9 +2266,12 @@ impl Scheduler {
         let sink = Arc::new(RunEnded {
             done: std::sync::Mutex::new(Some(done)),
         });
+        // The run after a write may stand aside for the next write's
+        // read-back, as a scheduled one may: create-then-merge would
+        // otherwise wait out the create's whole run (the pr-state fix).
         let triggered = self
             .inner
-            .trigger(source_id, SyncTrigger::Manual, Some(sink))
+            .trigger_as(source_id, SyncTrigger::Manual, Some(sink), true)
             .await?;
         let _ = wait.await;
         Ok(triggered)
@@ -2328,7 +2564,7 @@ impl Scheduler {
     /// are awaited together. One grace ([`SchedulerTiming::shutdown_grace`],
     /// [`SHUTDOWN_GRACE`] outside tests) from the cancel covers
     /// the door and both waits, and what is left at its end is aborted, and
-    /// awaited until it is gone. A write that was still at its source then
+    /// awaited until it is gone, for at most [`ABORTED_GONE_TIMEOUT`]. A write that was still at its source then
     /// is held as one the source may have (#1932, `write_queue::hold_cut`),
     /// so the next start does not send it again. Only then the pool.
     ///
@@ -2359,9 +2595,20 @@ impl Scheduler {
                 // Until each is gone: an aborted task's future is dropped on
                 // its own worker, and a send it cut is kept as it drops. A
                 // handle joined above is finished, and polling it again
-                // would panic.
-                for handle in handles.iter_mut().filter(|handle| !handle.is_finished()) {
-                    let _ = handle.await;
+                // would panic. Bounded: a run stuck in a blocking call is
+                // never gone ([`ABORTED_GONE_TIMEOUT`]).
+                let gone = async {
+                    for handle in handles.iter_mut().filter(|handle| !handle.is_finished()) {
+                        let _ = handle.await;
+                    }
+                };
+                if tokio::time::timeout(ABORTED_GONE_TIMEOUT, gone)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        "a sync run is stuck in a call that does not return: the quit goes on without it"
+                    );
                 }
             }
         };
@@ -2470,11 +2717,33 @@ impl ProgressSink for RunEnded {
 }
 
 impl Inner {
+    /// [`trigger_as`](Self::trigger_as), standing aside for a landed write
+    /// only where the ticker started it: a run a person asked for keeps going.
     async fn trigger(
         self: &Arc<Self>,
         source_id: &str,
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
+    ) -> Result<Triggered, TriggerError> {
+        self.trigger_as(
+            source_id,
+            trigger,
+            progress,
+            trigger == SyncTrigger::Schedule,
+        )
+        .await
+    }
+
+    /// Start or join a run of `source_id`. `may_stand_aside`: the run may be
+    /// stopped for a landed write's read-back (the ticker's, and the run
+    /// after a write); a caller that may not, joining a run that may, takes
+    /// that leave away. A first sync and a backfill never stand aside.
+    async fn trigger_as(
+        self: &Arc<Self>,
+        source_id: &str,
+        trigger: SyncTrigger,
+        progress: Option<Arc<dyn ProgressSink>>,
+        may_stand_aside: bool,
     ) -> Result<Triggered, TriggerError> {
         // Derived, never passed alongside: see `impl From<SyncTrigger> for
         // RunMode`. This is what makes "the log says `backfill`" and "the run
@@ -2505,6 +2774,9 @@ impl Inner {
                 // the wizard's *Retry*, which is the same command asking a
                 // second time -- gets work rather than this run again.
                 entry.first_run_claimed |= asks_for_the_first_sync;
+                if !may_stand_aside {
+                    entry.aside = None;
+                }
                 return Ok(Triggered::Existing(run_id));
             }
             let unclaimed = !entry.first_run_claimed;
@@ -2540,6 +2812,7 @@ impl Inner {
         // The caller that started the run is a watcher like any other; nothing
         // below this line knows which of them it was.
         watchers.attach(progress);
+        let aside = StandAside::default();
         claims.runs.insert(
             source_id.to_owned(),
             RunEntry {
@@ -2548,6 +2821,9 @@ impl Inner {
                 // wizard that got here first is watching the run it asked for,
                 // and its *Retry* must not be handed this one back.
                 first_run_claimed: asks_for_the_first_sync,
+                aside: (may_stand_aside
+                    && matches!(trigger, SyncTrigger::Schedule | SyncTrigger::Manual))
+                .then(|| aside.clone()),
             },
         );
         drop(claims);
@@ -2571,13 +2847,38 @@ impl Inner {
         // waiting at the door, so the pool is still open for it.
         if self.cancel.is_cancelled() {
             drop(tasks);
-            inner.run_task(id, run_id, mode, watchers).await;
+            inner
+                .run_task_in_background(id, run_id, mode, watchers, aside)
+                .await;
             return Err(TriggerError::ShuttingDown);
         }
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
+        let handle = tokio::spawn(async move {
+            inner
+                .run_task_in_background(id, run_id, mode, watchers, aside)
+                .await
+        });
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
         Ok(Triggered::Started(run_id))
+    }
+
+    /// [`run_task`](Self::run_task) in [`knobas_http::Lane::Background`]:
+    /// every request the run sends -- discovery, the sync, the pipelines'
+    /// latest logs after it -- yields to one a person is waiting for on the
+    /// same origin (the priority lane, 2026-11-13). Boxed, as the sync's
+    /// future is in [`attempt`], to keep the callers' futures shallow.
+    fn run_task_in_background(
+        self: Arc<Self>,
+        source_id: String,
+        run_id: i64,
+        mode: RunMode,
+        watchers: Arc<Watchers>,
+        aside: StandAside,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            self.run_task(source_id, run_id, mode, watchers, aside),
+        ))
     }
 
     /// One spawned run: take a permit, do the work (or give up when cancelled),
@@ -2589,6 +2890,7 @@ impl Inner {
         run_id: i64,
         mode: RunMode,
         watchers: Arc<Watchers>,
+        aside: StandAside,
     ) {
         // The permit is what caps concurrency. Acquired *after* the log row
         // exists, so a queued run is visible as "running" in the UI rather
@@ -2634,6 +2936,15 @@ impl Inner {
                 tokio::select! {
                     biased;
                     () = self.cancel.cancelled() => (RunResult::cancelled(), None),
+                    () = aside.token.cancelled() => {
+                        let write = aside
+                            .write
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .unwrap_or_default();
+                        tracing::info!(source_id, run_id, write, "the run stood aside for a landed write's read-back");
+                        (RunResult::stood_aside(write), None)
+                    }
                     ran = run_keeping_the_adapter(
                         &self.deps,
                         &source_id,
@@ -2667,6 +2978,50 @@ impl Inner {
                 stored = crate::pipeline_logs::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
                     if let Err(error) = stored {
                         tracing::warn!(source_id, %error, "storing the pipelines' latest logs failed");
+                    }
+                }
+            }
+            // Each open pull request's *Files* whose commits moved (the
+            // held-files pass of PR #2479, 2026-11-15): after the logs, in the
+            // same background lane, bounded (`held_sections::BUDGET`), before
+            // the trees so a push's *Files* is held by the run after it.
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                held = crate::held_sections::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = held {
+                        tracing::warn!(source_id, %error, "holding the open pull requests' files failed");
+                    }
+                }
+            }
+            // Every branch's tree, levels the store lacks only (the
+            // stored-trees pass of PR #2479): after the logs, in the same
+            // background lane, bounded (`stored_trees::BUDGET`); the quit
+            // cuts it, and what it left the next run reads.
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                stored = crate::stored_trees::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = stored {
+                        tracing::warn!(source_id, %error, "storing the branches' trees failed");
+                    }
+                }
+            }
+            // Every repository's files, on its default branch's head, into
+            // the files index (the everything-search decisions, D7): after
+            // the trees, which say which files changed, in the same lane,
+            // bounded (`code_files::BUDGET`); the quit cuts it.
+            if let Some(files) = self.deps.events.files() {
+                let events = Arc::clone(&self.deps.events);
+                let report =
+                    move |progress: crate::code_files::FilesProgress| events.code_files(&progress);
+                tokio::select! {
+                    biased;
+                    () = self.cancel.cancelled() => {}
+                    passed = crate::code_files::refresh(&self.deps.pool, &source_id, adapter.as_ref(), &files, &report) => {
+                        if let Err(error) = passed {
+                            tracing::warn!(source_id, %error, "reading the repositories' files failed");
+                        }
                     }
                 }
             }
@@ -2904,13 +3259,33 @@ async fn flush_loop(inner: Arc<Inner>) {
             () = inner.cancel.cancelled() => return,
             () = inner.flush_due.notified() => {}
         }
-        crate::write_queue::flush_all(&inner.deps).await;
+        // The tick's writes are retries nobody is watching: they yield to a
+        // person's requests. A write a person just pressed is flushed by its
+        // own submit, outside this task, in the interactive lane (the
+        // priority lane, 2026-11-13).
+        knobas_http::on_lane(
+            knobas_http::Lane::Background,
+            crate::write_queue::flush_all(&inner.deps),
+        )
+        .await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The quit's wall clock covers every wait inside the scheduler's shutdown
+    /// and a second more: the grace, the wait for aborted runs, the pool's
+    /// close twice. 3 + 2 + 2 * 2 + 1 = 10 s.
+    #[test]
+    fn the_quit_bound_covers_the_shutdowns_own_waits() {
+        assert_eq!(QUIT_BOUND, Duration::from_secs(10));
+        assert!(
+            QUIT_BOUND
+                > SHUTDOWN_GRACE + ABORTED_GONE_TIMEOUT + POOL_CLOSE_TIMEOUT + POOL_CLOSE_TIMEOUT
+        );
+    }
 
     /// The two states the status read excludes from `next_run_at` are the two
     /// [`config::due`] excludes from scheduling, spelled the same way. A

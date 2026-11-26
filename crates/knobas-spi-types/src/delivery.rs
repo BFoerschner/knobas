@@ -46,6 +46,10 @@ pub enum Projection {
     /// the op adds to a discussion, and only the item's state moving is a
     /// reason to look again.
     DeclaredState,
+    /// The target's status as its kind declares it (`KindPaths::status_name`,
+    /// ADR-0054): the op moves the item through its workflow, and only its
+    /// status moving is a reason to look again.
+    Status,
     /// The whole mirrored record: any change to the target holds.
     ///
     /// `per_field` narrows it to the fields the queued payload carries
@@ -64,6 +68,14 @@ impl Projection {
     #[must_use]
     pub fn reads_declared_state(self) -> bool {
         matches!(self, Self::DeclaredState | Self::Whole { per_field: true })
+    }
+
+    /// Whether this projection reads the target kind's declared status path
+    /// ([`Projection::Status`]), so the queue knows to look the kind's paths
+    /// up for it too.
+    #[must_use]
+    pub fn reads_declared_status(self) -> bool {
+        matches!(self, Self::Status)
     }
 }
 
@@ -95,5 +107,27 @@ impl ArrivalLink {
             Self::Related => "related",
             Self::Documents => "documents",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Projection;
+
+    /// Only a status move looks the kind's status path up; a declared state,
+    /// and a record whole or per field, look up the state paths instead (the
+    /// final suite's mutants: either constant answer went unseen).
+    #[test]
+    fn only_a_status_projection_reads_the_declared_status() {
+        assert!(Projection::Status.reads_declared_status());
+        for other in [
+            Projection::Liveness,
+            Projection::DeclaredState,
+            Projection::WHOLE,
+            Projection::Whole { per_field: true },
+        ] {
+            assert!(!other.reads_declared_status(), "{other:?}");
+        }
+        assert!(!Projection::Status.reads_declared_state());
     }
 }

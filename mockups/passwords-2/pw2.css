@@ -1,0 +1,269 @@
+/*
+  Passwords, second pass. Everything the page draws that the app's stylesheets do not already have.
+  The page itself is built from the app's own classes (app/src/lib/tf/css/*): the Docs tree's rail,
+  job panels, the canonical header, chips, buttons, dialogs, toasts, Settings rows. The `pw-` rules
+  below are the whole addition; the `mk` block at the end is the mockup pill and not part of the app.
+*/
+
+/* Google Fonts' family name behind the vendored one, for a copy of this folder without app/node_modules. */
+:root { --sans: "Archivo Variable", "Archivo", system-ui, sans-serif; }
+
+/* ---------- the page: the tree's rail, and the bench beside it ---------- */
+.pw-page { height: 100%; }
+.pw-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); position: relative; }
+.pw-work { overflow: auto; min-width: 0; min-height: 0; }
+/* The bench is the list and the entry as one block, centred in the space beside the tree: neither panel
+   reaches a window edge on a wide screen, and a six-field entry never sits alone in a wide column. */
+.pw-bench { max-width: 1482px; margin: 0 auto; padding: 0 22px 72px; }
+.tf-fhead.pw-head { padding: 18px 0 14px; align-items: center; }
+.pw-head > div:first-child { min-width: 0; flex: 1 1 320px; }
+.pw-head .tf-sub { max-width: 80ch; }
+.pw-cols { display: grid; grid-template-columns: minmax(280px, 700px) minmax(340px, 720px); justify-content: center; gap: 18px; align-items: start; }
+.pw-listcol { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
+.pw-entrycol { position: sticky; top: 14px; min-width: 0; max-height: calc(100vh - 150px); overflow: auto; border-radius: 6px; }
+.pw-back, .pw-foldersbtn { display: none; }
+
+/* ---------- the tree: folders only, the Docs rail's look, rows that take the arrow keys ---------- */
+.pw-tree .tf-dl-body { padding: 8px 0 14px; }
+.pw-node {
+  display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left;
+  padding: 4px 12px 4px calc(12px + var(--d, 0) * 14px); font-size: var(--t-sm); white-space: nowrap; border-radius: 0;
+}
+.pw-node:hover { background: var(--sheet-2); }
+.pw-node[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf .pw-node:focus-visible { outline-offset: -2px; }
+.pw-tw { width: 10px; flex: none; color: var(--ink-2); font-size: var(--t-2xs); }
+.pw-node[aria-current="true"] .pw-tw, .pw-node[aria-current="true"] .pw-n { color: inherit; }
+.pw-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pw-n { font-size: var(--t-2xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* A source's top folder, as the Docs tree draws a space. */
+.pw-node.pw-top { font-weight: 600; margin-top: 8px; }
+/* A folded folder that holds the open entry. */
+.pw-node.pw-holds .pw-nm { font-weight: 700; }
+.pw-node .tf-dot { width: 7px; height: 7px; }
+.pw-mark { width: 12px; height: 12px; flex: none; color: var(--ink-2); }
+.pw-node[aria-current="true"] .pw-mark { color: inherit; }
+
+/* ---------- the list: one panel a folder, one row an entry ---------- */
+.pw-filter.tf-fsearch { flex: none; max-width: none; height: var(--control-h); background: var(--sheet); }
+.pw-rows { display: flex; flex-direction: column; gap: 12px; }
+.pw-group > header { padding: 9px 12px 7px; align-items: baseline; }
+.pw-group > header h3 { font-size: var(--t-md); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-group > header h3 a { text-decoration: none; }
+.pw-group > header h3 a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.pw-group > header .pw-pre { color: var(--ink-2); font-weight: 400; }
+.pw-group > header .tf-count { margin-left: auto; }
+.pw-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: center; width: 100%;
+  padding: 8px 12px; border: 0; border-top: 1px solid var(--rule-2); background: none; text-align: left; cursor: pointer;
+}
+.pw-row:last-child { border-radius: 0 0 5px 5px; }
+.pw-row:hover { background: var(--sheet-2); }
+/* The selected row: the Docs search hit's mark, an ink bar on its left edge. */
+.pw-row[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf .pw-row:focus-visible { outline-offset: -2px; }
+.pw-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-s { grid-column: 1; font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-s > span + span { margin-left: 12px; }
+.pw-e { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 8px; align-items: center; font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
+.pw-more { border: 0; border-top: 1px solid var(--rule-2); background: none; padding: 7px 12px; text-align: left; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); border-radius: 0 0 5px 5px; }
+.pw-more:hover { background: var(--sheet-2); color: var(--ink); }
+.pw-group > header .pw-mark { align-self: center; }
+.pw-keys { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 2px 2px 0; font-size: var(--t-xs); color: var(--ink-2); }
+.pw-keys span { white-space: nowrap; }
+@container (max-width: 380px) { .pw-e .tf-num { display: none; } }
+
+/* ---------- the entry: one panel, one row a field ---------- */
+.pw-entry { container-type: inline-size; }
+.pw-ehead { padding: 14px 16px 14px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.pw-etitle { flex: 1 1 260px; min-width: 0; }
+.pw-epath { font-size: var(--t-xs); color: var(--ink-2); }
+.pw-epath a { text-decoration: none; }
+.pw-epath a:hover { text-decoration: underline; text-underline-offset: 2px; color: var(--ink); }
+.pw-epath .pw-sl { margin: 0 5px; }
+.pw-ehead h2 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; overflow-wrap: anywhere; margin-top: 3px; }
+.pw-ehead .tf-acts { display: flex; gap: var(--control-gap); flex: none; }
+.pw-echips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.pw-enote { margin: 0 16px 12px; }
+.tf-stale.pw-enote { font-size: var(--t-sm); gap: 12px; }
+.tf-stale.pw-enote > span { flex: 1; min-width: 0; }
+.tf-stale.pw-enote .tf-btn { flex: none; color: var(--ink); }
+/* An entry that needs approval says so in the info tone, with the request in the same box. */
+.pw-gate { margin: 0 16px 12px; padding: 9px 10px; border-radius: 4px; background: var(--info-bg); color: var(--info); font-size: var(--t-sm); display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
+.pw-gate.tf-ok { background: var(--ok-bg); color: var(--ok); }
+.pw-gate .tf-btn:not(.tf-primary) { color: var(--ink); }
+.pw-gate > span:first-child { flex: 1; min-width: 0; }
+.pw-gate form { flex: 1 0 100%; display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; }
+.pw-gate p { flex: 1 0 100%; font-size: var(--t-xs); }
+
+.pw-f { display: grid; grid-template-columns: 108px minmax(0, 1fr) auto; gap: 3px 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--rule-2); min-height: 48px; }
+.pw-fl { font-size: var(--t-sm); color: var(--ink-2); }
+.pw-fv { min-width: 0; overflow-wrap: anywhere; }
+.pw-fv.tf-mono { font-size: var(--t-sm); }
+.pw-fa { display: flex; gap: var(--control-gap); align-items: center; }
+.pw-fh { grid-column: 2 / -1; font-size: var(--t-xs); color: var(--ink-2); }
+.pw-fh.tf-stg-errt { font-weight: 600; }
+.pw-f.pw-top { align-items: start; }
+.pw-f.pw-top .pw-fl { padding-top: 2px; }
+.pw-notes { white-space: pre-line; max-width: 62ch; }
+/* A covered secret: twelve dots whatever its length, so the cover says nothing about it. Drawn, not typed. */
+.pw-cover {
+  --dot: 9px; display: inline-block; vertical-align: middle; width: calc(12 * var(--dot)); height: var(--dot); font-size: 0;
+  background: radial-gradient(circle at center, var(--ink-2) 0 2.6px, transparent 3.1px) left center / var(--dot) var(--dot) repeat-x;
+}
+/* A shown secret: mono, a step larger, digits and symbols tinted so 0 and O, 1 and l can be told apart. */
+.pw-clear { font: 600 var(--t-xl)/1.4 var(--mono); font-variant-ligatures: none; letter-spacing: .03em; overflow-wrap: anywhere; }
+.pw-clear .d { color: var(--info); }
+.pw-clear .s { color: var(--hl-kw); }
+.pw-timeleft { display: flex; align-items: center; gap: 8px; }
+.tf .tf-btn.tf-primary kbd { background: none; border-color: currentColor; color: inherit; opacity: .75; }
+.tf-btn kbd { margin-left: 2px; }
+
+/* Thirty ticks, one a second. Whatever is secret here lasts thirty seconds on screen or on the clipboard,
+   and a one-time code lasts thirty by its nature, so all three draw the same comb: the ticks still standing
+   are the seconds left, in the warn tone for the last five. One element; `--n` is the seconds left. */
+.pw-comb {
+  --n: 30; --tick: 5px; --bar: 3px; display: inline-block; position: relative; flex: none; height: 12px;
+  width: calc(30 * var(--tick) - (var(--tick) - var(--bar)));
+  background: repeating-linear-gradient(90deg, var(--rule) 0 var(--bar), transparent var(--bar) var(--tick));
+}
+.pw-comb::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: calc(var(--n) * var(--tick)); max-width: 100%;
+  background: repeating-linear-gradient(90deg, var(--ink) 0 var(--bar), transparent var(--bar) var(--tick));
+}
+.pw-comb.pw-low::before { background-image: repeating-linear-gradient(90deg, var(--warn) 0 var(--bar), transparent var(--bar) var(--tick)); }
+.pw-comb.pw-sm { --tick: 3px; --bar: 2px; height: 9px; }
+.pw-comb.pw-lg { --tick: 6px; --bar: 3px; height: 20px; }
+
+/* The one-time code: the value you read off the screen and type somewhere else, in the job key's type. */
+.pw-otp .pw-fv { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; }
+.pw-code { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d2); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pw-code i { font-style: normal; margin-left: .22em; }
+.pw-code.pw-cover { --dot: 20px; width: calc(6 * var(--dot)); height: 44px; background-image: radial-gradient(circle at center, var(--ink-2) 0 5px, transparent 5.6px); }
+.pw-otpleft { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* The usage comment, asked in the row that needs it: one field, pre-filled, Enter sends it. */
+.pw-ask {
+  grid-column: 1 / -1; display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; margin-top: 6px;
+  padding: 10px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet-2);
+}
+.pw-ask label { flex: 1 0 100%; font-size: var(--t-xs); font-weight: 600; }
+.pw-ask .pw-in { flex-basis: 150px; }
+.pw-in { border: 1px solid var(--rule); border-radius: 4px; padding: 0 8px; height: var(--control-h); background: var(--paper); color: var(--ink); flex: 1 1 220px; min-width: 0; }
+.pw-ask .pw-in { height: var(--control-h); }
+.pw-ask p { flex: 1 0 100%; font-size: var(--t-xs); color: var(--ink-2); }
+
+/* Attachments: the ticket page's kind badge, a name, and the two reads. */
+.pw-files { display: flex; flex-direction: column; gap: 6px; }
+.pw-file { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.pw-file .tf-rsub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.pw-file .pw-ask, .pw-file .pw-fh { grid-column: 1 / -1; }
+
+/* History is read when it is opened, so it is a fold with its own reading state. */
+.pw-fold { border-top: 1px solid var(--rule-2); }
+.pw-foldbtn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 16px; border: 0; background: none; cursor: pointer; text-align: left; font-size: var(--t-sm); }
+.pw-foldbtn:hover { background: var(--sheet-2); }
+.pw-foldbtn::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.pw-foldbtn[aria-expanded="true"]::before { content: "▾"; }
+.pw-foldbtn b { font-weight: 600; }
+.pw-log { list-style: none; padding: 0 16px 12px; }
+.pw-log li { display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); align-items: center; }
+.pw-log li:first-child { border-top: 0; }
+.pw-log .pw-when { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pw-log .pw-mine { font-weight: 600; }
+.pw-log q { color: var(--ink-2); quotes: '"' '"'; }
+.pw-efoot { padding: 10px 16px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); }
+.pw-blank { padding: 40px 22px; }
+@container (max-width: 470px) {
+  .pw-f { grid-template-columns: minmax(0, 1fr) auto; }
+  .pw-fl, .pw-fh, .pw-ask { grid-column: 1 / -1; }
+  .pw-code { font-size: var(--t-d1); }
+  .pw-log li { grid-template-columns: minmax(0, 1fr) auto; }
+  .pw-log .pw-when { grid-column: 1 / -1; }
+}
+
+/* ---------- the empty state: centred in the whole page ---------- */
+.pw-none { flex: 1; display: grid; place-items: center; padding: 22px; }
+.pw-none .tf-empty { gap: 12px; }
+.pw-none h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; color: var(--ink); }
+.pw-none p { max-width: 54ch; }
+
+/* ---------- the status bar: what is on the clipboard, and for how long ---------- */
+.pw-clip { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); min-width: 0; }
+.pw-clip b { font-weight: 600; }
+.pw-clip .pw-what { overflow: hidden; text-overflow: ellipsis; max-width: 38ch; }
+.pw-clip [data-left] { font-variant-numeric: tabular-nums; }
+
+/* ---------- dialogs: the entry form, the generator, the viewer ---------- */
+.pw-form.tf-formgrid { grid-template-columns: 132px minmax(0, 1fr); }
+.pw-form textarea { min-height: 64px; font: inherit; }
+.pw-form .pw-inl { display: flex; gap: var(--control-gap); align-items: center; }
+.pw-form .pw-inl input { flex: 1; min-width: 0; }
+.pw-form input.tf-mono { font-size: var(--t-sm); }
+.pw-form > label { align-self: start; padding-top: 6px; }
+.pw-form > .tf-dlg-note { grid-column: 2; margin-top: -4px; }
+.pw-newpw { display: flex; gap: var(--control-gap); align-items: stretch; }
+.pw-newpw input { flex: 1; min-width: 0; border: 1px solid var(--rule); border-radius: 4px; padding: 8px 10px; background: var(--paper); color: var(--ink); font: 600 var(--t-lg) var(--mono); font-variant-ligatures: none; }
+.pw-newpw .tf-btn { height: auto; }
+.pw-gen { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
+.pw-gen-row { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; font-size: var(--t-sm); }
+.pw-gen-row input[type="range"] { flex: 1 1 160px; accent-color: var(--ink); }
+.pw-gen-row input[type="checkbox"] { accent-color: var(--ink); }
+.pw-gen-row output { font-variant-numeric: tabular-nums; min-width: 3ch; font-weight: 600; }
+.pw-gen-row select { border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--sheet); }
+.pw-strength { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-vstage > pre.pw-pre { font: var(--t-sm)/1.55 var(--mono); font-variant-ligatures: none; padding: 14px 18px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* ---------- Settings: the app's own page, with two proposed changes ----------
+   The body is centred in the space beside the nav (settings.css keeps it at the left, which leaves a
+   2,000px window two-thirds empty on one side). */
+.tf-stg-body.pw-stg-body { margin: 0 auto; width: 100%; }
+.pw-capy { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.pw-capn { color: var(--ink-2); }
+.pw-capd { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-stg-c.pw-capc { align-items: baseline; gap: 12px; }
+/* A table scrolls sideways inside its frame on a narrow window, as a Docs table does. */
+.pw-tblwrap { overflow-x: auto; }
+.tf-tbl.pw-formats td { font-size: var(--t-sm); }
+.tf-tbl.pw-formats tr.pw-found td { font-weight: 600; }
+.pw-other { flex: 1; display: grid; place-items: center; }
+
+/* ---------- narrow: the tree is the Docs drawer below 900px (docs.css moves `.tf-rd-tree` itself);
+   below 700px the list and the entry are one pane at a time ---------- */
+@media (max-width: 1240px) {
+  .pw-body { grid-template-columns: 236px minmax(0, 1fr); }
+}
+/* An eleventh nav item pushes Time out of view at 1100px, which narrow.css keeps in view today (#1430).
+   Two pixels less padding a side on each item brings it back. */
+@media (max-width: 1240px) and (min-width: 901px) {
+  .tf-nav a { padding: 6px 5px; }
+}
+@media (max-width: 899px) {
+  .pw-body { grid-template-columns: minmax(0, 1fr); }
+  .pw-bench { padding: 0 16px 72px; }
+  .pw-foldersbtn { display: inline-flex; }
+}
+@media (max-width: 700px) {
+  .pw-cols { grid-template-columns: minmax(0, 1fr); }
+  .pw-cols[data-pane="list"] .pw-entrycol, .pw-cols[data-pane="entry"] .pw-listcol { display: none; }
+  .pw-entrycol { position: static; max-height: none; overflow: visible; }
+  .pw-back { display: inline-block; margin-bottom: 10px; }
+  .pw-keys { display: none; }
+  .pw-clip .pw-what { display: none; }
+  .pw-head .tf-sub { display: none; }
+}
+
+/* ================================================================================
+   Mockup only: the pill that switches scenario and theme. Not part of the app.
+   ================================================================================ */
+.mk { position: fixed; left: 12px; bottom: 38px; z-index: 50; display: flex; flex-direction: column; gap: 6px; max-width: min(300px, calc(100vw - 24px));
+      background: var(--card); color: var(--card-ink); border: 1px solid var(--card-2); border-radius: 6px; padding: 4px; font: 12px/1.45 var(--sans); box-shadow: var(--shadow); }
+.mk button { border: 1px solid rgba(0,0,0,.25); border-radius: 4px; padding: 2px 8px; background: rgba(255,255,255,.3); color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.mk button[aria-pressed="true"] { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+.mk button:focus-visible { outline: 2px solid var(--card-ink); outline-offset: 1px; }
+.mk-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.mk .mk-tog { border-color: transparent; background: none; }
+.mk .mk-tog b { font-weight: 700; margin-right: 4px; }
+.mk-menu { display: flex; flex-direction: column; gap: 4px; padding: 4px 4px 2px; }
+.mk-menu small { font-size: 11px; opacity: .8; margin-top: 2px; }
+.mk-hide .mk { display: none; }

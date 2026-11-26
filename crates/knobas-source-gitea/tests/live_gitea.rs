@@ -525,6 +525,18 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
             .unwrap_or_else(|| panic!("the fixture names {who}"))
             .to_owned()
     };
+    // The name the seed gave the account's profile (`seed-gitea.sh`'s
+    // `full_name`), which the view calls the person by (F-107).
+    let named = |who: &str| -> String {
+        fixture["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == who)
+            .and_then(|p| p["name"].as_str())
+            .unwrap_or_else(|| panic!("the fixture names {who}"))
+            .to_owned()
+    };
     let pr = fixture["prs"]
         .as_array()
         .unwrap()
@@ -595,7 +607,7 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
         );
     };
     has("State", "open", Some(Tone::Info));
-    has("Author", &person("mara"), None);
+    has("Author", &named("mara"), None);
     has(
         "Branches",
         &format!(
@@ -607,13 +619,26 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     );
     has(
         "Review",
-        &format!("approved by {}", person("priya")),
+        &format!("approved by {}", named("priya")),
         Some(Tone::Ok),
     );
     has(
         "Review",
-        &format!("requested from {}", person("jonas")),
+        &format!("requested from {}", named("jonas")),
         Some(Tone::Muted),
+    );
+    // Each person keeps their login as the fact's account, which the app
+    // compares with its username.
+    let account = |label: &str, value: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label && f.value == value)
+            .and_then(|f| f.account.clone())
+    };
+    assert_eq!(account("Author", &named("mara")), Some(person("mara")));
+    assert_eq!(
+        account("Review", &format!("approved by {}", named("priya"))),
+        Some(person("priya"))
     );
     assert!(
         facts.iter().any(|f| f.label == "Mergeable"),
@@ -755,8 +780,13 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     let mut entries: Vec<(String, Option<String>, String)> = Vec::new();
     for block in conversation {
         match block {
+            // By account: the label names the person by their profile's
+            // name (F-107), and the server's listing names the login.
             Block::Facts { facts } => entries.push((
-                facts[0].label.clone(),
+                facts[0]
+                    .account
+                    .clone()
+                    .unwrap_or_else(|| facts[0].label.clone()),
                 facts
                     .iter()
                     .find(|f| f.label == "Review")
@@ -3741,6 +3771,26 @@ async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_bran
 
 /// What a view's *Conversation* and overview say, as lines: each facts block
 /// as `label=value` pairs, each text as its text.
+/// Whether the overview holds a *Review* fact reading `opening` and a name,
+/// whose account is `login`: the view names a reviewer by their profile's
+/// name and keeps the login as the account (F-107), and the seed's accounts
+/// have names.
+fn verdict_by(view: &knobas_source::view::SourceView, opening: &str, login: &str) -> bool {
+    use knobas_source::view::Block;
+    view.sections
+        .iter()
+        .filter(|s| s.id == "overview")
+        .flat_map(|s| s.blocks.iter())
+        .any(|b| match b {
+            Block::Facts { facts } => facts.iter().any(|f| {
+                f.label == "Review"
+                    && f.value.starts_with(opening)
+                    && f.account.as_deref() == Some(login)
+            }),
+            _ => false,
+        })
+}
+
 fn said(view: &knobas_source::view::SourceView, section: &str) -> Vec<String> {
     use knobas_source::view::Block;
     let section = view
@@ -3867,10 +3917,7 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         "{conversation:#?}"
     );
     assert!(
-        said(&after, "overview").contains(&format!(
-            "Review=changes requested by {}",
-            env.login().await
-        )),
+        verdict_by(&after, "changes requested by ", &env.login().await),
         "{:#?}",
         said(&after, "overview")
     );
@@ -3893,7 +3940,7 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         "the approval is the newest thing said: {conversation:#?}"
     );
     assert!(
-        said(&after, "overview").contains(&format!("Review=approved by {}", env.login().await)),
+        verdict_by(&after, "approved by ", &env.login().await),
         "the latest verdict is the standing one: {:#?}",
         said(&after, "overview")
     );
@@ -6028,6 +6075,224 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
     println!("{id} filed, closed, reopened and commented on");
 }
 
+/// A ticket's fields against the real server (ADR-0054): a test issue
+/// filed, its fields read, then assigned to someone the repository's
+/// assignees list, labelled with a label made for the run, and retitled,
+/// each read back from the server; then unassigned, unlabelled and given its
+/// title back. The issue and the label are deleted at the end, so the
+/// repository is left as it was found.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_tickets_fields_are_edited_and_read_back() {
+    use knobas_source::{Assignee, LabelChange, WriteOp};
+
+    let env = env();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    clear_test_issues(&http, &env, &auth).await;
+    let source = env.one_repo();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let title = format!("{TEST_ISSUE}{stamp}");
+    let label = format!("knobas-live-{stamp}");
+    let made: serde_json::Value = http
+        .post(format!("{api}/labels"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": label, "color": "#123456" }))
+        .send()
+        .await
+        .expect("make the run's label")
+        .json()
+        .await
+        .expect("a label");
+    let label_id = made["id"].as_u64().expect("the label's id");
+
+    let key = source
+        .write(WriteOp::CreateTicket {
+            entity: format!("gitea:{}", env.full_name()),
+            title: title.clone(),
+            body: "Filed by the live suite.".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("Gitea takes the issue")
+        .remote_id
+        .expect("the receipt names the issue");
+    let id = format!("gitea:{key}");
+    let number = key.rsplit('/').next().unwrap().to_owned();
+    let read = || {
+        let http = &http;
+        let auth = &auth;
+        let url = format!("{api}/issues/{number}");
+        async move {
+            http.get(url)
+                .header("Authorization", auth)
+                .send()
+                .await
+                .expect("read the issue")
+                .json::<serde_json::Value>()
+                .await
+                .expect("an issue")
+        }
+    };
+    let edit = |change: Box<dyn FnOnce(&mut WriteOp)>| {
+        let mut op = WriteOp::EditTicket {
+            entity: id.clone(),
+            title: None,
+            assignee: None,
+            priority: None,
+            labels: None,
+            fields: std::collections::BTreeMap::new(),
+        };
+        change(&mut op);
+        op
+    };
+
+    // 1. The fields, and who can be assigned.
+    let fields = source
+        .ticket_fields(&id)
+        .await
+        .expect("the fields read")
+        .expect("an issue edits");
+    assert_eq!(knobas_source::ticket::fault(&fields), None);
+    assert_eq!(fields.get("title").unwrap().value, serde_json::json!(title));
+    let people = source
+        .field_options(&id, "assignee", "")
+        .await
+        .expect("the assignees read")
+        .expect("the assignee has a list");
+    let who = people
+        .options
+        .first()
+        .expect("somebody can be assigned")
+        .value
+        .clone();
+    let labels = source
+        .field_options(&id, "labels", "")
+        .await
+        .expect("the labels read")
+        .expect("the labels have a list");
+    assert!(
+        labels.options.iter().any(|o| o.value == label),
+        "{labels:?}"
+    );
+
+    // 2. Assigned, labelled and retitled in one edit, read back.
+    let retitled = format!("{title} (edited)");
+    source
+        .write(edit(Box::new({
+            let (who, label, retitled) = (who.clone(), label.clone(), retitled.clone());
+            move |op| {
+                if let WriteOp::EditTicket {
+                    title,
+                    assignee,
+                    labels,
+                    ..
+                } = op
+                {
+                    *title = Some(retitled);
+                    *assignee = Some(Assignee::Account(who));
+                    *labels = Some(LabelChange {
+                        add: vec![label],
+                        remove: vec![],
+                    });
+                }
+            }
+        })))
+        .await
+        .expect("Gitea takes the edit");
+    let after = read().await;
+    assert_eq!(after["title"], retitled);
+    assert_eq!(after["assignees"][0]["login"], who);
+    assert_eq!(after["assignees"].as_array().map(Vec::len), Some(1));
+    assert!(
+        after["labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["name"] == label),
+        "{after}"
+    );
+    let fields = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(
+        fields.get("assignee").unwrap().value,
+        serde_json::json!(who)
+    );
+
+    // 2b. A source's own field (step 10): the due date set, read back as its
+    // day through the fields, then cleared.
+    let due = |value: serde_json::Value| {
+        edit(Box::new(move |op| {
+            if let WriteOp::EditTicket { fields, .. } = op {
+                fields.insert("due_date".into(), value);
+            }
+        }))
+    };
+    source
+        .write(due(serde_json::json!("2026-12-01")))
+        .await
+        .expect("Gitea takes the due date");
+    let fields = source.ticket_fields(&id).await.unwrap().unwrap();
+    assert_eq!(
+        fields.get("due_date").unwrap().value,
+        serde_json::json!("2026-12-01"),
+        "{}",
+        read().await["due_date"]
+    );
+    source
+        .write(due(serde_json::Value::Null))
+        .await
+        .expect("Gitea clears the due date");
+    assert!(read().await["due_date"].is_null());
+
+    // 3. Back as it was: unassigned, the label off, the title restored.
+    source
+        .write(edit(Box::new({
+            let (label, title) = (label.clone(), title.clone());
+            move |op| {
+                if let WriteOp::EditTicket {
+                    title: t,
+                    assignee,
+                    labels,
+                    ..
+                } = op
+                {
+                    *t = Some(title);
+                    *assignee = Some(Assignee::Nobody);
+                    *labels = Some(LabelChange {
+                        add: vec![],
+                        remove: vec![label],
+                    });
+                }
+            }
+        })))
+        .await
+        .expect("Gitea takes the edit back");
+    let back = read().await;
+    assert_eq!(back["title"], title);
+    assert!(
+        back["assignees"].as_array().is_none_or(Vec::is_empty),
+        "{back}"
+    );
+    assert!(
+        back["labels"].as_array().is_none_or(Vec::is_empty),
+        "{back}"
+    );
+
+    clear_test_issues(&http, &env, &auth).await;
+    let gone = http
+        .delete(format!("{api}/labels/{label_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("delete the run's label");
+    assert!(gone.status().is_success(), "{}", gone.status());
+    println!("{id} assigned to {who}, labelled, retitled, due and put back");
+}
+
 /// The item a refresh answers for `id`, or a panic naming what it answered.
 async fn refreshed(source: &dyn knobas_source::Source, id: &str) -> SyncItem {
     match source.refresh(id).await {
@@ -7582,6 +7847,11 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     let thread_id = first.id.clone().expect("Gitea's comment id");
     assert!(first.replies, "{first:#?}");
     assert_eq!(first.resolved_by, None);
+    // Its author is the token's account, named by its profile where it has
+    // one and by the login beside it (F-107).
+    let profile = env.profile_name().await;
+    assert_eq!(first.comments[0].author, env.login().await, "{first:#?}");
+    assert_eq!(first.comments[0].author_name, profile, "{first:#?}");
 
     // 2. A reply joins the thread, and Conversation says it.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
@@ -7633,6 +7903,7 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         source.write(resolve(true)).await.expect("Gitea resolves");
         let (readme, _) = files().await;
         assert_eq!(thread(&readme).resolved_by, Some(env.login().await));
+        assert_eq!(thread(&readme).resolved_by_name, profile);
         source.write(resolve(false)).await.expect("Gitea reopens");
         let (readme, _) = files().await;
         assert_eq!(thread(&readme).resolved_by, None);
@@ -7685,7 +7956,7 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     assert!(asked.contains(&who.as_str()), "{asked:?} {pull}");
     let after = source.view(&id, None).await.unwrap().unwrap();
     assert!(
-        said(&after, "overview").contains(&format!("Review=requested from {who}")),
+        verdict_by(&after, "requested from ", &who),
         "{:#?}",
         said(&after, "overview")
     );
@@ -7790,4 +8061,218 @@ async fn the_declared_code_pages_are_pages_the_server_serves() {
             answer.url()
         );
     }
+}
+
+/// A pull request from the default branch into another (2026-11-13; Björn: "I
+/// cannot make a pullrequest into any branch FROM master"), against the real
+/// server, on a scratch repository of the account's own
+/// (`knobas-live-from-default`), so the seeded and scale repositories stay as
+/// found. `main` gains a commit the scratch base `release/scratch` lacks; the
+/// compare from that base to `main` is the diff Compare draws, and its range
+/// lists that commit, which Compare draws as *Commits* for the default branch;
+/// the adapter opens the pull request with head `main` and base
+/// `release/scratch`, and the server lists it so. The repository is removed
+/// before the run (a killed run leaves it) and again before anything is
+/// asserted.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_goes_from_the_default_branch_into_another() {
+    use knobas_source::view::Block;
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me = env.login().await;
+    let full = format!("{me}/knobas-live-from-default");
+    let base = "release/scratch";
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{full}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+    };
+    remove().await;
+
+    let created = http
+        .post(format!("{api}/user/repos"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": "knobas-live-from-default", "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("POST /user/repos")
+        .status()
+        .as_u16();
+    let branched = http
+        .post(format!("{api}/repos/{full}/branches"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": base, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("POST a branch")
+        .status()
+        .as_u16();
+    let pushed: serde_json::Value = http
+        .post(format!("{api}/repos/{full}/contents/from-default.txt"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": "main",
+            "content": "a25vYmFzIGxpdmUgY2hlY2sK",
+            "message": "Carry main's fix into the release",
+        }))
+        .send()
+        .await
+        .expect("write a file on main")
+        .json()
+        .await
+        .unwrap_or_default();
+    let carried = pushed["commit"]["sha"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+
+    let source = env.source(serde_json::json!({ "repos": [full] }));
+    let entity = format!("gitea:{full}");
+    let compare = source
+        .view(&entity, Some(&format!("compare:{base}...main")))
+        .await;
+    let drawn = match &compare {
+        Ok(Some(view)) => view.sections.first().and_then(|s| match s.blocks.first() {
+            Some(Block::Diff { files, range, .. }) => Some((
+                files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                range.as_ref().map(|r| {
+                    r.commits
+                        .iter()
+                        .map(|c| (c.sha.clone(), c.title.clone()))
+                        .collect::<Vec<_>>()
+                }),
+            )),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let opened = source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: entity.clone(),
+            title: "Merge main into release/scratch".to_owned(),
+            body: "Opened by knobas from the default branch.".to_owned(),
+            head: "main".to_owned(),
+            base: base.to_owned(),
+        })
+        .await;
+    let listed: Vec<serde_json::Value> = http
+        .get(format!("{api}/repos/{full}/pulls?state=open"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the pull requests")
+        .json()
+        .await
+        .unwrap_or_default();
+    let ends: Vec<(String, String)> = listed
+        .iter()
+        .map(|p| {
+            (
+                p["head"]["ref"].as_str().unwrap_or_default().to_owned(),
+                p["base"]["ref"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    println!("LIVE from the default branch: compare {drawn:?}, write {opened:?}, open {ends:?}");
+    remove().await;
+
+    assert_eq!(
+        (created, branched),
+        (201, 201),
+        "the scratch repository's set-up"
+    );
+    assert!(!carried.is_empty(), "main gained a commit: {pushed}");
+    let (files, commits) = drawn.unwrap_or_else(|| panic!("the compare draws a diff: {compare:?}"));
+    assert_eq!(
+        files,
+        ["from-default.txt"],
+        "the change main carries over the base"
+    );
+    assert_eq!(
+        commits.expect("a range the listing settles"),
+        [(carried, "Carry main's fix into the release".to_owned())],
+        "the range lists the commit main carries"
+    );
+    let opened = opened.expect("the adapter opens a pull request from the default branch");
+    assert!(
+        opened.remote_id.is_some(),
+        "the receipt names it: {opened:?}"
+    );
+    assert_eq!(
+        ends,
+        [("main".to_owned(), base.to_owned())],
+        "one pull request open, head the default branch and base the other"
+    );
+}
+
+/// The files pass's archive (the everything-search decisions, 2026-11-20,
+/// D3): every file of the seeded repository's default branch, as one
+/// archive hands it over, is the blob the tree names, by git's own sha of
+/// it, and no file is missing or extra. ADR-0013: the real instance is the
+/// witness.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_archive_hands_over_every_blob_of_the_tree() {
+    use sha1::Digest as _;
+    let env = env();
+    let source = env.one_repo();
+    let repo = format!("gitea:{}", env.full_name());
+    let meta = api_json(&env, &format!("repos/{}", env.full_name())).await;
+    let default = meta["default_branch"].as_str().expect("a default branch");
+    let branch = api_json(
+        &env,
+        &format!("repos/{}/branches/{default}", env.full_name()),
+    )
+    .await;
+    let commit = branch["commit"]["id"].as_str().expect("a head").to_owned();
+    let tree = api_json(
+        &env,
+        &format!(
+            "repos/{}/git/trees/{commit}?recursive=true&per_page=10000",
+            env.full_name()
+        ),
+    )
+    .await;
+    let blobs: std::collections::BTreeMap<String, String> = tree["tree"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .filter(|entry| entry["type"] == "blob" && entry["mode"] != "120000")
+        .filter(|entry| {
+            entry["size"]
+                .as_u64()
+                .is_some_and(|size| size <= knobas_core::code_text::SIZE_CAP)
+        })
+        .map(|entry| {
+            (
+                entry["path"].as_str().unwrap().to_owned(),
+                entry["sha"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let mut handed: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let requests = source
+        .read_archive(&repo, &commit, &|_| true, &mut |path, bytes| {
+            let mut sha = sha1::Sha1::new();
+            sha.update(format!("blob {}\0", bytes.len()).as_bytes());
+            sha.update(&bytes);
+            let hex: String = sha.finalize().iter().map(|b| format!("{b:02x}")).collect();
+            handed.insert(path, hex);
+        })
+        .await
+        .expect("the archive")
+        .expect("Gitea has archives");
+    println!("{} files in {requests} request of {commit}", handed.len());
+    assert_eq!(requests, 1);
+    assert!(!blobs.is_empty());
+    assert_eq!(handed, blobs);
 }

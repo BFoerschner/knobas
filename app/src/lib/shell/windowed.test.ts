@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { Heights } from "./windowed";
+import { gridLength, Heights, onGrid, stepOf, STEPS, textHeight } from "./windowed";
+import { LEVELS } from "../tf/zoom.svelte";
 
 /** Ten rows keyed `r0` … `r9`, 50 px estimated, no gap. */
 const ten = () => new Heights(50, 0);
@@ -79,5 +80,136 @@ describe("Heights", () => {
     expect(h.reveal(6, 100, 100)).toBe(250);
     // Row 0 is above: scroll to its top.
     expect(h.reveal(0, 100, 100)).toBe(0);
+  });
+
+  it("says drawn rows still cover a view only while it stays the margin inside them", () => {
+    const h = ten();
+    h.keys(keys);
+    // Rows 2 to 6 run 100 to 350 px. A view of 150 to 250 with 50 px to spare each side is inside.
+    expect(h.covers(2, 7, 150, 100, 50)).toBe(true);
+    // 20 px further down, the view's bottom margin runs past 350.
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(false);
+    // The list's ends need no margin past them: rows 0 to 3 cover a view at the top.
+    expect(h.covers(0, 3, 0, 100, 50)).toBe(true);
+    expect(h.covers(7, 10, 400, 100, 50)).toBe(true);
+    // A measurement that moves the rows is read: row 2 grown to 120 px pushes row 7's top to 420.
+    h.set("r2", 120);
+    expect(h.covers(2, 7, 210, 100, 50)).toBe(true);
+    expect(h.around(2, 7)).toEqual({ start: 2, end: 7, before: 100, after: 150 });
+  });
+});
+
+describe("a row's own estimate (the extremes pass)", () => {
+  it("stands for an undrawn row, and a measurement still wins", () => {
+    // A comment of one line and one of a page: their room before they are drawn is their own.
+    const h = new Heights<string>(50, 10, (key) => (key === "long" ? 2000 : 60));
+    h.keys(["a", "long", "b"]);
+    expect(h.total()).toBe(60 + 10 + 2000 + 10 + 60);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 2000 + 10);
+    h.set("long", 400);
+    expect(h.offsetOf(2)).toBe(60 + 10 + 400 + 10);
+  });
+});
+
+describe("textHeight", () => {
+  it("counts a line per newline and per `chars` of a long one", () => {
+    expect(textHeight("", { base: 40, line: 20, chars: 100 })).toBe(60);
+    expect(textHeight("one\ntwo", { base: 40, line: 20, chars: 100 })).toBe(80);
+    expect(textHeight("x".repeat(250), { base: 40, line: 20, chars: 100 })).toBe(100);
+    // A 300 KB comment's room is long, so the rows after it are placed near where they will be.
+    expect(textHeight("word ".repeat(60_000), { base: 46, line: 21, chars: 110 })).toBeGreaterThan(50_000);
+  });
+});
+
+
+/** The step `length` lands on at `dpr`: Chromium's single-precision cut, and below 2^16 device pixels the same in double. */
+const unit = (length: string, dpr: number) => {
+  const single = stepOf(parseFloat(length), dpr);
+  if (single < 2 ** 16 * STEPS) expect(Math.floor(parseFloat(length) * dpr * STEPS), `${length} at ${dpr} in double precision`).toBe(single);
+  return single;
+};
+
+describe("the device's layout grid (#2508)", () => {
+  it("keeps a height an observer cut to a 64th of a CSS pixel on the device's grid", () => {
+    // A 51-device-pixel row at 1.25 is 40.8 px; a ResizeObserver tells it as 40.796875.
+    expect(onGrid(40.796875, 1.25) * 1.25).toBeCloseTo(51, 12);
+    expect(onGrid(40.8, 1.25) * 1.25).toBeCloseTo(51, 12);
+    // 61.1875 device pixels at 1.5, a 64th-step height that is no whole pixel.
+    expect(onGrid(61.1875 / 1.5, 1.5) * 1.5).toBe(61.1875);
+  });
+
+  it("writes room that lands on its own step at every common scale, up to 2^17 device pixels", () => {
+    for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 3])
+      for (let rows = 1; rows < 2400; rows += 7)
+        for (const device of [51, 61.1875, 41.015625]) {
+          const want = rows * device * STEPS;
+          // The room as a windowed list sums it: CSS heights on the grid, added in a double.
+          let css = 0;
+          for (let i = 0; i < rows; i++) css += onGrid(device / dpr, dpr);
+          const length = gridLength(css, dpr);
+          expect(unit(length, dpr), `${rows} rows of ${device} at ${dpr}: ${length}`).toBe(want);
+        }
+  });
+
+  it("moves the rows that stay by nothing when a swap takes rows from above into the room", () => {
+    // 40 rows of 51 device pixels above at 1.25, then 8 more swapped out: the room grows by exactly their 8 x 51.
+    const dpr = 1.25;
+    const h = new Heights<number>(42, 0);
+    const keys = Array.from({ length: 200 }, (_, i) => i);
+    h.keys(keys);
+    for (const k of keys) h.set(k, onGrid(40.796875, dpr));
+    const room = (start: number) => unit(gridLength(h.around(start, start + 50).before, dpr), dpr);
+    for (let start = 8; start < 150; start += 8) expect(room(start) - room(start - 8)).toBe(8 * 51 * STEPS);
+  });
+
+  it("lands the room on its step at every display scale times every zoom level, 125 % x 110 % among them (the zoom, 2026-11-16)", () => {
+    for (const display of [1, 1.25, 1.5, 2])
+      for (const level of LEVELS) {
+        // As Chromium tells it: the display's scale times the zoom, in a double.
+        const dpr = display * level;
+        for (let rows = 1; rows < 1600; rows += 13)
+          for (const device of [51, 61.1875, 23.75]) {
+            let css = 0;
+            for (let i = 0; i < rows; i++) css += onGrid(device / dpr, dpr);
+            expect(unit(gridLength(css, dpr), dpr), `${rows} rows of ${device} at ${display} x ${level}`).toBe(rows * device * STEPS);
+          }
+      }
+  });
+
+  it("puts heights measured at one scale on the next one's grid, so a swap after a zoom step moves nothing", () => {
+    const h = new Heights<number>(42, 0);
+    const keys = Array.from({ length: 300 }, (_, i) => i);
+    h.keys(keys);
+    // Measured at 125 %: 51 device pixels a row.
+    for (const k of keys) h.set(k, onGrid(51 / 1.25, 1.25));
+    // A step to 110 % on that screen: 1.375, where the row lays out at 56.125 device pixels (40.8 x 1.375 on the grid).
+    const dpr = 1.25 * 1.1;
+    h.regrid((px) => onGrid(px, dpr));
+    for (const k of keys) expect(h.heightOf(k) * dpr * STEPS).toBeCloseTo(Math.round(40.8 * dpr * STEPS), 6);
+    const room = (start: number) => unit(gridLength(h.around(start, start + 50).before, dpr), dpr);
+    const row = Math.round(40.8 * dpr * STEPS);
+    for (let start = 8; start < 200; start += 8) expect(room(start) - room(start - 8)).toBe(8 * row);
+  });
+
+  it("takes measured heights and estimates by a text size's ratio, onto the grid (Settings › Fonts, 2026-11-18)", () => {
+    const h = new Heights<number>(18.6, 0, (key) => (key === 7 ? 40 : 18.6));
+    const keys = Array.from({ length: 10 }, (_, i) => i);
+    h.keys(keys);
+    h.set(0, 18.75);
+    h.set(1, 37.5);
+    h.rescale(1.2, (px) => onGrid(px, 1.25));
+    expect(h.heightOf(0)).toBeCloseTo(onGrid(22.5, 1.25), 9);
+    expect(h.heightOf(1)).toBeCloseTo(onGrid(45, 1.25), 9);
+    expect(h.heightOf(2)).toBeCloseTo(18.6 * 1.2, 9);
+    expect(h.heightOf(7)).toBeCloseTo(48, 9);
+    expect(h.total()).toBeCloseTo(onGrid(22.5, 1.25) + onGrid(45, 1.25) + 7 * 18.6 * 1.2 + 48, 9);
+    // Back to 100 %: the estimates where they began.
+    h.rescale(1 / 1.2, (px) => px);
+    expect(h.heightOf(2)).toBeCloseTo(18.6, 9);
+  });
+
+  it("writes whole and power-of-two scales' room as the plain length", () => {
+    expect(gridLength(1234, 1)).toBe("1234px");
+    expect(gridLength(100.5, 2)).toBe("100.5px");
   });
 });

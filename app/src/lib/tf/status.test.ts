@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth, SourceSyncStatus } from "../ipc/sources";
-import { queueLabel, queuedWords, sourceReadings } from "./status";
+import { healthyRollup, queueLabel, queuedWords, sourceReadings, type ReadingTone, type SourceReading } from "./status";
 
 const NOW = new Date("2026-08-22T14:32:00Z");
 
@@ -41,9 +41,9 @@ test("reads like prototype-6's status bar: the first says synced, a 401 says so"
     NOW,
   );
   expect(readings).toEqual([
-    { id: "jira", text: "Jira synced 4 min ago", fix: null },
-    { id: "confluence", text: "Confluence 4 min ago", fix: null },
-    { id: "teamcity", text: "TeamCity: sign-in failed 38 min ago (401)", fix: "Re-enter password" },
+    { id: "jira", text: "Jira synced 4 min ago", tone: "ok", syncedAt: "2026-08-22T14:28:00Z", fix: null },
+    { id: "confluence", text: "Confluence 4 min ago", tone: "ok", syncedAt: "2026-08-22T14:28:00Z", fix: null },
+    { id: "teamcity", text: "TeamCity: sign-in failed 38 min ago (401)", tone: "err", syncedAt: "2026-08-22T13:54:00Z", fix: "Re-enter password" },
   ]);
 });
 
@@ -59,9 +59,9 @@ test("a missing credential needs the reader too, in the source's noun; an unreac
     NOW,
   );
   expect(readings).toEqual([
-    { id: "gitea", text: "Gitea unreachable, synced 32 min ago", fix: null },
-    { id: "kuma", text: "Uptime Kuma: no token stored", fix: "Re-enter token" },
-    { id: "confluence", text: "Confluence: no password stored", fix: "Re-enter password" },
+    { id: "gitea", text: "Gitea unreachable, synced 32 min ago", tone: "warn", syncedAt: "2026-08-22T14:00:00Z", fix: null },
+    { id: "kuma", text: "Uptime Kuma: no token stored", tone: "err", syncedAt: null, fix: "Enter token" },
+    { id: "confluence", text: "Confluence: no password stored", tone: "err", syncedAt: null, fix: "Enter password" },
   ]);
 });
 
@@ -72,13 +72,68 @@ test("a refused token source is told to re-enter its token (#1405)", () => {
     [],
     NOW,
   );
-  expect(reading).toEqual({ id: "gitea", text: "Gitea: sign-in failed 38 min ago (401)", fix: "Re-enter token" });
+  expect(reading).toEqual({ id: "gitea", text: "Gitea: sign-in failed 38 min ago (401)", tone: "err", syncedAt: null, fix: "Re-enter token" });
 });
 
 test("before the source list answers, the health store's ids are the names", () => {
   expect(sourceReadings(null, [health("jira", "ok")], [], NOW)).toEqual([
-    { id: "jira", text: "jira not synced yet", fix: null },
+    { id: "jira", text: "jira not synced yet", tone: "muted", syncedAt: null, fix: null },
   ]);
+});
+
+function healthy(tone: ReadingTone, syncedAt: string | null = null): SourceReading {
+  return { id: syncedAt ?? tone, text: "named", tone, syncedAt, fix: null };
+}
+
+test("two healthy sources are named; past that they are one line that keeps the oldest age", () => {
+  const late = healthy("ok", "2026-08-22T14:28:00Z");
+  const early = healthy("ok", "2026-08-22T13:32:00Z");
+  expect(healthyRollup([late, early], NOW)).toBeNull();
+  expect(healthyRollup([late, early, healthy("ok", "2026-08-22T14:00:00Z")], NOW)).toEqual({
+    text: "3 synced",
+    rest: "oldest 1 h ago",
+    tone: "ok",
+  });
+});
+
+test("the rollup says what is not synced, and its dot takes the worst of what it counts", () => {
+  const synced = healthy("ok", "2026-08-22T14:28:00Z");
+  expect(healthyRollup([synced, healthy("info"), healthy("muted")], NOW)).toEqual({
+    text: "Syncing 1 source…",
+    rest: "1 synced 4 min ago, 1 not synced yet",
+    tone: "info",
+  });
+  expect(healthyRollup([healthy("info"), healthy("warn"), healthy("muted")], NOW)).toEqual({
+    text: "Syncing 1 source…, 1 needs a look",
+    rest: "1 not synced yet",
+    tone: "warn",
+  });
+  expect(healthyRollup([healthy("muted"), healthy("muted"), healthy("muted")], NOW)).toEqual({
+    text: "3 not synced yet",
+    rest: null,
+    tone: "muted",
+  });
+});
+
+test("what wants the reader stays with the count; only the age may drop out of sight", () => {
+  const synced = healthy("ok", "2026-08-22T14:28:00Z");
+  expect(healthyRollup([synced, synced, healthy("warn", "2026-08-22T14:28:00Z")], NOW)).toEqual({
+    text: "2 synced, 1 needs a look",
+    rest: "oldest 4 min ago",
+    tone: "warn",
+  });
+});
+
+test("a sync that left part of the source out is amber, as on its Settings row (#2374)", () => {
+  const partial: CredentialHealth = { ...health("jira", "ok"), detail: "boards unavailable" };
+  const [reading] = sourceReadings([SOURCES[0]!], [partial], [synced("jira", "2026-08-22T14:28:00Z")], NOW);
+  expect(reading).toEqual({
+    id: "jira",
+    text: "Jira synced 4 min ago, boards unavailable",
+    tone: "warn",
+    syncedAt: "2026-08-22T14:28:00Z",
+    fix: null,
+  });
 });
 
 test("the queue count in words", () => {
@@ -101,4 +156,22 @@ test("the queue control counts the writes that need a decision too", () => {
   expect(read(2, 0)).toBe("2 queued writes");
   expect(queueLabel(2, 0).decide).toBeNull();
   expect(read(0, 0)).toBe("No queued writes");
+});
+
+test("a source by hand reads its last sync as a clock time, by hand (ADR-0056)", () => {
+  const finished = "2026-08-22T10:22:00Z";
+  const at = new Date(finished);
+  const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const [first, second] = sourceReadings(
+    [
+      { id: "pw", display_name: "Team passwords", sync_by_hand: true },
+      { id: "pw2", display_name: "Tidewater org", sync_by_hand: true },
+    ],
+    [health("pw", "ok"), health("pw2", "ok")],
+    [synced("pw", finished), synced("pw2", finished)],
+    NOW,
+  );
+  expect(first!.text).toBe(`Team passwords synced ${clock}, by hand`);
+  expect(second!.text).toBe(`Tidewater org ${clock}, by hand`);
+  expect(first!.tone).toBe("ok");
 });

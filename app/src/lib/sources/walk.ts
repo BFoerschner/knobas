@@ -1,6 +1,6 @@
 /**
- * A run's outer walk (#1379), as the two surfaces that draw one read it: the
- * first-run wizard and a source's settings page (#1384).
+ * A run's outer walk (#1379), as a source's settings page (#1384) reads it.
+ * The first-run wizard drew it too until ux31 removed the wizard.
  */
 import type { SyncProgress } from "../ipc/sources";
 

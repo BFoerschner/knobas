@@ -1,0 +1,11 @@
+# GitGuardian (the GitHub app and ggshield) skips these paths.
+# The Passwords clickdummies carry made-up sample secrets for a fictional
+# company (Tidewater): a Stripe-shaped key, a GitHub-shaped token, an
+# "encrypted private key" whose base64 spells "NotARealKey", and demo
+# passwords. None was ever a real credential. Never list a path here that
+# could hold a real one.
+version: 2
+secret:
+  ignored_paths:
+    - mockups/passwords/**
+    - mockups/passwords-2/**

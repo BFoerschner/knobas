@@ -102,7 +102,7 @@ async fn queue_op(
         shape,
         &payload,
         wq::target_of(pool, entity).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     wq::queue(pool, &entity.namespace, entity, op, payload, snapshot)
         .await
@@ -142,7 +142,7 @@ async fn a_queued_write_survives_a_restart() {
             Projection::WHOLE,
             &found.payload,
             wq::target_of(&restarted, &ticket).await.unwrap().as_ref(),
-            &[]
+            None
         ),
         "and it is the target as the mirror still records it"
     );
@@ -478,7 +478,7 @@ async fn a_write_survives_its_target_being_withdrawn() {
         Projection::DeclaredState,
         &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     assert_ne!(
         now, write.target_snapshot,
@@ -536,7 +536,7 @@ async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
             Projection::DeclaredState,
             &serde_json::Value::Null,
             None,
-            &[],
+            None,
         ),
     )
     .await
@@ -585,7 +585,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
         Projection::WHOLE,
         &write.payload,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
-        &[],
+        None,
     );
     assert_ne!(moved, write.target_snapshot);
     wq::hold(&pool, write.id, moved).await.unwrap().unwrap();
@@ -676,4 +676,68 @@ async fn the_release_statement_releases_exactly_what_waits_on_credential_names()
     released.sort_unstable();
     assert_eq!(released, expected, "{cases:?}");
     assert_eq!(expected.len(), 5, "the cases cover both answers");
+}
+
+/// What is on its way to a ticket (ADR-0054): the statuses of its open moves
+/// and the values of its open edits, oldest first, pending or held as sends
+/// that may have landed, and only those queued before `before`. A move held
+/// for drift was never sent and sets nothing (the final suite's mutants: the
+/// held filter turned around, or either answer emptied, went unseen here).
+#[tokio::test]
+async fn what_is_on_its_way_is_the_open_moves_and_edits_the_source_may_take() {
+    let (pool, ticket) = seeded_pool().await;
+    let first = queue_transition(&pool, &ticket, "In Progress").await;
+    let drifted = queue_transition(&pool, &ticket, "Blocked").await;
+    wq::hold(&pool, drifted.id, serde_json::json!({ "changed": true }))
+        .await
+        .unwrap()
+        .unwrap();
+    let sent = queue_transition(&pool, &ticket, "Done").await;
+    let unanswered = wq::unconfirmed("transition", sent.payload.clone(), "Jira", "timed out");
+    wq::hold(&pool, sent.id, unanswered).await.unwrap().unwrap();
+
+    assert_eq!(
+        wq::statuses_on_their_way(&pool, &ticket, None)
+            .await
+            .unwrap(),
+        ["In Progress", "Done"],
+        "pending and unconfirmed, not the drift hold"
+    );
+    assert_eq!(
+        wq::statuses_on_their_way(&pool, &ticket, Some(drifted.id))
+            .await
+            .unwrap(),
+        ["In Progress"]
+    );
+    assert!(first.id < drifted.id);
+
+    let edit = |assignee: serde_json::Value| {
+        serde_json::json!({ "EditTicket": {
+            "entity": ticket.to_string(), "title": "Retitled", "assignee": assignee,
+        } })
+    };
+    queue_op(
+        &pool,
+        &ticket,
+        "edit_ticket",
+        Projection::Status,
+        edit(serde_json::json!("nobody")),
+    )
+    .await;
+    queue_op(
+        &pool,
+        &ticket,
+        "edit_ticket",
+        Projection::Status,
+        edit(serde_json::json!({ "account": "mara" })),
+    )
+    .await;
+    let after = wq::fields_on_their_way(&pool, &ticket, None).await.unwrap();
+    assert_eq!(after.get("title"), Some(&serde_json::json!(["Retitled"])));
+    assert_eq!(
+        after.get("assignee"),
+        Some(&serde_json::json!([null, "mara"])),
+        "nobody as null, a person as their account"
+    );
+    assert_eq!(after.get("priority"), None, "a field no edit sets");
 }

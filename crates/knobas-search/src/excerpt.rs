@@ -35,15 +35,43 @@ const SPAN: usize = 180;
 /// The places in `text` that hold one of `needles`, at most [`MAX`].
 ///
 /// `first_line` is the number of `text`'s first line in a run log, and says
-/// the text is one: every line is its own place, `line <n>`. Otherwise the
+/// the text is one: every line is its own place, `Log line <n>`. Otherwise the
 /// text is read for the Docs marks, and the title a source opens the text
-/// with is not quoted (it is on screen).
+/// with is not quoted (it is on screen). `lead` is the place the text before
+/// the first section or comment is quoted under: `Description` for a ticket's
+/// or a pull request's own text, none for a page's lead or a note (the
+/// everything-search decisions, 2026-11-20, D10).
+///
+/// The excerpt that marks the most distinct typed words comes first, the
+/// rest as they stand: the launcher's evidence line quotes the first.
 #[must_use]
 pub fn excerpts(
     title: &str,
     text: &str,
     first_line: Option<i64>,
     needles: &[String],
+    lead: Option<&str>,
+) -> Vec<Excerpt> {
+    let mut out = read_excerpts(title, text, first_line, needles, lead);
+    let stems: Vec<Vec<char>> = needles
+        .iter()
+        .map(|n| stem(n))
+        .filter(|s| !s.is_empty())
+        .collect();
+    // Stable: a tie keeps the text's order.
+    out.sort_by_key(|excerpt| {
+        std::cmp::Reverse(stems.iter().filter(|stem| quotes(excerpt, stem)).count())
+    });
+    out
+}
+
+/// [`excerpts`] in the text's order.
+fn read_excerpts(
+    title: &str,
+    text: &str,
+    first_line: Option<i64>,
+    needles: &[String],
+    lead: Option<&str>,
 ) -> Vec<Excerpt> {
     let stems: Vec<Vec<char>> = needles
         .iter()
@@ -70,13 +98,25 @@ pub fn excerpts(
         {
             return;
         }
-        out.push(Excerpt { place, segments });
+        out.push(Excerpt {
+            place,
+            segments,
+            file: None,
+        });
     };
+    // **Nothing past the last excerpt is read** (the broad-keys pass,
+    // 2026-11-13): `keep` takes no more once the list is full, so the rest of
+    // the text can add nothing. One letter under *Everything* fills every
+    // hit's list within its first lines, and the page's forty hits carried
+    // 800 kB of text that was still cut into sentences to the end.
     if let Some(first) = first_line {
         for (offset, line) in text.lines().enumerate() {
+            if out.len() >= MAX {
+                break;
+            }
             let number = first.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
             keep(
-                Some(format!("line {number}")),
+                Some(format!("Log line {number}")),
                 &|| marked(line.trim(), &stems),
                 &mut out,
             );
@@ -85,6 +125,9 @@ pub fn excerpts(
     }
     let read = indexed::read(text);
     for run in read.runs {
+        if out.len() >= MAX {
+            break;
+        }
         match &run.part {
             Part::Lead => {}
             Part::Section(heading) => {
@@ -98,7 +141,7 @@ pub fn excerpts(
             Part::Comment(by) => keep(None, &|| author_line(by, &stems), &mut out),
         }
         let place = match &run.part {
-            Part::Lead => None,
+            Part::Lead => lead.map(str::to_owned),
             Part::Section(heading) => Some(heading.clone()),
             Part::Comment(by) if by.is_empty() => Some("Comment".to_owned()),
             Part::Comment(by) => Some(format!("Comment by {by}")),
@@ -113,8 +156,14 @@ pub fn excerpts(
             _ => run.text,
         };
         for sentence in sentences(&body) {
+            if out.len() >= MAX {
+                break;
+            }
             keep(place.clone(), &|| marked(&sentence, &stems), &mut out);
         }
+    }
+    if out.len() >= MAX {
+        return out;
     }
     // Taken before the first link, so one link's line never silences another:
     // each names a different page.
@@ -299,6 +348,16 @@ fn marked(sentence: &str, stems: &[Vec<char>]) -> Option<Vec<Segment>> {
 mod tests {
     use super::*;
 
+    /// [`super::excerpts`] for a text whose lead names no place.
+    fn excerpts(
+        title: &str,
+        text: &str,
+        first_line: Option<i64>,
+        needles: &[String],
+    ) -> Vec<Excerpt> {
+        super::excerpts(title, text, first_line, needles, None)
+    }
+
     fn flat(excerpts: &[Excerpt]) -> Vec<(Option<&str>, String)> {
         excerpts
             .iter()
@@ -475,7 +534,7 @@ mod tests {
     }
 
     /// A word quoted nowhere else earns the line, and the line marks every
-    /// word it holds.
+    /// word it holds. It marks both words, so it comes first (D10).
     #[test]
     fn a_link_holding_a_word_no_other_place_quotes_is_quoted_with_all_its_words_marked() {
         let out = excerpts(
@@ -487,8 +546,8 @@ mod tests {
         assert_eq!(
             flat(&out),
             vec![
-                (None, "The [retry] stays.".to_owned()),
                 (None, "Links to [Retry] [budget] in ENG".to_owned()),
+                (None, "The [retry] stays.".to_owned()),
             ]
         );
     }
@@ -532,8 +591,8 @@ mod tests {
         assert_eq!(
             flat(&out),
             vec![
-                (Some("line 41"), "boom [AC04]".to_owned()),
-                (Some("line 43"), "[AC04] again".to_owned()),
+                (Some("Log line 41"), "boom [AC04]".to_owned()),
+                (Some("Log line 43"), "[AC04] again".to_owned()),
             ]
         );
     }
@@ -546,6 +605,203 @@ mod tests {
         assert!(text.starts_with('…') && text.ends_with('…'), "{text}");
         assert!(text.chars().count() <= SPAN + 2, "{text}");
         assert!(out[0].segments.iter().any(|s| s.hit && s.text == "needle"));
+    }
+
+    /// [`excerpts`] as it read every text to its end before the list could
+    /// be full: the same marking, with no early stop. The reference the test
+    /// below holds [`excerpts`] to.
+    fn excerpts_to_the_end(
+        title: &str,
+        text: &str,
+        first_line: Option<i64>,
+        needles: &[String],
+    ) -> Vec<Excerpt> {
+        let stems: Vec<Vec<char>> = needles
+            .iter()
+            .map(|n| stem(n))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if stems.is_empty() || text.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<Excerpt> = Vec::new();
+        let mut keep = |place: Option<String>, segments: Option<Vec<Segment>>| {
+            let Some(segments) = segments else { return };
+            if out.len() >= MAX
+                || out
+                    .iter()
+                    .any(|e| e.place == place && e.segments == segments)
+            {
+                return;
+            }
+            out.push(Excerpt {
+                place,
+                segments,
+                file: None,
+            });
+        };
+        if let Some(first) = first_line {
+            for (offset, line) in text.lines().enumerate() {
+                let number = first.saturating_add(i64::try_from(offset).unwrap());
+                keep(
+                    Some(format!("Log line {number}")),
+                    marked(line.trim(), &stems),
+                );
+            }
+            return out;
+        }
+        let read = indexed::read(text);
+        for run in read.runs {
+            match &run.part {
+                Part::Lead => {}
+                Part::Section(heading) => keep(Some("Heading".to_owned()), marked(heading, &stems)),
+                Part::Comment(by) => keep(None, author_line(by, &stems)),
+            }
+            let place = match &run.part {
+                Part::Lead => None,
+                Part::Section(heading) => Some(heading.clone()),
+                Part::Comment(by) if by.is_empty() => Some("Comment".to_owned()),
+                Part::Comment(by) => Some(format!("Comment by {by}")),
+            };
+            let body = match run.part {
+                Part::Lead => run
+                    .text
+                    .strip_prefix(title)
+                    .unwrap_or(&run.text)
+                    .trim()
+                    .to_owned(),
+                _ => run.text,
+            };
+            for sentence in sentences(&body) {
+                keep(place.clone(), marked(&sentence, &stems));
+            }
+        }
+        drop(keep);
+        let unquoted: Vec<Vec<char>> = stems
+            .iter()
+            .filter(|stem| !out.iter().any(|excerpt| quotes(excerpt, stem)))
+            .cloned()
+            .collect();
+        for (space, title) in &read.links {
+            if out.len() >= MAX {
+                break;
+            }
+            if let Some(segments) = link_line(space, title, &stems, &unquoted)
+                && !out
+                    .iter()
+                    .any(|e| e.place.is_none() && e.segments == segments)
+            {
+                out.push(Excerpt {
+                    place: None,
+                    segments,
+                    file: None,
+                });
+            }
+        }
+        out
+    }
+
+    /// Stopping at the last excerpt quotes what reading to the end quoted:
+    /// pages of sections, comments and links, and run logs, long enough that
+    /// a common word fills the list early and a rare one sits past where it
+    /// would have filled, asked for words that fill it in the lead, in one
+    /// section, across comments, only by a link, and never.
+    #[test]
+    fn stopping_at_the_last_excerpt_quotes_what_reading_to_the_end_did() {
+        let mut page = String::from("Runbook\nRetry the payout. Then page the owner.\n");
+        for n in 0..40 {
+            page.push_str(&format!(
+                "\u{1e}Section {n} backoff\nRetry number {n} waits. The ledger settles after {n} tries? Payout {n} is late!\n"
+            ));
+            if n % 3 == 0 {
+                page.push_str(&format!(
+                    "\u{1f}Priya {n}\nCap the retry at {n}. Rare{n} word here.\n"
+                ));
+            }
+            if n % 5 == 0 {
+                page.push_str(&format!("\u{1d}ENG\u{1d}Budget page {n}\u{1d}\n"));
+            }
+        }
+        page.push_str("\u{1e}Last\nOnly here: zebra crossing.\n");
+        let log: String = (0..300)
+            .map(|n| {
+                if n % 7 == 0 {
+                    format!("step {n} retry failed\n")
+                } else if n == 290 {
+                    "zebra at the end\n".to_owned()
+                } else {
+                    format!("step {n} ok\n")
+                }
+            })
+            .collect();
+        let asked: [&[&str]; 15] = [
+            &["rare3"],
+            &["crossing"],
+            &["end", "last"],
+            &["retry"],
+            &["r"],
+            &["p"],
+            &["payout", "ledger"],
+            &["priya"],
+            &["backoff"],
+            &["budget"],
+            &["zebra"],
+            &["rare39", "retry"],
+            &["section", "eng"],
+            &["s"],
+            &["nothing-holds-this"],
+        ];
+        let mut full = 0;
+        let mut some = 0;
+        for words in asked {
+            let needles = needles(words);
+            for (text, first_line) in [(&page, None), (&log, Some(12))] {
+                let now = read_excerpts("Runbook", text, first_line, &needles, None);
+                let before = excerpts_to_the_end("Runbook", text, first_line, &needles);
+                assert_eq!(now, before, "{words:?}, a log {}", first_line.is_some());
+                full += usize::from(now.len() == MAX);
+                some += usize::from(!now.is_empty() && now.len() < MAX);
+            }
+        }
+        assert!(full >= 8, "{full} lists were full");
+        assert!(some >= 4, "{some} lists were short of full");
+    }
+
+    /// D10: a ticket's or a pull request's own text is quoted under
+    /// `Description`; its comments keep their author.
+    #[test]
+    fn a_lead_is_quoted_under_the_place_it_is_given() {
+        let text = "T\nThe payout retried.\n\u{1f}Priya\nCap the payout.";
+        let out = super::excerpts("T", text, None, &needles(&["payout"]), Some("Description"));
+        assert_eq!(
+            flat(&out),
+            vec![
+                (Some("Description"), "The [payout] retried.".to_owned()),
+                (Some("Comment by Priya"), "Cap the [payout].".to_owned()),
+            ]
+        );
+        // A page's lead and a note name none.
+        assert_eq!(
+            flat(&excerpts("T", text, None, &needles(&["payout"])))[0].0,
+            None
+        );
+    }
+
+    /// D10: the excerpt that marks the most distinct typed words is first,
+    /// the rest in the text's order.
+    #[test]
+    fn the_excerpt_marking_the_most_words_comes_first_and_ties_keep_their_order() {
+        let text = "T\nThe payout waits.\nA retry later.\nThe payout retry fails.\nOne more retry.";
+        let out = excerpts("T", text, None, &needles(&["payout", "retry"]));
+        assert_eq!(
+            flat(&out),
+            vec![
+                (None, "The [payout] [retry] fails.".to_owned()),
+                (None, "The [payout] waits.".to_owned()),
+                (None, "A [retry] later.".to_owned()),
+                (None, "One more [retry].".to_owned()),
+            ]
+        );
     }
 
     #[test]

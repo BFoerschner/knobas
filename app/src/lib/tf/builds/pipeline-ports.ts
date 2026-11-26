@@ -3,7 +3,7 @@
  * test needs no bridge. Each is wrapped rather than referenced, so importing
  * this module calls nothing.
  */
-import { listen as tauriListen } from "@tauri-apps/api/event";
+import { windowListen } from "../../ipc/shared-listen";
 
 import {
   artifactBytes,
@@ -39,12 +39,14 @@ import type {
   RunPreset,
   RunRow,
   RunTests,
+  ShownView,
   SourceView,
   TestOutcome,
 } from "../../ipc/entity";
 import {
   listAdapters,
   listSources,
+  refreshEntity,
   syncStatus,
   type QueuedWrite,
   type SourceDescriptor,
@@ -55,7 +57,7 @@ import {
 import { EVENTS } from "../../ipc";
 import { writeFollower, type WriteFollower } from "../../shell/follow-write";
 import type { RefusedWritesPort } from "../../shell/refused-writes";
-import { openExternal } from "../../shell/open-external";
+import { routeWeb } from "../../shell/open-web";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
 import type { DetailRefreshPorts } from "../refresh.svelte";
@@ -96,6 +98,11 @@ export interface PipelinePorts {
   getEntity: (entityId: string) => Promise<EntityDetail>;
   /** The header's *Refresh* or *Sync now* (#2107, #2137); the bridge's when left out. */
   refresh?: DetailRefreshPorts;
+  /**
+   * A run in flight the page draws, refreshed by id in the background lane when the page is shown (`refresh_entity`
+   * behind, the TeamCity run fix); none is refreshed when left out.
+   */
+  follow?: (runId: string) => Promise<unknown>;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -143,6 +150,8 @@ export async function readRunParameters(runId: string): Promise<StartValue[]> {
   );
 }
 
+
+
 export const BRIDGE: PipelinePorts = {
   older: (pipelineId, before) => olderPipelineRuns(pipelineId, before),
   settings: (pipelineId) => pipelineSettings(pipelineId),
@@ -151,22 +160,25 @@ export const BRIDGE: PipelinePorts = {
   syncStatus: () => syncStatus(),
   jobBranches: (job) => readJobBranches(job),
   submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
-  openExternal: (url) => openExternal(url),
+  openExternal: (url) => routeWeb(url),
   presets: (pipelineId) => runPresets(pipelineId),
   savePreset: (preset) => saveRunPreset(preset),
   deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),
   repoBranches: (repoId) => readRepoBranches(repoId),
   runParameters: (runId) => readRunParameters(runId),
-  listen: (event, handler) => tauriListen(event, handler),
+  // One listener per event for the window (`shared-listen.ts`): a run opened from a pipeline page, or the other way,
+  // hears the same events and sends no listen or unlisten for them.
+  listen: (event, handler) => windowListen(event, handler),
   follower: () => writeFollower(),
   refusedWrites: (asks) => refusedWrites(asks),
   getEntity: (entityId) => getEntity(entityId),
+  follow: (runId) => refreshEntity(runId, true),
 };
 
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */
 export interface RunPorts extends PipelinePorts {
   /** The run's view (`entity_view`): the whole of it, or the one section named. */
-  view: (runId: string, section?: string) => Promise<SourceView | null>;
+  view: (runId: string, section?: string) => Promise<ShownView | SourceView | null>;
   /** The last lines of the run's whole log, up to the cap, and its steps (`run_log`, #854). */
   log: (runId: string) => Promise<RunLog | null>;
   /** The run's tests, failed first (`run_tests`, #855). */

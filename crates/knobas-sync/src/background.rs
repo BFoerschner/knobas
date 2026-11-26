@@ -143,8 +143,19 @@ impl Background {
                 tasks.abort_all();
                 // Until each is gone: an aborted task's future is dropped on
                 // its own worker, and a send it cut is kept as it drops
-                // (#1932), which the quit reads next.
-                while tasks.join_next().await.is_some() {}
+                // (#1932), which the quit reads next. Bounded: a task stuck in
+                // a blocking call is never gone
+                // ([`crate::scheduler::ABORTED_GONE_TIMEOUT`]).
+                let gone = async { while tasks.join_next().await.is_some() {} };
+                if tokio::time::timeout(crate::scheduler::ABORTED_GONE_TIMEOUT, gone)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        left = tasks.len(),
+                        "a background task is stuck in a call that does not return: the quit goes on without it"
+                    );
+                }
             }
         }
     }

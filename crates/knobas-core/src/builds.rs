@@ -116,6 +116,78 @@ pub struct PipelineRow {
     pub recent: Vec<RunRow>,
 }
 
+/// One run in Builds' *Recent* (2026-11-25): the run as a pipeline's runs
+/// draw it, and the id of the pipeline it sits under, which
+/// [`RecentRuns::pipelines`] names.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentRun {
+    pub pipeline_id: String,
+    pub run: RunRow,
+}
+
+/// A pipeline as *Recent* names it beside its runs: its name, its chain of
+/// groups and its source, as the Builds list names it ([`PipelineRow`]).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentPipeline {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+    pub path: Vec<String>,
+}
+
+/// Where a page of *Recent* ends: its last run's stored instant, in the
+/// database's own spelling, and its id. Handed back as it came to read the
+/// next page; nothing else reads it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RecentCursor {
+    pub made: String,
+    pub entity_id: String,
+}
+
+/// What *Recent* asks for beyond its page: every field empty asks for every run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RecentFilter {
+    /// The sources, by id; empty for every CI source.
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// The results the Runs filter's chips name (`Failed`, `Running`,
+    /// `Queued`, `Passed`); empty for any.
+    #[serde(default)]
+    pub results: Vec<String>,
+    /// Only the runs the reader started (*Mine*).
+    #[serde(default)]
+    pub mine: bool,
+    /// Only the runs built on these branches (*This job*); `None` for any.
+    #[serde(default)]
+    pub branches: Option<Vec<String>>,
+}
+
+/// A page of *Recent*: its runs newest first, the pipelines they sit under,
+/// and where the next page starts, `None` once the mirror holds no more.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RecentRuns {
+    pub runs: Vec<RecentRun>,
+    pub pipelines: Vec<RecentPipeline>,
+    pub next: Option<RecentCursor>,
+}
+
+/// How many runs a page of *Recent* answers when the caller names no cap.
+pub const RECENT_PAGE: u32 = 200;
+
+/// The most a page of *Recent* answers, whatever the caller asks.
+const RECENT_PAGE_MAX: u32 = 1_000;
+
 /// The `knobas.setting` key holding the pinned pipelines (#849, R-9.3): a
 /// JSON array of entity ids. In `knobas.setting` rather than a table of its
 /// own, for the reason the clones root is (`0002`, comment 6): a short list
@@ -159,40 +231,103 @@ macro_rules! frame_kinds_cte {
     };
 }
 
-/// A run's columns, read through its kind's declarations; the row alias is
-/// `i` and the declarations `$1`.
-macro_rules! run_columns {
+/// A run's columns, the row alias `i` and the declarations `$1`: each from the
+/// run's stored row (`sync.item_run`, migration `0088`, joined as `ru` by
+/// [`crate::run_join!`]) where it has one, and walked out of its payload
+/// through its kind's declarations where it has none: the same answer, since a
+/// row is read only under the declarations the statement binds. A statement that reads it holds
+/// [`crate::run_keys!`] among its CTEs and the join after its `i`.
+macro_rules! stored_run_columns {
     () => {
         concat!(
             "i.entity_id, i.source_id, i.web_url, i.item_updated_at, ",
-            crate::declared_string!("$1", "pipeline"),
+            crate::row_or!("ru", "pkey", crate::declared_string!("$1", "pipeline")),
             " as pkey, ",
-            crate::declared_string!("$1", "number"),
+            crate::row_or!("ru", "number", crate::declared_string!("$1", "number")),
             " as number, ",
-            crate::declared_state!("$1"),
+            crate::row_or!("ru", "state", crate::declared_state!("$1")),
             " as state, ",
-            crate::declared_string!("$1", "branch"),
+            crate::row_or!("ru", "branch", crate::declared_string!("$1", "branch")),
             " as branch, ",
-            crate::declared_string!("$1", "started"),
+            crate::row_or!("ru", "started", crate::declared_string!("$1", "started")),
             " as started, ",
-            crate::declared_string!("$1", "finished"),
+            crate::row_or!("ru", "finished", crate::declared_string!("$1", "finished")),
             " as finished, ",
-            crate::declared_trigger!("$1"),
+            crate::row_or!("ru", "trig", crate::declared_trigger!("$1")),
             " as trig, ",
-            crate::declared_string!("$1", "started_by"),
+            crate::row_or!(
+                "ru",
+                "started_by",
+                crate::declared_string!("$1", "started_by")
+            ),
             " as started_by, ",
-            crate::declared_string!("$1", "agent"),
+            crate::row_or!("ru", "agent", crate::declared_string!("$1", "agent")),
             " as agent, ",
-            crate::declared_string!("$1", "current_step"),
+            crate::row_or!(
+                "ru",
+                "current_step",
+                crate::declared_string!("$1", "current_step")
+            ),
             " as current_step, ",
-            crate::declared_integer!("$1", "tests_failed"),
+            crate::row_or!(
+                "ru",
+                "tests_failed",
+                crate::declared_integer!("$1", "tests_failed")
+            ),
             " as tests_failed, ",
-            crate::declared_integer!("$1", "tests_passed"),
+            crate::row_or!(
+                "ru",
+                "tests_passed",
+                crate::declared_integer!("$1", "tests_passed")
+            ),
             " as tests_passed, ",
-            crate::declared_integer!("$1", "tests_ignored"),
-            " as tests_ignored, (select l.value from ",
-            crate::declared_list!("$1", "revision"),
-            " l limit 1) as revision"
+            crate::row_or!(
+                "ru",
+                "tests_ignored",
+                crate::declared_integer!("$1", "tests_ignored")
+            ),
+            " as tests_ignored, ",
+            crate::row_or!(
+                "ru",
+                "revision",
+                "(select l.value from ",
+                crate::declared_list!("$1", "revision"),
+                " l limit 1)"
+            ),
+            " as revision"
+        )
+    };
+}
+
+/// A run of `r` (the alias [`stored_run_columns!`] reads into) as one jsonb object in
+/// [`RawRun`]'s fields: what a pipeline's runs are aggregated into.
+macro_rules! run_object {
+    () => {
+        "jsonb_build_object(
+           'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
+           'branch', r.branch, 'started', r.started, 'finished', r.finished,
+           'updated_at', r.item_updated_at, 'web_url', r.web_url,
+           'trigger', r.trig, 'started_by', r.started_by,
+           'agent', r.agent, 'current_step', r.current_step,
+           'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
+           'tests_ignored', r.tests_ignored,
+           'revision', r.revision)"
+    };
+}
+
+/// A pipeline item `i`'s declared chain of groups (#849), in order, as a jsonb
+/// array of names; the declarations are `$1`. One candidate is what a source
+/// declares; a second's names would follow the first's.
+macro_rules! pipeline_path {
+    () => {
+        concat!(
+            "(select coalesce(jsonb_agg(btrim(e.elem #>> c.entry_segs) order by e.ord), '[]'::jsonb) from ",
+            crate::declared_list_candidates!("$1", "group_path"),
+            " c cross join lateral jsonb_array_elements(
+             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
+                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
+           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
+             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null)"
         )
     };
 }
@@ -252,6 +387,8 @@ macro_rules! newest_runs {
 pub const PIPELINES: &str = concat!(
     "with ",
     frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
     ",
 p as materialized (
   select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name,
@@ -261,16 +398,10 @@ p as materialized (
     crate::declared_string!("$1", "group"),
     " as grp, ",
     crate::declared_string!("$1", "pipeline"),
-    // The declared chain of groups, in order (#849). One candidate is what a
-    // source declares; a second's names would follow the first's.
     " as pkey,
-         (select coalesce(jsonb_agg(btrim(e.elem #>> c.entry_segs) order by e.ord), '[]'::jsonb) from ",
-    crate::declared_list_candidates!("$1", "group_path"),
-    " c cross join lateral jsonb_array_elements(
-             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
-                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
-           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
-             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) as path
+         ",
+    pipeline_path!(),
+    " as path
     from frames f
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
     left join knobas.source_config c on c.id = i.source_id
@@ -283,25 +414,21 @@ pins as (
 ),
 r as materialized (
   select p.entity_id as pipeline, ",
-    run_columns!(),
+    stored_run_columns!(),
     "
     from p
     cross join lateral ",
     crate::newest_runs!("p", "$2"),
     " k
-    join sync.item i on i.entity_id = k.entity_id
+    join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
    where p.pkey is not null and p.name is not null
 ),
 recent as materialized (
-  select r.pipeline, jsonb_agg(jsonb_build_object(
-           'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
-           'branch', r.branch, 'started', r.started, 'finished', r.finished,
-           'updated_at', r.item_updated_at, 'web_url', r.web_url,
-           'trigger', r.trig, 'started_by', r.started_by,
-           'agent', r.agent, 'current_step', r.current_step,
-           'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
-           'tests_ignored', r.tests_ignored,
-           'revision', r.revision)
+  select r.pipeline, jsonb_agg(",
+    run_object!(),
+    "
            order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
     from r
    group by r.pipeline
@@ -316,12 +443,263 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
 "
 );
 
+/// One pipeline that builds a repository, for the repository's Builds tab
+/// (the repo-builds pass, 2026-11-13, `mockups/builds/repo-builds.md`): the
+/// pipeline as the Builds list names it, and its newest run on each branch
+/// among the runs that built one of the repository's mirrored commits.
+///
+/// `latest` holds one run per branch, newest first; the branch is as the run
+/// spells it, so `refs/heads/main` and `main` are two entries where a source
+/// writes both.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RepoPipelineRow {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+    pub path: Vec<String>,
+    pub web_url: Option<String>,
+    pub latest: Vec<RunRow>,
+}
+
+/// An open pull request of a repository, by the branch it is opened from: what
+/// puts a branch in the Builds tab's *Pull requests* group.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct PullHead {
+    /// The branch it is opened from, as the source names it (declared `head`).
+    pub branch: String,
+    pub entity_id: String,
+    /// Its key as the source writes it (`#142`), where the record carries one.
+    pub cell: Option<String>,
+}
+
+/// A branch of a repository as the mirror holds it, with the open pull
+/// request opened from it (the forge-rounds pass, 2026-11-15): what the
+/// repository header's *New pull request* is decided on, with no read of the
+/// branch's own view.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct BranchPull {
+    pub entity_id: String,
+    /// Its name, as the branch's record is titled.
+    pub name: String,
+    /// The commit at its head as the mirror holds it (declared `commit`).
+    pub tip: Option<String>,
+    /// The repository's default branch, by the repository's declared
+    /// `default_branch`.
+    pub is_default: bool,
+    /// The open pull request opened from it, as [`REPO_PULL_HEADS`] finds it.
+    pub pull: Option<PullHead>,
+}
+
+/// A repository's Builds tab in one answer: the pipelines that built its
+/// commits ([`RepoPipelineRow`]) and its open pull requests' branches.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RepoBuilds {
+    pub pipelines: Vec<RepoPipelineRow>,
+    pub pull_requests: Vec<PullHead>,
+}
+
+/// A mirrored commit's repository: what *By repository* on the Builds list
+/// groups a pipeline by, through the commits its runs built.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct CommitRepository {
+    pub commit_id: String,
+    pub repo_id: String,
+    pub repo_title: String,
+}
+
+/// The pipelines that build the repository `$2`, each with its newest run per
+/// branch ([`RepoPipelineRow`]). `$1` is the declarations, `$3` the CI role's
+/// fillers, as for [`PIPELINES`].
+///
+/// **A run builds the repository when its commit is one of the repository's
+/// mirrored commits**, nothing else: the commits that name the repository as
+/// their parent (`sync.item_parent`, `item_parent_name_idx`), their declared
+/// shas, the runs that built a sha (`item_revision_revision_idx`), and each
+/// run's stored pipeline and branch (`sync.item_pipeline`,
+/// `item_pipeline_entity_idx`). A branch name alone would be shared: every
+/// repository has a `main`.
+///
+/// **So it sees only the runs of commits the mirror holds.** A queued run
+/// that has no commit yet is not here until it starts. A run of a commit the
+/// code host has not synced yet is not here until its next sync, so for that
+/// while the branch shows the run before it. Runs of commits older than the
+/// code host's window (`commits_per_repo`), and runs that name no branch, are
+/// not here at all.
+///
+/// **Its cost is the repository's, not the mirror's.** It reads one
+/// repository's commits (Gitea keeps `commits_per_repo`, 100 by default) and
+/// the runs of those shas, and reads each pipeline's declared `pipeline` once
+/// but its name and chain only for the pipelines that matched: a declared read
+/// is about 17 µs a row (`first_string_of!`). `tests/it/read_plans.rs` holds
+/// the plan to that.
+///
+/// Public so the app's plan test can read its plan.
+pub const REPO_PIPELINES: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
+    ",
+repo as (
+  select i.source_id, lower(i.title) as name
+    from sync.live_item i
+   where i.entity_id = $2
+),
+shas as materialized (
+  select distinct ",
+    crate::declared_string!("$1", "commit"),
+    " as sha
+    from repo
+    join sync.item_parent ip
+      on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+    join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'commit'
+),
+built as materialized (
+  select distinct on (ip.source_id, ip.pkey, ip.adapter_kind, ip.branch)
+         ip.source_id, ip.pkey, ip.adapter_kind, ip.entity_id
+    from shas
+    join sync.item_revision rv on rv.revision = shas.sha
+    join sync.item_pipeline ip on ip.entity_id = rv.entity_id and ip.adapter_kind = rv.adapter_kind
+    join knobas.entity e on e.id = ip.entity_id and e.deleted_at is null
+   where shas.sha is not null and ip.branch is not null and ip.source_id = any($3::text[])
+   order by ip.source_id, ip.pkey, ip.adapter_kind, ip.branch, ip.at desc nulls last, ip.entity_id desc
+),
+keyed as materialized (
+  select i.entity_id, i.source_id, c.kind as adapter_kind, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline' and i.source_id in (select b.source_id from built b)
+),
+p as materialized (
+  select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name, ",
+    crate::declared_string!("$1", "name"),
+    " as name, ",
+    crate::declared_string!("$1", "group"),
+    " as grp, ",
+    pipeline_path!(),
+    " as path
+    from keyed k
+    join sync.live_item i on i.entity_id = k.entity_id
+    left join knobas.source_config c on c.id = i.source_id
+   where exists (select 1 from built b
+                  where b.source_id = k.source_id and b.pkey = k.pkey and b.adapter_kind = k.adapter_kind)
+),
+r as materialized (
+  select k.entity_id as pipeline, ",
+    stored_run_columns!(),
+    "
+    from built b
+    join keyed k on k.source_id = b.source_id and k.pkey = b.pkey and k.adapter_kind = b.adapter_kind
+    join sync.item i on i.entity_id = b.entity_id",
+    crate::run_join!("ru", "i"),
+    "
+),
+latest as (
+  select r.pipeline, jsonb_agg(",
+    run_object!(),
+    "
+           order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
+    from r
+   group by r.pipeline
+)
+select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path, l.runs
+  from p
+  join latest l on l.pipeline = p.entity_id
+ where p.name is not null
+ order by lower(p.name), p.entity_id
+"
+);
+
+/// The open pull requests of the repository `$2` by the branch each is opened
+/// from, `$1` the declarations: those naming the repository as their parent
+/// (`item_parent_name_idx`), open by their declared state, opened from a branch
+/// of the repository itself. A fork's same-named branch is not this one's, and
+/// nor is a deleted fork's pull request, whose `head_repo` is gone. One per
+/// branch, the most recently updated where two name it.
+pub const REPO_PULL_HEADS: &str = concat!(
+    "with repo as (
+  select i.source_id, lower(i.title) as name
+    from sync.live_item i
+   where i.entity_id = $2
+)
+select distinct on (p.branch) p.branch, p.entity_id, p.cell from (
+  select i.entity_id, i.key_cell as cell, i.item_updated_at, repo.name as repo_name, ",
+    crate::declared_string!("$1", "head"),
+    " as branch, ",
+    crate::declared_string!("$1", "head_repo"),
+    " as head_repo, ",
+    crate::declared_state!("$1"),
+    " as state
+    from repo
+    join sync.item_parent ip
+      on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+    join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'pr'
+) p
+ where p.branch is not null and lower(p.state->>'text') = 'open'
+   and lower(p.head_repo) = p.repo_name
+ order by p.branch, p.item_updated_at desc nulls last, p.entity_id
+"
+);
+
+/// The live branches of the repository `$2`, `$1` the declarations: those
+/// naming it as their parent (`item_parent_name_idx`), each with the commit
+/// its record names at its head and whether it is the repository's declared
+/// default branch, newest first.
+pub const REPO_BRANCHES: &str = concat!(
+    "with repo as (
+  select i.source_id, lower(i.title) as name, ",
+    crate::declared_string!("$1", "default_branch"),
+    " as default_branch
+    from sync.live_item i
+   where i.entity_id = $2
+)
+select i.entity_id, i.title as name, ",
+    crate::declared_string!("$1", "commit"),
+    " as tip, i.title = repo.default_branch as is_default
+  from repo
+  join sync.item_parent ip
+    on ip.arm = 'child' and lower(ip.name) = repo.name and ip.source_id = repo.source_id
+  join sync.live_item i on i.entity_id = ip.entity_id and i.kind = 'branch'
+ order by i.item_updated_at desc nulls last, i.entity_id
+"
+);
+
+/// The repositories of the mirrored commits `$1`: each commit's stored parent
+/// (`item_parent_entity_idx`) matched to the live item of that kind and title
+/// in its source. A commit the mirror does not hold answers nothing.
+pub const COMMIT_REPOSITORIES: &str = "
+select distinct ip.entity_id as commit_id, r.entity_id as repo_id, r.title as repo_title
+  from sync.item_parent ip
+  join sync.live_item r
+    on r.source_id = ip.source_id and r.kind = ip.kind and lower(r.title) = lower(ip.name)
+ where ip.arm = 'child' and ip.entity_id = any($1::text[])
+ order by ip.entity_id, r.entity_id
+";
+
 /// The runs of the pipeline `$2`, newest first, at most `$3`: the head of its
 /// range of the stored rows (`newest_runs!`, #2185), each read through its
 /// kind's declarations.
 const PIPELINE_RUNS_OF: &str = concat!(
     "with ",
     frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
     ",
 target as (
   select i.source_id, s.kind as adapter_kind, ",
@@ -335,15 +713,106 @@ target as (
 select t.pkey is not null as found, x.* from target t
   left join lateral (
     select ",
-    run_columns!(),
+    stored_run_columns!(),
     "
       from ",
     crate::newest_runs!("t", "$3"),
     " k
-      join sync.item i on i.entity_id = k.entity_id
+      join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
      order by i.item_updated_at desc nulls last, i.entity_id desc) x on true
 "
 );
+
+/// The newest runs across every drawn pipeline (Builds' *Recent*,
+/// 2026-11-25): the head of `run_made_idx` (migration `0103`), newest first
+/// by when each run started or, not started, was queued, as `runMade` orders
+/// every list of runs. `$1` the declarations, `$2` the limit, `$3` the CI
+/// fillers, `$4` the sources asked (empty: all), `$5`/`$6` the cursor (the
+/// last answered run's instant as text and its id; null: from the top), `$7`
+/// the results asked (`Failed`, `Running`, `Queued`, `Passed`; empty: all),
+/// `$8` who started it (empty: anyone), `$9` the branches (null: any).
+///
+/// A pipeline is drawn as [`PIPELINES`] draws it; a run sits under it by its
+/// stored `sync.item_pipeline` row, as a pipeline's own runs do, and only a
+/// run with a stored row has an instant here, so the filters read its row.
+const RECENT_RUNS: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
+    ",
+p as materialized (
+  select i.entity_id, i.source_id, c.kind as adapter_kind, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    crate::declared_string!("$1", "name"),
+    " as name
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline' and i.source_id = any($3::text[])
+     and (cardinality($4::text[]) = 0 or i.source_id = any($4::text[]))
+),
+dp as materialized (select * from p where p.pkey is not null and p.name is not null),
+k as materialized (
+  select m.entity_id, m.made, w.pipeline
+    from sync.run_made m
+    cross join lateral (
+      select dp.entity_id as pipeline from sync.item_pipeline ip
+        join dp on dp.source_id = ip.source_id and dp.pkey = ip.pkey and dp.adapter_kind = ip.adapter_kind
+       where ip.entity_id = m.entity_id
+       limit 1) w
+    join sync.item i on i.entity_id = m.entity_id",
+    crate::run_join!("ru", "i"),
+    "
+   where ($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
+     and exists (select 1 from knobas.entity e where e.id = m.entity_id and e.deleted_at is null)
+     and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
+     and ($9::text[] is null or ru.branch = any($9::text[]))
+     and (cardinality($7::text[]) = 0 or
+          (case when sync.run_instant(ru.finished) is null
+                then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
+                when ru.state->>'tone' = 'err' then 'Failed'
+                when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))
+   order by m.made desc, m.entity_id desc
+   limit $2
+)
+select k.pipeline, k.made::text as made_text, ",
+    stored_run_columns!(),
+    "
+  from k
+  join sync.item i on i.entity_id = k.entity_id",
+    crate::run_join!("ru", "i"),
+    "
+ order by k.made desc, k.entity_id desc
+"
+);
+
+/// The drawn pipelines `$2` names, as *Recent* names them: `$1` the
+/// declarations.
+const RECENT_PIPELINES: &str = concat!(
+    "select i.entity_id, i.source_id, coalesce(c.display_name, i.source_id) as source_name, ",
+    crate::declared_string!("$1", "name"),
+    " as name, ",
+    crate::declared_string!("$1", "group"),
+    " as grp, ",
+    pipeline_path!(),
+    " as path
+    from sync.live_item i
+    left join knobas.source_config c on c.id = i.source_id
+   where i.entity_id = any($2::text[])
+   order by i.entity_id"
+);
+
+/// *Recent*'s statement, for the app's plan test. It binds what
+/// [`recent_runs_page`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_recent_runs() -> &'static str {
+    RECENT_RUNS
+}
 
 /// One pipeline's runs statement, for the app's plan test
 /// (`tests/it/read_plans.rs`, #2185). It binds what [`pipeline_runs`] binds.
@@ -432,13 +901,36 @@ impl RunRow {
 /// live items of kind `commit` whose declared `commit` is that sha. Two rows
 /// for one sha are two mirrored repositories holding it, a fork or a mirror
 /// on a second forge (#1144).
+///
+/// A commit's sha is stored (`sync.item_run`, migration `0088`): the asked
+/// shas find their commits through `item_run_sha_idx`, and only a commit with
+/// no row under the bound declarations' key is walked, the walk it always
+/// was. Not one `= any($2)` over every commit: in the plan PostgreSQL keeps
+/// for a prepared statement the array is a parameter, and each of 5,636
+/// commits was compared with each of 600 shas one by one, 62 ms where the
+/// stored range answers in 2. The commits with no row are a fenced subquery
+/// (`offset 0`), so the sha test is not pushed down under the test for the
+/// row, which walked every commit again.
 const COMMITS_OF: &str = concat!(
-    "select c.sha, c.entity_id from (
-  select i.entity_id, ",
+    "with ",
+    crate::run_keys!("$1"),
+    "
+select c.sha, c.entity_id from (
+  select ru.sha, i.entity_id
+    from (select distinct s.sha from unnest($2::text[]) as s(sha)) s
+    join sync.item_run ru on ru.sha = s.sha
+    join sync.live_item i on i.entity_id = ru.entity_id and i.kind = 'commit'
+    join run_keys ru_k on ru_k.source_id = i.source_id and ru_k.kind = i.kind and ru_k.k = ru.paths_key
+  union all
+  select ",
     crate::declared_string!("$1", "commit"),
-    " as sha
-    from sync.live_item i
-   where i.kind = 'commit') c
+    " as sha, i.entity_id
+    from (select l.entity_id, l.source_id, l.kind, l.payload
+            from sync.live_item l",
+    crate::run_join!("ru", "l"),
+    "
+           where l.kind = 'commit' and ru.entity_id is null
+          offset 0) i) c
  where c.sha = any($2::text[])
  order by c.sha, c.entity_id"
 );
@@ -495,6 +987,140 @@ pub async fn pipelines(
             })
         })
         .collect()
+}
+
+/// The repository `repo`'s Builds tab ([`RepoBuilds`]): the pipelines that
+/// build it, each with its newest run per branch ([`REPO_PIPELINES`]), the
+/// sources in `fillers` only and `identity` the configured usernames as for
+/// [`pipelines`], and its open pull requests by branch ([`REPO_PULL_HEADS`]).
+/// No run's `commit_id` is filled here. Empty for an id no live repository
+/// carries.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn repo_pipelines(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    identity: &[String],
+    fillers: &[String],
+    repo: &EntityRef,
+) -> Result<RepoBuilds, CoreError> {
+    let rows = sqlx::query(REPO_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .bind(fillers)
+        .fetch_all(pool)
+        .await?;
+    let pipelines = rows
+        .iter()
+        .map(|row| {
+            let latest: sqlx::types::Json<Vec<RawRun>> = row.get("runs");
+            let path: sqlx::types::Json<Vec<String>> = row.get("path");
+            RepoPipelineRow {
+                entity_id: row.get("entity_id"),
+                source_id: row.get("source_id"),
+                source_name: row.get("source_name"),
+                name: row.get("name"),
+                group: row.get("grp"),
+                path: path.0,
+                web_url: row.get("web_url"),
+                latest: latest
+                    .0
+                    .into_iter()
+                    .map(|raw| RunRow::read(raw, identity))
+                    .collect(),
+            }
+        })
+        .collect();
+    let pull_requests = sqlx::query_as::<_, (String, String, Option<String>)>(REPO_PULL_HEADS)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(branch, entity_id, cell)| PullHead {
+            branch,
+            entity_id,
+            cell,
+        })
+        .collect();
+    Ok(RepoBuilds {
+        pipelines,
+        pull_requests,
+    })
+}
+
+/// The branches of the repository `repo` ([`REPO_BRANCHES`]), each with the
+/// open pull request opened from it ([`REPO_PULL_HEADS`]), from the mirror
+/// alone. Empty for an id no live repository carries.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn repo_branch_pulls(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    repo: &EntityRef,
+) -> Result<Vec<BranchPull>, CoreError> {
+    let branches =
+        sqlx::query_as::<_, (String, String, Option<String>, Option<bool>)>(REPO_BRANCHES)
+            .bind(declarations.as_param())
+            .bind(repo.to_string())
+            .fetch_all(pool)
+            .await?;
+    let pulls = sqlx::query_as::<_, (String, String, Option<String>)>(REPO_PULL_HEADS)
+        .bind(declarations.as_param())
+        .bind(repo.to_string())
+        .fetch_all(pool)
+        .await?;
+    let mut by_branch: std::collections::HashMap<String, PullHead> = pulls
+        .into_iter()
+        .map(|(branch, entity_id, cell)| {
+            (
+                branch.clone(),
+                PullHead {
+                    branch,
+                    entity_id,
+                    cell,
+                },
+            )
+        })
+        .collect();
+    Ok(branches
+        .into_iter()
+        .map(|(entity_id, name, tip, is_default)| BranchPull {
+            pull: by_branch.remove(&name),
+            entity_id,
+            name,
+            tip,
+            is_default: is_default.unwrap_or(false),
+        })
+        .collect())
+}
+
+/// The repositories of the mirrored commits `commits` ([`COMMIT_REPOSITORIES`]).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn commit_repositories(
+    pool: &PgPool,
+    commits: &[String],
+) -> Result<Vec<CommitRepository>, CoreError> {
+    Ok(
+        sqlx::query_as::<_, (String, String, String)>(COMMIT_REPOSITORIES)
+            .bind(commits)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|(commit_id, repo_id, repo_title)| CommitRepository {
+                commit_id,
+                repo_id,
+                repo_title,
+            })
+            .collect(),
+    )
 }
 
 /// Every run of `pipelines`, each with the id of its pipeline: what the app
@@ -568,6 +1194,118 @@ pub async fn pipeline_runs(
             })
             .collect(),
     ))
+}
+
+/// A page of Builds' *Recent* ([`RECENT_RUNS`]): at most `limit` runs
+/// ([`RECENT_PAGE`] when `None`, never more than 1,000) of the sources in
+/// `fillers`, newest first by when each started or, not started, was queued,
+/// after `before` where given, narrowed by `filter`; `identity` the configured
+/// usernames, what *Mine* and *started by me* match. No run's `commit_id` is
+/// filled here, as in [`pipelines`].
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn recent_runs_page(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    identity: &[String],
+    fillers: &[String],
+    filter: &RecentFilter,
+    before: Option<&RecentCursor>,
+    limit: Option<u32>,
+) -> Result<RecentRuns, CoreError> {
+    let limit = limit.unwrap_or(RECENT_PAGE).clamp(1, RECENT_PAGE_MAX);
+    let who: &[String] = if filter.mine { identity } else { &[] };
+    // *Mine* with no configured username keeps nothing, as `started_by_me` does.
+    if filter.mine && identity.is_empty() {
+        return Ok(RecentRuns {
+            runs: Vec::new(),
+            pipelines: Vec::new(),
+            next: None,
+        });
+    }
+    let rows = sqlx::query(RECENT_RUNS)
+        .bind(declarations.as_param())
+        .bind(i64::from(limit))
+        .bind(fillers)
+        .bind(&filter.sources)
+        .bind(before.map(|c| c.made.as_str()))
+        .bind(before.map(|c| c.entity_id.as_str()))
+        .bind(&filter.results)
+        .bind(who)
+        .bind(filter.branches.as_deref())
+        // The unnamed statement, planned with the values in hand. Its filters are `$n is null or …` and `cardinality($n)
+        // = 0 or …`, which a generic plan cannot read: once PostgreSQL kept one for the named statement (from a
+        // connection's sixth run), a page took 3.2 s on the scale database where it takes 23 ms (the probes,
+        // 2026-11-25).
+        .persistent(false)
+        .fetch_all(pool)
+        .await?;
+    let next = (rows.len() == limit as usize)
+        .then(|| rows.last())
+        .flatten()
+        .map(|row| RecentCursor {
+            made: row.get("made_text"),
+            entity_id: row.get("entity_id"),
+        });
+    let runs: Vec<RecentRun> = rows
+        .iter()
+        .map(|row| RecentRun {
+            pipeline_id: row.get("pipeline"),
+            run: RunRow::read(
+                RawRun {
+                    entity_id: row.get("entity_id"),
+                    number: row.get("number"),
+                    state: row
+                        .get::<Option<sqlx::types::Json<crate::payload::StateChip>>, _>("state")
+                        .map(|chip| chip.0),
+                    branch: row.get("branch"),
+                    started: row.get("started"),
+                    finished: row.get("finished"),
+                    updated_at: row.get("item_updated_at"),
+                    web_url: row.get("web_url"),
+                    trigger: row.get::<Option<String>, _>("trig").and_then(|word| {
+                        serde_json::from_value(serde_json::Value::String(word)).ok()
+                    }),
+                    started_by: row.get("started_by"),
+                    agent: row.get("agent"),
+                    current_step: row.get("current_step"),
+                    tests_failed: row.get("tests_failed"),
+                    tests_passed: row.get("tests_passed"),
+                    tests_ignored: row.get("tests_ignored"),
+                    revision: row.get("revision"),
+                },
+                identity,
+            ),
+        })
+        .collect();
+    let mut ids: Vec<&str> = runs.iter().map(|r| r.pipeline_id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let pipelines = sqlx::query(RECENT_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(&ids)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(|row| {
+            let path: sqlx::types::Json<Vec<String>> = row.get("path");
+            RecentPipeline {
+                entity_id: row.get("entity_id"),
+                source_id: row.get("source_id"),
+                source_name: row.get("source_name"),
+                name: row.get::<Option<String>, _>("name").unwrap_or_default(),
+                group: row.get("grp"),
+                path: path.0,
+            }
+        })
+        .collect();
+    Ok(RecentRuns {
+        runs,
+        pipelines,
+        next,
+    })
 }
 
 /// Every mirrored commit of every sha in `shas`, by sha ([`COMMITS_OF`]): one

@@ -11,9 +11,11 @@
  *    bring-up. Seeding at mount threw its one reading away, and because the
  *    scheduler emits `source:health` *on a change only*, a steady install where
  *    every source is `ok` never got a second chance.
- * 2. **The wizard's handoff.** Neither `add_source` nor `demo_load` emits
- *    `source:health`, so finishing the wizard landed on a shell that had never
- *    heard of what was just configured.
+ * 2. **The demo load's handoff.** `demo_load` emits no `source:health`, so a
+ *    load that did not reseed left the shell never having heard of the
+ *    source it configured. (This was the first-run wizard's handoff until
+ *    ux31 removed the wizard; *Load the Tidewater dataset* now stands in
+ *    Tickets' zero-source state.)
  *
  * Both are pinned here against the *lifecycle*, because "when the database is
  * ready" is the whole of what was wrong. The exception is the health test that
@@ -53,20 +55,16 @@ let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
 
-/**
- * Whether this profile has never been set up, and whether it is the `--demo`
- * one -- the two flags that decide whether the shell hands the whole window to
- * the §14a wizard, and whether the wizard offers the Tidewater fixture.
- */
-let firstRun = false;
+/** Whether this is the `--demo` profile, which offers the Tidewater fixture while it has no source. */
 let demoProfile = false;
+/** How many times `demo_load` was asked. */
+let demoLoads = 0;
 
 function status(): AppStatus {
   return {
     db: dbReady ? { state: "ready", detail: null } : { state: "starting", detail: null },
     app_version: "0.0.0-test",
     demo: demoProfile,
-    first_run: firstRun,
   } as AppStatus;
 }
 
@@ -74,10 +72,11 @@ vi.mock("./lib/ipc/app", () => ({
   appStatus: () => Promise.resolve(status()),
   frontendReady: () => Promise.resolve(undefined),
   retryDatabase: () => Promise.resolve(undefined),
-  completeFirstRun: () => Promise.resolve(undefined),
   ping: () => Promise.resolve("pong"),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: (count: number) => Promise.resolve(count),
+  smoothScrolling: () => Promise.resolve(true),
+  setSmoothScrolling: (on: boolean) => Promise.resolve(on),
   diffPipelines: () => Promise.resolve(true),
   setDiffPipelines: (on: boolean) => Promise.resolve(on),
   userRenderers: () => Promise.resolve([]),
@@ -87,6 +86,14 @@ vi.mock("./lib/ipc/app", () => ({
   setNamedPipelines: (list: unknown[]) => Promise.resolve(list),
   commandSteps: () => Promise.resolve([]),
   setCommandSteps: (list: unknown[]) => Promise.resolve(list),
+  folderRenderers: () => Promise.resolve([]),
+  setFolderRenderers: (list: unknown[]) => Promise.resolve(list),
+  folderRender: () => new Promise(() => {}),
+  folderRenderStop: () => Promise.resolve(undefined),
+  folderRenderLeave: () => Promise.resolve(undefined),
+  folderRenderOutput: () => Promise.resolve(new Uint8Array()),
+  folderRenderFrame: () => Promise.resolve(""),
+  folderRenderMarks: () => Promise.resolve([]),
 }));
 
 vi.mock("./lib/ipc/sources", () => ({
@@ -116,13 +123,17 @@ vi.mock("./lib/ipc/sources", () => ({
   testSource: () => Promise.resolve({ ok: true }),
   setSourceSecret: () => Promise.resolve(undefined),
   reindexFts: () => Promise.resolve(undefined),
-  demoLoad: () => Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" }),
-  syncNowWithProgress: () => Promise.resolve(1),
+  demoLoad: () => {
+    demoLoads += 1;
+    return Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" });
+  },
   // Settings › Backup reads it for the share export's *State colours* tick (#2469).
   stateColours: () => Promise.resolve([]),
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
+  // A read ahead of a press (`tf/repo/hover-reads.ts`): nothing is pressed here.
+  readViewAhead: () => Promise.resolve(null),
   // What a capture would attach (#503): the main window records its foreground
   // here whenever it changes. Recorded, because this file is the only place
   // the shell's own answer can be read.
@@ -170,12 +181,20 @@ vi.mock("./lib/ipc/entity", () => ({
   jobReach: () => Promise.reject(new Error("no jobReach in this test")),
   openCheckout: () => Promise.reject(new Error("no openCheckout in this test")),
   reachableTransitions: () => Promise.reject(new Error("no reachableTransitions in this test")),
+  // A ticket's fields (ADR-0054): no source here offers edits.
+  ticketFields: () => Promise.resolve(null),
+  fieldOptions: () => Promise.resolve(null),
   roomSuggestions: () => Promise.reject(new Error("no roomSuggestions in this test")),
   visitEntity: () => Promise.reject(new Error("no visitEntity in this test")),
   getEntity: (entityId: string) =>
     entityAnswer?.row.entity_id === entityId
       ? Promise.resolve(entityAnswer)
       : Promise.reject({ code: "not_found", message: "no such entity" }),
+  // What many ids are (the query audit): the one entity this test holds, as `getEntity` answers it.
+  entityBriefs: (ids: string[]) =>
+    Promise.resolve(entityAnswer !== null && ids.includes(entityAnswer.row.entity_id) ? [entityAnswer.row] : []),
+  batchedBrief: () => () => Promise.resolve(null),
+  cardReads: () => Promise.reject(new Error("no cardReads in this test")),
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   // The share export's link-set tick, read when Settings › Backup and export draws (#1469).
   linkSets: () => Promise.resolve([]),
@@ -184,6 +203,7 @@ vi.mock("./lib/ipc/entity", () => ({
   // arriving.
   inboxItems: (shelf: string) => Promise.resolve(shelf === "stream" ? inboxRows : []),
   inboxCount: () => Promise.resolve(inboxRows.length),
+  inboxShelves: () => Promise.resolve({ stream: inboxRows, snoozed: [], count: inboxRows.length }),
   snoozeInboxItem: () => Promise.reject(new Error("no snooze in this test")),
   completeInboxItem: () => Promise.reject(new Error("no answer in this test")),
   // Which kinds may raise a desktop notification (#290).
@@ -265,6 +285,8 @@ vi.mock("./lib/ipc/time", () => ({
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   pagesKeptOpen: () => Promise.resolve(5),
   setPagesKeptOpen: () => Promise.reject(new Error("no settings write in this test")),
+  smoothScrolling: () => Promise.resolve(true),
+  setSmoothScrolling: () => Promise.reject(new Error("no settings write in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
@@ -307,16 +329,15 @@ function emit(event: string, payload: unknown) {
 }
 
 /**
- * Press the button whose label reads exactly this. The wizard's module buttons
- * carry a second line under their name, so a button's own name (`.nm`) counts
- * as its label too.
+ * Press the button whose label reads exactly this. A button that draws a second label in the same cell (*Loading…*
+ * beside *Load the Tidewater dataset*) is named by its first.
  */
 function press(label: string): void {
   const buttons = [...target.querySelectorAll("button")];
   const button = buttons.find(
     (candidate) =>
       candidate.textContent?.trim() === label ||
-      candidate.querySelector(".nm, .tf-fr-name")?.textContent?.trim() === label,
+      candidate.querySelector(".tf-ld-demo > span")?.textContent?.trim() === label,
   );
   if (!button) {
     throw new Error(
@@ -356,8 +377,8 @@ beforeEach(() => {
   listenCalls = 0;
   listeners.clear();
   dbReady = false;
-  firstRun = false;
   demoProfile = false;
+  demoLoads = 0;
   timerStarts = [];
   entityAnswer = null;
   noteShownHere = false;
@@ -579,112 +600,74 @@ test("a rejection landing while the boot seed is in flight is not written back t
 });
 
 /**
- * **The app boots straight into the Job page** (#881, spec #2227 *Home*):
- * the ticket-first shell, at `#/job`, with nothing of the rooms UI drawn and,
- * with no job chosen yet, the empty state that points at Tickets.
+ * **The app boots straight into home** (#881, spec #2227 *Home*; 2026-11-20):
+ * the ticket-first shell, with nothing of the rooms UI drawn. With no job
+ * chosen, home is All tickets at `#/tickets`, its own page from the shell's
+ * first frame: never the page that only pointed at Tickets.
  */
-test("the window opens on the Job page at #/job, in the ticket-first shell", async () => {
+test("with no chosen job the window opens on All tickets at #/tickets, in the ticket-first shell, from its first frame", async () => {
   dbReady = true;
   expect(location.hash, "the test must start on no address").toBe("");
   const historyAtStart = history.length;
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
-  expect(location.hash).toBe("#/job");
+  expect(location.hash, "the shell's first frame is already at All tickets").toBe("#/tickets");
+  expect(target.querySelector(".tf-kept:not([hidden]) h1")?.textContent, "the first frame draws All tickets' own page").toContain("All tickets");
   expect(history.length, "the blank address is replaced, not pushed").toBe(historyAtStart);
   expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
-  // Home is a ticket page, under Tickets: Job has no nav entry (spec #2396).
   expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Tickets");
-  expect(target.textContent).toContain("No job is chosen yet");
+  expect(target.textContent).not.toContain("No job is chosen yet");
 });
 
 /**
- * §14a's landing, after the rooms: *Finish* lands on Tickets with the launcher
- * open, and reseeds credential health, which neither `add_source` nor
- * `demo_load` announces.
+ * **A fresh profile opens on the shell** (ux31, Björn: the first start screen was "an old artifact of earlier times"):
+ * All tickets with no source at all draws the way to add one, at `#/settings/sources/add`, and the way to restore a
+ * backup first, since knobas restores only into a database with no data. No first-run screen takes the window.
  */
-test("finishing the wizard lands on Tickets with the launcher open, and the new source known", async () => {
+test("a fresh profile opens on All tickets' zero-source state, with Add a source and the restore line, and no wizard", async () => {
   dbReady = true;
-  firstRun = true;
-  demoProfile = true;
-  location.hash = "#/settings";
-
   app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  expect(target.querySelector(".tf-top"), "the wizard takes the whole window").toBeNull();
+  await until(() => target.querySelector(".tf-nosources") !== null, "Tickets never drew its zero-source state");
+  expect(location.hash).toBe("#/tickets");
+  expect(target.querySelector(".tf-top"), "the shell has the window").not.toBeNull();
+  const empty = target.querySelector(".tf-nosources")!;
+  expect(empty.textContent).toContain("No sources yet. Add one and its tickets, pull requests, builds and pages come into knobas.");
+  const add = [...empty.querySelectorAll("a")].find((link) => link.textContent?.trim() === "Add a source…");
+  expect(add?.getAttribute("href")).toBe("#/settings/sources/add");
+  expect(add?.classList.contains("tf-primary")).toBe(true);
+  expect(empty.textContent).toContain("Restore it before you add a source: knobas restores only into a database that holds no data yet.");
+  const restore = [...empty.querySelectorAll("a")].find((link) => link.textContent?.trim() === "Open Settings › Backup and export");
+  expect(restore?.getAttribute("href")).toBe("#/settings/backup");
+  expect(empty.textContent, "the Tidewater dataset is the demo profile's alone").not.toContain("Tidewater");
+  expect(target.textContent).not.toContain("No tickets synced yet");
+});
+
+/** A profile with a source and no ticket yet keeps the sentence it had: a ticket system, not a first source. */
+test("with a source and no ticket, All tickets says no tickets synced yet, not the zero-source state", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok")];
+  app = mount(App, { target, props: {} });
+  await until(() => target.textContent?.includes("No tickets synced yet") === true, "the empty mirror's sentence never drew");
+  expect(target.querySelector(".tf-nosources")).toBeNull();
+});
+
+/**
+ * **The demo profile's Tidewater dataset**, which only the wizard offered: in the zero-source state, a press loads it,
+ * says so, and reseeds credential health, which `demo_load` does not announce; that is also what takes Tickets out of
+ * its zero-source state.
+ */
+test("on the demo profile, Load the Tidewater dataset loads it, says so and makes the source known", async () => {
+  dbReady = true;
+  demoProfile = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".tf-nosources") !== null, "Tickets never drew its zero-source state");
 
   healthRows = [row("mock", "ok")];
-  press("Next");
   press("Load the Tidewater dataset");
-  await until(
-    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
-    "the demo load never reached the wizard's last panel",
-  );
-  press("Finish");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash, "§14a lands on Tickets, not home: no job is chosen yet").toBe("#/tickets");
-  await until(
-    () => target.querySelector('.tf [role="dialog"].tf-launch') !== null,
-    "the launcher never opened over the landing",
-  );
-  await until(() => health.get("mock") !== null, "the wizard's source never reached the health store");
-});
-
-/**
- * **A way out of the Source step** (#1399): *Set up later in Settings* records
- * completion as *Finish* does and lands on Settings › Sources, where adding a
- * source lives, with no launcher over it. The next launch, whose `app_status`
- * then says `first_run: false`, opens the shell and no wizard.
- */
-test("Set up later in Settings lands on Settings › Sources, and the next launch has no wizard", async () => {
-  dbReady = true;
-  firstRun = true;
-  location.hash = "#/tickets";
-
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  press("Next");
-  press("Set up later in Settings");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash).toBe("#/settings/sources");
-  await until(
-    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Sources",
-    "Settings › Sources never drew",
-  );
-  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
-
-  unmount(app);
-  app = undefined;
-  // What `complete_first_run` wrote, read back on the next launch.
-  firstRun = false;
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew on the next launch");
-  expect(target.querySelector(".tf-fr")).toBeNull();
-});
-
-/**
- * **Restore on a clean machine** (#1469): the Source step's restore pointer
- * records completion and lands on Settings › Backup and export, with no
- * launcher over it, so the empty-database restore is reachable.
- */
-test("Restore from a backup in Settings lands on Settings › Backup and export", async () => {
-  dbReady = true;
-  firstRun = true;
-  location.hash = "#/tickets";
-
-  app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
-  press("Next");
-  press("Restore from a backup in Settings");
-
-  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
-  expect(location.hash).toBe("#/settings/backup");
-  await until(
-    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Backup and export",
-    "Settings › Backup and export never drew",
-  );
-  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
+  await until(() => health.get("mock") !== null, "the loaded source never reached the health store");
+  expect(demoLoads).toBe(1);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Loaded the Tidewater dataset.");
+  await until(() => target.querySelector(".tf-nosources") === null, "the zero-source state outlived the load");
 });
 
 /**
@@ -815,7 +798,7 @@ test("a note captured in the other window is asked for here when the capture say
     () => target.querySelector(".tf a[aria-current='page'][href='#/settings/notes']") !== null,
     "Settings never opened on Notes and capture",
   );
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 });
 
 /** #1504: while notes are shown, *Open in knobas* lands on the note's own page. */
@@ -853,12 +836,12 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 
   // An id the mirror does not know keeps its address and says so.
   location.hash = "#/entity/mock:NOPE-1";
   await until(
-    () => target.textContent?.includes("Nothing lives at #/entity/mock:NOPE-1") ?? false,
+    () => target.textContent?.includes("knobas has no such page.") ?? false,
     `an unknown #/entity/… read ${target.textContent}`,
   );
   expect(location.hash).toBe("#/entity/mock:NOPE-1");
@@ -897,7 +880,7 @@ test("an inbox item arriving while the window is unfocused reaches the notify co
       () => window.location.hash === "#/pr/gitea%3Aacme%2Fpayouts%23144",
       "the click never moved the window",
     );
-    expect(target.textContent, "the click landed on a dead end").not.toContain("Nothing lives at");
+    expect(target.textContent, "the click landed on a dead end").not.toContain("knobas has no such page.");
   } finally {
     unfocused.mockRestore();
   }
@@ -976,7 +959,7 @@ test("a stop opens the draft over the running clock, and Keep running leaves it 
   expect(timerStops, "the clock stopped before the reader answered").toBe(0);
   expect(target.querySelector(".tf-timer:not(.tf-off)"), "the chip read No timer behind the draft").not.toBeNull();
   const keep = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
-    (button) => button.textContent?.trim() === "Keep running",
+    (button) => button.textContent?.trim() === "Cancel, keep running",
   );
   keep!.click();
   await until(() => target.querySelector(".tf-dialog") === null, "Keep running never closed the draft");
@@ -1224,12 +1207,12 @@ test("capture: Settings › Notes and capture lands on the section capture.sh co
   await landsOn(landing("capture", "settings-notes"));
 });
 
-test("capture: the ticket preview's job link lands on the ticket page capture.sh knows by its compose box", async () => {
-  // The preview's link is the job's address (`TicketPreview.svelte`); this
-  // opens that address rather than the Tickets search that offers it.
+test("capture: a Tickets card's click lands on the ticket page capture.sh knows by its compose box", async () => {
+  // A card opens its ticket's address (`ticketAddress`, ux18: no preview); this
+  // opens that address rather than the Tickets search that draws the card.
   dbReady = true;
   entityAnswer = jobTicket();
-  location.hash = "#/job/mock:PAY-231";
+  location.hash = "#/ticket/mock%3APAY-231";
   app = mount(App, { target, props: {} });
   await landsOn(landing("capture", "job-link"));
 });
@@ -1250,7 +1233,9 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
   flushSync();
   const box = () => target.querySelector<HTMLInputElement>(".tf-launch input");
-  await until(() => box()?.value === "#t ", "the launcher never opened on #t");
+  const seed = () => target.querySelector(".tf-ln-seed")?.textContent?.trim();
+  // The query holds `#t `; the box draws it as a chip named for the section.
+  await until(() => box()?.value === "" && seed() === "Tickets", "the launcher never opened on the Tickets chip");
   target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
   flushSync();
   await until(() => box() === null, "the launcher never closed");
@@ -1258,6 +1243,7 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   flushSync();
   await until(() => box() !== null, "⌘K never opened the launcher");
   expect(box()!.value).toBe("");
+  expect(seed(), "⌘K opens with no section's chip").toBeUndefined();
 });
 
 test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
@@ -1271,7 +1257,7 @@ test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
 });
 
 test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("open-in-editor", "settings-checkouts"));
 });
 
@@ -1281,11 +1267,36 @@ test("pull-request-open-in: Settings › Sources lands on the section the driver
 });
 
 test("pull-request-open-in: Settings › Checkouts and Open in… lands on the section the driver sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("pull-request-open-in", "settings-checkouts"));
 });
 
 test("pull-request-open-in: ⌘K lands on the launcher's query box", async () => {
   await pressLauncherKey();
   await landsOn(landing("pull-request-open-in", "cmd-k"));
+});
+
+/**
+ * v3.2.9-ux7 hung on *Starting the local database* in every packaged build. The answer cache assigned to
+ * `window.__TAURI_INTERNALS__.invoke`, which Tauri 2.11 (`scripts/core.js`) defines with `Object.defineProperty` and
+ * `value` only, so the assignment threw inside `onMount`'s start-up block, before `lifecycle.start()`, and nothing
+ * ever asked `app_status`. The tests skip the cache (`MODE === "test"`), and the fake bridge's `invoke` was writable,
+ * so nothing caught it. Here the cache runs, over a bridge shaped as Tauri's, and the window must reach `ready`.
+ */
+test("the window starts over Tauri's read-only invoke, with the answer cache on", async () => {
+  const { disableAnswerCache, readCacheEnabled } = await import("./lib/ipc/answer-cache");
+  const internals = {};
+  Object.defineProperty(internals, "invoke", { value: () => Promise.resolve(null) });
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals, configurable: true });
+  vi.stubEnv("MODE", "production");
+  try {
+    dbReady = true;
+    app = mount(App, { target, props: {} });
+    await until(() => lifecycle.ready, "the window never left the database's start: the start-up block was thrown away");
+    expect(readCacheEnabled(), "the cache should start over a read-only invoke").toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
+    disableAnswerCache();
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
 });

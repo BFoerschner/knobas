@@ -34,7 +34,8 @@ export interface Held<T> {
  *
  * `next` with the key of a held page is that page: it keeps its instance, takes
  * `next.value` (the address it is at now) and moves last. If it was hidden its
- * `shows` moves, which is what a page re-reads on.
+ * `shows` moves: how many times it came back, which no page reads again on
+ * any more (2026-11-10: a role view reads again only on a run that changed something).
  */
 export function hold<T>(held: readonly Held<T>[], next: { key: string; value: T } | null, cap: number): Held<T>[] {
   const hidden = held
@@ -50,6 +51,32 @@ export function hold<T>(held: readonly Held<T>[], next: { key: string; value: T 
     visible: true,
   };
   return [...kept, shown];
+}
+
+/**
+ * The held pages with `next` held hidden behind them, least recently used, as a page opened ahead of its press is
+ * (`ahead.ts`): only where it is not held and a hidden page's room is free, so it never drops a page the reader left.
+ */
+export function holdBehind<T>(held: readonly Held<T>[], next: { key: string; value: T }, cap: number): Held<T>[] {
+  if (held.some((page) => page.key === next.key)) return [...held];
+  if (held.filter((page) => !page.visible).length >= cap) return [...held];
+  return [{ key: next.key, value: next.value, shows: 0, visible: false }, ...held];
+}
+
+/** The addresses asked to be held ahead and not yet taken by the page host. */
+const aheadAsked: string[] = [];
+let aheadMoves = $state(0);
+
+/** Ask the page host to hold the page at `hash` hidden, behind every page held (`ahead.ts`). */
+export function holdAhead(hash: string): void {
+  aheadAsked.push(hash);
+  aheadMoves += 1;
+}
+
+/** The addresses asked since the last take, for the page host; reading it ties its caller to the next ask. */
+export function takeAhead(): string[] {
+  void aheadMoves;
+  return aheadAsked.splice(0);
 }
 
 /**
