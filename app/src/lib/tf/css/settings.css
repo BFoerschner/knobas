@@ -156,11 +156,18 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* *Make default*, ↑ and *Edit* (PR #2479, 2026-11-13). */
 .tf-stg-apps th:nth-child(4) { width: 212px; }
 .tf-stg-apps .tf-chip { white-space: nowrap; }
+/* Pull request worktrees (#2518): the columns are set here, not by the paths, so a long worktree cuts its middle and moves
+   no column; the number with its *closed* chip, and *Remove…*, keep their line at every UI size. */
+.tf-tbl.tf-stg-trees { table-layout: fixed; }
+.tf-stg-trees th:nth-child(1) { width: calc(132px * var(--size-ui)); }
+.tf-stg-trees th:nth-child(3) { width: calc(108px * var(--size-ui)); }
+.tf-stg-trees td:first-child { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 /* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line.
-   Renderers' tables hold each cell to one line instead (below). */
-.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
+   Renderers' tables hold each cell to one line instead (below), and so does a `TfCommand` or a `TfPath` in any table (#2518):
+   each gives up its middle on one line, whole in its title, so it is never told to wrap here. */
+.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono):not(.tf-cmd, .tf-path) { white-space: normal; overflow-wrap: anywhere; }
 .tf-stg-body .tf-tbl td.tf-right { white-space: nowrap; }
 /* Settings › Renderers' tables (the renderers-columns pass, 2026-11-20; Björn: "the command, the files, and so on completely
    explode the columns"): each cell is one line, as Code's *Local checkout* column is. A command is a `TfCommand`, a list a

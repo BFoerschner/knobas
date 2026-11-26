@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { commandParts, nameParts, pathParts, programOf, wordsShown } from "./path";
+import { argsParts, commandParts, nameParts, pathParts, programOf, wordsShown } from "./path";
 
 test("a path splits after its last separator, so the folder or file it names is its end", () => {
   expect(pathParts("/Users/mara/src/payout-service")).toEqual({ head: "/Users/mara/src/", tail: "payout-service" });
@@ -39,6 +39,18 @@ test("a command splits into its first word as typed, cut as a path, and the rest
   expect(commandParts("/usr/local/bin/d2 - -")).toEqual({ head: "/usr/local/bin/", tail: "d2", rest: "- -" });
   expect(commandParts("'/Users/some one/bin/tool'")).toEqual({ head: "'/Users/some one/bin/", tail: "tool'", rest: "" });
   expect(commandParts("")).toEqual({ head: "", tail: "", rest: "" });
+});
+
+test("a command's arguments keep the folder or file at their end, and give up what comes before it (#2518)", () => {
+  // An *Open in…* line: the checkout's folder name is what says which one it opens.
+  expect(argsParts(String.raw`"C:\Users\some one\source\repos\payout-service-the-repository-name-that-is-long"`)).toEqual({
+    head: String.raw`"C:\Users\some one\source\repos\\`.slice(0, -1),
+    tail: 'payout-service-the-repository-name-that-is-long"',
+  });
+  expect(argsParts("--goto /Users/mara/src/payout-service/src/sepa/retry.rs:12")).toEqual({ head: "--goto /Users/mara/src/payout-service/src/sepa/", tail: "retry.rs:12" });
+  // Arguments with no path in them have no end to keep: all of them give way, at their end.
+  expect(argsParts("--goto {file}:{line}")).toEqual({ head: "--goto {file}:{line}", tail: "" });
+  expect(argsParts("")).toEqual({ head: "", tail: "" });
 });
 
 test("a list shows its first three and counts the rest", () => {

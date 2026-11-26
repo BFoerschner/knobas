@@ -68,6 +68,16 @@ export function commandParts(command: string): { head: string; tail: string; res
 }
 
 /**
+ * A command's arguments split where an *Open in…* line cuts them (#2518): up to and with the last separator, which gives
+ * way, and the folder or file after it, which stays, so the line still says which checkout or file it opens. Arguments
+ * with no separator have no end to keep: all of them are the part that gives way, cut at its end as `TfCommand` cuts them.
+ */
+export function argsParts(rest: string): { head: string; tail: string } {
+  const parts = pathParts(rest);
+  return parts.head === "" ? { head: rest, tail: "" } : parts;
+}
+
+/**
  * A list drawn on one line (`TfWords`): its first `shown` entries, and how many more there are, which the line says as "+N".
  */
 export function wordsShown(list: readonly string[], shown = 3): { shown: string[]; more: number } {
