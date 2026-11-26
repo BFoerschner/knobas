@@ -6,8 +6,8 @@
   A return to the page draws from what was read last (`held.svelte.ts`) and reads again behind.
 
   - **The tree** is one flat list of the rows on show (All entries, then each open fold's folders), one `Windowed`,
-    with the Docs rail's look, the folder on show drawn selected. A press selects the folder and opens its fold, and
-    never closes one; the chevron folds alone; Alt+click folds everything under it. ↑ ↓ walk it, → opens a fold and
+    with the Docs rail's look, the folder on show drawn selected. A press selects the folder and leaves its fold as it
+    is (#2531); the chevron folds alone; Alt+click folds everything under it. ↑ ↓ walk it, → opens a fold and
     steps in, ← closes it and steps out. One `Tab` stop.
   - **The list**: a folder lists everything under it, its own entries first, then a panel per folder below that holds
     entries; one further down with more than six rows draws five and *Show all*. At the top, *Used recently* first. One
@@ -29,7 +29,7 @@
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
   import { inTextField } from "../../shell/keys";
-  import { keyHint, onMac } from "../../shell/platform";
+  import { keyHint } from "../../shell/platform";
   import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { filterKeys } from "../filter-keys";
   import { push } from "../../shell/toasts.svelte";
@@ -234,8 +234,9 @@
   const treeWin = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.node.id || "~", estimate: 26, from: 40, scrolls: true });
 
   /**
-   * A press of a folder's row selects it and opens its fold, and never closes one (#2531: a second press on the folder
-   * on show folded it away). The chevron and ← → fold one folder; Alt+click folds everything under it (`tree-alt.ts`).
+   * A press of a folder's row selects it and leaves every fold as it is (#2531, spec #2514's "select-only": a second
+   * press on the folder on show folded it away). The chevron and ← → fold one folder; Alt+click folds everything under
+   * it (`tree-alt.ts`).
    */
   function pressNode(event: MouseEvent, target: Node): void {
     if (isAltClick(event)) {
@@ -249,17 +250,18 @@
       else opened.add(target.id);
       return;
     }
-    if (target.kids.length > 0 && target.id !== "") opened.add(target.id);
     go(target);
   }
 
   /**
    * Alt+click: `target` and every folder under it open, or close when `target` is open (All entries, always open: when
-   * any folder under it is). Selects nothing. Bounded as every tree's is (`TREE_EXPAND_CAP`).
+   * any folder under it is). Selects nothing. An opening is bounded as every tree's is (`TREE_EXPAND_CAP`); a closing
+   * reaches every folder, so none stays open under a closed one.
    */
   function foldAll(target: Node): void {
     const isOpen = target.id === "" ? target.kids.some((k) => opened.has(k.id)) : opened.has(target.id);
-    for (const at of collectDescendants([target], (n) => n.kids.filter((k) => k.kids.length > 0), TREE_EXPAND_CAP)) {
+    const cap = isOpen ? Number.POSITIVE_INFINITY : TREE_EXPAND_CAP;
+    for (const at of collectDescendants([target], (n) => n.kids.filter((k) => k.kids.length > 0), cap)) {
       if (at.id === "") continue;
       if (isOpen) opened.delete(at.id);
       else opened.add(at.id);
@@ -469,7 +471,11 @@
   function pick(e: Entry): void {
     waiting = null;
     picked = e.id;
-    if (where.entry !== null) location.hash = node ? hashOf(node) : "#/secrets";
+    if (where.entry === null) return;
+    // Drawn now, as a press of the tree is (`going`), so the row picked is the open one before the address answers:
+    // `Enter` in the filter focuses it (#2531).
+    if (node) going = node.id;
+    location.hash = node ? hashOf(node) : "#/secrets";
   }
 
   function move(step: number): void {
@@ -554,7 +560,7 @@
     const run = act[key];
     if (!run) return;
     event.preventDefault();
-    if ("csuoae".includes(key)) actOnEntry(run);
+    if (key === "e" || Object.hasOwn(onEntry, key)) actOnEntry(run);
     else run();
   }
 
@@ -578,8 +584,9 @@
 
   /**
    * The filter's own keys (#2531), before ↑ ↓: ⌘⇧C, S, U, O and A do what C, S, U, O and A do outside a field, so a
-   * match is acted on without leaving the box; ⌘C, ⌘A and the rest stay the box's own. `Enter` takes focus to the open
-   * entry's row, where the bare keys answer. Answers whether it took the key.
+   * match is acted on without leaving the box; ⌘C, ⌘A and the rest stay the box's own. ⌘ is ⌘ or Ctrl, as the shell
+   * reads it (`isBoxChord`), and a layout without Latin letters is read by the key's place. `Enter` takes focus to the
+   * open entry's row, where the bare keys answer. Answers whether it took the key.
    */
   function filterChord(event: KeyboardEvent): boolean {
     if (event.altKey || event.isComposing) return false;
@@ -589,15 +596,19 @@
       focusOpenRow();
       return true;
     }
-    const mod = onMac() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-    const run = mod && event.shiftKey && event.key.length === 1 ? onEntry[event.key.toLowerCase()] : undefined;
+    if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return false;
+    const letter = /^[a-z]$/i.test(event.key) ? event.key.toLowerCase() : /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : "";
+    const run = Object.hasOwn(onEntry, letter) ? onEntry[letter] : undefined;
     if (!run) return false;
     event.preventDefault();
     actOnEntry(run);
     return true;
   }
 
-  /** Focus on the open entry's row, drawn first where the window has not drawn it; with none open, the first row's. */
+  /**
+   * Focus on the open entry's row, drawn first where the window has not drawn it; with none open, or the open one not
+   * among the matches, the first row's, which it opens.
+   */
   let rowsBox = $state<HTMLElement | null>(null);
   function focusOpenRow(): void {
     let at = lineOf(openId);

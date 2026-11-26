@@ -10,6 +10,7 @@ import type { BackupStatus } from "../../ipc/backup";
 import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { KindStateColours, SourceSummary, ToneChoice } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
+import { onMac } from "../../shell/platform";
 import { toasts } from "../../shell/toasts.svelte";
 import { acks } from "../../shell/ack.svelte";
 import { keptPages } from "../kept-pages.svelte";
@@ -826,7 +827,7 @@ test("Keyboard lists the fixed shortcuts", async () => {
   // A ticket's assign and summary keys (ADR-0054); labels have none, `L` being the drawer's (2026-11-22).
   for (const key of ["A", "E", "L"]) expect(said, "ADR-0054").toContain(key);
   expect(where.filter((w) => w === "Secrets, in the filter"), "#2531").toHaveLength(2);
-  expect(said, "#2531").toContain("Alt click");
+  expect(said, "#2531").toContain(onMac() ? "⌥ click" : "Alt click");
   expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",

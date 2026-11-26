@@ -125,7 +125,9 @@ for (const throttle of throttles) {
     record(throttle, `folder ${name} (${n})`, await shown, LINES.act[throttle]);
     await sleep(400);
   }
-  // The 610-entry folder, found by its total wherever it nests: open its parents by key, then press it.
+  // The 610-entry folder, found by its total wherever it nests: open its parents by key, then press it. A press selects
+  // and opens no fold (#2531), so → opens the closed folds a level at a time until it shows.
+  await js(`(async () => { const has = () => [...document.querySelectorAll(".tf-pw-node")].some((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); for (let pass = 0; pass < 6 && !has(); pass++) { for (const n of document.querySelectorAll(".tf-pw-node[aria-expanded=false]")) n.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); await new Promise((r) => requestAnimationFrame(r)); } })()`);
   const deep = await js(`(() => { const n = [...document.querySelectorAll(".tf-pw-node")].find((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); return n ? { id: n.dataset.id, name: n.querySelector(".tf-pw-nm").textContent.trim() } : null; })()`);
   if (deep) {
     await js("__pw.reset()");

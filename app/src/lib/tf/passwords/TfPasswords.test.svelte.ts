@@ -565,8 +565,14 @@ test("a press on a folder's row selects it and never folds it; the chevron and �
   node("Payments").querySelector<HTMLElement>(".tf-pw-nm")!.click();
   props.rest = ["in", "pw:pay"];
   await settle();
-  // A first press on a folder that holds folders opens it, as before.
+  // Select-only (spec #2514): a press on a closed folder selects it and leaves it closed.
+  expect(location.hash).toBe("#/secrets/in/pw%3Apay");
+  expect(node("Payments").getAttribute("aria-current")).toBe("true");
+  expect(pressed()).toBe("false");
+  node("Payments").querySelector<HTMLElement>("[data-twist]")!.click();
+  await settle();
   expect(pressed()).toBe("true");
+  // On the folder on show, open: a second press does not close it.
   node("Payments").querySelector<HTMLElement>(".tf-pw-nm")!.click();
   await settle();
   expect(pressed()).toBe("true");
@@ -667,6 +673,42 @@ test("Enter in the filter takes focus to the open entry's row, where the bare ke
   focused.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true }));
   await settle();
   expect(p.calls.copy.map((c) => c[0])).toEqual(["pw:a3"]);
+});
+
+test("Enter in the filter focuses the first match's row when the entry opened by its address is filtered out (#2531)", async () => {
+  // Opened from the launcher: the address names the entry, and the router answers a new address only later.
+  const view = held();
+  view.entries.push(row("pw:kib", "pw:plat", "kibana"));
+  await open(ports({}, view), ["entry", "pw:graf"]);
+  await type("kib");
+  expect(text(".tf-pw-row .tf-pw-t")).toEqual(["kibana"]);
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.classList.contains("tf-pw-row")).toBe(true);
+  expect(focused.querySelector(".tf-pw-t")?.textContent).toBe("kibana");
+  expect(filterBox().value).toBe("kib");
+});
+
+test("the filter's chords read Ctrl as ⌘ and a layout without Latin letters by the key's place (#2531)", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:plat"]);
+  await type("graf");
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "C", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.calls.copy).toEqual([["pw:graf", { kind: "password" }, null]]);
+  // Cyrillic С on the C key.
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "С", code: "KeyC", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.calls.copy).toHaveLength(2);
+  // A Latin letter on another place is read as typed: ⌘⇧Q is no chord where Q sits on the A key.
+  const q = new KeyboardEvent("keydown", { key: "Q", code: "KeyA", metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  filterBox().dispatchEvent(q);
+  await settle();
+  expect(q.defaultPrevented).toBe(false);
+  expect(p.openExternal).not.toHaveBeenCalled();
 });
 
 test("a long attachment name is one line that gives up its middle, its end and extension kept, the whole name its title (#2531)", async () => {
