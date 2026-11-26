@@ -415,8 +415,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 button.tf-thm-sw { cursor: pointer; }
 .tf-thm-sw.tf-ink { background: linear-gradient(135deg, var(--ink) 0 50%, var(--sheet) 50% 100%); }
 .tf-thm-role code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A colour's hex value is a button that opens its swatch's panel (#2516): drawn as the value, underlined under the pointer. */
-.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); border: 0; background: none; padding: 0; margin: 0; text-align: left; cursor: pointer; justify-self: start; }
+/* A colour's hex value is a button that opens its swatch's panel (#2516): drawn as the value, underlined under the pointer.
+   Its line height is set, not the face's own, so two of them in a row keep its height when the code face lands. */
+.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.3 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); border: 0; background: none; padding: 0; margin: 0; text-align: left; cursor: pointer; justify-self: start; }
 .tf-thm-hex:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-thm-cr { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-thm-role.tf-low { background: var(--warn-bg); padding-top: 5px; padding-bottom: 6px; row-gap: 3px; }
