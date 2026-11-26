@@ -85,8 +85,14 @@ async function settle() {
 /** Answers that fail, by item key, with what the bridge throws. */
 let failing: Record<string, unknown> = {};
 
+/** Puts a row on the last store's stream, as a sync would, for its next read. */
+let arrive: (row: InboxEntry) => void = () => {};
+/** The last store `open` mounted. */
+let mounted: Inbox;
+
 function store(extra: InboxEntry[] = []): Inbox {
   let stream = [...STREAM, ...extra];
+  arrive = (row) => (stream = [row, ...stream]);
   let snoozed = SNOOZED.slice();
   let done: InboxEntry[] = [];
   let acked: InboxEntry[] = [];
@@ -163,7 +169,8 @@ async function open(
     },
     ...(over.pipelines ? { pipelines: over.pipelines } : {}),
   };
-  view = mount(TfInbox, { target, context: hiddenable, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, ...(over.clock ? {} : { now: NOW }) } });
+  mounted = store(over.extra);
+  view = mount(TfInbox, { target, context: hiddenable, props: { ready: true, job: over.job ?? null, inbox: mounted, ports, ...(over.clock ? {} : { now: NOW }) } });
   await settle();
 }
 
@@ -1009,6 +1016,69 @@ test("an inbox whose page is hidden stops its clock, and shown again reads it at
     expect(text(rowOf("Idempotent").querySelector("time"))).toBe("yesterday 13:50");
   } finally {
     vi.useRealTimers();
+    page.shown = true;
+  }
+});
+
+/**
+ * #2527: a sync's new row waits behind *Show N new* only while the reader is scrolled down among older rows. At the
+ * top, or on coming back to the Inbox, it is simply there.
+ */
+const ARRIVED = entry({ key: "review_request:gitea:payouts#150", title: "Ledger rounding", occurred_at: at(14, 30) });
+
+/** Mounts the Inbox inside a scroller, as `.tf-main` holds it, scrolled `top` px down. */
+async function openScrolled(top: number) {
+  const scroller = document.createElement("div");
+  scroller.style.overflowY = "auto";
+  document.body.appendChild(scroller);
+  scroller.appendChild(target);
+  onTestFinished(() => scroller.remove());
+  await open();
+  scroller.scrollTop = top;
+  scroller.dispatchEvent(new Event("scroll"));
+  flushSync();
+  return scroller;
+}
+
+async function sync() {
+  arrive(ARRIVED);
+  await mounted.refresh();
+  await settle();
+}
+
+const showNew = () => target.querySelector(".tf-fheld");
+
+test("at the top of the list a sync's new row draws at once, with no Show N new (#2527)", async () => {
+  await openScrolled(0);
+  await sync();
+  expect(whats()[0]).toContain("Ledger rounding");
+  expect(showNew()).toBeNull();
+});
+
+test("scrolled down, a sync's new row waits behind Show 1 new, and scrolling back to the top draws it (#2527)", async () => {
+  const scroller = await openScrolled(400);
+  await sync();
+  expect(whats().join(" ")).not.toContain("Ledger rounding");
+  expect(text(showNew())).toBe("Show 1 new");
+
+  scroller.scrollTop = 0;
+  scroller.dispatchEvent(new Event("scroll"));
+  flushSync();
+  expect(whats()[0]).toContain("Ledger rounding");
+  expect(showNew()).toBeNull();
+});
+
+test("a row that came while the Inbox was hidden is drawn when it is shown again, however far down it was left (#2527)", async () => {
+  try {
+    await openScrolled(400);
+    page.shown = false;
+    flushSync();
+    await sync();
+    page.shown = true;
+    flushSync();
+    expect(whats()[0]).toContain("Ledger rounding");
+    expect(showNew()).toBeNull();
+  } finally {
     page.shown = true;
   }
 });

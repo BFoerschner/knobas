@@ -184,6 +184,38 @@
   const drawn = $derived(withHolds(placed.rows, streamHolds));
   const shelfDrawn = $derived(withHolds(shelf, shelfHolds));
   const anyHeld = $derived(streamHolds.length + shelfHolds.length > 0);
+  /**
+   * The scroller the list stands in (`.tf-main`), and a count that moves when a scroll reaches its top or leaves it, so
+   * the hold below reads it again without waking on every scroll step.
+   */
+  let scroller: Element | null = null;
+  let scrolled = $state(0);
+  const scrolls: Attachment<HTMLElement> = (node) => {
+    const at = scrollerOf(node);
+    if (at === null) return;
+    scroller = at;
+    let wasTop = at.scrollTop <= 0;
+    const moved = () => {
+      const top = at.scrollTop <= 0;
+      if (top !== wasTop) scrolled += 1;
+      wasTop = top;
+    };
+    at.addEventListener("scroll", moved, { passive: true });
+    return () => {
+      at.removeEventListener("scroll", moved);
+      scroller = null;
+    };
+  };
+  /**
+   * New rows wait behind *Show N new* only while the reader is scrolled down among older ones (#2527): at the top of the
+   * list they push nothing the reader is looking at, and a page that is hidden draws them before it is seen again. A row
+   * a press holds under the pointer keeps them waiting until it goes.
+   */
+  $effect(() => {
+    void scrolled;
+    if (placed.waiting === 0 || anyHeld) return;
+    if (!shown() || (scroller?.scrollTop ?? 0) <= 0) streamHold.release();
+  });
   /** A key's hold, for as long as it stands. */
   const heldOf = (holds: readonly Hold[], key: string): Hold | undefined => holds.find((hold) => hold.entry.item.key === key);
 
@@ -622,7 +654,7 @@
       {kindOf(item.category)}{belongs !== null ? `, job ${belongs}` : ", no job"}{back !== null ? `, back ${back}` : ""}{#if detailOf(item)}{" · "}{detailOf(item)}{/if}
     </div>
   {/snippet}
-  <div class="tf-inbox" {@attach win.list}>
+  <div class="tf-inbox" {@attach win.list} {@attach scrolls}>
     {#each win.slice(drawn) as entry (entry.item.key)}
       {@const item = entry.item}
       {@const fix = fixOf(item, credentialFix)}
