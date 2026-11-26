@@ -91,9 +91,10 @@ test("an entry's text is its title, username, address and path, a line each, and
   withAddress.entries.push(["pw:web", 0, "pw:db", "Ledger", "ops", "https://ledger.example/", null, 0, null, []]);
   const m = model(withAddress);
   const web = m.entries.get("pw:web")!;
-  expect(searchIndex(m).textOf(web)).toBe("Ledger\nops\nhttps://ledger.example/\nPayments Prod Databases");
-  // "Le" of the title, "op" of the username, "led" of the address past its scheme.
-  expect(entryMarks(web, [0, 2, 7, 9, 19, 22])).toEqual({ title: [0, 2], user: [0, 2], address: [0, 3] });
+  // The path as the row draws it under a filter, joined with " / ", so its marks fall on it too.
+  expect(searchIndex(m).textOf(web)).toBe("Ledger\nops\nhttps://ledger.example/\nPayments / Prod / Databases");
+  // "Le" of the title, "op" of the username, "led" of the address past its scheme, "Pay" and "Prod" of the path.
+  expect(entryMarks(web, [0, 2, 7, 9, 19, 22, 35, 38, 46, 50])).toEqual({ title: [0, 2], user: [0, 2], address: [0, 3], path: [0, 3, 11, 15] });
 });
 
 test("the filter matches only inside the folder on show and the folders under it; at the top, everything (#2531)", () => {

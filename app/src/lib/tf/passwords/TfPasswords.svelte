@@ -58,6 +58,7 @@
     model,
     ordered,
     panels,
+    pathWords,
     plural,
     indexBuild,
     scopedEntries,
@@ -775,7 +776,7 @@
     <span class="tf-pw-t"><Marked text={e.title} typed={marking} pairs={lit?.title ?? []} /></span>
     <span class="tf-pw-s"
       >{#if e.user}<span class="tf-mono"><Marked text={e.user} typed={marking} pairs={lit?.user ?? []} /></span>{/if}{#if path && m}<span
-          >{chainOf(m, e.folder !== null ? (m.nodes.get(e.folder) ?? null) : null).map((n) => n.name).join(" / ")}</span
+          ><Marked text={pathWords(m, e.folder)} typed={marking} pairs={lit?.path ?? []} /></span
         >{:else if e.address}<span class="tf-mono"><Marked text={bare(e.address)} typed={marking} pairs={lit?.address ?? []} /></span>{/if}{#if !e.user && !e.address && !path}&nbsp;{/if}</span
     >
     <span class="tf-pw-e"

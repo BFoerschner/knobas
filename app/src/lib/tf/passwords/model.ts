@@ -362,7 +362,8 @@ export class IndexBuild {
   #pathText(folder: string | null): string {
     let text = this.#paths.get(folder);
     if (text === undefined) {
-      text = chainOf(this.#m, folder !== null ? (this.#m.nodes.get(folder) ?? null) : null).map((n) => n.name).join(" ");
+      // Joined as a filter's hit draws it, so the ranking's marks fall on the drawn path (#2535).
+      text = pathWords(this.#m, folder);
       this.#paths.set(folder, text);
     }
     return text;
@@ -545,18 +546,28 @@ export function treeRows(m: Model, open: ReadonlySet<string>): TreeRow[] {
   return out;
 }
 
+/** A folder's path as a filter's hit draws it under the entry: its folders' names, top first, joined with ` / `. */
+export function pathWords(m: Model, folder: string | null): string {
+  return chainOf(m, folder !== null ? (m.nodes.get(folder) ?? null) : null).map((n) => n.name).join(" / ");
+}
+
 /**
  * An entry's matched letters (`pairs` over its {@link SearchIndex} text) cut onto the cells its row draws: the title,
- * the username and the address as {@link bare} writes it. The path is read but drawn joined otherwise, so not marked.
+ * the username, the address as {@link bare} writes it, and the path as {@link pathWords} writes it.
  */
-export function entryMarks(e: Entry, pairs: readonly number[]): { title: readonly number[]; user: readonly number[]; address: readonly number[] } {
+export function entryMarks(
+  e: Entry,
+  pairs: readonly number[],
+): { title: readonly number[]; user: readonly number[]; address: readonly number[]; path: readonly number[] } {
   const user = e.title.length + 1;
   const address = user + (e.user ?? "").length + 1;
-  const scheme = (e.address ?? "").length - (e.address ?? "").replace(/^https?:\/\//i, "").length;
+  const written = e.address ?? "";
+  const shown = bare(written);
   return {
     title: sliceMarks(pairs, 0, e.title.length),
     user: sliceMarks(pairs, user, (e.user ?? "").length),
-    address: sliceMarks(pairs, address + scheme, bare(e.address ?? "").length),
+    address: sliceMarks(pairs, address + (shown === "" ? 0 : written.indexOf(shown)), shown.length),
+    path: sliceMarks(pairs, address + written.length + 1),
   };
 }
 
