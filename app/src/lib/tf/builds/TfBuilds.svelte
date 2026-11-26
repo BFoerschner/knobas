@@ -131,6 +131,7 @@
     recentNewestFirst,
     asksAttention,
     unreadRunsOf,
+    namesEvery,
     foldPipelines,
     keptPipelines,
     latestTime,
@@ -230,6 +231,21 @@
       if (at === listReads) failed = message(error);
     }
   }
+
+  /**
+   * A failure marked unread that the list names nowhere (#2543): it was read when the list was read, so no pipeline's
+   * `unread` holds it, and the rail's count would miss it. The list is read again. A mark the list names (*Undo* of a
+   * press, a run of the last twelve) moves the count through `read` alone.
+   */
+  let readBefore = untrack(() => read);
+  $effect(() => {
+    const now = read;
+    const before = readBefore;
+    readBefore = now;
+    if (before === null || now === null || before === now) return;
+    const back = [...before].filter((id) => !now.has(id));
+    if (back.length > 0 && untrack(() => all !== null && !namesEvery(all, back))) void rereadPipelines();
+  });
 
   /**
    * A pipeline's row read again when a run it draws moved, or a run queued on it here was read back (the TeamCity run
@@ -697,7 +713,10 @@
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} onclick={(event) => altFold(f, open, event)}
-      {@attach menuThing(() => ({ kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(foldPipelines(f), read) }))}
+      {@attach menuThing(() => {
+        const under = foldPipelines(f);
+        return { kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(under, read), pipelines: under.map((p) => p.entity_id) };
+      })}
       ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
         >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
             class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span

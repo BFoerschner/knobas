@@ -90,6 +90,7 @@ const PIPELINE: PipelineRow = {
   pinned: false,
   web_url: null,
   recent: RUNS,
+  unread: [],
 };
 
 const SETTINGS: PipelineSettings = {

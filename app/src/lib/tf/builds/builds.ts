@@ -332,11 +332,30 @@ export function foldPipelines(f: Fold): PipelineRow[] {
 }
 
 /**
- * The unread failed runs among `pipelines`' recent ones, the rail's last twelve of each (#2527): what a right-click's
- * *Mark N runs as read* counts and marks.
+ * The unread failed runs of `pipelines` over their whole history (#2543): what a right-click's *Mark N runs as read*
+ * counts, and what its press, which marks by pipeline, draws read at once. Each pipeline's `unread` is what the backend
+ * named as the list was read; `read`, the window's marks, keeps it fresh across every mark since, and a run of the rail's
+ * last twelve counts by its own row, so a failure a sync brought counts before the list is read again. Newest first.
  */
-export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent">[], read: ReadonlySet<string> | null): string[] {
-  return pipelines.flatMap((p) => p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id));
+export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent" | "unread">[], read: ReadonlySet<string> | null): string[] {
+  return pipelines.flatMap((p) => {
+    const ids = new Set(p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id));
+    for (const id of p.unread) if (!(read?.has(id) ?? false)) ids.add(id);
+    return [...ids];
+  });
+}
+
+/**
+ * Whether `pipelines` name every run in `ids`, among their last twelve or their unread failures: a run marked unread that
+ * none names was read when the list was read, so the list is read again to count it (#2543).
+ */
+export function namesEvery(pipelines: readonly Pick<PipelineRow, "recent" | "unread">[], ids: Iterable<string>): boolean {
+  let known: Set<string> | null = null;
+  for (const id of ids) {
+    known ??= new Set(pipelines.flatMap((p) => [...p.unread, ...p.recent.map((run) => run.entity_id)]));
+    if (!known.has(id)) return false;
+  }
+  return true;
 }
 
 /** Whether `id` is one of the fold's pipelines, at any depth. */
