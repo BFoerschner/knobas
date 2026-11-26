@@ -1905,3 +1905,56 @@ test("on a working tree whose branch the forge lacks, New pull request is off un
   await settle();
   expect(primary().tagName).toBe("A");
 });
+
+test("first open keeps the active branch selected and spacing intact when live branches replace the mirror placeholder (#2523)", async () => {
+  let releaseBranches!: () => void;
+  const branchesGate = new Promise<void>((resolve) => (releaseBranches = resolve));
+  const base = ports({
+    entityCheckout: async () => ({
+      ...checkout("/Users/mara/src/payout-service"),
+      tree: { status: "read", branch: "main", head: HEAD, upstream: null, ahead: 1, behind: 0, changed: 1, untracked: 0, conflicted: 0 },
+    }),
+  });
+  const staged = {
+    ...base,
+    getEntity: async (id: string) => {
+      const detail = await base.getEntity(id);
+      return id === REPO ? ({ ...detail, default_branch: "main" } as EntityDetail) : detail;
+    },
+    entityView: async (id: string, sectionId: string | null) => {
+      if (id === REPO && sectionId === "branches") await branchesGate;
+      return base.entityView(id, sectionId);
+    },
+  };
+
+  await draw([REPO], staged);
+  // Before live branches arrive, the mirror default is selected as the placeholder option after Working tree + <hr>.
+  expect(branchSelect().value).toBe("main");
+  const activeOptionBefore = branchSelect().selectedOptions[0];
+  expect(activeOptionBefore?.value).toBe("main");
+  expect(branchSelect().querySelectorAll("hr").length).toBe(1);
+
+  // Live branches arrive and replace the placeholder: the active branch must stay selected without unmounting its <option> or jumping to Working tree.
+  releaseBranches();
+  await settle();
+  expect(branchSelect().value).toBe("main");
+  expect(branchSelect().selectedOptions[0]).toBe(activeOptionBefore);
+  expect(branchSelect().selectedOptions[0]?.textContent).toBe("main");
+  expect(branchValues()).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  expect(branchSelect().querySelectorAll("hr").length).toBe(1);
+
+  // A second open of the same repository matches the first open identically.
+  const firstSnapshot = {
+    value: branchSelect().value,
+    options: [...branchSelect().options].map((o) => [o.value, o.textContent, o.disabled]),
+    hrs: branchSelect().querySelectorAll("hr").length,
+  };
+  unmount(view!);
+  view = null;
+  await draw([REPO], base);
+  expect({
+    value: branchSelect().value,
+    options: [...branchSelect().options].map((o) => [o.value, o.textContent, o.disabled]),
+    hrs: branchSelect().querySelectorAll("hr").length,
+  }).toEqual(firstSnapshot);
+});

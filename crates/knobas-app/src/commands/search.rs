@@ -932,8 +932,9 @@ pub fn fuzzy_rank(text: String, haystacks: Vec<String>) -> Vec<FuzzyRanked> {
         .collect()
 }
 
-/// The lists pages hold for ranking ([`fuzzy_hold`]), at most four
-/// (`HeldLists::BOUND`), in the app process for as long as it runs.
+/// The lists pages hold for ranking ([`fuzzy_hold`]), at most
+/// [`knobas_search::picker::HeldLists::BOUND`] (32), in the app process for as
+/// long as it runs.
 static HELD: std::sync::LazyLock<std::sync::Mutex<knobas_search::picker::HeldLists>> =
     std::sync::LazyLock::new(std::sync::Mutex::default);
 

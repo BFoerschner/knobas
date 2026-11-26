@@ -240,7 +240,7 @@ export function fuzzyRank(text: string, haystacks: readonly string[]): Promise<F
 
 /**
  * Holds a page's list for ranking (ux31, the API explorer's filter): its texts are sent once, and each key then
- * sends only what was typed ({@link fuzzyRankHeld}). At most four lists are held in the app, the least lately used
+ * sends only what was typed ({@link fuzzyRankHeld}). At most 32 lists are held in the app, the least lately used
  * dropped first.
  */
 export function fuzzyHold(id: string, haystacks: readonly string[]): Promise<void> {

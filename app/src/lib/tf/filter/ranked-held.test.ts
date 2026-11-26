@@ -80,3 +80,18 @@ test("new rows are held anew; an older text's answer is never drawn", async () =
   expect(order.rows("resource5", other, same)).toEqual([other[5]]);
   sent.length = 0;
 });
+
+test("a held order exposes sliced UTF-16 marks and clears stale marks when the query empties", async () => {
+  const emojiRows = ["🚀 get /resource5/items", "get /health"];
+  const order = FuzzyOrder.held<string>("spec-marks");
+  order.ask("resource5", emojiRows, same);
+  await flush();
+  // "🚀 get /" is 2 + 6 = 8 UTF-16 code units; "resource5" is [8, 17].
+  expect(order.marks(emojiRows[0]!)).toEqual([8, 17]);
+  expect(order.marks(emojiRows[0]!, 7, 16)).toEqual([1, 10]);
+
+  order.ask("", emojiRows, same);
+  expect(order.marks(emojiRows[0]!)).toEqual([]);
+  expect(order.marks(emojiRows[0]!, 7, 16)).toEqual([]);
+  sent.length = 0;
+});
