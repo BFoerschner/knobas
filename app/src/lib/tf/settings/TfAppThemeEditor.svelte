@@ -46,6 +46,10 @@
   } = $props();
 
   const own = $derived(theme.id.startsWith("own-"));
+  /** Each colour's swatch, whose panel its hex value opens (#2516). */
+  const swatches: Record<string, { openFrom(from: HTMLElement): void } | undefined> = {};
+  /** A colour's hex value as its row shows it: the selection has none of its own unless set. */
+  const hexOf = (key: AppKey): string => (key === "selection" ? (set.selection ?? "system") : (colours[key as keyof typeof colours] ?? ""));
   /**
    * A colour picker's drag (the swatch hands on one colour a frame as a preview): the preview, the swatch in hand and
    * its panel follow each frame; the role list keeps the theme as it stood when the drag began and takes the colour
@@ -276,6 +280,7 @@
           <span class="tf-apt-sws">
             {#each row.keys as key (key)}
               <TfThemeSwatch
+                bind:this={swatches[key]}
                 label={NAME[key]}
                 value={set[key]}
                 fallback={colours[key as keyof typeof colours] ?? colours.sheet}
@@ -317,7 +322,12 @@
               <span class="tf-apt-plate" {@attach cssVars(() => exampleOf(row))}>{row.words}</span>
             {/if}
           </span>
-          <span class="tf-thm-hex tf-apt-hex">{row.keys[0] === "selection" ? (set.selection ?? "") : colours[row.keys[0] as keyof typeof colours]}{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span>
+          <span class="tf-apt-hex"
+            ><span class="tf-apt-hexes"
+              >{#each row.keys as key (key)}<button type="button" class="tf-thm-hex" aria-label="{NAME[key]}: {hexOf(key)}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{hexOf(key)}</button
+                >{/each}</span
+            >{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span
+          >
           <span class="tf-thm-cr">{fig ? ratioText(fig.ratio) : ""}</span>
           {#if own && row.example === "selrow"}
             <div class="tf-apt-picks" role="group" aria-label="Selected row's colours">
@@ -354,6 +364,7 @@
         <div class="tf-thm-role tf-apt-role tf-apt-fold" data-row={key}>
           <span class="tf-apt-sws">
             <TfThemeSwatch
+              bind:this={swatches[key]}
               label={NAME[key]}
               value={set[key]}
               fallback={colours[key as keyof typeof colours] ?? colours.sheet}
@@ -366,7 +377,10 @@
           </span>
           <span class="tf-apt-foldname">{NAME[key]}</span>
           <span></span>
-          <span class="tf-thm-hex tf-apt-hex">{colours[key as keyof typeof colours]}{#if result.derived.has(key)}<i class="tf-apt-auto">auto</i>{/if}</span>
+          <span class="tf-apt-hex"
+            ><button type="button" class="tf-thm-hex" aria-label="{NAME[key]}: {hexOf(key)}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{hexOf(key)}</button
+            >{#if result.derived.has(key)}<i class="tf-apt-auto">auto</i>{/if}</span
+          >
           <span class="tf-thm-cr"></span>
         </div>
       {/each}

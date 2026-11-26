@@ -1,6 +1,6 @@
 <!--
   One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
-  small panel under it: the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
+  small panel under it (its row's hex value opens it too, at the hex field, #2516): the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
   for a role; *Auto* for a window colour on the Theme page, which is then derived again) and *Reset to ⟨from⟩'s*.
   Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
   panel and leaves focus on the swatch. A built-in's swatches are not buttons.
@@ -42,13 +42,19 @@
 
   let open = $state(false);
   let swatch = $state<HTMLButtonElement | null>(null);
+  /** The panel's Hex field. */
+  let field = $state<HTMLInputElement | null>(null);
+  /** What opened the panel when it was not the swatch (its row's hex value, #2516): where focus goes back on `Esc`. */
+  let opener: HTMLElement | null = null;
   let typed = $state("");
   // A role left out draws in ink; a window colour left out is derived, and its swatch shows what was derived.
   const ink = $derived(value === undefined && inkable && leave === "Use ink");
 
   function close(focus = true): void {
     open = false;
-    if (focus) void tick().then(() => swatch?.focus());
+    const back = opener ?? swatch;
+    opener = null;
+    if (focus) void tick().then(() => back?.focus());
   }
 
   let holder = $state<HTMLElement | null>(null);
@@ -69,7 +75,16 @@
 
   function toggle(): void {
     open = !open;
+    opener = null;
     typed = value ?? "";
+  }
+
+  /** Opens the panel from `from`, its row's hex value (#2516), with focus in the Hex field; `Esc` goes back to `from`. */
+  export function openFrom(from: HTMLElement): void {
+    open = true;
+    opener = from;
+    typed = value ?? "";
+    void tick().then(() => field?.focus());
   }
 
   function fromField(): void {
@@ -153,6 +168,7 @@
           ><span>Hex</span><input
             class="tf-stg-in"
             aria-label="{label} as hex"
+            bind:this={field}
             spellcheck="false"
             autocomplete="off"
             bind:value={typed}

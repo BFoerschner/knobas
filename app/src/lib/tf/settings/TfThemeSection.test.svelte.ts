@@ -438,3 +438,23 @@ test("a built-in's first colour change makes a copy with it, in the window's slo
   expect(storage.data.has(APP_SLOT_KEY.light)).toBe(false);
   expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
 });
+
+test("a row of a ground and its text shows both hex values, and a press on either opens that colour's panel at its hex field (#2516)", async () => {
+  draw();
+  const colours = derive("light", themes.find("knobas-light")!.app ?? {}).colours;
+  const hexes = [...q('[data-row="primary"]')!.querySelectorAll<HTMLButtonElement>("button.tf-thm-hex")];
+  expect(hexes.map((b) => b.textContent?.trim())).toEqual([colours.primary, colours.onPrimary]);
+  hexes[1]!.click();
+  flushSync();
+  await tick();
+  const pop = q(".tf-thm-pop")!;
+  expect(pop.getAttribute("aria-label")).toBe("Text on a primary button");
+  expect(document.activeElement).toBe(pop.querySelector(".tf-stg-in"));
+  // Looking made no copy.
+  expect(themes.own).toHaveLength(0);
+  (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+  await tick();
+  expect(q(".tf-thm-pop")).toBeNull();
+  expect(document.activeElement).toBe(hexes[1]);
+});

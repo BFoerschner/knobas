@@ -71,6 +71,8 @@
   const UNCHANGED_NAMES: Record<Unchanged, string> = { full: "Full colour", quiet: "Quiet", grey: "Grey" };
 
   const own = $derived(theme.id.startsWith("own-"));
+  /** Each row's swatch, whose panel its hex value opens (#2516). */
+  const swatches: Record<string, { openFrom(from: HTMLElement): void } | undefined> = {};
   /** The theme this one came from, where knobas still has it: what *Reset to ⟨from⟩'s* goes back to. */
   const source = $derived(theme.from === undefined || theme.from === theme.name ? undefined : [...BUILTINS, ...themes.own].find((t) => t.name === theme.from && t.id !== theme.id));
   const tints = $derived({ ...(theme.diff?.added ? { added: theme.diff.added } : {}), ...(theme.diff?.removed ? { removed: theme.diff.removed } : {}) });
@@ -261,6 +263,7 @@
       {@const c = roleContrast(surfaces, role, value, tints)}
       <div class="tf-thm-role" class:tf-low={c.low} data-role={role}>
         <TfThemeSwatch
+          bind:this={swatches[role]}
           label={ROLE_NAMES[role]}
           {value}
           fallback={surfaces.ink}
@@ -271,7 +274,7 @@
         />
         <span>{ROLE_NAMES[role]}</span>
         <code class="tf-hl-{role}" {@attach cssVars(() => ({ "--hl": value ?? "var(--ink)" }))}>{SAMPLE[role]}</code>
-        <span class="tf-thm-hex">{value ?? "ink"}</span>
+        <button type="button" class="tf-thm-hex" aria-label="{ROLE_NAMES[role]}: {value ?? 'ink'}" onclick={(event) => swatches[role]?.openFrom(event.currentTarget)}>{value ?? "ink"}</button>
         <span class="tf-thm-cr">{ratioText(c.ratio)}</span>
         {#if c.low}
           <div class="tf-thm-why">
@@ -286,6 +289,7 @@
       {@const value = theme.diff?.[key]}
       <div class="tf-thm-role" data-diff={key}>
         <TfThemeSwatch
+          bind:this={swatches[key]}
           label={DIFF_NAMES[key]}
           {value}
           fallback={DIFF_DEFAULT[key]}
@@ -297,7 +301,7 @@
         />
         <span>{DIFF_NAMES[key]}</span>
         <code></code>
-        <span class="tf-thm-hex">{value ?? DIFF_DEFAULT[key]}</span>
+        <button type="button" class="tf-thm-hex" aria-label="{DIFF_NAMES[key]}: {value ?? DIFF_DEFAULT[key]}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{value ?? DIFF_DEFAULT[key]}</button>
         <span class="tf-thm-cr"></span>
       </div>
     {/each}

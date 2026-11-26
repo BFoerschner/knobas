@@ -296,3 +296,20 @@ test("a built-in's first colour change makes a copy with it, in the slot it drew
   expect(themes.drawn("light").id).toBe("knobas-light");
   expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
 });
+
+test("a press on a role's hex value opens its panel at the hex field (#2516)", async () => {
+  draw();
+  q<HTMLButtonElement>('[data-role="kw"] button.tf-thm-hex')!.click();
+  flushSync();
+  await tick();
+  const pop = q(".tf-thm-pop")!;
+  expect(pop.getAttribute("aria-label")).toBe("Keyword");
+  expect(document.activeElement).toBe(pop.querySelector(".tf-stg-in"));
+  const added = q<HTMLButtonElement>('[data-diff="added"] button.tf-thm-hex')!;
+  // A press elsewhere closes the open panel first, as in the window.
+  added.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  added.click();
+  flushSync();
+  await tick();
+  expect(q(".tf-thm-pop")?.getAttribute("aria-label")).toBe("Added line");
+});
