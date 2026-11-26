@@ -718,6 +718,34 @@ test("Enter in the filter focuses the first match's row when the entry opened by
   expect(filterBox().value).toBe("kib");
 });
 
+test("Enter in the filter before the ranking answers opens the first match of that answer, not a row of the panels drawn before (#2535)", async () => {
+  await open(ports(), ["in", "pw:plat"]);
+  filterBox().value = "grfn";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  // The answer is out: the folder's panels still stand, grafana not first among them.
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.classList.contains("tf-pw-row")).toBe(true);
+  expect(focused.querySelector(".tf-pw-t")?.textContent).toBe("grafana");
+  // Typed on before an answer: that Enter is dropped, and nothing more is opened for the new words.
+  const opened = location.hash;
+  filterBox().focus();
+  filterBox().value = "grfnx";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  // Back to words grafana holds: a stale Enter would take focus to its row once they are answered.
+  filterBox().value = "grfn";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await settle();
+  expect(location.hash).toBe(opened);
+  expect(document.activeElement).toBe(filterBox());
+});
+
 test("the filter's chords read Ctrl as ⌘ and a layout without Latin letters by the key's place (#2531)", async () => {
   const p = ports();
   await open(p, ["in", "pw:plat"]);

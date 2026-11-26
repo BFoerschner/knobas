@@ -245,6 +245,20 @@
     return (drawnPanels = panels(m, node, query, order.rows(query, scoped, index.textOf)));
   });
   const marking = $derived(index === null ? "" : order.typed(query, scoped));
+  /**
+   * `Enter` in the filter before the ranking answered its words (#2535): the row it opens is the answer's first, not
+   * one of the panels kept meanwhile, so it waits for that answer. Typing on drops it.
+   */
+  let entering = $state<string | null>(null);
+  $effect(() => {
+    if (entering === null) return;
+    if (entering !== query || index === null) entering = null;
+    else if (order.settled(query, scoped)) {
+      entering = null;
+      // After this flush: `focusOpenRow` draws the row it picks with `flushSync`, which an effect cannot.
+      void tick().then(focusOpenRow);
+    }
+  });
 
   // ---- the tree ----
   /** Folds the reader opened, kept for the session. */
@@ -618,7 +632,8 @@
     if (event.key === "Enter") {
       if (event.shiftKey || event.metaKey || event.ctrlKey) return false;
       event.preventDefault();
-      focusOpenRow();
+      if (index !== null && !order.settled(query, scoped)) entering = query;
+      else focusOpenRow();
       return true;
     }
     if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return false;
