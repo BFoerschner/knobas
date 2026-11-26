@@ -85,7 +85,7 @@
 .tf-ftreebox > header > .tf-seg { margin-right: auto; }
 .tf-ftreebox > header .tf-ftsearch { display: flex; gap: var(--control-gap); align-items: center; flex: 1 0 100%; min-width: 0; }
 .tf-ftsearch .tf-fchips { flex-wrap: nowrap; flex: none; }
-.tf-ftsearch .tf-fchips button { font-family: var(--mono); font-variant-ligatures: none; }
+.tf-ftsearch .tf-fchips button { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 /* Go to file (#2311, mockups/code-area `.tree > header .tf-minif`): the head's field, `T` beside it. */
 /* An input in a row of buttons takes the row's height, here the small one (#2238). */
 .tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: var(--control-h-sm); }
@@ -108,10 +108,10 @@
    column of its own and the text cut at the row's end; the hits are the app's marks. */
 .tf-txres { display: flex; flex-direction: column; }
 .tf-txres.tf-txreading { opacity: .6; }
-.tf-ftree .tf-txhead { margin: 8px 6px 2px; font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-weight: 600; }
+.tf-ftree .tf-txhead { margin: 8px 6px 2px; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-weight: 600; }
 .tf-ftree a.tf-txfile { font-weight: 600; margin-top: 4px; }
 .tf-ftree a.tf-txfile > span:not(.tf-txcount) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tf-txcount { flex: none; color: var(--ink-2); font-weight: 400; font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-txcount { flex: none; color: var(--ink-2); font-weight: var(--wt-ui, 400); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-ftree a.tf-txhit { gap: 8px; padding-left: 26px; color: var(--ink-2); }
 .tf-txn { flex: none; min-width: 3ch; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tf-txl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; color: var(--ink); }

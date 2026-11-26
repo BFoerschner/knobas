@@ -796,9 +796,11 @@ pub async fn search(
         .map(|known| known.branch.clone());
     match indexed {
         Some(indexed) if index_shows(at, &repo, branch, &indexed) => {
-            Ok(scan_index(index, &repo, &matcher, &turn).await.unwrap_or_else(|| {
-                TextFound::nowhere("knobas holds no copy of this repository's files.")
-            }))
+            Ok(scan_index(index, &repo, &matcher, &turn)
+                .await
+                .unwrap_or_else(|| {
+                    TextFound::nowhere("knobas holds no copy of this repository's files.")
+                }))
         }
         Some(_) => Ok(TextFound::nowhere(if clone.is_some() {
             "Your clone does not hold this branch's commit yet, and knobas keeps the text of the default branch only."
@@ -820,7 +822,10 @@ mod tests {
     /// A turn of a lane of its own: tests run side by side.
     fn turn() -> Turn {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        Turn::take(&format!("test-lane-{}", NEXT.fetch_add(1, Ordering::SeqCst)))
+        Turn::take(&format!(
+            "test-lane-{}",
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ))
     }
 
     fn asked(text: &str, case_sensitive: bool, regex: bool) -> TextQuery {
@@ -1056,7 +1061,9 @@ mod tests {
         // A tracked file deleted on disk is no line.
         std::fs::remove_file(at.join("README.md")).unwrap();
         let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
-        let found = scan_disk(at, &matcher, &turn()).await.expect("a working tree");
+        let found = scan_disk(at, &matcher, &turn())
+            .await
+            .expect("a working tree");
         assert_eq!(found.from, TextFrom::WorkingTree);
         assert_eq!(
             found.commit.as_deref(),
@@ -1078,14 +1085,24 @@ mod tests {
         let mut query = asked("PAY", false, false);
         query.names = true;
         // Smart case: an upper-case query matches its case, in names too.
-        let exact = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap(), &turn())
-            .await
-            .unwrap();
+        let exact = scan_tree(
+            dir.path(),
+            &feature,
+            &Matcher::new(&query).unwrap(),
+            &turn(),
+        )
+        .await
+        .unwrap();
         assert!(exact.names.is_empty());
         query.text = "pay".to_owned();
-        let any = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap(), &turn())
-            .await
-            .unwrap();
+        let any = scan_tree(
+            dir.path(),
+            &feature,
+            &Matcher::new(&query).unwrap(),
+            &turn(),
+        )
+        .await
+        .unwrap();
         assert_eq!(any.names, vec!["src/pay.rs".to_owned()]);
         assert_eq!(
             found_lines(&any),
