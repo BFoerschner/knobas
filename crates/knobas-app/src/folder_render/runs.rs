@@ -1281,7 +1281,10 @@ impl Runs {
             let _ = std::fs::remove_dir_all(dir);
         }
         if let Some(dir) = self.store_dir(Some(source_id)) {
-            let _ = std::fs::remove_dir_all(dir);
+            let _ = std::fs::remove_dir_all(&dir);
+            if let Some(root) = dir.parent() {
+                store::changed(root);
+            }
         }
     }
 }

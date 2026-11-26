@@ -4,7 +4,8 @@
 //!
 //! - **Java** is looked for once (the first JAR opened, or Settings asking), never on a click: the path set in
 //!   Settings, `JAVA_HOME`, macOS's `java_home`, `PATH`, then the usual install folders. A `java` counts only where
-//!   `java -version` exits 0 and names a version within two seconds, which turns away macOS's stub.
+//!   `java -version` exits 0 and names a version within two seconds, which turns away macOS's stub. The candidates
+//!   are asked four at once, and each `java`'s answer is kept for the session until the file changes (#2519).
 //! - **The floor** is the bundled jar's own: the class file version of its main class (Vineflower 1.12 is Java 17).
 //!   No Java: no button. Java too old: the button disabled with the reason.
 //! - **A run**: the class and its nested classes written into a fresh folder, Vineflower into another, one JVM at a
@@ -13,8 +14,9 @@
 //! - **Kept** on disk in the app's cache folder by a SHA-256 over the classes' bytes and the decompiler's name, 200 MB
 //!   at most, the oldest dropped first. A failure is not kept.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -241,13 +243,67 @@ async fn probe(java: &Path) -> Option<FoundJava> {
     })
 }
 
+/// What `java -version` answered for a `java` asked this session, and the file as it was then (#2519).
+#[derive(Clone)]
+struct Probed {
+    stamp: (std::time::SystemTime, u64),
+    found: Option<FoundJava>,
+}
+
+/// Every `java` asked this session, by path: one replaced since (another modified time or length) is asked again.
+static PROBED: LazyLock<Mutex<HashMap<PathBuf, Probed>>> = LazyLock::new(Mutex::default);
+
+/// How many candidates are asked at once.
+const ASKED_AT_ONCE: usize = 4;
+
+fn stamp(java: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(java).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// [`probe`], answered from this session's asks where the `java` is unchanged; `again` (*Look again*) asks again a
+/// `java` that was no Java, as one installed since may now be.
+async fn probe_kept(java: &Path, again: bool) -> Option<FoundJava> {
+    let stamp = stamp(java);
+    if let Some(stamp) = stamp {
+        let kept = PROBED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(java)
+            .filter(|kept| kept.stamp == stamp && !(again && kept.found.is_none()))
+            .cloned();
+        if let Some(kept) = kept {
+            return kept.found;
+        }
+    }
+    let found = probe(java).await;
+    if let Some(stamp) = stamp {
+        PROBED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                java.to_path_buf(),
+                Probed {
+                    stamp,
+                    found: found.clone(),
+                },
+            );
+    }
+    found
+}
+
 /// The first of `places` that is a Java new enough to run the decompiler (`needs`), else the first Java at all, so the
 /// view can say which one it found and why it cannot decompile with it. A `java` 8 first in `PATH` no longer hides a
-/// Java 21 in an install folder.
-async fn first_java(places: Vec<PathBuf>, needs: Option<u16>) -> Option<FoundJava> {
+/// Java 21 in an install folder. The candidates are asked [`ASKED_AT_ONCE`] at a time and their answers taken in
+/// order, so a slow or hanging one costs its two seconds once, not once per candidate before it (#2519).
+async fn first_java(places: Vec<PathBuf>, needs: Option<u16>, again: bool) -> Option<FoundJava> {
+    use futures_util::stream::{self, StreamExt};
+    let mut answers = stream::iter(places)
+        .map(|candidate| async move { probe_kept(&candidate, again).await })
+        .buffered(ASKED_AT_ONCE);
     let mut older = None;
-    for candidate in places {
-        if let Some(found) = probe(&candidate).await {
+    while let Some(answer) = answers.next().await {
+        if let Some(found) = answer {
             if needs.is_none_or(|n| found.release >= n) {
                 return Some(found);
             }
@@ -354,18 +410,21 @@ pub async fn runtime(pool: Option<&PgPool>, dirs: &[PathBuf], again: bool) -> Ja
     }
     let set = set_path(pool).await;
     let looked = set.clone();
-    let places = tokio::task::spawn_blocking(move || candidates(looked.as_deref()))
-        .await
-        .unwrap_or_default();
-    let tool = decompiler(dirs);
+    // The candidates and the decompiler jar (read whole and hashed against its pin, the first time) on a blocking
+    // thread, never on the async runtime's (#2519).
+    let dirs = dirs.to_vec();
+    let (places, tool) =
+        tokio::task::spawn_blocking(move || (candidates(looked.as_deref()), decompiler(&dirs)))
+            .await
+            .unwrap_or_default();
     // A Java the person set is the one used, too old or not (the view says why); otherwise the first new enough.
     let own = match set.as_deref() {
-        Some(set) => probe(&set_candidate(set)).await,
+        Some(set) => probe_kept(&set_candidate(set), again).await,
         None => None,
     };
     let java = match own {
         Some(own) => Some(own),
-        None => first_java(places, tool.as_ref().map(|d| d.needs)).await,
+        None => first_java(places, tool.as_ref().map(|d| d.needs), again).await,
     };
     let (can, reason) = match (&java, &tool) {
         (None, _) => (false, None),
@@ -773,22 +832,91 @@ mod tests {
             fake("j21", "21.0.4"),
             fake("j25", "25"),
         );
-        let found = first_java(vec![old.clone(), new.clone(), newer], Some(17))
+        let found = first_java(vec![old.clone(), new.clone(), newer], Some(17), false)
             .await
             .unwrap();
         assert_eq!((found.release, found.path), (21, new.display().to_string()));
-        let found = first_java(vec![old.clone()], Some(17)).await.unwrap();
+        let found = first_java(vec![old.clone()], Some(17), false).await.unwrap();
         assert_eq!(
             found.release, 11,
             "no Java new enough: the one found, to say why not"
         );
         assert_eq!(
-            first_java(vec![old, dir.path().join("none")], None)
+            first_java(vec![old, dir.path().join("none")], None, false)
                 .await
                 .unwrap()
                 .release,
             11
         );
+    }
+
+    /// Settings › Renderers' look for a Java (#2519): the candidates are asked at once, not one after another, the first
+    /// new enough in their order still wins, and a `java` asked once this session is not started again unless it
+    /// changed; a look again asks again those that were no Java.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn javas_are_asked_at_once_and_once_a_session() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("asked.log");
+        let fake = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(
+                &path,
+                format!("#!/bin/sh\necho {name} >> '{}'\nsleep 1\n{body}\n", log.display()),
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let says = |v: &str| format!("echo 'openjdk version \"{v}\" 2024-07-16' >&2");
+        let places = vec![
+            fake("stub", "exit 1"),
+            fake("j11", &says("11.0.2")),
+            fake("j21", &says("21.0.4")),
+        ];
+        let asked = || {
+            let mut lines: Vec<String> = std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect();
+            lines.sort();
+            lines
+        };
+
+        let started = std::time::Instant::now();
+        let found = first_java(places.clone(), Some(17), false).await.unwrap();
+        let took = started.elapsed();
+        assert_eq!(found.path, places[2].display().to_string());
+        assert!(
+            took < Duration::from_millis(2500),
+            "three Javas of a second each asked at once, not in turn: {took:?}"
+        );
+        assert_eq!(asked(), ["j11", "j21", "stub"]);
+
+        let started = std::time::Instant::now();
+        let again = first_java(places.clone(), Some(17), false).await.unwrap();
+        assert_eq!(again, found);
+        assert!(started.elapsed() < Duration::from_millis(500), "answered from the session");
+        assert_eq!(asked(), ["j11", "j21", "stub"], "none started again");
+
+        // A look again asks only what was no Java; a `java` replaced since is asked again.
+        std::fs::write(
+            &places[1],
+            format!("#!/bin/sh\necho j11 >> '{}'\n{}\n", log.display(), says("17.0.9")),
+        )
+        .unwrap();
+        let file = std::fs::File::options().append(true).open(&places[1]).unwrap();
+        file.set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
+            .unwrap();
+        let looked = first_java(places.clone(), Some(17), true).await.unwrap();
+        assert_eq!(
+            (looked.release, looked.path),
+            (17, places[1].display().to_string()),
+            "the replaced one, now new enough and first in order"
+        );
+        assert_eq!(asked(), ["j11", "j11", "j21", "stub", "stub"]);
     }
 
     #[test]
