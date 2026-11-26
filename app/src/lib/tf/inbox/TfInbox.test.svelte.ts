@@ -1082,3 +1082,20 @@ test("a row that came while the Inbox was hidden is drawn when it is shown again
     page.shown = true;
   }
 });
+
+test("at the top, a sync's new row waits while a row a mouse press took away holds under the pointer, and draws once it goes (#2527)", async () => {
+  await openScrolled(0);
+  button(rowOf("dashboard"), "Done").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  expect(target.querySelector(".tf-ib-held")).not.toBeNull();
+  await sync();
+  expect(whats().join(" "), "nothing moves under the pointer").not.toContain("Ledger rounding");
+  expect(text(showNew())).toBe("Show 1 new");
+
+  dismiss(toasts.items.at(-1)!.id);
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
+  expect(target.querySelector(".tf-ib-held")).toBeNull();
+  expect(whats()[0]).toContain("Ledger rounding");
+  expect(showNew()).toBeNull();
+});
