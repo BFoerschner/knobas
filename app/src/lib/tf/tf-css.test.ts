@@ -225,10 +225,16 @@ test("width comes from font-variation-settings, and font-stretch only as its twi
   for (const [, wdth, stretch] of widths) expect(stretch).toBe(wdth);
 });
 
-test("focus is 2px --focus, and --card-ink on a card surface", () => {
+test("focus is a transient 2px --focus ring, and --card-ink on a card surface (#2517)", () => {
   expect(code).toMatch(/:root \{ --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; \}/);
+  expect(code).toMatch(/:root \{ --focus-fade: 0\.3s; --focus-a: 0%; \}/);
+  expect(code).toMatch(/:root\[data-focus-ring="on"\] \{ --focus-a: 100%; \}/);
   expect(code).toMatch(/\.tf \{ --focus-c: var\(--focus\); --focus-o: var\(--focus-off\); \}/);
-  expect(block(code, ".tf :focus-visible")).toMatch(/outline: var\(--focus-w\) solid var\(--focus-c\); outline-offset: var\(--focus-o\);/);
+  expect(block(code, ".tf :focus-visible")).toMatch(/outline: none;/);
+  expect(block(code, ":where(:root[data-focus-ring]) .tf :focus-visible")).toMatch(
+    /outline: var\(--focus-w\) solid color-mix\(in srgb, var\(--focus-c\) var\(--focus-a\), transparent\); outline-offset: var\(--focus-o\);/,
+  );
+  expect(block(code, ':where(:root[data-focus-ring="fade"]) .tf :focus-visible')).toMatch(/transition: outline-color var\(--focus-fade\) ease-out;/);
   expect(block(code, ".tf .tf-card")).toMatch(/--focus-c: var\(--card-ink\)/);
 });
 
@@ -262,15 +268,47 @@ test("no component writes a ring of its own: every focus outline is drawn from t
   }
 });
 
-test("a field rings inside, as its own border; a box that clips gives what it holds the inside ring", () => {
-  expect(code).toMatch(/\.tf :is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\]\)\):focus-visible \{ outline-color: var\(--focus\); outline-offset: var\(--focus-in\); \}/);
+test("a field rings inside while transient focus is active, keeps a subtle border when focused, and clippers keep the inside ring", () => {
+  expect(code).toMatch(
+    /:where\(:root\[data-focus-ring\]\) \.tf :is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\]\)\):focus-visible \{ --focus-c: var\(--focus\); outline-offset: var\(--focus-in\); \}/,
+  );
+  expect(code).toMatch(
+    /\.tf :is\(textarea, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\]\)\):not\(\[aria-invalid="true"\], \.tf-oas-missing\):focus \{ border-color: var\(--ink-2\); \}/,
+  );
+  expect(code).toMatch(/\.tf :is\(\.tf-fsearch, \.tf-minif\):focus-within \{ border-color: var\(--ink-2\); \}/);
   const clippers = /:is\(([^)]*)\) \{ --focus-o: var\(--focus-in\); \}/.exec(code);
   expect(clippers).not.toBeNull();
   for (const box of [".tf-nav", ".tf-tabs", ".tf-seg", ".tf-menu", ".tf-flist", ".tf-fence", ".tf-ftree", ".tf-tbl"]) expect(clippers![1]!.split(", ")).toContain(box);
 });
 
-test("a select pressed with the mouse draws no ring (`data-input`, input-modality.ts)", () => {
-  expect(code).toMatch(/:root\[data-input="pointer"\] \.tf select:focus-visible \{ outline: none; \}/);
+test("pointer presses draw no focus ring (`data-input`, input-modality.ts) and no unconditional blue :focus/:focus-within rings remain (#2517)", () => {
+  expect(code).toMatch(
+    /:where\(:root\[data-input="pointer"\]\) \.tf :focus-visible, :where\(:root\[data-input="pointer"\]\) \.tf :is\(\.tf-fsearch, \.tf-minif\):focus-within \{ outline: none; \}/,
+  );
+  expect(block(code, ".tf .tf-set-title:focus, .tf .tf-set-desc:focus")).toMatch(/outline: var\(--set-edit-w\) solid var\(--rule\);/);
+  const xmlCss = readFileSync(join(APP, "src/lib/tf/css/xml.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(code).not.toMatch(/\.tf-land:focus(?![\w-])\s*\{[^}]*var\(--focus(?:-c)?\)/);
+  expect(xmlCss).not.toMatch(/\.tf-xv-qfield:focus-within\s*\{[^}]*var\(--focus(?:-c)?\)/);
+  expect(code).not.toMatch(/\.tf-set-title:focus(?![\w-])[^{]*\{[^}]*var\(--focus(?:-c)?\)/);
+  const allSheets: [string, string][] = [
+    ...readdirSync(join(APP, "src/lib/tf/css"))
+      .filter((name) => name.endsWith(".css"))
+      .map((name) => [name, readFileSync(join(APP, "src/lib/tf/css", name), "utf8")] as [string, string]),
+    ["unported.css", unportedCode],
+    ...(readdirSync(join(APP, "src/lib"), { recursive: true }) as string[])
+      .filter((name) => name.endsWith(".svelte"))
+      .map((name) => [name, readFileSync(join(APP, "src/lib", name), "utf8").match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ""] as [string, string]),
+  ];
+  const blueFocus: string[] = [];
+  for (const [name, raw] of allSheets) {
+    const bodyText = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const [, selectors, body] of bodyText.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (/:focus(-within)?(?![\w-])/.test(selectors!) && /var\(--focus(?:-c)?\)/.test(body!) && !/data-focus-ring/.test(selectors!)) {
+        blueFocus.push(`${name}: ${selectors!.trim()}`);
+      }
+    }
+  }
+  expect(blueFocus).toEqual([]);
 });
 
 /** The branch box is a button that opens a list (2026-11-21; Björn: "the box from branch switching … different sized than the button above"). */
@@ -995,8 +1033,10 @@ test("no rule writes text in a surface colour on what is selected or on the prim
   expect(block(code, ".tf-btn.tf-primary")).toMatch(/background: var\(--primary\); color: var\(--on-primary\)/);
 });
 
-/** No colour fades (ADR-0055, 3.16): a fading surface would draw half a theme for the length of the fade. */
-test("no transition names a colour, but the site bar's key hint", () => {
+/** No colour fades (ADR-0055, 3.16): a fading surface would draw half a theme for the length of the fade.
+ *  Exceptions: the site bar's key hint and the transient focus ring's 0.3 s fade-out (`[data-focus-ring="fade"]`, #2517),
+ *  which only runs while the focus ring is fading out and never on surfaces. */
+test("no transition names a colour, but the site bar's key hint and the transient focus ring fade", () => {
   const COLOURED = /\b(all|color|background(-color)?|border(-[a-z]+)?-color|border|fill|stroke|outline-color)\b/;
   const wrong: string[] = [];
   for (const { file, source, sheet } of everySheet())
@@ -1004,6 +1044,7 @@ test("no transition names a colour, but the site bar's key hint", () => {
       if (property !== "transition" && property !== "transition-property") continue;
       if (value.trim() === "none") continue;
       if (file === "lib/tf/css/site.css" && selector === ".tf-sitebar kbd") continue;
+      if (selector.includes('data-focus-ring="fade"') && value.includes("var(--focus-fade)")) continue;
       for (const part of value.split(",")) {
         const [name, duration] = part.trim().split(/\s+/);
         // A colour that changes at once after a delay (`0s .12s`, the side edge's hover) does not fade.

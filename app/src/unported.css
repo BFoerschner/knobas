@@ -30,7 +30,9 @@
   --disp: var(--sans);
   --row: 30px;
 }
-:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+:focus-visible{outline:none}
+:where(:root[data-focus-ring]) :focus-visible{outline:var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent);outline-offset:1px}
+:where(:root[data-focus-ring="fade"]) :focus-visible{transition:outline-color var(--focus-fade) ease-out}
 .mono,.k{font-family:var(--mono);font-variant-ligatures:var(--mono-ligatures);font-variant-numeric:tabular-nums}
 .lab{font:600 12px/1.3 var(--disp);color:var(--ink-2)}
 .muted{color:var(--muted)}.faint{color:var(--faint)}.amber{color:var(--amber)}.fail{color:var(--fail)}.ok{color:var(--ok)}.link{color:var(--link)}

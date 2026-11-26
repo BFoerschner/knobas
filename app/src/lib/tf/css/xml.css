@@ -110,7 +110,6 @@
    2026-11-23: the field stood in the rail first, where 300 px cut every query. ---- */
 .tf-xv-qbar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 38%); align-items: center; column-gap: 14px; height: 42px; box-sizing: border-box; padding: 0 12px; border-bottom: 1px solid var(--rule-2); background: var(--sheet); }
 .tf-xv-qbar .tf-minif.tf-xv-qfield { max-width: none; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 6px 0 9px; gap: 8px; cursor: text; }
-.tf-xv-qfield:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
 .tf-xv-qfield input { min-width: 0; flex: 1; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-xv-lang { flex: none; font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 700; color: var(--ink-2); letter-spacing: .02em; }
 .tf-xv-qsay { min-width: 0; height: 32px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: calc(var(--t-xs) * var(--fs)); line-height: 16px; color: var(--ink-2); }
