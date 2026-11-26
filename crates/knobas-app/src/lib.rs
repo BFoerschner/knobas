@@ -76,6 +76,8 @@ pub mod time;
 pub mod update;
 pub mod webview_menu;
 pub mod window_look;
+#[cfg(windows)]
+mod win_registry;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
@@ -1886,10 +1888,23 @@ fn start_app(app: &tauri::App, demo: bool, log_sink: &logging::Sink) -> tauri::R
     if let Err(error) = stop_signals::listen(move |_| quitting.exit(0)) {
         tracing::warn!(%error, "no stop-signal handler: a signal leaves the database running");
     }
-    let profile = Profile::new(demo, &handle.path().app_data_dir()?);
+    let app_data_dir = handle.path().app_data_dir()?;
+    let profile = Profile::new(demo, &app_data_dir);
     tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
-    // The desktop notification sender (#339) over the real backend.
-    let backend: std::sync::Arc<dyn notify::Backend> = std::sync::Arc::new(notify::platform::show);
+    // The desktop notification sender (#339) over the real backend, sending
+    // Windows toasts under the bundle identifier, registered with knobas's
+    // name and icon first (#2529). A failed registration costs the toasts of
+    // a run without a Start menu shortcut, not the start.
+    let identifier = handle.config().identifier.clone();
+    #[cfg(windows)]
+    {
+        let name = handle.config().product_name.as_deref().unwrap_or("knobas");
+        if let Err(error) = notify::platform::register_aumid(&identifier, name, &app_data_dir) {
+            tracing::warn!(%error, "the notification identity is not registered");
+        }
+    }
+    let backend: std::sync::Arc<dyn notify::Backend> =
+        std::sync::Arc::new(notify::platform::Desktop::new(&identifier));
     manage_app_state(&handle, profile, backend);
     // The updater needs no database: its settings are a file, so the start
     // screen can offer an update when PostgreSQL will not start (ADR-0052).

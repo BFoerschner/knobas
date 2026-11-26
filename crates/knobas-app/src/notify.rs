@@ -295,9 +295,165 @@ impl Notifier {
     }
 }
 
-/// The real backend: `notify-rust`, on whichever OS this is.
+/// The action id of a body click, on every backend.
+pub const DEFAULT: &str = "default";
+
+/// What a shown desktop notification reported, in words the wait decides on
+/// whichever platform said it (#2529). Windows is the one backend that feeds
+/// these today ([`platform`]'s toast); the rule they serve is here so it is
+/// tested on every OS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reported {
+    /// The body was clicked.
+    Body,
+    /// A button with this id was clicked.
+    Button(String),
+    /// The banner timed out. On Windows that is `ToastDismissalReason::TimedOut`,
+    /// and the toast has moved into Action Center, where it can still be
+    /// clicked: it is not a clear.
+    BannerExpired,
+    /// The reader dismissed it, the app hid it, or the platform failed it:
+    /// nothing more will come.
+    Gone,
+}
+
+/// A Windows toast activation, by its `Arguments`: empty for the body (the
+/// toast carries no `launch` arguments), a button's id otherwise.
+#[must_use]
+pub fn reported_activation(arguments: &str) -> Reported {
+    if arguments.is_empty() {
+        Reported::Body
+    } else {
+        Reported::Button(arguments.to_owned())
+    }
+}
+
+/// A Windows toast dismissal: a timed-out banner went to Action Center; every
+/// other reason (the reader, the app, an unknown one) ends it.
+#[must_use]
+pub fn reported_dismissal(timed_out: bool) -> Reported {
+    if timed_out {
+        Reported::BannerExpired
+    } else {
+        Reported::Gone
+    }
+}
+
+/// Read a notification's reports until one decides it, and answer with the
+/// action id: [`DEFAULT`] for the body, the button's id, or [`CLOSED`].
+///
+/// `next` answers `None` once the platform can report nothing more (its
+/// senders dropped), which is a clear. A banner that expired into Action
+/// Center is read past, so a click there still reaches the item -- the trap
+/// in `notify-rust` 4.18.0's Windows handle, whose one `recv` answers the
+/// expiry and drops the receiver the later click is sent to (#2529).
+pub fn decide(mut next: impl FnMut() -> Option<Reported>) -> String {
+    loop {
+        match next() {
+            Some(Reported::Body) => return DEFAULT.to_owned(),
+            Some(Reported::Button(id)) => return id,
+            Some(Reported::BannerExpired) => {}
+            Some(Reported::Gone) | None => return CLOSED.to_owned(),
+        }
+    }
+}
+
+/// The toast document for a draft: the generic template, title then body as
+/// text, escaped. No `launch` arguments, so a body click activates with empty
+/// ones ([`reported_activation`]).
+#[must_use]
+pub fn toast_xml(title: &str, body: &str) -> String {
+    format!(
+        "<toast><visual><binding template=\"ToastGeneric\">\
+         <text>{}</text><text>{}</text>\
+         </binding></visual></toast>",
+        xml_text(title),
+        xml_text(body)
+    )
+}
+
+fn xml_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The per-user registry values that give an AUMID a name and an icon in
+/// toasts and Action Center, written by [`platform::register_aumid`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AumidKey {
+    /// Under `HKEY_CURRENT_USER`.
+    pub subkey: String,
+    /// `(value name, REG_SZ value)`, in write order.
+    pub values: Vec<(&'static str, String)>,
+}
+
+/// What to write so Windows knows `app_id` by `display_name` and `icon`
+/// without a Start menu shortcut: `Software\Classes\AppUserModelId\<id>`,
+/// the registration the Windows Community Toolkit and the Windows App SDK
+/// make for an unpackaged app. An installed knobas has the shortcut too,
+/// carrying the same id and name, so the two agree.
+#[must_use]
+pub fn aumid_registration(app_id: &str, display_name: &str, icon: &std::path::Path) -> AumidKey {
+    AumidKey {
+        subkey: format!("Software\\Classes\\AppUserModelId\\{app_id}"),
+        values: vec![
+            ("DisplayName", display_name.to_owned()),
+            ("IconUri", icon.display().to_string()),
+        ],
+    }
+}
+
+/// The real backend: a WinRT toast on Windows, `notify-rust` elsewhere.
 pub mod platform {
-    use super::{NotificationDraft, Wait};
+    use super::{Backend, NotificationDraft, Wait};
+
+    /// The desktop notification backend, carrying the identity a Windows
+    /// toast is sent under.
+    pub struct Desktop {
+        app_id: String,
+    }
+
+    impl Desktop {
+        /// `app_id` is the bundle identifier (`tauri.conf.json`'s
+        /// `identifier`): the AUMID Tauri's installer puts on the Start menu
+        /// shortcut, and the one [`register_aumid`] registers. Read on
+        /// Windows only; the other backends take the identity from the
+        /// running bundle.
+        #[must_use]
+        pub fn new(app_id: &str) -> Self {
+            Self {
+                app_id: app_id.to_owned(),
+            }
+        }
+
+        /// The identity toasts are sent under.
+        #[must_use]
+        pub fn app_id(&self) -> &str {
+            &self.app_id
+        }
+    }
+
+    impl Backend for Desktop {
+        #[cfg(windows)]
+        fn show(&self, draft: &NotificationDraft) -> Result<Wait, String> {
+            toast::show(&self.app_id, draft)
+        }
+
+        #[cfg(not(windows))]
+        fn show(&self, draft: &NotificationDraft) -> Result<Wait, String> {
+            show(draft)
+        }
+    }
 
     /// Show `draft` with `notify-rust` and hand back its handle's wait.
     ///
@@ -316,6 +472,7 @@ pub mod platform {
     /// # Errors
     ///
     /// `notify-rust`'s error, displayed.
+    #[cfg(not(windows))]
     pub fn show(draft: &NotificationDraft) -> Result<Wait, String> {
         let mut notification = notify_rust::Notification::new();
         notification.summary(&draft.title).body(&draft.body);
@@ -331,6 +488,124 @@ pub mod platform {
             handle.wait_for_action(|reported| action = reported.to_owned());
             action
         }))
+    }
+
+    /// Register `app_id` for the current user with knobas's name and icon
+    /// ([`super::aumid_registration`]), the icon written as a PNG into
+    /// `data_dir`. Without it a toast sent under an id that no shortcut
+    /// carries (a dev or portable run) is not shown at all. Idempotent, so
+    /// it runs on every start and follows a moved install.
+    ///
+    /// # Errors
+    ///
+    /// The icon write or the registry write that failed, as a sentence.
+    #[cfg(windows)]
+    pub fn register_aumid(
+        app_id: &str,
+        display_name: &str,
+        data_dir: &std::path::Path,
+    ) -> Result<(), String> {
+        const ICON: &[u8] = include_bytes!("../icons/128x128.png");
+        std::fs::create_dir_all(data_dir)
+            .map_err(|error| format!("{}: {error}", data_dir.display()))?;
+        let icon = data_dir.join("notification-icon.png");
+        std::fs::write(&icon, ICON).map_err(|error| format!("{}: {error}", icon.display()))?;
+        let key = super::aumid_registration(app_id, display_name, &icon);
+        for (name, value) in &key.values {
+            crate::win_registry::set_string(&key.subkey, Some(name), value.as_ref())?;
+        }
+        Ok(())
+    }
+
+    /// The Windows toast, on WinRT directly rather than through
+    /// `notify-rust`'s handle (#2529). That handle answers a body click as
+    /// [`super::CLOSED`] through `wait_for_action`, and its one `recv`
+    /// returns on the banner's timeout and drops the receiver a later click
+    /// from Action Center is sent to; it also lets go of the
+    /// `ToastNotification` once shown. Here the toast and its notifier are
+    /// held for the whole wait, the handlers report into a channel the wait
+    /// reads until [`super::decide`] decides, and the id is knobas's.
+    #[cfg(windows)]
+    mod toast {
+        use std::sync::mpsc;
+
+        use windows::Data::Xml::Dom::XmlDocument;
+        use windows::Foundation::TypedEventHandler;
+        use windows::UI::Notifications::{
+            ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs,
+            ToastFailedEventArgs, ToastNotification, ToastNotificationManager,
+        };
+        use windows::core::{HSTRING, IInspectable, Interface};
+
+        use crate::notify::{
+            NotificationDraft, Reported, Wait, decide, reported_activation, reported_dismissal,
+            toast_xml,
+        };
+
+        fn said(error: windows::core::Error) -> String {
+            format!("Windows toast: {error}")
+        }
+
+        pub fn show(app_id: &str, draft: &NotificationDraft) -> Result<Wait, String> {
+            let xml = XmlDocument::new().map_err(said)?;
+            xml.LoadXml(&HSTRING::from(toast_xml(&draft.title, &draft.body)))
+                .map_err(said)?;
+            let toast = ToastNotification::CreateToastNotification(&xml).map_err(said)?;
+            let (report, reports) = mpsc::channel::<Reported>();
+
+            let activated = report.clone();
+            toast
+                .Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
+                    move |_, args| {
+                        let arguments = args
+                            .as_ref()
+                            .and_then(|args| args.cast::<ToastActivatedEventArgs>().ok())
+                            .and_then(|args| args.Arguments().ok())
+                            .map(|arguments| arguments.to_string())
+                            .unwrap_or_default();
+                        let _ = activated.send(reported_activation(&arguments));
+                        Ok(())
+                    },
+                ))
+                .map_err(said)?;
+            let dismissed = report.clone();
+            toast
+                .Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(
+                    move |_, args| {
+                        let reason = args.as_ref().and_then(|args| args.Reason().ok());
+                        let _ = dismissed.send(reported_dismissal(
+                            reason == Some(ToastDismissalReason::TimedOut),
+                        ));
+                        Ok(())
+                    },
+                ))
+                .map_err(said)?;
+            toast
+                .Failed(&TypedEventHandler::<ToastNotification, ToastFailedEventArgs>::new(
+                    move |_, args| {
+                        let code = args.as_ref().and_then(|args| args.ErrorCode().ok());
+                        tracing::warn!(?code, "the Windows toast failed");
+                        let _ = report.send(Reported::Gone);
+                        Ok(())
+                    },
+                ))
+                .map_err(said)?;
+
+            let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
+                app_id,
+            ))
+            .map_err(said)?;
+            notifier.Show(&toast).map_err(said)?;
+            Ok(Box::new(move || {
+                // Held until the wait ends: the handlers live on the toast,
+                // and a toast nothing holds can lose them before a click from
+                // Action Center arrives.
+                let held = (toast, notifier);
+                let action = decide(|| reports.recv().ok());
+                drop(held);
+                action
+            }))
+        }
     }
 }
 
@@ -636,6 +911,123 @@ mod tests {
         open.send(()).expect("the emit is waiting on the gate");
         b.settled();
         assert_eq!(b.clicked(), vec!["#/inbox"]);
+    }
+
+    /// Feed `decide` a fixed run of reports, and say how many it read.
+    fn decided(reports: Vec<Reported>) -> (String, usize) {
+        let mut reports = reports.into_iter();
+        let mut read = 0;
+        let action = decide(|| {
+            read += 1;
+            reports.next()
+        });
+        (action, read)
+    }
+
+    /// A Windows toast's body click comes as an activation with no
+    /// arguments, and it is a click -- the `"default"` action -- not the
+    /// clear `notify-rust`'s `wait_for_action` turned it into (#2529).
+    #[test]
+    fn a_body_click_is_the_default_action() {
+        assert_eq!(reported_activation(""), Reported::Body);
+        assert_eq!(decided(vec![Reported::Body]), ("default".to_owned(), 1));
+    }
+
+    /// A button's activation carries its id, which is the action.
+    #[test]
+    fn a_button_click_is_its_own_action() {
+        assert_eq!(
+            reported_activation("snooze"),
+            Reported::Button("snooze".to_owned())
+        );
+        assert_eq!(
+            decided(vec![Reported::Button("snooze".to_owned())]),
+            ("snooze".to_owned(), 1)
+        );
+    }
+
+    /// The banner timing out moves the toast into Action Center, where it
+    /// can still be clicked: the wait reads past it and the later click
+    /// still opens the item (#2529).
+    #[test]
+    fn a_banner_that_times_out_into_action_center_still_waits_for_its_click() {
+        assert_eq!(reported_dismissal(true), Reported::BannerExpired);
+        assert_eq!(
+            decided(vec![Reported::BannerExpired, Reported::Body]),
+            ("default".to_owned(), 2)
+        );
+    }
+
+    /// A dismiss, the app hiding it or a failure ends the wait as a clear,
+    /// after the banner expired as well as before.
+    #[test]
+    fn a_dismiss_ends_the_wait_as_a_clear() {
+        assert_eq!(reported_dismissal(false), Reported::Gone);
+        assert_eq!(decided(vec![Reported::Gone]), (CLOSED.to_owned(), 1));
+        assert_eq!(
+            decided(vec![Reported::BannerExpired, Reported::Gone, Reported::Body]),
+            (CLOSED.to_owned(), 2),
+            "nothing after a dismiss is read"
+        );
+    }
+
+    /// A notification the platform let go of (every sender dropped) is a
+    /// clear, not a wait that never ends.
+    #[test]
+    fn a_notification_the_platform_dropped_ends_as_a_clear() {
+        assert_eq!(
+            decided(vec![Reported::BannerExpired]),
+            (CLOSED.to_owned(), 2)
+        );
+    }
+
+    /// The toast's XML carries the title and body as text, escaped, so an
+    /// item called `<b>` or `a & b` shows as written and cannot break the
+    /// document the toast is built from.
+    #[test]
+    fn the_toast_xml_carries_title_and_body_escaped() {
+        assert_eq!(
+            toast_xml("PAY-1 <b> & \"x\"", "it's 'done'"),
+            "<toast><visual><binding template=\"ToastGeneric\">\
+             <text>PAY-1 &lt;b&gt; &amp; &quot;x&quot;</text>\
+             <text>it&apos;s &apos;done&apos;</text>\
+             </binding></visual></toast>"
+        );
+    }
+
+    /// The toast identity is the bundle identifier: the AUMID Tauri's
+    /// installer stamps on the Start menu shortcut, so a toast from an
+    /// installed knobas and its taskbar button are one app, and not
+    /// PowerShell's fallback id (#2529).
+    #[test]
+    fn the_toast_identity_is_the_bundle_identifier() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let identifier = config["identifier"].as_str().expect("an identifier");
+        assert_eq!(platform::Desktop::new(identifier).app_id(), "dev.knobas.desktop");
+    }
+
+    /// The per-user registration that gives a toast knobas's name and icon
+    /// without a shortcut (a dev or portable run): the key Windows looks the
+    /// AUMID up under, the name, and the icon file.
+    #[test]
+    fn the_aumid_registration_names_knobas_and_its_icon() {
+        let key = aumid_registration(
+            "dev.knobas.desktop",
+            "knobas",
+            std::path::Path::new("C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png"),
+        );
+        assert_eq!(key.subkey, "Software\\Classes\\AppUserModelId\\dev.knobas.desktop");
+        assert_eq!(
+            key.values,
+            vec![
+                ("DisplayName", "knobas".to_owned()),
+                (
+                    "IconUri",
+                    "C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png".to_owned()
+                ),
+            ]
+        );
     }
 
     /// A platform that refuses is reported, and keeps no slot: the next send

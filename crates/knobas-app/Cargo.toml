@@ -229,7 +229,9 @@ webview2-com = "=0.38.2"
 windows-core = "=0.61.2"
 # *The window's own look* (`window_look.rs`): the system's side read from the registry before the window is built,
 # so WebView2 is made with the page colour of that side. The copy already in the lockfile through tao and wry.
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+# The desktop notification's toast (#2529, `notify.rs`) is sent on WinRT directly: the `Data_Xml_Dom`,
+# `Foundation` and `UI_Notifications` features `tauri-winrt-notification` already turns on for this copy.
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Data_Xml_Dom", "Foundation", "UI_Notifications"] }
 
 [target.'cfg(unix)'.dependencies]
 # A user renderer (#2262, ADR-0033) runs in a process group of its own, and
