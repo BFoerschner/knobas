@@ -55,7 +55,7 @@
   import { push } from "../../../shell/toasts.svelte";
   import { jsonQuery, jsonQueryClose } from "../../../ipc/api";
   import { DOC_KEYS, isKey } from "./doc-keys";
-  import { DocCheck, heldSettings, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
+  import { DocCheck, entryFor, heldSettings, rootSays, sameAsk, settingsFor, type CheckSettings, type RootSays } from "./doc-check.svelte";
   import TfXsdPage from "../xsd/TfXsdPage.svelte";
   import TfXsdRuns from "../xsd/TfXsdRuns.svelte";
   import TfXsdPoint from "../xsd/TfXsdPoint.svelte";
@@ -419,6 +419,12 @@
 
   /** The path the highlighter reads: the file's own where it names XML, else an XML file's. */
   const colourAs = $derived(kind !== "xml" ? (languageOf(path) === "json" ? path : "document.json") : languageOf(path) === "xml" || languageOf(path) === "xsl" ? path : "document.xml");
+  /** Whether the document's first tag names a schema or namespace: holds full rail-head room from the first frame. */
+  const expectsSchema = $derived.by(() => {
+    if (kind !== "xml") return false;
+    const root = rootSays(text);
+    return root !== null && entryFor(path, root) !== null;
+  });
 
   /** The longest line as drawn, in characters: every row is as wide, so a line's end holds to the pane's edge. */
   const longest = $derived.by(() => {
@@ -769,6 +775,19 @@
   let resultList = $state<HTMLElement | null>(null);
   let copyOpen = $state(false);
   let copyButton = $state<HTMLButtonElement | null>(null);
+  let levelsOpen = $state(false);
+  let levelsButton = $state<HTMLButtonElement | null>(null);
+  $effect(() => {
+    void st;
+    levelsOpen = false;
+  });
+  function pickLevel(level: number) {
+    levelsOpen = false;
+    const state = st;
+    if (state === null) return;
+    state.toLevel(level);
+    void tick().then(() => (state.cursor > 0 ? lines?.reveal(state.cursor, false) : undefined));
+  }
 
   /** The lines of what the rail lists, in its order: the break of a broken file, or the matches. */
   function listed(state: DocState): number[] {
@@ -927,7 +946,7 @@
       void tick().then(() => (state.cursor > 0 ? lines?.reveal(state.cursor, false) : undefined));
       return;
     }
-    if (key === "Enter" && state.cursor > 0) {
+    if (key === "Enter" && state.cursor > 0 && target?.closest("button, a") == null) {
       // What the line holds: its address or path, else its value, else its fold.
       const links = (linkCache.get(state.cursor) ?? []).filter((l) => l.kind !== "namespace");
       done();
@@ -985,6 +1004,7 @@
     <TfDocRail
       st={state}
       json={kind !== "xml"}
+      {expectsSchema}
       bind:mode
       ongo={(n) => void go(n)}
       {check}
@@ -1042,9 +1062,13 @@
             <button
               type="button"
               class="tf-xv-stepn"
+              bind:this={levelsButton}
+              aria-haspopup="menu"
+              aria-expanded={levelsOpen}
               aria-label="{state.levels} of {state.depth} levels shown"
-              title={state.levels >= state.depth ? `All ${state.depth} levels are shown` : `${state.levels} of ${state.depth} levels are shown. Press to unfold everything (0)`}
-              onclick={() => state.toLevel(0)}>{state.depth === 0 ? "–" : state.levels}</button
+              title={state.depth === 0 ? "Nothing to fold" : state.levels >= state.depth ? `All ${state.depth} levels are shown. Press to pick a level (0–9)` : `${state.levels} of ${state.depth} levels are shown. Press to pick a level (0–9)`}
+              disabled={state.depth === 0}
+              onclick={() => (levelsOpen = !levelsOpen)}>{state.depth === 0 ? "–" : state.levels}</button
             >
             <button type="button" aria-label="Show one level more" title="Unfold one more level (+)" disabled={state.levels >= state.depth} onclick={() => state.stepLevel(1)}>+</button>
           </span>
@@ -1169,6 +1193,24 @@
     {#if kind !== "xml" && onpipeline !== null}
       <button type="button" role="menuitem" onclick={() => ((copyOpen = false), st !== null && onpipeline?.(st.source.trim()))}>Use as this file's pipeline</button>
     {/if}
+  </TfMenu>
+{/if}
+
+{#if levelsOpen && levelsButton !== null && st !== null && st.depth > 0}
+  {@const state = st}
+  {@const allOpen = state.folded.size === 0}
+  <TfMenu bind:open={levelsOpen} opener={levelsButton} label="Levels shown" className="tf-xv-lvmenu" focusOn="[aria-checked=true]">
+    <button type="button" role="menuitemradio" aria-checked={allOpen} onclick={() => pickLevel(0)}>
+      <span>All</span>{#if allOpen}<span aria-hidden="true">✓</span>{/if}
+    </button>
+    <hr />
+    {#each { length: state.depth } as _, i (i)}
+      {@const level = i + 1}
+      {@const active = !allOpen && state.levels === level}
+      <button type="button" role="menuitemradio" aria-checked={active} onclick={() => pickLevel(level)}>
+        <span>{level}</span>{#if active}<span aria-hidden="true">✓</span>{/if}
+      </button>
+    {/each}
   </TfMenu>
 {/if}
 
