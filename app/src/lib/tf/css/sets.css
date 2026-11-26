@@ -26,11 +26,11 @@
 .tf-hint-card b { font-weight: 600; }
 .tf-set-desc:empty::before { content: attr(data-placeholder); color: var(--ink-2); }
 /* The title and the description are edited in place, so pointing at them draws a field's outline. An underline read as a link. */
-.tf-set-title, .tf-set-desc { border-radius: 3px; cursor: text; outline: 1px solid transparent; outline-offset: 2px; }
+.tf-set-title, .tf-set-desc { border-radius: 3px; cursor: text; --set-edit-w: 1px; outline: var(--set-edit-w) solid transparent; outline-offset: var(--focus-off); }
 .tf-set-title:hover, .tf-set-desc:hover { outline-color: var(--ink-2); }
-.tf-set-title:focus, .tf-set-desc:focus { outline-color: var(--rule); background: var(--field); }
-:where(:root[data-focus-ring]) .tf-set-title:focus-visible, :where(:root[data-focus-ring]) .tf-set-desc:focus-visible { outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent); outline-offset: var(--focus-off); }
-:where(:root[data-focus-ring="fade"]) .tf-set-title:focus-visible, :where(:root[data-focus-ring="fade"]) .tf-set-desc:focus-visible { transition: outline-color var(--focus-fade) ease-out; }
+.tf .tf-set-title:focus, .tf .tf-set-desc:focus { outline: var(--set-edit-w) solid var(--rule); background: var(--field); }
+:where(:root[data-focus-ring]) .tf .tf-set-title:focus-visible, :where(:root[data-focus-ring]) .tf .tf-set-desc:focus-visible { outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent); outline-offset: var(--focus-off); }
+:where(:root[data-focus-ring="fade"]) .tf .tf-set-title:focus-visible, :where(:root[data-focus-ring="fade"]) .tf .tf-set-desc:focus-visible { transition: outline-color var(--focus-fade) ease-out; }
 .tf-set-desc { width: fit-content; max-width: 100%; min-width: 24ch; }
 .tf-cbody.tf-set { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-set, 300px); gap: 22px; align-items: start; }
 .tf-set > .tf-sedge { --tf-sedge-gap: 22px; }

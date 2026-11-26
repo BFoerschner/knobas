@@ -13,6 +13,8 @@
  * change, so a run of keys or presses costs one write.
  */
 const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn", "FnLock", "Hyper", "Super", "OS", "AltGraph"]);
+const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+const COMPOSITE_ROLES = new Set(["listbox", "tree", "grid", "menu", "menubar", "tablist", "radiogroup"]);
 
 export const FOCUS_HOLD_MS = 1200;
 export const FOCUS_FADE_MS = 300;
@@ -27,6 +29,14 @@ export function handOfKey(key: string): InputHand | null {
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Whether `el` is a non-editable composite widget (e.g. a listbox rail) that moves an internal cursor without firing `focusin`. */
+function isCompositeFocus(el: Element | null): boolean {
+  if (el === null) return false;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return false;
+  if (el instanceof HTMLElement && el.isContentEditable) return false;
+  return COMPOSITE_ROLES.has(el.getAttribute("role") ?? "") || el.hasAttribute("aria-activedescendant");
 }
 
 export function installInputModality(root: HTMLElement = document.documentElement): () => void {
@@ -90,7 +100,7 @@ export function installInputModality(root: HTMLElement = document.documentElemen
     const next = handOfKey(event.key);
     if (next === null) return;
     setHand(next);
-    if (event.key === "Tab") showRing();
+    if (event.key === "Tab" || (NAV_KEYS.has(event.key) && isCompositeFocus(document.activeElement))) showRing();
   };
 
   const onFocusIn = (event: FocusEvent): void => {

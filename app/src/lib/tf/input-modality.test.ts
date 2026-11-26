@@ -291,3 +291,47 @@ test("blurring to nothing clears the ring immediately", () => {
     button.remove();
   }
 });
+
+test("arrow navigation inside a composite listbox restarts the ring without triggering on text inputs or buttons", () => {
+  vi.useFakeTimers();
+  setReducedMotion(false);
+  off = installInputModality();
+  const root = document.documentElement;
+  const listbox = document.createElement("div");
+  listbox.setAttribute("role", "listbox");
+  listbox.tabIndex = 0;
+  const input = document.createElement("input");
+  const button = document.createElement("button");
+  document.body.append(listbox, input, button);
+  try {
+    key("Tab");
+    listbox.focus();
+    vi.advanceTimersByTime(FOCUS_HOLD_MS + FOCUS_FADE_MS);
+    expect(root.dataset.focusRing).toBeUndefined();
+
+    // Moving the internal cursor via arrow key restarts the transient ring even with no focusin.
+    key("ArrowDown", listbox);
+    expect(root.dataset.focusRing).toBe("on");
+    vi.advanceTimersByTime(FOCUS_HOLD_MS);
+    expect(root.dataset.focusRing).toBe("fade");
+    vi.advanceTimersByTime(FOCUS_FADE_MS);
+    expect(root.dataset.focusRing).toBeUndefined();
+
+    // Arrow keys inside a text input or while a plain button holds focus do not flash a ring.
+    press(input);
+    input.focus();
+    key("ArrowLeft", input);
+    expect(root.dataset.focusRing).toBeUndefined();
+
+    key("Tab");
+    button.focus();
+    vi.advanceTimersByTime(FOCUS_HOLD_MS + FOCUS_FADE_MS);
+    expect(root.dataset.focusRing).toBeUndefined();
+    key("ArrowDown", button);
+    expect(root.dataset.focusRing).toBeUndefined();
+  } finally {
+    listbox.remove();
+    input.remove();
+    button.remove();
+  }
+});

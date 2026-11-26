@@ -235,7 +235,7 @@ a { color: var(--link); text-decoration: none; }
 :where(:root[data-focus-ring]) .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent); outline-offset: var(--focus-in); }
 :where(:root[data-focus-ring="fade"]) .tf :is(.tf-fsearch, .tf-minif):focus-within { transition: outline-color var(--focus-fade) ease-out; }
 /* Pointer presses never draw a focus ring (`input-modality.ts` sets `data-input="pointer"`). */
-:root[data-input="pointer"] .tf :focus-visible, :root[data-input="pointer"] .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: none; }
+:where(:root[data-input="pointer"]) .tf :focus-visible, :where(:root[data-input="pointer"]) .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: none; }
 /* On a yellow card the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
 .tf .tf-card { --focus-c: var(--card-ink); }
 /* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */
