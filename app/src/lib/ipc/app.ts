@@ -23,8 +23,11 @@ import type {
   MadeStore,
   MadeTree,
   JavaRuntime,
+  LinkHandoffScope,
+  LinkHandoffSetting,
   NamedPipeline,
   NamedPipelineDraft,
+  NativeHostStatus,
   RenderContent,
   RendererDefault,
   RenderRun,
@@ -60,10 +63,14 @@ export type {
   ReadFrom,
   InstalledFont,
   JavaRuntime,
+  LinkHandoffScope,
+  LinkHandoffSetting,
+  LinkHandoffTarget,
   FoundJava,
   KeptField,
   NamedPipeline,
   NamedPipelineDraft,
+  NativeHostStatus,
   RenderContent,
   RendererDefault,
   RendererInput,
@@ -348,4 +355,34 @@ export function javaRuntime(again: boolean): Promise<JavaRuntime> {
 /** Settings' Java for *Decompile* — `set_java_path`: an absolute path to a `java` or a Java home, `null` to look by itself. */
 export function setJavaPath(path: string | null): Promise<JavaRuntime> {
   return invoke<JavaRuntime>("set_java_path", { path });
+}
+
+/** One source's *Open matching links in knobas* setting (ADR-0061). */
+export function sourceLinkHandoff(id: string): Promise<LinkHandoffSetting> {
+  return invoke<LinkHandoffSetting>("source_link_handoff", { id });
+}
+
+/** Persist one source's *Open matching links in knobas* setting (ADR-0061). */
+export function setSourceLinkHandoff(id: string, enabled: boolean, scope: LinkHandoffScope): Promise<LinkHandoffSetting> {
+  return invoke<LinkHandoffSetting>("set_source_link_handoff", { id, enabled, scope });
+}
+
+/** Firefox Native Messaging host manifest status on this machine (ADR-0061). */
+export function firefoxHostStatus(): Promise<NativeHostStatus> {
+  return invoke<NativeHostStatus>("firefox_host_status");
+}
+
+/** Install or update the Firefox Native Messaging host manifest (ADR-0061). */
+export function installFirefoxHost(): Promise<NativeHostStatus> {
+  return invoke<NativeHostStatus>("install_firefox_host");
+}
+
+/** Remove the Firefox Native Messaging host manifest (ADR-0061). */
+export function uninstallFirefoxHost(): Promise<NativeHostStatus> {
+  return invoke<NativeHostStatus>("uninstall_firefox_host");
+}
+
+/** Record a short-lived one-shot *Open in browser* bypass for `url` (ADR-0061). */
+export function recordBrowserBypass(url: string): Promise<void> {
+  return invoke<void>("record_browser_bypass", { url });
 }

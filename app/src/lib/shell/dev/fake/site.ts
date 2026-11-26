@@ -10,6 +10,7 @@
  * that long. A view commits its page 250 ms after it is
  * made, as a fast local site would.
  */
+import type { LinkHandoffScope, LinkHandoffSetting, NativeHostStatus } from "../../../ipc/app";
 import type { SiteInsets, SiteSetting, SiteStatus } from "../../../ipc/site";
 import { onFakeReset } from "../fake-seed";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -144,6 +145,26 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     ]),
   );
   const sites = new Map<string, FakeSite>();
+  const handoff = new Map<string, LinkHandoffSetting>(
+    Object.keys(BASES).map((source) => [
+      source,
+      {
+        source,
+        enabled: source === "jira",
+        scope: "known_items" as LinkHandoffScope,
+      },
+    ]),
+  );
+  let hostInstalled = true;
+  const hostStatus = (): NativeHostStatus => ({
+    installed: hostInstalled,
+    supported: true,
+    host_name: "dev.knobas.desktop",
+    extension_id: "link-handoff@knobas.dev",
+    manifest_path: "/Users/dev/Library/Application Support/Mozilla/NativeMessagingHosts/dev.knobas.desktop.json",
+    executable_path: hostInstalled ? "/Applications/knobas.app/Contents/MacOS/knobas" : null,
+    matches_current: hostInstalled,
+  });
   let kept = 2;
 
   const emit = (site: FakeSite) => {
@@ -302,6 +323,27 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // The theme store kept in the database for backups (Björn, 2026-11-22): the browser keeps none.
     themes_kept: () => null,
     set_themes_kept: () => null,
+    source_link_handoff: (args) => {
+      const id = String(args["id"]);
+      return handoff.get(id) ?? { source: id, enabled: false, scope: "known_items" as LinkHandoffScope };
+    },
+    set_source_link_handoff: (args) => {
+      const id = String(args["id"]);
+      const scope = (args["scope"] === "whole_source" ? "whole_source" : "known_items") as LinkHandoffScope;
+      const next: LinkHandoffSetting = { source: id, enabled: args["enabled"] === true, scope };
+      handoff.set(id, next);
+      return next;
+    },
+    firefox_host_status: () => hostStatus(),
+    install_firefox_host: () => {
+      hostInstalled = true;
+      return hostStatus();
+    },
+    uninstall_firefox_host: () => {
+      hostInstalled = false;
+      return hostStatus();
+    },
+    record_browser_bypass: () => null,
     site_reveal_download: () => null,
     sites_kept: () => kept,
     set_sites_kept: (args) => {
