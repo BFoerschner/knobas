@@ -4,7 +4,8 @@
   of the app's real code areas (`TfThemePreview.svelte`), with how a diff's unchanged lines draw and whether comments
   slant under it.
 
-  A built-in is read-only: its swatches are not buttons and its first action is *Duplicate and edit*. Each row gives
+  A built-in keeps its colours: its first action is *Duplicate and edit*, and its swatches open their panels as a theme
+  of one's own does, the first colour changed there going to a copy, put where it drew (#2516). Each row gives
   the role's lowest contrast over every surface code is drawn on (`theme/contrast.ts`); under 4.5:1 the row says on
   which, and offers the fix that moves the colour's lightness alone.
 -->
@@ -32,6 +33,7 @@
     onduplicate,
     ondelete,
     onfixcopy,
+    onfork,
   }: {
     theme: Theme;
     themes: Themes;
@@ -41,6 +43,8 @@
     ondelete: (theme: Theme) => void;
     /** A built-in's fix: a copy of it with these colours, where it drew (Björn, 2026-11-22: built-ins keep their colours, and he lightens them). */
     onfixcopy: (theme: Theme, syntax: Partial<Theme["syntax"]>) => void;
+    /** A built-in's first colour change: a copy of it, where it drew, whose id the change goes to; `null` when none could be made. */
+    onfork: (theme: Theme) => string | null;
   } = $props();
 
   /** A short sample of each role, drawn in the role's own class. */
@@ -67,6 +71,8 @@
   const UNCHANGED_NAMES: Record<Unchanged, string> = { full: "Full colour", quiet: "Quiet", grey: "Grey" };
 
   const own = $derived(theme.id.startsWith("own-"));
+  /** Each row's swatch, whose panel its hex value opens (#2516). */
+  const swatches: Record<string, { openFrom(from: HTMLElement): void } | undefined> = {};
   /** The theme this one came from, where knobas still has it: what *Reset to ⟨from⟩'s* goes back to. */
   const source = $derived(theme.from === undefined || theme.from === theme.name ? undefined : [...BUILTINS, ...themes.own].find((t) => t.name === theme.from && t.id !== theme.id));
   const tints = $derived({ ...(theme.diff?.added ? { added: theme.diff.added } : {}), ...(theme.diff?.removed ? { removed: theme.diff.removed } : {}) });
@@ -76,9 +82,20 @@
   const surfaces = $derived(themes.colours(theme.kind));
   const DIFF_DEFAULT = $derived(diffDefault(surfaces));
 
+  /**
+   * The theme a colour change goes to: this one, or for a built-in the copy its first change makes (#2516). A colour the
+   * built-in has already is no change, so a panel opened to look makes no copy.
+   */
+  function changed(same: boolean): string | null {
+    if (own) return theme.id;
+    return same ? null : onfork(theme);
+  }
+
   function setRole(role: Role, next: string | undefined, preview = false): void {
+    const id = changed(next === theme.syntax[role]);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const syntax = { ...t.syntax };
         if (next === undefined) delete syntax[role];
@@ -90,8 +107,10 @@
   }
 
   function setDiff(key: DiffKey, next: string | undefined, preview = false): void {
+    const id = changed(next === theme.diff?.[key]);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const diff = { ...t.diff };
         if (next === undefined) delete diff[key];
@@ -125,6 +144,16 @@
     if (!own) return onfixcopy(theme, { [role]: next });
     setRole(role, next);
     undoable(`${ROLE_NAMES[role]} ${fixWord === "Darken" ? "darkened" : "lightened"} to 4.5:1.`, () => setRole(role, was), { subject: `theme-fix-${theme.id}-${role}` });
+  }
+
+  // ---------- Edit on a slot (#2516) ----------
+  let root = $state<HTMLElement | null>(null);
+  let heading = $state<HTMLElement | null>(null);
+  /** A slot's *Edit*: the editor scrolled to, smoothly unless motion is reduced, and its heading focused. */
+  export function reveal(): void {
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    root?.scrollIntoView?.({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    (renaming ? nameField : heading)?.focus({ preventScroll: true });
   }
 
   // ---------- rename ----------
@@ -170,7 +199,7 @@
   }
 </script>
 
-<div class="tf-thm-ed">
+<div class="tf-thm-ed" bind:this={root}>
   <div class="tf-thm-edh">
     {#if renaming}
       <input
@@ -189,7 +218,7 @@
         onblur={() => endRename(true)}
       />
     {:else}
-      <h2>{theme.name}</h2>
+      <h2 tabindex="-1" bind:this={heading}>{theme.name}</h2>
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
@@ -234,17 +263,18 @@
       {@const c = roleContrast(surfaces, role, value, tints)}
       <div class="tf-thm-role" class:tf-low={c.low} data-role={role}>
         <TfThemeSwatch
+          bind:this={swatches[role]}
           label={ROLE_NAMES[role]}
           {value}
           fallback={surfaces.ink}
-          editable={own}
+          editable
           resetTo={source ? source.syntax[role] : null}
           resetName={source?.name ?? ""}
           onchange={(next, preview) => setRole(role, next, preview)}
         />
         <span>{ROLE_NAMES[role]}</span>
         <code class="tf-hl-{role}" {@attach cssVars(() => ({ "--hl": value ?? "var(--ink)" }))}>{SAMPLE[role]}</code>
-        <span class="tf-thm-hex">{value ?? "ink"}</span>
+        <button type="button" class="tf-thm-hex" aria-label="{ROLE_NAMES[role]}: {value ?? 'ink'}" onclick={(event) => swatches[role]?.openFrom(event.currentTarget)}>{value ?? "ink"}</button>
         <span class="tf-thm-cr">{ratioText(c.ratio)}</span>
         {#if c.low}
           <div class="tf-thm-why">
@@ -259,10 +289,11 @@
       {@const value = theme.diff?.[key]}
       <div class="tf-thm-role" data-diff={key}>
         <TfThemeSwatch
+          bind:this={swatches[key]}
           label={DIFF_NAMES[key]}
           {value}
           fallback={DIFF_DEFAULT[key]}
-          editable={own}
+          editable
           inkable={false}
           resetTo={source ? (source.diff?.[key] ?? undefined) : null}
           resetName={source?.name ?? ""}
@@ -270,7 +301,7 @@
         />
         <span>{DIFF_NAMES[key]}</span>
         <code></code>
-        <span class="tf-thm-hex">{value ?? DIFF_DEFAULT[key]}</span>
+        <button type="button" class="tf-thm-hex" aria-label="{DIFF_NAMES[key]}: {value ?? DIFF_DEFAULT[key]}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{value ?? DIFF_DEFAULT[key]}</button>
         <span class="tf-thm-cr"></span>
       </div>
     {/each}

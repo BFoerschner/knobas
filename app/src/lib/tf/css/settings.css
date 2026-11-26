@@ -419,7 +419,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 button.tf-thm-sw { cursor: pointer; }
 .tf-thm-sw.tf-ink { background: linear-gradient(135deg, var(--ink) 0 50%, var(--sheet) 50% 100%); }
 .tf-thm-role code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+/* A colour's hex value is a button that opens its swatch's panel (#2516): drawn as the value, underlined under the pointer.
+   Its line height is set, not the face's own, so two of them in a row keep its height when the code face lands. */
+.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.3 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); border: 0; background: none; padding: 0; margin: 0; text-align: left; cursor: pointer; justify-self: start; }
+.tf-thm-hex:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-thm-cr { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-thm-role.tf-low { background: var(--warn-bg); padding-top: 5px; padding-bottom: 6px; row-gap: 3px; }
 .tf-thm-role.tf-low .tf-thm-cr { color: var(--warn); font-weight: 600; }
@@ -434,6 +437,16 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); contain: strict; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 .tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+/* A swatch's own picker (#2516): saturation across the square and brightness up it, over the hue the strip under it
+   picks; a ring marks where each stands. Its colours are the picture of every colour, not a theme's. */
+.tf-cp { display: grid; gap: 8px; }
+/* Each is its own layout root (`contain`; their sizes are set), as the Hex field is: a native picker's drag moves both
+   rings every frame, which otherwise laid out the whole editor (6x worst pick 343 ms against 100 without them). */
+.tf-cp-sv, .tf-cp-hue { position: relative; border: 1px solid var(--rule); touch-action: none; contain: strict; }
+.tf-cp-sv { height: 120px; border-radius: 4px; cursor: crosshair; background: linear-gradient(to top, #000000, transparent), linear-gradient(to right, #FFFFFF, transparent), var(--cp-hue); }
+.tf-cp-hue { height: 12px; border-radius: 4px; cursor: ew-resize; background: linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000); }
+.tf-cp-at { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #000000; pointer-events: none; }
+.tf-cp-hue .tf-cp-at { top: 50%; }
 /* The preview stays in view while the role list scrolls. */
 .tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; background: var(--paper); }
 .tf-thm-pre { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
@@ -449,8 +462,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-italic { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
 /* A code slot that follows a window theme with no code colours says which draws (ADR-0055). */
 .tf-thm-follow { grid-column: 1 / -1; margin: 0; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
-/* Code colours' editor: the line on a theme's window colours, over the role list. */
-.tf-thm-app { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* Code colours' editor: the line on a theme's window colours, over the role list and the preview both: a row of the
+   editor's grid to itself, so the list and the preview keep their columns (#2516). */
+.tf-thm-app { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Updates (ADR-0052; design system, *The update box*) ---------- */
 /* One box, the same rooms in every state: only its words, the track's fill and the two buttons' words change. */
 .tf-upd {
@@ -528,7 +542,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-apt-sws { display: flex; gap: 4px; }
 .tf-apt-eg { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; }
 .tf-apt-eg > span { overflow: hidden; text-overflow: ellipsis; }
-.tf-apt-hex { display: flex; align-items: center; gap: 5px; justify-content: flex-start; }
+.tf-apt-hex { display: flex; align-items: center; gap: 5px; justify-content: flex-start; min-width: 0; }
+/* A ground and its text: both values, one over the other (#2516). */
+.tf-apt-hexes { display: flex; flex-direction: column; align-items: flex-start; }
 .tf-apt-auto { font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; font-style: normal; }
 /* The examples: each drawn in the colour its row sets, on the ground it is checked against. */
 .tf-apt-plate { display: inline-block; flex: none; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); }
