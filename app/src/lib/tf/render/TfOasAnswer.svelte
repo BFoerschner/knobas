@@ -116,7 +116,15 @@
     {#if ok.follow !== null}<p class="tf-oas-hint">It points to <code>{ok.follow}</code>. knobas does not follow a redirect there by itself.</p>{/if}
     {#if ok.cut}<p class="tf-oas-hint">The answer is longer than 64 MiB. knobas kept its first 64 MiB.</p>{/if}
     {#if tab === "headers"}
-      <dl class="tf-oas-kv tf-oas-anshdrs">{#each ok.headers as [n, v], i (i)}<dt class="tf-oas-code">{n}</dt><dd class="tf-oas-code">{v}</dd>{/each}</dl>
+      {#if ok.headers.length === 0}
+        <p class="tf-oas-fnote">No headers.</p>
+      {:else}
+        <dl class="tf-oas-anshdrs">
+          {#each ok.headers as [n, v], i (i)}
+            <div class="tf-oas-anshdr"><dt class="tf-oas-code">{n}</dt><dd class="tf-oas-code">{v}</dd></div>
+          {/each}
+        </dl>
+      {/if}
     {:else if !drawable}
       <p class="tf-oas-fnote">{ok.content_type || "A body"} of {sizeWords(ok.bytes)}, not drawn here.</p>
     {:else if gone}

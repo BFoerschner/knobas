@@ -8,7 +8,23 @@ import { execFileSync } from "node:child_process";
 import { expect, test } from "vitest";
 
 import type { Operation, Scheme } from "./openapi";
-import { bodyText, curl, outgoing, requestLine, startDraft, startValue, type RequestDraft } from "./openapi-request";
+import {
+  DEFAULT_MANUAL_API_KEY,
+  MANUAL_API_KEY,
+  MANUAL_BASIC,
+  MANUAL_BEARER,
+  authPlace,
+  bodyText,
+  curl,
+  hasTypedSecret,
+  outgoing,
+  requestLine,
+  resolveScheme,
+  shownHeaders,
+  startDraft,
+  startValue,
+  type RequestDraft,
+} from "./openapi-request";
 
 const op = (o: Partial<Operation>): Operation => ({
   i: 0, method: "get", path: "/app/rest/builds/{buildLocator}", summary: "", description: "", operationId: null, deprecated: false,
@@ -94,4 +110,71 @@ test("no writer ever prints a secret's value: an outgoing request holds none to 
     expect(all).not.toMatch(/tok|secret-value|s3cret/);
     for (const [, v] of out.headers) if (typeof v !== "string") expect(Object.keys(v).sort()).toEqual(v.cookie === undefined ? ["scheme", "secret"] : ["cookie", "scheme", "secret"]);
   }
+});
+
+test("resolveScheme resolves spec schemes and manual Basic, Bearer, and API key (defaulting to Header: X-API-Key)", () => {
+  const specSchemes = [scheme({ name: "bearer", type: "http", scheme: "bearer" })];
+  expect(resolveScheme(null, specSchemes)).toBeNull();
+  expect(resolveScheme("", specSchemes)).toBeNull();
+  expect(resolveScheme("missing", specSchemes)).toBeNull();
+  expect(resolveScheme("bearer", specSchemes)?.name).toBe("bearer");
+
+  const basic = resolveScheme(MANUAL_BASIC, specSchemes)!;
+  expect(basic).toMatchObject({ name: MANUAL_BASIC, type: "http", scheme: "basic" });
+  expect(authPlace(basic)).toEqual({ place: "basic", name: "" });
+
+  const bearer = resolveScheme(MANUAL_BEARER, specSchemes)!;
+  expect(bearer).toMatchObject({ name: MANUAL_BEARER, type: "http", scheme: "bearer" });
+  expect(authPlace(bearer)).toEqual({ place: "bearer", name: "" });
+
+  const defKey = resolveScheme(MANUAL_API_KEY, specSchemes)!;
+  expect(DEFAULT_MANUAL_API_KEY).toEqual({ in: "header", name: "X-API-Key" });
+  expect(defKey).toMatchObject({ name: MANUAL_API_KEY, type: "apiKey", in: "header", keyName: "X-API-Key" });
+  expect(authPlace(defKey)).toEqual({ place: "header", name: "X-API-Key" });
+
+  const queryKey = resolveScheme(MANUAL_API_KEY, specSchemes, { in: "query", name: " api_token " })!;
+  expect(queryKey).toMatchObject({ name: MANUAL_API_KEY, type: "apiKey", in: "query", keyName: "api_token" });
+  expect(authPlace(queryKey)).toEqual({ place: "query", name: "api_token" });
+});
+
+test("hasTypedSecret accepts Basic auth with an empty password (token-as-username) and requires a secret otherwise", () => {
+  const basic = resolveScheme(MANUAL_BASIC, [])!;
+  const bearer = resolveScheme(MANUAL_BEARER, [])!;
+  const apiKey = resolveScheme(MANUAL_API_KEY, [])!;
+  expect(hasTypedSecret(null, "tok", "user")).toBe(false);
+  expect(hasTypedSecret(basic, "", "tok_as_user")).toBe(true);
+  expect(hasTypedSecret(basic, "pw", "")).toBe(true);
+  expect(hasTypedSecret(basic, "", "")).toBe(false);
+  expect(hasTypedSecret(bearer, "", "ignored")).toBe(false);
+  expect(hasTypedSecret(bearer, "tok", "")).toBe(true);
+  expect(hasTypedSecret(apiKey, "", "ignored")).toBe(false);
+  expect(hasTypedSecret(apiKey, "k-1", "")).toBe(true);
+});
+
+test("manual API key flows through outgoing, requestLine, shownHeaders, and curl, and blocks a blank key name", () => {
+  const baseOp = op({ path: "/items" });
+  const draft = startDraft(baseOp, {}, MANUAL_API_KEY);
+  draft.params = [];
+
+  const hdrScheme = resolveScheme(MANUAL_API_KEY, [], { in: "header", name: "X-API-Key" })!;
+  const hdrOut = outgoing(baseOp, draft, "https://api.example.com", hdrScheme);
+  expect(hdrOut.blocked).toBeNull();
+  expect(shownHeaders(hdrOut)).toContainEqual(["X-API-Key", "••••••••"]);
+  expect(curl(hdrOut)).toContain('-H "X-API-Key: $API_KEY"');
+
+  const qryScheme = resolveScheme(MANUAL_API_KEY, [], { in: "query", name: "token" })!;
+  const qryOut = outgoing(baseOp, draft, "https://api.example.com", qryScheme);
+  expect(qryOut.blocked).toBeNull();
+  expect(requestLine(qryOut)).toBe("GET https://api.example.com/items?token=••••••••");
+  expect(curl(qryOut)).toContain('"https://api.example.com/items?token=$API_KEY"');
+
+  const blankScheme = resolveScheme(MANUAL_API_KEY, [], { in: "header", name: "   " })!;
+  const blankOut = outgoing(baseOp, draft, "https://api.example.com", blankScheme);
+  expect(blankOut.blocked).toMatch(/API key name/);
+  expect(blankOut.headers.some(([n]) => n === "")).toBe(false);
+  expect(blankOut.secretQuery).toBeNull();
+
+  const quotedScheme = resolveScheme(MANUAL_API_KEY, [], { in: "header", name: 'X-"$Key`' })!;
+  const quotedOut = outgoing(baseOp, draft, "https://api.example.com", quotedScheme);
+  expect(curl(quotedOut)).toContain('-H "X-\\"\\$Key\\`: $API_KEY"');
 });

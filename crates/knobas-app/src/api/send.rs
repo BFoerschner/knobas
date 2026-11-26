@@ -250,19 +250,27 @@ pub fn prepare(send: &ApiSend) -> Result<(person::Request, url::Url), IpcError> 
             )),
             AuthPlace::Basic => {
                 use base64::Engine as _;
-                let pair = format!("{}:{}", secret.user().unwrap_or(""), secret.secret());
-                headers.push((
-                    "Authorization".into(),
-                    format!(
-                        "Basic {}",
-                        base64::engine::general_purpose::STANDARD.encode(pair)
-                    ),
-                ));
+                let mut pair = format!("{}:{}", secret.user().unwrap_or(""), secret.secret());
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&pair);
+                zeroize::Zeroize::zeroize(&mut pair);
+                headers.push(("Authorization".into(), format!("Basic {encoded}")));
             }
-            AuthPlace::Header => headers.push((auth.name.clone(), secret.secret().to_owned())),
+            AuthPlace::Header => {
+                let name = auth.name.trim();
+                if name.is_empty() {
+                    return Err(refuse("The API key header has no name."));
+                }
+                if name.contains(['\r', '\n']) {
+                    return Err(refuse("The API key header holds a line break."));
+                }
+                headers.push((name.to_owned(), secret.secret().to_owned()));
+            }
             AuthPlace::Query => {
-                url.query_pairs_mut()
-                    .append_pair(&auth.name, secret.secret());
+                let name = auth.name.trim();
+                if name.is_empty() {
+                    return Err(refuse("The API key query parameter has no name."));
+                }
+                url.query_pairs_mut().append_pair(name, secret.secret());
             }
             AuthPlace::Cookie => headers.push((
                 "Cookie".into(),
