@@ -60,6 +60,15 @@
 
   /** The theme in the editor: the one last chosen or edited, at first the one the window draws now. */
   let editingId = $state(untrack(() => themes.slot(drawnSide)));
+  // Light or dark chosen while the page is open puts that side's theme in the editor (#2516); a theme chosen or
+  // edited stays there until the side changes again.
+  let editedSide = untrack(() => drawnSide);
+  $effect.pre(() => {
+    const side = drawnSide;
+    if (side === editedSide) return;
+    editedSide = side;
+    untrack(() => (editingId = themes.slot(side)));
+  });
   const editing = $derived(themes.find(editingId) ?? themes.drawn(drawnSide));
 
   function choose(id: string): void {

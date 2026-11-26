@@ -377,3 +377,20 @@ test("colour-blind mode names the pairs that read alike under the States, and no
   expect(lines).toContain("Attention and Failed read the same under deuteranopia.");
   colourBlind.set(false);
 });
+
+test("light or dark chosen while the page is open puts that side's window theme in the editor and its preview (#2516)", () => {
+  storage = memory();
+  html = root();
+  themes = createThemes(() => storage, () => html, { set: setTimeout, clear: clearTimeout, frame: (run) => run() });
+  const mode = createTheme();
+  views.push(mount(TfThemeSection, { target, props: { themes, mode, prefersDark: () => false } }));
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+  mode.set("dark");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Dark");
+  expect(target.querySelector(".tf-thm-side")?.textContent).not.toMatch(/Shown as it draws while the window is/);
+  mode.set("light");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+});

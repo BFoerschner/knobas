@@ -213,3 +213,22 @@ test("a theme with window colours that the window does not draw offers Use for t
   expect(themes.follows("dark")).toBe(true);
   expect(button("Use for the app too")).toBeNull();
 });
+
+test("light or dark chosen while the page is open puts that side's theme in the editor and its preview (#2516)", () => {
+  storage = memory();
+  html = root();
+  themes = createThemes(() => storage, () => html);
+  const mode = createTheme();
+  view = mount(TfThemesSection, { target, props: { themes, mode, render: plainPort, prefersDark: () => false } });
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe(themes.drawn("light").name);
+  mode.set("dark");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe(themes.drawn("dark").name);
+  expect(q('[data-slot="dark"]')?.classList.contains("tf-cur")).toBe(true);
+  // The preview draws the theme in the editor: its note no longer says it is shown on the other side.
+  expect(target.querySelector(".tf-thm-side")?.textContent).not.toMatch(/while the window is light/);
+  mode.set("light");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe(themes.drawn("light").name);
+});

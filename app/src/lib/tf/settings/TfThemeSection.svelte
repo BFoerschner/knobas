@@ -49,6 +49,15 @@
 
   /** The theme in the editor: the one last chosen, imported or edited, at first the one the window draws now. */
   let editingId = $state(untrack(() => themes.appDrawn(drawnSide).id));
+  // Light or dark chosen while the page is open puts that side's theme in the editor (#2516); a theme chosen,
+  // imported or edited stays there until the side changes again.
+  let editedSide = untrack(() => drawnSide);
+  $effect.pre(() => {
+    const side = drawnSide;
+    if (side === editedSide) return;
+    editedSide = side;
+    untrack(() => (editingId = themes.appDrawn(side).id));
+  });
   const editing = $derived(themes.find(editingId) ?? themes.appDrawn(drawnSide));
   /** The theme just imported, whose band asks where to use it; it goes once a button is pressed or another is shown. */
   let justImported = $state<string | null>(null);
