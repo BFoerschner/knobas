@@ -482,6 +482,8 @@ test("the filter draws a flat list; clearing it returns the folds and the scroll
   await settle();
   expect(railText().slice(0, 4)).toEqual(["GET /resource7/{id}", "PUT /resource7/{id}", "POST /resource7/{id}", "DEL /resource7/{id}"]);
   expect(text(target.querySelector(".tf-oas-count"))).toMatch(/^\d+ of 400$/);
+  // The path marks the matched letters at their place in it, past the method the ranking also read (#2520, #2532).
+  expect([...rail()[0]!.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["resource7"]);
   type("");
   await settle();
   expect(list.scrollTop).toBe(84);
