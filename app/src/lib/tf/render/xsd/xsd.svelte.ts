@@ -115,10 +115,12 @@ export class XsdState {
       }
       return;
     }
+    this.folds.add(id);
     await expandLazy(id, {
       nodeCap: TREE_EXPAND_CAP,
       fetchCap: LOCAL_FETCH_CAP,
       depthCap: 6,
+      alive: () => this.folds.has(id),
       cached: (cur) => {
         const list = this.tree.get(cur);
         return list === undefined ? undefined : list.filter((r) => r.kids && !r.again).map((r) => r.id);

@@ -67,7 +67,9 @@
 
   /** The spaces folded open in the rail by the reader, and each space's folds, for the session: a return finds them as left, whichever of the rail's trees draws them. */
   const openSpaces = new SvelteSet<string>();
+  const closedSpaces = new SvelteSet<string>();
   const openFolds = new Map<string, SvelteSet<string>>();
+  const closedFolds = new Map<string, SvelteSet<string>>();
 
   function foldsOf(space: string): SvelteSet<string> {
     const held = openFolds.get(space) ?? new SvelteSet<string>();
@@ -75,10 +77,18 @@
     return held;
   }
 
+  function closedFoldsOf(space: string): SvelteSet<string> {
+    const held = closedFolds.get(space) ?? new SvelteSet<string>();
+    closedFolds.set(space, held);
+    return held;
+  }
+
   /** A new session: what each test is. */
   export function forgetDocFolds(): void {
     openSpaces.clear();
+    closedSpaces.clear();
     openFolds.clear();
+    closedFolds.clear();
   }
 </script>
 
@@ -626,6 +636,18 @@
   /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`): settles once its read is drawn or has failed. */
   const needFold = (id: string) => needParts({ folds: [id] });
 
+  let closedFor: string | null | undefined = undefined;
+  $effect(() => {
+    const now = current;
+    if (closedFor !== undefined && closedFor !== now) {
+      untrack(() => {
+        closedSpaces.clear();
+        for (const set of closedFolds.values()) set.clear();
+      });
+    }
+    closedFor = now;
+  });
+
   /** Alt+click on a space header expands or collapses the space and its page tree recursively (bounded when lazy). */
   function altSpace(space: DocsTree["spaces"][number], holds: boolean, event: MouseEvent & { currentTarget: HTMLElement }) {
     if (!isAltClick(event)) return;
@@ -635,7 +657,10 @@
     const want = !details.open;
     const sid = spaceId(space);
     const folds = foldsOf(sid);
+    const closed = closedFoldsOf(sid);
     if (want) {
+      closedSpaces.delete(sid);
+      closed.clear();
       if (!holds) openSpaces.add(sid);
       const index = childrenByParent(space);
       const roots = (index.get(null) ?? []).filter((n) => hasChildren(n, index));
@@ -649,7 +674,12 @@
       details.open = true;
     } else {
       openSpaces.delete(sid);
+      if (holds) closedSpaces.add(sid);
       folds.clear();
+      const index = childrenByParent(space);
+      for (const p of space.pages) {
+        if (hasChildren(p, index)) closed.add(p.entity_id);
+      }
       details.open = false;
     }
   }
@@ -2041,20 +2071,26 @@
             <p class="tf-dl-note">No space's name or key holds {spaceFilter.text.trim()}. <button type="button" class="tf-linkish" onclick={() => (spaceFilter.text = "")}>Clear</button></p>
           {/if}
           {#each rail.shown as space (spaceId(space))}
+            {@const sid = spaceId(space)}
             {@const here = space.pages.some((p) => p.entity_id === current)}
             {@const holds = (followPage && here) || space.pages.some((p) => revealed.includes(p.entity_id))}
             {@const from = spaceSource(space, tree.spaces)}
-            {@const open = holds || openSpaces.has(spaceId(space))}
+            {@const open = (holds && !closedSpaces.has(sid)) || openSpaces.has(sid)}
             <details
               {open}
               ontoggle={(event) => {
-                if (!event.currentTarget.open) openSpaces.delete(spaceId(space));
-                else if (!holds) openSpaces.add(spaceId(space));
+                if (!event.currentTarget.open) {
+                  openSpaces.delete(sid);
+                  if (holds) closedSpaces.add(sid);
+                } else {
+                  closedSpaces.delete(sid);
+                  if (!holds) openSpaces.add(sid);
+                }
               }}
             >
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-              <summary class="tf-spc" class:tf-holds={here && !open} onclick={(event) => altSpace(space, holds, event)} {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
-              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
+              <summary class="tf-spc" class:tf-holds={here && !open} onclick={(event) => altSpace(space, holds, event)} {@attach menuThing(() => ({ kind: "space", id: sid, name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} follow={followPage} opened={foldsOf(sid)} closed={closedFoldsOf(sid)} need={lazy ? needFold : undefined} /></div>
             </details>
           {/each}
           <TfDocsHidden hidden={rail.hidden} spaces={tree.spaces} where="rail" only={filteringSpaces && rail.shown.length === 0} />
@@ -2065,7 +2101,7 @@
               {name} is hidden from Docs. <button type="button" class="tf-linkish" onclick={() => void docsChoices.setHidden(spaceId(shownSpace), name, false)}>Unhide</button>
             </p>
           {/if}
-          <TfDocTree space={shownSpace} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(shownSpace))} closed={closedFoldsOf(spaceId(shownSpace))} need={lazy ? needFold : undefined} />
         {/if}
       {/if}
     </div>

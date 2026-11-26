@@ -540,3 +540,24 @@ test("Alt+click on a Docs page fold and space summary recursively expands and co
   await toggle(spaceFold("Operations"), true);
   expect(fold("Ops home")!.open).toBe(false);
 });
+
+test("Alt+click collapsing a Docs space that holds the current page collapses its ancestor folds too", async () => {
+  await draw(["confluence:5"]);
+  const picker = target.querySelector<HTMLSelectElement>(".tf-rd-tree select")!;
+  picker.value = "*";
+  picker.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(spaceFold("Operations").open).toBe(true);
+  expect(fold("Runbooks")!.open).toBe(true);
+  expect(fold("Restart the ledger")!.open).toBe(true);
+
+  const opsSummary = spaceFold("Operations").querySelector<HTMLElement>(":scope > summary.tf-spc")!;
+  opsSummary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, altKey: true }));
+  await settle();
+  expect(spaceFold("Operations").open).toBe(false);
+  expect(opsSummary.classList.contains("tf-holds")).toBe(true);
+
+  // Reopening the space with a plain toggle leaves its nested folds collapsed.
+  await toggle(spaceFold("Operations"), true);
+  expect(fold("Runbooks")!.open).toBe(false);
+});

@@ -247,10 +247,10 @@
     const filePrefix = `${row.scope}|${row.dir.path}`;
     const nestedPrefix = scopeOf(row.scope, row.dir.path);
     for (const k of [...openFiles]) {
-      if (k.startsWith(filePrefix) || k.startsWith(`${nestedPrefix}!`) || k.startsWith(`${nestedPrefix}|`)) openFiles.delete(k);
+      if (k.startsWith(filePrefix) || (row.dir.path !== "" && k.startsWith(nestedPrefix))) openFiles.delete(k);
     }
     for (const k of [...openDirs]) {
-      if (k.startsWith(`${nestedPrefix}!`) || k.startsWith(`${nestedPrefix}|`)) openDirs.delete(k);
+      if (k.startsWith(filePrefix) || (row.dir.path !== "" && k.startsWith(nestedPrefix))) openDirs.delete(k);
     }
   }
 

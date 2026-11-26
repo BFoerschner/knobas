@@ -121,7 +121,7 @@
     if (!now) {
       for (const desc of collectDescendants([node], (n) => (index.get(n.entity_id) ?? []).filter((c) => hasChildren(c, index)), TREE_EXPAND_CAP)) {
         open.delete(desc.entity_id);
-        if (holding.has(desc.entity_id)) shut.add(desc.entity_id);
+        if (holding.has(desc.entity_id) || echoesOn(desc.entity_id, "page").length > 0) shut.add(desc.entity_id);
       }
       return;
     }

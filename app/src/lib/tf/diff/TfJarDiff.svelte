@@ -329,9 +329,11 @@
         }
         return kids;
       };
+      open.add(k);
       await expandLazy(k, {
         nodeCap: TREE_EXPAND_CAP,
         fetchCap: LAZY_FETCH_CAP,
+        alive: () => open.has(k),
         cached: archiveChildren,
         fetch: async (key) => {
           const item = byKey.get(key);
