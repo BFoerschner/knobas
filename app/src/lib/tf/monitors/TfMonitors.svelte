@@ -587,7 +587,7 @@
   const heldRoster = $derived(
     roster === null
       ? { rows: [] as typeof kept.shown, waiting: 0, stale: false }
-      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text, monitorOrder.settled(filter.text, roster ?? [])])),
+      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text, monitorOrder.settled(filter.text, roster)])),
   );
   const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
   const rows = $derived(markedRow !== null && !markedRow.hidden && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
