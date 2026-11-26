@@ -475,12 +475,21 @@ test("an answer's body: the compact JSON view in its column; Expand lays it over
   await vi.waitFor(() => expect(over.querySelector(".tf-xv-rail")).not.toBeNull(), { timeout: 10_000, interval: 20 });
   expect(over.querySelector(".tf-xv-compactview")).toBeNull();
   expect(document.activeElement?.textContent).toBe("Back to the explorer");
+  // What it lies over is out of reach, and ⌘↵ sends nothing under it (the expanded body would be an older answer).
+  const under = [...over.parentElement!.children].filter((c) => c !== over);
+  expect(under.length).toBeGreaterThan(0);
+  expect(under.every((c) => c.hasAttribute("inert"))).toBe(true);
+  const sends = calls.filter((c) => c.cmd === "send").length;
+  over.querySelector<HTMLElement>("[data-oas-collapse]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+  await settle();
+  expect(calls.filter((c) => c.cmd === "send").length).toBe(sends);
 
   // Esc puts it away; focus goes back to Expand.
   over.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await settle();
   expect(target.querySelector(".tf-oas-expanded")).toBeNull();
   expect(document.activeElement).toBe(expandButton);
+  expect(target.querySelector(".tf-oas [inert]")).toBeNull();
 
   button("Expand")!.click();
   await settle();

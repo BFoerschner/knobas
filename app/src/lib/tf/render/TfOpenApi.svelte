@@ -366,6 +366,16 @@
     expandedFrom = null;
     void tick().then(() => back?.focus());
   }
+  // What the expanded body lies over is out of reach while it stands: Tab and a screen reader stay on the answer.
+  $effect(() => {
+    const el = box;
+    if (expanded === null || el === null) return;
+    const under = [...el.children].filter((c) => !c.classList.contains("tf-oas-expanded"));
+    for (const c of under) c.setAttribute("inert", "");
+    return () => {
+      for (const c of under) c.removeAttribute("inert");
+    };
+  });
   let sendKey = $state<(() => void) | null>(null);
   $effect(() => {
     void apiServers().then((list) => (saved = list.servers), () => (saved = []));
@@ -409,6 +419,8 @@
     if (cols === 2) view = "request";
   }
   function keys(event: KeyboardEvent) {
+    // Expanded, the keys are the answer's: a send under it would leave the expanded body an older answer.
+    if (expanded !== null) return;
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && sendKey !== null && shownOp !== null) {
       event.preventDefault();
       sendKey();
