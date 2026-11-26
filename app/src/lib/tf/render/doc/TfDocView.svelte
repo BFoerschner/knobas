@@ -910,7 +910,7 @@
       web(event.shiftKey);
       return;
     }
-    if (isKey(DOC_KEYS.look, key) && state.cursor > 0) {
+    if (isKey(DOC_KEYS.look, key) && state.cursor > 0 && target?.closest("button, a") == null) {
       done();
       void lookAt(state.cursor);
       return;

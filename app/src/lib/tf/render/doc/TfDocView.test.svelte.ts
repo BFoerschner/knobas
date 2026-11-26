@@ -199,6 +199,12 @@ test("Levels: the number is the document's depth when it opens, + is off there, 
   const reopened = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')];
   expect(reopened[0]!.getAttribute("aria-checked")).toBe("true");
   expect(reopened.slice(1).every((b) => b.getAttribute("aria-checked") === "false")).toBe(true);
+  // Space and Enter on a focused control button (like Levels) are not swallowed by document keys even with a line picked.
+  row(2).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  const spaceEvent = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+  stepper()[1]!.dispatchEvent(spaceEvent);
+  expect(spaceEvent.defaultPrevented).toBe(false);
 });
 
 test("Levels dropdown works in inline mode and is disabled when the document has no foldable levels", async () => {
