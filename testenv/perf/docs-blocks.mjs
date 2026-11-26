@@ -95,7 +95,7 @@ const viewOpen = (i, word) => `async () => {
     await (${blocksAsCode(i)})();
     (${pressBar(i, word)})();
     for (let n = 0; n < 200 && !(${PRE})(${i}).querySelector('.tf-xv-caret'); n++) await wait(30);
-    (${PRE})(${i}).querySelector('.tf-xv-stepn').click();
+    (${PRE})(${i}).querySelector('.tf-xv-lines .tf-code').dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true }));
     await wait(200);
   }`;
 /** In the page: block `i`'s view's line `n` picked (a click on it), its lines focused. */
@@ -119,7 +119,7 @@ const viewerOpen = `async () => {
     await (${attachmentsShown})();
     (${openAttachment("junit.xml")})();
     for (let n = 0; n < 200 && !document.querySelector('.tf-vdoc .tf-xv-caret'); n++) await wait(30);
-    document.querySelector('.tf-vdoc .tf-xv-stepn').click();
+    document.querySelector('.tf-vdoc .tf-xv-lines .tf-code').dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true }));
     await wait(200);
   }`;
 

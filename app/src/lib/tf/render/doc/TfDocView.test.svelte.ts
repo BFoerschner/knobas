@@ -97,7 +97,8 @@ test("the first frame is the lines, the caret's column and the rail's head, befo
   expect(target.querySelectorAll(".tf-xv-cc")).toHaveLength(10);
   expect(target.querySelector(".tf-xv-caret")).toBeNull();
   expect(head()).toBe("Reading…");
-  expect(target.querySelector(".tf-oas-modes .tf-seg")).not.toBeNull();
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).toBeNull();
+  expect(words(target.querySelector(".tf-oas-modes"))).toBe("Results");
   expect(words(target.querySelector(".tf-xv-crumbs"))).toBe("Pick a line: the way down to it stands here.");
 });
 
@@ -168,9 +169,62 @@ test("Levels: the number is the document's depth when it opens, + is off there, 
   key("-");
   expect(words(stepper()[1])).toBe("2");
   drawnFrom(2);
+  // Clicking the center Levels button opens a direct depth-picker dropdown listing All and 1..N.
+  expect(stepper()[1]!.getAttribute("aria-haspopup")).toBe("menu");
+  expect(stepper()[1]!.getAttribute("aria-expanded")).toBe("false");
   stepper()[1]!.click();
   flushSync();
+  expect(stepper()[1]!.getAttribute("aria-expanded")).toBe("true");
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="Levels shown"]')!;
+  expect(menu).not.toBeNull();
+  const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  expect(items.map((b) => words(b).replace(/\s*✓$/, ""))).toEqual(["All", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(items.find((b) => b.getAttribute("aria-checked") === "true")).toBe(items[2]);
+  // Picking a level folds/unfolds directly to that depth and closes the menu.
+  items[4]!.click();
+  flushSync();
+  expect(document.querySelector('[role="menu"][aria-label="Levels shown"]')).toBeNull();
+  expect(words(stepper()[1])).toBe("4");
+  drawnFrom(4);
+  // Picking All unfolds everything.
+  stepper()[1]!.click();
+  flushSync();
+  const allItem = document.querySelector<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')!;
+  allItem.click();
+  flushSync();
   expect(words(stepper()[1])).toBe("9");
+  // Re-opening when fully unfolded marks All as checked.
+  stepper()[1]!.click();
+  flushSync();
+  const reopened = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')];
+  expect(reopened[0]!.getAttribute("aria-checked")).toBe("true");
+  expect(reopened.slice(1).every((b) => b.getAttribute("aria-checked") === "false")).toBe(true);
+  // Space and Enter on a focused control button (like Levels) are not swallowed by document keys even with a line picked.
+  row(2).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  flushSync();
+  const spaceEvent = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+  stepper()[1]!.dispatchEvent(spaceEvent);
+  expect(spaceEvent.defaultPrevented).toBe(false);
+});
+
+test("Levels dropdown works in inline mode and is disabled when the document has no foldable levels", async () => {
+  draw(SMALL, { inline: true });
+  await settle();
+  const center = stepper()[1]!;
+  expect(center.disabled).toBe(false);
+  center.click();
+  flushSync();
+  const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')];
+  expect(items.map((b) => words(b).replace(/\s*✓$/, ""))).toEqual(["All", "1", "2"]);
+  items[1]!.click();
+  flushSync();
+  expect(rows()).toEqual([1, 2, 3, 7, 10]);
+  unmount(view!);
+  view = null;
+  draw("<flat/>");
+  await settle();
+  expect(words(stepper()[1])).toBe("–");
+  expect(stepper()[1]!.disabled).toBe(true);
 });
 
 test("a picked line draws the way down to it, each name going to its line", async () => {
@@ -348,27 +402,40 @@ test("a document whose schema is not in the repository says so, quietly where it
   expect(words(target.querySelector(".tf-xv-head"))).toContain("It names ../schemas/opentrans/opentrans_2_1.xsd, and no file is there.");
 });
 
-test("checking off: the head says so and nothing is read", async () => {
+test("checking off: the head says so, nothing is read, and Findings stays hidden", async () => {
   const port = schemaPort({ on: false });
   view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r", render: quiet, engine: localDocEngine(), schema: port } });
   flushSync();
   await checked();
   expect(words(target.querySelector(".tf-xv-head"))).toContain("Checking is off for this file.");
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).toBeNull();
+  expect(target.querySelector('.tf-xv-list[aria-label="Results"]')).not.toBeNull();
   expect(port.read).not.toHaveBeenCalled();
 });
 
-test("a document that says nothing of a schema reads nothing and says No schema", async () => {
+test("a document that says nothing of a schema reads nothing, shows a compact one-line No schema control, and hides Findings", async () => {
   const port = schemaPort();
   draw(SMALL.replace(" xmlns='urn:a'", ""), { schema: port });
   await checked();
+  expect(target.querySelector(".tf-xv-head.tf-xv-compact")).not.toBeNull();
   expect(words(target.querySelector(".tf-xv-verdict"))).toBe("No schema");
+  expect(words(target.querySelector(".tf-xv-head"))).toBe("No schema · Point to a file…");
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).toBeNull();
+  expect(target.querySelector('.tf-xv-list[aria-label="Results"]')).not.toBeNull();
   expect(port.read).not.toHaveBeenCalled();
+  // Clicking Point to a file… opens the schema picker dialog.
+  target.querySelector<HTMLButtonElement>(".tf-xv-head button")!.click();
+  flushSync();
+  expect(document.querySelector(".tf-xsd-point")).not.toBeNull();
+  document.querySelector<HTMLButtonElement>(".tf-xsd-point .tf-dclose")?.click();
+  flushSync();
 });
 
-test("N steps to each departure: its line wears the mark and its sentence; Stop checking clears them in one frame", async () => {
+test("N steps to each departure: its line wears the mark and its sentence; Stop checking hides Findings and Check it reveals it again", async () => {
   view = mount(TfDocView, { target, props: { text: fixture("order-4711.xml"), path: "orders/order-4711.xml", repo: "r2", render: quiet, engine: localDocEngine(), schema: schemaPort() } });
   flushSync();
   await checked();
+  expect(words(target.querySelector(".tf-oas-modes button[aria-pressed='true']"))).toBe("Findings 5");
   const code = target.querySelector<HTMLElement>(".tf-xv-lines .tf-code")!;
   code.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
   await settle();
@@ -379,13 +446,19 @@ test("N steps to each departure: its line wears the mark and its sentence; Stop 
   code.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
   await settle();
   expect(target.querySelector('.tf-xv-frow[aria-selected="true"] .tf-xv-fline')?.textContent).toBe("708");
-  // Stop checking this file.
+  // Stop checking this file hides Findings and returns directly to Results.
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => words(b) === "Schema ▾")!.click();
   flushSync();
   [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => words(b) === "Stop checking this file")!.click();
   flushSync();
   expect(target.querySelectorAll(".tf-xv-bad").length).toBe(0);
   expect(words(target.querySelector(".tf-xv-head"))).toContain("Checking is off for this file.");
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).toBeNull();
+  expect(target.querySelector('.tf-xv-list[aria-label="Results"]')).not.toBeNull();
+  // Check it re-runs the schema check and reveals Findings automatically.
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-xv-head button")].find((b) => words(b) === "Check it")!.click();
+  await checked();
+  expect(words(target.querySelector(".tf-oas-modes button[aria-pressed='true']"))).toBe("Findings 5");
 });
 
 test("a page kept hidden keeps its columns: on its return the side column is drawn in the first frame", () => {
@@ -493,15 +566,28 @@ test("a document whose schema is at an address is offered it; Download it keeps 
 
 // ---- The JSON view (J1, the design's section 25) ----
 
-test("a JSON file opens in the same view: its folds count items and members, the head says it is well formed, no XPath field", async () => {
+test("a JSON file opens in the same view: its folds count items and members, no schema header or Findings tab, no XPath field", async () => {
   const exportText = (await import("node:fs")).readFileSync((await import("node:path")).resolve(__dirname, "../../../../../../fixtures/doc/files/tidewater/ledger-api/exports/orders-2026-11.json"), "utf8");
   view = mount(TfDocView, { target, props: { text: exportText, path: "exports/orders-2026-11.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json" } });
   flushSync();
   await settle();
-  expect(head()).toContain("Well formed");
-  expect(head()).toContain("JSON is not checked against a schema.");
+  expect(target.querySelector(".tf-xv-head")).toBeNull();
+  expect(target.querySelector(".tf-oas-modes .tf-seg")).toBeNull();
+  expect(target.querySelector('.tf-xv-list[aria-label="Results"]')).not.toBeNull();
   expect(target.querySelector(".tf-xv-qfield")).toBeNull();
-  // The export goes five levels deep; every level is open when it opens.
+  // The export goes five levels deep; every level is open when it opens, and the Levels dropdown lists All + 1..5.
+  expect(words(target.querySelector(".tf-xv-stepn"))).toBe("5");
+  stepper()[1]!.click();
+  flushSync();
+  const levelItems = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')];
+  expect(levelItems.map((b) => words(b).replace(/\s*✓$/, ""))).toEqual(["All", "1", "2", "3", "4", "5"]);
+  levelItems[2]!.click();
+  flushSync();
+  expect(words(target.querySelector(".tf-xv-stepn"))).toBe("2");
+  stepper()[1]!.click();
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[role="menu"][aria-label="Levels shown"] [role="menuitemradio"]')!.click();
+  flushSync();
   expect(words(target.querySelector(".tf-xv-stepn"))).toBe("5");
   // `orders` on line 6 folded by its caret: one line, counting its 48 items.
   row(6).querySelector<HTMLElement>(".tf-xv-caret")!.click();
@@ -598,6 +684,28 @@ test("jq: a JSON view without a session draws no field; jq's stop says why", asy
   flushSync();
   await settle();
   expect(target.querySelector(".tf-xv-qfield")).toBeNull();
+});
+
+test("malformed JSON reveals the Findings tab and Not well formed header; a valid schema check reveals Findings", async () => {
+  view = mount(TfDocView, { target, props: { text: '{\n  "a": [\n}\n', path: "broken.json", repo: "r", render: quiet, engine: localDocEngine(), kind: "json" } });
+  flushSync();
+  await settle();
+  expect(head()).toContain("Not well formed");
+  expect(words(target.querySelector(".tf-oas-modes button[aria-pressed='true']"))).toBe("Findings 1");
+  unmount(view);
+  view = null;
+  // Valid schema check (0 departures) still reveals Findings beside Results.
+  const validXml = fixture("order-4710.xml");
+  view = mount(TfDocView, { target, props: { text: validXml, path: "orders/order-4710.xml", repo: "r", render: quiet, engine: localDocEngine(), schema: schemaPort() } });
+  flushSync();
+  await checked();
+  expect(words(target.querySelector(".tf-xv-verdict"))).toContain("Valid");
+  const modeButtons = [...target.querySelectorAll<HTMLButtonElement>(".tf-oas-modes .tf-seg button")];
+  expect(modeButtons.map((b) => words(b))).toEqual(["Findings", "Results"]);
+  expect(modeButtons[1]!.getAttribute("aria-pressed")).toBe("true");
+  modeButtons[0]!.click();
+  flushSync();
+  expect(words(target.querySelector(".tf-xv-list"))).toContain("Nothing departs from the schema.");
 });
 
 // ---- The miniature form (E1): the document alone, a verdict made elsewhere at its lines' ends ----
