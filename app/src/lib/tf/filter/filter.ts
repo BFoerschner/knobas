@@ -122,8 +122,7 @@ export function words(text: string): string[] {
 
 /** Whether every word typed appears in `haystack`, in any order, ignoring case (R-2.3). */
 export function matchesAll(haystack: string, text: string): boolean {
-  const lower = haystack.toLowerCase();
-  return words(text).every((word) => lower.includes(word));
+  return matcherOf(text)(haystack);
 }
 
 /** {@link matchesAll} for one text over many rows, its words read once (#2532: a key's fallback over 10,000 rows). */
