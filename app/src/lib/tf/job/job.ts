@@ -584,12 +584,3 @@ export interface SectionRow {
   /** The label of a row from the parent (or, from TF5, a link set). */
   from: string | null;
 }
-
-/** Whether a section row matches the in-section filter, ignoring case. */
-export function rowMatches(row: SectionRow, text: string): boolean {
-  const needle = text.trim().toLowerCase();
-  if (needle === "") return true;
-  return [row.title, row.repo ?? "", row.sub, row.from ?? "", row.chip?.text ?? ""].some((field) =>
-    field.toLowerCase().includes(needle),
-  );
-}

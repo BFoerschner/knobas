@@ -19,7 +19,7 @@
   import { refusedAttrs } from "../../shell/refused-writes";
   import type { RunRow } from "../../ipc/entity";
   import { failedRun, runTone, testsWords } from "./builds";
-  import { DURBAR_WIDTH, chipTone, durbarWidth, isStartedHere, triggerLabel } from "./pipeline";
+  import { DURBAR_WIDTH, chipTone, durbarWidth, isStartedHere, triggerLabel, type RunMarks } from "./pipeline";
   import { runsRead } from "./runs-read.svelte";
 
   let {
@@ -27,6 +27,7 @@
     attach,
     href,
     typed = "",
+    marks = null,
     job = null,
     jobBranches = [],
     max,
@@ -42,8 +43,10 @@
     attach: Attachment<HTMLElement>;
     /** The run's page. */
     href: string;
-    /** The filter's words, lit where they match. */
+    /** The filter's words, lit where they match while the ranking's answer is out. */
     typed?: string;
+    /** The letters the ranking matched, per cell (#2535); `pipeline`'s name and place on *Recent*. */
+    marks?: (RunMarks & { name?: readonly number[]; place?: readonly number[] }) | null;
     job?: string | null;
     /** The job's branches: a run on one carries the job's chip. */
     jobBranches?: readonly string[];
@@ -76,26 +79,26 @@
       <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
       <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
     {:else if pipeline === null}
-      <a {href}><b><Marked text={number} typed={typed} /></b></a>
+      <a {href}><b><Marked text={number} {typed} pairs={marks?.number ?? []} /></b></a>
     {/if}
     {#if run.state !== null && !here}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
   </td>
   {#if pipeline !== null}
     <td class="tf-run-pipe"
       ><span class="tf-run-pipein" title={pipeline.place === "" ? pipeline.name : `${pipeline.place} › ${pipeline.name}`}
-        ><span class="tf-run-pname"><Marked text={pipeline.name} {typed} /></span
-        ><a class="tf-run-pno" {href}><b><Marked text={number} {typed} /></b></a
-        >{#if pipeline.place !== ""}<span class="tf-run-place"><bdi><Marked text={pipeline.place} {typed} /></bdi></span>{/if}</span
+        ><span class="tf-run-pname"><Marked text={pipeline.name} {typed} pairs={marks?.name ?? []} /></span
+        ><a class="tf-run-pno" {href}><b><Marked text={number} {typed} pairs={marks?.number ?? []} /></b></a
+        >{#if pipeline.place !== ""}<span class="tf-run-place"><bdi><Marked text={pipeline.place} {typed} pairs={marks?.place ?? []} /></bdi></span>{/if}</span
       ></td
     >
   {/if}
   <!-- A flex row, so the name takes the ellipsis: it is the chip that ties a run to the job, and an inline chip after the name is the first thing cut (F-357). -->
   <td class="tf-mono tf-run-br"
     ><span class="tf-run-brin"
-      >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} {typed} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
+      >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} {typed} pairs={marks?.branch ?? []} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
     ></td
   >
-  <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} {typed} /></td>
+  <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} {typed} pairs={marks?.trigger ?? []} /></td>
   <td class="tf-nowrap tf-run-tests"
     >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{testsWords({ ...run.tests, failed: 0 })}{/if}</td
   >

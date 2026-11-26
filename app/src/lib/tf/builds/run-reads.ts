@@ -8,7 +8,7 @@ import { secondsLabel } from "../../time/format";
 import { ipcErrorMessage } from "../../ipc";
 import type { ArtifactEntry, DownloadTarget, LogLine, LogStep, RunLog, RunTest, TestOutcome } from "../../ipc/entity";
 import { push } from "../../shell/toasts.svelte";
-import { marks, matchesAll } from "../filter/filter";
+import { marks } from "../filter/filter";
 import { thousands } from "../counted";
 
 // -- the log (#854) -----------------------------------------------------------
@@ -275,18 +275,14 @@ export const RESULT_CHIPS = [
   { value: "passed", label: "Passed" },
 ] as const;
 
-/** The tests the filter keeps, failed first: results switched on (any), the module, and the typed words. */
-export function keptTests(
-  tests: readonly RunTest[],
-  typed: string,
-  results: readonly string[],
-  module: string | null,
-): RunTest[] {
-  return tests
-    .filter((t) => results.length === 0 || results.includes(t.status))
-    .filter((t) => module === null || t.module === module)
-    .filter((t) => matchesAll(t.name, typed))
-    .sort((a, b) => Number(b.status === "failed" && !b.muted) - Number(a.status === "failed" && !a.muted));
+/** The tests the result chips (any) and the module keep, failed first; the typed words rank their names through the app (#2535). */
+export function keptTests(tests: readonly RunTest[], results: readonly string[], module: string | null): RunTest[] {
+  return failedFirst(tests.filter((t) => (results.length === 0 || results.includes(t.status)) && (module === null || t.module === module)));
+}
+
+/** `tests` with the failures that are not muted first, each part in the order given (a ranking's, best first). */
+export function failedFirst(tests: readonly RunTest[]): RunTest[] {
+  return [...tests].sort((a, b) => Number(b.status === "failed" && !b.muted) - Number(a.status === "failed" && !a.muted));
 }
 
 /** The modules the tests are in, in their first order. */

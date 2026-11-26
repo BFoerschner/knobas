@@ -4,7 +4,10 @@
  * held behind *Show N new runs* under the pointer; older pages; the way back from a run; the minute's ask of each source.
  */
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The typed words rank through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { RecentCursor, RecentFilter, RecentPipeline, RecentRun, RecentRuns, RunRow } from "../../ipc/entity";
 import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
@@ -168,6 +171,19 @@ test("a result chip asks the backend; typed words narrow what is held without a 
   await settle();
   expect(drawn.asked.length).toBe(reads);
   expect(numbers()).toEqual(["#12"]);
+});
+
+test("typed words have the app rank the runs by their pipeline's name and place, newest first, its letters marked (#2535)", async () => {
+  draw();
+  await settle();
+  const input = target.querySelector<HTMLInputElement>("input[type=search], input")!;
+  // No substring holds "pylnt"; its letters stand in order in "Payout_Lint".
+  input.value = "pylnt";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(numbers()).toEqual(["#11", "#10"]);
+  const names = [...target.querySelectorAll(".tf-run-pname")];
+  for (const name of names) expect([...name.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("pylnt");
 });
 
 test("Mine and This job are asked of the backend", async () => {

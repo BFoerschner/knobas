@@ -7,7 +7,6 @@
  * `job_link_sets`; a set's rows hidden on this ticket go under *Hidden on KEY*.
  */
 import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, Tone } from "../../ipc/entity";
-import { matchesAll } from "../filter/filter";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
 import { entityAddress } from "../address";
 import { itemHash, keyOf, runKindsOf } from "./job";
@@ -75,9 +74,24 @@ export function linkedOn(detail: Pick<EntityDetail, "links">): LinkEntry[] {
   return detail.links.filter((entry) => entry.other.deleted_at === null);
 }
 
-/** The rows the drawer's filter keeps: every word in the title, what it is or the section it shows in. */
-export function filterLinks(links: readonly LinkEntry[], text: string): LinkEntry[] {
-  return links.filter((entry) => matchesAll(`${entry.other.title} ${kindWord(entry.other.kind)} ${sectionOf(entry.other.kind)}`, text));
+/**
+ * One row of the drawer's filter (#2535): a link on the ticket (`list` "links") or a row of a group (`list` its key).
+ * The drawer ranks every row in one list, so the typed words read the whole drawer at once.
+ */
+export type ConnectionHit = { list: "links"; entry: LinkEntry } | { list: string; row: GroupRow };
+
+/** The drawer's rows in the order it draws them: the ticket's links, then each group's rows. */
+export function connectionHits(links: readonly LinkEntry[], groups: readonly JobGroup[]): ConnectionHit[] {
+  return [...links.map((entry) => ({ list: "links" as const, entry })), ...groups.flatMap((group) => group.rows.map((row) => ({ list: group.key, row })))];
+}
+
+/**
+ * What the filter ranks a row by: a link's title, what it is and the section it shows in; a group row's title and
+ * section. The title leads, so its marks start at 0.
+ */
+export function connectionText(hit: ConnectionHit): string {
+  if ("entry" in hit) return `${hit.entry.other.title} ${kindWord(hit.entry.other.kind)} ${sectionOf(hit.entry.other.kind)}`;
+  return `${hit.row.title} ${hit.row.section}`;
 }
 
 /**
@@ -207,9 +221,4 @@ export function hiddenOf(read: JobLinkSets | null): HiddenRow[] {
 /** The names of the sets that also hold `entityId`, for a *Linked on* row's "also in". */
 export function alsoIn(read: JobLinkSets | null, entityId: string): string[] {
   return (read?.sets ?? []).filter((set) => set.members.some((member) => member.entity_id === entityId)).map((set) => set.name);
-}
-
-/** The group rows the drawer's filter keeps: every word in the title or the section. */
-export function filterRows(rows: readonly GroupRow[], text: string): GroupRow[] {
-  return rows.filter((row) => matchesAll(`${row.title} ${row.section}`, text));
 }

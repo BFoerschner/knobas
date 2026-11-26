@@ -14,6 +14,7 @@ import {
   draftRestore,
   drawnSavedViewColumns,
   groupViews,
+  viewText,
   hiddenViews,
   listColumnsOf,
   savedViewKindWords,
@@ -70,7 +71,7 @@ function card(key: string, updated: string): MiniBoardCard {
 test("own groups first in their order, typed groups after in the order their first view sits, views by position", () => {
   const groups = groupViews(
     [row("z", "Zeta", 0), row("p", "Projects", 1), row("a", "Alpha", 2), row("m2", "Mine", 5), row("m1", "Mine", 3)],
-    "",
+    null,
   );
   expect(groups.map((g) => [g.name, g.views.map((v) => v.id)])).toEqual([
     ["Mine", ["m1", "m2"]],
@@ -80,11 +81,17 @@ test("own groups first in their order, typed groups after in the order their fir
   ]);
 });
 
-test("finding needs every word somewhere in the name or the text, and drops groups left empty", () => {
-  const views = [row("bugs", "Mine", 0, { query: "issuetype:Bug" }), row("ops", "Team", 1, { name: "OPS board" })];
-  expect(groupViews(views, "BUG").map((g) => g.name)).toEqual(["Mine"]);
-  expect(groupViews(views, "ops board").map((g) => g.name)).toEqual(["Team"]);
-  expect(groupViews(views, "ops bug")).toEqual([]);
+test("finding keeps the views the ranking kept, each in its group and place, and drops groups left empty (#2535)", () => {
+  const views = [row("bugs", "Mine", 0, { query: "issuetype:Bug" }), row("ops", "Team", 1, { name: "OPS board" }), row("ops2", "Team", 2, { name: "OPS lane" })];
+  expect(groupViews(views, new Set([views[0]!])).map((g) => g.name)).toEqual(["Mine"]);
+  // The ranking's order does not reach the rail: the views stand in list order.
+  expect(groupViews(views, new Set([views[2]!, views[1]!])).map((g) => [g.name, g.views.map((v) => v.id)])).toEqual([["Team", ["ops", "ops2"]]]);
+  expect(groupViews(views, new Set())).toEqual([]);
+});
+
+test("a view's text is its name, then the query it reads, its source's own where it has one (#2535)", () => {
+  expect(viewText(row("bugs", "Mine", 0, { name: "Bugs", query: "issuetype:Bug" }))).toBe("Bugs issuetype:Bug");
+  expect(viewText(row("cus", "Jira boards", 0, { name: "CUS", saved_view_source: savedViewOf("project = CUS") }))).toBe("CUS project = CUS");
 });
 
 test("own columns gather their statuses newest first and leave a status on no column out", () => {
@@ -131,10 +138,9 @@ test("Jira boards and Jira filters come after every group of your own, and a Jir
     row("ops", "Ops", 1),
     row("mine", "Mine", 2),
   ];
-  expect(groupViews(views, "").map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
-  expect(groupViews(views, "cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
-  // "project" is only in the source's query, so this finds it by that and not by its name (#1273).
-  expect(groupViews(views, "project = cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
+  expect(groupViews(views, null).map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
+  // "project" is only in the source's query, so the ranking finds it by that and not by its name (#1273).
+  expect(viewText(views[0]!)).toContain("project = CUS");
 });
 
 function savedViewOf(sourceQuery: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
@@ -167,7 +173,7 @@ test("a second ticket system's views come last by their source, and a group of y
     row("named", "Kestrel boards", 4),
     row("mine", "Mine", 5),
   ];
-  expect(groupViews(views, "").map((group) => [group.name, group.system])).toEqual([
+  expect(groupViews(views, null).map((group) => [group.name, group.system])).toEqual([
     ["Mine", null],
     ["Jira boards of mine", null],
     ["Kestrel boards", null],
@@ -192,7 +198,7 @@ test("a hidden Jira view leaves its group and is listed apart, in list order (#8
     row("cus", "Jira boards", 2, { saved_view_source: savedViewOf("project = CUS"), saved_view: "jira:board-31" }),
     row("fix", "Jira filters", 3, { saved_view_source: savedViewOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), saved_view: "jira:filter-1" }),
   ];
-  expect(groupViews(views, "").map((group) => [group.name, group.views.map((view) => view.id)])).toEqual([
+  expect(groupViews(views, null).map((group) => [group.name, group.views.map((view) => view.id)])).toEqual([
     ["Jira boards", ["cus"]],
   ]);
   expect(hiddenViews(views).map((view) => view.id)).toEqual(["fix", "flow"]);

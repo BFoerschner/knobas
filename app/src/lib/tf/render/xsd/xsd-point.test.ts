@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { candidatesElsewhere, downloadedSha, elsewhereOf, stillUsed, withDownload, withPointed } from "./xsd-point";
+import { candidatesElsewhere, downloadedSha, elsewhereOf, pointSorted, pointText, stillUsed, withDownload, withPointed, type Candidate } from "./xsd-point";
 
 test("another repository's files: this repository's own are left out, so one other is not counted as two", () => {
   const list = [
@@ -35,4 +35,17 @@ test("a download is kept in the place of the answer it replaces; its file stays 
   expect(downloadedSha(`@download/${sha("a")}`)).toBe(sha("a"));
   expect(downloadedSha("@download/../x")).toBeNull();
   expect(downloadedSha(`@repo/r/${sha("a")}`)).toBeNull();
+});
+
+test("the picker ranks a file by its repository's name and path, and sorts what fits first, this repository's before another's (#2535)", () => {
+  const here = (path: string, declares = "urn:a"): Candidate => ({ repo: "r", repoName: null, path, declares });
+  const there: Candidate = { repo: "o", repoName: "other", branch: "main", path: "a.xsd", declares: "urn:a" };
+  expect(pointText(here("xsd/a.xsd"))).toBe(" xsd/a.xsd");
+  expect(pointText(there)).toBe("other a.xsd");
+  const fits = (c: Candidate) => c.declares === "urn:a";
+  const ranked = [there, here("deep/long/a.xsd"), here("b.xsd", "urn:b"), here("a.xsd")];
+  // Typed: what fits, then this repository's, each in the ranking's order.
+  expect(pointSorted(ranked, fits, true).map((c) => `${c.repoName ?? ""}:${c.path}`)).toEqual([":deep/long/a.xsd", ":a.xsd", "other:a.xsd", ":b.xsd"]);
+  // Nothing typed: the shorter path first.
+  expect(pointSorted(ranked, fits, false).map((c) => `${c.repoName ?? ""}:${c.path}`)).toEqual([":a.xsd", ":deep/long/a.xsd", "other:a.xsd", ":b.xsd"]);
 });

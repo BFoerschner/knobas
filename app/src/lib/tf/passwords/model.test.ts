@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { Held, PwRow } from "../../ipc/passwords";
-import { CUT, chainOf, commentFolder, expiry, holding, homesOf, indexBuild, marks, model, ordered, panels, pathOf, searchIndex, sourceNode, sourceWord, treeRows } from "./model";
+import { CUT, chainOf, commentFolder, expiry, holding, homesOf, entryMarks, indexBuild, model, ordered, panels, pathOf, scopedEntries, searchIndex, sourceNode, sourceWord, treeRows } from "./model";
 
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
@@ -67,11 +67,34 @@ test("the filter needs every word somewhere in title, username, address or path,
   expect(panels(m, m.root, "grafana platform")[0]!.rows.map((e) => e.id)).toEqual(["pw:pl1"]);
   expect(panels(m, m.root, "user_3")[0]!.rows.map((e) => e.id)).toEqual(["pw:d3"]);
   expect(panels(m, m.root, "nothing here")[0]!.rows).toEqual([]);
-  expect(marks("db user 1", "USER")).toEqual([
-    { text: "db ", hit: false },
-    { text: "user", hit: true },
-    { text: " 1", hit: false },
-  ]);
+});
+
+test("the app's ranking is held to the folder's scope and keeps its order, best first (#2535)", () => {
+  const scoped = held();
+  scoped.entries.push(["pw:shared", 0, "pw:plat", "shared admin", null, null, null, 0, null, ["pw:db"]]);
+  const m = model(scoped);
+  const e = (id: string) => m.entries.get(id)!;
+  // As the app ranked every entry: the ranking's order, whatever the titles' order.
+  const ranked = [e("pw:pl1"), e("pw:shared"), e("pw:p1"), e("pw:d3")];
+  expect(panels(m, m.root, "x", ranked)[0]!.rows.map((r) => r.id)).toEqual(["pw:pl1", "pw:shared", "pw:p1", "pw:d3"]);
+  // Payments holds its own entry and, through Prod ▸ Databases, the one also listed there and the database's own.
+  expect(panels(m, m.nodes.get("pw:pay")!, "x", ranked)[0]!.rows.map((r) => r.id)).toEqual(["pw:shared", "pw:p1", "pw:d3"]);
+  expect(panels(m, m.nodes.get("pw:plat")!, "x", ranked)[0]!.rows.map((r) => r.id)).toEqual(["pw:pl1", "pw:shared"]);
+  expect(panels(m, m.nodes.get("pw:plat")!, "x", ranked)[0]!.count).toBe(2);
+  // What the app holds at a folder: the entries of its scope, by title; every entry at All entries.
+  expect(scopedEntries(m, m.nodes.get("pw:plat")!).map((r) => r.id)).toEqual(["pw:pl1", "pw:shared"]);
+  expect(scopedEntries(m, m.root)).toHaveLength(m.entries.size);
+});
+
+test("an entry's text is its title, username, address and path, a line each, and its marks fall on the cells drawn (#2535)", () => {
+  const withAddress = held();
+  withAddress.entries.push(["pw:web", 0, "pw:db", "Ledger", "ops", "https://ledger.example/", null, 0, null, []]);
+  const m = model(withAddress);
+  const web = m.entries.get("pw:web")!;
+  // The path as the row draws it under a filter, joined with " / ", so its marks fall on it too.
+  expect(searchIndex(m).textOf(web)).toBe("Ledger\nops\nhttps://ledger.example/\nPayments / Prod / Databases");
+  // "Le" of the title, "op" of the username, "led" of the address past its scheme, "Pay" and "Prod" of the path.
+  expect(entryMarks(web, [0, 2, 7, 9, 19, 22, 35, 38, 46, 50])).toEqual({ title: [0, 2], user: [0, 2], address: [0, 3], path: [0, 3, 11, 15] });
 });
 
 test("the filter matches only inside the folder on show and the folders under it; at the top, everything (#2531)", () => {
@@ -213,5 +236,5 @@ test("the filter's index builds in slices that each stop when told, and comes ou
   for (let i = 0; i < 10; i++) indexBuild(half).step(() => false);
   expect(indexBuild(half).index).toBeNull();
   expect(searchIndex(half).all.map((e) => e.id)).toEqual(whole.all.map((e) => e.id));
-  expect(panels(half, half.root, "key 7")[0]!.count).toBe(whole.hay.filter((h) => h.includes("key") && h.includes("7")).length);
+  expect(panels(half, half.root, "key 7")[0]!.count).toBe(whole.hay.filter((h) => h.toLowerCase().includes("key") && h.includes("7")).length);
 });

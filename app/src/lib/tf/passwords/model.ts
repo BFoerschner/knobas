@@ -4,6 +4,7 @@
  * no request and are tested as data.
  */
 import type { Held, PwFolder, PwRow, PwSource } from "../../ipc/passwords";
+import { matcherOf, sliceMarks } from "../filter/filter";
 
 /** One entry, read out of its row. */
 export interface Entry {
@@ -142,14 +143,15 @@ export class Entries {
 }
 
 /**
- * What the filter reads: every entry by title, and each one's lower-cased title, username, address and path, in the
- * same order. Built on the filter's first use or once the page has drawn (`searchIndex`), never with the model: at
+ * What the filter reads: every entry by title, and each one's text (title, username, address and path, a line each,
+ * as {@link entryMarks} reads it), in the same order; `textOf` is an entry's text, the haystack the app ranks (#2535). Built on the filter's first use or once the page has drawn (`searchIndex`), never with the model: at
  * 20,000 entries the sort and the strings were most of the model's cost, on the first open's path (the ux30 end gate,
  * 2026-11-23: 418 ms at 6x against the line's 300).
  */
 export interface SearchIndex {
   all: Entry[];
   hay: string[];
+  textOf: (e: Entry) => string;
 }
 
 /** The id of a source's top node. */
@@ -248,6 +250,7 @@ export class IndexBuild {
   #hi = 0;
   #inPair = false;
   #hay: string[] = [];
+  readonly #texts = new Map<Entry, string>();
   readonly #paths = new Map<string | null, string>();
   #index: SearchIndex | null = null;
 
@@ -336,13 +339,16 @@ export class IndexBuild {
         const end = Math.min(n, this.#at + BLOCK);
         for (let i = this.#at; i < end; i++) {
           const e = all[i]!;
-          // One lower-casing of the whole: a flat string, where a join of four is flattened by the first keystroke's
-          // `includes`, 20,000 of them in its task.
-          this.#hay.push(`${e.title}\n${e.user ?? ""}\n${e.address ?? ""}\n${this.#pathText(e.folder)}`.toLowerCase());
+          // As drawn, not lower-cased (#2535): the ranking's marks are places in this text, and a lower-casing can
+          // change a text's length.
+          const text = `${e.title}\n${e.user ?? ""}\n${e.address ?? ""}\n${this.#pathText(e.folder)}`;
+          this.#hay.push(text);
+          this.#texts.set(e, text);
         }
         this.#at = end;
         if (end === n) {
-          this.#index = { all, hay: this.#hay };
+          const texts = this.#texts;
+          this.#index = { all, hay: this.#hay, textOf: (e) => texts.get(e) ?? "" };
           this.#stage = "done";
         }
         return;
@@ -356,7 +362,8 @@ export class IndexBuild {
   #pathText(folder: string | null): string {
     let text = this.#paths.get(folder);
     if (text === undefined) {
-      text = chainOf(this.#m, folder !== null ? (this.#m.nodes.get(folder) ?? null) : null).map((n) => n.name).join(" ").toLowerCase();
+      // Joined as a filter's hit draws it, so the ranking's marks fall on the drawn path (#2535).
+      text = pathWords(this.#m, folder);
       this.#paths.set(folder, text);
     }
     return text;
@@ -444,23 +451,40 @@ export function scopeOf(m: Model, node: Node): ReadonlySet<Entry> | null {
   return scope;
 }
 
+const scopedLists = new WeakMap<Node, Entry[]>();
+
+/**
+ * The entries the filter ranks at `node`, by title (#2535): every entry at All entries, else those of {@link scopeOf}.
+ * Kept per node, so the app holds a folder's list once and a key in it sends only its words.
+ */
+export function scopedEntries(m: Model, node: Node): Entry[] {
+  const { all } = searchIndex(m);
+  const scope = scopeOf(m, node);
+  if (scope === null) return all;
+  let list = scopedLists.get(node);
+  if (list === undefined) {
+    list = all.filter((e) => scope.has(e));
+    scopedLists.set(node, list);
+  }
+  return list;
+}
+
 /**
  * What a folder lists: at the top, the recent entries; then its own entries; then one panel for each folder below
  * that holds entries, in tree order. With a filter, one panel of every match inside the folder and the folders under
- * it ({@link scopeOf}), by title.
+ * it ({@link scopeOf}): `ranked`, the app's ranking of every entry's text (#2535), best first, held to that scope;
+ * without one, every entry by title that holds each typed word.
  */
-export function panels(m: Model, node: Node, query: string): Panel[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length > 0) {
-    const { all, hay } = searchIndex(m);
+export function panels(m: Model, node: Node, query: string, ranked: readonly Entry[] | null = null): Panel[] {
+  if (query.trim() !== "") {
     const scope = scopeOf(m, node);
-    // A plain loop, not a closure per entry and word: a keystroke reads all 20,000.
-    const rows: Entry[] = [];
-    outer: for (let i = 0; i < all.length; i++) {
-      if (scope !== null && !scope.has(all[i]!)) continue;
-      const text = hay[i]!;
-      for (let w = 0; w < words.length; w++) if (!text.includes(words[w]!)) continue outer;
-      rows.push(all[i]!);
+    let rows: Entry[];
+    if (ranked !== null) rows = scope === null ? [...ranked] : ranked.filter((e) => scope.has(e));
+    else {
+      const { all, hay } = searchIndex(m);
+      const holds = matcherOf(query);
+      rows = [];
+      for (let i = 0; i < all.length; i++) if ((scope === null || scope.has(all[i]!)) && holds(hay[i]!)) rows.push(all[i]!);
     }
     return [{ kind: "hits", node: null, count: rows.length, rows }];
   }
@@ -522,22 +546,29 @@ export function treeRows(m: Model, open: ReadonlySet<string>): TreeRow[] {
   return out;
 }
 
-/** The marks of `query`'s words in `text`, as runs of plain and marked text. */
-export function marks(text: string, query: string): { text: string; hit: boolean }[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0 || text === "") return [{ text, hit: false }];
-  const lower = text.toLowerCase();
-  const hit = new Array<boolean>(text.length).fill(false);
-  for (const w of words) {
-    for (let at = lower.indexOf(w); at !== -1; at = lower.indexOf(w, at + 1)) hit.fill(true, at, at + w.length);
-  }
-  const out: { text: string; hit: boolean }[] = [];
-  for (let i = 0; i < text.length; i++) {
-    const last = out[out.length - 1];
-    if (last && last.hit === hit[i]) last.text += text[i];
-    else out.push({ text: text[i]!, hit: hit[i]! });
-  }
-  return out;
+/** A folder's path as a filter's hit draws it under the entry: its folders' names, top first, joined with ` / `. */
+export function pathWords(m: Model, folder: string | null): string {
+  return chainOf(m, folder !== null ? (m.nodes.get(folder) ?? null) : null).map((n) => n.name).join(" / ");
+}
+
+/**
+ * An entry's matched letters (`pairs` over its {@link SearchIndex} text) cut onto the cells its row draws: the title,
+ * the username, the address as {@link bare} writes it, and the path as {@link pathWords} writes it.
+ */
+export function entryMarks(
+  e: Entry,
+  pairs: readonly number[],
+): { title: readonly number[]; user: readonly number[]; address: readonly number[]; path: readonly number[] } {
+  const user = e.title.length + 1;
+  const address = user + (e.user ?? "").length + 1;
+  const written = e.address ?? "";
+  const shown = bare(written);
+  return {
+    title: sliceMarks(pairs, 0, e.title.length),
+    user: sliceMarks(pairs, user, (e.user ?? "").length),
+    address: sliceMarks(pairs, address + (shown === "" ? 0 : written.indexOf(shown)), shown.length),
+    path: sliceMarks(pairs, address + written.length + 1),
+  };
 }
 
 /** An expiry as the row and the entry say it: the tone and the words, `null` far off or with none. */

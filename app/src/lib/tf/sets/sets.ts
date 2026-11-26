@@ -17,7 +17,6 @@ import type {
   LinkSetRuleKind,
   LinkSetRuleRow,
 } from "../../ipc/entity";
-import { matchesAll } from "../filter/filter";
 
 /**
  * An asset member's line in words. The read sends *type id, environment* (`link_sets::line_of`): `container_engine, dev`
@@ -178,13 +177,14 @@ export function contentLines(set: Pick<LinkSetRow, "members" | "patterns">): str
     .map(([kind, count]) => counted(count, KIND_ONE[kind], KIND_LABEL[kind].toLowerCase()));
 }
 
-/** The sets the filter keeps: every word in the name, description or an item, and any chip's rule kind. */
-export function visibleSets(sets: readonly LinkSetRow[], text: string, by: readonly string[]): LinkSetRow[] {
-  return sets.filter(
-    (set) =>
-      (by.length === 0 || set.rules.some((rule) => by.includes(rule.kind))) &&
-      matchesAll([set.name, set.description, ...itemsOf(set).map((member) => member.title ?? member.entity_id)].join(" "), text),
-  );
+/** The sets a chip keeps: any chip's rule kind (#2535: the typed words rank {@link setText} through the app's ranking). */
+export function visibleSets(sets: readonly LinkSetRow[], by: readonly string[]): readonly LinkSetRow[] {
+  return by.length === 0 ? sets : sets.filter((set) => set.rules.some((rule) => by.includes(rule.kind)));
+}
+
+/** What the filter ranks a set by: its name, then its description, then each item. The name leads, so its marks start at 0. */
+export function setText(set: LinkSetRow): string {
+  return [set.name, set.description, ...itemsOf(set).map((member) => member.title ?? member.entity_id)].join(" ");
 }
 
 /** The member kinds with *Add a pattern…* (R-7.7: builds and pages). */

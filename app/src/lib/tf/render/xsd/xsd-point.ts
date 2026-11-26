@@ -19,6 +19,24 @@ export interface Candidate {
   readonly declares: string;
 }
 
+/** What *Find a schema file* ranks a file by (#2535): its repository's name (none for this one's), then its path. */
+export function pointText(c: Candidate): string {
+  return `${c.repoName ?? ""} ${c.path}`;
+}
+
+/**
+ * The files in the picker's order: those that `fits` first, this repository's before another's, then, with words
+ * typed, the ranking's order (`list` as ranked, best first), else the shorter path.
+ */
+export function pointSorted(list: readonly Candidate[], fits: (c: Candidate) => boolean, ranked: boolean): Candidate[] {
+  return [...list].sort(
+    (a, b) =>
+      Number(fits(b)) - Number(fits(a)) ||
+      Number(a.repoName !== null) - Number(b.repoName !== null) ||
+      (ranked ? 0 : a.path.length - b.path.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+  );
+}
+
 /** The repository's schema files as candidates, from its index's sniffs. */
 export function candidatesOf(repo: string, declares: readonly (readonly [string, string | null])[]): Candidate[] {
   return declares.filter(([, ns]) => ns !== null).map(([path, ns]) => ({ repo, repoName: null, path, declares: ns ?? "" }));
