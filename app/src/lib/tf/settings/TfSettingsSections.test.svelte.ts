@@ -810,8 +810,9 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  // 35 (Zen mode's `Z`, ux31), and the Secrets page's twelve (ADR-0056; W and Shift W, ux30; `/` moved to section search, #2515).
-  expect(rows).toHaveLength(53);
+  // 35 (Zen mode's `Z`, ux31), and the Secrets page's twelve (ADR-0056; W and Shift W, ux30; `/` moved to section search, #2515),
+  // its filter's chords and Enter, and Alt+click in a tree (#2531).
+  expect(rows).toHaveLength(56);
   const where = rows.map((row) => row.querySelectorAll("td")[1]?.textContent?.trim());
   expect(where).toContain("Secrets");
   expect(where).not.toContain("Passwords");
@@ -824,6 +825,8 @@ test("Keyboard lists the fixed shortcuts", async () => {
   for (const key of ["⌘D", "Tab", "⌘?", "⌘B", "⌘Enter", "J K", "N P", "V", "C", "S"]) expect(said, "F-062, F-633").toContain(key);
   // A ticket's assign and summary keys (ADR-0054); labels have none, `L` being the drawer's (2026-11-22).
   for (const key of ["A", "E", "L"]) expect(said, "ADR-0054").toContain(key);
+  expect(where.filter((w) => w === "Secrets, in the filter"), "#2531").toHaveLength(2);
+  expect(said, "#2531").toContain("Alt click");
   expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",
