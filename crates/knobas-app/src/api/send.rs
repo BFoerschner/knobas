@@ -489,6 +489,29 @@ pub fn body(id: u64, pretty: bool) -> Option<Bytes> {
     Some(bytes)
 }
 
+/// The body of send `id` through the file pipeline `steps` (#2533, ADR-0057), as a file's bytes are run: the bytes
+/// read from [`kept`] in this process's memory, the steps run in memory under their caps, `name` the file the answer
+/// goes by (it picks the steps' defaults and the renderer). Neither the body nor the run is written to a file, the
+/// database or a backup; nothing of it is kept beyond the answer. `None` once the body is no longer kept.
+pub async fn piped(
+    id: u64,
+    name: &str,
+    steps: &[crate::file_pipeline::PipeStep],
+    commands: &[crate::file_pipeline::saved::CommandStep],
+) -> Option<crate::file_pipeline::PipeRun> {
+    let bytes = kept().body(id)?.to_vec();
+    Some(
+        crate::file_pipeline::run_bytes_with(
+            steps,
+            commands,
+            bytes,
+            name,
+            crate::file_pipeline::Limits::default(),
+        )
+        .await,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApiAuth, ApiSend, AuthPlace, changes, is_this_computer, needs_asking, prepare};

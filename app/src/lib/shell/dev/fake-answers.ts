@@ -3,7 +3,7 @@
  * function, so a Rust rename that regenerates the mirror turns the fixture red in svelte-check (#1670).
  * One line per `invoke("<command>")` in `app/src/lib/ipc/*.ts`; a command missing here is simply untyped.
  */
-import type { apiAnswerBody, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, filesDeclaring, xsdFetch, xsdDownloaded, xsdForget, xsdSaveExample, textPiped, textPipedSave, jsonQueryOpen, jsonQuery, jsonQueryClose } from "../../ipc/api";
+import type { apiAnswerBody, apiAnswerPiped, apiAnswerPipedSave, apiCancel, apiClientsFound, apiOpenIn, apiScratchClear, apiScratchSize, apiForgetHeld, apiHeld, apiHoldSecret, apiSaveAnswer, apiSend, apiSent, apiServers, apiSetServers, imageFetch, imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdLocations, xsdSetLocations, filesDeclaring, xsdFetch, xsdDownloaded, xsdForget, xsdSaveExample, textPiped, textPipedSave, jsonQueryOpen, jsonQuery, jsonQueryClose } from "../../ipc/api";
 import type { appStatus, commandSteps, diffPipelines, firefoxHostStatus, folderRender, folderRenderers, folderRenderPicks, folderRenderCompare, setFolderRenderPick, folderRenderFrame, folderRenderLeave, folderRenderMarks, folderRenderOutput, folderRenderStop, folderRenderTree, folderRenderFile, folderRenderFileBytes, folderRenderArchiveOpen, folderRenderOpen, folderRenderStore, setFolderRenderStore, clearFolderRenderStore, setFolderRenderers, setJavaPath, frontendReady, installFirefoxHost, installedFonts, javaRuntime, namedPipelines, pagesKeptOpen, ping, recordBrowserBypass, rendererDefaults, retryDatabase, runRenderer, setCommandSteps, setDiffPipelines, setNamedPipelines, setPagesKeptOpen, setRendererDefaults, setSmoothScrolling, setSourceLinkHandoff, setUserRenderers, smoothScrolling, sourceLinkHandoff, uninstallFirefoxHost, userRenderers } from "../../ipc/app";
 import type { unackAlert, ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, createDepLayer, createRoute, deleteAsset, deleteDepLayer, deleteDepView, deleteRoute, depViews, dependencies, dependsOnThis, editAsset, editRoute, getAsset, getRoute, monitorRoster, monitorsDown, monitoringSettings, moveAsset, openAlerts, orderDepLayers, placeDepKind, previewEstateImport, produceEstateFile, renameDepLayer, saveDepView, setDepViewDefaults, setMonitorHidden, setMonitoringSettings, unmonitoredAssets } from "../../ipc/assets";
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
@@ -82,6 +82,8 @@ export interface Answers {
   api_send: Answer<typeof apiSend>;
   api_cancel: Answer<typeof apiCancel>;
   api_answer_body: Answer<typeof apiAnswerBody>;
+  api_answer_piped: Answer<typeof apiAnswerPiped>;
+  api_answer_piped_save: Answer<typeof apiAnswerPipedSave>;
   api_sent: Answer<typeof apiSent>;
   api_hold_secret: Answer<typeof apiHoldSecret>;
   api_held: Answer<typeof apiHeld>;
