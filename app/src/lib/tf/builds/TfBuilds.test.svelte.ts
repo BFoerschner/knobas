@@ -12,6 +12,7 @@ import * as entityIpc from "../../ipc/entity";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 import { runsRead } from "./runs-read.svelte";
+import { thingAt } from "../context/thing";
 import { buildsView } from "./builds-view.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
@@ -945,4 +946,33 @@ test("Alt+click on a Builds folder recursively expands and collapses every neste
   coreDetails.dispatchEvent(new Event("toggle"));
   flushSync();
   expect((foldSummary("Payments").parentElement as HTMLDetailsElement).open).toBe(false);
+});
+
+// -- Right-click on the rail: Mark N runs as read (#2527) ---------------------
+
+test("a right-click on a rail pipeline or folder carries the unread failed runs the rail holds under it, read as the menu opens (#2527)", async () => {
+  marks(["teamcity:build:5"]);
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "err"), run("teamcity:build:9", "ok"), run("teamcity:build:5", "err")]), path: ["Core", "Payments"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "err"), run("teamcity:build:8", "ok", { finished: null, state: { text: "running", tone: "info" } })]), path: ["Core", "Payments"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw([], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const fold = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)!;
+
+  expect(thingAt(nameOf("Api").querySelector(".tf-pi-nm"))?.thing).toEqual({
+    kind: "pipeline",
+    id: "teamcity:buildType:a",
+    hash: "#/builds/teamcity%3AbuildType%3Aa",
+    unread: ["teamcity:build:1"],
+  });
+  expect(thingAt(fold("Core").querySelector(".tf-fold-nm"))?.thing).toEqual({ kind: "pipeline-folder", name: "Core", unread: ["teamcity:build:1", "teamcity:build:2"] });
+  expect(thingAt(fold("Edge"))?.thing).toEqual({ kind: "pipeline-folder", name: "Edge", unread: [] });
+
+  void runsRead.markRead(["teamcity:build:2"]);
+  flushSync();
+  expect(thingAt(fold("Core"))?.thing).toMatchObject({ unread: ["teamcity:build:1"] });
+  expect(thingAt(nameOf("Worker"))?.thing).toMatchObject({ kind: "pipeline", unread: [] });
 });

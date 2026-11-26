@@ -420,17 +420,44 @@ export const CUT = 5;
 /** A panel cut at {@link CUT} has more than this many rows. */
 export const CUT_OVER = 6;
 
+const scopes = new WeakMap<Node, ReadonlySet<Entry>>();
+
+/**
+ * The entries the filter reads at `node` (#2531): every entry listed in it or in a folder under it, an entry also
+ * listed there included, as `model` placed them in the folders' `own`. `null` at All entries, which reads every entry.
+ * Kept per node, so a keystroke costs a set's lookup per entry. The seam the Rust filter (#2535) takes: what it ranks
+ * is held to this set.
+ */
+export function scopeOf(m: Model, node: Node): ReadonlySet<Entry> | null {
+  if (node === m.root) return null;
+  let scope = scopes.get(node);
+  if (scope === undefined) {
+    const out = new Set<Entry>();
+    const walk = (at: Node): void => {
+      for (let i = 0; i < at.own.length; i++) out.add(m.entries.at(at.own[i]!));
+      for (const kid of at.kids) walk(kid);
+    };
+    walk(node);
+    scope = out;
+    scopes.set(node, scope);
+  }
+  return scope;
+}
+
 /**
  * What a folder lists: at the top, the recent entries; then its own entries; then one panel for each folder below
- * that holds entries, in tree order. With a filter, one panel of every match, by title.
+ * that holds entries, in tree order. With a filter, one panel of every match inside the folder and the folders under
+ * it ({@link scopeOf}), by title.
  */
 export function panels(m: Model, node: Node, query: string): Panel[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length > 0) {
     const { all, hay } = searchIndex(m);
+    const scope = scopeOf(m, node);
     // A plain loop, not a closure per entry and word: a keystroke reads all 20,000.
     const rows: Entry[] = [];
     outer: for (let i = 0; i < all.length; i++) {
+      if (scope !== null && !scope.has(all[i]!)) continue;
       const text = hay[i]!;
       for (let w = 0; w < words.length; w++) if (!text.includes(words[w]!)) continue outer;
       rows.push(all[i]!);
