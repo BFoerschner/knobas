@@ -197,6 +197,32 @@ test("with knobas closed the page loads, and so it does when the host is missing
   });
 });
 
+test("a handoff never queues in the host behind a request that timed out, so it cannot open after the page loaded", async () => {
+  // The host stamps a request when it gets to it, and knobas acts within 1.5 s
+  // of that stamp: a handoff stuck behind a hung frame would be stamped late.
+  const host = fakeHost({ answer: knobas([JIRA], opened) });
+  const clock = fakeClock();
+  const { router, tabs } = await started({ host, clock });
+  host.answer = (m) => (m.type === "get_rules" ? "hang" : knobas([JIRA], opened)(m));
+  clock.advance(60_000); // stale: this navigation reads the rules first, and that read hangs
+  const t0 = Date.now();
+  assert.deepEqual(await router.onBeforeRequest(nav(PAY, { tabId: 1 })), { cancel: true });
+  assert.ok(Date.now() - t0 < 125, "answered on its own port, not at the handoff timeout behind the hung read");
+  assert.deepEqual(tabs.removed, [1]);
+  assert.equal(host.ports[0].closed, true, "the port whose request timed out is closed");
+  assert.equal(host.connects, 2);
+});
+
+test("two links at once each get a port, and only one stays open afterwards", async () => {
+  const host = fakeHost({ answer: knobas([JIRA], opened) });
+  const { router, tabs } = await started({ host, tabs: fakeTabs({ 1: "about:blank", 2: "about:blank" }) });
+  const answers = await Promise.all([router.onBeforeRequest(nav(PAY, { tabId: 1 })), router.onBeforeRequest(nav(PAY, { tabId: 2 }))]);
+  assert.deepEqual(answers, [{ cancel: true }, { cancel: true }]);
+  assert.deepEqual(tabs.removed.sort(), [1, 2]);
+  assert.equal(host.connects, 2);
+  assert.equal(host.ports.filter((p) => !p.closed).length, 1, "a second idle port would keep a host process running");
+});
+
 test("rules are read at startup and again on the first navigation after they go stale", async () => {
   let running = false;
   const host = fakeHost({

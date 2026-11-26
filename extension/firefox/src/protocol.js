@@ -15,7 +15,9 @@ export const PROTOCOL_VERSION = 1;
  * How long a `handoff` may take before the page loads in Firefox. The host
  * answers `knobas_not_running` after 2 s, and knobas acts on a request only
  * within 1.5 s of the host sending it, so past this nothing opens in knobas
- * and loading the page cannot open it twice.
+ * and loading the page cannot open it twice. That holds because the host
+ * gets to the request at once: native.js never queues it behind another one
+ * on the same port.
  */
 export const HANDOFF_TIMEOUT_MS = 2500;
 

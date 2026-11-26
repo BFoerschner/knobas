@@ -19,7 +19,10 @@ installs. Everything it knows comes from knobas.
   - `opened`: Firefox drops the load. A tab opened for this link alone closes
     (it showed nothing yet). A tab that already showed a page keeps it.
   - `bypass`, `ignore`, any error, no answer within 2.5 s, or no host: Firefox
-    loads the page. *Known items only* versus *Whole source* is decided by
+    loads the page. Each request has a port to itself, because the host
+    answers a port's requests in turn and knobas acts only within 1.5 s of
+    the host passing one on: a request stuck behind a slow one could open in
+    knobas after Firefox had loaded the page. *Known items only* versus *Whole source* is decided by
     knobas: a page it doesn't mirror comes back `ignore`.
 - **No loops.** *Open in browser* in knobas records a one-shot bypass, and
   knobas answers `bypass` for it. For two minutes after that, the same tab
@@ -65,7 +68,7 @@ allows. Change it and Firefox refuses the connection.
 | --- | --- |
 | `manifest.json` | Manifest V2, persistent background page, `webRequestBlocking` |
 | `src/router.js` | Every decision: rules cache, matching, handoff, bypass, pause |
-| `src/native.js` | One persistent Native Messaging port; requests matched by `id` |
+| `src/native.js` | Native Messaging ports to the host, one request in flight on each; a port that timed out is closed |
 | `src/rules.js` | The URL-to-rule match |
 | `src/toolbar.js` | The button's icon, badge and tooltip for a status |
 | `src/background.js` | Wiring to `browser.*`, nothing else |

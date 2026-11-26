@@ -20,6 +20,27 @@ export function fakeHost({ installed = true, answer = () => ({ ok: false, error:
       host.connects += 1;
       const messageListeners = [];
       const disconnectListeners = [];
+      // Like the real host, a port's frames are served one at a time, in order:
+      // a frame that hangs holds up every frame behind it on that port.
+      const queue = [];
+      let busy = false;
+      const serve = () => {
+        if (busy || port.dead || queue.length === 0) return;
+        const message = queue.shift();
+        const reply = host.answer(message);
+        if (reply === "hang") {
+          busy = true;
+          return;
+        }
+        busy = true;
+        setImmediate(() => {
+          busy = false;
+          if (port.dead) return;
+          if (reply === "disconnect") return drop(null);
+          for (const f of messageListeners) f({ ...reply, id: message.id });
+          serve();
+        });
+      };
       const port = {
         error: null,
         onMessage: { addListener: (f) => messageListeners.push(f) },
@@ -27,16 +48,12 @@ export function fakeHost({ installed = true, answer = () => ({ ok: false, error:
         postMessage(message) {
           if (port.dead) throw new Error("Attempt to postMessage on disconnected port");
           host.sent.push(message);
-          const reply = host.answer(message);
-          if (reply === "hang") return;
-          setImmediate(() => {
-            if (port.dead) return;
-            if (reply === "disconnect") return drop(null);
-            for (const f of messageListeners) f({ ...reply, id: message.id });
-          });
+          queue.push(message);
+          serve();
         },
         disconnect() {
           port.dead = true;
+          port.closed = true;
         },
       };
       const drop = (message) => {
