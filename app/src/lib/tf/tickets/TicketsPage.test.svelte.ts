@@ -18,6 +18,7 @@ import { scopedTicket } from "../job/scoped.svelte";
 import { layers } from "../layers.svelte";
 import { until } from "../../shell/test-wait";
 import { withStatusEchoes } from "./echo-board";
+import { fuzzyRankHeld } from "../../ipc/search";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -30,6 +31,12 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
     return Promise.reject(new Error("no bridge in this suite"));
   },
 }));
+
+// The local filters rank through the app's ranking (#2535): here a letters-in-order stand-in, its held ranking counted.
+vi.mock("../../ipc/search", async (actual) => {
+  const fuzzy = (await import("../filter/test-fuzzy")).fuzzyIpc();
+  return { ...(await actual<object>()), ...fuzzy, fuzzyRankHeld: vi.fn(fuzzy.fuzzyRankHeld) };
+});
 
 // The board laid over its echoes, counted (the ux30 end gate): a write's answer must not lay it over again.
 vi.mock("./echo-board", async (original) => {
@@ -1351,6 +1358,8 @@ test("a condition with many values is a list to search: typed letters find a val
 
   input(valueSearch(), "pay");
   await settle();
+  // The app ranks the values (#2535), not the page.
+  expect(vi.mocked(fuzzyRankHeld)).toHaveBeenCalledWith(expect.stringMatching(/^value-picker:/), "pay");
   expect(offeredNames()).toEqual(["Payments (PAY)", "Team Pay (TPY)", "Platform Analytics Yearly (PLY)"]);
   expect([...offered()[0]!.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["Pay"]);
   offered()[0]!.click();
@@ -1413,6 +1422,15 @@ test("the value search is worked from the keys: arrows move, Enter picks without
   key(valueSearch(), "Escape");
   await settle();
   expect(dialog()).toBeNull();
+});
+
+test("Enter in the value search before the ranking answers picks the best of that answer (#2535)", async () => {
+  await projectCondition();
+  input(valueSearch(), "trk");
+  // No answer yet: the list drawn is every value, Tracking not first.
+  key(valueSearch(), "Enter");
+  await settle();
+  expect(searchLine().textContent).toBe("project:TRK");
 });
 
 test("a condition with few values stays a row of toggles, with no search", async () => {
