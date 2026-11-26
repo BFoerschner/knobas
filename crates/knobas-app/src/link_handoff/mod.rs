@@ -11,6 +11,7 @@ pub mod protocol;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use knobas_sync::scheduler::AdapterRegistry;
 use serde::{Deserialize, Serialize};
@@ -108,6 +109,12 @@ pub fn is_http_or_https_url(url: &str) -> bool {
 /// Normalize an `http(s)` URL using the same four rules as `web_url_normalized!`:
 /// lowercase scheme + host[:port], strip `#fragment`, strip trailing `/` on the
 /// path, and keep `?query` verbatim. Returns `None` for non-`http(s)` URLs.
+///
+/// Not a second spelling of the mirror's rule (`knobas_core::web_url`): its
+/// output never meets a stored `web_url`. Both sides of every comparison it
+/// serves, a bypass recorded and a bypass checked, a rule's base and the
+/// rule it is matched against, pass through this one function; finding an
+/// item by its address stays `resolve_url_inner`'s SQL.
 #[must_use]
 pub fn normalize_web_url(url: &str) -> Option<String> {
     let trimmed = url.trim();
@@ -486,9 +493,14 @@ pub fn start_bridge<R: tauri::Runtime>(app: &tauri::AppHandle<R>, profile: &crat
         .filter(|v| !v.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| profile.dir.join(bridge::BRIDGE_FILE));
+    // A bridge from an earlier bring-up goes first: the new one takes the
+    // same endpoint file and socket, which stopping the old one removes.
+    if let Some(state) = app.try_state::<LinkHandoffState>() {
+        state.stop_bridge();
+    }
     let handle = app.clone();
-    match BridgeServer::start(endpoint_file.clone(), move |request| {
-        handle_bridge_request(&handle, request)
+    match BridgeServer::start(endpoint_file.clone(), move |request, left| {
+        handle_bridge_request(&handle, request, left)
     }) {
         Ok(server) => {
             if let Some(state) = app.try_state::<LinkHandoffState>() {
@@ -579,9 +591,20 @@ pub fn drain_pending<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     });
 }
 
+/// The answer the host gives when knobas cannot answer before the host stops
+/// waiting: Firefox loads the page, and knobas does nothing with the link.
+fn too_slow() -> HostResponse {
+    HostResponse::error("not_ready", "knobas could not answer in time")
+}
+
+/// Answer one host request within `left`, the time before the host stops
+/// waiting (`bridge::budget_left`). A `handoff` that would open the link acts
+/// only when it finished inside that time and the webview listens for
+/// `link-handoff:open`; otherwise Firefox keeps the page.
 fn handle_bridge_request<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     request: HostRequest,
+    left: Duration,
 ) -> HostResponse {
     match request {
         HostRequest::Ping => HostResponse::pong(true),
@@ -599,9 +622,13 @@ fn handle_bridge_request<R: tauri::Runtime>(
                 return HostResponse::error("not_ready", "database is not ready");
             };
             let registry = lifecycle.registry();
-            match tauri::async_runtime::block_on(export_rules(&pool, registry)) {
-                Ok(rules) => HostResponse::rules(rules),
-                Err(error) => HostResponse::error("internal", error.message),
+            match tauri::async_runtime::block_on(tokio::time::timeout(
+                left,
+                export_rules(&pool, registry),
+            )) {
+                Ok(Ok(rules)) => HostResponse::rules(rules),
+                Ok(Err(error)) => HostResponse::error("internal", error.message),
+                Err(_) => too_slow(),
             }
         }
         HostRequest::Handoff { url } => {
@@ -611,6 +638,11 @@ fn handle_bridge_request<R: tauri::Runtime>(
             let Some(state) = app.try_state::<LinkHandoffState>() else {
                 return HostResponse::error("not_ready", "link handoff is not ready");
             };
+            // Before `frontend_ready` nothing hears `link-handoff:open`: an
+            // `opened` answer would close the tab and open nothing.
+            if !state.is_frontend_armed() {
+                return HostResponse::error("not_ready", "the knobas window is starting");
+            }
             let Some(lifecycle) = app.try_state::<Lifecycle>() else {
                 return HostResponse::error("not_ready", "knobas is starting");
             };
@@ -618,13 +650,12 @@ fn handle_bridge_request<R: tauri::Runtime>(
                 return HostResponse::error("not_ready", "database is not ready");
             };
             let registry = lifecycle.registry();
-            match tauri::async_runtime::block_on(evaluate_native_handoff(
-                &pool,
-                registry,
-                state.bypass(),
-                &url,
+            match tauri::async_runtime::block_on(tokio::time::timeout(
+                left,
+                evaluate_native_handoff(&pool, registry, state.bypass(), &url),
             )) {
-                Ok((action, maybe_target)) => {
+                Err(_) => too_slow(),
+                Ok(Ok((action, maybe_target))) => {
                     if let Some(target) = maybe_target {
                         crate::capture::focus_main_window(app);
                         crate::events::emit(
@@ -636,7 +667,7 @@ fn handle_bridge_request<R: tauri::Runtime>(
                     }
                     HostResponse::handoff(action)
                 }
-                Err(error) => HostResponse::error("internal", error.message),
+                Ok(Err(error)) => HostResponse::error("internal", error.message),
             }
         }
     }
@@ -698,5 +729,37 @@ mod tests {
             Some("root")
         );
         assert_eq!(match_rule(&rules, "https://other.example/wiki/page"), None);
+    }
+
+    fn error_message(response: &HostResponse) -> Option<(&str, &str)> {
+        match &response.body {
+            protocol::HostResponseBody::Error { error, message } => {
+                Some((error.as_str(), message.as_str()))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_handoff_before_the_window_listens_leaves_the_page_in_firefox() {
+        let app = tauri::test::mock_app();
+        app.manage(LinkHandoffState::new());
+        let handoff = || HostRequest::Handoff {
+            url: "https://jira.example/browse/PAY-231".into(),
+        };
+
+        let early = handle_bridge_request(app.handle(), handoff(), bridge::ANSWER_BUDGET);
+        assert_eq!(
+            error_message(&early),
+            Some(("not_ready", "the knobas window is starting"))
+        );
+
+        // Armed, it goes on to the database (not managed in this test).
+        app.state::<LinkHandoffState>().arm_frontend();
+        let armed = handle_bridge_request(app.handle(), handoff(), bridge::ANSWER_BUDGET);
+        assert_eq!(
+            error_message(&armed),
+            Some(("not_ready", "knobas is starting"))
+        );
     }
 }

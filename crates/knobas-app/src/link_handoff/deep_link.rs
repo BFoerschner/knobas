@@ -57,9 +57,12 @@ where
 {
     for arg in args {
         let s = arg.as_ref().trim();
-        if s.len() >= DEEP_LINK_SCHEME.len() + 3
-            && s[..DEEP_LINK_SCHEME.len()].eq_ignore_ascii_case(DEEP_LINK_SCHEME)
-            && s[DEEP_LINK_SCHEME.len()..].starts_with("://")
+        // `get`, not indexing: an argument need not split on a character
+        // boundary there (`knobaé://`), and this runs on any launch's argv.
+        if s.get(..DEEP_LINK_SCHEME.len())
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case(DEEP_LINK_SCHEME))
+            && s.get(DEEP_LINK_SCHEME.len()..)
+                .is_some_and(|rest| rest.starts_with("://"))
             && let Ok(url) = parse_deep_link(s)
         {
             return Some(url);
@@ -101,6 +104,12 @@ mod tests {
         ] {
             assert!(parse_deep_link(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn an_argument_that_splits_a_character_where_the_scheme_ends_is_skipped() {
+        // Byte 6 falls inside `é`: slicing there would panic on any launch.
+        assert_eq!(find_deep_link_in_args(["knobaé://x", "knobé"]), None);
     }
 
     #[test]

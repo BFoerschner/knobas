@@ -371,7 +371,7 @@ async fn native_messaging_host_binary_speaks_stdio_framing_over_authenticated_br
     let server_reg = Arc::clone(&registry);
     let server_bypass = Arc::clone(&bypass);
     let server_opened = Arc::clone(&opened);
-    let server = BridgeServer::start(endpoint_file.clone(), move |req| match req {
+    let server = BridgeServer::start(endpoint_file.clone(), move |req, _left| match req {
         HostRequest::Ping => HostResponse::pong(true),
         HostRequest::GetRules => {
             match handle.block_on(export_rules(&server_pool, server_reg.as_ref())) {

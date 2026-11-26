@@ -408,6 +408,16 @@ pub fn run() {
                                 link_handoff::handle_deep_link(&handle, url.as_str());
                             }
                         });
+                        // An open-URL event macOS sent before the listener
+                        // above existed is not replayed to it; the plugin
+                        // keeps it as the current link. Windows and Linux
+                        // carry theirs in argv, read below.
+                        #[cfg(target_os = "macos")]
+                        if let Ok(Some(urls)) = app.deep_link().get_current() {
+                            for url in urls {
+                                link_handoff::handle_deep_link(app.handle(), url.as_str());
+                            }
+                        }
                         #[cfg(any(target_os = "windows", target_os = "linux"))]
                         {
                             let _ = app.deep_link().register_all();
