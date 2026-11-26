@@ -172,6 +172,23 @@ test("a command step's command and a pipeline's steps and patterns keep to one l
   expect(used!.querySelector(".tf-words-more")?.textContent).toBe("+2");
 });
 
+test("Schemas: a namespace, a location and the file that answers it each keep to one line, cut in the middle, whole on hover (#2518)", async () => {
+  const location = String.raw`C:\Users\some one\source\repos\folders with spaces in them\schemas\opentrans_2_1.xsd`;
+  const namespace = "http://www.opentrans.org/XMLSchema/2.1/with/a/namespace/that/is/long";
+  const path = "schemas/vendors/opentrans/a folder with a long name/opentrans_2_1.xsd";
+  schemas.pointed = [{ namespace, location, to: { repo: "tidewater/edi-schemas", path } }];
+  app = mount(TfPipelinesSettings, { target, props: stores([], [], []) });
+  await settle();
+  const row = [...target.querySelectorAll(".tf-rnd-schemas tbody tr")][0]!;
+  const [ns, at, by] = [...row.querySelectorAll("td")].map((td) => td.querySelector(".tf-path"));
+  expect(ns?.getAttribute("title")).toBe(namespace);
+  expect(text(ns?.querySelector(".tf-path-tail"))).toBe("long");
+  expect(at?.getAttribute("title")).toBe(location);
+  expect(text(at?.querySelector(".tf-path-tail"))).toBe("opentrans_2_1.xsd");
+  expect(by?.getAttribute("title")).toBe(`tidewater/edi-schemas: ${path}`);
+  expect(text(by?.querySelector(".tf-path-tail"))).toBe("opentrans_2_1.xsd");
+});
+
 test("Schemas: Download again keeps the row in its place and drops the old file once nothing uses it; Forget drops a file with its last row", async () => {
   const [one, two] = ["1".repeat(64), "2".repeat(64)];
   const url = "https://schemas.example/b.xsd";

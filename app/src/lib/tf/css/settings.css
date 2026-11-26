@@ -188,6 +188,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-steps th:nth-child(3) { width: calc(80px * var(--size-ui)); }
 .tf-rnd-pipes th:nth-child(1) { width: 24%; }
 .tf-rnd-pipes th:nth-child(3) { width: 24%; }
+/* Schemas (#2518): a namespace, a location and the file answering them, each a `TfPath` that gives up its middle. */
+.tf-rnd-schemas th:nth-child(1), .tf-rnd-schemas th:nth-child(2) { width: 28%; }
 .tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
 .tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
 .tf-rnd-defaults .tf-select { max-width: 100%; }

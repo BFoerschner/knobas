@@ -23,6 +23,7 @@
   import TfDialog from "./TfDialog.svelte";
   import TfCommand from "../TfCommand.svelte";
   import TfWords from "../TfWords.svelte";
+  import TfPath from "../TfPath.svelte";
   import { needsWords, secondsWhy } from "./form-words";
   import { imageHosts, setImageHosts, setXmlCheck, xmlCheck, xsdFetch, xsdForget, xsdLocations, xsdSetLocations, type PointedSchema } from "../../ipc/api";
   import { stillUsed, withDownload } from "../render/xsd/xsd-point";
@@ -358,14 +359,14 @@
   {#if pointed.length === 0}
     <p class="tf-dim">None: where a file is not found here, <i>Point to a file…</i> keeps the answer here.</p>
   {:else}
-    <table class="tf-tbl tf-rnd-tbl">
+    <table class="tf-tbl tf-rnd-tbl tf-rnd-schemas">
       <thead><tr><th>Namespace</th><th>Location</th><th>Answered by</th><th><span class="tf-sr">Actions</span></th></tr></thead>
       <tbody>
         {#each pointed.slice(0, POINTED_SHOWN) as p, i (`${p.namespace}\n${p.location}`)}
           <tr>
-            <td><code class="tf-mono">{p.namespace || "no namespace"}</code></td>
-            <td><code class="tf-mono">{p.location || "(none)"}</code></td>
-            <td class="tf-small"><span class="tf-cut" title={answeredBy(p)}>{answeredBy(p)}</span></td>
+            <td>{#if p.namespace}<TfPath path={p.namespace} />{:else}<span class="tf-dim">no namespace</span>{/if}</td>
+            <td>{#if p.location}<TfPath path={p.location} />{:else}<span class="tf-dim">(none)</span>{/if}</td>
+            <td class="tf-small"><TfPath path={answeredBy(p)} /></td>
             <td class="tf-right">
               {#if "url" in p.to}<button class="tf-btn tf-sm tf-ghost" aria-label="Download {p.to.url} again" disabled={again !== null} onclick={() => void downloadAgain(i)}>{again === i ? "Downloading…" : "Download again"}</button>{/if}
               <button class="tf-btn tf-sm tf-ghost" aria-label="Forget the file for {p.namespace || p.location}" onclick={() => void forgetPointed(i)}>Forget</button>
