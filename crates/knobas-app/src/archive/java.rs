@@ -836,7 +836,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!((found.release, found.path), (21, new.display().to_string()));
-        let found = first_java(vec![old.clone()], Some(17), false).await.unwrap();
+        let found = first_java(vec![old.clone()], Some(17), false)
+            .await
+            .unwrap();
         assert_eq!(
             found.release, 11,
             "no Java new enough: the one found, to say why not"
@@ -863,7 +865,10 @@ mod tests {
             let path = dir.path().join(name);
             std::fs::write(
                 &path,
-                format!("#!/bin/sh\necho {name} >> '{}'\nsleep 1\n{body}\n", log.display()),
+                format!(
+                    "#!/bin/sh\necho {name} >> '{}'\nsleep 1\n{body}\n",
+                    log.display()
+                ),
             )
             .unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -898,16 +903,26 @@ mod tests {
         let started = std::time::Instant::now();
         let again = first_java(places.clone(), Some(17), false).await.unwrap();
         assert_eq!(again, found);
-        assert!(started.elapsed() < Duration::from_millis(500), "answered from the session");
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "answered from the session"
+        );
         assert_eq!(asked(), ["j11", "j21", "stub"], "none started again");
 
         // A look again asks only what was no Java; a `java` replaced since is asked again.
         std::fs::write(
             &places[1],
-            format!("#!/bin/sh\necho j11 >> '{}'\n{}\n", log.display(), says("17.0.9")),
+            format!(
+                "#!/bin/sh\necho j11 >> '{}'\n{}\n",
+                log.display(),
+                says("17.0.9")
+            ),
         )
         .unwrap();
-        let file = std::fs::File::options().append(true).open(&places[1]).unwrap();
+        let file = std::fs::File::options()
+            .append(true)
+            .open(&places[1])
+            .unwrap();
         file.set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
             .unwrap();
         let looked = first_java(places.clone(), Some(17), true).await.unwrap();
