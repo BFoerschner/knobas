@@ -2030,7 +2030,13 @@ async fn hash_s_narrows_to_secret_entries_only() {
         (&entry_id, "password_entry", format!("Payout {t} db")),
         (&folder_id, "password_folder", format!("Payout {t} folder")),
     ] {
-        // ADR-0056: titles stay in sync.item, never knobas.entity.
+        // ADR-0056: titles stay in sync.item; knobas.entity gets an empty title.
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, '')")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query(
             "insert into sync.item
                (entity_id, source_id, kind, title, body_text, author, item_updated_at,
