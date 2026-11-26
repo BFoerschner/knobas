@@ -21,6 +21,8 @@
   import { SvelteSet } from "svelte/reactivity";
   import { Windowed } from "../../shell/windowed.svelte";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import TfOasOperation from "./TfOasOperation.svelte";
   import TfOasSchemaPage from "./TfOasSchemaPage.svelte";
   import { OasState, type Place } from "./oas.svelte";
@@ -91,16 +93,14 @@
     const schemas = index.schemas.map((name): Row => ({ k: `schemas/${name}`, kind: "schema", name }));
     return [...ops, ...schemas];
   });
-  /** The rows a comparison marked, else all; then those holding every word typed. */
-  const rows = $derived.by((): Row[] => {
-    const held = marks === null ? all : all.filter((r) => marks!.has(r.k));
-    const words = typed.toLowerCase().split(/\s+/).filter((w) => w !== "");
-    if (words.length === 0) return held;
-    return held.filter((r) => {
-      const hay = (r.kind === "op" ? `${r.method} ${r.path} ${r.summary}` : r.name).toLowerCase();
-      return words.every((w) => hay.includes(w));
-    });
-  });
+  /** The rows a comparison marked, else all; the typed words rank them through the app's ranking (#2535), best first. */
+  const held = $derived(marks === null ? all : all.filter((r) => marks!.has(r.k)));
+  /** What the filter ranks a row by: an operation's method, path and summary; a schema's name. */
+  const rowText = (r: Row) => (r.kind === "op" ? `${r.method} ${r.path} ${r.summary}` : r.name);
+  const order = heldOrder<Row>("oas-inline");
+  $effect(() => order.ask(typed, held, rowText));
+  const rows = $derived(order.rows(typed, held, rowText));
+  const marking = $derived(order.typed(typed, held));
   const opCount = $derived(index === null ? 0 : index.ops.length);
 
   /** Each open row's page, once read. */
@@ -175,11 +175,11 @@
             <button type="button" class="tf-oas-ibtn" aria-expanded={open.has(row.k)} onclick={() => toggle(row.k)}>
               {#if row.kind === "op"}
                 <span class="tf-oas-m">{shortMethod(row.method)}</span>
-                <span class="tf-oas-rpath" class:tf-oas-dep={row.deprecated}>{row.path}</span>
-                <span class="tf-oas-rsum">{row.summary}</span>
+                <span class="tf-oas-rpath" class:tf-oas-dep={row.deprecated}><Marked text={row.path} typed={marking} pairs={order.marks(row, row.method.length + 1, row.path.length)} /></span>
+                <span class="tf-oas-rsum"><Marked text={row.summary} typed={marking} pairs={order.marks(row, row.method.length + row.path.length + 2, row.summary.length)} /></span>
               {:else}
                 <span class="tf-oas-m tf-oas-mschema">Schema</span>
-                <span class="tf-oas-rpath">{row.name}</span>
+                <span class="tf-oas-rpath"><Marked text={row.name} typed={marking} pairs={order.marks(row)} /></span>
                 <span class="tf-oas-rsum"></span>
               {/if}
               {#if mark !== undefined}<span class="tf-oas-imark">{markWords(mark)}</span>{/if}
