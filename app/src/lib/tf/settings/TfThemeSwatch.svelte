@@ -1,10 +1,11 @@
 <!--
-  One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
+  One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and when `editable` a button that opens a
   small panel under it (its row's hex value opens it too, at the hex field, #2516): its own picker, a square of
   saturation and brightness over a strip of hue (`TfColourPicker.svelte`), the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
   for a role; *Auto* for a window colour on the Theme page, which is then derived again) and *Reset to ⟨from⟩'s*.
   Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
-  panel and leaves focus on the swatch. A built-in's swatches are not buttons.
+  panel and leaves focus on the swatch. Both editors make every swatch a button, a built-in's too: its first change
+  goes to a copy (#2516).
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";

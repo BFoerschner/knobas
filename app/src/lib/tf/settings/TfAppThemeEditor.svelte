@@ -89,7 +89,7 @@
   let folded = $state(true);
   let list = $state<HTMLElement | null>(null);
 
-  /** A colour picked in the preview: its row scrolled to and, on a theme of one's own, its swatch's panel open. */
+  /** A colour picked in the preview: its row scrolled to and its swatch's panel open (a built-in's too, #2516). */
   async function pickKey(key: AppKey): Promise<void> {
     if (FOLD.includes(key)) folded = false;
     await tick();

@@ -14,12 +14,13 @@
   let { label, value, onpick }: { label: string; value: string; onpick: (next: string, end: boolean) => void } = $props();
 
   let hsv = $state<Triple>(untrack(() => toHsv(value)));
-  /** The last colour picked here, which coming back as `value` moves nothing. */
+  /** The last colour picked here, which coming back as `value` moves nothing; a value from elsewhere forgets it. */
   let sent: string | null = null;
   $effect.pre(() => {
     const next = value.toUpperCase();
     untrack(() => {
       if (next === sent) return;
+      sent = null;
       const [h, s, v] = toHsv(next);
       hsv = [s === 0 || v === 0 ? hsv[0] : h, s, v];
     });
