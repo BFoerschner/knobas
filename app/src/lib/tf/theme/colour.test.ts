@@ -1,7 +1,7 @@
 /** The colour maths themes are checked and fixed with (ADR-0055). */
 import { expect, test } from "vitest";
 
-import { apart, contrast, deltaE, fix, mix, over, parse, ratioText, simulate, toOklch, worst } from "./colour";
+import { apart, contrast, deltaE, fix, fromHsv, mix, over, parse, ratioText, simulate, toHsv, toOklch, worst } from "./colour";
 
 test("a colour is read with or without alpha, and a translucent one is laid over what it lies on", () => {
   expect(parse("#abc")).toEqual(["#AABBCC", 1]);
@@ -64,4 +64,26 @@ test("two colours' distance is their closest under any vision: knobas Light's At
   const a = apart("#8A5600", "#B0262A");
   expect(a.under).toBe("deutan");
   expect(a.delta).toBeCloseTo(0.018, 3);
+});
+
+test("a colour reads as hue, saturation and brightness and back, as a colour picker's square and strip draw it (#2516)", () => {
+  expect(toHsv("#FF0000")).toEqual([0, 1, 1]);
+  expect(toHsv("#00FF00")).toEqual([120, 1, 1]);
+  expect(toHsv("#0000FF")).toEqual([240, 1, 1]);
+  expect(toHsv("#000000")).toEqual([0, 0, 0]);
+  const [h, s, v] = toHsv("#1E90FF");
+  expect(h).toBeCloseTo(209.6, 1);
+  expect(s).toBeCloseTo(0.8824, 3);
+  expect(v).toBe(1);
+  const grey = toHsv("#808080");
+  expect(grey[0]).toBe(0);
+  expect(grey[1]).toBe(0);
+  expect(grey[2]).toBeCloseTo(0.502, 3);
+  expect(fromHsv([0, 1, 1])).toBe("#FF0000");
+  expect(fromHsv([210, 1, 1])).toBe("#0080FF");
+  expect(fromHsv([300, 0.5, 0.6])).toBe("#994D99");
+  expect(fromHsv([60, 1, 1])).toBe("#FFFF00");
+  expect(fromHsv([360, 1, 1])).toBe("#FF0000");
+  expect(fromHsv([0, 0, 0.5])).toBe("#808080");
+  for (const hex of ["#1E90FF", "#994D99", "#2E7D32", "#F7F8F9", "#17212B"]) expect(fromHsv(toHsv(hex))).toBe(hex);
 });

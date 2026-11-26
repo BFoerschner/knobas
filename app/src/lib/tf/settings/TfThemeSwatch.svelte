@@ -1,6 +1,7 @@
 <!--
   One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
-  small panel under it (its row's hex value opens it too, at the hex field, #2516): the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
+  small panel under it (its row's hex value opens it too, at the hex field, #2516): its own picker, a square of
+  saturation and brightness over a strip of hue (`TfColourPicker.svelte`), the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
   for a role; *Auto* for a window colour on the Theme page, which is then derived again) and *Reset to ⟨from⟩'s*.
   Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
   panel and leaves focus on the swatch. A built-in's swatches are not buttons.
@@ -9,6 +10,7 @@
   import { tick, untrack } from "svelte";
 
   import { layers } from "../layers.svelte";
+  import TfColourPicker from "./TfColourPicker.svelte";
   import { cssVars } from "../theme/paint";
   import { colour } from "../theme/themes";
 
@@ -124,6 +126,12 @@
     }
     if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
   }
+  /** The panel's own picker (`TfColourPicker.svelte`, #2516): a drag's moves once a frame as a preview, its end and each key at once. */
+  function slide(next: string, end: boolean): void {
+    picked = next;
+    if (end) return handPick(false);
+    if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
+  }
   function handPick(preview: boolean): void {
     if (pickFrame !== 0) cancelAnimationFrame(pickFrame);
     pickFrame = 0;
@@ -164,6 +172,7 @@
     {#if open}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="tf-thm-pop" role="group" aria-label={label} onkeydown={keydown}>
+        <TfColourPicker {label} value={dragged ?? value ?? fallback} onpick={slide} />
         <label class="tf-thm-popf"
           ><span>Hex</span><input
             class="tf-stg-in"
@@ -177,7 +186,7 @@
           /></label
         >
         <label class="tf-thm-popf"
-          ><span>Pick</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={pick} onchange={pick} /></label
+          ><span>System</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={pick} onchange={pick} /></label
         >
         <div class="tf-thm-popa">
           {#if inkable}

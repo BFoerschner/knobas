@@ -6,3 +6,6 @@ lib/tf/css/docs.css | .tf-embed iframe | An embedded page is another document: w
 lib/tf/css/settings.css | .tf-stg-sw i | The switch knob's shadow is a shadow, not a theme's colour, as `--shadow` is not
 lib/tf/css/oneoff.css | .tf-oo-page iframe | A page a command made is another document: white behind it, as an embedded page has, whatever the window wears
 lib/tf/css/oneoff.css | .tf-oo-image img | An image a command made is drawn for paper (a graph with no background of its own): white behind it, whatever the window wears
+lib/tf/css/settings.css | .tf-cp-sv | A colour picker's square is the picture of every saturation and brightness: white to the hue across, black up from the foot, whatever the window wears (#2516)
+lib/tf/css/settings.css | .tf-cp-hue | A colour picker's strip is the picture of every hue, whatever the window wears (#2516)
+lib/tf/css/settings.css | .tf-cp-at | A colour picker's ring is white with a black edge, so it shows on every colour under it (#2516)

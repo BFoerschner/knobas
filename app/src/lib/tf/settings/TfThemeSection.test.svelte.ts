@@ -458,3 +458,27 @@ test("a row of a ground and its text shows both hex values, and a press on eithe
   expect(q(".tf-thm-pop")).toBeNull();
   expect(document.activeElement).toBe(hexes[1]);
 });
+
+test("a drag on a panel's square colours the preview each frame, on a built-in's copy made by its first move (#2516)", async () => {
+  draw();
+  q('[data-row="ok"]')!.querySelector<HTMLButtonElement>("button.tf-thm-sw")!.click();
+  flushSync();
+  const square = q('.tf-thm-pop [role="slider"][aria-label="Passed: saturation and brightness"]')!;
+  square.getBoundingClientRect = () => ({ left: 0, top: 0, x: 0, y: 0, width: 100, height: 100, right: 100, bottom: 100, toJSON: () => ({}) });
+  square.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0 }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  const first = themes.own[0]!.app!.ok!;
+  expect(stage().style.getPropertyValue("--ok")).toBe(first);
+  square.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 50, clientY: 50 }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  const second = themes.own[0]!.app!.ok!;
+  expect(second).not.toBe(first);
+  expect(stage().style.getPropertyValue("--ok")).toBe(second);
+  square.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 50, clientY: 50 }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  expect(themes.moving).toBeNull();
+});

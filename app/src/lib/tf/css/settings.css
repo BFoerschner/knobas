@@ -432,6 +432,14 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); contain: strict; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 .tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+/* A swatch's own picker (#2516): saturation across the square and brightness up it, over the hue the strip under it
+   picks; a ring marks where each stands. Its colours are the picture of every colour, not a theme's. */
+.tf-cp { display: grid; gap: 8px; }
+.tf-cp-sv, .tf-cp-hue { position: relative; border: 1px solid var(--rule); touch-action: none; }
+.tf-cp-sv { height: 120px; border-radius: 4px; cursor: crosshair; background: linear-gradient(to top, #000000, transparent), linear-gradient(to right, #FFFFFF, transparent), var(--cp-hue); }
+.tf-cp-hue { height: 12px; border-radius: 4px; cursor: ew-resize; background: linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000); }
+.tf-cp-at { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #000000; pointer-events: none; }
+.tf-cp-hue .tf-cp-at { top: 50%; }
 /* The preview stays in view while the role list scrolls. */
 .tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; background: var(--paper); }
 .tf-thm-pre { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
