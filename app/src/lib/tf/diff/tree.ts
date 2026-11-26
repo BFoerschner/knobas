@@ -95,7 +95,7 @@ const dirOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/"))
  * The rail's rows: each directory's files under it, root files first, directories and files by name; a grouped folder
  * (`groups`) sorts with the directories by its path, as its row, its band and its generated files.
  */
-export function treeOf(files: readonly DrawnFile[], groups: readonly TreeGroup[] = [], collapsed?: ReadonlySet<string>): TreeRow[] {
+export function treeOf(files: readonly DrawnFile[], groups: readonly TreeGroup[] = []): TreeRow[] {
   const byDir = new Map<string, DrawnFile[]>();
   for (const file of files) {
     const dir = dirOf(keyOf(file));
@@ -122,7 +122,7 @@ export function treeOf(files: readonly DrawnFile[], groups: readonly TreeGroup[]
     for (const { file, name } of named.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
       rows.push({ kind: "file", file, name, depth: dir === "" ? 0 : 1 });
   }
-  return collapsed !== undefined && collapsed.size > 0 ? collapseTree(rows, collapsed) : rows;
+  return rows;
 }
 
 const EXEC = 0o111;
