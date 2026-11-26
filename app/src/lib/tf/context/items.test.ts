@@ -180,6 +180,17 @@ test("selected words: Copy, Search for short ones, then the thing's own below a 
   expect(searchable("x".repeat(81))).toBe(false);
 });
 
+test("selected code in a repository: Search in repository after Search knobas, short one-line words only", () => {
+  const inRepo = { ...ctx(), searchRepo: "gitea:acme/pay" };
+  expect(ids(menuFor(null, "retry_on", inRepo))).toEqual(["copy-sel", "search-sel", "search-repo"]);
+  expect(item(menuFor(null, "retry_on", inRepo), "search-repo")).toMatchObject({
+    label: "Search in repository",
+    act: { do: "search-repo", repoId: "gitea:acme/pay", text: "retry_on" },
+  });
+  expect(ids(menuFor(null, "a\nb", inRepo))).toEqual(["copy-sel"]);
+  expect(ids(menuFor(null, "retry_on", ctx()))).toEqual(["copy-sel", "search-sel"]);
+});
+
 test("nothing on nothing", () => {
   expect(menuFor(null, null, ctx())).toEqual([]);
 });

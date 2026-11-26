@@ -848,7 +848,7 @@ pub async fn whole(
 
 /// `rel` under `root`, where it is a plain relative path: no `..`, no root,
 /// no drive, no NUL, and no folder on the way that is a link.
-fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
+pub(super) fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
     if rel.is_empty() || rel.contains('\0') || rel.contains('\\') {
         return None;
     }
@@ -903,7 +903,7 @@ pub async fn file_bytes(path: &Path, rel: &str, cap: u64) -> Result<Bytes, Refus
         .map_err(|why| Refused::Failed(why.to_string()))
 }
 
-fn read_no_follow(full: &Path, cap: u64) -> Bytes {
+pub(super) fn read_no_follow(full: &Path, cap: u64) -> Bytes {
     let Ok(meta) = std::fs::symlink_metadata(full) else {
         return Bytes::NotThere;
     };

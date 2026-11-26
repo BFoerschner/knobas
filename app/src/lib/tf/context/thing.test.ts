@@ -1,7 +1,7 @@
 /** What a right-click is on (`thing.ts`): read from the page as drawn, nothing from the backend. */
 import { afterEach, expect, test } from "vitest";
 
-import { isEditable, menuThing, selectionAt, thingAt, thingOfHash } from "./thing";
+import { isEditable, menuThing, repoOfSelection, selectionAt, thingAt, thingOfHash } from "./thing";
 
 const ORIGIN = "http://app.test";
 
@@ -161,4 +161,19 @@ test("a generated folder's addresses name its file, its line and its top; `.` is
   expect(thingOfHash("#/repo/r/rendered/site/docs/files/a/b.md")).toEqual({ ...made, folder: "docs", rel: "a/b.md", dir: false, line: null });
   expect(thingOfHash("#/repo/r/rendered/site/docs/line/12/a/b.md")).toEqual({ ...made, folder: "docs", rel: "a/b.md", dir: false, line: 12 });
   expect(thingOfHash("#/repo/r/rendered/site/.")).toEqual({ ...made, folder: "", rel: "", dir: true, line: null });
+});
+
+test("a selection's repository: a file view's on its page, a diff's from its card, none elsewhere or in a generated file", () => {
+  const root = page(`
+    <div class="tf-fileview"><div class="tf-l" data-n="3"><span class="code">retry_on</span></div></div>
+    <div class="tf-diff" data-search-repo="gitea:acme/pay"><div class="tf-dline"><span class="hunk">retry_on</span></div></div>
+    <div data-made><div class="tf-fileview"><span class="made">x</span></div></div>
+    <p class="plain">words</p>`);
+  const at = (selector: string) => root.querySelector(selector)!;
+  expect(repoOfSelection(at(".code"), "#/repo/gitea%3Aacme%2Fpay/files/src/a.rs")).toBe("gitea:acme/pay");
+  // A diff names its repository on any page: a pull request's address names none.
+  expect(repoOfSelection(at(".hunk"), "#/pr/gitea%3Aacme%2Fpay%2312/files")).toBe("gitea:acme/pay");
+  expect(repoOfSelection(at(".made"), "#/repo/gitea%3Aacme%2Fpay/files/a")).toBeNull();
+  expect(repoOfSelection(at(".plain"), "#/repo/gitea%3Aacme%2Fpay/files/a")).toBeNull();
+  expect(repoOfSelection(at(".code"), "#/inbox")).toBeNull();
 });
