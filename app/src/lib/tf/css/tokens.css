@@ -42,23 +42,26 @@
   /* Code's face (2026-11-16): the family chosen in Settings › Fonts first (`--mono-chosen`, which `fonts.svelte.ts`
      sets on <html>), then the bundled face (`--mono-bundled`), its stand-ins while it loads (`fonts/fonts.css`), and
      the system's monospace, so a font missing on this machine draws in the bundled face and never in a proportional
-     one. The bundled face is Cascadia Mono (2026-11-21; Björn: "Cascadia Mono looks better with like, ASCII and
-     boxes"), with no programming ligatures. *Ligatures in code* is off until turned on; on, `fonts.svelte.ts` sets
-     `--mono-bundled` to Cascadia Code, which draws `=>` and `->` as one sign, and `--mono-ligatures` to `normal`, so a
-     chosen face draws its own. Only one of the two Cascadias is in the list, so the other is never loaded. Every rule
-     that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
-  --mono-bundled: "knobas Cascadia Mono";
+     one. The bundled face is Cascadia Code 2009.22 with its ligatures, which draw `=>` and `->` as one sign (#2516; the
+     newer Cascadia Mono from 2026-11-21). With *Ligatures in code* turned off or the newer release picked,
+     `fonts.svelte.ts` sets `--mono-bundled` to that release's Cascadia Mono or Code and `--mono-ligatures` to `none`, so
+     a chosen face draws none either. 2009.22 has no italic, so its comments stand upright (`--mono-synth`), which
+     `fonts.svelte.ts` sets to `auto` for any other face. Only one of the Cascadias is in the list, so the others are
+     never loaded. Every rule that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
+  --mono-bundled: "knobas Cascadia Code 2009";
   --mono: var(--mono-chosen, var(--mono-bundled)), var(--mono-bundled), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;
-  --mono-ligatures: none;
+  --mono-ligatures: normal;
+  --mono-synth: none;
   /* A code row's height (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): every area that stacks code
      lines (a file, a diff, a hunk, a fence, the editor, a log, a Docs block, an OpenAPI or JAR block) draws its rows at
-     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). *Joined*,
-     the default, is the drawn face's own line height (`--code-lh-face`, its ascent and descent over its size: Cascadia's
-     2380 of 2048 at 105 %, or an installed face's, measured when picked), rounded to whole device pixels
-     (`--dpr`, which `fonts.svelte.ts` writes on <html> with each scale), so its box drawing joins from row to row: 16 px
-     at 13 px. A custom line height is written to `--code-lh-face` the same way; *Open* sets `--code-lh` to `initial`, so
-     each area's own number stands. The `1em` is the area's own font size: a custom property is substituted where used. */
-  --code-lh-face: 1.2202;
+     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). The default
+     is 1.60 of the size (`--code-lh-face`, #2516), rounded to whole device pixels (`--dpr`, which `fonts.svelte.ts`
+     writes on <html> with each scale): 21 px at 13 px, at which Cascadia 2009.22's `│` still joins from row to row.
+     *Joined* writes the drawn face's own line height there (its ascent and descent over its size: Cascadia's 2380 of
+     2048 at 105 %, or an installed face's, measured when picked), and another notch its own; *Open* sets `--code-lh`
+     to `initial`, so each area's own number stands. The `1em` is the area's own font size: a custom property is
+     substituted where used. */
+  --code-lh-face: 1.6;
   --dpr: 1;
   --code-lh: round(calc(var(--code-lh-face) * 1em), calc(1px / var(--dpr)));
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */

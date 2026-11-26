@@ -1,14 +1,17 @@
 <!--
-  One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and for a theme of one's own a button that opens a
-  small panel under it: the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
+  One colour of a theme in Settings › Appearance › Code colours (ADR-0051): a swatch, and when `editable` a button that opens a
+  small panel under it (its row's hex value opens it too, at the hex field, #2516): its own picker, a square of
+  saturation and brightness over a strip of hue (`TfColourPicker.svelte`), the hex field, the platform's own colour well, the button that leaves the colour out (*Use ink*
   for a role; *Auto* for a window colour on the Theme page, which is then derived again) and *Reset to ⟨from⟩'s*.
   Every change is written at once; the theme is kept 300 ms after the last (`themes.svelte.ts`). `Esc` closes the
-  panel and leaves focus on the swatch. A built-in's swatches are not buttons.
+  panel and leaves focus on the swatch. Both editors make every swatch a button, a built-in's too: its first change
+  goes to a copy (#2516).
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
   import { layers } from "../layers.svelte";
+  import TfColourPicker from "./TfColourPicker.svelte";
   import { cssVars } from "../theme/paint";
   import { colour } from "../theme/themes";
 
@@ -42,13 +45,19 @@
 
   let open = $state(false);
   let swatch = $state<HTMLButtonElement | null>(null);
+  /** The panel's Hex field. */
+  let field = $state<HTMLInputElement | null>(null);
+  /** What opened the panel when it was not the swatch (its row's hex value, #2516): where focus goes back on `Esc`. */
+  let opener: HTMLElement | null = null;
   let typed = $state("");
   // A role left out draws in ink; a window colour left out is derived, and its swatch shows what was derived.
   const ink = $derived(value === undefined && inkable && leave === "Use ink");
 
   function close(focus = true): void {
     open = false;
-    if (focus) void tick().then(() => swatch?.focus());
+    const back = opener ?? swatch;
+    opener = null;
+    if (focus) void tick().then(() => back?.focus());
   }
 
   let holder = $state<HTMLElement | null>(null);
@@ -69,7 +78,16 @@
 
   function toggle(): void {
     open = !open;
+    opener = null;
     typed = value ?? "";
+  }
+
+  /** Opens the panel from `from`, its row's hex value (#2516), with focus in the Hex field; `Esc` goes back to `from`. */
+  export function openFrom(from: HTMLElement): void {
+    open = true;
+    opener = from;
+    typed = value ?? "";
+    void tick().then(() => field?.focus());
   }
 
   function fromField(): void {
@@ -107,6 +125,12 @@
         if (moved === value) moved = null;
       });
     }
+    if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
+  }
+  /** The panel's own picker (`TfColourPicker.svelte`, #2516): a drag's moves once a frame as a preview, its end and each key at once. */
+  function slide(next: string, end: boolean): void {
+    picked = next;
+    if (end) return handPick(false);
     if (pickFrame === 0) pickFrame = requestAnimationFrame(() => handPick(true));
   }
   function handPick(preview: boolean): void {
@@ -149,10 +173,12 @@
     {#if open}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="tf-thm-pop" role="group" aria-label={label} onkeydown={keydown}>
+        <TfColourPicker {label} value={dragged ?? value ?? fallback} onpick={slide} />
         <label class="tf-thm-popf"
           ><span>Hex</span><input
             class="tf-stg-in"
             aria-label="{label} as hex"
+            bind:this={field}
             spellcheck="false"
             autocomplete="off"
             bind:value={typed}
@@ -161,7 +187,7 @@
           /></label
         >
         <label class="tf-thm-popf"
-          ><span>Pick</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={pick} onchange={pick} /></label
+          ><span>System</span><input type="color" aria-label="Pick {label}" value={value ?? fallback} oninput={pick} onchange={pick} /></label
         >
         <div class="tf-thm-popa">
           {#if inkable}

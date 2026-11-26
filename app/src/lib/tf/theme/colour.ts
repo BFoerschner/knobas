@@ -20,6 +20,34 @@ export const toHex = (c: readonly number[]): string =>
     .join("")
     .toUpperCase()}`;
 
+/**
+ * A colour as hue (0 to 360, 0 for a grey), saturation and brightness (0 to 1): the theme editor's colour picker draws
+ * saturation across its square, brightness up it and hue along its strip (#2516).
+ */
+export function toHsv(hex: string): Triple {
+  const [r, g, b] = rgb(hex);
+  const max = Math.max(r, g, b);
+  const span = max - Math.min(r, g, b);
+  let h = 0;
+  if (span > 0) {
+    if (max === r) h = ((g - b) / span) % 6;
+    else if (max === g) h = (b - r) / span + 2;
+    else h = (r - g) / span + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : span / max, max];
+}
+
+/** Hue, saturation and brightness (`toHsv`) as `#RRGGBB`. */
+export function fromHsv([h, s, v]: readonly [number, number, number]): string {
+  const at = (n: number) => {
+    const k = (n + h / 60) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return toHex([at(5), at(3), at(1)]);
+}
+
 /** `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA` as `[#RRGGBB, alpha]`, or `null`. */
 export function parse(value: unknown): [string, number] | null {
   if (typeof value !== "string") return null;

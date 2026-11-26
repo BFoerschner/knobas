@@ -66,6 +66,7 @@
     CASCADIA_CODE,
     CASCADIA_MONO,
     CODE_LINES,
+    DEFAULT_LINES,
     cssFamily,
     FAMILY_PROPERTY,
     evenStep,
@@ -101,7 +102,7 @@
   const uid = $props.id();
   const listId = `tf-fr-${uid}-list`;
   const name = $derived(ROLE_NAMES[role]);
-  /** The face the role draws in with none chosen: for code, Cascadia Mono, or Cascadia Code with ligatures on (2026-11-21). */
+  /** The face the role draws in with none chosen: for code, the release's Cascadia Code, or its Cascadia Mono with ligatures off (#2516). */
   const bundled = $derived(fonts.bundled(role));
 
   /**
@@ -455,17 +456,17 @@
             label="Code line spacing"
             notches={CODE_LINES}
             value={lineNotch}
-            home={null}
+            home={DEFAULT_LINES}
             from={lineFrom}
             ring={joinsUpTo}
             ringTitle="the tallest at which box lines join"
             text={(at) => (at / 100).toFixed(2)}
             onPick={(at) => fonts.setLines(at)}
-            onHome={() => fonts.setLines("joined")}
+            onHome={() => fonts.setLines(DEFAULT_LINES)}
           />
           <output class="tf-fr-fig">{linesFigure}</output>
-          {#if fonts.lines !== "joined"}
-            <button type="button" class="tf-btn tf-sm" onclick={() => fonts.setLines("joined")}>Back to Joined</button>
+          {#if fonts.lines !== DEFAULT_LINES}
+            <button type="button" class="tf-btn tf-sm" onclick={() => fonts.setLines(DEFAULT_LINES)}>Back to {(DEFAULT_LINES / 100).toFixed(2)}</button>
           {/if}
         </div>
         <p class="tf-fr-hint tf-fr-linesnote">{linesNote}</p>
