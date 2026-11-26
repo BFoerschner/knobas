@@ -668,3 +668,18 @@ test("Enter in the filter takes focus to the open entry's row, where the bare ke
   await settle();
   expect(p.calls.copy.map((c) => c[0])).toEqual(["pw:a3"]);
 });
+
+test("a long attachment name is one line that gives up its middle, its end and extension kept, the whole name its title (#2531)", async () => {
+  const name = "payout-db client certificate bundle for the payments team 2026-11.p12";
+  const listed = { state: "listed" as const, files: [{ id: "a1", name, size: 612 }] };
+  const view = held();
+  view.sources[0] = { ...view.sources[0]!, offers: { ...offers, attachments: true } };
+  await open(ports({ entry: vi.fn(async (id: string) => record(id, { attachments: listed })) }, view), ["entry", "pw:graf"]);
+  const box = target.querySelector<HTMLElement>(".tf-pw-file .tf-pw-filename > :first-child")!;
+  expect(box.title).toBe(name);
+  expect(box.classList.contains("tf-path")).toBe(true);
+  expect(box.querySelector(".tf-path-head")?.textContent).toBe("payout-db client certificate bundle for the payments ");
+  expect(box.querySelector(".tf-path-tail")?.textContent).toBe("team 2026-11.p12");
+  // The size stays under the name, out of the cut.
+  expect(box.textContent).toBe(name);
+});
