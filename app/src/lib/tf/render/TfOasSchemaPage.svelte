@@ -52,14 +52,20 @@
     screenful?: boolean;
   } = $props();
 
-  /** How many *Used by* rows draw before *Show the other*, and *Part of* names before the rest are counted. */
+  /** How many *Used by* rows draw before *Show the other*, and *Part of* chips draw before *Show all*. */
   const USED = 12;
-  const PART = 40;
+  const PART = 12;
 
   const k = $derived(`schemas/${name}`);
   const type = $derived(summary(node).type || "object");
   const ops = $derived(uses.ops.map((i) => st.index?.ops[i]).filter((o) => o !== undefined));
   const used = $derived(st.expand.has(`${k}#uses`) ? ops : ops.slice(0, USED));
+  const partAll = $derived(st.expand.has(`${k}#part`));
+  const parts = $derived(partAll ? uses.schemas : uses.schemas.slice(0, PART));
+  function togglePart() {
+    if (partAll) st.expand.delete(`${k}#part`);
+    else st.expand.add(`${k}#part`);
+  }
   const facts = $derived(factsOf(shape.facts));
   const trail = $derived([`${shape.base}#${st.index?.schemaBase ?? ""}${name}`]);
   const opens = $derived(shape.props.some((p) => hasInside(p.node)) || shape.variants !== null || shape.items !== undefined);
@@ -131,9 +137,12 @@
 {#if uses.schemas.length > 0}
   <section class="tf-oas-sec">
     <h3 class="tf-oas-lab">Part of <span class="tf-oas-n">{uses.schemas.length}</span></h3>
-    <div class="tf-oas-fd">
-      {#each uses.schemas.slice(0, PART) as holder, n (holder)}{#if n > 0}{" "}{/if}<button type="button" class="tf-oas-ref" onclick={() => onfollow(holder)}>{holder}</button>{/each}{#if uses.schemas.length > PART}{" "}and {uses.schemas.length - PART} more{/if}
+    <div class="tf-oas-chips">
+      {#each parts as holder (holder)}<span class="tf-chip tf-oas-part"><button type="button" class="tf-chipbtn" onclick={() => onfollow(holder)}>{holder}</button></span>{/each}
     </div>
+    {#if uses.schemas.length > PART}
+      <p class="tf-oas-fd"><button type="button" class="tf-oas-more" onclick={togglePart}>{partAll ? "Show fewer" : "Show all"}</button></p>
+    {/if}
   </section>
 {/if}
 {#if ops.length === 0 && uses.schemas.length === 0}

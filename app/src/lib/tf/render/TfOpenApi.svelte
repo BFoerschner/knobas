@@ -467,7 +467,10 @@
           </div>
         {/key}
       {:else}
-        <div class="tf-oas-col tf-oas-req"><p class="tf-oas-fnote">Pick an endpoint, and its request stands here.</p>{#if cols === 3 && sent.length > 0}<TfOasAnswer sending={undefined} {sent} onopen={openSent} />{/if}</div>
+        <div class="tf-oas-col tf-oas-reqcol">
+          <div class="tf-oas-req"><p class="tf-oas-fnote">Pick an endpoint, and its request stands here.</p></div>
+          {#if cols === 3 && sent.length > 0}<TfOasAnswer sending={undefined} {sent} onopen={openSent} />{/if}
+        </div>
       {/if}
       {#if cols === 4}
         <div class="tf-oas-col tf-oas-anscol"><TfOasAnswer sending={shownOp === null ? undefined : state.answers.get(state.shown.place)} {sent} onopen={openSent} /></div>
