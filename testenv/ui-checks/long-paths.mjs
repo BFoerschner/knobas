@@ -33,6 +33,8 @@
 // A screen with `whole` (the ux30 end gate, 2026-11-23: Passwords' *Open web interface W* cut at the entry panel's edge in a
 // 1100 px window) holds every button under the selectors it names to the window and to every box that clips it, sideways: a
 // control is drawn whole or the screen misses.
+// A screen with `oneline` (#2531: a Secrets attachment's long name wrapped into a block of lines) holds every element it names to
+// one line: its text drawn on a single line, a long one cut in its middle (`.tf-path-head`), never wrapped.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -173,7 +175,8 @@ const SCREENS = [
   { id: "docs-blocks", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["XML view", "JSON view"], wait: 1500, whole: ".tf-pre-bar, .tf-doc-xv .tf-xv-bar, .tf-xsd-inline .tf-xsd-irow", sizes: SMALLEST },
   { id: "docs-blocks-decl", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["~AmountType"], wait: 1500, whole: ".tf-pre-bar, .tf-xsd-iopen .tf-xsd-h, .tf-xsd-iopen .tf-oas-meta", sizes: SMALLEST },
   { id: "viewer-junit", route: "ticket/mock%3APAY-228", press: '[aria-labelledby="tf-tkatt"] summary', then: ["~junit.xml"], wait: 1500, whole: ".tf-viewer, .tf-vdoc .tf-xv-bar", sizes: SMALLEST },
-  { id: "passwords-entry", route: "secrets/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
+  // The entry's attachments (#2531): under ?fake-long-paths it holds two with long names, each held to one line.
+  { id: "passwords-entry", route: "secrets/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", oneline: ".tf-pw-filename > :first-child", sizes: PW_SIZES },
   { id: "passwords-folder", route: "secrets/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
 
@@ -357,6 +360,28 @@ const WHOLE = (selector) => String.raw`(() => {
   return JSON.stringify(out);
 })()`;
 
+// Runs in the page: each element under `selector` that is drawn and whose text takes more than one line. Null when none is drawn.
+const ONELINE = (selector) => String.raw`(() => {
+  const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
+  const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
+  const boxes = [...document.querySelectorAll(${JSON.stringify(selector)})].filter((e) => e.getBoundingClientRect().width > 0);
+  if (boxes.length === 0) return "null";
+  const out = [];
+  for (const box of boxes) {
+    const centres = [];
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.textContent.trim() === "") continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) if (r.width > 0) centres.push((r.top + r.bottom) / 2);
+    }
+    if (centres.length > 1 && Math.max(...centres) - Math.min(...centres) > 6)
+      out.push({ at: where(box), text: box.textContent.trim().slice(-48), lines: Math.round((Math.max(...centres) - Math.min(...centres)) / 16) + 1 });
+  }
+  return JSON.stringify(out);
+})()`;
+
 // Opens the launcher (⌘K) under *Everything* (⌘D when it is under *Titles*), types `words` and waits for the pane to follow the
 // first row. False when the launcher or its rows never come.
 const LAUNCHER = (words) => String.raw`(async () => {
@@ -444,7 +469,9 @@ for (const [at, screen] of SCREENS.entries()) {
       if (screen.under && under === null) stepped = false;
       const whole = screen.whole ? JSON.parse(await evaluate(WHOLE(screen.whole))) : null;
       if (screen.whole && whole === null) stepped = false;
-      return { stepped, tables, under, whole, ...JSON.parse(await evaluate(CHECK)) };
+      const oneline = screen.oneline ? JSON.parse(await evaluate(ONELINE(screen.oneline))) : null;
+      if (screen.oneline && oneline === null) stepped = false;
+      return { stepped, tables, under, whole, oneline, ...JSON.parse(await evaluate(CHECK)) };
     };
     const shoot = async (name) => {
       if (!shots) return;
@@ -458,12 +485,13 @@ for (const [at, screen] of SCREENS.entries()) {
     await shoot(`${screen.id}-${size}`);
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: [screen.whole, screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: [screen.whole, screen.oneline, screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),
       ...(long.under ?? []).map((u) => ({ kind: "under", at: u.at, text: "stands outside the table's column", over: u.over })),
       ...[...(short.whole ?? []), ...(long.whole ?? [])].map((w) => ({ kind: "whole", at: w.at, text: `"${w.text}" is cut`, over: w.over })),
+      ...(long.oneline ?? []).map((w) => ({ kind: "oneline", at: w.at, text: `${w.text} (${w.lines} lines)` })),
       ...(long.tables?.wraps ?? []).map((w) => ({ kind: "wraps", at: w.at, text: `${w.text} (${w.lines} lines)` })),
       ...(long.tables?.wider ?? []).map((w) => ({ kind: "wider", at: w.at, text: "the table is wider than its box", over: w.over })),
       ...Object.entries(long.tables?.widths ?? {})

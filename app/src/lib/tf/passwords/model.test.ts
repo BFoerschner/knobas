@@ -74,6 +74,35 @@ test("the filter needs every word somewhere in title, username, address or path,
   ]);
 });
 
+test("the filter matches only inside the folder on show and the folders under it; at the top, everything (#2531)", () => {
+  const scoped = held();
+  // Grafana is also listed in Databases: a match in a folder it is also in counts there.
+  scoped.entries.push(["pw:shared", 0, "pw:plat", "shared admin", null, null, null, 0, null, ["pw:db"]]);
+  const m = model(scoped);
+  const ids = (node: string, q: string) => panels(m, m.nodes.get(node)!, q)[0]!.rows.map((e) => e.id).sort();
+  // "admin" is in Payments (payments admin) and Platform (shared admin).
+  expect(panels(m, m.root, "admin")[0]!.rows.map((e) => e.id).sort()).toEqual(["pw:p1", "pw:shared"]);
+  expect(ids("pw:plat", "admin")).toEqual(["pw:shared"]);
+  // Payments holds its own entry and, through Prod ▸ Databases, the one also listed there.
+  expect(ids("pw:pay", "admin")).toEqual(["pw:p1", "pw:shared"]);
+  expect(ids("pw:prod", "admin")).toEqual(["pw:shared"]);
+  expect(ids("pw:db", "db user")).toHaveLength(8);
+  expect(ids("pw:plat", "db user")).toEqual([]);
+  // A path word still matches inside the scope: "prod" names Databases' chain.
+  expect(ids("pw:pay", "prod")).toHaveLength(8);
+});
+
+test("with two sources a source's top scopes the filter to that source, entries outside its folders included (#2531)", () => {
+  const two = held();
+  two.sources.push(source("org", "Tidewater org"));
+  two.folders.push({ id: "org:f", source: 1, parent: null, name: "Shared", comment_read: false, can_add: false });
+  two.entries.push(row("org:e", "org:f", "shared admin", null, 1), row("org:loose", null, "loose admin", null, 1));
+  const m = model(two);
+  const top = m.nodes.get(sourceNode("org"))!;
+  expect(panels(m, top, "admin")[0]!.rows.map((e) => e.id).sort()).toEqual(["org:e", "org:loose"]);
+  expect(panels(m, m.root, "admin")[0]!.rows.map((e) => e.id).sort()).toEqual(["org:e", "org:loose", "pw:p1"]);
+});
+
 test("the rule of a comment-required folder covers the folders under it", () => {
   const m = model(held());
   expect(commentFolder(m.nodes.get("pw:db")!)?.id).toBe("pw:prod");
