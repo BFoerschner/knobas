@@ -211,20 +211,31 @@ a { color: var(--link); text-decoration: none; }
 /* No `.tf p { margin: 0 }` here: `* { margin: 0 }` above already does it, and that rule's weight beat every
    one-class margin on a heading or paragraph, so `.tf-md > * + *` and the like never applied. */
 
-/* Focus (design system, Motion and focus; docs/decisions/2026-11-21-a-ring-takes-the-shape-of-what-it-rings.md): a 2 px ring
-   in the surface's colour with no radius of its own, so it takes the shape of what it rings (a pill stays round, a square row
-   stays square). A control standing free wears it outside, `--focus-off`; a field, and anything in a box that clips, inside,
-   `--focus-in`, so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no
-   component writes an outline of its own. */
+/* Focus (design system, Motion and focus; #2517): a 2 px transient ring in the surface's colour with no radius of its
+   own, so it takes the shape of what it rings (a pill stays round, a square row stays square). Keyboard or programmatic
+   focus sets `data-focus-ring="on"` on `<html>` (`input-modality.ts`) for 1.2 s and then `"fade"` for 0.3 s (~1.5 s total;
+   under `prefers-reduced-motion: reduce`, it hides cleanly after the hold). Pointer clicks set `data-input="pointer"` and
+   never draw the blue ring; focused text inputs retain their blinking caret and subtle border (`--ink-2`). A control
+   standing free wears the ring outside, `--focus-off`; a field, and anything in a box that clips, inside, `--focus-in`,
+   so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no component
+   writes an outline of its own. */
 :root { --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; }
+:root { --focus-fade: 0.3s; --focus-a: 0%; }
+:root[data-focus-ring="on"] { --focus-a: 100%; }
 .tf { --focus-c: var(--focus); --focus-o: var(--focus-off); }
-.tf :focus-visible { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-o); }
+.tf :focus-visible { outline: none; }
+:where(:root[data-focus-ring]) .tf :focus-visible { outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c) var(--focus-a), transparent); outline-offset: var(--focus-o); }
+:where(:root[data-focus-ring="fade"]) .tf :focus-visible { transition: outline-color var(--focus-fade) ease-out; }
+/* Focused text fields and search wrappers keep a subtle border once the transient ring fades or on pointer click. */
+.tf :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"])):not([aria-invalid="true"], .tf-oas-missing):focus { border-color: var(--ink-2); }
+.tf :is(.tf-fsearch, .tf-minif):focus-within { border-color: var(--ink-2); }
 /* A field's ring is its own border, in `--focus` on the field's own fill wherever the field stands. */
-.tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { outline-color: var(--focus); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring]) .tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { --focus-c: var(--focus); outline-offset: var(--focus-in); }
 /* A box that is the field, its input bare inside it. */
-.tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-in); }
-/* A select pressed with the mouse draws no ring, as a button pressed so draws none (`input-modality.ts` sets `data-input`). */
-:root[data-input="pointer"] .tf select:focus-visible { outline: none; }
+:where(:root[data-focus-ring]) .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring="fade"]) .tf :is(.tf-fsearch, .tf-minif):focus-within { transition: outline-color var(--focus-fade) ease-out; }
+/* Pointer presses never draw a focus ring (`input-modality.ts` sets `data-input="pointer"`). */
+:root[data-input="pointer"] .tf :focus-visible, :root[data-input="pointer"] .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: none; }
 /* On a yellow card the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
 .tf .tf-card { --focus-c: var(--card-ink); }
 /* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */

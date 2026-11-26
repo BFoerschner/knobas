@@ -174,7 +174,8 @@
 .tf-oas { position: relative; }
 .tf-oas-list .tf-wgap { pointer-events: none; }
 .tf-oas-rows { position: relative; }
-.tf-oas-list:focus-visible .tf-oas-cursor { box-shadow: inset 0 0 0 2px var(--focus); }
+:where(:root[data-focus-ring]) .tf-oas-list:focus-visible .tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) color-mix(in srgb, var(--focus) var(--focus-a), transparent); }
+:where(:root[data-focus-ring="fade"]) .tf-oas-list:focus-visible .tf-oas-cursor { transition: box-shadow var(--focus-fade) ease-out; }
 .tf-oas-reading { margin: 0; padding: 16px 20px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-oas-bad { padding: 16px 20px; display: grid; gap: 8px; max-width: 760px; }
 .tf-oas-bad p { margin: 0; }
@@ -237,7 +238,8 @@
 .tf-oas-fr.tf-oas-can:hover .tf-oas-fd code { background: var(--rule-2); }
 .tf-oas-fr:is(.tf-oas-can:hover, :focus-visible, .tf-oas-cursor) > .tf-oas-tog { color: var(--ink); }
 .tf .tf-oas-fr:focus-visible { outline-offset: var(--focus-in); }
-:focus-visible .tf-oas-fr.tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) var(--focus); }
+:where(:root[data-focus-ring]) :focus-visible .tf-oas-fr.tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) color-mix(in srgb, var(--focus) var(--focus-a), transparent); }
+:where(:root[data-focus-ring="fade"]) :focus-visible .tf-oas-fr.tf-oas-cursor { transition: box-shadow var(--focus-fade) ease-out; }
 
 /* What a row holds: one step in, under a guide that drops from its caret. */
 .tf-oas-in { grid-column: 1 / -1; margin: 0 0 6px 8px; padding-left: 11px; border-left: 1px solid var(--rule); }

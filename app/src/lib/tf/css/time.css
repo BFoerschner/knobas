@@ -35,9 +35,12 @@
 .tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; } .tf-tm-b.tf-tm-gap text { fill: var(--ink-2); }
 .tf-tm-hatch { fill: var(--info-bg); }
 /* After the states, so the ring wins over each state's own edge. */
-.tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: var(--focus-w); }
+.tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: var(--focus-w); }
+:where(:root[data-focus-ring]) .tf-tm-b:focus-visible rect { stroke: color-mix(in srgb, var(--focus) var(--focus-a), transparent); stroke-width: var(--focus-w); }
+:where(:root[data-focus-ring="fade"]) .tf-tm-b:focus-visible rect { transition: stroke var(--focus-fade) ease-out; }
 /* On the yellow block the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
-.tf-tm-b.tf-tm-run:focus-visible rect, .tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
+.tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
+:where(:root[data-focus-ring]) .tf-tm-b.tf-tm-run:focus-visible rect { stroke: color-mix(in srgb, var(--card-ink) var(--focus-a), transparent); }
 /* Ink: red means something failed, and the time of day never has. */
 .tf-tm-now { fill: var(--ink); }
 .tf-tm-nowl { fill: var(--ink); font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; }

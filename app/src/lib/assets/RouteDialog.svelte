@@ -558,9 +558,13 @@
   }
 
   /* Inside the list, as `MoveDialog` draws it. */
-  .opt:focus-visible {
-    outline: var(--focus-w) solid var(--focus-c, var(--focus));
+  :global(:where(:root[data-focus-ring])) .opt:focus-visible {
+    outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c, var(--focus)) var(--focus-a), transparent);
     outline-offset: var(--focus-in);
+  }
+
+  :global(:where(:root[data-focus-ring="fade"])) .opt:focus-visible {
+    transition: outline-color var(--focus-fade) ease-out;
   }
 
   .opt {
