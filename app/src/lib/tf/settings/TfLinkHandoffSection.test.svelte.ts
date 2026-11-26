@@ -127,3 +127,16 @@ test("installs and removes the Firefox Native Messaging host manifest", async ()
   expect(hostCalls).toEqual(["install", "uninstall"]);
   expect(target.textContent).toContain("Not installed");
 });
+
+/** Nothing moves once drawn: the Firefox host row is there before its status answers, so the rows under it keep their place. */
+test("draws the Firefox host row before its status answers", async () => {
+  const ports = { ...makePorts(), hostStatus: () => new Promise<NativeHostStatus>(() => {}) };
+  view = mount(TfLinkHandoffSection, {
+    target,
+    props: { source: "jira", name: "Tidewater Jira", openInside: true, ports },
+  });
+  await settle();
+
+  expect(target.textContent).toContain("Firefox host");
+  expect(target.textContent).toContain("Checking…");
+});

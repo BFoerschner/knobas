@@ -188,29 +188,30 @@
       {/if}
     </div>
   </div>
-  {#if host !== null}
-    <div class="tf-stg-row">
-      <div class="tf-stg-l">
-        Firefox host
-        <small>Native Messaging manifest for the Firefox extension</small>
-      </div>
-      <div class="tf-stg-c tf-stg-inl">
-        {#if !host.supported}
-          <span class="tf-stg-hint">Not supported on this system</span>
-        {:else if host.installed && host.matches_current}
-          <span>Installed</span>
-          <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
-        {:else if host.installed}
-          <span class="tf-stg-hint">Points to another knobas copy</span>
-          <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Update host</button>
-          <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
-        {:else}
-          <span class="tf-stg-hint">Not installed</span>
-          <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Install host</button>
-        {/if}
-      </div>
+  <!-- Drawn before its status lands, so the rows under it never move. -->
+  <div class="tf-stg-row">
+    <div class="tf-stg-l">
+      Firefox host
+      <small>Native Messaging manifest for the Firefox extension</small>
     </div>
-  {/if}
+    <div class="tf-stg-c tf-stg-inl">
+      {#if host === null}
+        <span class="tf-stg-hint">Checking…</span>
+      {:else if !host.supported}
+        <span class="tf-stg-hint">Not supported on this system</span>
+      {:else if host.installed && host.matches_current}
+        <span>Installed</span>
+        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
+      {:else if host.installed}
+        <span class="tf-stg-hint">Points to another knobas copy</span>
+        <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Update host</button>
+        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
+      {:else}
+        <span class="tf-stg-hint">Not installed</span>
+        <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Install host</button>
+      {/if}
+    </div>
+  </div>
   <p class="tf-stg-note">
     Known items only opens mirrored tickets, pages, runs, repositories and pull requests in knobas and leaves other pages in
     your browser. Whole source also sends other {name} pages to its site inside knobas when Open its pages inside knobas is
