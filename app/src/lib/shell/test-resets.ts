@@ -232,6 +232,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
   "tf/openin/app-drafts.svelte.ts#typedDrafts": async () => (await import("../tf/openin/app-drafts.svelte")).forgetAppDrafts(),
   "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  // The spaces and folds the reader shut although they hold the open page (#2521).
+  "tf/docs/TfDocs.svelte#closedSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  "tf/docs/TfDocs.svelte#closedFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),

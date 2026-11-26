@@ -103,7 +103,7 @@ async function settle() {
 }
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"));
+const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"));
 
 test("the list draws as it answers, its commits with it, and each file's lines are read between the commits it settled", async () => {
   const { lists, pages } = draw("feature/a");

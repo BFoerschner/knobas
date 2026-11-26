@@ -321,3 +321,47 @@ test("a run with no artifacts says so and offers no zip", async () => {
   expect(target.querySelector(".tf-atree .tf-empty")?.textContent).toBe("This run has published no artifacts yet.");
   expect(target.querySelector(".tf-aall")).toBeNull();
 });
+
+test("Alt+click on a Run artifacts folder recursively expands/collapses and caps lazy folder fetches", async () => {
+  const deep: Record<string, ArtifactEntry[]> = {
+    "": [folder("logs", 1)],
+    logs: [folder("logs/sub", 1)],
+    "logs/sub": [folder("logs/sub/inner", 1)],
+    "logs/sub/inner": [file("logs/sub/inner/run.txt", 12)],
+  };
+  draw(deep);
+  await settle();
+  const foldBtn = (label: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-fold")].find((b) => b.textContent?.trim() === label)!;
+  // Top-level `logs/` starts open; collapse it first, then Alt+click to recursively expand all levels.
+  foldBtn("logs/").click();
+  flushSync();
+  foldBtn("logs/").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  expect(rows().map((r) => r[0])).toEqual(["logs/", "sub/", "inner/", "run.txt"]);
+
+  // Alt+click again collapses logs/ and every nested folder under it.
+  foldBtn("logs/").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(rows().map((r) => r[0])).toEqual(["logs/"]);
+  foldBtn("logs/").click();
+  flushSync();
+  expect(foldBtn("sub/").getAttribute("aria-expanded")).toBe("false");
+  unmount(page!);
+  page = null;
+
+  // Wide lazy tree: Alt+click caps uncached artifacts fetches at LAZY_FETCH_CAP (8).
+  const wide: Record<string, ArtifactEntry[]> = {
+    "": [folder("many", 15)],
+    many: Array.from({ length: 15 }, (_, i) => folder(`many/d${i}`, 1)),
+    ...Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`many/d${i}`, [file(`many/d${i}/x.txt`, 1)]])),
+  };
+  const drawn = draw(wide);
+  await settle();
+  foldBtn("many/").click();
+  flushSync();
+  const before = drawn.read.length;
+  foldBtn("many/").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  expect(drawn.read.length - before).toBeLessThanOrEqual(8);
+  expect(drawn.read.length - before).toBeGreaterThan(0);
+});

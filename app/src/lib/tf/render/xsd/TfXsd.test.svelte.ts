@@ -349,3 +349,24 @@ test("an import at an address is offered, never fetched; Download it keeps the f
   expect(text(row)).toContain("downloaded");
 });
 
+test("Alt+click on an XSD tree rail row recursively expands and collapses its non-cyclic subtree", async () => {
+  draw(OT);
+  await settle(20);
+  const treeRow = (name: string) => rail().find((b) => text(b).startsWith(name))!;
+  expect(treeRow("ORDER 0..1").getAttribute("aria-expanded")).toBe("false");
+
+  // Alt+click expands ORDER and its nested element folders in the rail tree.
+  treeRow("ORDER 0..1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle(20);
+  expect(treeRow("ORDER 0..1").getAttribute("aria-expanded")).toBe("true");
+  expect(treeRow("ORDER_HEADER 1").getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click again collapses ORDER and all descendants under it.
+  treeRow("ORDER 0..1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(treeRow("ORDER 0..1").getAttribute("aria-expanded")).toBe("false");
+  treeRow("ORDER 0..1").querySelector<Element>(".tf-oas-caret")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  await settle(10);
+  expect(treeRow("ORDER_HEADER 1").getAttribute("aria-expanded")).toBe("false");
+});
+

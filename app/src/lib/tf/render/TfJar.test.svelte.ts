@@ -257,3 +257,86 @@ test("Save to Downloads saves the archive, and says where", async () => {
   expect(ports.calls).toContain("archive_download a1 ");
   expect(text(target.querySelector(".tf-jar-saved"))).toBe("Saved to /Users/mara/Downloads/ledger-core-2.3.1.jar");
 });
+
+test("Alt+click on a JAR folder recursively expands and collapses all nested subdirectories", async () => {
+  draw(PLAIN, portsFor(PLAIN));
+  await settle();
+  const pkg = row("com/tidewater/ledger/")!;
+  pkg.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(pkg.getAttribute("aria-expanded")).toBe("true");
+  expect(row("rules/")!.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Rounding.class")).toBeDefined();
+
+  // Alt+click again collapses the folder and its nested directories.
+  pkg.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(pkg.getAttribute("aria-expanded")).toBe("false");
+  expect(row("rules/")).toBeUndefined();
+  pkg.click();
+  flushSync();
+  expect(row("rules/")!.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("Alt+click collapsing a JAR folder also collapses open directories inside nested archives under it", async () => {
+  const outer: ArchiveIndex = {
+    handle: "outer",
+    kind: "war",
+    size: 100,
+    total: 50,
+    packed: 40,
+    names: "WEB-INF/lib/core.jar",
+    sizes: [50],
+    packed_sizes: [40],
+    crcs: [1],
+    flags: [0],
+    manifest: [],
+    maven: [],
+    release: null,
+    releases: [],
+    libs: [],
+    prefix: 0,
+    warnings: [],
+  };
+  const inner: ArchiveIndex = {
+    handle: "inner",
+    kind: "jar",
+    size: 50,
+    total: 30,
+    packed: 30,
+    names: "META-INF/MANIFEST.MF\ncom/app/sub/A.class",
+    sizes: [10, 20],
+    packed_sizes: [10, 20],
+    crcs: [2, 3],
+    flags: [0, 0],
+    manifest: [],
+    maven: [],
+    release: null,
+    releases: [],
+    libs: [],
+    prefix: 0,
+    warnings: [],
+  };
+  const ports = portsFor("app.war", "", {
+    open: () => Promise.resolve(outer),
+    nested: () => Promise.resolve(inner),
+  });
+  draw("app.war", ports);
+  await settle();
+  row("WEB-INF/lib/")!.click();
+  flushSync();
+  row("core.jar")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  expect(row("com/app/sub/")!.getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click WEB-INF/lib/ collapses the folder, the nested archive, and the nested archive's open directories.
+  row("WEB-INF/lib/")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(row("WEB-INF/lib/")!.getAttribute("aria-expanded")).toBe("false");
+  row("WEB-INF/lib/")!.click();
+  flushSync();
+  expect(row("core.jar")!.getAttribute("aria-expanded")).toBe("false");
+  row("core.jar")!.click();
+  await settle();
+  expect(row("com/app/sub/")!.getAttribute("aria-expanded")).toBe("false");
+});

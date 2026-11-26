@@ -661,3 +661,39 @@ test("a file view with no width, a page kept hidden, says nothing of its columns
   expect(columnsSeen(1)).toBe(2);
   expect(columnsSeen(2560)).toBe(4);
 });
+
+test("Alt+click on an OpenAPI Paths rail folder recursively expands and collapses nested path folders", async () => {
+  const nestedSpec = JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "Nested", version: "1.0" },
+    paths: {
+      "/v1/items": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/items/{id}/sub": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/items/{id}/sub/leaf": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/orders": { get: { responses: { "200": { description: "ok" } } } },
+    },
+  });
+  draw("nested.json", nestedSpec);
+  await settle();
+  button("Paths", target.querySelector(".tf-oas-rail")!)!.click();
+  flushSync();
+  const dirRow = (label: string) => rail().find((b) => text(b).startsWith(label))!;
+  // Ensure /v1 starts collapsed, then Alt+click expands /v1 and all nested path folders at once.
+  if (dirRow("/v1").getAttribute("aria-expanded") === "true") {
+    dirRow("/v1").click();
+    flushSync();
+  }
+  dirRow("/v1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirRow("/v1").getAttribute("aria-expanded")).toBe("true");
+  expect(dirRow("/items").getAttribute("aria-expanded")).toBe("true");
+  expect(dirRow("/{id}/sub").getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click again collapses /v1 and every nested folder under it.
+  dirRow("/v1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirRow("/v1").getAttribute("aria-expanded")).toBe("false");
+  dirRow("/v1").click();
+  flushSync();
+  expect(dirRow("/items").getAttribute("aria-expanded")).toBe("false");
+});

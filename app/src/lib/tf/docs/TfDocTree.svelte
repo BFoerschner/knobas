@@ -43,6 +43,7 @@
   import { childrenMissing, hasChildren } from "./tree-store";
   import { treeKeys } from "./tree-keys";
   import { foldKeyed, foldPress } from "../fold-press";
+  import { collectDescendants, collectLazySync, LAZY_FETCH_CAP, TREE_EXPAND_CAP } from "../tree-alt";
   import { Windowed } from "../../shell/windowed.svelte";
 
   let {
@@ -53,6 +54,7 @@
     held,
     path,
     opened,
+    closed,
     reveal = [],
     follow = true,
     need,
@@ -68,6 +70,8 @@
     path?: Set<string>;
     /** The folds the reader opened, so they draw what is under them. */
     opened?: SvelteSet<string>;
+    /** Folds that started open (e.g. holding the current page) which the reader explicitly collapsed. */
+    closed?: SvelteSet<string>;
     /** Pages a page was queued under: the folds holding them start open too, so its row, and the page once it lands, are in view (F-449). */
     reveal?: string[];
     /** Whether the folds holding the open page start open: the rail follows the page (2026-11-19). */
@@ -81,6 +85,12 @@
   const holding = $derived(held ?? new Set([...(follow ? way : []), ...reveal.flatMap((id) => [...foldsHolding(space, id)])]));
   const own = new SvelteSet<string>();
   const open = $derived(opened ?? own);
+  const ownClosed = new SvelteSet<string>();
+  const shut = $derived(closed ?? ownClosed);
+  $effect(() => {
+    void current;
+    if (closed === undefined) untrack(() => ownClosed.clear());
+  });
   const nodes = $derived(index.get(parent) ?? []);
   /**
    * A level of thousands of pages (a space's 3,000 pages under its home) draws only the rows near the tree's scroll
@@ -89,14 +99,42 @@
    */
   const win = new Windowed({ count: () => nodes.length, key: (i) => nodes[i]!.entity_id, estimate: 26 });
 
+  const isOpen = (id: string, starts: boolean): boolean => (starts && !shut.has(id)) || open.has(id);
+
   /**
    * The reader opened or closed fold `id`. A fold opening because it holds the
    * open page is not kept, so it closes again when the reader moves on, as it
    * did; one the reader opened stays open when the fold around it is opened again.
    */
   function toggled(id: string, now: boolean, starts: boolean): void {
-    if (now && !starts) open.add(id);
-    else if (!now) open.delete(id);
+    if (now) {
+      shut.delete(id);
+      if (!starts) open.add(id);
+    } else {
+      open.delete(id);
+      if (starts) shut.add(id);
+    }
+  }
+
+  /** Alt+click recursive expand/collapse, capping lazy folds so un-read subtrees never fire runaway `docs_nodes` reads. */
+  function toggleAll(node: DocNode, now: boolean): void {
+    if (!now) {
+      for (const desc of collectDescendants([node], (n) => (index.get(n.entity_id) ?? []).filter((c) => hasChildren(c, index)), TREE_EXPAND_CAP)) {
+        open.delete(desc.entity_id);
+        if (holding.has(desc.entity_id) || echoesOn(desc.entity_id, "page").length > 0) shut.add(desc.entity_id);
+      }
+      return;
+    }
+    const picked = collectLazySync([node], {
+      isLazy: (n) => need !== undefined && childrenMissing(n, index),
+      childrenOf: (n) => (index.get(n.entity_id) ?? []).filter((c) => hasChildren(c, index)),
+      nodeCap: TREE_EXPAND_CAP,
+      fetchCap: LAZY_FETCH_CAP,
+    });
+    for (const desc of picked) {
+      shut.delete(desc.entity_id);
+      if (!holding.has(desc.entity_id)) open.add(desc.entity_id);
+    }
   }
 
   /** The folds whose read has answered (or failed) since they opened: they draw what they hold, whole or not. */
@@ -110,7 +148,7 @@
     const read = need;
     for (const node of nodes) {
       const id = node.entity_id;
-      if (!(holding.has(id) || open.has(id))) {
+      if (!isOpen(id, holding.has(id))) {
         if (untrack(() => answered.has(id))) answered.delete(id);
         continue;
       }
@@ -132,20 +170,21 @@
 {#each win.slice(nodes) as node (node.entity_id)}
   {@const queued = echoesOn(node.entity_id, "page")}
   {@const starts = queued.length > 0 || holding.has(node.entity_id)}
+  {@const expanded = isOpen(node.entity_id, starts)}
   {#if hasChildren(node, index) || queued.length > 0}
-    <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
+    <details open={expanded} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)} {@attach win.row(node.entity_id)}>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <summary
-        onclick={(event) => foldPress(event, node.entity_id === current, (now) => toggled(node.entity_id, now, starts))}
+        onclick={(event) => foldPress(event, node.entity_id === current, (now) => toggled(node.entity_id, now, starts), (now) => toggleAll(node, now))}
         onkeydown={(event) => foldKeyed(event, (now) => toggled(node.entity_id, now, starts))}
-        class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !starts && !open.has(node.entity_id)}
+        class:tf-cur={node.entity_id === current} class:tf-holds={node.entity_id !== current && way.has(node.entity_id) && !expanded}
         ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
         ></summary
       >
       <div class="tf-fold-in">
-        {#if (starts || open.has(node.entity_id)) && !waits(node)}
-          <Self {space} parent={node.entity_id} {current} under={index} held={holding} path={way} opened={open} {need} />
+        {#if expanded && !waits(node)}
+          <Self {space} parent={node.entity_id} {current} under={index} held={holding} path={way} opened={open} closed={shut} {need} />
         {/if}
         {#each queued as echo, n (n)}
           <span class="tf-dl-queued">{echo.text} <TfStateChip text={echo.state} tone="info" /></span>

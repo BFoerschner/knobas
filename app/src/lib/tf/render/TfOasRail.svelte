@@ -21,6 +21,7 @@
   import type { OpRow, PathRef } from "../../render/openapi";
   import { counted, fitPath, fitRows, pathParts, railRows, shortMethod, type RailInput, type RailMode, type RailRow } from "../../render/openapi-view";
   import { OVERVIEW, pageOf, type OasState, type Place } from "./oas.svelte";
+  import { isAltClick } from "../tree-alt";
 
   let {
     st,
@@ -88,11 +89,13 @@
     return here >= 0 ? here : 0;
   });
 
-  function press(row: RailRow) {
+  function press(row: RailRow, all = false) {
     st.cursor = row.k;
     if (row.kind === "group") st.fold(row.group.key);
-    else if (row.kind === "dir") st.fold(row.k);
-    else if (row.kind === "webhooks") st.fold("w");
+    else if (row.kind === "dir") {
+      if (all) st.foldDir(row.dir);
+      else st.fold(row.k);
+    } else if (row.kind === "webhooks") st.fold("w");
     else if (row.kind === "overview") onpick(OVERVIEW);
     else if (row.kind === "op") onpick(row.op.anchor);
     else if (row.kind === "schema") onpick(`schemas/${row.name}`);
@@ -248,7 +251,7 @@
           data-d={row.d}
           aria-expanded={row.open}
           title={row.kind === "group" ? row.group.description : undefined}
-          onclick={() => press(row)}
+          onclick={(e) => press(row, isAltClick(e))}
           {@attach win.row(row.k)}
         >
           <svg class="tf-oas-caret" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l4 3-4 3" /></svg>
