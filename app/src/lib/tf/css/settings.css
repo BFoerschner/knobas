@@ -263,8 +263,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-more > * { grid-area: 1 / 1; }
 .tf-stg-more > .tf-stg-done { visibility: hidden; }
 .tf-appremove { margin-left: auto; }
-/* Where a list lands back from an entry's page (2026-11-17): the entry's row, outlined inside the table's edge. */
-.tf-land:focus { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-in); }
+/* Where a list lands back from an entry's page (2026-11-17): the entry's row wears the transient ring inside the table's edge. */
+.tf-land { --focus-o: var(--focus-in); }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }

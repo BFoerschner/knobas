@@ -185,7 +185,8 @@
 .tf-pl .tf-pi[aria-current="true"]::after { background: var(--sel-row); }
 /* The ring follows the pill, inside it. */
 .tf-pl .tf-tr:focus-visible { outline: none; }
-.tf-pl .tf-tr:focus-visible::after { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring]) .tf-pl .tf-tr:focus-visible::after { outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c) var(--focus-a), transparent); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring="fade"]) .tf-pl .tf-tr:focus-visible::after { transition: outline-color var(--focus-fade) ease-out; }
 /* The glyph (`TfRunGlyph`): a quiet tick for a pass, a filled disc for a failure, so red is the loud thing on a scan.
    The marks cut into a filled shape are the row's ground (`--rg-x`), the fill on a selected row. */
 .tf-rg { flex: none; width: 12px; height: 12px; --rg-x: var(--sheet); }

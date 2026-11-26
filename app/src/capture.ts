@@ -18,6 +18,7 @@ import "./lib/shell/own-frame-guard";
 import { mount } from "svelte";
 
 import CaptureWindow from "./lib/capture/CaptureWindow.svelte";
+import { installInputModality } from "./lib/tf/input-modality";
 import "./lib/tf/tf.css";
 import "./unported.css";
 
@@ -43,6 +44,7 @@ async function start() {
     const dev = await import("./lib/shell/dev/fake-tauri");
     dev.installIfRequested();
   }
+  installInputModality();
   mount(CaptureWindow, { target: target! });
 }
 
