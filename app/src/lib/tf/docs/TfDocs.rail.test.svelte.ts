@@ -514,3 +514,29 @@ test("Enter on a fold's row and a modified click open the page only, as before",
   link.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
   expect(fold("Runbooks")!.open).toBe(false);
 });
+
+test("Alt+click on a Docs page fold and space summary recursively expands and collapses without navigating", async () => {
+  await draw([]);
+  const opsSummary = spaceFold("Operations").querySelector<HTMLElement>(":scope > summary.tf-spc")!;
+  opsSummary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, altKey: true }));
+  await settle();
+  expect(spaceFold("Operations").open).toBe(true);
+  expect(fold("Ops home")!.open).toBe(true);
+  expect(fold("Runbooks")!.open).toBe(true);
+  expect(row("Restart the ledger")).toBeDefined();
+
+  // Alt+click on a page fold collapses it and nested folds under it.
+  const runbooksSummary = fold("Runbooks")!.querySelector<HTMLElement>(":scope > summary")!;
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, altKey: true });
+  runbooksSummary.dispatchEvent(event);
+  await settle();
+  expect(event.defaultPrevented).toBe(true);
+  expect(fold("Runbooks")!.open).toBe(false);
+
+  // Alt+click on the space collapses the space and forgets its open folds.
+  opsSummary.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, altKey: true }));
+  await settle();
+  expect(spaceFold("Operations").open).toBe(false);
+  await toggle(spaceFold("Operations"), true);
+  expect(fold("Ops home")!.open).toBe(false);
+});

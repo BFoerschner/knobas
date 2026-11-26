@@ -316,3 +316,22 @@ test("a generated file's last line break ends its last line: no empty line after
   expect(counts("index.md")).toBe("+1 −1");
   expect(counts("steps/04-alert.md")).toBe("+1 −0");
 });
+
+test("grouped folders and renderer-marked directories in the diff rail collapse on click without firing the renderer glyph", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("lib/x.rs"), file("docs/index.md")], fake);
+  await settle();
+  const grouped = target.querySelector<HTMLButtonElement>(".tf-flist button.tf-dgdir")!;
+  expect(grouped.getAttribute("aria-expanded")).toBe("true");
+  grouped.click();
+  flushSync();
+  expect(grouped.getAttribute("aria-expanded")).toBe("false");
+  expect(rail()).toEqual(["<docs>", "[lib]", "x.rs"]);
+  grouped.click();
+  flushSync();
+  expect(rail()).toEqual(["<docs>", "band: Made by Low-code siteReal files", "made index.md", "made steps/04-alert.md", "[lib]", "x.rs"]);
+});

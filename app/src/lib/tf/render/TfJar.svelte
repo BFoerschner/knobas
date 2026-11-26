@@ -59,6 +59,7 @@
     UNREADABLE,
     UNSAFE,
     bytes,
+    chain,
     filteredRows,
     head,
     kindOf,
@@ -68,10 +69,12 @@
     terms,
     textOf,
     treeRows,
+    type Dir,
     type Listing,
     type Nested,
     type Row,
   } from "../../render/jar";
+  import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { renderPort, type RenderPort } from "../../render/port";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfPdf from "./TfPdf.svelte";
@@ -227,14 +230,32 @@
     return typeof got === "object" && got.ok ? got.listing : null;
   }
 
-  function toggleDir(row: Extract<Row, { kind: "dir" }>) {
+  function toggleDir(row: Extract<Row, { kind: "dir" }>, all = false) {
     const key = `${row.scope}|${row.dir.path}`;
-    if (openDirs.has(key)) openDirs.delete(key);
-    else openDirs.add(key);
+    if (!all) {
+      if (openDirs.has(key)) openDirs.delete(key);
+      else openDirs.add(key);
+      return;
+    }
+    const want = !openDirs.has(key);
+    const dirs = collectDescendants([row.dir], (d: Dir) => d.dirs.map((sub) => chain(sub).end), TREE_EXPAND_CAP);
+    if (want) {
+      for (const d of dirs) openDirs.add(`${row.scope}|${d.path}`);
+      return;
+    }
+    for (const d of dirs) openDirs.delete(`${row.scope}|${d.path}`);
+    const filePrefix = `${row.scope}|${row.dir.path}`;
+    const nestedPrefix = scopeOf(row.scope, row.dir.path);
+    for (const k of [...openFiles]) {
+      if (k.startsWith(filePrefix) || k.startsWith(`${nestedPrefix}!`) || k.startsWith(`${nestedPrefix}|`)) openFiles.delete(k);
+    }
+    for (const k of [...openDirs]) {
+      if (k.startsWith(`${nestedPrefix}!`) || k.startsWith(`${nestedPrefix}|`)) openDirs.delete(k);
+    }
   }
 
   /** Opens a nested archive below its entry once it is listed, so its tree draws whole. */
-  async function openNested(scope: string, entry: string) {
+  async function openNested(scope: string, entry: string, expandAll = false) {
     const key = `${scope}|${entry}`;
     const inner = scopeOf(scope, entry);
     if (!nested.has(inner)) {
@@ -251,20 +272,32 @@
         reading.delete(key);
       }
     }
+    if (expandAll) {
+      const got = nested.get(inner);
+      if (got !== undefined && typeof got === "object" && got.ok) {
+        const roots = got.listing.tree.dirs.map((sub) => chain(sub).end);
+        for (const d of collectDescendants(roots, (x: Dir) => x.dirs.map((sub) => chain(sub).end), TREE_EXPAND_CAP)) openDirs.add(`${inner}|${d.path}`);
+      }
+    }
     openFiles.add(key);
   }
 
-  async function openEntry(scope: string, entry: string, flags: number) {
+  async function openEntry(scope: string, entry: string, flags: number, all = false) {
     const key = `${scope}|${entry}`;
+    const kind = kindOf(entry);
     if (openFiles.has(key)) {
       openFiles.delete(key);
+      if (all && kind === "archive") {
+        const inner = scopeOf(scope, entry);
+        for (const k of [...openDirs]) if (k.startsWith(`${inner}|`) || k.startsWith(`${inner}!`)) openDirs.delete(k);
+        for (const k of [...openFiles]) if (k.startsWith(`${inner}|`) || k.startsWith(`${inner}!`)) openFiles.delete(k);
+      }
       return;
     }
     if (reading.has(key)) return;
-    const kind = kindOf(entry);
     if (flags & UNSAFE) contents.set(key, { kind: "note", text: "Its name leaves the archive (an absolute path or `..`), so knobas does not open it." });
     else if (flags & UNREADABLE) contents.set(key, { kind: "note", text: "It is encrypted, or packed in a way knobas does not read." });
-    else if (kind === "archive") return openNested(scope, entry);
+    else if (kind === "archive") return openNested(scope, entry, all);
     else if (!contents.has(key)) {
       reading.add(key);
       try {
@@ -431,7 +464,7 @@
 {#snippet drawRow(row: Row)}
   {#if row.kind === "dir"}
     <div class="tf-jar-row" data-k={row.k} data-depth={row.depth} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn" aria-expanded={row.open} onclick={() => toggleDir(row)}>
+      <button type="button" class="tf-jar-rbtn" aria-expanded={row.open} onclick={(event) => toggleDir(row, isAltClick(event))}>
         {@render caret(row.open)}
         <span class="tf-jar-dname">{row.label}/</span>
         <span class="tf-jar-meta">{row.dir.count.toLocaleString("en")} {row.dir.count === 1 ? "file" : "files"}</span>
@@ -444,7 +477,7 @@
     {@const key = `${row.scope}|${row.path}`}
     {@const kind = kindOf(row.path)}
     <div class="tf-jar-row" data-k={row.k} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn" class:tf-jar-bad-name={(flags & UNSAFE) !== 0} aria-expanded={row.open} onclick={() => void openEntry(row.scope, row.path, flags)}>
+      <button type="button" class="tf-jar-rbtn" class:tf-jar-bad-name={(flags & UNSAFE) !== 0} aria-expanded={row.open} onclick={(event) => void openEntry(row.scope, row.path, flags, isAltClick(event))}>
         {#if kind === "archive"}{@render caret(row.open)}{:else}<span class="tf-jar-nocaret"></span>{/if}
         <span class="tf-jar-fname" class:tf-jar-class={kind === "class"}>{row.label}</span>
         <span class="tf-jar-meta">
@@ -458,7 +491,7 @@
   {:else if row.kind === "lib"}
     {@const key = `|${row.path}`}
     <div class="tf-jar-row" data-k={row.k} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn tf-jar-lib" aria-expanded={row.open} onclick={() => void openEntry("", row.path, 0)}>
+      <button type="button" class="tf-jar-rbtn tf-jar-lib" aria-expanded={row.open} onclick={(event) => void openEntry("", row.path, 0, isAltClick(event))}>
         {@render caret(row.open)}
         <span class="tf-jar-fname">{row.name}</span>
         <span class="tf-jar-vers">{row.version ?? ""}</span>

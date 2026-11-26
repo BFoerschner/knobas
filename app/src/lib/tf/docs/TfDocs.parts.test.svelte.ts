@@ -238,6 +238,24 @@ test("an open page reads the way to it, and the rail shows its space before that
   expect(target.querySelector(".tf-rd-tree select")?.getAttribute("title")).toBe("Operations");
 });
 
+test("Alt+click on a lazy Docs space caps unread fold fetches instead of reading every chapter", async () => {
+  const docsNodes = vi.fn(async (asked: DocsNodesAsked) => nodes(asked));
+  await draw([], ports({ docsNodes }));
+  // Open Home first so all 30 unread chapter folds are present in the space's index.
+  const home = await openHome();
+  expect(chapters(home)).toHaveLength(30);
+  const readsBefore = docsNodes.mock.calls.length;
+  // Close Home, then Alt+click Home to recursively expand: only LAZY_FETCH_CAP (8) unread chapters may fetch.
+  home.open = false;
+  home.dispatchEvent(new Event("toggle"));
+  await settle();
+  home.querySelector<HTMLElement>(":scope > summary")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, altKey: true }));
+  await settle();
+  const extraCalls = docsNodes.mock.calls.length - readsBefore;
+  expect(extraCalls).toBeLessThanOrEqual(8);
+  expect(extraCalls).toBeGreaterThan(0);
+});
+
 const PAGE_BASE: DocPage = {
   entity_id: "",
   source_id: "c",

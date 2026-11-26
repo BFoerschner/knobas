@@ -1280,3 +1280,46 @@ test("Zen mode: T leaves it first, so Go to file, which it hides, takes the focu
   zen.here = false;
 });
 
+test("Alt+click recursively expands and collapses nested folders, and caps uncloned remote fetches", async () => {
+  const source = openSource(DEEP_FILES);
+  draw(source.entityView, "README.md");
+  await settle();
+  const dirBtn = (path: string) => target.querySelector<HTMLButtonElement>(`.tf-ftree button.tf-fdir[data-path="${path}"]`)!;
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  expect(tree()).toContain("mod.rs");
+  expect(dirBtn("src/psp/gateway/sepa").getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click again collapses src and every open descendant.
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("false");
+  expect(tree()).not.toContain("psp");
+  // Re-opening with a plain click shows psp closed (descendants were collapsed).
+  dirBtn("src").click();
+  flushSync();
+  expect(dirBtn("src/psp").getAttribute("aria-expanded")).toBe("false");
+  unmount(view!);
+  view = null;
+
+  // Wide uncloned remote tree: Alt+click caps uncached remote fetches at LAZY_FETCH_CAP (8).
+  const wide: Files = { "README.md": "# wide" };
+  for (let i = 0; i < 15; i += 1) wide[`many/d${String(i).padStart(2, "0")}/a.txt`] = "x";
+  const remote = openSource(wide);
+  const remoteReads: string[] = [];
+  draw(
+    (at, section) => {
+      if (section !== null) remoteReads.push(section);
+      return remote.entityView(at, section);
+    },
+    "README.md",
+  );
+  await settle();
+  const readsBefore = remoteReads.length;
+  dirBtn("many").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  const extraDirReads = remoteReads.slice(readsBefore).filter((s) => s.startsWith("files:"));
+  expect(extraDirReads.length).toBeLessThanOrEqual(8);
+  expect(extraDirReads.length).toBeGreaterThan(1);
+});
+

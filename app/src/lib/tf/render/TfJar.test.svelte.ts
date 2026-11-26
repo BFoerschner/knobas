@@ -257,3 +257,23 @@ test("Save to Downloads saves the archive, and says where", async () => {
   expect(ports.calls).toContain("archive_download a1 ");
   expect(text(target.querySelector(".tf-jar-saved"))).toBe("Saved to /Users/mara/Downloads/ledger-core-2.3.1.jar");
 });
+
+test("Alt+click on a JAR folder recursively expands and collapses all nested subdirectories", async () => {
+  draw(PLAIN, portsFor(PLAIN));
+  await settle();
+  const pkg = row("com/tidewater/ledger/")!;
+  pkg.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(pkg.getAttribute("aria-expanded")).toBe("true");
+  expect(row("rules/")!.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Rounding.class")).toBeDefined();
+
+  // Alt+click again collapses the folder and its nested directories.
+  pkg.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(pkg.getAttribute("aria-expanded")).toBe("false");
+  expect(row("rules/")).toBeUndefined();
+  pkg.click();
+  flushSync();
+  expect(row("rules/")!.getAttribute("aria-expanded")).toBe("false");
+});

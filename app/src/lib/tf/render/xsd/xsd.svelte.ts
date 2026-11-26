@@ -10,6 +10,7 @@ import { localeOf } from "../../../render/example-fakes";
 import type { Example, ExampleOptions } from "../../../render/xsd-example";
 import type { XsdPort } from "../../../render/xsd-port";
 import type { RailMode } from "../../../render/xsd-view";
+import { collectDescendants, expandLazy, LOCAL_FETCH_CAP, TREE_EXPAND_CAP } from "../../tree-alt";
 
 /** An example's first seed (`xsd-example.ts`' `SEED`, which the page does not load: the maker runs in the worker). */
 const SEED = 4711;
@@ -103,6 +104,34 @@ export class XsdState {
     }
     if (!id.startsWith("F:") && !this.tree.has(id)) this.tree.set(id, await this.port.tree(id));
     this.folds.add(id);
+  }
+
+  /** Recursively opens or shuts a tree row and its non-cyclic descendants (Alt+click), bounded in depth and node count. */
+  async foldAll(id: string, open?: boolean): Promise<void> {
+    const want = open ?? !this.folds.has(id);
+    if (!want) {
+      for (const key of collectDescendants([id], (cur) => (this.tree.get(cur) ?? []).map((r) => r.id), TREE_EXPAND_CAP)) {
+        this.folds.delete(key);
+      }
+      return;
+    }
+    await expandLazy(id, {
+      nodeCap: TREE_EXPAND_CAP,
+      fetchCap: LOCAL_FETCH_CAP,
+      depthCap: 6,
+      cached: (cur) => {
+        const list = this.tree.get(cur);
+        return list === undefined ? undefined : list.filter((r) => r.kids && !r.again).map((r) => r.id);
+      },
+      fetch: async (cur) => {
+        const list = await this.port.tree(cur);
+        this.tree.set(cur, list);
+        return list.filter((r) => r.kids && !r.again).map((r) => r.id);
+      },
+      open: (cur) => {
+        this.folds.add(cur);
+      },
+    });
   }
 
   /** The opened file's fold: open until it is shut. */

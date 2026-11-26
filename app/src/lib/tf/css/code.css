@@ -386,9 +386,15 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
 .tf-ftree .tf-state, .tf-flist .tf-state { --fs: var(--size-ui); letter-spacing: var(--ls-ui); font-family: var(--sans); }
 .tf-diff .tf-fh-open { margin-left: auto; --fs: var(--size-ui); letter-spacing: var(--ls-ui); font: var(--wt-ui, 400) calc(var(--t-sm) * var(--fs)) var(--sans); }
 .tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }
-.tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); --fs: var(--size-code); font: 600 calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-flist .tf-fdir { display: flex; align-items: center; gap: 6px; padding: 6px 10px 4px; border-top: 1px solid var(--rule-2); color: var(--ink-2); --fs: var(--size-code); font: 600 calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
+.tf-flist button.tf-fdir { padding: 6px 8px 4px; gap: 6px; }
 .tf-flist .tf-fdir:first-child { border-top: 0; }
-.tf-flist .tf-fdir + button { border-top: 0; }
+.tf-flist .tf-fdir + button:not(.tf-fdir) { border-top: 0; }
+.tf-flist .tf-fdir-btn { margin: 0; width: auto; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tf-flist .tf-fdir-btn:hover { background: none; }
+.tf-flist .tf-fdir.tf-dfr:hover { background: var(--sheet-2); }
+.tf-flist .tf-fcaret { flex: none; width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.1s; }
+.tf-flist .tf-fcaret.tf-open { transform: rotate(90deg); }
 .tf-flist button.tf-d1 { padding-left: 24px; }
 .tf-flist .tf-fname { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; }
 .tf-dkeys { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: calc(var(--t-xs) * var(--fs)); }
@@ -776,7 +782,7 @@ html[data-diff-unchanged="grey"] .tf-diff .tf-ln:not(.tf-add, .tf-del) [class*="
   margin: 0; width: 20px; height: 20px; padding: 0; justify-content: center; border: 0; border-radius: 3px; color: var(--ink-2);
 }
 .tf-flist button.tf-dfmark:hover { background: var(--rule-2); color: var(--ink); }
-.tf-flist :is(.tf-dfmark, .tf-dgdir) svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tf-flist :is(.tf-dfmark, .tf-dgdir) svg.tf-dgicon, .tf-flist .tf-dfmark svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .tf-flist .tf-fdir.tf-dgdir { display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .tf-flist .tf-dgdir > .tf-path { flex: 1 1 auto; min-width: 0; }
 .tf-flist button.tf-dgband {

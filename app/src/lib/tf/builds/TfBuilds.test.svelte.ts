@@ -911,3 +911,38 @@ test("a bare #/builds with Recent kept takes Recent's address; Pipelines takes i
   expect(location.hash.startsWith("#/builds")).toBe(true);
   expect(location.hash).not.toBe("#/builds/recent");
 });
+
+test("Alt+click on a Builds folder recursively expands and collapses every nested folder under it", async () => {
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw([], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const foldSummary = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)!;
+
+  // Collapse Core recursively first, then Alt+click to expand Core + Payments + V1 + V2 + Edge at once.
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect((foldSummary("Core").parentElement as HTMLDetailsElement).open).toBe(false);
+  expect(names()).toEqual([]);
+
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect((foldSummary("Core").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect((foldSummary("Payments").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect((foldSummary("V1").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect(names()).toEqual(["Edge", "Api", "Worker"]);
+
+  // Alt+click Core again collapses the subtree; re-opening Core alone leaves Payments closed.
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(names()).toEqual([]);
+  const coreDetails = foldSummary("Core").parentElement as HTMLDetailsElement;
+  coreDetails.open = true;
+  coreDetails.dispatchEvent(new Event("toggle"));
+  flushSync();
+  expect((foldSummary("Payments").parentElement as HTMLDetailsElement).open).toBe(false);
+});

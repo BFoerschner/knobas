@@ -107,7 +107,7 @@ test("the working tree's page is the short shape in its first flush and reads no
   expect(asked).toEqual(["names main ~working-tree", "files main ~working-tree"]);
   named[0]!.answer({ paths: ["docs/a.md", "notes/new.md"], changes: "MA", renamed: [], modes: [], truncated: false, range, predicted_at: "", working: at("s1", ["notes/new.md"]) });
   await settle();
-  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"))).toEqual(["docs/a.md", "notes/new.md (untracked)"]);
+  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"))).toEqual(["docs/a.md", "notes/new.md (untracked)"]);
   lists[0]!.answer({ files: [listed("docs/a.md"), { ...listed("notes/new.md", 3, 0), change: "added" }], truncated: false, range, read_at: "checkout", working: at("s1", ["notes/new.md"]) });
   await settle();
   expect(text(target.querySelector(".tf-cfiles"))).toBe("2 files changed against main");
@@ -122,18 +122,18 @@ test("a focus re-read lays nothing down at the same stamp, and replaces the list
   named[0]!.answer(null);
   lists[0]!.answer({ files: [listed("docs/a.md")], truncated: false, range, read_at: "checkout", working: at("s1") });
   await settle();
-  const before = target.querySelector(".tf-cdiff .tf-flist button");
+  const before = target.querySelector(".tf-cdiff .tf-flist button.tf-ffile");
   window.dispatchEvent(new Event("focus"));
   await settle();
   expect(lists).toHaveLength(2);
   lists[1]!.answer({ files: [listed("docs/a.md")], truncated: false, range, read_at: "checkout", working: at("s1") });
   await settle();
-  expect(target.querySelector(".tf-cdiff .tf-flist button"), "the same row, not laid down again").toBe(before);
+  expect(target.querySelector(".tf-cdiff .tf-flist button.tf-ffile"), "the same row, not laid down again").toBe(before);
   window.dispatchEvent(new Event("focus"));
   await settle();
   lists[2]!.answer({ files: [listed("docs/a.md"), listed("docs/b.md")], truncated: false, range, read_at: "checkout", working: at("s2") });
   await settle();
-  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"))).toEqual(["docs/a.md", "docs/b.md"]);
+  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"))).toEqual(["docs/a.md", "docs/b.md"]);
 });
 
 test("with no checkout here, the page says so and reads nothing", () => {

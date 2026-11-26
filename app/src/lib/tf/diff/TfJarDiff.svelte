@@ -49,6 +49,7 @@
   import type { ClassMode } from "./class-mode.svelte";
   import { lineDiff } from "./line-diff";
   import type { Side } from "./rendered";
+  import { expandLazy, isAltClick, LAZY_FETCH_CAP, TREE_EXPAND_CAP } from "../tree-alt";
 
   let {
     path,
@@ -290,20 +291,60 @@
 
   const contentKey = (k: string, row: JarRow) => (row.kind === "class" && row.change === "changed" ? `${k}|${java?.can_decompile === true ? mode : "outline"}` : k);
 
-  async function toggle(scope: string, row: JarRow) {
+  async function toggle(scope: string, row: JarRow, all = false) {
     const k = keyOf(scope, row);
     if (open.has(k)) {
       open.delete(k);
+      if (all && row.kind === "archive") {
+        const inner = scopeOf(scope, row);
+        for (const key of [...open]) if (key.startsWith(`${inner}|`) || key.startsWith(`${inner}!`)) open.delete(key);
+      }
       return;
     }
     if (reading.has(k)) return;
     if (row.kind === "archive") {
-      if (!nested.has(scopeOf(scope, row))) {
-        reading.set(k, "Reading…");
-        await openNested(scope, row);
-        reading.delete(k);
+      if (!all) {
+        if (!nested.has(scopeOf(scope, row))) {
+          reading.set(k, "Reading…");
+          await openNested(scope, row);
+          reading.delete(k);
+        }
+        open.add(k);
+        return;
       }
-      open.add(k);
+      const byKey = new Map<string, { scope: string; row: JarRow }>([[k, { scope, row }]]);
+      const archiveChildren = (key: string): string[] | undefined => {
+        const item = byKey.get(key);
+        if (item === undefined) return undefined;
+        const innerScope = scopeOf(item.scope, item.row);
+        const got = nested.get(innerScope);
+        if (got === undefined) return undefined;
+        if (!got.ok) return [];
+        const kids: string[] = [];
+        for (const child of got.compare.rows) {
+          if (child.kind !== "archive") continue;
+          const ck = keyOf(innerScope, child);
+          byKey.set(ck, { scope: innerScope, row: child });
+          kids.push(ck);
+        }
+        return kids;
+      };
+      await expandLazy(k, {
+        nodeCap: TREE_EXPAND_CAP,
+        fetchCap: LAZY_FETCH_CAP,
+        cached: archiveChildren,
+        fetch: async (key) => {
+          const item = byKey.get(key);
+          if (item === undefined || reading.has(key)) return undefined;
+          reading.set(key, "Reading…");
+          await openNested(item.scope, item.row);
+          reading.delete(key);
+          return archiveChildren(key);
+        },
+        open: (key) => {
+          open.add(key);
+        },
+      });
       return;
     }
     await fill(scope, row);
@@ -384,7 +425,7 @@
       {#if d.kind === "row"}
         {@const k = keyOf(d.scope, d.row)}
         <div class="tf-jar-row" data-k={d.k} {@attach win.row(d.k)} {@attach indent(d.depth)}>
-          <button type="button" class="tf-jar-rbtn tf-jdiff-row" aria-expanded={d.open} onclick={() => void toggle(d.scope, d.row)}>
+          <button type="button" class="tf-jar-rbtn tf-jdiff-row" aria-expanded={d.open} onclick={(event) => void toggle(d.scope, d.row, isAltClick(event))}>
             <span class="tf-bd tf-bd-{BADGE[d.row.change]}" title={d.row.change}>{BADGE[d.row.change]}</span>
             <span class="tf-jar-fname" class:tf-jar-class={d.row.kind === "class"}><TfPath path={d.row.key} /></span>
             <span class="tf-jar-meta">{meta(d.row)}</span>

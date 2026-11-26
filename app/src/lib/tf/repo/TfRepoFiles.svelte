@@ -161,6 +161,7 @@
   import { inTextField } from "../../shell/keys";
   import { flipZen, zen } from "../zen.svelte";
   import { layers } from "../layers.svelte";
+  import { expandLazy, isAltClick, LAZY_FETCH_CAP, LOCAL_FETCH_CAP, prefixDescendants, TREE_EXPAND_CAP } from "../tree-alt";
   import {
     BAND,
     bandFolder,
@@ -362,6 +363,8 @@
   const readAtOf = new WeakMap<ViewSection, string>();
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
+  /** In-flight directory reads by path, so recursive Alt+click can await them without double-fetching. */
+  let dirReads = new Map<string, Promise<readonly TreeEntry[] | null>>();
   // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
   /** The read the file drawn came from, which a listing's section can stand for once it names it. */
   let drawnRead: ViewSection | undefined;
@@ -558,6 +561,7 @@
       // over the clone's.
       generation += 1;
       asked = new Set(Object.keys(drawn));
+      dirReads = new Map();
       early = new Map();
     }
     local = { commit: top.commit, checked: first && sourceTop === top.commit, asOf: top.as_of };
@@ -616,6 +620,7 @@
       movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
       generation += 1;
       asked = new Set([""]);
+      dirReads = new Map();
       early = new Map();
       listings = { "": block.entries };
       pathsSection = block.paths ?? null;
@@ -690,31 +695,43 @@
     return read;
   }
 
-  function readDir(dir: string, section: string) {
-    if (asked.has(dir) || listings[dir] !== undefined) return;
+  function readDir(dir: string, section: string): Promise<readonly TreeEntry[] | null> {
+    if (listings[dir] !== undefined) return Promise.resolve(listings[dir]!);
+    const pending = dirReads.get(dir);
+    if (pending !== undefined) return pending;
+    if (asked.has(dir)) return Promise.resolve(null);
     asked.add(dir);
     const mine = generation;
-    take(section, dirKey(dir)).then(
-      (read) => {
-        if (mine !== generation) return;
-        const block = read?.blocks[0];
-        if (dir === "" && block?.type === "tree") {
-          sourceTop = block.commit ?? null;
-          sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
-          topHeld = sourceTopHeld;
-          topFailed = null;
-        }
-        if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
-        listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
-        if (block?.type === "tree" && block.read_alone) readAlone = true;
-        if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
-        if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
-      },
-      (error) => {
-        // The checkout's copy stands where the source cannot answer.
-        if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
-      },
-    );
+    const read = take(section, dirKey(dir))
+      .then(
+        (got) => {
+          if (mine !== generation) return null;
+          const block = got?.blocks[0];
+          if (dir === "" && block?.type === "tree") {
+            sourceTop = block.commit ?? null;
+            sourceTopHeld = got === undefined || !heldBefore(got) ? null : (readAtOf.get(got) ?? null);
+            topHeld = sourceTopHeld;
+            topFailed = null;
+          }
+          if (dir === "" && block?.type === "tree" && settleLocal(block)) return listings[dir] ?? null;
+          const entries = block?.type === "tree" ? block.entries : [];
+          listings = { ...listings, [dir]: entries };
+          if (block?.type === "tree" && block.read_alone) readAlone = true;
+          if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
+          if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
+          return entries;
+        },
+        (error) => {
+          // The checkout's copy stands where the source cannot answer.
+          if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
+          return null;
+        },
+      )
+      .finally(() => {
+        if (dirReads.get(dir) === read) dirReads.delete(dir);
+      });
+    dirReads.set(dir, read);
+    return read;
   }
 
   // A new branch is a new tree, and so is the working tree at another `HEAD`.
@@ -730,6 +747,7 @@
     unkept = null;
     fileBehind = null;
     asked = new Set();
+    dirReads = new Map();
     early = new Map();
     listings = {};
     treeFailed = null;
@@ -1926,9 +1944,39 @@
     }
   }
 
-  function toggle(dir: string) {
-    if (open.has(dir)) open.delete(dir);
-    else open.add(dir);
+  function toggle(dir: string, all = false) {
+    if (!all) {
+      if (open.has(dir)) open.delete(dir);
+      else open.add(dir);
+      return;
+    }
+    if (open.has(dir)) {
+      for (const k of prefixDescendants(open, dir)) open.delete(k);
+      return;
+    }
+    const mine = generation;
+    const isLocal = disk !== null || local !== null;
+    const dirChildren = (d: string): string[] | undefined => {
+      const list = treeListings[d];
+      return list === undefined ? undefined : list.filter((e) => e.kind === "dir").map((e) => join(d, e.name));
+    };
+    open.add(dir);
+    void expandLazy(dir, {
+      nodeCap: TREE_EXPAND_CAP,
+      fetchCap: isLocal ? LOCAL_FETCH_CAP : LAZY_FETCH_CAP,
+      alive: () => mine === generation && open.has(dir),
+      cached: dirChildren,
+      fetch: async (d) => {
+        if (inGraft(d) || grafts.has(d)) return dirChildren(d) ?? [];
+        const entry = entryOf(d);
+        if (entry?.kind !== "dir" || entry.section === null) return [];
+        await readDir(d, entry.section);
+        return dirChildren(d);
+      },
+      open: (d) => {
+        open.add(d);
+      },
+    });
   }
 
   // ---- Go to file and the tree's keys (#2311) ----
@@ -2206,7 +2254,7 @@
           onpointerleave={unrest}
           class:tf-frmarked={folderRendererOf(full) !== undefined}
           aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
-          onclick={() => toggle(full)}
+          onclick={(event) => toggle(full, isAltClick(event))}
           {@attach row.made === undefined ? undefined : menuThing(() => madeDirThing(full))}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >

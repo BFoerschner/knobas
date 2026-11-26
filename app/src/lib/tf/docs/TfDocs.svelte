@@ -144,7 +144,8 @@
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDocsSpace from "./TfDocsSpace.svelte";
-  import { heldTree, pageCount, readHeld, readParts, spaceWhole, type TreeReads } from "./tree-store";
+  import { childrenMissing, hasChildren, heldTree, pageCount, readHeld, readParts, spaceWhole, type TreeReads } from "./tree-store";
+  import { collectLazySync, isAltClick, LAZY_FETCH_CAP, TREE_EXPAND_CAP } from "../tree-alt";
   import { knownPageMakers, pageMakers } from "./page-makers";
   import { docsPageOf } from "./press-reads";
   import TfRailBar from "../TfRailBar.svelte";
@@ -170,6 +171,7 @@
   import { FuzzyOrder } from "../filter/ranked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
+    childrenByParent,
     copyLinkText,
     createdBy,
     LINK_RELATION,
@@ -623,6 +625,34 @@
   }
   /** A fold drawn open whose pages are not read yet (`TfDocTree`'s `need`): settles once its read is drawn or has failed. */
   const needFold = (id: string) => needParts({ folds: [id] });
+
+  /** Alt+click on a space header expands or collapses the space and its page tree recursively (bounded when lazy). */
+  function altSpace(space: DocsTree["spaces"][number], holds: boolean, event: MouseEvent & { currentTarget: HTMLElement }) {
+    if (!isAltClick(event)) return;
+    const details = event.currentTarget.parentElement;
+    if (!(details instanceof HTMLDetailsElement)) return;
+    event.preventDefault();
+    const want = !details.open;
+    const sid = spaceId(space);
+    const folds = foldsOf(sid);
+    if (want) {
+      if (!holds) openSpaces.add(sid);
+      const index = childrenByParent(space);
+      const roots = (index.get(null) ?? []).filter((n) => hasChildren(n, index));
+      const picked = collectLazySync(roots, {
+        isLazy: (n) => lazy && childrenMissing(n, index),
+        childrenOf: (n) => (index.get(n.entity_id) ?? []).filter((c) => hasChildren(c, index)),
+        nodeCap: TREE_EXPAND_CAP,
+        fetchCap: LAZY_FETCH_CAP,
+      });
+      for (const n of picked) folds.add(n.entity_id);
+      details.open = true;
+    } else {
+      openSpaces.delete(sid);
+      folds.clear();
+      details.open = false;
+    }
+  }
 
   // A press on a page's link in Docs asks for the way to it too, where the tree does not hold it yet, so its frame's crumb
   // and title come with the press (Fable's ruling, 2026-11-25). The page's own reads go with the press app-wide
@@ -2022,7 +2052,8 @@
                 else if (!holds) openSpaces.add(spaceId(space));
               }}
             >
-              <summary class="tf-spc" class:tf-holds={here && !open} {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+              <summary class="tf-spc" class:tf-holds={here && !open} onclick={(event) => altSpace(space, holds, event)} {@attach menuThing(() => ({ kind: "space", id: spaceId(space), name: spaceTitle(space, tree?.spaces ?? []), hash: spaceHash(tree?.spaces ?? [], space) }))}><span class="tf-spc-n" title={spaceTitle(space, tree.spaces)}>{spaceName(space)}{#if from !== null}{" "}<span class="tf-dim">on {from}</span>{/if}</span> <span class="tf-count">{pageCount(space)}</span></summary>
               <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} follow={followPage} opened={foldsOf(spaceId(space))} need={lazy ? needFold : undefined} /></div>
             </details>
           {/each}

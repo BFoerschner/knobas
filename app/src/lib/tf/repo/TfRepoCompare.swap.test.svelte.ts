@@ -120,7 +120,7 @@ const pairOf = (ask: { base: string; head: string }) => `${ask.base}...${ask.hea
 const aheadOf = <T extends { base: string; head: string }>(asks: T[], own: string) => () => asks.filter((ask) => pairOf(ask) !== own);
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"));
+const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"));
 
 test("a pair drawn before draws at once when it is picked again, nothing dimmed, and its reads fill it in place", async () => {
   const { props, lists } = draw("feature/a");
@@ -139,14 +139,14 @@ test("a pair drawn before draws at once when it is picked again, nothing dimmed,
   props.head = "feature/a";
   flushSync();
   expect(railNames(), "drawn in the pick's own frame").toEqual(["pay.py", "retry.py"]);
-  expect(text(target.querySelector(".tf-cdiff .tf-flist button .tf-n")), "with the counts it had").toBe("+4 −2");
+  expect(text(target.querySelector(".tf-cdiff .tf-flist button.tf-ffile .tf-n")), "with the counts it had").toBe("+4 −2");
   expect(target.querySelector(".tf-cdiff .tf-wait-dim"), "nothing dimmed").toBeNull();
   expect(text(target.querySelector(".tf-cdiff p.tf-cnote"))).toBe("Read from your clone as of the last sync; checking the code host…");
   expect(lists.length, "the pick reads as any pick does").toBe(before + 1);
-  const rows = [...target.querySelectorAll(".tf-cdiff .tf-flist button")];
+  const rows = [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")];
   lists.at(-1)!.answer(counted("feature/a", [listed("pay.py", 4, 2), listed("retry.py")]));
   await settle();
-  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button")], "the same rows, filled in place").toEqual(rows);
+  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")], "the same rows, filled in place").toEqual(rows);
 });
 
 test("the names of the next picks are read at the clone while the page is idle, and such a pick draws at once", async () => {
