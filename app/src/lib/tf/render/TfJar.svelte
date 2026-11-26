@@ -189,7 +189,7 @@
   const libOrder = heldOrder<(typeof allLibs)[number]>("jar-libs");
   $effect(() => libOrder.ask(tab === "deps" ? typed : "", allLibs, libText));
 
-  /** What the list drew last: kept while a first key's ranking is out (`FuzzyOrder.ready`). */
+  /** What Contents drew last: kept while a first key's ranking is out (`FuzzyOrder.ready`); never the Dependencies' rows. */
   let drewLast: { rows: Row[]; hits: number | null } | null = null;
   // Plain copies of what is open, read once a pass: the rows ask for each of thousands.
   const filtered = $derived.by(() => {
@@ -201,7 +201,7 @@
     else if (filtering && !entryOrder.ready(typed, entries) && drewLast !== null) made = drewLast;
     else if (filtering) made = filteredRows(entryOrder.rows(typed, entries, entryName), open, got);
     else made = { rows: treeRows(top.listing, "", 0, open, got), hits: null };
-    drewLast = made;
+    drewLast = tab === "contents" ? made : null;
     return made;
   });
   /** What a row's `<Marked>` marks by its words while the ranking's answer is out (`FuzzyOrder.typed`). */

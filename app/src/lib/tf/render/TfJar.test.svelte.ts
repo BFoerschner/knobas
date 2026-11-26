@@ -210,6 +210,12 @@ test("a fat JAR lists its dependencies with their versions, and one opens to its
   const lib = rows()[0]!;
   expect([...lib.querySelectorAll(".tf-jar-fname mark")].map(text).join("")).toBe("jcksn");
   expect([...lib.querySelectorAll(".tf-jar-vers mark")].map(text).join("")).toBe("2");
+  // Back to Contents with the words still typed: no dependency row is drawn under it while its ranking is out.
+  button("Contents")!.click();
+  flushSync();
+  expect(target.querySelectorAll(".tf-jar-lib")).toHaveLength(0);
+  await settle();
+  expect(target.querySelectorAll(".tf-jar-lib")).toHaveLength(0);
 });
 
 test("10,000 entries draw a window of rows; the filter counts every match", async () => {
