@@ -7,11 +7,15 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2535): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+
 import type { LinkSetDetail, LinkSetDraft, LinkSetHint, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
 import { layers } from "../layers.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import type { Candidate, SetPorts } from "./ports";
 import TfSets from "./TfSets.svelte";
+import { ranked } from "../filter/test-fuzzy";
 
 const STACK: LinkSetDetail = {
   id: "payout-stack",
@@ -199,6 +203,18 @@ test("the filter keeps sets by name or member, and by what they apply by", async
   button("By hand").click();
   await settle();
   expect(text("tbody .tf-set-name")).toEqual(["Payout stack"]);
+});
+
+test("the filter ranks names, descriptions and items through the app's ranking and marks the letters it matched (#2535)", async () => {
+  await draw([]);
+  const field = target.querySelector<HTMLInputElement>("input[placeholder='Filter link sets']")!;
+  // No substring holds "pystk"; its letters stand in order in "Payout stack".
+  field.value = "pystk";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await ranked();
+  const names = [...target.querySelectorAll("tbody .tf-set-name")];
+  expect(names.map((el) => el.textContent)).toEqual(["Payout stack"]);
+  expect([...names[0]!.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("pystk");
 });
 
 test("the sub-task switch is R-7.3's, and New link set opens a set with nothing saved yet", async () => {

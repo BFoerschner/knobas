@@ -6,7 +6,11 @@
 import { pageContext } from "../kept-pages.svelte";
 import { takeTold } from "../opener";
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filters rank through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+import { ranked } from "../filter/test-fuzzy";
 
 import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetDetail, LinkSetDraft, LinkSetRow, LinkSetRule } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
@@ -214,6 +218,7 @@ test("Apply a link set… lists the sets with what they hold, marks the one that
   field.value = "payout";
   field.dispatchEvent(new Event("input"));
   flushSync();
+  await ranked();
   expect([...dialog().querySelectorAll(".tf-pickrow b")].map(squash)).toEqual(["Payout stack"]);
 });
 
@@ -333,12 +338,29 @@ test("Enter in the filter applies the first set the filter leaves", async () => 
   field.value = "payout";
   field.dispatchEvent(new Event("input"));
   flushSync();
+  await ranked();
   expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
   // A text field's Enter is its form's implicit submission.
   field.form!.requestSubmit();
   await settle();
   expect(saved.at(-1)?.id).toBe("payout-stack");
   expect(document.querySelector(".tf-dialog")).toBeNull();
+});
+
+test("Enter in the filter before the ranking answers applies the set the answer leaves first (#2535)", async () => {
+  open();
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
+  field.value = "payout";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  // The ranking has not answered yet: Ledger stack is still drawn first.
+  field.form!.requestSubmit();
+  await ranked();
+  await settle();
+  expect(saved.at(-1)?.id).toBe("payout-stack");
 });
 
 test("Apply is disabled when no set the filter leaves can apply", async () => {
@@ -350,6 +372,7 @@ test("Apply is disabled when no set the filter leaves can apply", async () => {
   field.value = "ledger";
   field.dispatchEvent(new Event("input"));
   flushSync();
+  await ranked();
   const primary = dialog().querySelector<HTMLButtonElement>("footer .tf-primary")!;
   expect([squash(primary), primary.disabled]).toEqual(["Apply", true]);
   field.form!.requestSubmit();

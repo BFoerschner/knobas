@@ -14,8 +14,8 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetRow } from "../../ipc/entity";
-  import { matchesAll } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import type { Layers } from "../layers.svelte";
   import { goVisiting } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -63,7 +63,13 @@
     };
   });
 
-  const shown = $derived((sets ?? []).filter((set) => matchesAll(`${set.name} ${set.description}`, typed)));
+  /** The typed words rank every set by its name and description, best first, through the app's ranking (#2535). */
+  const rows = $derived(sets ?? []);
+  const setText = (set: LinkSetRow) => `${set.name} ${set.description}`;
+  const order = heldOrder<LinkSetRow>("apply-set");
+  $effect(() => order.ask(typed, rows, setText));
+  const shown = $derived(order.rows(typed, rows, setText));
+  const marking = $derived(order.typed(typed, rows));
 
   const uid = $props.id();
   let pickedId = $state<string | null>(null);
@@ -91,9 +97,21 @@
     onclose();
   }
 
+  /**
+   * `Enter` in the filter before the ranking answered what was typed (#2535): the set it applies is the first the
+   * answer leaves, not the first drawn for the words before, so the press waits for that answer.
+   */
+  let waiting = $state(false);
+  $effect(() => {
+    if (!waiting || !order.settled(typed, rows)) return;
+    waiting = false;
+    if (chosen !== null) onapply(chosen);
+  });
+
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    if (chosen !== null) onapply(chosen);
+    if (!order.settled(typed, rows)) waiting = true;
+    else if (chosen !== null) onapply(chosen);
   }
 
   let filterEl = $state<HTMLInputElement | null>(null);
@@ -140,7 +158,7 @@
             checked={chosen?.id === set.id}
             onchange={() => (pickedId = set.id)}
           />
-          <span><b><Marked text={set.name} {typed} /></b><span class="tf-dim tf-pick-sub">{contentLines(set).join(", ")}</span></span>
+          <span><b><Marked text={set.name} typed={marking} pairs={order.marks(set, 0, set.name.length)} /></b><span class="tf-dim tf-pick-sub">{contentLines(set).join(", ")}</span></span>
           <span class="tf-dim">{on ? "already applies" : ""}</span>
         </label>
       {/each}
