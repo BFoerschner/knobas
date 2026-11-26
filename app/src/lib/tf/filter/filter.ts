@@ -122,8 +122,17 @@ export function words(text: string): string[] {
 
 /** Whether every word typed appears in `haystack`, in any order, ignoring case (R-2.3). */
 export function matchesAll(haystack: string, text: string): boolean {
-  const lower = haystack.toLowerCase();
-  return words(text).every((word) => lower.includes(word));
+  return matcherOf(text)(haystack);
+}
+
+/** {@link matchesAll} for one text over many rows, its words read once (#2532: a key's fallback over 10,000 rows). */
+export function matcherOf(text: string): (haystack: string) => boolean {
+  const typed = words(text);
+  return (haystack) => {
+    const lower = haystack.toLowerCase();
+    for (const word of typed) if (!lower.includes(word)) return false;
+    return true;
+  };
 }
 
 /** A run of drawn text, and whether a typed word matched it. */
@@ -141,6 +150,17 @@ export interface Mark {
  */
 export function marks(text: string, typed: string): Mark[] {
   return markNeedles(text, words(typed));
+}
+
+/** {@link marks} as pairs of start and end (#2532): what a ranked list's rows mark where the ranking did not answer. */
+export function wordPairs(text: string, typed: string): number[] {
+  const pairs: number[] = [];
+  let at = 0;
+  for (const run of marks(text, typed)) {
+    if (run.hit) pairs.push(at, at + run.text.length);
+    at += run.text.length;
+  }
+  return pairs;
 }
 
 /** {@link marks} for needles already read (lowercased); a needle may hold spaces, as a phrase does. */

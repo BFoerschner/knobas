@@ -73,7 +73,9 @@
   import { reviewSubject } from "../../shell/queued-toast";
   import { pageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown } from "../while-shown.svelte";
-  import { matchesPath, sameTarget, targetOf } from "../pr/files";
+  import { sameTarget, targetOf } from "../pr/files";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import {
     cardIn,
     DIFF_CEILING,
@@ -107,7 +109,7 @@
   import { allRenderers, type Renderer } from "../../render/registry";
   import { docHint, hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
-  import { badgeOf, collapsedAtFirst, collapseTree, descendantFolderKeys, folderKey, isLock, needsLoad, treeOf, type FolderRow } from "./tree";
+  import { badgeOf, collapsedAtFirst, collapseTree, descendantFolderKeys, flatOf, folderKey, isLock, needsLoad, treeOf, type FolderRow } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
@@ -468,18 +470,37 @@
   }
   /** A grouped folder as the rail and the cards column draw it. */
   type ShownGroup = TreeGroup & { group: FolderGroup; key: string; compare: FolderCompare | undefined; made: Compared | null; all: DrawnFile[]; lists: boolean; same: number };
-  const groupsShown = $derived.by((): ShownGroup[] => {
-    const words = filter;
-    const narrowed = words.trim() !== "";
-    return groups.flatMap((group) => {
+  /** Every grouped folder with every generated file it lists, before the filter. */
+  const groupsAll = $derived.by((): ShownGroup[] =>
+    groups.map((group) => {
       const key = compareKey(group);
       const compare = compares.get(key);
       const made = shownMade.get(key) ?? null;
       const all = made === null ? [] : madeFilesOf(group, made, compare);
-      const shownFiles = narrowed ? all.filter((file) => matchesPath(file.path, words)) : all;
-      if (narrowed && shownFiles.length === 0 && !matchesPath(group.folder, words)) return [];
       const same = made?.kind === "folder" && all.length > 0 ? made.compare.same : 0;
-      return [{ folder: group.folder, files: shownFiles, group, key, compare, made, all, lists: all.length > 0, same }];
+      return { folder: group.folder, files: all, group, key, compare, made, all, lists: all.length > 0, same };
+    }),
+  );
+  /**
+   * The grouped folders the filter keeps, each with the generated files the ranking kept, best first: a folder whose
+   * name was kept stays with none.
+   */
+  const groupsShown = $derived.by((): ShownGroup[] => {
+    if (!flat) return groupsAll;
+    const kept = new Map<ShownGroup, DrawnFile[]>();
+    const named = new Set<ShownGroup>();
+    for (const hit of rankedHits) {
+      if (hit.group === undefined) continue;
+      if (hit.file === undefined) named.add(hit.group);
+      else {
+        const into = kept.get(hit.group);
+        if (into === undefined) kept.set(hit.group, [hit.file]);
+        else into.push(hit.file);
+      }
+    }
+    return groupsAll.flatMap((group) => {
+      const files = kept.get(group) ?? [];
+      return files.length === 0 && !named.has(group) ? [] : [{ ...group, files }];
     });
   });
   /** Every generated file the groups list, by key, for the reads a card makes. */
@@ -635,13 +656,56 @@
 
   let filter = $state("");
   let filterField = $state<HTMLInputElement | null>(null);
-  const shown = $derived.by(() => {
-    const words = filter;
-    // No filter, every file: a list of thousands asked the filter of each file (the stored-compare pass, 2026-11-14).
-    return words.trim() === "" ? realFiles : realFiles.filter((file) => matchesPath(keyOf(file), words));
+  const filtering = $derived(filter.trim() !== "");
+  /**
+   * What the filter ranks (#2532): each file by its path as the rail names it, each grouped folder by its path and
+   * its generated files by theirs. Built once the filter has words: a list of thousands built nothing on the open.
+   */
+  type Hit = { file: DrawnFile; group?: ShownGroup } | { file?: undefined; group: ShownGroup };
+  const NO_HITS: Hit[] = [];
+  const hits = $derived(
+    filtering
+      ? [
+          ...realFiles.map((file): Hit => ({ file })),
+          ...groupsAll.flatMap((group): Hit[] => [...(group.folder === "" ? [] : [{ group }]), ...group.all.map((file) => ({ file, group }))]),
+        ]
+      : NO_HITS,
+  );
+  const hitText = (hit: Hit) => (hit.file === undefined ? hit.group.folder : hit.group === undefined ? keyOf(hit.file) : hit.file.path);
+  const fileOrder = heldOrder<Hit>("diff-files");
+  $effect(() => fileOrder.ask(filter, hits, hitText));
+  /**
+   * Whether the rail is the ranking's flat list: from the first answer on (`FuzzyOrder.ready`). Until the first key's
+   * answer lands the tree stays as drawn, as a list held before keeps its rows, so no pass of the filter as it was
+   * runs over every file and nothing drawn moves when the answer comes.
+   */
+  /**
+   * A list rebuilt while the rail is flat (a working tree read again, a grouped folder's run landing) keeps the rail
+   * flat. Plain, not state: read and written by `flat` alone.
+   */
+  let wasFlat = false;
+  const flat = $derived.by(() => (wasFlat = filtering && (wasFlat || fileOrder.ready(filter, hits))));
+  /** A hit's place in the list, its kind with its text: a rebuilt list's hit found by the one drawn. */
+  const hitPlace = (hit: Hit) => (hit.file === undefined ? "g:" : hit.group === undefined ? "f:" : "m:") + hitText(hit);
+  /** What the rail drew last: kept, read from the rebuilt list, while that list's answer is out. */
+  let drewHits: readonly Hit[] = NO_HITS;
+  /** The hits the ranking kept, best first; none with no words. */
+  const rankedHits = $derived.by((): readonly Hit[] => {
+    if (!flat) return (drewHits = NO_HITS);
+    if (fileOrder.ready(filter, hits)) return (drewHits = fileOrder.rows(filter, hits, hitText));
+    const now = new Map(hits.map((hit) => [hitPlace(hit), hit]));
+    return (drewHits = drewHits.flatMap((hit) => now.get(hitPlace(hit)) ?? []));
   });
-  /** Expanded rail tree used to derive diff card ordering; unaffected by sidebar folder collapse. */
-  const allTree = $derived(list ? treeOf(shown, groupsShown) : []);
+  /** Each kept file's hit, for its row's marks. */
+  const hitOf = $derived(new Map(rankedHits.flatMap((hit) => (hit.file === undefined ? [] : [[hit.file, hit] as const]))));
+  const fileMarking = $derived(fileOrder.typed(filter, hits));
+  /** The files the rail lists: every one, or the ones the ranking kept, best first. */
+  const shown = $derived(flat ? rankedHits.flatMap((hit) => (hit.file !== undefined && hit.group === undefined ? [hit.file] : [])) : realFiles);
+  /**
+   * Expanded rail tree used to derive diff card ordering; unaffected by sidebar folder collapse. While the filter has
+   * words it is flat, the ranking's order (#2532); cleared, the folders come back as they were left.
+   */
+  const allTree = $derived(list ? (flat ? flatOf(shown, groupsShown) : treeOf(shown, groupsShown)) : []);
   /** Folder headers collapsed by hand in the changed-files rail (`d:<path>` / `g:<folder>`). */
   const collapsedDirs = new SvelteSet<string>();
   const tree = $derived(collapseTree(allTree, collapsedDirs));
@@ -2154,6 +2218,8 @@
             {@const badge = badgeOf(file)}
             {@const how = / \((?:[^()]*, )?(not staged|staged|untracked)\)$/.exec(row.name)?.[1] ?? null}
             {@const counts = file.made === undefined ? file : (lined[keyOf(file)]?.file ?? null)}
+            {@const named = how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}
+            {@const hit = flat ? hitOf.get(file) : undefined}
             <button
               type="button"
               class="tf-ffile"
@@ -2165,7 +2231,9 @@
               onclick={() => pick(file)}
               {@attach railWin.row(treeKey(row))}
               {@attach menuThing(() => (openAt !== null && file.made === undefined && file.change !== "deleted" ? { kind: "file", repoId: openAt.entityId, path: file.path } : null))}
-              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
+              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname"
+                ><Marked text={named} typed={fileMarking} pairs={hit === undefined ? [] : fileOrder.marks(hit, 0, named.length)} /></span
+              >{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary" && counted && counts !== null}<span class="tf-add-n">+{counts.additions}</span> <span class="tf-del-n">−{counts.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >

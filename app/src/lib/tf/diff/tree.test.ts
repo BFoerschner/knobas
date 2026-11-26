@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile } from "../../ipc/entity";
-import { badgeOf, collapsedAtFirst, collapseTree, descendantFolderKeys, folderKey, LOAD_OVER, needsLoad, treeOf, type FolderRow, type TreeRow } from "./tree";
+import { badgeOf, collapsedAtFirst, collapseTree, descendantFolderKeys, flatOf, folderKey, LOAD_OVER, needsLoad, treeOf, type FolderRow, type TreeRow } from "./tree";
 
 const file = (path: string, more: Partial<DiffFile> = {}): DiffFile => ({
   path,
@@ -39,6 +39,14 @@ test("a grouped folder sorts with the directories by its path: its row, its band
   // A folder of the same path as a directory sorts right after it; the top folder before every directory.
   expect(treeOf([file("docs/x.md")], [{ folder: "docs", files: [] }]).map(said)).toEqual(["[docs]", "1:x.md", "<docs>", "band"]);
   expect(treeOf([file("a/b.md")], [{ folder: "", files: [] }]).map(said)).toEqual(["<>", "band", "[a]", "1:b.md"]);
+});
+
+test("while the filter has words the rail is flat: the files in the order given by whole path, then each grouped folder (#2532)", () => {
+  const made = (path: string) => ({ ...file(path), key: `docs\u0000${path}` });
+  const rows = flatOf([file("src/sepa/retry.rs"), file("README.md"), file("src/a.rs")], [{ folder: "docs", files: [made("steps/03-retry.md")] }]);
+  expect(rows.map(said)).toEqual(["0:src/sepa/retry.rs", "0:README.md", "0:src/a.rs", "<docs>", "band", "made 1:steps/03-retry.md"]);
+  // A collapsed grouped folder still folds its files; no directory row is drawn to fold.
+  expect(collapseTree(rows, new Set(["g:docs", "d:src"])).map(said)).toEqual(["0:src/sepa/retry.rs", "0:README.md", "0:src/a.rs", "<docs>"]);
 });
 
 test("a badge says what happened to the file", () => {

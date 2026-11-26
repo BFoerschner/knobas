@@ -16,6 +16,7 @@ import {
   twinRows,
   repoTeams,
   visiblePrs,
+  prText,
   visibleRepos,
   type PrFilter,
   type RepoFilter,
@@ -97,7 +98,7 @@ test("a pull request's opener is named by the profile where the source keeps one
   ]);
 });
 
-test("the pull request filter keeps by the repository's team and finds the author (#966)", () => {
+test("the pull request filter keeps by the repository's team, and its words reach the author (#966)", () => {
   const ledger = { ...pr("9", "open"), path: "tidewater/ledger-api" };
   const repos = [repo("payout-service"), repo("ledger-api")];
   const known = factsById([
@@ -109,13 +110,14 @@ test("the pull request filter keeps by the repository's team and finds the autho
   const numbers = (filter: Partial<PrFilter>) =>
     visiblePrs(
       lines,
-      { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", text: "", ...filter },
+      { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", ...filter },
       repoTeams(repos, known),
     ).map((line) => line.number);
 
   expect(numbers({ team: "Ledger" })).toEqual(["#9"]);
   expect(numbers({ team: "Payments" })).toEqual(["#1", "#9"]);
-  expect(numbers({ text: "priya" })).toEqual(["#9"]);
+  // The words are ranked over what `prText` reads: the number, title, repository and author (#2532).
+  expect(prText(lines.find((line) => line.number === "#9")!)).toBe("#9 PR 9 tidewater/ledger-api priya");
 });
 
 test("an open pull request untouched for more than five days is idle; a settled one never is", () => {
@@ -133,7 +135,7 @@ test("with no identity configured the open pull requests carry no group", () => 
   expect(lines.map((line) => line.group)).toEqual([null, "settled"]);
 });
 
-test("the pull request filter keeps by scope, state, flags, repository and words", () => {
+test("the pull request filter keeps by scope, state, flags and repository", () => {
   const other = { ...pr("9", "open"), path: "tidewater/ledger-api", title: "Fix ledger drift" };
   const lines = prLines(
     page([pr("144", "open"), pr("142", "open", "2026-08-10T10:00:00Z"), other], [
@@ -145,7 +147,7 @@ test("the pull request filter keeps by scope, state, flags, repository and words
     NOW,
   );
   const numbers = (filter: Partial<PrFilter>) =>
-    visiblePrs(lines, { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", text: "", ...filter }, new Map()).map(
+    visiblePrs(lines, { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", ...filter }, new Map()).map(
       (line) => line.number,
     );
 
@@ -156,8 +158,6 @@ test("the pull request filter keeps by scope, state, flags, repository and words
   expect(numbers({ flags: ["Waiting on me"] })).toEqual(["#144"]);
   expect(numbers({ flags: ["Idle > 5 days"] })).toEqual(["#142"]);
   expect(numbers({ repo: "tidewater/ledger-api" })).toEqual(["#9"]);
-  expect(numbers({ text: "ledger drift" })).toEqual(["#9"]);
-  expect(numbers({ text: "#57" })).toEqual(["#57"]);
 });
 
 function repo(name: string, updated = "2026-08-20T10:00:00Z"): EntityRow {

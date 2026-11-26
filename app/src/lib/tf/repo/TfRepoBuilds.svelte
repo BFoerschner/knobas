@@ -22,6 +22,8 @@
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfRunGlyph from "../builds/TfRunGlyph.svelte";
   import { pipelineHash, runAt, runGlyph, runHash, runTone, shortTime, stateWord, testsWords, toneWord } from "../builds/builds";
@@ -112,14 +114,16 @@
   let text = $state("");
   let onlyFailing = $state(false);
   let onlyMine = $state(false);
-  const kept = $derived(
-    rail.filter(
-      (b) =>
-        (!onlyFailing || b.failing > 0) &&
-        (!onlyMine || heldMine.includes(b.name)) &&
-        b.name.toLowerCase().includes(text.trim().toLowerCase()),
-    ),
-  );
+  const toggled = $derived(rail.filter((b) => (!onlyFailing || b.failing > 0) && (!onlyMine || heldMine.includes(b.name))));
+  /**
+   * The typed words decide through the app's ranking which branches keep (#2532); each keeps the place it first drew
+   * in its group (`holdOrder`), so the rail's order is the groups', not the ranking's.
+   */
+  const railName = (b: RailBranch) => b.name;
+  const order = heldOrder<RailBranch>("repo-builds-branches");
+  $effect(() => order.ask(text, toggled, railName));
+  const kept = $derived(order.rows(text, toggled, railName));
+  const marking = $derived(order.typed(text, toggled));
   const groups = $derived(
     groupBranches(kept, def, heldMine, heldPulls).map((group) => ({
       ...group,
@@ -349,7 +353,11 @@
               <a class="tf-tr tf-pi tf-d0 tf-rbr" href={branchHref(b.name)} aria-current={b.name === current} title="{b.name}: {branchWords(b)}" {@attach railWin.row(item.key)}>
                 <TfRunGlyph tone={b.tone} word={toneWord(b.tone)} />
                 <span class="tf-pi-nm" class:tf-bad={b.failing > 0}
-                  >{#if slash > 0}<span class="tf-pi-pre">{b.name.slice(0, slash + 1)}</span>{/if}{b.name.slice(slash + 1)}</span
+                  >{#if slash > 0}<span class="tf-pi-pre"><Marked text={b.name.slice(0, slash + 1)} typed={marking} pairs={order.marks(b, 0, slash + 1)} /></span>{/if}<Marked
+                    text={b.name.slice(slash + 1)}
+                    typed={marking}
+                    pairs={order.marks(b, slash + 1)}
+                  /></span
                 >
                 {#if b.failing > 0}<span class="tf-pi-when tf-err">{b.failing} failing</span>{:else if b.tone === "run"}<span
                     class="tf-pi-when tf-info">running</span

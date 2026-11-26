@@ -9,7 +9,10 @@
  */
 import { dropPrMove, heardRefresh, notePrMove } from "../pr/pr-state.svelte";
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filters rank through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type {
   BranchPull,
@@ -765,7 +768,47 @@ test("Commits lists sha, message and who and when; the filter narrows; a mirrore
   field.value = "jonas";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await settle();
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+});
+
+/** Types `words` into the tab's filter and waits for the ranking's answer. */
+async function filterBy(words: string) {
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = words;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await settle();
+}
+const marked = (el: Element | null) => [...(el?.querySelectorAll("mark") ?? [])].map(text);
+
+test("Commits ranks its words through the app's ranking, letters in order, marks them, and keeps the branch's order (#2532)", async () => {
+  await draw([REPO, "commits"]);
+  // No substring holds "bmpdps"; its letters stand in order in "Bump deps".
+  await filterBy("bmpdps");
+  const rows = [...target.querySelectorAll(".tf-cbody tbody tr")];
+  expect(rows.map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+  expect(marked(rows[0]!).join("").toLowerCase()).toBe("bmpdps");
+  // Two kept stay newest first, as the branch lists them, whichever the ranking put first: a range reads their places.
+  await filterBy("a");
+  expect([...target.querySelectorAll(".tf-cbody tbody tr")].map((tr) => text(tr.querySelector(".tf-mono")))).toEqual(["c90d11a2b3", "a41f2c0000"]);
+});
+
+test("Branches and Pull requests rank their words through the app's ranking and mark the matched letters (#2532)", async () => {
+  await draw([REPO, "branches"]);
+  await filterBy("ftsepa");
+  const branches = [...target.querySelectorAll(".tf-rbranches tbody tr[data-place]")];
+  expect(branches.map((tr) => text(tr.querySelector("td")))).toEqual(["feature/PAY-231-sepa-retry"]);
+  expect(marked(branches[0]!.querySelector("td")).join("").toLowerCase()).toBe("ftsepa");
+  unmount(view!);
+  view = null;
+  target.replaceChildren();
+
+  await draw([REPO, "prs"]);
+  await filterBy("sprtry");
+  const prs = [...target.querySelectorAll(".tf-cbody tbody tr")];
+  expect(prs.map((tr) => text(tr.querySelector("td")))).toEqual(["#142"]);
+  expect(marked(prs[0]!).join("").toLowerCase()).toBe("sprtry");
 });
 
 test("Commits' Author: Mine keeps the commits whose declared author is mine (#973)", async () => {
