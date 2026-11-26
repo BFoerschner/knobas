@@ -8,7 +8,7 @@
   `localStorage` (`themes.svelte.ts`, `theme.svelte.ts`).
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import { renderPort, type RenderPort } from "../../render/port";
   import { ROLE_NAMES, type Role } from "../../render/roles";
@@ -70,6 +70,13 @@
     untrack(() => (editingId = themes.slot(side)));
   });
   const editing = $derived(themes.find(editingId) ?? themes.drawn(drawnSide));
+
+  let editor = $state<ReturnType<typeof TfThemeEditor> | null>(null);
+  /** A slot's *Edit*: its theme in the editor, which is scrolled to and focused, the theme already there included (#2516). */
+  function edit(held: Theme): void {
+    editingId = held.id;
+    void tick().then(() => editor?.reveal());
+  }
 
   function choose(id: string): void {
     themes.choose(id);
@@ -183,7 +190,7 @@
           <option value={t.id}>{t.id.startsWith("own-") ? `${t.name}, yours` : t.name}</option>
         {/each}
       </select>
-      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editingId = held.id)}>Edit</button>
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => edit(held)}>Edit</button>
       <div class="tf-thm-chips" aria-hidden="true">
         {#each CHIPS as role (role)}
           <i title={ROLE_NAMES[role]} {@attach cssVars(() => ({ background: held.syntax[role] ?? themes.colours(kind).ink }))}></i>
@@ -196,4 +203,4 @@
   {/each}
 </div>
 <!-- Not keyed by the theme: the preview's code stays drawn while another theme is shown, and only its colours change. -->
-<TfThemeEditor theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} onfixcopy={fixCopy} />
+<TfThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} onfixcopy={fixCopy} />

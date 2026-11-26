@@ -2,7 +2,7 @@
  * Settings › Appearance › Theme (`TfThemeSection.svelte`, ADR-0055): the window slots, the editor's rows, their fixes
  * and *Auto*, the code line, the preview, the import band, and a theme that cannot be read asking first.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
@@ -393,4 +393,22 @@ test("light or dark chosen while the page is open puts that side's window theme 
   mode.set("light");
   flushSync();
   expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+});
+
+test("Edit on a slot scrolls smoothly to the editor and focuses its heading, the theme already shown included (#2516)", async () => {
+  draw();
+  const scrolled: { el: Element; how: unknown }[] = [];
+  const was = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, how?: unknown) {
+    scrolled.push({ el: this, how });
+  };
+  try {
+    button("Edit")!.click();
+    flushSync();
+    await tick();
+    expect(document.activeElement).toBe(q(".tf-thm-edh h2"));
+    expect(scrolled.at(-1)).toEqual({ el: q(".tf-thm-ed"), how: { behavior: "smooth", block: "start" } });
+  } finally {
+    HTMLElement.prototype.scrollIntoView = was;
+  }
 });

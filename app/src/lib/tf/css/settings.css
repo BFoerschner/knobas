@@ -445,8 +445,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-italic { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
 /* A code slot that follows a window theme with no code colours says which draws (ADR-0055). */
 .tf-thm-follow { grid-column: 1 / -1; margin: 0; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
-/* Code colours' editor: the line on a theme's window colours, over the role list. */
-.tf-thm-app { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* Code colours' editor: the line on a theme's window colours, over the role list and the preview both: a row of the
+   editor's grid to itself, so the list and the preview keep their columns (#2516). */
+.tf-thm-app { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Updates (ADR-0052; design system, *The update box*) ---------- */
 /* One box, the same rooms in every state: only its words, the track's fill and the two buttons' words change. */
 .tf-upd {

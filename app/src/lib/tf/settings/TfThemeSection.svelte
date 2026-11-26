@@ -10,7 +10,7 @@
   15 s unless kept, `TfThemeKeep.svelte`) and *Fix and use*. Everything here is this computer's (`themes.svelte.ts`).
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import { push, undoable } from "../../shell/toasts.svelte";
   import { layers } from "../layers.svelte";
@@ -64,6 +64,13 @@
   const showBand = $derived(justImported !== null && justImported === editing.id);
 
   const label = (t: Theme) => (t.id.startsWith("own-") ? `${t.name}, yours` : t.name);
+
+  let editor = $state<ReturnType<typeof TfAppThemeEditor> | null>(null);
+  /** A slot's *Edit*: its theme in the editor, which is scrolled to and focused, the theme already there included (#2516). */
+  function edit(held: Theme): void {
+    editingId = held.id;
+    void tick().then(() => editor?.reveal());
+  }
 
   // ---------- choosing, and asking first ----------
   /** The theme a dialog asks about before it is used, and what using it does. */
@@ -203,7 +210,7 @@
           <option value={t.id}>{label(t)}</option>
         {/each}
       </select>
-      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editingId = held.id)}>Edit</button>
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => edit(held)}>Edit</button>
       <div class="tf-thm-chips tf-apt-chips" aria-hidden="true">
         {#each CHIPS as key (key)}
           <i {@attach cssVars(() => ({ background: colours[key as keyof typeof colours] ?? colours.sheet }))}></i>
@@ -222,7 +229,7 @@
   {/each}
 </div>
 <!-- Not keyed by the theme: the editor stays drawn while another theme is shown, and only its colours change. -->
-<TfAppThemeEditor theme={editing} {themes} {drawnSide} onduplicate={duplicate} ondelete={remove}>
+<TfAppThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} onduplicate={duplicate} ondelete={remove}>
   {#snippet band()}
     {#if showBand}
       {@const both = hasApp(editing) && hasCode(editing)}

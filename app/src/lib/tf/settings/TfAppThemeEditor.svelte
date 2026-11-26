@@ -155,6 +155,16 @@
     setMany(next, `${running ? "Passed, Attention, Failed and Running" : "Passed, Attention and Failed"} moved ${got.reached.toFixed(2)} apart.`);
   }
 
+  // ---------- Edit on a slot (#2516) ----------
+  let root = $state<HTMLElement | null>(null);
+  let heading = $state<HTMLElement | null>(null);
+  /** A slot's *Edit*: the editor scrolled to, smoothly unless motion is reduced, and its heading focused. */
+  export function reveal(): void {
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    root?.scrollIntoView?.({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    (renaming ? nameField : heading)?.focus({ preventScroll: true });
+  }
+
   // ---------- rename ----------
   let renaming = $state(false);
   let typedName = $state("");
@@ -212,7 +222,7 @@
   const isAuto = (row: Row) => row.keys.every((k) => (k === "selection" ? set.selection === undefined : result.derived.has(k)));
 </script>
 
-<div class="tf-thm-ed tf-apt-ed">
+<div class="tf-thm-ed tf-apt-ed" bind:this={root}>
   <div class="tf-thm-edh">
     {#if renaming}
       <input
@@ -231,7 +241,7 @@
         onblur={() => endRename(true)}
       />
     {:else}
-      <h2>{theme.name}</h2>
+      <h2 tabindex="-1" bind:this={heading}>{theme.name}</h2>
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">

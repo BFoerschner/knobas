@@ -127,6 +127,16 @@
     undoable(`${ROLE_NAMES[role]} ${fixWord === "Darken" ? "darkened" : "lightened"} to 4.5:1.`, () => setRole(role, was), { subject: `theme-fix-${theme.id}-${role}` });
   }
 
+  // ---------- Edit on a slot (#2516) ----------
+  let root = $state<HTMLElement | null>(null);
+  let heading = $state<HTMLElement | null>(null);
+  /** A slot's *Edit*: the editor scrolled to, smoothly unless motion is reduced, and its heading focused. */
+  export function reveal(): void {
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    root?.scrollIntoView?.({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    (renaming ? nameField : heading)?.focus({ preventScroll: true });
+  }
+
   // ---------- rename ----------
   let renaming = $state(false);
   let typedName = $state("");
@@ -170,7 +180,7 @@
   }
 </script>
 
-<div class="tf-thm-ed">
+<div class="tf-thm-ed" bind:this={root}>
   <div class="tf-thm-edh">
     {#if renaming}
       <input
@@ -189,7 +199,7 @@
         onblur={() => endRename(true)}
       />
     {:else}
-      <h2>{theme.name}</h2>
+      <h2 tabindex="-1" bind:this={heading}>{theme.name}</h2>
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">

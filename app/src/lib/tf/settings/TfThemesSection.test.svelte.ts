@@ -232,3 +232,27 @@ test("light or dark chosen while the page is open puts that side's theme in the 
   flushSync();
   expect(q(".tf-thm-edh h2")?.textContent).toBe(themes.drawn("light").name);
 });
+
+test("Edit on a slot scrolls smoothly to the editor and focuses its heading, the theme already shown included (#2516)", async () => {
+  draw();
+  const scrolled: { el: Element; how: unknown }[] = [];
+  const was = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, how?: unknown) {
+    scrolled.push({ el: this, how });
+  };
+  try {
+    expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+    q('[data-slot="light"]')!.querySelector<HTMLButtonElement>("button.tf-btn")!.click();
+    flushSync();
+    await tick();
+    expect(document.activeElement).toBe(q(".tf-thm-edh h2"));
+    expect(scrolled.at(-1)).toEqual({ el: q(".tf-thm-ed"), how: { behavior: "smooth", block: "start" } });
+    q('[data-slot="dark"]')!.querySelector<HTMLButtonElement>("button.tf-btn")!.click();
+    flushSync();
+    await tick();
+    expect(q(".tf-thm-edh h2")?.textContent).toBe(themes.drawn("dark").name);
+    expect(document.activeElement).toBe(q(".tf-thm-edh h2"));
+  } finally {
+    HTMLElement.prototype.scrollIntoView = was;
+  }
+});
