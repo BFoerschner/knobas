@@ -102,18 +102,31 @@
   let saved = $state<UserRenderer[] | null>(null);
   /**
    * Whether the folder renderers' read has answered, held or not. The sections draw once it and `saved` have (the
-   * nothing-moves pass): the folder renderers' table landing alone pushed *Default renderers* 30 px down.
+   * nothing-moves pass): the folder renderers' table landing alone pushed *Default renderers* 30 px down. This is the
+   * page's one read of them; their table takes its answer and reads nothing itself (#2519).
    */
   let foldersRead = $state(false);
-  /** Where generated folders are kept, read with the folder renderers so its row lands with their table (ADR-0046). */
+  /** Why that read failed, said in the folder renderers' section. */
+  let foldersUnread = $state<string | null>(null);
+  $effect(() => {
+    folders.load().then(
+      () => (foldersRead = true),
+      (cause: unknown) => {
+        foldersUnread = ipcErrorMessage(cause);
+        foldersRead = true;
+      },
+    );
+  });
+  /**
+   * Where generated folders are kept (ADR-0046). Not waited for (#2519): counting them walks the store on disk the
+   * first time, so its row keeps its room unseen until it answers and nothing else waits on it.
+   */
   let madePlace = $state.raw<MadeStore | null>(null);
   $effect(() => {
-    const listed = folders.load().catch(() => {});
-    const placed = madeStore().then(
+    madeStore().then(
       (read) => (madePlace = read),
       () => {},
     );
-    void Promise.all([listed, placed]).then(() => (foldersRead = true));
   });
   /** The renderer being edited: an index into `saved`, `"new"`, or none. */
   let editing = $state<number | "new" | null>(null);
@@ -360,8 +373,8 @@
     {#if refusal !== null && editing === null}<p class="tf-stg-errt" role="alert">{refusal}</p>{/if}
   </div>
 
-  <TfFolderRenderersTable {folders} answered={foldersRead} />
-  {#if madePlace !== null}<TfMadeStoreRow store={madePlace} onstore={(next) => (madePlace = next)} />{/if}
+  <TfFolderRenderersTable {folders} answered={foldersRead} unread={foldersUnread} />
+  <TfMadeStoreRow store={madePlace} onstore={(next) => (madePlace = next)} />
 
   {#if editing !== null}
     <TfDialog title={editing === "new" ? "Add a renderer" : `Edit ${saved[editing]?.name ?? ""}`} why={formWhy} onclose={() => (editing = null)}>

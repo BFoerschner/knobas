@@ -208,7 +208,9 @@ pub fn write_meta(
     std::fs::write(source_dir.join(format!("{leaf}.files.json")), files)?;
     std::fs::write(source_dir.join(format!("{leaf}.json")), described)?;
     std::fs::write(keys.join(&meta.key), leaf)?;
-    std::fs::write(slots.join(slot_name), &meta.key)
+    let pointed = std::fs::write(slots.join(slot_name), &meta.key);
+    changed_under(source_dir);
+    pointed
 }
 
 /// The leaf kept for `key` under `source_dir`, read back: its description
@@ -287,6 +289,7 @@ pub fn remove_leaf(source_dir: &Path, leaf: &str) {
     if std::fs::remove_dir_all(source_dir.join(leaf)).is_ok() {
         let _ = std::fs::remove_file(source_dir.join(format!("{leaf}.files.json")));
     }
+    changed_under(source_dir);
 }
 
 /// One leaf found under the store.
@@ -374,14 +377,64 @@ pub fn bound(root: &Path, cap: u64, keep: Option<&str>) {
     }
 }
 
-/// How many generated folders the store keeps, and their bytes.
+/// What [`usage`] last found for each store, and how many times knobas
+/// changed it (#2519): Settings › Renderers reads the usage from here, and a
+/// walk is kept only when no change came while it walked.
+#[derive(Default)]
+struct Usage {
+    changes: u64,
+    found: Option<(u32, u64)>,
+}
+
+static USAGE: LazyLock<Mutex<HashMap<PathBuf, Usage>>> = LazyLock::new(Mutex::default);
+
+/// knobas changed the store at `root`: the next [`usage`] walks it again.
+/// The changes here call it themselves; a removal of the store's folders
+/// made elsewhere calls it after.
+pub fn changed(root: &Path) {
+    let mut usage = USAGE.lock().unwrap_or_else(PoisonError::into_inner);
+    let entry = usage.entry(root.to_path_buf()).or_default();
+    entry.changes += 1;
+    entry.found = None;
+}
+
+/// A change under one source's folder of a store (`<store>/<source12>`).
+fn changed_under(source_dir: &Path) {
+    if let Some(root) = source_dir.parent() {
+        changed(root);
+    }
+}
+
+/// How many generated folders the store keeps, and their bytes: walked the
+/// first time, then from memory until knobas changes the store (#2519).
 #[must_use]
 pub fn usage(root: &Path) -> (u32, u64) {
+    surveyed(root, || ())
+}
+
+/// [`usage`], with `during` run after the walk and before its answer is kept:
+/// a test's change in the middle of a walk.
+fn surveyed(root: &Path, during: impl FnOnce()) -> (u32, u64) {
+    let changes = {
+        let mut usage = USAGE.lock().unwrap_or_else(PoisonError::into_inner);
+        let entry = usage.entry(root.to_path_buf()).or_default();
+        if let Some(found) = entry.found {
+            return found;
+        }
+        entry.changes
+    };
     let (kept, _) = survey(root);
-    (
+    let found = (
         u32::try_from(kept.len()).unwrap_or(u32::MAX),
         kept.iter().map(|f| f.bytes).sum(),
-    )
+    );
+    during();
+    let mut usage = USAGE.lock().unwrap_or_else(PoisonError::into_inner);
+    let entry = usage.entry(root.to_path_buf()).or_default();
+    if entry.changes == changes {
+        entry.found = Some(found);
+    }
+    found
 }
 
 /// Remove every generated folder; a run's staging stays.
@@ -393,6 +446,7 @@ pub fn clear(root: &Path) {
         }
         let _ = std::fs::remove_dir_all(source.path());
     }
+    changed(root);
 }
 
 /// Remove the store at `root` whole: it moved. Only a folder named
@@ -400,6 +454,7 @@ pub fn clear(root: &Path) {
 pub fn remove(root: &Path) {
     if root.file_name().is_some_and(|n| n == STORE_NAME) {
         let _ = std::fs::remove_dir_all(root);
+        changed(root);
     }
 }
 
@@ -578,6 +633,64 @@ mod tests {
         assert!(!root.join("src").exists());
         assert!(root.join(STAGING).join("1-0").exists());
         assert_eq!(usage(&root), (0, 0));
+    }
+
+    /// Settings › Renderers reads the usage from memory (#2519): a second read
+    /// walks nothing, so a folder put there behind knobas's back is not seen,
+    /// and every change knobas makes (a leaf kept, a leaf removed, a clear, a
+    /// move) is seen at the next read.
+    #[test]
+    fn the_usage_is_kept_in_memory_until_knobas_changes_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(STORE_NAME);
+        let source = root.join("src");
+        assert_eq!(usage(&root), (0, 0));
+        leaf(&source, "a.r.11111111", "k1", 10, 0);
+        assert_eq!(usage(&root), (1, 10), "a kept leaf is seen");
+
+        // Behind knobas's back: a whole second leaf, written as `write_meta` would.
+        let behind = source.join("b.r.22222222");
+        std::fs::create_dir_all(&behind).unwrap();
+        std::fs::write(
+            source.join("b.r.22222222.json"),
+            serde_json::to_vec(&meta("k2", 20)).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(source.join("keys").join("k2"), "b.r.22222222").unwrap();
+        assert_eq!(usage(&root), (1, 10), "the second read walks nothing");
+
+        leaf(&source, "c.r.33333333", "k3", 30, 0);
+        assert_eq!(usage(&root), (3, 60), "a leaf kept: walked again");
+        remove_leaf(&source, "c.r.33333333");
+        assert_eq!(usage(&root), (2, 30), "a leaf removed");
+        clear(&root);
+        assert_eq!(usage(&root), (0, 0), "cleared");
+        leaf(&source, "d.r.44444444", "k4", 40, 0);
+        assert_eq!(usage(&root), (1, 40));
+        remove(&root);
+        assert_eq!(usage(&root), (0, 0), "moved away");
+
+        // Another store's change leaves this one's reading be.
+        leaf(&source, "e.r.55555555", "k5", 50, 0);
+        assert_eq!(usage(&root), (1, 50));
+        let other = dir.path().join("other").join(STORE_NAME);
+        leaf(&other.join("src"), "f.r.66666666", "k6", 60, 0);
+        std::fs::remove_dir_all(source.join("e.r.55555555")).unwrap();
+        assert_eq!(usage(&root), (1, 50), "kept per store");
+        changed(&root);
+        assert_eq!(usage(&root), (0, 0), "told: walked again");
+    }
+
+    /// A walk that a change overtakes is not kept: the next read walks again.
+    #[test]
+    fn a_walk_overtaken_by_a_change_is_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(STORE_NAME);
+        let source = root.join("src");
+        leaf(&source, "a.r.11111111", "k1", 10, 0);
+        let seen = surveyed(&root, || leaf(&source, "b.r.22222222", "k2", 20, 0));
+        assert_eq!(seen, (1, 10), "what the walk found before the change");
+        assert_eq!(usage(&root), (2, 30), "not kept: walked again");
     }
 
     /// The clones-root scan finds no clone in the store, even when a tool
