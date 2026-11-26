@@ -5,6 +5,8 @@
   (`render/folders.svelte.ts`), so the Code page draws what is saved here.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import TfCommand from "../TfCommand.svelte";
   import { folderRenderers, type FolderRenderers } from "../../render/folders.svelte";
@@ -15,15 +17,26 @@
   let {
     folders = folderRenderers,
     answered = false,
+    unread = null,
   }: {
     folders?: FolderRenderers;
-    /** Whether the page has read the list already: an empty one says so at once, not a frame after its own read (the nothing-moves pass). */
+    /**
+     * Whether the page has read the list already: an empty one says so at once, not a frame after its own read (the
+     * nothing-moves pass), and the table reads it no second time (#2519).
+     */
     answered?: boolean;
+    /** Why the page's read failed, where it did. */
+    unread?: string | null;
   } = $props();
 
   let failed = $state<string | null>(null);
   let read = $state(false);
+  const failure = $derived(failed ?? unread);
   $effect(() => {
+    if (untrack(() => answered)) {
+      read = true;
+      return;
+    }
     folders.load().then(
       () => (read = true),
       (cause: unknown) => (failed = ipcErrorMessage(cause)),
@@ -44,8 +57,8 @@
     A program of yours that takes a folder and makes a picture, text, Markdown or a page out of it. The Code page draws a folder it takes in the
     file’s place. It runs on a copy of the folder at the commit shown, never in your checkout.
   </p>
-  {#if failed !== null}
-    <p class="tf-stg-errt" role="status">Could not read the folder renderers: {failed}</p>
+  {#if failure !== null}
+    <p class="tf-stg-errt" role="status">Could not read the folder renderers: {failure}</p>
   {:else if (read || answered) && folders.list.length === 0}
     <p class="tf-dim">No folder renderers yet.</p>
   {:else if folders.list.length > 0}
