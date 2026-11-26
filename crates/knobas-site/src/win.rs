@@ -368,19 +368,20 @@ fn route_at(point: Point) -> Option<MouseHook> {
     }
     // `try_with` and `try_borrow`: a panic here, inside Windows' call,
     // would abort the process.
-    MOUSE_ROUTES.try_with(|routes| {
-        let routes = routes.try_borrow().ok()?;
-        routes.iter().find_map(|route| {
-            // SAFETY: plain Win32 window questions.
-            let inside = unsafe {
-                IsWindowVisible(route.container) != 0
-                    && (hit == route.container || IsChild(route.container, hit) != 0)
-            };
-            (route.shown.get() && inside).then(|| Rc::clone(&route.mouse))
+    MOUSE_ROUTES
+        .try_with(|routes| {
+            let routes = routes.try_borrow().ok()?;
+            routes.iter().find_map(|route| {
+                // SAFETY: plain Win32 window questions.
+                let inside = unsafe {
+                    IsWindowVisible(route.container) != 0
+                        && (hit == route.container || IsChild(route.container, hit) != 0)
+                };
+                (route.shown.get() && inside).then(|| Rc::clone(&route.mouse))
+            })
         })
-    })
-    .ok()
-    .flatten()
+        .ok()
+        .flatten()
 }
 
 /// The hook: quick, since Windows drops a low-level hook that keeps the
