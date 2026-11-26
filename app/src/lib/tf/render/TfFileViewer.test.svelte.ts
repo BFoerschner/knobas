@@ -1,9 +1,16 @@
 /** The file viewer (#2415): XML or JSON text is drawn by the XML view's inline form and folds (D1); other text as lines. */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 
 import TfFileViewer from "./TfFileViewer.svelte";
+import { docViewModule } from "./doc/doc-module";
 import { createLayers } from "../layers.svelte";
+
+// The XML view's code loads on first use: held before the tests, a cold import on a busy machine outlasts
+// `vi.waitFor`'s second (the spec-2514 landing gate, 2026-11-26).
+beforeAll(async () => {
+  await docViewModule();
+});
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
