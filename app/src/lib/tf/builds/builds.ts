@@ -326,6 +326,19 @@ export function treeOf(list: readonly PipelineRow[], read: ReadonlySet<string> |
   }));
 }
 
+/** Every pipeline of the fold, at any depth: its own, then its subgroups'. */
+export function foldPipelines(f: Fold): PipelineRow[] {
+  return [...f.pipelines, ...f.folds.flatMap(foldPipelines)];
+}
+
+/**
+ * The unread failed runs among `pipelines`' recent ones, the rail's last twelve of each (#2527): what a right-click's
+ * *Mark N runs as read* counts and marks.
+ */
+export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent">[], read: ReadonlySet<string> | null): string[] {
+  return pipelines.flatMap((p) => p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id));
+}
+
 /** Whether `id` is one of the fold's pipelines, at any depth. */
 export function foldHolds(f: Fold, id: string | null): boolean {
   if (id === null) return false;

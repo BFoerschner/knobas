@@ -207,6 +207,7 @@
       case "web":
       case "inbox":
       case "space":
+      case "pipeline-folder":
       // A generated folder's file reads nothing: it is on this disk, kept by knobas (ADR-0060 amended 2026-11-25).
       case "made":
         break;
@@ -511,6 +512,8 @@
         return void (act.read ? runsRead.markRead([act.id]) : runsRead.markUnread([act.id]));
       case "pipeline-read":
         return void runsRead.markAll({ runs: [], pipelines: [act.id] });
+      case "runs-read":
+        return void runsRead.markAll({ runs: act.runs, pipelines: [] });
       case "move":
         return void moveProvider()?.move(act.entityId, act.status);
       case "assign":

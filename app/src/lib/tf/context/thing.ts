@@ -25,7 +25,14 @@ import { heldTree } from "../docs/tree-store";
 
 export type Thing =
   /** An item of a source, opened at its address. `kind` is the address's kind, not the source's word. */
-  | { kind: "ticket" | "pr" | "repo" | "branch" | "pipeline" | "page" | "asset" | "note" | "set" | "item"; id: string; hash: string }
+  | { kind: "ticket" | "pr" | "repo" | "branch" | "page" | "asset" | "note" | "set" | "item"; id: string; hash: string }
+  /**
+   * A pipeline. `unread` where the Builds rail draws it (#2527): the unread failed runs of it the rail holds, its last
+   * twelve, read when the menu opens; the menu's *Mark N runs as read* marks exactly those. A link elsewhere has none.
+   */
+  | { kind: "pipeline"; id: string; hash: string; unread?: readonly string[] }
+  /** A folder of the Builds rail (#2527): what it says, and the unread failed runs the rail holds of every pipeline under it. */
+  | { kind: "pipeline-folder"; name: string; unread: readonly string[] }
   /**
    * A monitor; `alerting` where its row shows an open alert, so *Acknowledge* is offered with no read, and `ack` the
    * row's own *Ack*, so its *Acked* and its toast follow.
