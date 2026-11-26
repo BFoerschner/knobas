@@ -40,6 +40,8 @@ async function open(offers: Offers): Promise<void> {
 
 test("a source that marks no field protected says every value rests in the mirror and is searched", async () => {
   await open(OFFERS);
+  expect(target.querySelector("h2")?.textContent).toBe("Secrets");
+  expect(target.querySelector(".tf-stg-p")?.textContent?.replace(/\s+/g, " ")).toContain("What Team passwords offers the Secrets page.");
   expect(target.querySelector(".tf-pw-fieldsnote")?.textContent?.replace(/\s+/g, " ")).toContain("so knobas cannot tell a PIN from a port number");
   unmount(app!);
   app = null;

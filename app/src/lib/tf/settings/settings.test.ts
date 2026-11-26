@@ -172,7 +172,7 @@ test("a source by hand says so under its name and under Syncs", () => {
     "Pleasant Password Server, 177 tickets. Paused, not synced yet.",
   );
   expect(byHandNote("Team passwords", true)).toBe(
-    "Nothing is read from Team passwords in the background. It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.",
+    "Nothing is read from Team passwords in the background. It syncs when you press Sync now, here or on the Secrets page. One-time codes keep working between syncs.",
   );
   expect(byHandNote("Tidewater Jira", false)).toBe("Nothing is read from Tidewater Jira in the background. It syncs when you press Sync now.");
 });

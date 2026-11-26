@@ -97,9 +97,9 @@ for (const throttle of throttles) {
   await sleep(1500);
   await c.send("Emulation.setCPUThrottlingRate", { rate: throttle });
 
-  // First open: the bar's Passwords, to its rows drawn.
+  // First open: the bar's Secrets, to its rows drawn.
   await js("__pw.reset()");
-  const nav = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Passwords")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const nav = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Secrets")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   const opened = js(`__pw.until(() => document.querySelectorAll(".tf-pw-row").length > 0 && document.querySelector(".tf-pw-node"))`);
   await click(nav);
   record(throttle, "first open", await opened, LINES.open[throttle]);
@@ -110,7 +110,7 @@ for (const throttle of throttles) {
   await sleep(500);
   await js("__pw.reset()");
   const back = js(`__pw.until(() => document.querySelectorAll(".tf-pw-row").length > 0)`);
-  const nav2 = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Passwords")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const nav2 = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Secrets")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   await click(nav2);
   record(throttle, "return", await back, LINES.open[throttle]);
   await sleep(600);
@@ -125,7 +125,9 @@ for (const throttle of throttles) {
     record(throttle, `folder ${name} (${n})`, await shown, LINES.act[throttle]);
     await sleep(400);
   }
-  // The 610-entry folder, found by its total wherever it nests: open its parents by key, then press it.
+  // The 610-entry folder, found by its total wherever it nests: open its parents by key, then press it. A press selects
+  // and opens no fold (#2531), so → opens the closed folds a level at a time until it shows.
+  await js(`(async () => { const has = () => [...document.querySelectorAll(".tf-pw-node")].some((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); for (let pass = 0; pass < 6 && !has(); pass++) { for (const n of document.querySelectorAll(".tf-pw-node[aria-expanded=false]")) n.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); await new Promise((r) => requestAnimationFrame(r)); } })()`);
   const deep = await js(`(() => { const n = [...document.querySelectorAll(".tf-pw-node")].find((e) => /^6\\d\\d$/.test(e.querySelector(".tf-pw-n")?.textContent.trim() ?? "")); return n ? { id: n.dataset.id, name: n.querySelector(".tf-pw-nm").textContent.trim() } : null; })()`);
   if (deep) {
     await js("__pw.reset()");
@@ -137,11 +139,12 @@ for (const throttle of throttles) {
     results.push({ throttle, name: "folder 6xx", note: "not on screen in the tree's first rows" });
   }
 
-  // A filter keystroke.
+  // A filter keystroke, in the folder just pressed: the filter reads that folder and the folders under it (#2531), so its
+  // heading names the folder ("610 entries in CI"), or says nothing in it matches.
   await click(await rect(".tf-pw-filter input"));
   await js("__pw.reset()");
   const before = await js(`document.querySelectorAll(".tf-pw-row").length`);
-  const filtered = js(`__pw.until(() => document.querySelector(".tf-pw-filter input").value === "d" && document.querySelector(".tf-pw-lhead h3")?.textContent.includes("every folder"))`);
+  const filtered = js(`__pw.until(() => document.querySelector(".tf-pw-filter input").value === "d" && (/^[\\d,]+ entr(y|ies) in /.test(document.querySelector(".tf-pw-lhead h3")?.textContent ?? "") || /^Nothing in .* matches "d"/.test(document.querySelector(".tf-pw-blank p")?.textContent ?? "")))`);
   await key("d", "d");
   record(throttle, "filter keystroke", await filtered, LINES.act[throttle], { note: `${before} rows before` });
   await key("Escape");

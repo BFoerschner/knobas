@@ -14,6 +14,7 @@ import { createApps, type Apps } from "../openin/apps.svelte";
 import TfContextMenu from "./TfContextMenu.svelte";
 import type { MenuPorts } from "./ports";
 import { menuThing } from "./thing";
+import { runsRead } from "../builds/runs-read.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -599,4 +600,32 @@ test.each(Array.from({ length: 60 }, (_, index) => index + 1))("right-click spam
     expect(layers.open, steps.join(" ")).toHaveLength(0);
     expect(page.querySelectorAll("[data-ctx-on]"), steps.join(" ")).toHaveLength(0);
   });
+});
+
+test("a Builds folder's Mark N runs as read marks exactly those runs, with Undo on its toast (#2527)", async () => {
+  const marked: string[][] = [];
+  const unmarked: string[][] = [];
+  runsRead.ports = {
+    read: async () => [],
+    mark: async (runs, pipelines) => (marked.push([...runs, ...pipelines]), [...runs]),
+    unmark: async (runs) => (unmarked.push([...runs]), [...runs]),
+  };
+  try {
+    await runsRead.load();
+    await draw(`<details><summary class="f">Payout</summary></details>`);
+    menuThing(() => ({ kind: "pipeline-folder", name: "Payout", unread: ["tc:9", "tc:3"] }))(page.querySelector(".f")!);
+    rightClick(page.querySelector(".f")!);
+    expect(rows()).toEqual(["read-runs", "copy-name"]);
+    expect(row("read-runs").textContent).toContain("Mark 2 runs as read");
+    row("read-runs").click();
+    await settle();
+    expect(marked).toEqual([["tc:9", "tc:3"]]);
+    const toast = toasts.items.find((one) => one.action?.label === "Undo")!;
+    expect(toast.text).toBe("Marked 2 runs as read");
+    toast.action!.run();
+    await settle();
+    expect(unmarked).toEqual([["tc:9", "tc:3"]]);
+  } finally {
+    runsRead.forget();
+  }
 });

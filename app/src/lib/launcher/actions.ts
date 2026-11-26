@@ -37,7 +37,7 @@ const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
   code: "Repositories, branches and pull requests",
   builds: "Pipelines and their runs",
   docs: "The wiki's spaces and pages",
-  passwords: "Your password manager's entries, their one-time codes",
+  secrets: "Your secret entries and their one-time codes",
 
   monitors: "Uptime checks and their current state",
   assets: "The asset tree: your machines, VMs, containers and services, and what watches them",

@@ -395,18 +395,18 @@ pub fn kind_infos(full_sync_exhaustive: bool) -> Vec<KindInfo> {
     vec![
         KindInfo {
             id: ENTRY_KIND.to_owned(),
-            label: "Password entry".to_owned(),
-            plural: "Password entries".to_owned(),
-            monogram: "PW".to_owned(),
+            label: "Secret entry".to_owned(),
+            plural: "Secret entries".to_owned(),
+            monogram: "SE".to_owned(),
             full_sync_exhaustive,
             refreshes: false,
             title_stays_in_mirror: true,
         },
         KindInfo {
             id: FOLDER_KIND.to_owned(),
-            label: "Password folder".to_owned(),
-            plural: "Password folders".to_owned(),
-            monogram: "PF".to_owned(),
+            label: "Secret folder".to_owned(),
+            plural: "Secret folders".to_owned(),
+            monogram: "SF".to_owned(),
             full_sync_exhaustive,
             refreshes: false,
             title_stays_in_mirror: true,
@@ -985,8 +985,40 @@ mod tests {
 
     #[test]
     fn the_two_kinds_are_the_roles_and_name_their_folders_at_path() {
+        assert_eq!(PASSWORDS, "passwords");
+        assert_eq!(ENTRY_KIND, "password_entry");
+        assert_eq!(FOLDER_KIND, "password_folder");
         assert!(is_password_kind(ENTRY_KIND) && is_password_kind(FOLDER_KIND));
         assert!(!is_password_kind("ticket") && !is_password_kind(""));
+        let infos = kind_infos(true);
+        assert_eq!(
+            infos
+                .iter()
+                .map(|k| (
+                    k.id.as_str(),
+                    k.label.as_str(),
+                    k.plural.as_str(),
+                    k.monogram.as_str(),
+                    k.title_stays_in_mirror
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "password_entry",
+                    "Secret entry",
+                    "Secret entries",
+                    "SE",
+                    true
+                ),
+                (
+                    "password_folder",
+                    "Secret folder",
+                    "Secret folders",
+                    "SF",
+                    true
+                ),
+            ]
+        );
         let paths = payload_paths();
         assert_eq!(
             paths.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>(),

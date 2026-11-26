@@ -175,3 +175,44 @@ test("a source by hand reads its last sync as a clock time, by hand (ADR-0056)",
   expect(second!.text).toBe(`Tidewater org ${clock}, by hand`);
   expect(first!.tone).toBe("ok");
 });
+
+/**
+ * A source synced by hand (ADR-0056) is as old as its last press, which says
+ * nothing about whether the scheduler keeps up (#2527): the rollup's count and
+ * *oldest* are the auto-synced sources'. Only when every source is by hand does
+ * the rollup say so.
+ */
+test("the rollup leaves sources synced by hand out of its count and its oldest age (#2527)", () => {
+  const [pw] = sourceReadings(
+    [{ id: "pw", display_name: "Team passwords", sync_by_hand: true }],
+    [health("pw", "ok")],
+    [synced("pw", "2026-08-19T09:00:00Z")],
+    NOW,
+  );
+  expect(pw!.byHand).toBe(true);
+  const auto = (at: string) => ({ ...healthy("ok", at), id: `auto-${at}` });
+  expect(healthyRollup([auto("2026-08-22T14:28:00Z"), auto("2026-08-22T14:00:00Z"), pw!], NOW)).toEqual({
+    text: "2 synced",
+    rest: "oldest 32 min ago",
+    tone: "ok",
+  });
+  expect(healthyRollup([auto("2026-08-22T14:28:00Z"), pw!, { ...pw!, id: "pw2" }], NOW)).toEqual({
+    text: "1 synced 4 min ago",
+    rest: null,
+    tone: "ok",
+  });
+});
+
+test("the rollup says by hand only when every source it counts is synced by hand (#2527)", () => {
+  const pw: SourceReading = { id: "pw", text: "named", tone: "ok", syncedAt: "2026-08-19T09:00:00Z", fix: null, byHand: true };
+  expect(healthyRollup([pw, { ...pw, id: "pw2" }, { ...pw, id: "pw3" }], NOW)).toEqual({
+    text: "3 synced by hand",
+    rest: null,
+    tone: "ok",
+  });
+  expect(healthyRollup([pw, { ...pw, id: "pw2" }, healthy("muted")], NOW)).toEqual({
+    text: "1 not synced yet",
+    rest: null,
+    tone: "muted",
+  });
+});
