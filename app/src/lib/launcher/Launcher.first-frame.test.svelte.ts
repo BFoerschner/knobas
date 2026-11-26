@@ -129,11 +129,10 @@ async function type(text: string) {
 }
 
 /**
- * The answer's rows. The section *Passwords* (ADR-0056) matches `p` and `pa` too and is drawn after them as a place to
- * go; it is no row of the answer these tests time.
+ * The answer's rows. Any place-to-go row (such as *Secrets*) is excluded from the timed search hit count.
  */
 const rows = () =>
-  [...target.querySelectorAll<HTMLElement>(".tf-ln-list [role=option]")].filter((row) => !row.textContent?.trim().startsWith("Passwords"));
+  [...target.querySelectorAll<HTMLElement>(".tf-ln-list [role=option]")].filter((row) => !row.textContent?.trim().startsWith("Secrets"));
 
 const titles = () => rows().map((row) => row.textContent?.replace(/\s+/g, " ").trim() ?? "");
 const headings = () => [...target.querySelectorAll(".tf-ln-list .tf-ln-h")].map((h) => h.textContent?.trim());

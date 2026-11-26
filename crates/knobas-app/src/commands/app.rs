@@ -477,6 +477,10 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
 pub fn frontend_ready<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
     let state = app.state::<Lifecycle>().get();
     crate::events::emit(&app, None, crate::events::DB_STATE, state);
+    if let Some(handoff) = app.try_state::<crate::link_handoff::LinkHandoffState>() {
+        handoff.arm_frontend();
+    }
+    crate::link_handoff::drain_pending(&app);
     Ok(())
 }
 
@@ -1175,6 +1179,121 @@ pub async fn set_named_pipelines<R: tauri::Runtime>(
     crate::file_pipeline::saved::save_named_pipelines(&pool, &pipelines).await
 }
 
+/// One source's *Open matching links in knobas* setting (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn source_link_handoff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<crate::link_handoff::LinkHandoffSetting, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::link_handoff::read_setting(&pool, &id).await
+}
+
+/// Persist one source's *Open matching links in knobas* setting (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for an unknown source,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_source_link_handoff<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    enabled: bool,
+    scope: crate::link_handoff::LinkHandoffScope,
+) -> Result<crate::link_handoff::LinkHandoffSetting, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    let saved = crate::link_handoff::write_setting(&pool, &id, enabled, scope).await?;
+    tracing::info!(source = %id, enabled, ?scope, "source link handoff setting saved");
+    Ok(saved)
+}
+
+/// Whether the Firefox Native Messaging host manifest is installed and matches
+/// this executable (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the OS cannot
+/// resolve the current executable path.
+#[tauri::command]
+pub fn firefox_host_status() -> Result<crate::link_handoff::manifest::NativeHostStatus, IpcError> {
+    let exe = crate::link_handoff::manifest::current_executable().map_err(IpcError::internal)?;
+    let target = crate::link_handoff::manifest::ManifestTarget::platform();
+    Ok(crate::link_handoff::manifest::status_in(
+        target.as_ref(),
+        &exe,
+    ))
+}
+
+/// Install or update the Firefox Native Messaging host manifest on this machine (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) on unsupported OSes,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) on I/O or registry failure.
+#[tauri::command]
+pub fn install_firefox_host() -> Result<crate::link_handoff::manifest::NativeHostStatus, IpcError> {
+    let exe = crate::link_handoff::manifest::current_executable().map_err(IpcError::internal)?;
+    let target = crate::link_handoff::manifest::ManifestTarget::platform()
+        .ok_or_else(|| IpcError::invalid("Firefox Native Messaging host is not supported here"))?;
+    let status =
+        crate::link_handoff::manifest::install_in(&target, &exe).map_err(IpcError::internal)?;
+    tracing::info!(
+        manifest = ?status.manifest_path,
+        "installed Firefox Native Messaging host manifest"
+    );
+    Ok(status)
+}
+
+/// Remove the Firefox Native Messaging host manifest on this machine (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) on unsupported OSes,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) on I/O or registry failure.
+#[tauri::command]
+pub fn uninstall_firefox_host() -> Result<crate::link_handoff::manifest::NativeHostStatus, IpcError>
+{
+    let exe = crate::link_handoff::manifest::current_executable().map_err(IpcError::internal)?;
+    let target = crate::link_handoff::manifest::ManifestTarget::platform()
+        .ok_or_else(|| IpcError::invalid("Firefox Native Messaging host is not supported here"))?;
+    let status =
+        crate::link_handoff::manifest::uninstall_in(&target, &exe).map_err(IpcError::internal)?;
+    tracing::info!(
+        manifest = ?status.manifest_path,
+        "removed Firefox Native Messaging host manifest"
+    );
+    Ok(status)
+}
+
+/// Record a short-lived one-shot *Open in browser* bypass for `url` so Firefox
+/// does not bounce it straight back into knobas (ADR-0061).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) if `url` is not `http(s)`.
+#[tauri::command]
+pub fn record_browser_bypass<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    url: String,
+) -> Result<(), IpcError> {
+    if !crate::link_handoff::is_http_or_https_url(&url) {
+        return Err(IpcError::invalid(format!(
+            "{url:?} is not an http or https URL"
+        )));
+    }
+    if let Some(handoff) = app.try_state::<crate::link_handoff::LinkHandoffState>() {
+        handoff.record_bypass(&url);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1239,6 +1358,9 @@ mod tests {
             ("set_renderer_defaults", &["defaults"][..]),
             ("set_command_steps", &["steps"][..]),
             ("set_named_pipelines", &["pipelines"][..]),
+            ("source_link_handoff", &["id"][..]),
+            ("set_source_link_handoff", &["id", "enabled", "scope"][..]),
+            ("record_browser_bypass", &["url"][..]),
         ] {
             let invocation = crate::commands::mirror::invocation(mirror, command);
             let keys = crate::commands::mirror::keys(invocation);

@@ -304,9 +304,9 @@ function passwordActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx
           { id: "pw-password", label: "Copy password", detail: "It clears in 30 seconds; one that asks a comment opens instead", does: { kind: "pw-copy", what: "password" } },
           { id: "pw-username", label: "Copy username", detail: "From the last sync; nothing is read", does: { kind: "pw-copy", what: "username" } },
           { id: "pw-code", label: "Copy one-time code", detail: "Made on this machine; works offline", does: { kind: "pw-copy", what: "code" } },
-          { id: "open", label: "Open", detail: "The entry on the Passwords page", does: { kind: "go", hash } },
+          { id: "open", label: "Open", detail: "The entry on the Secrets page", does: { kind: "go", hash } },
         ]
-      : [{ id: "open", label: "Open", detail: "The folder on the Passwords page", does: { kind: "go", hash } }];
+      : [{ id: "open", label: "Open", detail: "The folder on the Secrets page", does: { kind: "go", hash } }];
   actions.push(favouriteAction({ entity: id }, ctx));
   actions.push({ id: "copy", label: "Copy title", detail: title, does: { kind: "copy", text: title, said: `Copied ${title}` } });
   return actions;

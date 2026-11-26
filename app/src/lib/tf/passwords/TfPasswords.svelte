@@ -26,6 +26,7 @@
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
   import { inTextField } from "../../shell/keys";
+  import { keyHint } from "../../shell/platform";
   import { filterKeys } from "../filter-keys";
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
@@ -203,7 +204,6 @@
   });
 
   let query = $state("");
-  let filter = $state<HTMLInputElement | null>(null);
   const shownPanels = $derived(m && node ? panels(m, node, query) : []);
 
   // ---- the tree ----
@@ -233,9 +233,9 @@
   }
 
   function hashOf(target: Node): string {
-    if (target.id === "") return "#/passwords";
-    if (target.top) return `#/passwords/source/${encodeURIComponent(target.id.slice(4))}`;
-    return `#/passwords/in/${encodeURIComponent(target.id)}`;
+    if (target.id === "") return "#/secrets";
+    if (target.top) return `#/secrets/source/${encodeURIComponent(target.id.slice(4))}`;
+    return `#/secrets/in/${encodeURIComponent(target.id)}`;
   }
 
   function go(target: Node): void {
@@ -428,7 +428,7 @@
   function pick(e: Entry): void {
     waiting = null;
     picked = e.id;
-    if (where.entry !== null) location.hash = node ? hashOf(node) : "#/passwords";
+    if (where.entry !== null) location.hash = node ? hashOf(node) : "#/secrets";
   }
 
   function move(step: number): void {
@@ -496,7 +496,6 @@
       return;
     }
     const act: Record<string, () => void> = {
-      "/": () => filter?.focus(),
       ArrowDown: () => move(1),
       ArrowUp: () => move(-1),
       j: () => move(1),
@@ -584,7 +583,7 @@
     push({ text: `${words}.` });
     await read();
     if (where.entry === null) picked = entityId;
-    else location.hash = `#/passwords/entry/${encodeURIComponent(entityId)}`;
+    else location.hash = `#/secrets/entry/${encodeURIComponent(entityId)}`;
     records.delete(entityId);
     const fresh = await fetchEntry(entityId).catch(() => null);
     if (fresh && openId === entityId) record = fresh;
@@ -653,12 +652,12 @@
   {:else if held.sources.length === 0}
     <div class="tf-pw-none">
       <div class="tf-empty">
-        <h1>No password source yet</h1>
+        <h1>No secrets source yet</h1>
         <p>
-          Add your password manager in Settings › Sources, the way Jira or Gitea is added. Its entries are listed here and found by the filter. A password stays where it is:
+          Add your secrets source in Settings › Sources, the way Jira or Gitea is added. Its entries are listed here and found by the filter. A protected value stays where it is:
           knobas reads one only when you show or copy it.
         </p>
-        <a class="tf-btn tf-primary" href="#/settings/sources">Add a password source</a>
+        <a class="tf-btn tf-primary" href="#/settings/sources">Add a secrets source</a>
       </div>
     </div>
   {:else if held.sources.length === 1 && held.sources[0]!.never_synced}
@@ -710,7 +709,7 @@
         <div class="tf-pw-bench">
           <header class="tf-fhead tf-pw-head">
             <div>
-              <h1>{node.id === "" ? "Passwords" : node.name}</h1>
+              <h1>{node.id === "" ? "Secrets" : node.name}</h1>
               <p class="tf-sub">{headLine}</p>
             </div>
             <div class="tf-acts">
@@ -731,7 +730,6 @@
                   autocomplete="off"
                   spellcheck="false"
                   bind:value={query}
-                  bind:this={filter}
                   {@attach filterKeys()}
                   onkeydown={(event) => {
                     if (event.key === "ArrowDown") {
@@ -742,7 +740,7 @@
                       move(-1);
                     }
                   }}
-                /><kbd>/</kbd></label
+                /><kbd>{keyHint("⌘F")}</kbd></label
               >
               <div class="tf-pw-rows" {@attach listWin.list}>
                 {#each listWin.slice(lines) as line (line.key)}
@@ -766,7 +764,7 @@
                 {/each}
               </div>
               <div class="tf-pw-keys" aria-label="Keys">
-                <span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>/</kbd> filter</span><span><kbd>C</kbd> copy the password</span><span><kbd>U</kbd> username</span><span
+                <span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>{keyHint("⌘F")}</kbd> filter</span><span><kbd>C</kbd> copy the password</span><span><kbd>U</kbd> username</span><span
                   ><kbd>O</kbd> one-time code</span
                 ><span><kbd>Esc</kbd> up a folder</span>
               </div>

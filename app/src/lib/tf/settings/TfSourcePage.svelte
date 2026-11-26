@@ -99,7 +99,9 @@
   import { replaceAddress } from "../opener";
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
+  import TfLinkHandoffSection from "./TfLinkHandoffSection.svelte";
   import TfSiteSection from "../site/TfSiteSection.svelte";
+  import { siteStore } from "../site/site.svelte";
   import TfPasswordsSection from "./TfPasswordsSection.svelte";
   import TfSecretPrompt from "./TfSecretPrompt.svelte";
 
@@ -676,6 +678,9 @@
 
 <!-- A source's own website inside knobas (ADR-0050), after Connection. -->
 <TfSiteSection source={source.id} {name} />
+
+<!-- Per-source external link handoff (ADR-0061), after Site. -->
+<TfLinkHandoffSection source={source.id} {name} openInside={siteStore.settings.get(source.id)?.open_inside ?? false} />
 
 <section class="tf-stg-sec">
   <h2>Schedule</h2>

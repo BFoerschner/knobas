@@ -373,6 +373,21 @@ field: string,
 end: string, };
 
 /**
+ * How broadly a source's matching external URLs hand off into knobas.
+ */
+export type LinkHandoffScope = "known_items" | "whole_source";
+
+/**
+ * Per-source *Open matching links in knobas* setting persisted in `knobas.setting`.
+ */
+export type LinkHandoffSetting = { source: string, enabled: boolean, scope: LinkHandoffScope, };
+
+/**
+ * Payload emitted on `link-handoff:open` so the shell navigates to the target.
+ */
+export type LinkHandoffTarget = { "kind": "entity", entity_id: string, entity_kind: string, url: string, } | { "kind": "site", source: string, url: string, } | { "kind": "unmatched", url: string, };
+
+/**
  * One generated file that differs.
  */
 export type MadeChange = { path: string, change: MadeChangeKind, before_size: number | null, after_size: number | null, 
@@ -476,6 +491,40 @@ fields?: Array<KeptField>, };
  * A named pipeline as the viewer or Settings sends it: a new one has no id.
  */
 export type NamedPipelineDraft = { id: string | null, name: string, steps: Array<PipeStep>, fields?: Array<KeptField>, };
+
+/**
+ * Manifest installation state shown in Settings.
+ */
+export type NativeHostStatus = { 
+/**
+ * Whether the manifest (and Windows registry key) is currently installed.
+ */
+installed: boolean, 
+/**
+ * Whether this OS supports automatic Firefox Native Messaging registration.
+ */
+supported: boolean, 
+/**
+ * Registered Native Messaging host identifier (`dev.knobas.desktop`).
+ */
+host_name: string, 
+/**
+ * Allowed Firefox WebExtension add-on ID (`link-handoff@knobas.dev`).
+ */
+extension_id: string, 
+/**
+ * Absolute path of the Native Messaging manifest JSON file.
+ */
+manifest_path: string | null, 
+/**
+ * Executable path currently recorded in the installed manifest, if any.
+ */
+executable_path: string | null, 
+/**
+ * True when the installed manifest points to the currently running executable
+ * and lists [`EXTENSION_ID`].
+ */
+matches_current: boolean, };
 
 /**
  * One saved command, a row of Settings › Commands.

@@ -440,6 +440,7 @@ impl KindCatalog {
             .get(kind)
             .cloned()
             .or_else(|| launcher_kind(kind))
+            .or_else(|| secrets_kind(kind))
             .or_else(|| self.declared.get(kind).cloned())
             .unwrap_or_else(|| derive_kind_info(kind))
     }
@@ -573,6 +574,21 @@ fn launcher_kind(kind: &str) -> Option<KindInfo> {
             refreshes: true,
             title_stays_in_mirror: false,
         })
+}
+
+/// The Secrets surface's two kinds (`password_entry`, `password_folder`,
+/// ADR-0056, #2515), in the `passwords` role's own words: the role names them,
+/// not the adapter that fills it, as the launcher's words name a pipeline.
+/// Ahead of the declared kinds in [`KindCatalog::info`], so a group says
+/// *Secret entries* whatever an adapter calls its own, and from the role's
+/// one table, so the launcher and Settings › Sources never word them apart.
+fn secrets_kind(kind: &str) -> Option<KindInfo> {
+    if !knobas_source::passwords::is_password_kind(kind) {
+        return None;
+    }
+    knobas_source::passwords::kind_infos(false)
+        .into_iter()
+        .find(|info| info.id == kind)
 }
 
 /// Everything a kind's chip needs, worked out from its id alone.
@@ -716,6 +732,40 @@ mod tests {
         assert_eq!(catalog.info("pr").plural, "Pull requests");
         assert_eq!(catalog.info("branch").plural, "Branches");
         assert_eq!(catalog.info("repo").plural, "Repositories");
+    }
+
+    /// The Secrets surface's two kinds (#2515) are labelled in the role's
+    /// words wherever the catalog came from: the app's searcher holds the
+    /// default catalog, which no descriptor fills (**E-Q2**), and an adapter
+    /// that declares the kinds in its own words does not rename them.
+    #[test]
+    fn the_secrets_kinds_say_secret_whatever_declared_them() {
+        let renamed = KindInfo {
+            id: "password_entry".to_owned(),
+            label: "Credential".to_owned(),
+            plural: "Credentials".to_owned(),
+            monogram: "CR".to_owned(),
+            full_sync_exhaustive: true,
+            refreshes: false,
+            title_stays_in_mirror: true,
+        };
+        for catalog in [
+            KindCatalog::default(),
+            KindCatalog::from_descriptors([descriptor(&[renamed])]),
+        ] {
+            let named = |kind: &str| {
+                let info = catalog.info(kind);
+                (info.label, info.plural, info.monogram)
+            };
+            assert_eq!(
+                named("password_entry"),
+                ("Secret entry".into(), "Secret entries".into(), "SE".into())
+            );
+            assert_eq!(
+                named("password_folder"),
+                ("Secret folder".into(), "Secret folders".into(), "SF".into())
+            );
+        }
     }
 
     /// **The catalog seam, in both directions** (issue #46, story 21).

@@ -71,6 +71,7 @@ mod job_pipelines_ipc;
 mod json_query;
 mod keychain_write;
 mod keys_ipc;
+mod link_handoff;
 mod link_on_arrival_ipc;
 mod link_set_patterns_ipc;
 mod link_sets_ipc;

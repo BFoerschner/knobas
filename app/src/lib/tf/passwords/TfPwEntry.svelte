@@ -119,7 +119,7 @@
     <div class="tf-pw-etitle">
       <div class="tf-pw-epath">
         {#if chain.length === 0}Not in a folder{/if}
-        {#each chain as node, i (node.id)}{#if i > 0}<span class="tf-pw-sl">/</span>{/if}<a href="#/passwords/{node.top ? `source/${encodeURIComponent(node.id.slice(4))}` : `in/${encodeURIComponent(node.id)}`}">{node.name}</a>{/each}
+        {#each chain as node, i (node.id)}{#if i > 0}<span class="tf-pw-sl">/</span>{/if}<a href="#/secrets/{node.top ? `source/${encodeURIComponent(node.id.slice(4))}` : `in/${encodeURIComponent(node.id)}`}">{node.name}</a>{/each}
       </div>
       <h2>{entry.title}</h2>
     </div>

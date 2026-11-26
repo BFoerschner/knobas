@@ -287,8 +287,8 @@ const PLACES = [
   // Passwords (ADR-0056; the ux30 end gate's Passwords fix, 2026-11-23): its first open and a return, on the clickdummy's
   // entries and at 20,000 (`pw-scale`), where a folder's rows are made and sorted as they draw and the filter's index
   // builds in idle slices after the first frame.
-  { name: "passwords", start: "#/time", nav: "passwords", hash: "#/passwords", away: "time" },
-  { name: "passwords-20k", fixture: true, fake: "pw-scale=20000", start: "#/time", nav: "passwords", hash: "#/passwords", away: "time" },
+  { name: "passwords", start: "#/time", nav: "secrets", hash: "#/secrets", away: "time" },
+  { name: "passwords-20k", fixture: true, fake: "pw-scale=20000", start: "#/time", nav: "secrets", hash: "#/secrets", away: "time" },
   { name: "time", start: "#/docs", nav: "time", hash: "#/time", away: "docs", tabs: true },
   // An estate of one root lands on that root, so the address can be an asset's; the tree's rows are buttons (2026-11-19:
   // `asset` had found nothing to press since its rows stopped being links).

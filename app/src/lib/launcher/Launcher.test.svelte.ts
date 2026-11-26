@@ -2305,7 +2305,7 @@ test("> with nothing after it lists every section, then Settings and its section
     "Builds",
     "Builds › Recent runs",
     "Docs",
-    "Passwords",
+    "Secrets",
     "Monitors",
     "Assets",
     "Link sets",

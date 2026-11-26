@@ -242,10 +242,12 @@ test("a password entry: its three copies, Open, Favourite and Copy title; never 
   const actions = sheetActions(entry, CTX);
   expect(actions.slice(0, 3).map((a) => a.label)).toEqual(["Copy password", "Copy username", "Copy one-time code"]);
   expect(actions.find((a) => a.id === "pw-password")?.does).toEqual({ kind: "pw-copy", what: "password" });
-  expect(actions.find((a) => a.id === "open")?.does).toEqual({ kind: "go", hash: "#/passwords/entry/pw%3Ae1" });
+  expect(actions.find((a) => a.id === "open")?.detail).toBe("The entry on the Secrets page");
+  expect(actions.find((a) => a.id === "open")?.does).toEqual({ kind: "go", hash: "#/secrets/entry/pw%3Ae1" });
   const folder = entity("password_folder", "pw:f1", "Payments");
   expect(ids(folder, { ...CTX, sets })).toEqual(["open", "fav", "copy"]);
-  expect(sheetActions(folder, CTX)[0]?.does).toEqual({ kind: "go", hash: "#/passwords/in/pw%3Af1" });
+  expect(sheetActions(folder, CTX)[0]?.detail).toBe("The folder on the Secrets page");
+  expect(sheetActions(folder, CTX)[0]?.does).toEqual({ kind: "go", hash: "#/secrets/in/pw%3Af1" });
 });
 
 test("a repository's commands follow its Open in rows: Run ⟨first⟩ and the Run… flow (ADR-0060)", () => {

@@ -1,16 +1,16 @@
 /**
- * Passwords (ADR-0056): `#/passwords`, `#/passwords/in/<folder>`, `#/passwords/source/<source>` and
- * `#/passwords/entry/<entry>`, one page, a view of the Passwords role whose frame draws its *Sync now*.
+ * Secrets (ADR-0056, #2515): `#/secrets`, `#/secrets/in/<folder>`, `#/secrets/source/<source>` and
+ * `#/secrets/entry/<entry>`, one page, a view of the `passwords` role whose frame draws its *Sync now*.
  */
 import { definePage } from "../page-entry";
 import { PASSWORDS } from "../roles.svelte";
 import type { TfRoute } from "../route";
 import TfPasswords from "./TfPasswords.svelte";
 
-type PasswordsRoute = Extract<TfRoute, { view: "full" }> & { section: "passwords" };
+type SecretsRoute = Extract<TfRoute, { view: "full" }> & { section: "secrets" };
 
 export const page = definePage({
-  matches: (route): route is PasswordsRoute => route.view === "full" && route.section === "passwords",
+  matches: (route): route is SecretsRoute => route.view === "full" && route.section === "secrets",
   role: PASSWORDS,
   component: TfPasswords,
   crumbs: true,

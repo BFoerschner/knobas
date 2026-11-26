@@ -17,6 +17,9 @@ test.each([
   ["#/build/pipe-1/run-4812", "#b "],
   ["#/docs", "#d "],
   ["#/page/confluence%3A1", "#d "],
+  ["#/secrets", "#s "],
+  ["#/secrets/in/pw%3Af1", "#s "],
+  ["#/secrets/entry/pw%3Ae1", "#s "],
   ["#/monitors", "#m "],
   ["#/time", ""],
   ["#/settings", ""],
@@ -33,6 +36,7 @@ test.each([
   ["#rp ", "Code"],
   ["#b ", "Builds"],
   ["#i ", "Inbox"],
+  ["#s ", "Secrets"],
   ["#x ", null],
   ["", null],
 ])("the chip for %j says %j (F-008)", (filter, name) => {
@@ -42,4 +46,5 @@ test.each([
 test("a section's filter names its kinds from the grammar's table, not a copy of it", () => {
   expect(seedKinds("#rp ", SYNTAX)).toEqual(["pr", "repo"]);
   expect(seedKinds("#b ", SYNTAX)).toEqual(["pipeline"]);
+  expect(seedKinds("#s ", SYNTAX)).toEqual(["password_entry"]);
 });

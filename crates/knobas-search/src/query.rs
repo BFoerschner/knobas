@@ -711,7 +711,7 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
 /// the letters combine (`#rl` is repositories and saved lists), case aside.
 /// Like `kind:`, a letter whose kind nothing indexes yet matches nothing:
 /// `list` and `inbox` are answered by later tickets of the spec.
-pub const KIND_LETTERS: [(char, &str); 8] = [
+pub const KIND_LETTERS: [(char, &str); 9] = [
     ('t', "ticket"),
     ('p', "pr"),
     ('r', "repo"),
@@ -720,6 +720,7 @@ pub const KIND_LETTERS: [(char, &str); 8] = [
     ('d', "page"),
     ('l', "list"),
     ('i', "inbox"),
+    ('s', "password_entry"),
 ];
 
 /// The kinds a run of `#` letters names, in the order typed and once each, or
@@ -1260,6 +1261,9 @@ mod tests {
             ("#d", &["page"][..], ""),
             ("#l", &["list"][..], ""),
             ("#i", &["inbox"][..], ""),
+            ("#s", &["password_entry"][..], ""),
+            ("#S payout", &["password_entry"][..], "payout"),
+            ("#st sepa", &["password_entry", "ticket"][..], "sepa"),
             ("#rl sepa", &["repo", "list"][..], "sepa"),
             ("#t #b", &["ticket", "pipeline"][..], ""),
             ("#tt", &["ticket"][..], ""),
