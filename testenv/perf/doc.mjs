@@ -97,6 +97,7 @@ const click = (sel, text = null) =>
 const query = (value) =>
   `() => { const box = document.querySelector('.tf-xv-qfield input'); box.value = ${JSON.stringify(value)}; box.dispatchEvent(new Event('input', { bubbles: true })); }`;
 const key = (k) => `() => document.querySelector('.tf-xv-lines .tf-code').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }))`;
+const unfoldAll = `() => { for (const c of document.querySelectorAll('.tf-xv-lines .tf-code')) c.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true })); }`;
 const settle = () => sleep(700);
 // In the page: once the warm-up's hidden view (`doc-warm.ts`) has stood and come down and the check's tier had its idle
 // moment (`done`; on a build without it, 6 s after the start), or as soon as it stands (`!done`).
@@ -181,14 +182,14 @@ const CASES = [
   }`, act: click("[role=menuitem]", "Point to another file…"), sel: ".tf-xsd-pointrow" },
   // The JSON view (J1): the export opened, its 48 orders folded by their caret, three levels by the key.
   { name: "json", label: "the JSON export (1,189 lines) opened from the README, to its carets", kind: "page", before: go(file("README.md")), act: go(file(EXPORT)), sel: ".tf-xv .tf-xv-caret", watch: LINE_ROWS },
-  { name: "json-fold", label: "the export's orders (48 items) folded by their caret", kind: "press", before: go(file(EXPORT)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => document.querySelector('.tf-xv .tf-l[data-n="6"] .tf-xv-caret').click()`, sel: ".tf-xv-fold", text: "items" },
-  { name: "json-three", label: "three levels of the export (the 3 key)", kind: "press", before: go(file(EXPORT)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
+  { name: "json-fold", label: "the export's orders (48 items) folded by their caret", kind: "press", before: go(file(EXPORT)), prep: unfoldAll, act: `() => document.querySelector('.tf-xv .tf-l[data-n="6"] .tf-xv-caret').click()`, sel: ".tf-xv-fold", text: "items" },
+  { name: "json-three", label: "three levels of the export (the 3 key)", kind: "press", before: go(file(EXPORT)), prep: unfoldAll, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
   // jq (J2): the session warmed by `.` first, so a key costs its filter and the marks; the dev fake answers as the helper would.
   { name: "jq-pick", label: "a jq key that picks, .orders[] | select(.total > 2000), to its 22 values marked", kind: "press", before: go(file(EXPORT)), prep: query("."), act: query(".orders[] | select(.total > 2000)"), sel: ".tf-xv-qsay b", text: "22 values" },
   { name: "jq-make", label: "a jq key that makes a value, .orders | map(.total) | add", kind: "press", before: go(file(EXPORT)), prep: query("."), act: query(".orders | map(.total) | add"), sel: ".tf-xv-qsay", text: "makes new values" },
-  { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: `() => { for (const b of document.querySelectorAll('.tf-xv-stepn')) b.click(); }`, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
-  { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
-  { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: `() => document.querySelector('.tf-xv-stepn').click()`, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
+  { name: "fold", label: "the ORDER_HEADER (lines 3 to 702) folded by its caret", kind: "press", before: go(file(ORDER)), prep: unfoldAll, act: `() => { const row = [...document.querySelectorAll('.tf-xv .tf-l')].find((r) => r.textContent.includes('<ORDER_HEADER>')); row.querySelector('.tf-xv-caret').click(); }`, sel: ".tf-xv-fold", text: "elements" },
+  { name: "levels", label: "one level fewer (−) from all nine", kind: "press", before: go(file(ORDER)), prep: unfoldAll, act: click(".tf-xv-step button", "−"), sel: ".tf-xv-stepn", text: "8" },
+  { name: "three", label: "three levels (the 3 key)", kind: "press", before: go(file(ORDER)), prep: unfoldAll, act: key("3"), sel: ".tf-xv-stepn", text: "3" },
   { name: "query", label: "a query key, //ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//ORDER_ITEM[QUANTITY > 10]/LINE_ITEM_ID"), sel: ".tf-xv-qsay b", text: "node" },
   { name: "query-text", label: "a query key, //*[not(*)][contains(., 'https://')]", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//*[not(*)][contains(., 'https://')]"), sel: ".tf-xv-qsay b", text: "node" },
   { name: "query-all", label: "a query key that answers every element, //*", kind: "press", before: go(file(ORDER)), prep: query(""), act: query("//*"), sel: ".tf-xv-qsay b", text: "nodes" },
@@ -199,9 +200,9 @@ const CASES = [
     for (let i = 0; i < 100 && !document.querySelector('.tf-xv-lines .tf-code .tf-l'); i++) await wait(50);
     await wait(600);
     // The cases before left the order folded to three levels, and folds stay with the document: unfold it all.
-    document.querySelector('.tf-xv-stepn').click();
-    await wait(300);
     const box = document.querySelector('.tf-xv-lines .tf-code');
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true }));
+    await wait(300);
     box.scrollTop = 1215 * box.querySelector('.tf-l').getBoundingClientRect().height;
     for (let i = 0; i < 100 && ![...document.querySelectorAll('.tf-xv-chip')].some((c) => c.textContent.includes('PDF')); i++) await wait(50);
   }`, act: click(".tf-xv-chip", "PDF"), sel: ".tf-xv-dialog .tf-pdf-page canvas" },
