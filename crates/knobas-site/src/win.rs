@@ -90,9 +90,11 @@ unsafe extern "system" {
     fn GetAncestor(hwnd: isize, flags: u32) -> isize;
 }
 
-/// `WH_MOUSE_LL`, `HC_ACTION`, `GA_ROOT`.
+/// `WH_MOUSE_LL`: the low-level mouse hook.
 const WH_MOUSE_LL: i32 = 14;
+/// `HC_ACTION`: the hook's `lparam` holds an event.
 const HC_ACTION: i32 = 0;
+/// `GA_ROOT`: a window's top-level ancestor.
 const GA_ROOT: u32 = 2;
 
 #[link(name = "kernel32")]
@@ -300,7 +302,8 @@ impl Hardened {
 
 impl Drop for Hardened {
     fn drop(&mut self) {
-        MOUSE_ROUTES.with(|routes| {
+        // `try_with`: a view dropped as the thread's locals go must not panic.
+        let _ = MOUSE_ROUTES.try_with(|routes| {
             routes
                 .borrow_mut()
                 .retain(|route| !Rc::ptr_eq(route, &self.route));
@@ -321,13 +324,20 @@ struct MouseRoute {
 thread_local! {
     static MOUSE_ROUTES: RefCell<Vec<Rc<MouseRoute>>> = const { RefCell::new(Vec::new()) };
     static MOUSE_HOOK: Cell<isize> = const { Cell::new(0) };
+    /// The `XButton` press the hook swallowed, whose release it owes itself.
+    static MOUSE_PRESSED: Cell<Option<crate::host::Travel>> = const { Cell::new(None) };
 }
 
 /// Install the hook while a site is shown, remove it when none is: a
 /// low-level hook runs on this thread for every mouse event on the machine.
 fn refresh_mouse_hook() {
-    let wanted = MOUSE_ROUTES.with(|routes| routes.borrow().iter().any(|route| route.shown.get()));
+    let wanted = MOUSE_ROUTES
+        .try_with(|routes| routes.borrow().iter().any(|route| route.shown.get()))
+        .unwrap_or(false);
     let hook = MOUSE_HOOK.with(Cell::get);
+    if wanted != (hook != 0) {
+        MOUSE_PRESSED.with(|pressed| pressed.set(None));
+    }
     if wanted && hook == 0 {
         // SAFETY: a low-level hook for this thread's own message loop.
         let hook = unsafe {
@@ -356,7 +366,9 @@ fn route_at(point: Point) -> Option<MouseHook> {
     if hit == 0 {
         return None;
     }
-    MOUSE_ROUTES.with(|routes| {
+    // `try_with` and `try_borrow`: a panic here, inside Windows' call,
+    // would abort the process.
+    MOUSE_ROUTES.try_with(|routes| {
         let routes = routes.try_borrow().ok()?;
         routes.iter().find_map(|route| {
             // SAFETY: plain Win32 window questions.
@@ -367,22 +379,31 @@ fn route_at(point: Point) -> Option<MouseHook> {
             (route.shown.get() && inside).then(|| Rc::clone(&route.mouse))
         })
     })
+    .ok()
+    .flatten()
 }
 
 /// The hook: quick, since Windows drops a low-level hook that keeps the
-/// machine's mouse waiting. A site's travel is posted, never done here.
+/// machine's mouse waiting. A site's travel is posted (`Shell::later`),
+/// never done here. Every message that is not a site's `XButton` click goes
+/// on to the next hook; a release goes on whenever its press did
+/// (`glue::xbutton_step`).
 unsafe extern "system" fn mouse_proc(code: i32, wparam: usize, lparam: isize) -> isize {
     if code == HC_ACTION && lparam != 0 {
         // SAFETY: for `HC_ACTION` Windows hands an `MSLLHOOKSTRUCT`.
         let info = unsafe { &*(lparam as *const MouseLowLevel) };
         let message = u32::try_from(wparam).unwrap_or(0);
-        if let Some((travel, release)) = crate::glue::xbutton(message, info.mouse_data)
-            && let Some(mouse) = route_at(info.pt)
-        {
-            if release {
+        if let Some((travel, release)) = crate::glue::xbutton(message, info.mouse_data) {
+            let route = route_at(info.pt);
+            let pressed = MOUSE_PRESSED.with(Cell::get);
+            let step = crate::glue::xbutton_step(pressed, travel, release, route.is_some());
+            MOUSE_PRESSED.with(|slot| slot.set(step.pressed));
+            if let (Some(travel), Some(mouse)) = (step.travel, route) {
                 mouse(travel);
             }
-            return 1;
+            if step.swallow {
+                return 1;
+            }
         }
     }
     // SAFETY: passing the event on, as every hook must.

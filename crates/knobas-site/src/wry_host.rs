@@ -162,7 +162,7 @@ pub struct WryView {
     #[cfg(target_os = "macos")]
     _mac: crate::mac::Wrapped,
     #[cfg(windows)]
-    _windows: crate::win::Hardened,
+    windows_hardened: crate::win::Hardened,
 }
 
 impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
@@ -276,7 +276,7 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
             #[cfg(target_os = "macos")]
             _mac: mac,
             #[cfg(windows)]
-            _windows: windows,
+            windows_hardened: windows,
         }))
     }
 
@@ -356,7 +356,7 @@ impl SiteView for WryView {
         #[cfg(windows)]
         {
             crate::win::memory(&self.view, visible);
-            self._windows.shown(visible);
+            self.windows_hardened.shown(visible);
         }
     }
 
@@ -457,7 +457,7 @@ impl SiteView for WryView {
         }
         #[cfg(windows)]
         {
-            Some(self._windows.holds_keyboard())
+            Some(self.windows_hardened.holds_keyboard())
         }
     }
 

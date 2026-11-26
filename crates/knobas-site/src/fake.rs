@@ -223,7 +223,6 @@ impl FakeHost {
         (hooks.key)(press)
     }
 
-    /// The view starts a download.
     /// The mouse's back or forward button released over `source`'s view.
     pub fn mouse(&self, source: &str, travel: Travel) {
         let hooks = self.hooks(source);
@@ -237,6 +236,7 @@ impl FakeHost {
         (hooks.focus)(focused);
     }
 
+    /// The view starts a download.
     #[must_use]
     pub fn download(&self, source: &str, suggested: &str) -> Option<(std::path::PathBuf, u64)> {
         let hooks = self.hooks(source);

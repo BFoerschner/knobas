@@ -725,6 +725,7 @@ fn route_under(event: &NSEvent) -> Option<MouseHook> {
     let content = window.contentView()?;
     let point = event.locationInWindow();
     // `hitTest:` takes a point in the receiver's superview.
+    // SAFETY: an NSView question on the main thread (the marker above).
     let point = match unsafe { content.superview() } {
         Some(frame) => frame.convertPoint_fromView(point, None),
         None => point,

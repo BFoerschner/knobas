@@ -1824,21 +1824,24 @@ test("on a site's page the mouse's back and forward step in the site while it ca
       fill: false,
     });
   const mouse = (button: 3 | 4) => window.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
-  siteActs.length = 0;
-  status(true, true);
-  mouse(3);
-  mouse(4);
-  expect(siteActs).toEqual(["wiki back", "wiki forward"]);
-  expect(nav.back).not.toHaveBeenCalled();
-  expect(nav.forward).not.toHaveBeenCalled();
-  siteActs.length = 0;
-  status(false, false);
-  mouse(3);
-  mouse(4);
-  expect(siteActs, "the site has nowhere to go").toEqual([]);
-  expect(nav.back).toHaveBeenCalledOnce();
-  expect(nav.forward).toHaveBeenCalledOnce();
-  siteStore.reset();
+  try {
+    siteActs.length = 0;
+    status(true, true);
+    mouse(3);
+    mouse(4);
+    expect(siteActs).toEqual(["wiki back", "wiki forward"]);
+    expect(nav.back).not.toHaveBeenCalled();
+    expect(nav.forward).not.toHaveBeenCalled();
+    siteActs.length = 0;
+    status(false, false);
+    mouse(3);
+    mouse(4);
+    expect(siteActs, "the site has nowhere to go").toEqual([]);
+    expect(nav.back).toHaveBeenCalledOnce();
+    expect(nav.forward).toHaveBeenCalledOnce();
+  } finally {
+    siteStore.reset();
+  }
 });
 
 test("history stays put while a dialog is open, keys and mouse alike, and moves again once it closes", () => {

@@ -338,3 +338,40 @@ async fn closing_a_site_that_holds_the_keyboard_without_a_key_gives_it_to_knobas
     w.shell.drain();
     assert_eq!(shell_focused(&w), 1);
 }
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_click_straight_into_a_site_on_the_way_back_keeps_the_keyboard_there() {
+    // knobas held the keyboard at the blur; the window comes back by a click
+    // into the site's page, which hands it the keyboard before the window's
+    // focus event is handled: knobas must not take it from the site.
+    let w = world();
+    shown(&w, "jira", false, false).await;
+    w.host.view("jira").borrow_mut().holds_keyboard = Some(false);
+    w.sites.window_focused(false);
+    w.host.view("jira").borrow_mut().holds_keyboard = Some(true);
+    w.sites.window_focused(true);
+    assert_eq!(shell_focused(&w), 0);
+    assert_eq!(site_focused(&w, "jira"), 0);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn on_windows_a_return_no_focus_event_reported_ends_with_the_next_click_into_a_site() {
+    // Alt+Tab away from a site, then back with knobas's web view focused
+    // while another window was still in front: no return was seen. The
+    // user clicks into the site, then onto knobas's bar: the bar's focus
+    // event must not pull the keyboard back into the site (the trap).
+    let w = world();
+    shown(&w, "jira", false, false).await;
+    *w.host.active.borrow_mut() = Some(true);
+    w.host.focus("jira", true);
+    *w.host.active.borrow_mut() = Some(false);
+    w.host.focus("jira", false);
+    w.sites.window_focused(true);
+    *w.host.active.borrow_mut() = Some(true);
+    w.host.focus("jira", true);
+    w.sites.window_focused(false);
+    w.host.focus("jira", false);
+    w.sites.window_focused(true);
+    assert_eq!(site_focused(&w, "jira"), 0);
+    assert_eq!(shell_focused(&w), 0);
+}

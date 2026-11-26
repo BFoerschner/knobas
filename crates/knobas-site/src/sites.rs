@@ -1402,6 +1402,9 @@ impl Sites {
             tracing::debug!(site = ?site, "window back in front: the keyboard to the site, else to knobas");
             match site.and_then(|source| view(&source)) {
                 Some(view) => view.focus(),
+                // A click straight into a site's page brought the window
+                // back: that site keeps the keyboard the click gave it.
+                None if self.keyboard_holder().is_some() => {}
                 None => {
                     if let Some(host) = host() {
                         host.focus_shell();
@@ -1409,26 +1412,32 @@ impl Sites {
                 }
             }
         } else if !active {
-            let shown: Vec<(String, bool)> = {
-                let book = self.book();
-                if book.away {
-                    return;
-                }
-                book.sites
-                    .values()
-                    .filter(|site| site.visible())
-                    .map(|site| (site.source.clone(), site.keyboard == SiteKeyboard::Site))
-                    .collect()
-            };
-            let holder = shown
-                .into_iter()
-                .find(|(source, recorded)| holds_keyboard(source, *recorded))
-                .map(|(source, _)| source);
+            if self.book().away {
+                return;
+            }
+            let holder = self.keyboard_holder();
             tracing::debug!(holder = ?holder, "window went behind another");
             let mut book = self.book();
             book.away = true;
             book.keyboard_on_blur = holder;
         }
+    }
+
+    /// The shown site that holds the keyboard now: the platform's answer,
+    /// else the controller's record. On the main thread.
+    fn keyboard_holder(&self) -> Option<String> {
+        let shown: Vec<(String, bool)> = {
+            let book = self.book();
+            book.sites
+                .values()
+                .filter(|site| site.visible())
+                .map(|site| (site.source.clone(), site.keyboard == SiteKeyboard::Site))
+                .collect()
+        };
+        shown
+            .into_iter()
+            .find(|(source, recorded)| holds_keyboard(source, *recorded))
+            .map(|(source, _)| source)
     }
 
     /// `source`'s view took the keyboard or lost it, as the platform says
@@ -1447,7 +1456,12 @@ impl Sites {
                 SiteKeyboard::Shell
             };
             let visible = site.visible();
-            if !focused && !active && !book.away && visible {
+            if focused && active {
+                // Taken in a window in front: whatever blur came before has
+                // ended, even one whose return no focus event reported.
+                book.away = false;
+                book.keyboard_on_blur = None;
+            } else if !focused && !active && !book.away && visible {
                 book.away = true;
                 book.keyboard_on_blur = Some(source.to_owned());
             }
