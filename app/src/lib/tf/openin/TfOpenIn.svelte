@@ -25,7 +25,7 @@
   import { openExternal } from "../../shell/open-external"; // browser on purpose: the menu's *Browser*
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
-  import TfPath from "../TfPath.svelte";
+  import TfCommand from "../TfCommand.svelte";
   import { apps as sharedApps, fileFolder, type Apps } from "./apps.svelte";
   import { clones as sharedClones, type Clones } from "./clones.svelte";
   import { appPageHash } from "./app-page";
@@ -185,7 +185,7 @@
       <TfMenu bind:open opener={face} label="Open in" className="tf-appmenu" {layers}>
           {#each entries as entry (entry.app.id)}
             <button role="menuitem" onclick={() => run(entry.app.id, entry.app.name)}
-              ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><TfPath path={willRun(entry.app, path)} /></button
+              ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b><TfCommand command={willRun(entry.app, path)} keepEnd /></button
             >
           {/each}
           {#if browserUrl !== null}
