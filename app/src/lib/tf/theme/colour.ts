@@ -40,7 +40,7 @@ export function toHsv(hex: string): Triple {
 }
 
 /** Hue, saturation and brightness (`toHsv`) as `#RRGGBB`. */
-export function fromHsv([h, s, v]: readonly number[]): string {
+export function fromHsv([h, s, v]: readonly [number, number, number]): string {
   const at = (n: number) => {
     const k = (n + h / 60) % 6;
     return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
