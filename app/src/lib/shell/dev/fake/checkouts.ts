@@ -3,7 +3,7 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, LocalDir, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, ViewBlock, WorkingAt } from "../../../ipc/entity";
+import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, LocalDir, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, TextFile, TextFound, TextPart, TextQuery, ViewBlock, WorkingAt } from "../../../ipc/entity";
 import { repoView } from "./views/repos";
 import { lineDiff } from "../../../tf/diff/line-diff";
 import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
@@ -238,6 +238,61 @@ function fakeHeadFile(entityId: string, commit: string | null, path: string): Vi
   if (commit === null || commit !== fakeHead(entityId)) return null;
   const block = repoView(entityId, `file:${path}`)?.sections[0]?.blocks[0];
   return block?.type === "file" ? { ...block, commit } : null;
+}
+
+/**
+ * `entity_text_search` (ADR-0062): every file of the repository's fake tree read from its source view and matched as
+ * the backend matches (smart case, *Aa*, *.\**), answered as read from the clone at its `HEAD`. A walk of the listings,
+ * so a shot of *Text* draws the lines a real search would.
+ */
+function fakeTextSearch(entityId: string, query: TextQuery): TextFound {
+  const repo = fakeRepoOf(entityId) ?? entityId;
+  const answer: TextFound = { from: "clone", commit: fakeHead(repo) ?? "4c1d0aa9e2b7c4d9018e6a2b3c4d5e6f70819200", branch: null, files: [], names: [], searched: 0, skipped: 0, cut: false, invalid: null, why: null, stale: false };
+  const upper = /\p{Lu}/u.test(query.regex ? query.text.replace(/\\./g, "") : query.text);
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(query.regex ? query.text : query.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), query.case_sensitive || upper ? "gu" : "giu");
+  } catch (error) {
+    return { ...answer, from: "none", invalid: `The pattern does not parse: ${(error as Error).message}.` };
+  }
+  const paths: string[] = [];
+  const walk = (dir: string) => {
+    const block = repoView(repo, dir === "" ? "files" : `files:${dir}`)?.sections[0]?.blocks[0];
+    if (block?.type !== "tree") return;
+    for (const entry of block.entries) {
+      const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
+      if (entry.kind === "dir") walk(path);
+      else paths.push(path);
+    }
+  };
+  walk("");
+  for (const path of paths.sort()) {
+    if (query.names && pattern.test(path)) answer.names.push(path);
+    pattern.lastIndex = 0;
+    const block = repoView(repo, `file:${path}`)?.sections[0]?.blocks[0];
+    if (block?.type !== "file" || block.binary) {
+      answer.skipped += 1;
+      continue;
+    }
+    answer.searched += 1;
+    const file: TextFile = { path, hits: [], more: 0 };
+    block.text.split("\n").forEach((line, at) => {
+      const parts: TextPart[] = [];
+      let from = 0;
+      for (const match of line.matchAll(pattern)) {
+        if (match[0] === "") continue;
+        if (match.index > from) parts.push({ text: line.slice(from, match.index), hit: false });
+        parts.push({ text: match[0], hit: true });
+        from = match.index + match[0].length;
+      }
+      if (parts.length === 0) return;
+      if (from < line.length) parts.push({ text: line.slice(from), hit: false });
+      if (file.hits.length < 20) file.hits.push({ line: at + 1, parts });
+      else file.more += 1;
+    });
+    if (file.hits.length > 0) answer.files.push(file);
+  }
+  return answer;
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
@@ -757,6 +812,7 @@ export function handlers(): Handlers {
     entity_local_tree: () => null,
     entity_local_dir: (args) => fakeHeadDir(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["dir"] ?? "")),
     entity_local_paths: () => null,
+    entity_text_search: (args) => fakeTextSearch(String(args["entityId"] ?? ""), args["query"] as TextQuery),
     entity_local_file: (args) => fakeHeadFile(String(args["entityId"] ?? ""), (args["commit"] as string | null | undefined) ?? null, String(args["path"] ?? "")),
     entity_source_range_diff: (args) =>
       fakeRangeDiff(String(args["entityId"] ?? ""), String(args["base"] ?? ""), String(args["head"] ?? ""), false),

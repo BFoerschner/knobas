@@ -65,6 +65,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The band's *Rendered* and an image's mode in a rendered diff (ux26): off and side by side again.
   "tf/diff/diff-rendered.svelte.ts#diffRendered": async () => (await import("../tf/diff/diff-rendered.svelte")).diffRendered.reset(),
   "tf/repo/cloned-here.svelte.ts#known": async () => (await import("../tf/repo/cloned-here.svelte")).forgetCheckouts(),
+  // *Search in repository*'s words waiting for a Files tab (ADR-0062).
+  "tf/repo/text-search.svelte.ts#asked": async () => (await import("../tf/repo/text-search.svelte")).forgetAsked(),
   "tf/diff/image-mode.svelte.ts#imageMode": async () => (await import("../tf/diff/image-mode.svelte")).imageMode.set("sides"),
   // How a changed class in a JAR's comparison is diffed (2026-11-22), stored in `localStorage`: each test starts on Source.
   "tf/diff/class-mode.svelte.ts#classMode": async () => (await import("../tf/diff/class-mode.svelte")).classMode.reset(),

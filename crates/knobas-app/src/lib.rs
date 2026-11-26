@@ -974,6 +974,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_local_dir,
         commands::entity::entity_local_paths,
         commands::entity::entity_local_file,
+        commands::entity::entity_text_search,
         commands::entity::entity_source_range_diff,
         // The compare pass (PR #2479, 2026-11-13): a range's files first, each file's lines as it is reached,
         // and a read the page no longer wants called off.

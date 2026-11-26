@@ -59,6 +59,7 @@ pub mod range;
 pub mod range_files;
 pub mod reader;
 pub mod stamp;
+pub mod text_search;
 pub mod uncommitted;
 pub mod working;
 pub mod working_tree;

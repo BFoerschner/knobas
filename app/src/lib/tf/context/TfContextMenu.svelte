@@ -41,7 +41,9 @@
   import { runsRead } from "../builds/runs-read.svelte";
   import { moveProvider } from "../tickets/moves.svelte";
   import { fieldProvider } from "../tickets/card-fields.svelte";
-  import { isEditable, selectionAt, thingAt, type Found } from "./thing";
+  import { isEditable, repoOfSelection, selectionAt, thingAt, type Found } from "./thing";
+  import { askText } from "../repo/text-search.svelte";
+  import { repoHash } from "../repo/repo";
 
   let {
     onsearch,
@@ -81,6 +83,8 @@
     ranges: Range[];
     /** Opened by a key: its first row takes focus, as a pointer's opening doesn't. */
     keyed: boolean;
+    /** The repository the selected words are code of, for *Search in repository*; `null` for none. */
+    repo: string | null;
   }
 
   let shown = $state<Shown | null>(null);
@@ -118,6 +122,7 @@
             docs: { isHome: (kind, id) => docsChoices.isHome(kind, id), hidden: docsChoices.hidden },
             runs: { isRead: (id) => runsRead.read?.has(id) ?? false },
             checkout: clonedHere,
+            searchRepo: shown.repo,
             moves: (id) => moveProvider()?.offer(id) ?? null,
             fields: (id) => fieldProvider()?.offer(id) ?? null,
             commands: oneoffs.loaded ? oneoffs.commands : null,
@@ -165,7 +170,8 @@
     const found = thingAt(node);
     if (found === null && selection === null) return false;
     const active = document.activeElement;
-    shown = { found, selection, at, back: active instanceof HTMLElement && active !== document.body ? active : null, ranges, keyed };
+    const repo = selection === null ? null : repoOfSelection(node);
+    shown = { found, selection, at, back: active instanceof HTMLElement && active !== document.body ? active : null, ranges, keyed, repo };
     facts = {};
     sub = null;
     subOpen = false;
@@ -437,6 +443,13 @@
         return;
       case "search":
         return onsearch(act.text);
+      case "search-repo": {
+        // The repository's Files tab takes the words when it shows: where it already shows, nothing moves.
+        askText(act.repoId, act.text);
+        const base = repoHash(act.repoId);
+        if (location.hash.startsWith(`${base}/files`) || location.hash.startsWith(`${base}/line/`)) return;
+        return ports.go(repoHash(act.repoId, "files"));
+      }
       case "browser": {
         const value = now(act.url);
         // browser on purpose: the item is *Open in browser*
