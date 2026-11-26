@@ -138,7 +138,7 @@
   <section class="tf-oas-sec">
     <h3 class="tf-oas-lab">Part of <span class="tf-oas-n">{uses.schemas.length}</span></h3>
     <div class="tf-oas-chips">
-      {#each parts as holder (holder)}<button type="button" class="tf-oas-part" onclick={() => onfollow(holder)}>{holder}</button>{/each}
+      {#each parts as holder (holder)}<span class="tf-chip tf-oas-part"><button type="button" class="tf-chipbtn" onclick={() => onfollow(holder)}>{holder}</button></span>{/each}
     </div>
     {#if uses.schemas.length > PART}
       <p class="tf-oas-fd"><button type="button" class="tf-oas-more" onclick={togglePart}>{partAll ? "Show fewer" : "Show all"}</button></p>

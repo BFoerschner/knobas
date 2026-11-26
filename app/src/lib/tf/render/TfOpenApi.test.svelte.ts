@@ -677,7 +677,7 @@ test("Part of renders distinct parent schema chips with a Show all / Show fewer 
   await settle();
   await drawnWhole();
 
-  const chips = () => [...page().querySelectorAll<HTMLButtonElement>(".tf-oas-chips .tf-oas-part")];
+  const chips = () => [...page().querySelectorAll<HTMLButtonElement>(".tf-oas-chips .tf-oas-part .tf-chipbtn")];
   expect(text(page())).toContain("Part of 16");
   expect(chips().map((b) => text(b))).toHaveLength(12);
   expect(chips()[0]!.textContent?.trim()).toBe("Holder0");

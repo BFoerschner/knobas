@@ -355,7 +355,7 @@
             <span class="tf-oas-k">Secret</span>
             <div class="tf-oas-row2">
               <span class="tf-oas-inp tf-oas-dots" aria-label="Held">••••••••••••</span>
-              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = true)}>Change</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = true)}>Change…</button>
               <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void forgetHeld()}>Forget</button>
             </div>
           </div>

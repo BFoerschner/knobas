@@ -107,13 +107,14 @@
 .tf-oas-usedrow { display: grid; grid-template-columns: 44px minmax(0, max-content) minmax(0, 1fr); column-gap: 10px; align-items: baseline; padding: 4px 4px; border: 0; border-bottom: 1px solid var(--rule-2); background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-oas-usedrow:hover { background: var(--sheet-2); }
 .tf-oas-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
-.tf .tf-oas-part {
-  display: inline-flex; align-items: center; max-width: 100%; padding: 2px 8px;
-  border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); color: var(--ink);
-  cursor: pointer; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs)) var(--mono); line-height: 1.5; font-variant-ligatures: var(--mono-ligatures);
-  overflow-wrap: anywhere; text-align: left;
+/* A parent schema: a `.tf-chip` (chrome.css sizes it) whose name is a `.tf-chipbtn` (design system, Controls: chip
+   buttons). The view gives it the code face and lets a long name wrap; it sets no size of its own. */
+.tf-chip.tf-oas-part {
+  max-width: 100%; white-space: normal; overflow-wrap: anywhere; background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule);
+  --fs: var(--size-code); font-family: var(--mono); font-weight: var(--wt-code, 400); font-variant-ligatures: var(--mono-ligatures);
 }
-.tf .tf-oas-part:hover { border-color: var(--ink-2); background: var(--sheet); }
+.tf-oas-part .tf-chipbtn { text-align: left; }
+.tf-oas-part .tf-chipbtn:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 .tf-oas-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-oas-kv dt { color: var(--ink-2); }
@@ -157,7 +158,7 @@
 .tf-oas-ask div { display: flex; gap: 8px; }
 
 /* The answer. Its status is a state, so it takes a tone. Matches `.tf-oas-req` padding; border only when stacked below it. */
-.tf-oas-ans { padding: 14px 16px 30px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.tf-oas-ans { padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
 .tf-oas-req + .tf-oas-ans { border-top: 1px solid var(--rule); }
 .tf-oas-page .tf-oas-ans { padding: 14px 0 0; }
 .tf-oas-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: calc(var(--t-sm) * var(--fs)); }

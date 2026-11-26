@@ -311,11 +311,11 @@ test("held origin secrets expose working Change and Forget controls", async () =
   input(target.querySelector<HTMLInputElement>('[id$="-path-id"]')!, "7");
 
   expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
-  expect(button("Change")).toBeDefined();
+  expect(button("Change…")).toBeDefined();
   expect(button("Forget")).toBeDefined();
 
   // Change reveals the input; Cancel returns to the masked held view without forgetting.
-  button("Change")!.click();
+  button("Change…")!.click();
   flushSync();
   expect(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')).not.toBeNull();
   button("Cancel")!.click();
@@ -324,7 +324,7 @@ test("held origin secrets expose working Change and Forget controls", async () =
   expect(calls).toEqual([]);
 
   // Change + typing a replacement + Send updates the held secret and returns to masked view.
-  button("Change")!.click();
+  button("Change…")!.click();
   flushSync();
   input(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')!, "rotated-tok");
   button("Send")!.click();
@@ -359,7 +359,9 @@ test("the right column has no nested scroll container, response padding matches 
   expect(text(hdrRows[1]!.querySelector("dd"))).toBe("req-42");
 
   const css = readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8");
-  expect(css).toMatch(/\n\.tf-oas-ans \{ padding: 14px 16px 30px;/);
+  const padding = (sel: string) => css.match(new RegExp(`\\n\\.${sel} \\{ padding: ([^;]+);`))?.[1];
+  expect(padding("tf-oas-ans")).toBe("14px 16px 24px");
+  expect(padding("tf-oas-ans")).toBe(padding("tf-oas-req"));
   expect(css).not.toMatch(/\n\.tf-oas-ans \{[^}]*border-top:/);
   expect(css).toContain(".tf-oas-req + .tf-oas-ans { border-top: 1px solid var(--rule); }");
   expect(css).toContain(".tf-oas-anshdr + .tf-oas-anshdr { border-top: 1px solid var(--rule-2); }");
@@ -380,7 +382,7 @@ test("switching to another origin clears typed credentials and editing state so 
   await settle();
 
   pickSelect(target.querySelector<HTMLSelectElement>('[id^="oas-scheme-"]')!, "__manual:basic");
-  button("Change")!.click();
+  button("Change…")!.click();
   flushSync();
   input(target.querySelector<HTMLInputElement>('[id^="oas-user-"]')!, "secret-for-a");
   input(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')!, "pw-for-a");
