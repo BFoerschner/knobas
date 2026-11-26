@@ -53,6 +53,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { itemHash } from "../job/job";
   import { jumpAcross } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -307,11 +308,16 @@
     chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged", "Failing"].map((value) => ({ value, label: value })) }],
   });
   /** *Failing* (the repo-builds pass): the branches whose builds failed, by the page's Builds answer. */
-  const shown = $derived(
-    visibleBranches(rows, filter.chips["show"] ?? [], filter.text).filter(
+  const chipped = $derived(
+    visibleBranches(rows, filter.chips["show"] ?? []).filter(
       (row) => !(filter.chips["show"] ?? []).includes("Failing") || (buildsByBranch?.get(row.name)?.failing ?? 0) > 0,
     ),
   );
+  /** The typed words rank the names the chips keep, best first, through the app's ranking (#2532). */
+  const branchName = (row: BranchRow) => row.name;
+  const order = heldOrder<BranchRow>("repo-branches");
+  $effect(() => order.ask(filter.text, chipped, branchName));
+  const shown = $derived(order.rows(filter.text, chipped, branchName));
   /** Thousands of branches draw only the rows near the viewport (the extremes pass, 2026-11-13); a row is 41 px. */
   const win = new Windowed({ count: () => shown.length, key: (i) => shown[i]!.name, estimate: 41 });
   const drawnIds = $derived(win.slice(shown).flatMap((row) => standingId(row) ?? []));
@@ -376,7 +382,7 @@
         {@const prState = standing?.pr?.state ? (standing.pr.entityId === null ? { text: standing.pr.state, tone: standing.pr.tone } : prStateOver(standing.pr.entityId, { text: standing.pr.state, tone: standing.pr.tone as Tone | null })) : null}
         <tr data-place {@attach win.row(row.name)} {@attach menuThing(() => ({ kind: "branch-name", repoId, name: row.name }))}>
           <td title={row.name}
-            ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
+            ><span class="tf-mono"><Marked text={row.name} typed={order.typed(filter.text, chipped)} pairs={order.marks(row)} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
           <td
             >{#if standing?.merged}<TfStateChip text="merged" tone="ok" />{:else}{against(standing)}{/if}</td

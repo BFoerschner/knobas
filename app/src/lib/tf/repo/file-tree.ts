@@ -17,7 +17,9 @@ const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 /**
  * The paths holding every word typed (case aside), best first: a file whose
  * name starts with the last word, then one whose name holds it, then the
- * rest; a shorter path first within each. At most `limit`.
+ * rest; a shorter path first within each. At most `limit`. Go to file's own
+ * ranking for a tree past what the app ranks (`MOST_RANKED`); below that it
+ * ranks through the app's (#2532).
  */
 export function goToFile(paths: readonly string[], typed: string, limit = GO_TO_FILE_SHOWN): string[] {
   const words = typed.toLowerCase().split(/\s+/).filter(Boolean);

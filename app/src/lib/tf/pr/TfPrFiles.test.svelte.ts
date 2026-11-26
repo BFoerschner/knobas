@@ -194,11 +194,15 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
   filter.value = "BACKOFF";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(list()).toEqual(["Abackoff.md+1 −0"]);
+  await settle();
+  // No app here to rank (#2532): the failed ask is the filter as it was, the list flat by whole path, the word marked.
+  expect(list()).toEqual(["Adocs/backoff.md+1 −0"]);
+  expect(squash(target.querySelector(".tf-flist mark"))).toBe("backoff");
   expect(cards()).toHaveLength(1);
   filter.value = "nothing";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await settle();
   expect(target.querySelector(".tf-flist")).toBeNull();
   expect(squash(target.querySelector(".tf-flist-none"))).toBe("No files match. Clear the filter");
   // The one way out, drawn as every list draws it.

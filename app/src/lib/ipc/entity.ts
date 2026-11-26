@@ -21,6 +21,8 @@ import type {
   LocalDir,
   LocalPaths,
   LocalTree,
+  TextFound,
+  TextQuery,
   BranchPull,
   RepoBuilds,
   ViewBlock,
@@ -139,6 +141,12 @@ export type {
   LocalPaths,
   LocalTree,
   MirrorTip,
+  TextFile,
+  TextFound,
+  TextFrom,
+  TextHit,
+  TextPart,
+  TextQuery,
   ActionField,
   ActionItemTicket,
   ActivityRow,
@@ -1785,6 +1793,15 @@ export function entityLocalPaths(entityId: string, commit: string): Promise<Loca
  */
 export function entityLocalFile(entityId: string, commit: string, path: string): Promise<ViewBlock | null> {
   return invoke<ViewBlock | null>("entity_local_file", { entityId, commit, path });
+}
+
+/**
+ * *Text search* in the tree the Files tab shows for `entityId` — `entity_text_search` (ADR-0062): the clone's copy of
+ * `commit` (the mirror's tip for `null`), the working tree when `working`, or the files index's copy of the default
+ * branch where no clone holds it. `branch` is the branch's name. An answer marked `stale` was overtaken by a newer one.
+ */
+export function entityTextSearch(entityId: string, commit: string | null, working: boolean, branch: string | null, query: TextQuery): Promise<TextFound> {
+  return invoke<TextFound>("entity_text_search", { entityId, commit, working, branch, query });
 }
 
 /**

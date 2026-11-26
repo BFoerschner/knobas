@@ -70,6 +70,19 @@ test("a list the app dropped is held again once, and the key is answered", async
   sent.length = 0;
 });
 
+test("a key out when the page drops its list holds nothing again (#2532)", async () => {
+  const order = FuzzyOrder.held<string>("spec-gone");
+  sent.length = 0;
+  order.ask("resource9", rows, same);
+  // The page closes while the key's ranking is out: the app answers it `not_found`.
+  order.drop();
+  await flush();
+  await flush();
+  expect(sent.map((s) => s.cmd)).toEqual(["fuzzy_hold", "fuzzy_drop", "fuzzy_rank_held"]);
+  expect(held.has("spec-gone")).toBe(false);
+  sent.length = 0;
+});
+
 test("new rows are held anew; an older text's answer is never drawn", async () => {
   const order = FuzzyOrder.held<string>("spec-3");
   order.ask("resource5", rows, same);

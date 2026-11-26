@@ -9,7 +9,7 @@
  *   typed (a return to the page) draws the filter as it was until its answer lands.
  * - **No text, the rows as given**, in the page's own order.
  * - **A failed ask is the filter as it was**: every typed word somewhere in the row, any order, any case
- *   ({@link matchesAll}), so the page keeps working if the command does not answer.
+ *   ({@link matcherOf}), each marked where it stands, so the page keeps working if the command does not answer.
  *
  * {@link FuzzyOrder.held} is the same over a list held once (ux31, the API explorer's filter): its texts are sent
  * with the first ask ({@link fuzzyHold}) and each key then sends only what was typed ({@link fuzzyRankHeld}). A list
@@ -17,9 +17,38 @@
  */
 import { fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld } from "../../ipc/search";
 import type { FuzzyRanked } from "../../ipc/generated/search";
-import { markPairs, matchesAll, sliceMarks } from "./filter";
+import { markPairs, matcherOf, sliceMarks, wordPairs } from "./filter";
 
 export { markPairs, sliceMarks };
+
+/**
+ * Most texts the app ranks in one list (`MOST_RANKED` in `commands/search.rs`): a longer list is not held, and its
+ * filter is the one {@link matcherOf} draws when an ask fails. A page with its own ranking for such a list
+ * (Go to file's) reads this to keep it.
+ */
+export const MOST_RANKED = 20_000;
+
+/**
+ * The rows of `rows` that `kept` holds, in `rows`' own order (#2532): the ranking decides what keeps, the page what
+ * order means, for a list whose order is its sense (a branch's commits, newest first). `kept` is a subset of `rows`.
+ */
+export function inOrder<T>(rows: readonly T[], kept: readonly T[]): readonly T[] {
+  if (kept.length === rows.length) return rows;
+  const keep = new Set(kept);
+  return rows.filter((row) => keep.has(row));
+}
+
+let pageLists = 0;
+
+/**
+ * A page's {@link FuzzyOrder.held} order (#2532), under an id no other mounted page shares (`name:n`), its list dropped
+ * when the component that made it goes. Call it while a component starts, as `$effect` is called.
+ */
+export function heldOrder<T>(name: string): FuzzyOrder<T> {
+  const order = FuzzyOrder.held<T>(`${name}:${++pageLists}`);
+  $effect(() => () => order.drop());
+  return order;
+}
 
 interface Answer<T> {
   text: string;
@@ -51,11 +80,14 @@ export class FuzzyOrder<T> {
   /** The held list's ranking of `text`, holding the texts first where they were not sent for `rows`, again once if dropped. */
   async #rankHeld(id: string, text: string, rows: readonly T[], texts: () => string[]): Promise<FuzzyRanked[]> {
     if (this.#heldFor?.rows !== rows) this.#heldFor = { rows, sent: fuzzyHold(id, texts()) };
-    await this.#heldFor.sent;
+    const holding = this.#heldFor;
+    await holding.sent;
     try {
       return await fuzzyRankHeld(id, text);
     } catch (cause) {
-      if ((cause as { code?: string } | null)?.code !== "not_found") throw cause;
+      // Held again only while this list is still the one held: not once the page dropped it (#2532), so a key out
+      // when the page closed leaves nothing held behind it.
+      if ((cause as { code?: string } | null)?.code !== "not_found" || this.#heldFor !== holding) throw cause;
       this.#heldFor = { rows, sent: fuzzyHold(id, texts()) };
       await this.#heldFor.sent;
       return fuzzyRankHeld(id, text);
@@ -92,7 +124,10 @@ export class FuzzyOrder<T> {
       this.#answer = { text, from: rows, rows: kept, marks };
     };
     const asked = this.#held === null ? fuzzyRank(text, textsOf()) : this.#rankHeld(this.#held, text, rows, textsOf);
-    asked.then(answered, () => answered(textsOf().flatMap((at, index) => (matchesAll(at, text) ? [{ index, marks: [] }] : []))));
+    asked.then(answered, () => {
+      const holds = matcherOf(text);
+      answered(textsOf().flatMap((at, index) => (holds(at) ? [{ index, marks: wordPairs(at, text) }] : [])));
+    });
   }
 
   /** The rows to draw for `text` over `rows`: as given with no text, the answer once it is theirs, else what was drawn. */
@@ -106,7 +141,10 @@ export class FuzzyOrder<T> {
       const answer = this.#answer;
       if (answer !== null && answer.text === text && answer.from === rows) shown = answer.rows;
       else if (this.#drawnFrom === rows) shown = this.#drawn;
-      else shown = rows.filter((row) => matchesAll(haystack(row), text));
+      else {
+        const holds = matcherOf(text);
+        shown = rows.filter((row) => holds(haystack(row)));
+      }
     }
     this.#drawn = shown;
     this.#drawnFrom = rows;
@@ -117,6 +155,24 @@ export class FuzzyOrder<T> {
   settled(text: string, rows: readonly T[]): boolean {
     const answer = this.#answer;
     return text.trim() === "" || (answer !== null && answer.text === text && answer.from === rows);
+  }
+
+  /**
+   * Whether {@link rows} has rows of its own for `text` over `rows` (#2532): the answer, or rows it drew for them
+   * before. A page whose list draws for the first time (a JAR's entries on the first key) keeps what it drew until
+   * then, sparing a pass of the filter as it was over every row in the frame the answer lands in.
+   */
+  ready(text: string, rows: readonly T[]): boolean {
+    return this.settled(text, rows) || this.#drawnFrom === rows;
+  }
+
+  /**
+   * What a `<Marked>` beside {@link marks} marks by its words (#2532): `text` while its answer over `rows` is out, so
+   * the rows drawn meanwhile mark what they hold, and nothing once it lands, so a field marks only the letters the
+   * ranking matched and never a word the ranking did not read there.
+   */
+  typed(text: string, rows: readonly T[]): string {
+    return this.settled(text, rows) ? "" : text;
   }
 
   /**
