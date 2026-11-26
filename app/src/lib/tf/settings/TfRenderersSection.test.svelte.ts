@@ -2,7 +2,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { RenderContent, UserRenderer, UserRendererDraft } from "../../ipc/app";
+import type { MadeStore, RenderContent, UserRenderer, UserRendererDraft } from "../../ipc/app";
 import { installCommands } from "../../render/command";
 import { renderersFor, renderersForFence } from "../../render/registry";
 import { toasts } from "../../shell/toasts.svelte";
@@ -452,6 +452,37 @@ test("the sections draw once the folder renderers have answered too, so their ta
   await settle();
   expect(headings()).toEqual(expect.arrayContaining(["Command renderers", "Folder renderers", "Default renderers"]));
   expect(target.querySelector(".tf-rnd-folders"), "the folder renderers' table with them").not.toBeNull();
+});
+
+test("the sections draw before the generated folders are counted, their row held unseen in its room until then, and the folder renderers are read once (#2519)", async () => {
+  let reads = 0;
+  const folders = createFolderRenderers({
+    read: async () => ((reads += 1), [{ id: "lc", name: "Low code", command: "lc {path} {out}.png", holds: ["*.lcproj"], folders: [], output: "image", timeout_secs: 60 }] as never),
+    save: async (list) => list as never,
+  });
+  let count!: (store: MadeStore) => void;
+  const madeStore = () => new Promise<MadeStore>((resolve) => (count = resolve));
+  app = mount(TfRenderersSection, { target, props: { ports: backend().ports, defaults: storedDefaults().store, folders, madeStore } });
+  await settle();
+  const headings = () => [...target.querySelectorAll(".tf-stg-sec h2")].map((h) => h.textContent?.trim());
+  expect(headings(), "drawn while the store is still walked").toEqual(expect.arrayContaining(["Command renderers", "Folder renderers", "Default renderers"]));
+  expect(target.querySelector(".tf-rnd-folders"), "the folder renderers' table with them").not.toBeNull();
+  const row = () => target.querySelector<HTMLElement>(".tf-made-row");
+  expect(row(), "the row's room is there from the first frame").not.toBeNull();
+  expect(row()!.classList, "held unseen until the store answers").toContain("tf-made-held");
+  expect(row()!.querySelectorAll("button:not([disabled])"), "nothing in it can be pressed").toHaveLength(0);
+  count({ dir: "/home/me/code/knobas-rendered", set: null, default_dir: "/home/me/code", place: "clones", folders: 2, bytes: 3 * 1024 ** 2, cap_bytes: 4 * 1024 ** 3 });
+  await settle();
+  expect(row()!.classList).not.toContain("tf-made-held");
+  expect(row()!.textContent).toContain("2 folders, 3.0 MB of 4 GB. Beside your clones.");
+  expect(reads, "one read of the folder renderers, not one more when their table mounts").toBe(1);
+});
+
+test("a refused read of the folder renderers is said in their section (#2519: the section reads them, the table no longer does)", async () => {
+  const folders = createFolderRenderers({ read: () => Promise.reject(new Error("the database is gone")), save: async (list) => list as never });
+  app = mount(TfRenderersSection, { target, props: { ports: backend().ports, defaults: storedDefaults().store, folders } });
+  await settle();
+  expect(target.querySelector("[data-land-list='folder-renderers'] .tf-stg-errt")?.textContent).toContain("Could not read the folder renderers: the database is gone");
 });
 
 // -- One line a cell (the renderers-columns pass, 2026-11-20) -------------------------

@@ -358,12 +358,17 @@ async fn archive_of(
 
 /// Point the runner at the store as the settings say now: at bring-up, and
 /// after the setting or the clones root changed. A store that moved is
-/// removed at its old place.
+/// removed at its old place. Its folders are counted then, on a blocking
+/// thread and waited for by nothing, so Settings › Renderers reads the count
+/// from memory (#2519).
 pub async fn place_store(pool: &PgPool, profile: &Path) {
-    Runs::global().set_store(store::root(pool, profile).await);
+    let root = store::root(pool, profile).await;
+    Runs::global().set_store(root.clone());
+    drop(tokio::task::spawn_blocking(move || store::usage(&root)));
 }
 
-/// The store as Settings shows it.
+/// The store as Settings shows it. Its count is [`store::usage`]'s, from
+/// memory once the store was walked.
 ///
 /// # Errors
 ///

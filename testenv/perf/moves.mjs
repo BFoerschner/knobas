@@ -330,6 +330,9 @@ const PLACES = [
   // The Decompiler's Java read, past the 500 ms hold, with a reason to say: the ux19 gate found its path row moving on
   // the real backend, where the look for a Java answers after the page draws (2026-11-19).
   { name: "settings-renderers-java-late", fixture: true, late: "java_runtime:900", fake: "fake-jar=oldjava", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
+  // The generated folders' count, past the hold: the sections draw without it (#2519), and its row shows in the room it
+  // kept, so nothing under it moves.
+  { name: "settings-renderers-store-late", fixture: true, late: "folder_render_store:900", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
   // Commands (ADR-0060): Settings › Commands and a command's page, and a run's dialog opened from a file's Run…, which
   // streams lines and ends while it records; nothing in it moves but the rows it adds.
   { name: "settings-commands", fixture: true, fake: "fake-oneoff", start: "#/settings", press: `${shown} a[href="#/settings/commands"]`, hash: "#/settings/commands", away: "#/settings" },
