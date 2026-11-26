@@ -73,10 +73,10 @@ test("the slot the window draws now has the ring", () => {
   expect(q('[data-slot="dark"]')?.classList.contains("tf-cur")).toBe(false);
 });
 
-test("a built-in has no swatch buttons, and Duplicate and edit puts the copy where the original drew: the window's slot, code following", () => {
+test("a built-in's swatches are buttons too, and Duplicate and edit puts the copy where the original drew: the window's slot, code following", () => {
   draw();
   expect(q(".tf-thm-edh .tf-lab")?.textContent).toBe("comes with knobas");
-  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(0);
+  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(17 + 4);
   button("Duplicate and edit")!.click();
   flushSync();
   expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light copy");
@@ -255,4 +255,44 @@ test("Edit on a slot scrolls smoothly to the editor and focuses its heading, the
   } finally {
     HTMLElement.prototype.scrollIntoView = was;
   }
+});
+
+test("a built-in's first colour change makes a copy with it, in the slot it drew in; looking makes none, and Undo takes the copy back (#2516)", () => {
+  draw();
+  const swatch = q<HTMLButtonElement>('[data-role="kw"] button.tf-thm-sw')!;
+  swatch.click();
+  flushSync();
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  expect(themes.own).toHaveLength(0);
+  const field = q<HTMLInputElement>(".tf-thm-pop .tf-stg-in")!;
+  // The colour it has already is no change.
+  field.value = themes.find("knobas-light")!.syntax.kw!;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  field.value = "#123456";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  const copy = themes.own[0]!;
+  expect(copy.syntax.kw).toBe("#123456");
+  expect(copy.from).toBe("knobas Light");
+  expect(themes.find("knobas-light")!.syntax.kw).not.toBe("#123456");
+  expect(themes.drawn("light").id).toBe(copy.id);
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light copy");
+  // The panel stays open on the copy, and a second change goes to the same copy.
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  const again = q<HTMLInputElement>(".tf-thm-pop .tf-stg-in")!;
+  again.value = "#654321";
+  again.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  expect(themes.own[0]!.syntax.kw).toBe("#654321");
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("knobas Light comes with knobas, so your change went to a copy, knobas Light copy.");
+  toast.action!.run();
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  expect(themes.drawn("light").id).toBe("knobas-light");
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
 });

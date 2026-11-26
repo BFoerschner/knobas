@@ -65,13 +65,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("choosing in a slot keeps the id and writes the properties; a built-in has no swatch buttons, and Duplicate and edit puts the copy in that slot", () => {
+test("choosing in a slot keeps the id and writes the properties; a built-in's swatches are buttons, and Duplicate and edit puts the copy in that slot", () => {
   draw();
   choose("dark", "dracula");
   expect(storage.data.get(APP_SLOT_KEY.dark)).toBe("dracula");
   expect(html.props.get("--sheet-dark")).toBe("#282A36");
   expect(q(".tf-thm-edh h2")?.textContent).toBe("Dracula");
-  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(0);
+  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(32);
   button("Duplicate and edit")!.click();
   flushSync();
   const copy = themes.own[0]!;
@@ -411,4 +411,30 @@ test("Edit on a slot scrolls smoothly to the editor and focuses its heading, the
   } finally {
     HTMLElement.prototype.scrollIntoView = was;
   }
+});
+
+test("a built-in's first colour change makes a copy with it, in the window's slot; opening the panel makes none, and Undo takes it back (#2516)", () => {
+  draw();
+  q('[data-row="ok"]')!.querySelector<HTMLButtonElement>("button.tf-thm-sw")!.click();
+  flushSync();
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  expect(themes.own).toHaveLength(0);
+  const field = q<HTMLInputElement>(".tf-thm-pop .tf-stg-in")!;
+  field.value = "#2E7D32";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  const copy = themes.own[0]!;
+  expect(copy.app!.ok).toBe("#2E7D32");
+  expect(storage.data.get(APP_SLOT_KEY.light)).toBe(copy.id);
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light copy");
+  expect(stage().style.getPropertyValue("--ok")).toBe("#2E7D32");
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("knobas Light comes with knobas, so your change went to a copy, knobas Light copy.");
+  toast.action!.run();
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  expect(storage.data.has(APP_SLOT_KEY.light)).toBe(false);
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
 });

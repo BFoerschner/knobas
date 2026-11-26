@@ -158,6 +158,25 @@
     editingId = copy.id;
   }
 
+  /** A built-in's first colour change (#2516): a copy in the window's slot, which the change goes to, with Undo. */
+  function fork(of: Theme): string | null {
+    const before = themes.appSlot(of.kind);
+    const { id: _id, ...rest } = of;
+    const copy = themes.add({ ...rest, app: { ...(of.app ?? {}) }, name: `${of.name} copy`, from: of.name });
+    if (copy === null) {
+      push({ text: "knobas keeps 64 themes of your own. Delete one to make another." });
+      return null;
+    }
+    themes.chooseApp(copy.id);
+    editingId = copy.id;
+    undoable(`${of.name} comes with knobas, so your change went to a copy, ${copy.name}.`, () => {
+      themes.remove(copy.id);
+      if (themes.appSlot(of.kind) !== before) themes.chooseApp(before);
+      editingId = of.id;
+    });
+    return copy.id;
+  }
+
   function remove(gone: Theme): void {
     const undo = themes.remove(gone.id);
     if (undo === null) return;
@@ -229,7 +248,7 @@
   {/each}
 </div>
 <!-- Not keyed by the theme: the editor stays drawn while another theme is shown, and only its colours change. -->
-<TfAppThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} onduplicate={duplicate} ondelete={remove}>
+<TfAppThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} onduplicate={duplicate} ondelete={remove} onfork={fork}>
   {#snippet band()}
     {#if showBand}
       {@const both = hasApp(editing) && hasCode(editing)}

@@ -4,7 +4,8 @@
   of the app's real code areas (`TfThemePreview.svelte`), with how a diff's unchanged lines draw and whether comments
   slant under it.
 
-  A built-in is read-only: its swatches are not buttons and its first action is *Duplicate and edit*. Each row gives
+  A built-in keeps its colours: its first action is *Duplicate and edit*, and its swatches open their panels as a theme
+  of one's own does, the first colour changed there going to a copy, put where it drew (#2516). Each row gives
   the role's lowest contrast over every surface code is drawn on (`theme/contrast.ts`); under 4.5:1 the row says on
   which, and offers the fix that moves the colour's lightness alone.
 -->
@@ -32,6 +33,7 @@
     onduplicate,
     ondelete,
     onfixcopy,
+    onfork,
   }: {
     theme: Theme;
     themes: Themes;
@@ -41,6 +43,8 @@
     ondelete: (theme: Theme) => void;
     /** A built-in's fix: a copy of it with these colours, where it drew (Björn, 2026-11-22: built-ins keep their colours, and he lightens them). */
     onfixcopy: (theme: Theme, syntax: Partial<Theme["syntax"]>) => void;
+    /** A built-in's first colour change: a copy of it, where it drew, whose id the change goes to; `null` when none could be made. */
+    onfork: (theme: Theme) => string | null;
   } = $props();
 
   /** A short sample of each role, drawn in the role's own class. */
@@ -76,9 +80,20 @@
   const surfaces = $derived(themes.colours(theme.kind));
   const DIFF_DEFAULT = $derived(diffDefault(surfaces));
 
+  /**
+   * The theme a colour change goes to: this one, or for a built-in the copy its first change makes (#2516). A colour the
+   * built-in has already is no change, so a panel opened to look makes no copy.
+   */
+  function changed(same: boolean): string | null {
+    if (own) return theme.id;
+    return same ? null : onfork(theme);
+  }
+
   function setRole(role: Role, next: string | undefined, preview = false): void {
+    const id = changed(next === theme.syntax[role]);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const syntax = { ...t.syntax };
         if (next === undefined) delete syntax[role];
@@ -90,8 +105,10 @@
   }
 
   function setDiff(key: DiffKey, next: string | undefined, preview = false): void {
+    const id = changed(next === theme.diff?.[key]);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const diff = { ...t.diff };
         if (next === undefined) delete diff[key];
@@ -247,7 +264,7 @@
           label={ROLE_NAMES[role]}
           {value}
           fallback={surfaces.ink}
-          editable={own}
+          editable
           resetTo={source ? source.syntax[role] : null}
           resetName={source?.name ?? ""}
           onchange={(next, preview) => setRole(role, next, preview)}
@@ -272,7 +289,7 @@
           label={DIFF_NAMES[key]}
           {value}
           fallback={DIFF_DEFAULT[key]}
-          editable={own}
+          editable
           inkable={false}
           resetTo={source ? (source.diff?.[key] ?? undefined) : null}
           resetName={source?.name ?? ""}

@@ -3,7 +3,7 @@
   and where it came from, its actions (Code colours' own), then the role list written in the theme's own colours (22
   rows under seven headings, a ground and its text in one row with one figure) and the preview beside it.
 
-  A row's swatch sets its key; *Auto* leaves it out, so it is derived again and says *auto*. A row's figure is its
+  A row's swatch sets its key, on a built-in too: its first change goes to a copy in the window's slot (#2516); *Auto* leaves it out, so it is derived again and says *auto*. A row's figure is its
   lowest contrast against what it needs; under it the row says the pair and offers the fix, which moves lightness
   alone, and for a filled pair the ground. Under the States, how far apart the states are for a colour-blind reader,
   and on a theme of one's own *Tell them apart*. Under a fold, the 19 colours knobas works out from the rows.
@@ -31,6 +31,7 @@
     drawnSide,
     onduplicate,
     ondelete,
+    onfork,
     band,
   }: {
     theme: Theme;
@@ -38,6 +39,8 @@
     drawnSide: ThemeKind;
     onduplicate: (theme: Theme) => void;
     ondelete: (theme: Theme) => void;
+    /** A built-in's first colour change: a copy of it in the window's slot, whose id the change goes to; `null` when none could be made (#2516). */
+    onfork: (theme: Theme) => string | null;
     /** What shows over the role list: the import's band (`TfThemeSection.svelte`). */
     band?: Snippet;
   } = $props();
@@ -91,8 +94,11 @@
   }
 
   function setKey(key: AppKey, next: string | undefined, preview = false): void {
+    // A built-in's first change goes to a copy (#2516); a colour it has already is no change, so looking makes none.
+    const id = own ? theme.id : next === theme.app?.[key] ? null : onfork(theme);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const app = { ...t.app };
         if (next === undefined) delete app[key];
@@ -273,7 +279,7 @@
                 label={NAME[key]}
                 value={set[key]}
                 fallback={colours[key as keyof typeof colours] ?? colours.sheet}
-                editable={own}
+                editable
                 leave="Auto"
                 resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
                 resetName={source?.name ?? ""}
@@ -351,7 +357,7 @@
               label={NAME[key]}
               value={set[key]}
               fallback={colours[key as keyof typeof colours] ?? colours.sheet}
-              editable={own}
+              editable
               leave="Auto"
               resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
               resetName={source?.name ?? ""}

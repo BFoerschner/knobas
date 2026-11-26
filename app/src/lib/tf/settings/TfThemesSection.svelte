@@ -94,23 +94,45 @@
     editingId = copy.id;
   }
 
-  /** A built-in's fix: a copy with the fixed colours, put where the original drew, with Undo. */
-  function fixCopy(of: Theme, fixes: Partial<Theme["syntax"]>): void {
+  /**
+   * A copy of a built-in put where it drew, shown in the editor; and what puts the slots back and takes it away again.
+   * While code follows the window's theme and that is the original, to the window's slot, code going on following it.
+   */
+  function copyWhereItDrew(of: Theme, syntax: Theme["syntax"]): { copy: Theme; undo: () => void } | null {
     const { id: _id, ...rest } = of;
     const before = { follows: themes.follows(of.kind), code: themes.slot(of.kind), app: themes.appSlot(of.kind) };
-    const copy = themes.add({ ...rest, ...(of.app ? { app: { ...of.app } } : {}), syntax: { ...of.syntax, ...fixes }, name: `${of.name} copy`, from: of.name });
-    if (copy === null) return void push({ text: "knobas keeps 64 themes of your own. Delete one to make another." });
+    const copy = themes.add({ ...rest, ...(of.app ? { app: { ...of.app } } : {}), syntax, name: `${of.name} copy`, from: of.name });
+    if (copy === null) {
+      push({ text: "knobas keeps 64 themes of your own. Delete one to make another." });
+      return null;
+    }
     if (themes.follows(of.kind) && themes.appDrawn(of.kind).id === of.id && copy.app) themes.chooseApp(copy.id);
     else themes.choose(copy.id);
     editingId = copy.id;
-    const n = Object.keys(fixes).length;
-    undoable(`${of.name} comes with knobas, so a copy was made with ${n === 1 ? "1 colour" : `${n} colours`} fixed.`, () => {
+    const undo = () => {
       themes.remove(copy.id);
       if (before.app !== themes.appSlot(of.kind)) themes.chooseApp(before.app);
       if (before.follows) themes.follow(of.kind);
       else themes.choose(before.code);
       editingId = of.id;
-    });
+    };
+    return { copy, undo };
+  }
+
+  /** A built-in's fix: a copy with the fixed colours, put where the original drew, with Undo. */
+  function fixCopy(of: Theme, fixes: Partial<Theme["syntax"]>): void {
+    const made = copyWhereItDrew(of, { ...of.syntax, ...fixes });
+    if (made === null) return;
+    const n = Object.keys(fixes).length;
+    undoable(`${of.name} comes with knobas, so a copy was made with ${n === 1 ? "1 colour" : `${n} colours`} fixed.`, made.undo);
+  }
+
+  /** A built-in's first colour change (#2516): a copy put where it drew, which the change goes to, with Undo. */
+  function fork(of: Theme): string | null {
+    const made = copyWhereItDrew(of, { ...of.syntax });
+    if (made === null) return null;
+    undoable(`${of.name} comes with knobas, so your change went to a copy, ${made.copy.name}.`, made.undo);
+    return made.copy.id;
   }
 
   function remove(gone: Theme): void {
@@ -203,4 +225,4 @@
   {/each}
 </div>
 <!-- Not keyed by the theme: the preview's code stays drawn while another theme is shown, and only its colours change. -->
-<TfThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} onfixcopy={fixCopy} />
+<TfThemeEditor bind:this={editor} theme={editing} {themes} {drawnSide} {render} onduplicate={duplicate} ondelete={remove} onfixcopy={fixCopy} onfork={fork} />
