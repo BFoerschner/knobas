@@ -27,6 +27,8 @@
 //! - **One waiter per address.** A second send for an address already waited
 //!   on shows the desktop notification and starts no second wait: the click
 //!   on either banner lands on the one thread, and it goes to the same room.
+//!   Not on Windows: there the wait listens on its own toast, so a click on
+//!   the second toast opens nothing (#2529).
 //! - **At most [`WAITER_CAP`] concurrent waiters.** A send beyond it still
 //!   shows -- the reader is told -- but drops the handle, which on every
 //!   backend sends fire-and-forget, and says so at `debug`. A clicked banner
@@ -35,7 +37,7 @@
 //!
 //! A completed wait frees its slot, whichever way it completed. The registry
 //! is tested with an injected backend so the tests show nothing on the OS;
-//! [`platform::show`] is the one real backend and is exercised by the signed
+//! [`platform::Desktop`] is the one real backend and is exercised by the signed
 //! bundle check in `testenv/README.md`.
 //!
 //! ## Platforms
@@ -153,7 +155,8 @@ pub enum Delivery {
     /// Shown, and a thread is waiting on its click.
     Waiting,
     /// Shown; a wait for the same address was already running, so a click on
-    /// either banner lands on it.
+    /// either banner lands on it -- except on Windows, where only the first
+    /// toast's click does.
     AlreadyWaiting,
     /// Shown fire-and-forget: [`WAITER_CAP`] waits were already running.
     OverCap,
@@ -544,7 +547,7 @@ pub mod platform {
         use windows::Foundation::TypedEventHandler;
         use windows::UI::Notifications::{
             ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs,
-            ToastFailedEventArgs, ToastNotification, ToastNotificationManager,
+            ToastFailedEventArgs, ToastNotification, ToastNotificationManager, ToastNotifier,
         };
         use windows::core::{HSTRING, IInspectable, Interface};
 
@@ -565,7 +568,7 @@ pub mod platform {
             let (report, reports) = mpsc::channel::<Reported>();
 
             let activated = report.clone();
-            toast
+            let on_activated = toast
                 .Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
                     move |_, args| {
                         let arguments = args
@@ -580,7 +583,7 @@ pub mod platform {
                 ))
                 .map_err(said)?;
             let dismissed = report.clone();
-            toast
+            let on_dismissed = toast
                 .Dismissed(&TypedEventHandler::<
                     ToastNotification,
                     ToastDismissedEventArgs,
@@ -592,7 +595,7 @@ pub mod platform {
                     Ok(())
                 }))
                 .map_err(said)?;
-            toast
+            let on_failed = toast
                 .Failed(
                     &TypedEventHandler::<ToastNotification, ToastFailedEventArgs>::new(
                         move |_, args| {
@@ -608,16 +611,41 @@ pub mod platform {
             let notifier =
                 ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
                     .map_err(said)?;
-            notifier.Show(&toast).map_err(said)?;
+            let held = Held {
+                toast,
+                notifier,
+                handlers: [on_activated, on_dismissed, on_failed],
+            };
+            held.notifier.Show(&held.toast).map_err(said)?;
             Ok(Box::new(move || {
                 // Held until the wait ends: the handlers live on the toast,
                 // and a toast nothing holds can lose them before a click from
                 // Action Center arrives.
-                let held = (toast, notifier);
                 let action = decide(|| reports.recv().ok());
                 drop(held);
                 action
             }))
+        }
+
+        /// A shown toast, its notifier and its three handler tokens. Dropped
+        /// when the wait ends, or unrun when the notifier dropped the wait
+        /// (a second banner for the address, or past the cap): either way the
+        /// handlers come off the toast, so a toast Windows still holds for
+        /// Action Center keeps no closure or sender of ours alive.
+        struct Held {
+            toast: ToastNotification,
+            notifier: ToastNotifier,
+            /// `Activated`, `Dismissed`, `Failed`, in that order.
+            handlers: [i64; 3],
+        }
+
+        impl Drop for Held {
+            fn drop(&mut self) {
+                let [activated, dismissed, failed] = self.handlers;
+                let _ = self.toast.RemoveActivated(activated);
+                let _ = self.toast.RemoveDismissed(dismissed);
+                let _ = self.toast.RemoveFailed(failed);
+            }
         }
     }
 }
