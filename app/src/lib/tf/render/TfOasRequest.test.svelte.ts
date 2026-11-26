@@ -399,3 +399,56 @@ test("switching to another origin clears typed credentials and editing state so 
     args: { auth: { origin: "https://b.example.com", scheme: "__manual:basic", place: "basic", name: "" } },
   });
 });
+
+const XML_SPEC = JSON.stringify({
+  openapi: "3.0.3",
+  info: { title: "Pets", version: "1" },
+  servers: [{ url: "https://pets.example.com" }],
+  paths: {
+    "/pets": {
+      post: {
+        requestBody: { content: { "application/xml": { schema: { $ref: "#/components/schemas/Pet" } }, "application/json": { schema: { $ref: "#/components/schemas/Pet" } } } },
+        responses: { "200": { description: "OK", content: { "text/xml": { schema: { $ref: "#/components/schemas/Pet" } } } } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      Pet: {
+        type: "object",
+        xml: { name: "pet", namespace: "urn:pets", prefix: "p" },
+        properties: { id: { type: "integer", example: 7, xml: { attribute: true } }, tags: { type: "array", xml: { wrapped: true }, items: { type: "string", example: "dog", xml: { name: "tag" } } } },
+      },
+    },
+  },
+});
+const PET_XML = '<?xml version="1.0" encoding="UTF-8"?>\n<p:pet xmlns:p="urn:pets" id="7">\n  <tags>\n    <tag>dog</tag>\n  </tags>\n</p:pet>';
+
+test("an XML body and answer: the Reference shows XML made from the schema, and Try-it starts its XML body with it (#2525)", async () => {
+  view = mount(TfOpenApi, { target, props: { path: "pets.json", text: XML_SPEC, engine: localEngine(), at: "post /pets", repo: "repo" } });
+  await vi.waitFor(() => expect(button("Request")).toBeDefined(), { timeout: 10_000, interval: 20 });
+  await settle();
+  const section = (head: string) => [...target.querySelectorAll("section")].find((s) => text(s.querySelector("h3")).startsWith(head))!;
+  // The body shows its first media type, application/xml: XML, not JSON.
+  expect(section("Request body").querySelector(".tf-oas-ex")!.textContent).toBe(PET_XML);
+  expect(section("Responses").querySelector(".tf-oas-ex")!.textContent).toBe(PET_XML);
+  // Switching the body to JSON keeps JSON as it was.
+  [...section("Request body").querySelectorAll<HTMLButtonElement>(".tf-seg button")].find((b) => text(b) === "application/json")!.click();
+  flushSync();
+  expect(JSON.parse(section("Request body").querySelector(".tf-oas-ex")!.textContent!)).toEqual({ id: 7, tags: ["dog"] });
+
+  button("Request")!.click();
+  await settle();
+  const body = () => target.querySelector<HTMLTextAreaElement>("textarea.tf-oas-body")!;
+  const media = target.querySelector<HTMLSelectElement>('select[aria-label="Media type"]')!;
+  // JSON is the media type a request starts with where there is one; its body is JSON.
+  expect(media.value).toBe("application/json");
+  expect(JSON.parse(body().value)).toEqual({ id: 7, tags: ["dog"] });
+  pickSelect(media, "application/xml");
+  expect(body().value).toBe(PET_XML);
+  button("Start again from the spec")!.click();
+  flushSync();
+  expect(body().value).toBe(PET_XML);
+  // What goes out says it is XML.
+  expect(text(target.querySelector(".tf-oas-hdrs"))).toContain("application/xml");
+});

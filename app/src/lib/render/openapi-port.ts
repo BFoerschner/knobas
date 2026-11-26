@@ -165,9 +165,9 @@ export class SpecSession {
     return this.#engine(this.#id, { kind: "uses", name }) as Promise<Uses>;
   }
 
-  /** An example the schema allows, made from it where it names none; `choice` picks the top `oneOf`'s. */
-  sample(base: string, node: unknown, direction: Direction = "any", choice = 0): Promise<unknown> {
-    return this.#engine(this.#id, { kind: "sample", base, node, direction, choice });
+  /** An example the schema allows, made from it where it names none; `choice` picks the top `oneOf`'s; XML text for an XML `media`. */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, media?: string): Promise<unknown> {
+    return this.#engine(this.#id, { kind: "sample", base, node, direction, choice, ...(media === undefined ? {} : { media }) });
   }
 
   /** The spec as a Bruno collection: its files, by path from its folder. */
