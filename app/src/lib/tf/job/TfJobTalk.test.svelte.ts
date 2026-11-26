@@ -7,6 +7,7 @@
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { ranked } from "../filter/test-fuzzy";
 
 import type { EntityDetail, LinkEntry, Thread } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
@@ -476,6 +477,8 @@ test("the drawer's filter keeps the rows it matches", async () => {
   input.value = "pages";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  // The ranking's answer (#2535); with no app behind the suite, the filter as it was.
+  await ranked();
   expect([...target.querySelectorAll(".tf-lk-name")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
 });
 
