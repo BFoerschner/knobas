@@ -15,9 +15,13 @@
   there is an offer. *Download and restart* downloads, checks and installs in one go, saying each step in the line.
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { DbState } from "../ipc/app";
+  import { installInputModality } from "../tf/input-modality";
   import type { Updates } from "../tf/update.svelte";
   import { bootLine, bootStep } from "../tf/settings/updates";
+
+  onMount(() => installInputModality());
 
   let {
     db,
@@ -247,8 +251,14 @@
     color: var(--ink);
   }
 
-  .acts :focus-visible, .boot-upd :focus-visible {
-    outline: var(--focus-w) solid var(--focus);
+  :global(:where(:root[data-focus-ring])) .acts :focus-visible,
+  :global(:where(:root[data-focus-ring])) .boot-upd :focus-visible {
+    outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent);
     outline-offset: var(--focus-off);
+  }
+
+  :global(:where(:root[data-focus-ring="fade"])) .acts :focus-visible,
+  :global(:where(:root[data-focus-ring="fade"])) .boot-upd :focus-visible {
+    transition: outline-color var(--focus-fade) ease-out;
   }
 </style>
