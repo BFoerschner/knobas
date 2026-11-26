@@ -284,6 +284,23 @@ impl<W: HasWindowHandle + 'static> SiteHost for WryHost<W> {
         (self.focus_shell)();
     }
 
+    fn window_active(&self) -> Option<bool> {
+        #[cfg(windows)]
+        {
+            use raw_window_handle::RawWindowHandle;
+            match self.window.window_handle().map(|handle| handle.as_raw()) {
+                Ok(RawWindowHandle::Win32(handle)) => {
+                    Some(crate::win::window_active(handle.hwnd.get()))
+                }
+                _ => None,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
     fn remakes_to_confine(&self) -> bool {
         cfg!(windows)
     }
@@ -334,9 +351,13 @@ impl SiteView for WryView {
 
     fn set_visible(&self, visible: bool) {
         let _ = self.view.set_visible(visible);
-        // Windows: a hidden site holds less memory at once (decisions §14).
+        // Windows: a hidden site holds less memory at once (decisions §14),
+        // and the mouse hook runs only while a site is shown (#2528).
         #[cfg(windows)]
-        crate::win::memory(&self.view, visible);
+        {
+            crate::win::memory(&self.view, visible);
+            self._windows.shown(visible);
+        }
     }
 
     fn focus(&self) {
@@ -426,6 +447,17 @@ impl SiteView for WryView {
         #[cfg(windows)]
         {
             None
+        }
+    }
+
+    fn holds_keyboard(&self) -> Option<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            Some(crate::mac::holds_keyboard(&self.view))
+        }
+        #[cfg(windows)]
+        {
+            Some(self._windows.holds_keyboard())
         }
     }
 
