@@ -115,12 +115,15 @@ test("pause on the toolbar stops interception at once, survives a restart, and r
   const host = fakeHost({ answer: knobas([JIRA], opened) });
   const storage = fakeStorage();
   const statuses = [];
-  const { router } = await started({ host, storage, onStatus: (s) => statuses.push(s) });
+  const clock = fakeClock();
+  const { router } = await started({ host, storage, clock, onStatus: (s) => statuses.push(s) });
   await router.togglePause();
   assert.equal(router.status().paused, true);
   assert.equal(statuses.at(-1).paused, true);
+  const sent = host.sent.length;
+  clock.advance(60_000); // stale rules are not refreshed while paused either
   assert.equal(router.onBeforeRequest(nav(PAY)), undefined);
-  assert.equal(host.of("handoff").length, 0);
+  assert.equal(host.sent.length, sent, "paused, the extension sends knobas nothing");
 
   const again = await started({ host, storage });
   assert.equal(again.router.status().paused, true);
