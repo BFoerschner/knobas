@@ -201,7 +201,7 @@ test("the working tree is searched on disk, and where the text came from is said
   await settle(200);
   expect(asked[0]).toMatchObject({ working: true, commit: null });
   expect(target.querySelector(".tf-ftree [role='status']")!.textContent).toContain("in knobas's copy of main, as of the last sync");
-  expect(target.textContent).toContain("Clone the repository to search any branch.");
+  expect(target.textContent).toContain("A clone searches any branch.");
 });
 
 test("a pattern that does not parse, and a branch nothing can search, say why", async () => {

@@ -98,14 +98,25 @@ export class TextSearch {
     this.reading = false;
   }
 
-  #run() {
+  #run(retry = false) {
     this.#timer = null;
     const mine = this.#asked;
     const where = this.#where();
     const query: TextQuery = { text: this.typed, case_sensitive: this.caseSensitive, regex: this.regex, names: this.names };
     this.#port(where.at, where.commit, where.working, where.branch, query).then(
       (found) => {
-        if (mine !== this.#asked || found.stale) return;
+        if (mine !== this.#asked) return;
+        if (found.stale) {
+          // The newest question stopped by another search of the same tree (another tab on it): asked once more, then
+          // said, so the list never waits on an answer that will not come.
+          if (!retry) {
+            this.#run(true);
+            return;
+          }
+          this.failed = "another search of this tree stopped this one. Press Enter to search again.";
+          this.reading = false;
+          return;
+        }
         this.found = found;
         this.failed = null;
         this.reading = false;

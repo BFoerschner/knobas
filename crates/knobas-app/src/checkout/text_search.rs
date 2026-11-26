@@ -340,8 +340,9 @@ fn is_inside_char(byte: u8) -> bool {
 
 // -- the scan -------------------------------------------------------------------
 
-/// The searches under way, one lane a place searched (a clone, or the
-/// index's copy of a repository): each search takes its lane's next turn,
+/// The searches under way, one lane a place searched (the tab's entity, a
+/// repository or a branch): each search takes its lane's next turn when it is
+/// asked, before it reads anything,
 /// and a scan whose turn is no longer its lane's last stops, so the keys
 /// typed before the last one cost nothing more once it starts.
 fn lanes() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Arc<AtomicU64>>> {
@@ -536,13 +537,14 @@ pub async fn scan_index(
     index: &knobas_files::FileIndex,
     repo: &str,
     matcher: &Matcher,
+    turn: &Turn,
 ) -> Option<TextFound> {
     let repos = index.repos();
     let (no, branch) = repos
         .iter()
         .find(|(_, known)| known.entity_id == repo)
         .map(|(no, known)| (*no, known.branch.clone()))?;
-    let turn = Turn::take(repo);
+    let turn = turn.clone();
     let index = index.clone();
     let matcher = matcher.clone();
     tokio::task::spawn_blocking(move || {
@@ -606,9 +608,14 @@ pub async fn scan_index(
 /// `query` over the tree at `sha` in the clone at `path`, its blobs read in
 /// knobas's own process (git where that cannot answer one, as every read of
 /// a clone): `None` where the clone does not hold that commit.
-pub async fn scan_tree(path: &Path, sha: &str, matcher: &Matcher) -> Option<TextFound> {
+pub async fn scan_tree(
+    path: &Path,
+    sha: &str,
+    matcher: &Matcher,
+    turn: &Turn,
+) -> Option<TextFound> {
     let tree = super::local::tree(path, sha).await?;
-    let turn = Turn::take(&path.to_string_lossy());
+    let turn = turn.clone();
     let path = path.to_path_buf();
     let matcher = matcher.clone();
     let runtime = tokio::runtime::Handle::current();
@@ -660,10 +667,10 @@ pub async fn scan_tree(path: &Path, sha: &str, matcher: &Matcher) -> Option<Text
 /// every file git lists there, tracked or untracked and not ignored
 /// ([`super::working::listing`], the list the tab's marks come from), never
 /// a link and never a submodule. `None` where git cannot list it.
-pub async fn scan_disk(path: &Path, matcher: &Matcher) -> Option<TextFound> {
+pub async fn scan_disk(path: &Path, matcher: &Matcher, turn: &Turn) -> Option<TextFound> {
     let (status, index) = super::working::listing(path).await.ok()?;
     let head = super::working::head(path).await;
-    let turn = Turn::take(&path.to_string_lossy());
+    let turn = turn.clone();
     let root = path.to_path_buf();
     let matcher = matcher.clone();
     tokio::task::spawn_blocking(move || {
@@ -737,6 +744,11 @@ pub async fn search(
     branch: Option<&str>,
     query: &TextQuery,
 ) -> Result<TextFound, crate::IpcError> {
+    // The turn is taken before anything is awaited: the reads below finish in
+    // any order, and a search asked before this one must never take a later
+    // turn than it and stop it (the page draws only the newest question's
+    // answer, and a stopped one draws nothing).
+    let turn = Turn::take(at);
     let matcher = match Matcher::new(query) {
         Ok(matcher) => matcher,
         Err(why) => {
@@ -760,7 +772,7 @@ pub async fn search(
                 "This repository is not cloned on this computer, so it has no working tree here.",
             ));
         };
-        return Ok(scan_disk(&clone, &matcher)
+        return Ok(scan_disk(&clone, &matcher, &turn)
             .await
             .unwrap_or_else(|| TextFound::nowhere("git could not list this working tree.")));
     }
@@ -772,7 +784,7 @@ pub async fn search(
                 .map(|tip| tip.commit),
         };
         if let Some(sha) = sha
-            && let Some(found) = scan_tree(clone, &sha, &matcher).await
+            && let Some(found) = scan_tree(clone, &sha, &matcher, &turn).await
         {
             return Ok(found);
         }
@@ -784,7 +796,7 @@ pub async fn search(
         .map(|known| known.branch.clone());
     match indexed {
         Some(indexed) if index_shows(at, &repo, branch, &indexed) => {
-            Ok(scan_index(index, &repo, &matcher).await.unwrap_or_else(|| {
+            Ok(scan_index(index, &repo, &matcher, &turn).await.unwrap_or_else(|| {
                 TextFound::nowhere("knobas holds no copy of this repository's files.")
             }))
         }
@@ -804,6 +816,12 @@ pub async fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A turn of a lane of its own: tests run side by side.
+    fn turn() -> Turn {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        Turn::take(&format!("test-lane-{}", NEXT.fetch_add(1, Ordering::SeqCst)))
+    }
 
     fn asked(text: &str, case_sensitive: bool, regex: bool) -> TextQuery {
         TextQuery {
@@ -968,7 +986,7 @@ mod tests {
         let (dir, main, feature) = branches();
         let at = dir.path();
         let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
-        let on_feature = scan_tree(at, &feature, &matcher)
+        let on_feature = scan_tree(at, &feature, &matcher, &turn())
             .await
             .expect("the clone holds it");
         assert_eq!(on_feature.from, TextFrom::Clone);
@@ -983,7 +1001,7 @@ mod tests {
         // The binary file holds the word too: skipped and counted.
         assert_eq!(on_feature.skipped, 1);
         assert_eq!(on_feature.searched, 3);
-        let on_main = scan_tree(at, &main, &matcher).await.unwrap();
+        let on_main = scan_tree(at, &main, &matcher, &turn()).await.unwrap();
         assert_eq!(
             found_lines(&on_main),
             vec!["src/pay.rs:2:    [retry]_on_main();".to_owned()]
@@ -993,7 +1011,7 @@ mod tests {
         assert_eq!(git(at, &["status", "--porcelain"]), "");
         // A commit the clone does not hold is no answer.
         let missing = "0123456789abcdef0123456789abcdef01234567";
-        assert!(scan_tree(at, missing, &matcher).await.is_none());
+        assert!(scan_tree(at, missing, &matcher, &turn()).await.is_none());
     }
 
     #[tokio::test]
@@ -1009,7 +1027,7 @@ mod tests {
         git(at, &["commit", "-q", "-m", "many"]);
         let sha = git(at, &["rev-parse", "HEAD"]);
         let matcher = Matcher::new(&asked("hit", false, false)).unwrap();
-        let first = scan_tree(at, &sha, &matcher).await.unwrap();
+        let first = scan_tree(at, &sha, &matcher, &turn()).await.unwrap();
         assert!(first.cut);
         let shown: usize = first.files.iter().map(|file| file.hits.len()).sum();
         assert_eq!(shown, MOST_HITS);
@@ -1019,7 +1037,7 @@ mod tests {
         assert_eq!(first.files[0].more, 10);
         // The same answer each time, whichever thread read what.
         for _ in 0..5 {
-            let again = scan_tree(at, &sha, &matcher).await.unwrap();
+            let again = scan_tree(at, &sha, &matcher, &turn()).await.unwrap();
             assert_eq!(found_lines(&again), found_lines(&first));
         }
     }
@@ -1038,7 +1056,7 @@ mod tests {
         // A tracked file deleted on disk is no line.
         std::fs::remove_file(at.join("README.md")).unwrap();
         let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
-        let found = scan_disk(at, &matcher).await.expect("a working tree");
+        let found = scan_disk(at, &matcher, &turn()).await.expect("a working tree");
         assert_eq!(found.from, TextFrom::WorkingTree);
         assert_eq!(
             found.commit.as_deref(),
@@ -1060,12 +1078,12 @@ mod tests {
         let mut query = asked("PAY", false, false);
         query.names = true;
         // Smart case: an upper-case query matches its case, in names too.
-        let exact = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap())
+        let exact = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap(), &turn())
             .await
             .unwrap();
         assert!(exact.names.is_empty());
         query.text = "pay".to_owned();
-        let any = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap())
+        let any = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap(), &turn())
             .await
             .unwrap();
         assert_eq!(any.names, vec!["src/pay.rs".to_owned()]);
@@ -1117,7 +1135,7 @@ mod tests {
             (8, "src/a.rs", Some("retry elsewhere\n")),
         ]);
         let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
-        let found = scan_index(&index, "gitea:acme/pay", &matcher)
+        let found = scan_index(&index, "gitea:acme/pay", &matcher, &turn())
             .await
             .expect("indexed");
         assert_eq!(found.from, TextFrom::Index);
@@ -1133,13 +1151,13 @@ mod tests {
         assert_eq!(found.searched, 2);
         // A repository the index does not know is no answer.
         assert!(
-            scan_index(&index, "gitea:acme/other", &matcher)
+            scan_index(&index, "gitea:acme/other", &matcher, &turn())
                 .await
                 .is_none()
         );
         // A pattern scans the same text.
         let pattern = Matcher::new(&asked(r"^let \w+", false, true)).unwrap();
-        let by_pattern = scan_index(&index, "gitea:acme/pay", &pattern)
+        let by_pattern = scan_index(&index, "gitea:acme/pay", &pattern, &turn())
             .await
             .unwrap();
         assert_eq!(
@@ -1156,6 +1174,27 @@ mod tests {
         assert!(first.passed());
         assert!(!second.passed());
         assert!(!other.passed());
+    }
+
+    #[tokio::test]
+    async fn a_scan_whose_turn_was_overtaken_answers_stale_and_the_newer_one_answers() {
+        let (dir, _, feature) = branches();
+        let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
+        // Asked in this order; the newer one's read starts first, as reads may.
+        let older = Turn::take("lane-test-overtaken");
+        let newer = Turn::take("lane-test-overtaken");
+        let answered = scan_tree(dir.path(), &feature, &matcher, &newer)
+            .await
+            .unwrap();
+        assert!(!answered.stale);
+        assert_eq!(found_lines(&answered).len(), 2);
+        let late = scan_tree(dir.path(), &feature, &matcher, &older)
+            .await
+            .unwrap();
+        assert!(late.stale);
+        assert!(late.files.is_empty());
+        // The older scan reading last did not stop the newer one's turn.
+        assert!(!newer.passed());
     }
     #[test]
     fn the_index_stands_for_the_repository_and_for_the_branch_it_reads_only() {
@@ -1207,7 +1246,7 @@ mod tests {
             let matcher = Matcher::new(query).unwrap();
             for run in 0..3 {
                 let started = std::time::Instant::now();
-                let found = scan_tree(at, &head, &matcher).await.unwrap();
+                let found = scan_tree(at, &head, &matcher, &turn()).await.unwrap();
                 println!(
                     "tree {name} run {run}: {:?} searched {} skipped {} files {} cut {}",
                     started.elapsed(),
@@ -1219,7 +1258,7 @@ mod tests {
             }
             for run in 0..2 {
                 let started = std::time::Instant::now();
-                let found = scan_disk(at, &matcher).await.unwrap();
+                let found = scan_disk(at, &matcher, &turn()).await.unwrap();
                 println!(
                     "disk {name} run {run}: {:?} searched {} files {} cut {}",
                     started.elapsed(),

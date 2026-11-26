@@ -104,7 +104,7 @@
       <p class="tf-gonote">{plural(found.skipped, "binary or large file was", "binary or large files were")} not searched.</p>
     {/if}
     {#if found.from === "index"}
-      <p class="tf-gonote">Not cloned here, so the default branch's text is searched. Clone the repository to search any branch.</p>
+      <p class="tf-gonote">No clone on this computer holds this commit, so knobas's copy of the default branch was searched. A clone searches any branch.</p>
     {/if}
   {/if}
 </div>
