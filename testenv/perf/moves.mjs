@@ -131,8 +131,9 @@ const HL_PLACES = [
   SPACED("file", FILE),
   SPACED("diff", COMMIT),
   SPACED("docs-code", "#/page/confluence%3Asepa"),
-  // The older Cascadia kept (ux29): it loads as the file draws, at the current one's metrics, so nothing moves when it lands.
-  { name: "older-cascadia-file", fixture: true, store: { "knobas.code.release": "2009.22" }, start: "#/time", go: FILE, hash: FILE, away: "#/time", track: CODE_LINES },
+  // The release that is not the default kept (ux29; 2009.22 is the default since #2516, so the newer one is the kept
+  // case): it loads as the file draws, at the default's metrics, so nothing moves when it lands.
+  { name: "newer-cascadia-file", fixture: true, store: { "knobas.code.release": "2407.24" }, start: "#/time", go: FILE, hash: FILE, away: "#/time", track: CODE_LINES },
   ...["tanstack", "shiki", "pierre"].map((engine) => ({
     name: `hl-preview-${engine}`, fixture: true, once: true, start: CODE_COLOURS, ...(engine === "pierre" ? { store: { "knobas.highlighter": "shiki" } } : {}),
     ...RADIO(ENGINE[engine]), hash: null, ready: `${shown} input[name=tf-thm-engine][value=${engine}]:checked`, track: CODE_LINES, away: "#/settings",
