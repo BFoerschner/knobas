@@ -26,13 +26,18 @@ export interface TextWhere {
 
 export type TextPort = (at: string, commit: string | null, working: boolean, branch: string | null, query: TextQuery) => Promise<TextFound>;
 
-export const ipcTextPort: TextPort = entityTextSearch;
+export const ipcTextPort: TextPort = (...asked) => entityTextSearch(...asked);
 
 let asked = $state<{ repoId: string; text: string } | null>(null);
 
 /** *Search in repository*: the words for `repoId`'s Files tab, which reads them when it shows. */
 export function askText(repoId: string, text: string): void {
   asked = { repoId, text };
+}
+
+/** No words wait: for tests. */
+export function forgetAsked(): void {
+  asked = null;
 }
 
 /** The words handed to `repoId`'s tab, once; `null` where none wait. Reactive: a tab's effect re-runs on a hand-off. */

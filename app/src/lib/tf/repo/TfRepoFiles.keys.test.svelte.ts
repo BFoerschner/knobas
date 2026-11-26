@@ -15,6 +15,7 @@ import { createRendererDefaults } from "../../render/defaults.svelte";
 import { pageContext } from "../kept-pages.svelte";
 import { layers } from "../layers.svelte";
 import { fileHash } from "./repo";
+import { keyHint } from "../../shell/platform";
 
 const REPO = "gitea:tidewater/payout-service";
 const SHA = "4c1d0aa9e2b7c4d9018e6a2b3c4d5e6f70819200";
@@ -282,7 +283,7 @@ test("T is not taken while a dialog or the launcher is open over the page", asyn
 test("the tree's footer names its keys", async () => {
   draw(stand());
   await settle();
-  expect(target.querySelector(".tf-ftree-keys")?.textContent).toBe("T go to file↑↓ move←→ fold");
+  expect(target.querySelector(".tf-ftree-keys")?.textContent).toBe(`T go to file${keyHint("⌘⇧F")} text↑↓ move←→ fold`);
 });
 
 test("the file header says the size, the lines and the commit, and More holds Edit and History (the source's page is Open in… › Browser)", async () => {
