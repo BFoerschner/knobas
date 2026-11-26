@@ -556,6 +556,10 @@ _Avoid_: whitelist, trusted site, base URL (the source's own, which is always al
 A username and password saved for a [site](#site), kept in its source's keychain item beside the credential and typed into the site's own sign-in form: on *Fill sign-in*, and by itself once a page loads where the adapter says its sign-in form is. Only on the source's own origin, with "remember me" ticked; never a one-time code, never a provider's page. Settings shows the username alone (ADR-0050, ux29).
 _Avoid_: account (Uptime Kuma's second API credential), saved password (says where, not what), auto-login
 
+**Link handoff**:
+Opening matching external URLs for an opted-in [source](#source) directly in knobas through the Firefox Native Messaging host (`dev.knobas.desktop`), and any mirrored item's URL through the OS `knobas://open?url=...` scheme, which someone asks for explicitly. Configured per source in Settings › Sources as *Open matching links in knobas*, defaulting to *Known items only* (`known_items`, mirrored items resolved through `resolve_url` and declared `UrlForm` patterns) with an optional *Whole source* (`whole_source`) mode that routes non-item URLs to the source's [site](#site) when *Open its pages inside knobas* is on. Every *Open in browser* action in knobas records a short-lived one-shot bypass in memory so Firefox lets that navigation load normally without looping back into knobas (ADR-0061).
+_Avoid_: URL interceptor, redirector, protocol proxy
+
 **Update**:
 A newer knobas than the one running, offered on Settings › Updates and marked by a dot on the Settings cog. knobas
 finds it in its own GitHub releases, downloads it on a press, checks it against its own signing keys, backs up, and

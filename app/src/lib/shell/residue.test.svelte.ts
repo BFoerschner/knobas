@@ -360,6 +360,39 @@ vi.mock("../ipc/app", () => ({
     deferred({ dir: "/s/knobas-rendered", set: null, default_dir: "/s", place: "clones", folders: 0, bytes: 0, cap_bytes: 4 * 1024 ** 3 }),
   setFolderRenderStore: () => new Promise(() => {}),
   clearFolderRenderStore: () => new Promise(() => {}),
+  sourceLinkHandoff: (source: string) => deferred({ source, enabled: false, scope: "known_items" }),
+  setSourceLinkHandoff: (source: string, enabled: boolean, scope: string) => deferred({ source, enabled, scope }),
+  firefoxHostStatus: () =>
+    deferred({
+      installed: false,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: null,
+      matches_current: false,
+    }),
+  installFirefoxHost: () =>
+    deferred({
+      installed: true,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: "/tmp/knobas",
+      matches_current: true,
+    }),
+  uninstallFirefoxHost: () =>
+    deferred({
+      installed: false,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: null,
+      matches_current: false,
+    }),
+  recordBrowserBypass: () => deferred(true),
 }));
 
 /**
@@ -673,6 +706,7 @@ const TfPwWrite = (await import("../tf/passwords/TfPwWrite.svelte")).default;
 const TfPwFile = (await import("../tf/passwords/TfPwFile.svelte")).default;
 const { model: passwordModel } = await import("../tf/passwords/model");
 const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svelte")).default;
+const TfLinkHandoffSection = (await import("../tf/settings/TfLinkHandoffSection.svelte")).default;
 
 /** The Passwords page's reads (ADR-0056), answering late: one source, one folder, one entry with a code. */
 function passwordPorts() {
@@ -4037,6 +4071,21 @@ const CASES: Case[] = [
           offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
           synced: true,
           facts: () => deferred({ entries: 1, folders: 1, formats: [["keepass", 1]] } as never),
+        },
+      }),
+    }),
+  },
+  {
+    /** Per-source Link handoff Settings section (ADR-0061): its setting and Firefox host status, answering late. */
+    name: "TfLinkHandoffSection",
+    source: "lib/tf/settings/TfLinkHandoffSection.svelte",
+    open: (target) => ({
+      app: mount(TfLinkHandoffSection, {
+        target,
+        props: {
+          source: "jira",
+          name: "Tidewater Jira",
+          openInside: false,
         },
       }),
     }),

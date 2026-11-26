@@ -16,7 +16,9 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 const opened: string[] = [];
+const bypassed: string[] = [];
 let fail: Error | null = null;
+let bypassFail: Error | null = null;
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: async (url: string) => {
@@ -25,11 +27,20 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   },
 }));
 
+vi.mock("../ipc/app", () => ({
+  recordBrowserBypass: async (url: string) => {
+    bypassed.push(url);
+    if (bypassFail) throw bypassFail;
+  },
+}));
+
 const { openExternal } = await import("./open-external");
 
 beforeEach(() => {
   opened.length = 0;
+  bypassed.length = 0;
   fail = null;
+  bypassFail = null;
 });
 
 test("opens http and https", async () => {
@@ -89,4 +100,21 @@ test("the scheme is what the URL parser says it is, not what the string looks li
 test("a failure from the opener propagates", async () => {
   fail = new Error("no handler for https");
   await expect(openExternal("https://127.0.0.1:8443/x")).rejects.toThrow("no handler for https");
+});
+
+/** ADR-0061: *Open in browser* records a one-shot bypass before launching the OS opener, never on a refused scheme. */
+test("records a one-shot browser bypass before opening http(s) URLs and tolerates bridge refusal", async () => {
+  const url = "https://127.0.0.1:8443/browse/PAY-231";
+  await openExternal(url);
+  expect(bypassed).toEqual([url]);
+  expect(opened).toEqual([url]);
+
+  bypassed.length = 0;
+  opened.length = 0;
+  await expect(openExternal("javascript:alert(1)")).rejects.toThrow(/refused/i);
+  expect(bypassed).toEqual([]);
+
+  bypassFail = new Error("bridge not ready");
+  await openExternal(url);
+  expect(opened).toEqual([url]);
 });
