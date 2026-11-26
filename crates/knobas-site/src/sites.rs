@@ -1396,6 +1396,7 @@ impl Sites {
             }
             let back = self.book().keyboard_on_blur.take();
             let site = back.filter(|source| self.book().sites.get(source).is_some_and(Site::visible));
+            tracing::debug!(site = ?site, "window back in front: the keyboard to the site, else to knobas");
             match site.and_then(|source| view(&source)) {
                 Some(view) => view.focus(),
                 None => {
@@ -1420,6 +1421,7 @@ impl Sites {
                 .into_iter()
                 .find(|(source, recorded)| holds_keyboard(source, *recorded))
                 .map(|(source, _)| source);
+            tracing::debug!(holder = ?holder, "window went behind another");
             let mut book = self.book();
             book.away = true;
             book.keyboard_on_blur = holder;
