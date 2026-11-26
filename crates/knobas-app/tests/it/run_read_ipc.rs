@@ -372,8 +372,24 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
         let at = format!("2026-08-02T{:02}:00:00Z", n);
         build(&pool, &tc, 1100 + n, "Payout_Tests", "SUCCESS", &at).await;
     }
-    build(&pool, &tc, 1200, "Payout_Tests", "running", "2026-08-03T00:00:00Z").await;
-    let other = build(&pool, &tc, 2001, "Payout_Lint", "FAILURE", "2026-08-03T00:00:00Z").await;
+    build(
+        &pool,
+        &tc,
+        1200,
+        "Payout_Tests",
+        "running",
+        "2026-08-03T00:00:00Z",
+    )
+    .await;
+    let other = build(
+        &pool,
+        &tc,
+        2001,
+        "Payout_Lint",
+        "FAILURE",
+        "2026-08-03T00:00:00Z",
+    )
+    .await;
     let read_one = failures.remove(0);
     mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&read_one), &[])
         .await
@@ -395,16 +411,34 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
     assert_eq!(drawn, 12, "the row draws its last twelve");
     let mut expected = failures.clone();
     expected.sort();
-    assert_eq!(unread, expected, "thirteen unread failures, none of them drawn");
-    assert_eq!(unread_of(pool.clone(), lint.clone()).await.1, [other.clone()]);
+    assert_eq!(
+        unread, expected,
+        "thirteen unread failures, none of them drawn"
+    );
+    assert_eq!(
+        unread_of(pool.clone(), lint.clone()).await.1,
+        std::slice::from_ref(&other)
+    );
 
     let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &[], std::slice::from_ref(&tests))
         .await
         .unwrap();
-    assert_eq!(wrote.len(), 13, "the pipeline's mark writes what the list named");
+    assert_eq!(
+        wrote.len(),
+        13,
+        "the pipeline's mark writes what the list named"
+    );
     assert!(unread_of(pool.clone(), tests.clone()).await.1.is_empty());
-    assert_eq!(unread_of(pool.clone(), lint).await.1, [other], "another pipeline's stays");
+    assert_eq!(
+        unread_of(pool.clone(), lint).await.1,
+        [other],
+        "another pipeline's stays"
+    );
 
     mark_runs_unread_inner(&pool, &wrote).await.unwrap();
-    assert_eq!(unread_of(pool.clone(), tests).await.1, expected, "Undo brings them back");
+    assert_eq!(
+        unread_of(pool.clone(), tests).await.1,
+        expected,
+        "Undo brings them back"
+    );
 }

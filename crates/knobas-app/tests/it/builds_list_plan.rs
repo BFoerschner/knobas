@@ -220,7 +220,11 @@ async fn the_unread_failures_read_one_range() {
         .iter()
         .find(|p| p.entity_id == "teamcity:buildType:Long")
         .expect("the long pipeline is listed");
-    assert_eq!(long.unread.len(), unread as usize, "every unread failure, past the twelve");
+    assert_eq!(
+        long.unread.len(),
+        unread as usize,
+        "every unread failure, past the twelve"
+    );
     let (stored,): (i64,) = sqlx::query_as("select count(*) from sync.item_run")
         .fetch_one(&pool)
         .await
