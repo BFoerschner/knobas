@@ -12,9 +12,13 @@
 //!    removed with the last, sees every key before the first responder.
 //! 4. The monitor sees a key the page did not use twice, with one time stamp:
 //!    [`crate::keys::Keyboard`] counts it once.
-//! 5. The user agent names a Safari, so sites do not answer "unsupported
+//! 5. The mouse's back (3) and forward (4) buttons: a second local monitor,
+//!    with the first, takes a press whose hit view is a site's and hands its
+//!    release to the site's mouse hook (#2528). A press over knobas's own
+//!    page passes: the page has its own handler.
+//! 6. The user agent names a Safari, so sites do not answer "unsupported
 //!    browser".
-//! 6. A confined site (ux30, [`crate::confine`]): a `WKContentRuleList`
+//! 7. A confined site (ux30, [`crate::confine`]): a `WKContentRuleList`
 //!    refuses every load the rule refuses, frames included, and the
 //!    navigation delegate cancels such a frame before it starts. WebRTC is
 //!    off on such a view, since no rule list sees UDP.
@@ -34,7 +38,7 @@ use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore, WKWebsiteDataStor
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtDarwin, WebViewExtDarwin, WebViewExtMacOS};
 
 use crate::confine::Confine;
-use crate::host::{Hooks, KeyHook, LeaveFreely, ViewEvent, ViewSpec};
+use crate::host::{Hooks, KeyHook, LeaveFreely, MouseHook, ViewEvent, ViewSpec};
 use crate::keys::{Key, Press};
 
 /// The macOS release whose WebKit keeps a data store per identifier.
@@ -612,6 +616,7 @@ fn load(web: &AnyObject, url: &str) {
 struct Route {
     view: Retained<AnyObject>,
     key: KeyHook,
+    mouse: MouseHook,
 }
 
 /// What knobas does with a key its own page holds: whether it took it.
@@ -620,6 +625,7 @@ pub type ShellKeys = Rc<dyn Fn(&Press) -> bool>;
 thread_local! {
     static ROUTES: RefCell<Vec<Route>> = const { RefCell::new(Vec::new()) };
     static MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static MOUSE_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     static SHELL_KEYS: RefCell<Option<ShellKeys>> = const { RefCell::new(None) };
 }
 
@@ -703,9 +709,85 @@ fn install_monitor() {
 }
 
 fn remove_monitor() {
-    if let Some(monitor) = MONITOR.with(|slot| slot.borrow_mut().take()) {
-        // SAFETY: the object `addLocalMonitor…` answered.
-        unsafe { NSEvent::removeMonitor(&monitor) };
+    for slot in [&MONITOR, &MOUSE_MONITOR] {
+        if let Some(monitor) = slot.with(|slot| slot.borrow_mut().take()) {
+            // SAFETY: the object `addLocalMonitor…` answered.
+            unsafe { NSEvent::removeMonitor(&monitor) };
+        }
+    }
+}
+
+/// The site whose view is under `event`'s pointer, on top: AppKit's own hit
+/// test of the window's content, so a view off screen or under another is
+/// never the hit.
+fn route_under(event: &NSEvent) -> Option<MouseHook> {
+    let window = event.window(MainThreadMarker::new()?)?;
+    let content = window.contentView()?;
+    let point = event.locationInWindow();
+    // `hitTest:` takes a point in the receiver's superview.
+    // SAFETY: an NSView question on the main thread (the marker above).
+    let point = match unsafe { content.superview() } {
+        Some(frame) => frame.convertPoint_fromView(point, None),
+        None => point,
+    };
+    let hit = content.hitTest(point)?;
+    ROUTES.with(|routes| {
+        routes.borrow().iter().find_map(|route| {
+            // SAFETY: both are NSViews.
+            let inside: bool = unsafe { msg_send![&*hit, isDescendantOf: &*route.view] };
+            inside.then(|| Rc::clone(&route.mouse))
+        })
+    })
+}
+
+fn install_mouse_monitor() {
+    let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit hands a live event.
+        let event_ref = unsafe { event.as_ref() };
+        let Some(travel) = crate::glue::travel_of_button(event_ref.buttonNumber()) else {
+            return event.as_ptr();
+        };
+        let Some(mouse) = route_under(event_ref) else {
+            return event.as_ptr();
+        };
+        // The press and its release are the site's own no more: WebKit
+        // gets neither, and the release travels.
+        if event_ref.r#type() == objc2_app_kit::NSEventType::OtherMouseUp {
+            mouse(travel);
+        }
+        std::ptr::null_mut()
+    });
+    // SAFETY: a local monitor on the main thread, removed with the last site.
+    let monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            NSEventMask::OtherMouseDown | NSEventMask::OtherMouseUp,
+            &block,
+        )
+    };
+    MOUSE_MONITOR
+        .with(|slot| *slot.borrow_mut() = monitor.map(|m| unsafe { Retained::cast_unchecked(m) }));
+}
+
+/// Whether `view` holds the keyboard: its window's first responder is the
+/// view or inside it. A site clicked into holds it with no key pressed.
+#[must_use]
+pub fn holds_keyboard(view: &WebView) -> bool {
+    let wk = view.webview();
+    // SAFETY: NSView and NSWindow questions on the main thread.
+    unsafe {
+        let window: Option<Retained<AnyObject>> = msg_send![&*wk, window];
+        let Some(window) = window else {
+            return false;
+        };
+        let responder: Option<Retained<AnyObject>> = msg_send![&*window, firstResponder];
+        let Some(responder) = responder else {
+            return false;
+        };
+        let Some(view_class) = AnyClass::get(c"NSView") else {
+            return false;
+        };
+        let is_view: bool = msg_send![&*responder, isKindOfClass: view_class];
+        is_view && msg_send![&*responder, isDescendantOf: &*wk]
     }
 }
 
@@ -749,11 +831,13 @@ pub fn wrap(
         routes.push(Route {
             view: as_view.clone(),
             key: Rc::clone(&hooks.key),
+            mouse: Rc::clone(&hooks.mouse),
         });
         routes.len() == 1
     });
     if first {
         install_monitor();
+        install_mouse_monitor();
     }
     let Some(mtm) = MainThreadMarker::new() else {
         return Wrapped {

@@ -45,10 +45,16 @@ const refreshed = vi.hoisted(() => [] as string[]);
 
 /** The sites' settings as `site_settings` answers, when a test turns them on; the bridge's own read otherwise. */
 const siteReads = vi.hoisted(() => ({ on: false, n: 0, sources: [] as string[] }));
+/** Every `site_do` the shell asked for, as `source act` (#2528). */
+const siteActs = vi.hoisted(() => [] as string[]);
 vi.mock("../ipc/site", async (importOriginal) => {
   const real = await importOriginal<typeof import("../ipc/site")>();
   return {
     ...real,
+    siteDo: (source: string, act: string) => {
+      siteActs.push(`${source} ${act}`);
+      return Promise.resolve({ done: true, asks: null });
+    },
     siteSettings: () => {
       if (!siteReads.on) return real.siteSettings();
       siteReads.n += 1;
@@ -1793,6 +1799,49 @@ test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and
   expect(nav.back).not.toHaveBeenCalled();
   press("[", { metaKey: true, altKey: true });
   expect(nav.back, "⌥ with ⌘ is a layout typing the bracket").toHaveBeenCalledOnce();
+});
+
+// #2528: over the site's bar the mouse's back is the site's back first, as ⌘[ is; over its page Rust decides the same.
+test("on a site's page the mouse's back and forward step in the site while it can, then in knobas", async () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  start({ nav });
+  await at("#/site/wiki");
+  const status = (can_back: boolean, can_forward: boolean) =>
+    siteStore.update({
+      source: "wiki",
+      phase: "live",
+      url: "https://wiki.example/x",
+      title: "X",
+      own: true,
+      loading: false,
+      can_back,
+      can_forward,
+      shown: true,
+      keyboard: "shell",
+      asks_origin: null,
+      failure: null,
+      esc_again_ms: 500,
+      fill: false,
+    });
+  const mouse = (button: 3 | 4) => window.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
+  try {
+    siteActs.length = 0;
+    status(true, true);
+    mouse(3);
+    mouse(4);
+    expect(siteActs).toEqual(["wiki back", "wiki forward"]);
+    expect(nav.back).not.toHaveBeenCalled();
+    expect(nav.forward).not.toHaveBeenCalled();
+    siteActs.length = 0;
+    status(false, false);
+    mouse(3);
+    mouse(4);
+    expect(siteActs, "the site has nowhere to go").toEqual([]);
+    expect(nav.back).toHaveBeenCalledOnce();
+    expect(nav.forward).toHaveBeenCalledOnce();
+  } finally {
+    siteStore.reset();
+  }
 });
 
 test("history stays put while a dialog is open, keys and mouse alike, and moves again once it closes", () => {
