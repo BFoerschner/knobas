@@ -3,9 +3,10 @@
 
   - **Server**: the operation's servers from the spec (a `{variable}` a field, a select where the spec lists
     choices), then *Yours*, the servers saved in Settings › API servers.
-  - **Sign in with**: the schemes the operation accepts, and *Nothing*. A secret is typed here and handed to the
-    app once, on the first send (Björn: "I'd just type it into the openapi viewer page itself. not using stored
-    credentials"): the app holds it for this origin until knobas quits, and the field then says so and holds nothing.
+  - **Sign in with**: the schemes the operation accepts, *Nothing*, and manual *Basic*, *Bearer*, or *API key*. A secret
+    is typed here and handed to the app once, on the first send (Björn: "I'd just type it into the openapi viewer page
+    itself. not using stored credentials"): the app holds it for this origin until knobas quits, and the field then says
+    so and holds nothing.
   - **In the path**, **In the query**, **Headers**: a row a parameter, a query or header row sent when ticked; typing
     ticks it; a required one is always sent.
   - **Body**: the media type and the text, with *Start again from the spec*.
@@ -118,8 +119,16 @@
   let user = $state("");
   let editing = $state(false);
   let held = $state<string[]>([]);
+  let lastOrigin: string | null = null;
   $effect(() => {
     const at = origin;
+    if (lastOrigin !== null && lastOrigin !== at) {
+      held = [];
+      secret = "";
+      user = "";
+      editing = false;
+    }
+    lastOrigin = at;
     if (at === "") {
       held = [];
       return;
@@ -131,14 +140,18 @@
   const isHeld = $derived(scheme !== null && held.includes(scheme.name));
 
   async function forgetHeld() {
-    if (origin === "") return;
+    const at = origin;
+    if (at === "") return;
+    const host = out.host || at;
     try {
-      await apiForgetHeld(origin);
-      held = [];
-      secret = "";
-      user = "";
-      editing = false;
-      push({ text: `Forgot the secret held for ${out.host || origin}`, subject: "api-forget" });
+      await apiForgetHeld(at);
+      if (at === origin) {
+        held = [];
+        secret = "";
+        user = "";
+        editing = false;
+      }
+      push({ text: `Forgot the secret held for ${host}`, subject: "api-forget" });
     } catch (cause) {
       push({ text: `Could not forget: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

@@ -173,4 +173,8 @@ test("manual API key flows through outgoing, requestLine, shownHeaders, and curl
   expect(blankOut.blocked).toMatch(/API key name/);
   expect(blankOut.headers.some(([n]) => n === "")).toBe(false);
   expect(blankOut.secretQuery).toBeNull();
+
+  const quotedScheme = resolveScheme(MANUAL_API_KEY, [], { in: "header", name: 'X-"$Key`' })!;
+  const quotedOut = outgoing(baseOp, draft, "https://api.example.com", quotedScheme);
+  expect(curl(quotedOut)).toContain('-H "X-\\"\\$Key\\`: $API_KEY"');
 });

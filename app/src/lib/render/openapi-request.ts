@@ -259,18 +259,21 @@ export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Escapes double-quoted shell metacharacters so a variable placeholder stays inside `"…"`. */
+const escapeDoubleQuoted = (s: string) => s.replace(/(["\\$`])/g, "\\$1");
+
 /**
  * The request as one curl command, a line an option (section 21). A secret is a variable's name, never its value:
  * `-H "Authorization: Bearer $TOKEN"`, `-u "$USER:$PASSWORD"`, `$API_KEY` in a query or a header.
  */
 export function curl(out: Outgoing): string {
-  const url = out.secretQuery === null ? shellQuote(out.url) : `"${out.url.replace(/(["\\$`])/g, "\\$1")}${out.url.includes("?") ? "&" : "?"}${encodeURIComponent(out.secretQuery.name)}=$API_KEY"`;
+  const url = out.secretQuery === null ? shellQuote(out.url) : `"${escapeDoubleQuoted(out.url)}${out.url.includes("?") ? "&" : "?"}${encodeURIComponent(out.secretQuery.name)}=$API_KEY"`;
   const lines = [`curl -X ${out.method} ${url}`];
   for (const [name, value] of out.headers) {
     if (typeof value === "string") lines.push(`  -H ${shellQuote(`${name}: ${value}`)}`);
     else if (value.secret === "basic") lines.push(`  -u "$USER:$PASSWORD"`);
-    else if (value.secret === "bearer") lines.push(`  -H "${name}: Bearer $TOKEN"`);
-    else lines.push(`  -H "${name}: ${value.cookie !== undefined ? `${value.cookie}=` : ""}$API_KEY"`);
+    else if (value.secret === "bearer") lines.push(`  -H "${escapeDoubleQuoted(name)}: Bearer $TOKEN"`);
+    else lines.push(`  -H "${escapeDoubleQuoted(name)}: ${value.cookie !== undefined ? `${escapeDoubleQuoted(value.cookie)}=` : ""}$API_KEY"`);
   }
   if (out.body !== null) lines.push(`  --data ${shellQuote(out.body)}`);
   return lines.join(" \\\n");

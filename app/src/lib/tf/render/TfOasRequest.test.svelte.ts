@@ -364,3 +364,36 @@ test("the right column has no nested scroll container, response padding matches 
   expect(css).toContain(".tf-oas-req + .tf-oas-ans { border-top: 1px solid var(--rule); }");
   expect(css).toContain(".tf-oas-anshdr + .tf-oas-anshdr { border-top: 1px solid var(--rule-2); }");
 });
+
+test("switching to another origin clears typed credentials and editing state so secrets never cross origins", async () => {
+  const twoServers = JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "Two", version: "1" },
+    servers: [{ url: "https://a.example.com/v1" }, { url: "https://b.example.com/v1" }],
+    paths: { "/ping": { get: { responses: { "200": { description: "OK" } } } } },
+  });
+  heldByOrigin.set("https://a.example.com", new Set(["__manual:basic"]));
+  heldByOrigin.set("https://b.example.com", new Set(["__manual:basic"]));
+  view = mount(TfOpenApi, { target, props: { path: "two.json", text: twoServers, engine: localEngine(), at: "get /ping", repo: "repo" } });
+  await vi.waitFor(() => expect(button("Request")).toBeDefined(), { timeout: 10_000, interval: 20 });
+  button("Request")!.click();
+  await settle();
+
+  pickSelect(target.querySelector<HTMLSelectElement>('[id^="oas-scheme-"]')!, "__manual:basic");
+  button("Change")!.click();
+  flushSync();
+  input(target.querySelector<HTMLInputElement>('[id^="oas-user-"]')!, "secret-for-a");
+  input(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')!, "pw-for-a");
+
+  pickSelect(target.querySelector<HTMLSelectElement>('[id^="oas-server-"]')!, "spec:1");
+  await settle();
+  // Origin B shows its own held secret masked (not stuck in editing with Origin A's inputs).
+  expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
+  button("Send")!.click();
+  await settle();
+  expect(calls.filter((c) => c.cmd === "hold")).toEqual([]);
+  expect(calls[0]).toMatchObject({
+    cmd: "send",
+    args: { auth: { origin: "https://b.example.com", scheme: "__manual:basic", place: "basic", name: "" } },
+  });
+});

@@ -464,6 +464,20 @@ async fn manual_header_and_query_api_keys_attach_by_name_and_refuse_blank_name()
             .message
             .contains("no name")
     );
+    let mut crlf_hdr = request(1204, "GET", format!("{}/hdr", server.uri()));
+    crlf_hdr.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:apiKey".into(),
+        place: AuthPlace::Header,
+        name: "X-Key\r\nEvil: 1".into(),
+    });
+    assert!(
+        send::send(crlf_hdr, None)
+            .await
+            .unwrap_err()
+            .message
+            .contains("line break")
+    );
     held().forget(&server.uri());
 }
 

@@ -250,14 +250,10 @@ pub fn prepare(send: &ApiSend) -> Result<(person::Request, url::Url), IpcError> 
             )),
             AuthPlace::Basic => {
                 use base64::Engine as _;
-                let pair = format!("{}:{}", secret.user().unwrap_or(""), secret.secret());
-                headers.push((
-                    "Authorization".into(),
-                    format!(
-                        "Basic {}",
-                        base64::engine::general_purpose::STANDARD.encode(pair)
-                    ),
-                ));
+                let mut pair = format!("{}:{}", secret.user().unwrap_or(""), secret.secret());
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&pair);
+                zeroize::Zeroize::zeroize(&mut pair);
+                headers.push(("Authorization".into(), format!("Basic {encoded}")));
             }
             AuthPlace::Header => {
                 let name = auth.name.trim();
