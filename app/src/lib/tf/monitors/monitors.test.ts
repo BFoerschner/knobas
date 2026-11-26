@@ -200,8 +200,8 @@ describe("the filter", () => {
       { id: "asset:rep", name: "replica", path: null, type_label: "Database" },
     ] });
     expect(monitorText(pg)).toBe("pg TCP payments Database replica Database");
-    // "p" of the name, "pay" of the first asset, "rep" of the second; "TCP" and the types are read but not drawn here.
-    expect(monitorMarks(pg, [0, 1, 7, 10, 25, 28])).toEqual({ name: [0, 1], assets: [[0, 3], [0, 3]] });
+    // "p" of the name, "p" of the first asset, "rep" of the second; "TCP" and the types are read but not drawn here.
+    expect(monitorMarks(pg, [0, 1, 7, 8, 25, 28])).toEqual({ name: [0, 1], assets: [[0, 1], [0, 3]] });
     expect(monitorMarks(pg, [3, 6])).toEqual({ name: [], assets: [[], []] });
   });
 });
