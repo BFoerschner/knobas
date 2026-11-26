@@ -89,7 +89,7 @@ test("every file is listed at once, and a card holds its room while its lines ar
   const { fill, asked, answer } = fakeFill();
   const files = [listed("a.ts", 3), listed("b.ts", 2), listed("img.png", 0, "binary"), listed("empty.txt", 0)];
   draw({ files, fill });
-  expect([...target.querySelectorAll(".tf-flist button")].map((b) => b.getAttribute("title"))).toEqual(["a.ts", "b.ts", "empty.txt", "img.png"]);
+  expect([...target.querySelectorAll(".tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"))).toEqual(["a.ts", "b.ts", "empty.txt", "img.png"]);
   expect(card("a.ts")?.querySelector(".tf-dwait[aria-busy=true]")).not.toBeNull();
   expect(card("a.ts")?.querySelector(".tf-dbody")).toBeNull();
   // A binary file and one with no changed lines have none to read.

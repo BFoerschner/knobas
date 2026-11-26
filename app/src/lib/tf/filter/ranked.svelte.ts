@@ -13,11 +13,13 @@
  *
  * {@link FuzzyOrder.held} is the same over a list held once (ux31, the API explorer's filter): its texts are sent
  * with the first ask ({@link fuzzyHold}) and each key then sends only what was typed ({@link fuzzyRankHeld}). A list
- * the app dropped (it holds four) answers `not_found`, and is held again once.
+ * the app dropped (it holds 32) answers `not_found`, and is held again once.
  */
 import { fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld } from "../../ipc/search";
 import type { FuzzyRanked } from "../../ipc/generated/search";
-import { matchesAll } from "./filter";
+import { markPairs, matchesAll, sliceMarks } from "./filter";
+
+export { markPairs, sliceMarks };
 
 interface Answer<T> {
   text: string;
@@ -63,11 +65,18 @@ export class FuzzyOrder<T> {
   #drawn: readonly T[] = [];
   /** The rows {@link FuzzyOrder.rows} was last given: what was drawn stands for those rows only. */
   #drawnFrom: readonly T[] | null = null;
+  /** Whether the latest query seen by {@link rows} or {@link ask} was empty, hiding stale marks on the same frame. */
+  #cleared = false;
 
   /** Ask for `rows` ranked by `text`, each row's text being `haystack(row)`. Call it again whenever either changes. */
   ask(text: string, rows: readonly T[], haystack: (row: T) => string): void {
     const ticket = ++this.#asked;
-    if (text.trim() === "") return;
+    if (text.trim() === "") {
+      this.#cleared = true;
+      this.#answer = null;
+      return;
+    }
+    this.#cleared = false;
     let made: string[] | null = null;
     const textsOf = () => (made ??= rows.map(haystack));
     const answered = (ranked: { index: number; marks: readonly number[] }[]) => {
@@ -89,8 +98,11 @@ export class FuzzyOrder<T> {
   /** The rows to draw for `text` over `rows`: as given with no text, the answer once it is theirs, else what was drawn. */
   rows(text: string, rows: readonly T[], haystack: (row: T) => string): readonly T[] {
     let shown: readonly T[];
-    if (text.trim() === "") shown = rows;
-    else {
+    if (text.trim() === "") {
+      this.#cleared = true;
+      shown = rows;
+    } else {
+      this.#cleared = false;
       const answer = this.#answer;
       if (answer !== null && answer.text === text && answer.from === rows) shown = answer.rows;
       else if (this.#drawnFrom === rows) shown = this.#drawn;
@@ -107,8 +119,16 @@ export class FuzzyOrder<T> {
     return text.trim() === "" || (answer !== null && answer.text === text && answer.from === rows);
   }
 
-  /** A drawn row's matched letters, pairs of start and end in UTF-16 code units of its text; none before an answer. */
-  marks(row: T): readonly number[] {
-    return this.#answer?.marks.get(row) ?? [];
+  /**
+   * A drawn row's matched letters, pairs of start and end in UTF-16 code units of its text; none before an answer or
+   * once the query clears. Pass `from` (and optional `length`) to clip and rebase pairs onto a single field slice.
+   */
+  marks(row: T, from?: number, length?: number): readonly number[] {
+    // Read `#answer` before `#cleared` so Svelte reactive readers always subscribe even when mounted cleared.
+    const answer = this.#answer;
+    if (this.#cleared || answer === null) return [];
+    const pairs = answer.marks.get(row) ?? [];
+    if (from === undefined && length === undefined) return pairs;
+    return sliceMarks(pairs, from ?? 0, length);
   }
 }

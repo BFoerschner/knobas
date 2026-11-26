@@ -400,6 +400,25 @@ export function withMade(listed: readonly BranchOption[], made: readonly { text:
 }
 
 /**
+ * The branch `<option>` list rendered by the repository header's `<select>` (#2523):
+ * while the live branch list has not answered (`known === null`), offer the known
+ * active branch name as a single entry under the same keyed `{#each}` so the
+ * `<option>` DOM node is preserved in-place when live branches arrive instead of
+ * unmounting and remounting (which resets selection/spacing on first open).
+ */
+export function selectBranches(
+  known: readonly BranchOption[] | null,
+  fallbackName: string | null,
+  wantsDisk: boolean,
+): readonly BranchOption[] {
+  if (known !== null) return known;
+  if (fallbackName !== null && fallbackName !== "" && !wantsDisk) {
+    return [{ name: fallbackName, entityId: null, isDefault: true }];
+  }
+  return [];
+}
+
+/**
  * The rows of every list the section holds, in the source's order: a muted
  * line a source writes beside its list (`view::muted_line`) is drawn where
  * it put it, as the note a cut list ends on is, never taken for the list

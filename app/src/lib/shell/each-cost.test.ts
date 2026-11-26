@@ -335,7 +335,7 @@ const SMALL: Record<string, string> = {
   "tf/render/TfRendererSwitch.svelte  opened.offered": "the profile's own settings, tens at most: the renderers that fit one file",
   "tf/repo/TfNewBranch.svelte  branches": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepo.svelte  drawn": "a handful by what it is: the tabs kept drawn",
-  "tf/repo/TfRepo.svelte  known ?? []": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
+  "tf/repo/TfRepo.svelte  selectOptions": "capped where it is read or drawn: a native select's options, never laid out until opened: the branches view, which the source cuts (Gitea at 1,000)",
   "tf/repo/TfRepoBranches.svelte  notes": "a handful by what it is: the lines a cut listing ends on",
   "tf/repo/TfRepoBuilds.svelte  page.notRun": "a handful by what it is: the pipelines that build this repository and never ran on the branch shown, as one line of links: tens",
   "tf/repo/TfRepoBuilds.svelte  page.ran": "a handful by what it is: the pipelines that build this repository and ran on the branch shown: as many as its CI configures for it, tens",

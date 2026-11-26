@@ -290,6 +290,7 @@
     REPO_TABS,
     MADE,
     REPO_BRANCHES,
+    selectBranches,
     withMade,
     type BranchOption,
     type BranchStanding,
@@ -1030,6 +1031,16 @@
    */
   const at = $derived(repoId === null ? null : (selected && !selected.isDefault ? selected.entityId : null) ?? repoId);
   const branchName = $derived(selected?.name ?? null);
+  /** The `<select>` value and unified branch options (#2523), keeping the active `<option>` node stable across placeholder→live swaps. */
+  const selectValue = $derived(wantsDisk ? WORKING_TREE : (branchName ?? ""));
+  const selectOptions = $derived(selectBranches(known, branchName, wantsDisk));
+  const hasWorkingTree = $derived(checkout?.path != null || wantsDisk);
+  function syncSelect(node: HTMLSelectElement) {
+    const want = selectValue;
+    void selectOptions;
+    void hasWorkingTree;
+    if (node.value !== want) node.value = want;
+  }
   /**
    * Whether `one` is Files on a repository no branch was picked on this session: it reads at the repository itself,
    * which is its default branch whatever the list or the mirror will name, so it starts its reads with the page's own
@@ -1510,20 +1521,19 @@
             >{/if}<select
               aria-label="Branch"
               title={wantsDisk ? `Working tree${checkout?.path ? ` at ${checkout.path}` : ""}${diskTree?.branch ? `, on ${diskTree.branch}` : ""}` : (branchName ?? undefined)}
-              value={wantsDisk ? WORKING_TREE : (branchName ?? "")}
+              value={selectValue}
+              {@attach syncSelect}
               onchange={pick}
               disabled={(known === null || known.length === 0) && !wantsDisk}
             >
               <!-- The working tree first, under a rule, where the repository is cloned here (2026-11-21): its words never
                    change, so no re-read resizes the box; a checkout that can't be read keeps it, disabled, saying why. -->
-              {#if checkout?.path != null || wantsDisk}
+              {#if hasWorkingTree}
                 <option value={WORKING_TREE} disabled={!wantsDisk && diskWhy !== null} title={diskWhy ?? undefined}
                   >{wantsDisk || diskWhy === null ? "Working tree" : `Working tree: ${diskWhy}`}</option
-                ><hr />
+                >{#if selectOptions.length > 0}<hr />{/if}
               {/if}
-              <!-- Before the list is read, the shown name is its one option, so the box is as wide as that name from its first draw. -->
-              {#if known === null && branchName && !wantsDisk}<option value={branchName}>{branchName}</option>{/if}
-              {#each known ?? [] as option (option.name)}
+              {#each selectOptions as option (option.name)}
                 <!-- A branch knobas is making has nothing to read at until a read lists it: offered, but not to read at yet. -->
                 <option value={option.name} disabled={option.made !== undefined} title={option.made !== undefined ? `Being made on ${sourceName(source)}: it can be read once it is there` : undefined}
                   >{option.name}{option.made !== undefined ? ` (${option.made})` : ""}</option

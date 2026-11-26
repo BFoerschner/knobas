@@ -162,6 +162,41 @@ export function markNeedles(text: string, needles: readonly string[]): Mark[] {
   return runs.length === 0 ? [{ text, hit: false }] : runs;
 }
 
+/**
+ * Clips UTF-16 `[start, end, ...]` mark pairs from `frizbee` (`FuzzyRanked.marks`)
+ * to the field slice `[from, from + length)` and rebases them to `0..length` (#2520).
+ */
+export function sliceMarks(pairs: readonly number[], from: number, length = Infinity): number[] {
+  if (pairs.length < 2 || length <= 0) return [];
+  const limit = from + length;
+  const out: number[] = [];
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    const start = Math.max(pairs[i]!, from);
+    const end = Math.min(pairs[i + 1]!, limit);
+    if (end > start) out.push(start - from, end - from);
+  }
+  return out;
+}
+
+/**
+ * Splits `text` into plain and matched runs from UTF-16 `[start, end, ...]` pairs
+ * (`frizbee`), optionally shifted by `from` code units into a longer haystack (#2520).
+ */
+export function markPairs(text: string, pairs: readonly number[], from = 0): Mark[] {
+  const runs: Mark[] = [];
+  let at = 0;
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    const start = Math.max(at, pairs[i]! - from);
+    const end = Math.min(text.length, pairs[i + 1]! - from);
+    if (end <= start) continue;
+    if (start > at) runs.push({ text: text.slice(at, start), hit: false });
+    runs.push({ text: text.slice(start, end), hit: true });
+    at = end;
+  }
+  if (at < text.length || runs.length === 0) runs.push({ text: text.slice(at), hit: false });
+  return runs;
+}
+
 /** The result count (R-2.1): "8 of 75 tickets", or "75 tickets" when nothing filters. */
 export function countLine(shown: number, total: number, noun: string, one?: string): string {
   const word = total === 1 && one !== undefined ? one : noun;

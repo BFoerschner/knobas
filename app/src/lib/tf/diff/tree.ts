@@ -27,11 +27,67 @@ export interface TreeGroup {
 }
 
 export type TreeRow =
-  | { kind: "dir"; path: string }
+  | { kind: "dir"; path: string; open: boolean }
   | { kind: "file"; file: DrawnFile; name: string; depth: 0 | 1; made?: true }
   /** A grouped folder's row, where its directory header would be, then its band, then its generated files (ux26). */
-  | { kind: "gdir"; group: TreeGroup }
+  | { kind: "gdir"; group: TreeGroup; open: boolean }
   | { kind: "gband"; group: TreeGroup };
+
+/** A collapsible directory or grouped-folder header row in the changed-files rail. */
+export type FolderRow = Extract<TreeRow, { kind: "dir" | "gdir" }>;
+
+/** Stable collapse-set key distinguishing regular directories (`d:`) from grouped folders (`g:`). */
+export function folderKey(row: Pick<Extract<TreeRow, { kind: "dir" }>, "kind" | "path"> | Pick<Extract<TreeRow, { kind: "gdir" }>, "kind" | "group">): string {
+  return row.kind === "dir" ? `d:${row.path}` : `g:${row.group.folder}`;
+}
+
+/** Directory path of a folder or grouped-folder row (`""` for a top-level grouped folder). */
+export function folderPath(row: Pick<Extract<TreeRow, { kind: "dir" }>, "kind" | "path"> | Pick<Extract<TreeRow, { kind: "gdir" }>, "kind" | "group">): string {
+  return row.kind === "dir" ? row.path : row.group.folder;
+}
+
+/**
+ * Keys of `target` and every nested folder header under its path in `rows` (for recursive `Alt+click`).
+ * A top-level grouped folder (`""`) covers every folder header in the list.
+ */
+export function descendantFolderKeys(rows: readonly TreeRow[], target: FolderRow): string[] {
+  const targetKey = folderKey(target);
+  const base = folderPath(target);
+  const prefix = base === "" ? "" : `${base}/`;
+  const out: string[] = [];
+  for (const row of rows) {
+    if (row.kind !== "dir" && row.kind !== "gdir") continue;
+    const key = folderKey(row);
+    const path = folderPath(row);
+    if (key === targetKey || base === "" || path.startsWith(prefix)) out.push(key);
+  }
+  return out;
+}
+
+/**
+ * Applies `collapsed` folder keys to an expanded `rows` list in one pass: collapsed headers carry `open: false` and
+ * their immediate file/band rows are omitted while root files and other folders remain intact.
+ */
+export function collapseTree(rows: readonly TreeRow[], collapsed: ReadonlySet<string>): TreeRow[] {
+  if (collapsed.size === 0) return rows as TreeRow[];
+  const out: TreeRow[] = [];
+  let hidden = false;
+  for (const row of rows) {
+    if (row.kind === "dir" || row.kind === "gdir") {
+      const shut = collapsed.has(folderKey(row));
+      hidden = shut;
+      out.push(shut ? { ...row, open: false } : row.open ? row : { ...row, open: true });
+      continue;
+    }
+    if (row.kind === "file" && row.depth === 0) {
+      hidden = false;
+      out.push(row);
+      continue;
+    }
+    if (!hidden) out.push(row);
+  }
+  return out;
+}
 
 const dirOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
@@ -56,12 +112,12 @@ export function treeOf(files: readonly DrawnFile[], groups: readonly TreeGroup[]
   for (const key of all) {
     if (key.endsWith("\u0000")) {
       const group = grouped.get(key.slice(0, -1))!;
-      rows.push({ kind: "gdir", group }, { kind: "gband", group });
+      rows.push({ kind: "gdir", group, open: true }, { kind: "gband", group });
       for (const file of group.files) rows.push({ kind: "file", file, name: file.path, depth: 1, made: true });
       continue;
     }
     const dir = key;
-    if (dir !== "") rows.push({ kind: "dir", path: dir });
+    if (dir !== "") rows.push({ kind: "dir", path: dir, open: true });
     const named = byDir.get(dir)!.map((file) => ({ file, name: keyOf(file).slice(dir === "" ? 0 : dir.length + 1) }));
     for (const { file, name } of named.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)))
       rows.push({ kind: "file", file, name, depth: dir === "" ? 0 : 1 });

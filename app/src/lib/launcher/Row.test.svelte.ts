@@ -5,6 +5,8 @@
  * Mounted directly; the cell rule per kind is `cells.ts`'s and is witnessed
  * through the launcher in `Launcher.test.svelte.ts`.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { flushSync, mount, unmount } from "svelte";
 import { expect, test, vi } from "vitest";
 
@@ -195,4 +197,22 @@ test("an evidence line that looks like markup is drawn as text", () => {
   expect(target.querySelectorAll("img, b")).toHaveLength(0);
   expect(target.querySelector("mark")!.textContent).toBe("<b>x</b>");
   done();
+});
+
+test("the primary title column renders in semibold (600) on a single line while the evidence line stays regular weight underneath (#2520)", () => {
+  const style = document.createElement("style");
+  style.textContent = readFileSync(join(process.cwd(), "src/lib/tf/css/launcher.css"), "utf8");
+  document.head.append(style);
+  const { target, done } = render({ why });
+  target.classList.add("tf");
+  try {
+    const title = target.querySelector<HTMLElement>(".tf-ln-t")!;
+    const evidence = target.querySelector<HTMLElement>(".tf-ln-why")!;
+    expect(getComputedStyle(title).fontWeight).toBe("600");
+    expect(getComputedStyle(title).whiteSpace).toBe("nowrap");
+    expect(getComputedStyle(evidence).fontWeight).not.toBe("600");
+  } finally {
+    done();
+    style.remove();
+  }
 });

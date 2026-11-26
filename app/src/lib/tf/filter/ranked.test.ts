@@ -66,3 +66,30 @@ test("an older text's answer that lands after a newer one's never replaces it", 
   expect(order.rows("prox", rows, same)).toEqual(["acme/ADProxy"]);
   pending.length = 0;
 });
+
+test("clearing the query drops stale highlight marks immediately, and marks slices multi-field UTF-16 ranges", async () => {
+  const emojiRows = ["🚀 acme/ADProxy", "acme/routing"];
+  const order = new FuzzyOrder<string>();
+  order.ask("proxy", emojiRows, same);
+  // "🚀 acme/AD" is 2 + 1 + 7 = 10 UTF-16 code units; "Proxy" is [10, 15].
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [10, 15] }]);
+  await flush();
+  expect(order.marks(emojiRows[0]!)).toEqual([10, 15]);
+  // Field slice starting after "🚀 acme/" (8 UTF-16 units), length 7 ("ADProxy"):
+  expect(order.marks(emojiRows[0]!, 8, 7)).toEqual([2, 7]);
+  // Field slice before the match ("🚀 acme/", 0..8) has no marks:
+  expect(order.marks(emojiRows[0]!, 0, 8)).toEqual([]);
+
+  // Clearing via rows("") immediately hides stale marks even before ask("") runs (first render frame).
+  expect(order.rows("", emojiRows, same)).toEqual(emojiRows);
+  expect(order.marks(emojiRows[0]!)).toEqual([]);
+
+  // Clearing via ask("") clears `#answer` permanently.
+  order.ask("   ", emojiRows, same);
+  expect(order.marks(emojiRows[0]!)).toEqual([]);
+  // Even after rows() sees a new non-empty query before its answer lands (keeping what was drawn),
+  // the cleared answer's old marks never return.
+  expect(order.rows("routing", emojiRows, same)).toEqual(emojiRows);
+  expect(order.marks(emojiRows[0]!)).toEqual([]);
+  pending.length = 0;
+});

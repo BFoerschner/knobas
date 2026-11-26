@@ -167,7 +167,7 @@ async function settle() {
 }
 
 const squash = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-const list = () => [...target.querySelectorAll(".tf-flist button")].map(squash);
+const list = () => [...target.querySelectorAll(".tf-flist button.tf-ffile")].map(squash);
 const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-diff")];
 /** A file's card: the diffs follow the tree's order, so `docs/` comes first. */
 const card = (path: string) => cards().find((one) => one.dataset["file"]?.endsWith(path));

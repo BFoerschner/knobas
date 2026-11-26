@@ -107,12 +107,15 @@
   import { allRenderers, type Renderer } from "../../render/registry";
   import { docHint, hunkText, renderedChoices, renderedPlan, renderedRoom, specHint, type DiffMode, type RenderedPlan, type Side, type SideGot } from "./rendered";
   import type { OpenAt } from "./TfDiffCard.svelte";
-  import { badgeOf, collapsedAtFirst, isLock, needsLoad, treeOf } from "./tree";
+  import { badgeOf, collapsedAtFirst, collapseTree, descendantFolderKeys, folderKey, isLock, needsLoad, treeOf, type FolderRow } from "./tree";
   import { diffPipelines, type DiffPipelinesSetting } from "./diff-pipelines.svelte";
   import { defaultPipelines, pipedDiff, pipelineLabel, type DiffPipeline, type DiffPipelines, type PipedDiff } from "./piped";
   import TfWrittenAt from "./TfWrittenAt.svelte";
   import { Windowed, landOn, listScrolled, placeWindowsNow } from "../../shell/windowed.svelte";
-  import { SvelteMap } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
+  import { layers } from "../layers.svelte";
+  import { flipZen, zen } from "../zen.svelte";
+  import { isAltClick } from "../tree-alt";
   import { menuThing } from "../context/thing";
   import { thousands } from "../counted";
   import TfPath from "../TfPath.svelte";
@@ -631,12 +634,25 @@
   });
 
   let filter = $state("");
+  let filterField = $state<HTMLInputElement | null>(null);
   const shown = $derived.by(() => {
     const words = filter;
     // No filter, every file: a list of thousands asked the filter of each file (the stored-compare pass, 2026-11-14).
     return words.trim() === "" ? realFiles : realFiles.filter((file) => matchesPath(keyOf(file), words));
   });
-  const tree = $derived(list ? treeOf(shown, groupsShown) : []);
+  /** Expanded rail tree used to derive diff card ordering; unaffected by sidebar folder collapse. */
+  const allTree = $derived(list ? treeOf(shown, groupsShown) : []);
+  /** Folder headers collapsed by hand in the changed-files rail (`d:<path>` / `g:<folder>`). */
+  const collapsedDirs = new SvelteSet<string>();
+  const tree = $derived(collapseTree(allTree, collapsedDirs));
+  function toggleDir(row: FolderRow, all = false) {
+    const key = folderKey(row);
+    const shut = !collapsedDirs.has(key);
+    for (const k of all ? descendantFolderKeys(allTree, row) : [key]) {
+      if (shut) collapsedDirs.add(k);
+      else collapsedDirs.delete(k);
+    }
+  }
   /** A row of the cards column: a file, a grouped folder's bar, or the line that ends its generated files (ux26). */
   type CardRow = { kind: "file"; file: DrawnFile } | { kind: "folder"; group: ShownGroup } | { kind: "end"; group: ShownGroup };
   const rowKey = (row: CardRow) => (row.kind === "file" ? keyOf(row.file) : row.kind === "folder" ? `\u0001${row.group.folder}` : `\u0002${row.group.folder}`);
@@ -644,7 +660,7 @@
   const cardRows = $derived.by((): CardRow[] => {
     if (!list) return files.map((file) => ({ kind: "file", file }));
     const out: CardRow[] = [];
-    for (const row of tree) {
+    for (const row of allTree) {
       if (row.kind === "file" && row.made !== true) out.push({ kind: "file", file: row.file });
       else if (row.kind === "gdir") {
         const group = row.group as ShownGroup;
@@ -1789,6 +1805,17 @@
   function onkey(event: KeyboardEvent) {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (inTextField(event.target) || inTextField(document.activeElement)) return;
+    if (event.key === "t" || event.key === "T") {
+      if (layers.open.some((layer) => layer.kind !== "panel") || filterField === null) return;
+      event.preventDefault();
+      if (zen.shown) flipZen(document.querySelector<HTMLElement>("main.tf-main"), flushSync);
+      if (!railOpen) {
+        railOpen = true;
+        flushSync();
+      }
+      filterField.focus();
+      return;
+    }
     const keys = drawn.map(keyOf);
     if (keys.length === 0) return;
     const at = current === null ? -1 : keys.indexOf(current);
@@ -2076,7 +2103,7 @@
       <div class="tf-dstick">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys({ aside: true })} />
+        <input bind:this={filterField} bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys({ aside: true })} />
       </label>
       {#if tree.length === 0}
         <div class="tf-empty tf-flist-none">
@@ -2092,7 +2119,9 @@
             {#if offered && savedFolders.length > 0}
               <!-- A folder a renderer takes (ux26): the Files tree's glyph at the row's end, its room kept while any renderer is saved. -->
               <div class="tf-fdir tf-dfr" {@attach railWin.row(treeKey(row))}
-                ><span class="tf-dfr-p">{row.path}</span><span class="tf-dfr-g"
+                ><button type="button" class="tf-fdir-btn" aria-expanded={row.open} onclick={(event) => toggleDir(row, isAltClick(event))}
+                  ><svg class="tf-fcaret" class:tf-open={row.open} viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l4 3-4 3" /></svg><span class="tf-dfr-p">{row.path}</span></button
+                ><span class="tf-dfr-g"
                   >{#if glyph !== null}{@const by = glyph.taking.find((r) => r.id === pickOf(glyph.folder)) ?? glyph.taking[0]}<button
                       type="button"
                       class="tf-dfmark"
@@ -2105,11 +2134,15 @@
                 ></div
               >
             {:else}
-              <div class="tf-fdir" {@attach railWin.row(treeKey(row))}>{row.path}</div>
+              <button type="button" class="tf-fdir" aria-expanded={row.open} onclick={(event) => toggleDir(row, isAltClick(event))} {@attach railWin.row(treeKey(row))}
+                ><svg class="tf-fcaret" class:tf-open={row.open} viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l4 3-4 3" /></svg><span class="tf-dfr-p">{row.path}</span></button
+              >
             {/if}
           {:else if row.kind === "gdir"}
             <!-- A grouped folder (ux26, mock tag 8): its row where its directory header would be. -->
-            <div class="tf-fdir tf-dgdir" data-folder={row.group.folder} {@attach railWin.row(treeKey(row))}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg><TfPath path={row.group.folder === "" ? "The top folder" : row.group.folder} /></div>
+            <button type="button" class="tf-fdir tf-dgdir" data-folder={row.group.folder} aria-expanded={row.open} onclick={(event) => toggleDir(row, isAltClick(event))} {@attach railWin.row(treeKey(row))}
+              ><svg class="tf-fcaret" class:tf-open={row.open} viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l4 3-4 3" /></svg><svg class="tf-dgicon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11z M2.5 10l3-3 2.5 2.5 2-2 3.5 3.5" /><circle cx="10.5" cy="6" r="1" /></svg><TfPath path={row.group.folder === "" ? "The top folder" : row.group.folder} /></button
+            >
           {:else if row.kind === "gband"}
             {@const group = row.group as ShownGroup}
             <button type="button" class="tf-dgband" data-folder={group.folder} title="Show {group.folder || 'the top folder'}'s real files" onclick={() => putBack(group.folder)} {@attach railWin.row(treeKey(row))}
@@ -2123,6 +2156,7 @@
             {@const counts = file.made === undefined ? file : (lined[keyOf(file)]?.file ?? null)}
             <button
               type="button"
+              class="tf-ffile"
               class:tf-viewed={done}
               class:tf-d1={row.depth === 1}
               class:tf-dmade={row.made === true}
@@ -2142,7 +2176,7 @@
       {/if}
       </div>
       <p class="tf-dkeys tf-dim">
-        <span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
+        <span><kbd>t</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
             ><kbd>c</kbd> comment</span
           >{/if}<span><kbd>d</kbd> rendered</span><span><kbd>s</kbd> split</span>
       </p>

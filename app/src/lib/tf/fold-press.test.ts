@@ -85,6 +85,27 @@ test("Enter, a modified click and a middle click keep the link's own way", () =>
   expect(stored).toEqual([]);
 });
 
+test("Alt+click invokes the recursive callback when provided and prevents navigation", () => {
+  const alt: boolean[] = [];
+  const run = (el: Element) => {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1, button: 0, clientX: 100, altKey: true });
+    const handler = (e: Event) => foldPress(e as MouseEvent & { currentTarget: HTMLElement }, false, (open) => stored.push(open), (open) => alt.push(open));
+    summary.addEventListener("click", handler);
+    el.dispatchEvent(event);
+    summary.removeEventListener("click", handler);
+    return event;
+  };
+  const first = run(link);
+  expect(first.defaultPrevented).toBe(true);
+  expect(fold.open).toBe(true);
+  expect(alt).toEqual([true]);
+  expect(stored).toEqual([]);
+  const second = run(summary);
+  expect(second.defaultPrevented).toBe(true);
+  expect(fold.open).toBe(false);
+  expect(alt).toEqual([true, false]);
+});
+
 test("→ and ← bring the stored state along with the fold's", () => {
   const key = (name: string) => {
     const handler = (e: Event) => foldKeyed(e as KeyboardEvent & { currentTarget: HTMLElement }, (open) => stored.push(open));
