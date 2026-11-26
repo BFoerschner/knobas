@@ -56,5 +56,12 @@
         "depends": ["libssl.so.3()(64bit)"]
       }
     }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["knobas"]
+      }
+    }
   }
 }
