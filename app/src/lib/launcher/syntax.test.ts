@@ -54,6 +54,7 @@ test("the overlay holds every # letter, then >, @me and t, each one word", () =>
     "#d pages",
     "#l lists",
     "#i inbox",
+    "#s secrets",
     "> go to",
     "@me mine",
     "t time",

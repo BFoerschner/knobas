@@ -289,11 +289,11 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
       return `#/asset/${id}`;
     case "monitor":
       return `#/monitors/at/${id}`;
-    // The Passwords page (ADR-0056), never `#/item`, whose page draws the payload.
+    // The Secrets page (ADR-0056, #2515), never `#/item`, whose page draws the payload.
     case ENTRY_KIND:
-      return `#/passwords/entry/${id}`;
+      return `#/secrets/entry/${id}`;
     case FOLDER_KIND:
-      return `#/passwords/in/${id}`;
+      return `#/secrets/in/${id}`;
     case "jira_view":
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     // A pipeline under the shell's word (#2422, the launcher's kind) or the

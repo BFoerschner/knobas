@@ -173,8 +173,8 @@ const SCREENS = [
   { id: "docs-blocks", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["XML view", "JSON view"], wait: 1500, whole: ".tf-pre-bar, .tf-doc-xv .tf-xv-bar, .tf-xsd-inline .tf-xsd-irow", sizes: SMALLEST },
   { id: "docs-blocks-decl", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["~AmountType"], wait: 1500, whole: ".tf-pre-bar, .tf-xsd-iopen .tf-xsd-h, .tf-xsd-iopen .tf-oas-meta", sizes: SMALLEST },
   { id: "viewer-junit", route: "ticket/mock%3APAY-228", press: '[aria-labelledby="tf-tkatt"] summary', then: ["~junit.xml"], wait: 1500, whole: ".tf-viewer, .tf-vdoc .tf-xv-bar", sizes: SMALLEST },
-  { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
-  { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
+  { id: "passwords-entry", route: "secrets/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
+  { id: "passwords-folder", route: "secrets/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables

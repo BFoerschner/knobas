@@ -810,8 +810,11 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  // 35 (Zen mode's `Z`, ux31), and the Passwords page's thirteen (ADR-0056; W and Shift W, ux30).
-  expect(rows).toHaveLength(54);
+  // 35 (Zen mode's `Z`, ux31), and the Secrets page's twelve (ADR-0056; W and Shift W, ux30; `/` moved to section search, #2515).
+  expect(rows).toHaveLength(53);
+  const where = rows.map((row) => row.querySelectorAll("td")[1]?.textContent?.trim());
+  expect(where).toContain("Secrets");
+  expect(where).not.toContain("Passwords");
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
