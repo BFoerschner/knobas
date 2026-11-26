@@ -559,6 +559,57 @@ pub async fn scan_tree(path: &Path, sha: &str, matcher: &Matcher) -> Option<Text
     .ok()
 }
 
+/// `query` over the working tree of the clone at `path`, as it is on disk:
+/// every file git lists there, tracked or untracked and not ignored
+/// ([`super::working::listing`], the list the tab's marks come from), never
+/// a link and never a submodule. `None` where git cannot list it.
+pub async fn scan_disk(path: &Path, matcher: &Matcher) -> Option<TextFound> {
+    let (status, index) = super::working::listing(path).await.ok()?;
+    let head = super::working::head(path).await;
+    let turn = Turn::take();
+    let root = path.to_path_buf();
+    let matcher = matcher.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut paths: Vec<&str> = index
+            .iter()
+            // A link and a submodule are no file of text.
+            .filter(|(_, (mode, _))| mode != "120000" && mode != "160000")
+            .map(|(path, _)| path.as_str())
+            .chain(status.untracked.iter().map(String::as_str))
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        let items: Vec<Item> = paths
+            .into_iter()
+            .map(|path| Item {
+                path: path.to_owned(),
+                size: None,
+            })
+            .collect();
+        let reader = || {
+            let root = &root;
+            move |_: usize, item: &Item| -> Read<'_> {
+                let Some(full) = super::working::safe_join(root, &item.path) else {
+                    return Read::Gone;
+                };
+                if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                    return Read::Gone;
+                }
+                match super::working::read_no_follow(&full, FILE_CAP) {
+                    super::working::Bytes::Read(bytes) => Read::Bytes(bytes.into()),
+                    super::working::Bytes::TooLarge(_) => Read::Skipped,
+                    super::working::Bytes::NotThere => Read::Gone,
+                }
+            }
+        };
+        let mut found = scan(&items, &reader, &matcher, turn, TextFrom::WorkingTree);
+        found.commit = head;
+        found
+    })
+    .await
+    .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -764,5 +815,49 @@ mod tests {
             let again = scan_tree(at, &sha, &matcher).await.unwrap();
             assert_eq!(found_lines(&again), found_lines(&first));
         }
+    }
+    #[tokio::test]
+    async fn the_working_tree_is_read_from_disk_and_what_git_ignores_is_left_out() {
+        let (dir, _, _) = branches();
+        let at = dir.path();
+        write(at, ".gitignore", b"target/\n*.log\n");
+        git(at, &["add", ".gitignore"]);
+        git(at, &["commit", "-q", "-m", "ignore"]);
+        // Edited, not committed; a new file; ignored files that hold the word.
+        write(at, "src/pay.rs", b"fn pay() {\n    retry_on_disk();\n}\n");
+        write(at, "src/added.rs", b"retry added\n");
+        write(at, "target/debug/out.rs", b"retry ignored\n");
+        write(at, "build.log", b"retry ignored\n");
+        // A tracked file deleted on disk is no line.
+        std::fs::remove_file(at.join("README.md")).unwrap();
+        let matcher = Matcher::new(&asked("retry", false, false)).unwrap();
+        let found = scan_disk(at, &matcher).await.expect("a working tree");
+        assert_eq!(found.from, TextFrom::WorkingTree);
+        assert_eq!(found.commit.as_deref(), Some(git(at, &["rev-parse", "HEAD"]).as_str()));
+        assert_eq!(
+            found_lines(&found),
+            vec![
+                "src/added.rs:1:[retry] added".to_owned(),
+                "src/pay.rs:2:    [retry]_on_disk();".to_owned(),
+            ]
+        );
+        assert_eq!(found.skipped, 1, "logo.bin");
+    }
+
+    #[tokio::test]
+    async fn names_are_answered_beside_lines_when_asked() {
+        let (dir, _, feature) = branches();
+        let mut query = asked("PAY", false, false);
+        query.names = true;
+        // Smart case: an upper-case query matches its case, in names too.
+        let exact = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap()).await.unwrap();
+        assert!(exact.names.is_empty());
+        query.text = "pay".to_owned();
+        let any = scan_tree(dir.path(), &feature, &Matcher::new(&query).unwrap()).await.unwrap();
+        assert_eq!(any.names, vec!["src/pay.rs".to_owned()]);
+        assert_eq!(
+            found_lines(&any),
+            vec!["README.md:1:# [Pay]".to_owned(), "src/pay.rs:1:fn [pay]() {".to_owned()]
+        );
     }
 }
