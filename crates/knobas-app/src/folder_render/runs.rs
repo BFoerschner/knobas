@@ -2104,8 +2104,15 @@ mod tests {
             1,
             "drawn at once, no second run"
         );
+        let root = fresh.store().unwrap();
+        assert_eq!(store::usage(&root).0, 1, "Settings counts it");
         fresh.forget_source("gitea-main");
         assert!(place.leaves().is_empty());
+        assert_eq!(
+            store::usage(&root),
+            (0, 0),
+            "the count kept in memory follows the source's folders removed (#2519)"
+        );
         let after = place.runs();
         let gone = after.view(&slot(), &r, Ok(resolved(&r, &files)), Ask::Look);
         assert!(gone.drawn.is_none(), "{gone:?}");
