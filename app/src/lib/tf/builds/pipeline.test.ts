@@ -16,6 +16,8 @@ import {
   historyOf,
   jobBranchFor,
   keptRuns,
+  runMarks,
+  runText,
   longest,
   echoRun,
   pipelineWord,
@@ -107,7 +109,7 @@ test("a run falls under one result chip by its declared tone and instants", () =
   expect(resultOf(run(1, "ok", { state: { text: "canceled", tone: "muted" } }))).toBeNull();
 });
 
-test("the Runs filter keeps by words over number and branch, the job's branches, any result chip and the branch", () => {
+test("the Runs filter keeps by the job's branches, any result chip and the branch", () => {
   const runs = [
     run(1190, "err", { branch: "feature/PAY-231-sepa-retry" }),
     run(1189, "ok", { branch: "main" }),
@@ -115,10 +117,8 @@ test("the Runs filter keeps by words over number and branch, the job's branches,
     run(1187, "ok", { branch: "feature/csv-export" }),
   ];
   const keep = (filter: Partial<Parameters<typeof keptRuns>[1]>, job: string[] = []) =>
-    keptRuns(runs, { text: "", scope: "all", results: [], branch: null, ...filter }, job).map((r) => r.number);
+    keptRuns(runs, { scope: "all", results: [], branch: null, ...filter }, job).map((r) => r.number);
   expect(keep({})).toEqual(["1190", "1189", "1188", "1187"]);
-  expect(keep({ text: "#1189" })).toEqual(["1189"]);
-  expect(keep({ text: "sepa" })).toEqual(["1190"]);
   expect(keep({ scope: "job" }, ["feature/PAY-231-sepa-retry"])).toEqual(["1190"]);
   expect(keep({ scope: "job" }, [])).toEqual([]);
   expect(keep({ results: ["Failed", "Running"] })).toEqual(["1190", "1188"]);
@@ -150,14 +150,27 @@ test("Started by me keeps the reader's runs; the words reach the commit and who 
     run(1187, "ok", { trigger: "schedule" }),
   ];
   const keep = (filter: Partial<Parameters<typeof keptRuns>[1]>) =>
-    keptRuns(runs, { text: "", scope: "all", results: [], branch: null, ...filter }, []).map((r) => r.number);
+    keptRuns(runs, { scope: "all", results: [], branch: null, ...filter }, []).map((r) => r.number);
   expect(keep({ scope: "mine" })).toEqual(["1189"]);
-  expect(keep({ text: "a41f2c" })).toEqual(["1190"]);
-  expect(keep({ text: "91fe0c11" })).toEqual(["1189"]);
-  expect(keep({ text: "jonas" })).toEqual(["1188"]);
-  expect(keep({ text: "mara" })).toEqual(["1189"]);
-  expect(keep({ text: "you" })).toEqual(["1189"]);
-  expect(keep({ text: "schedule" })).toEqual(["1187"]);
+  // The typed words are ranked by the app over each run's text (#2535): it holds the commit and who or what started it.
+  const texts = runs.map(runText);
+  expect(texts[0]).toContain("a41f2c0e9b8d");
+  expect(texts[1]).toContain("91fe0c11");
+  expect(texts[1]).toContain("mara");
+  expect(texts[1]).toContain("you");
+  expect(texts[2]).toContain("jonas");
+  expect(texts[3]).toContain("Schedule");
+});
+
+test("a run's text leads with its number, branch, commit and trigger, and its marks fall on the cells the row draws (#2535)", () => {
+  const sepa = run(1190, "err", { branch: "feature/sepa", trigger: "person", started_by: "jonas", revision: "a41f2c" });
+  expect(runText(sepa)).toBe("#1190 feature/sepa a41f2c jonas jonas");
+  // "#11" in the number, "sepa" in the branch, "jo" in the trigger cell; "a41" in the commit, which no cell draws here.
+  const pairs = [0, 3, 14, 18, 19, 22, 26, 28];
+  expect(runMarks(sepa, pairs)).toEqual({ number: [0, 3], branch: [8, 12], trigger: [0, 2] });
+  // A queued run draws "queued", not its number: nothing is marked there.
+  expect(runMarks(run(1, "info", { number: null, branch: "main" }), [0, 1, 2, 4]).number).toEqual([]);
+  expect(runMarks(run(1, "info", { number: null, branch: "main" }), [0, 1, 2, 4]).branch).toEqual([0, 2]);
 });
 
 test("runs group by the local day they started, Today and Yesterday by name", () => {
