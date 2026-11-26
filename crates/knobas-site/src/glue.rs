@@ -240,18 +240,38 @@ mod tests {
         assert_eq!(travel_of_button(3), Some(Travel::Back));
         assert_eq!(travel_of_button(4), Some(Travel::Forward));
         assert_eq!(travel_of_button(0), None);
-        assert_eq!(travel_of_button(2), None, "the middle button stays the page's");
+        assert_eq!(
+            travel_of_button(2),
+            None,
+            "the middle button stays the page's"
+        );
         assert_eq!(travel_of_button(5), None);
     }
 
     #[test]
     fn xbutton1_is_back_xbutton2_forward_and_the_release_travels() {
         // `mouseData`'s high word names the button; its low word is unused.
-        assert_eq!(xbutton(WM_XBUTTONUP, 0x0001_0000), Some((Travel::Back, true)));
-        assert_eq!(xbutton(WM_XBUTTONUP, 0x0002_0000), Some((Travel::Forward, true)));
-        assert_eq!(xbutton(WM_XBUTTONDOWN, 0x0001_0000), Some((Travel::Back, false)));
-        assert_eq!(xbutton(WM_XBUTTONDBLCLK, 0x0002_0000), Some((Travel::Forward, false)));
-        assert_eq!(xbutton(WM_XBUTTONUP, 0x0000_0001), None, "no button in the high word");
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0001_0000),
+            Some((Travel::Back, true))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0002_0000),
+            Some((Travel::Forward, true))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONDOWN, 0x0001_0000),
+            Some((Travel::Back, false))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONDBLCLK, 0x0002_0000),
+            Some((Travel::Forward, false))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0000_0001),
+            None,
+            "no button in the high word"
+        );
         // WM_LBUTTONUP, WM_MOUSEMOVE, WM_MBUTTONUP: not a site's travel.
         for other in [0x0202, 0x0200, 0x0208] {
             assert_eq!(xbutton(other, 0x0001_0000), None);

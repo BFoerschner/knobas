@@ -1389,13 +1389,16 @@ impl Sites {
     /// click into a site is a "blur" and the click back onto the bar a
     /// "focus". On the main thread.
     pub fn window_focused(&self, focused: bool) {
-        let active = host().and_then(|host| host.window_active()).unwrap_or(focused);
+        let active = host()
+            .and_then(|host| host.window_active())
+            .unwrap_or(focused);
         if focused {
             if !active || !std::mem::take(&mut self.book().away) {
                 return;
             }
             let back = self.book().keyboard_on_blur.take();
-            let site = back.filter(|source| self.book().sites.get(source).is_some_and(Site::visible));
+            let site =
+                back.filter(|source| self.book().sites.get(source).is_some_and(Site::visible));
             tracing::debug!(site = ?site, "window back in front: the keyboard to the site, else to knobas");
             match site.and_then(|source| view(&source)) {
                 Some(view) => view.focus(),

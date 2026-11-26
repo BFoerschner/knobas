@@ -611,7 +611,10 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
         travel::steps(&sites, &proxy, &rt);
         // Nothing of the run stays on the machine: its session goes, as *Forget…* removes it.
         let forgot = rt.block_on(sites.forget("a", true));
-        log("forgot", json!({ "source": "a", "answer": format!("{forgot:?}") }));
+        log(
+            "forgot",
+            json!({ "source": "a", "answer": format!("{forgot:?}") }),
+        );
         sleep(1500);
         return quit(&sites, &proxy);
     }
@@ -1022,17 +1025,14 @@ fn main() {
     ]));
     let focus_window = Rc::clone(&window);
     let _ = focus_window;
-    install_host(Box::new(ProbeHost(WryHost::new(
-        Rc::clone(&window),
-        {
-            // As knobas's `focus_shell`: the keyboard to the shell's own web view.
-            let shell_view = Rc::clone(&shell_view);
-            Rc::new(move || {
-                log("focus-shell", json!({}));
-                let _ = shell_view.focus();
-            })
-        },
-    ))));
+    install_host(Box::new(ProbeHost(WryHost::new(Rc::clone(&window), {
+        // As knobas's `focus_shell`: the keyboard to the shell's own web view.
+        let shell_view = Rc::clone(&shell_view);
+        Rc::new(move || {
+            log("focus-shell", json!({}));
+            let _ = shell_view.focus();
+        })
+    }))));
     #[cfg(target_os = "macos")]
     {
         let keys = sites.clone();
@@ -1076,7 +1076,6 @@ fn main() {
 static ORIGIN: Mutex<(f64, f64, f64, f64)> = Mutex::new((0.0, 0.0, 0.0, 0.0));
 /// The probe window's `NSWindow`, from tao (macOS).
 static NS_WINDOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
 
 /// Read the window's content origin now, on the main thread: AppKit's
 /// content rectangle on the screen, flipped against the primary screen, the
@@ -1153,7 +1152,12 @@ mod travel {
 
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
-        fn CGEventCreateMouseEvent(source: *const c_void, kind: u32, at: CgPoint, button: u32) -> *mut c_void;
+        fn CGEventCreateMouseEvent(
+            source: *const c_void,
+            kind: u32,
+            at: CgPoint,
+            button: u32,
+        ) -> *mut c_void;
         fn CGEventCreateKeyboardEvent(source: *const c_void, key: u16, down: bool) -> *mut c_void;
         fn CGEventSetFlags(event: *mut c_void, flags: u64);
         fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
@@ -1198,7 +1202,10 @@ mod travel {
         let _ = rx.recv_timeout(Duration::from_secs(2));
         let (ox, oy, width, height) = *ORIGIN.lock().unwrap();
         let y = y.unwrap_or(INSETS.top + (height - INSETS.top) / 2.0);
-        CgPoint { x: ox + width / 2.0, y: oy + y }
+        CgPoint {
+            x: ox + width / 2.0,
+            y: oy + y,
+        }
     }
 
     fn mouse(kind: u32, point: CgPoint, button: i64) {
@@ -1226,7 +1233,12 @@ mod travel {
         unsafe {
             post(CGEventCreateMouseEvent(std::ptr::null(), MOVED, point, 0));
             std::thread::sleep(Duration::from_millis(60));
-            post(CGEventCreateMouseEvent(std::ptr::null(), LEFT_DOWN, point, 0));
+            post(CGEventCreateMouseEvent(
+                std::ptr::null(),
+                LEFT_DOWN,
+                point,
+                0,
+            ));
             std::thread::sleep(Duration::from_millis(40));
             post(CGEventCreateMouseEvent(std::ptr::null(), LEFT_UP, point, 0));
         }
@@ -1270,7 +1282,9 @@ mod travel {
 
     /// Another application in front, then ⌘Tab back, as a person does.
     fn away_and_back() {
-        let _ = std::process::Command::new("open").args(["-a", "Finder"]).status();
+        let _ = std::process::Command::new("open")
+            .args(["-a", "Finder"])
+            .status();
         sleep(1500);
         command_key(KEY_TAB);
         sleep(1500);
@@ -1290,7 +1304,10 @@ mod travel {
     fn url(source: &Sites, rt: &tokio::runtime::Runtime, name: &str) {
         let at = format!("http://127.0.0.1:{}/page?name={name}", port());
         let answer = rt.block_on(source.open("a", Some(at.clone()), INSETS, true));
-        log("open", json!({ "source": "a", "url": at, "answer": format!("{answer:?}") }));
+        log(
+            "open",
+            json!({ "source": "a", "url": at, "answer": format!("{answer:?}") }),
+        );
     }
 
     fn since(t: u64, kind: &str, pick: impl Fn(&Value) -> bool) -> usize {
@@ -1334,7 +1351,10 @@ mod travel {
         sleep(2500);
         let site = at(proxy, None);
         let bar = at(proxy, Some(44.0));
-        log("aim", json!({ "site": [site.x, site.y], "bar": [bar.x, bar.y] }));
+        log(
+            "aim",
+            json!({ "site": [site.x, site.y], "bar": [bar.x, bar.y] }),
+        );
 
         let t = mark();
         button(site, 3);

@@ -331,7 +331,12 @@ fn refresh_mouse_hook() {
     if wanted && hook == 0 {
         // SAFETY: a low-level hook for this thread's own message loop.
         let hook = unsafe {
-            SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), GetModuleHandleW(std::ptr::null()), 0)
+            SetWindowsHookExW(
+                WH_MOUSE_LL,
+                Some(mouse_proc),
+                GetModuleHandleW(std::ptr::null()),
+                0,
+            )
         };
         if hook == 0 {
             tracing::warn!("the mouse's back and forward buttons over a site could not be hooked");

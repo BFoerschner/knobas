@@ -37,7 +37,10 @@ fn world() -> World {
         },
     );
     let mut map = HashMap::new();
-    for (source, base) in [("jira", "https://jira.example"), ("wiki", "https://wiki.example")] {
+    for (source, base) in [
+        ("jira", "https://jira.example"),
+        ("wiki", "https://wiki.example"),
+    ] {
         map.insert(
             source.to_owned(),
             SiteRules {
@@ -180,7 +183,10 @@ async fn a_history_read_at_the_press_reaches_the_page_before_the_hand_over() {
     w.shell.drain();
     assert!(calls(&w, "jira").is_empty());
     let told = told(&w);
-    let key = told.iter().position(|t| t == "key back").expect("handed over");
+    let key = told
+        .iter()
+        .position(|t| t == "key back")
+        .expect("handed over");
     let cannot = told
         .iter()
         .position(|t| t.starts_with("status can_back=false"))
@@ -214,7 +220,10 @@ fn shell_focused(w: &World) -> usize {
 }
 
 fn site_focused(w: &World, source: &str) -> usize {
-    calls(w, source).iter().filter(|call| *call == "focus").count()
+    calls(w, source)
+        .iter()
+        .filter(|call| *call == "focus")
+        .count()
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
