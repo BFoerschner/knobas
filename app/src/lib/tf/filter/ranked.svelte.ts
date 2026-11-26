@@ -124,8 +124,10 @@ export class FuzzyOrder<T> {
    * once the query clears. Pass `from` (and optional `length`) to clip and rebase pairs onto a single field slice.
    */
   marks(row: T, from?: number, length?: number): readonly number[] {
-    if (this.#cleared) return [];
-    const pairs = this.#answer?.marks.get(row) ?? [];
+    // Read `#answer` before `#cleared` so Svelte reactive readers always subscribe even when mounted cleared.
+    const answer = this.#answer;
+    if (this.#cleared || answer === null) return [];
+    const pairs = answer.marks.get(row) ?? [];
     if (from === undefined && length === undefined) return pairs;
     return sliceMarks(pairs, from ?? 0, length);
   }

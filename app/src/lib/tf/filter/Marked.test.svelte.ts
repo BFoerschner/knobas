@@ -5,9 +5,21 @@
  * text node once the filter clears.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+
+const pending: { text: string; resolve: (ranked: { index: number; loose: boolean; marks: number[] }[]) => void }[] = [];
+vi.mock("../../ipc/search", () => ({
+  fuzzyRank: (text: string) =>
+    new Promise((resolve) => {
+      pending.push({ text, resolve });
+    }),
+  fuzzyHold: async () => {},
+  fuzzyRankHeld: async () => [],
+  fuzzyDrop: async () => {},
+}));
 
 import Marked from "./Marked.svelte";
+const { FuzzyOrder } = await import("./ranked.svelte");
 
 function render(props: { text: string; typed?: string; pairs?: readonly number[]; from?: number }) {
   const target = document.createElement("div");
@@ -50,4 +62,51 @@ test("paints non-contiguous UTF-16 pairs and honours field offsets without creat
   expect(target.querySelectorAll("mark")).toHaveLength(0);
   expect(target.textContent).toBe("ADProxy");
   done();
+});
+
+test("Marked subscribing to FuzzyOrder.marks while starting cleared updates reactively when an answer lands (#2520)", async () => {
+  const rows = ["🚀 acme/ADProxy", "acme/routing"];
+  const same = (row: string) => row;
+  const order = new FuzzyOrder<string>();
+  // Page mounts with an empty filter: `rows("")` marks the order cleared before `<Marked>` reads `marks(row)`.
+  order.rows("", rows, same);
+
+  const target = document.createElement("div");
+  document.body.append(target);
+  const app = mount(Marked, {
+    target,
+    props: {
+      text: "ADProxy",
+      get pairs() {
+        return order.marks(rows[0]!, 8, 7);
+      },
+    },
+  });
+  flushSync();
+  expect(target.querySelectorAll("mark")).toHaveLength(0);
+
+  // User types a query (no `typed` prop on `<Marked>`, so reactivity depends solely on `order.marks`).
+  order.rows("proxy", rows, same);
+  order.ask("proxy", rows, same);
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [10, 15] }]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect([...target.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["Proxy"]);
+
+  // Clearing the query removes marks again, and a subsequent query paints fresh marks.
+  order.rows("", rows, same);
+  order.ask("", rows, same);
+  flushSync();
+  expect(target.querySelectorAll("mark")).toHaveLength(0);
+
+  order.rows("ad", rows, same);
+  order.ask("ad", rows, same);
+  pending[1]!.resolve([{ index: 0, loose: false, marks: [8, 10] }]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect([...target.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["AD"]);
+
+  unmount(app);
+  target.remove();
+  pending.length = 0;
 });
