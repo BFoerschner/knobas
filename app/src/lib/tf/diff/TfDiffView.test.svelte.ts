@@ -481,6 +481,27 @@ test("the filter narrows the rail and the diff together: a flat list by whole pa
   expect(target.querySelectorAll(".tf-flist mark")).toHaveLength(0);
 });
 
+test("files read again while the filter has words keep the flat rail as drawn until their ranking answers (#2532)", async () => {
+  const props = $state({ files: [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs")], layout: createDiffLayout(() => null) });
+  draw(props);
+  const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
+  input.value = "retry";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  const flat = treeRows();
+  expect([...flat].sort()).toEqual(["M docs/retry.md +1 −1", "M src/retry.rs +1 −1"]);
+  // A working tree read again (a save): new file objects, one more that matches.
+  props.files = [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs"), file("lib/retry.ts")];
+  flushSync();
+  // Before the new list's answer: still flat, the rows where they drew, no folder tree over every file.
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
+  expect(treeRows()).toEqual(flat);
+  await ranked();
+  expect([...treeRows()].sort()).toEqual(["M docs/retry.md +1 −1", "M lib/retry.ts +1 −1", "M src/retry.rs +1 −1"]);
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
+});
+
 test("the diffs are drawn in the rail's order, so j walks the rail down", () => {
   draw({ files: [file("tests/z.rs"), file("src/b.rs"), file("docs/a.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
   expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);

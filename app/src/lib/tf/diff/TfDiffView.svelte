@@ -679,9 +679,23 @@
    * answer lands the tree stays as drawn, as a list held before keeps its rows, so no pass of the filter as it was
    * runs over every file and nothing drawn moves when the answer comes.
    */
-  const flat = $derived(filtering && fileOrder.ready(filter, hits));
+  /**
+   * A list rebuilt while the rail is flat (a working tree read again, a grouped folder's run landing) keeps the rail
+   * flat. Plain, not state: read and written by `flat` alone.
+   */
+  let wasFlat = false;
+  const flat = $derived.by(() => (wasFlat = filtering && (wasFlat || fileOrder.ready(filter, hits))));
+  /** A hit's place in the list, its kind with its text: a rebuilt list's hit found by the one drawn. */
+  const hitPlace = (hit: Hit) => (hit.file === undefined ? "g:" : hit.group === undefined ? "f:" : "m:") + hitText(hit);
+  /** What the rail drew last: kept, read from the rebuilt list, while that list's answer is out. */
+  let drewHits: readonly Hit[] = NO_HITS;
   /** The hits the ranking kept, best first; none with no words. */
-  const rankedHits = $derived(flat ? fileOrder.rows(filter, hits, hitText) : NO_HITS);
+  const rankedHits = $derived.by((): readonly Hit[] => {
+    if (!flat) return (drewHits = NO_HITS);
+    if (fileOrder.ready(filter, hits)) return (drewHits = fileOrder.rows(filter, hits, hitText));
+    const now = new Map(hits.map((hit) => [hitPlace(hit), hit]));
+    return (drewHits = drewHits.flatMap((hit) => now.get(hitPlace(hit)) ?? []));
+  });
   /** Each kept file's hit, for its row's marks. */
   const hitOf = $derived(new Map(rankedHits.flatMap((hit) => (hit.file === undefined ? [] : [[hit.file, hit] as const]))));
   const fileMarking = $derived(fileOrder.typed(filter, hits));
