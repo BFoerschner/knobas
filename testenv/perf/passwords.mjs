@@ -137,11 +137,12 @@ for (const throttle of throttles) {
     results.push({ throttle, name: "folder 6xx", note: "not on screen in the tree's first rows" });
   }
 
-  // A filter keystroke.
+  // A filter keystroke, in the folder just pressed: the filter reads that folder and the folders under it (#2531), so its
+  // heading names the folder ("610 entries in CI"), or says nothing in it matches.
   await click(await rect(".tf-pw-filter input"));
   await js("__pw.reset()");
   const before = await js(`document.querySelectorAll(".tf-pw-row").length`);
-  const filtered = js(`__pw.until(() => document.querySelector(".tf-pw-filter input").value === "d" && document.querySelector(".tf-pw-lhead h3")?.textContent.includes("every folder"))`);
+  const filtered = js(`__pw.until(() => document.querySelector(".tf-pw-filter input").value === "d" && (/^[\\d,]+ entr(y|ies) in /.test(document.querySelector(".tf-pw-lhead h3")?.textContent ?? "") || /^Nothing in .* matches "d"/.test(document.querySelector(".tf-pw-blank p")?.textContent ?? "")))`);
   await key("d", "d");
   record(throttle, "filter keystroke", await filtered, LINES.act[throttle], { note: `${before} rows before` });
   await key("Escape");
