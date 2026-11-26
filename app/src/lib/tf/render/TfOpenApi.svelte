@@ -43,6 +43,9 @@
   import { columnsSeen, paneHeight } from "./explorer/layout";
   import { zen } from "../zen.svelte";
   import { clientsFound, specOpener, type SpecOpener } from "./oas-open.svelte";
+  import TfOasBody from "./TfOasBody.svelte";
+  import { statusTone, type BodyView } from "./oas-answer";
+  import type { ApiAnswer } from "../../ipc/api";
 
   /** What the parse answers for a file with no version key at its top (`indexSpec`). */
   const NOT_AT_TOP = "The file has no openapi or swagger version at its top.";
@@ -354,6 +357,21 @@
   let sent = $state<SentLine[]>([]);
   /** Under 1,480 px an operation's page shows its reference or its request, picked at its head. */
   let view = $state<"reference" | "request">("reference");
+  /** An answer's body expanded over the pane (#2533): the whole XML or JSON view, with its rail. */
+  let expanded = $state<{ answer: Extract<ApiAnswer, { kind: "answered" }>; view: BodyView; line: string } | null>(null);
+  /** What *Expand* was pressed on: focus goes back there when the expanded body goes. */
+  let expandedFrom: HTMLElement | null = null;
+  function expand(what: NonNullable<typeof expanded>) {
+    expandedFrom = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    expanded = what;
+    void tick().then(() => box?.querySelector<HTMLElement>("[data-oas-collapse]")?.focus());
+  }
+  function collapse() {
+    expanded = null;
+    const back = expandedFrom;
+    expandedFrom = null;
+    void tick().then(() => back?.focus());
+  }
   let sendKey = $state<(() => void) | null>(null);
   $effect(() => {
     void apiServers().then((list) => (saved = list.servers), () => (saved = []));
@@ -463,7 +481,7 @@
         {#key state.shown.place}
           <div class="tf-oas-col tf-oas-reqcol">
             <TfOasRequest st={state} op={shownOp} place={state.shown.place} {index} file={fileKey} {saved} {bodies} onsent={readSent} bind:sendKey />
-            {#if cols === 3}<TfOasAnswer sending={state.answers.get(state.shown.place)} {sent} onopen={openSent} />{/if}
+            {#if cols === 3}<TfOasAnswer sending={state.answers.get(state.shown.place)} {sent} onopen={openSent} onexpand={expand} />{/if}
           </div>
         {/key}
       {:else}
@@ -473,8 +491,25 @@
         </div>
       {/if}
       {#if cols === 4}
-        <div class="tf-oas-col tf-oas-anscol"><TfOasAnswer sending={shownOp === null ? undefined : state.answers.get(state.shown.place)} {sent} onopen={openSent} /></div>
+        <div class="tf-oas-col tf-oas-anscol"><TfOasAnswer sending={shownOp === null ? undefined : state.answers.get(state.shown.place)} {sent} onopen={openSent} onexpand={expand} /></div>
       {/if}
+    {/if}
+    {#if expanded !== null}
+      {@const shown = expanded}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div class="tf-oas-expanded" role="region" aria-label="Answer, expanded" onkeydown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented && event.target instanceof Element && event.target.closest("input, textarea, select, .tf-menu, .tf-dialog") === null) {
+          event.preventDefault();
+          collapse();
+        }
+      }}>
+        <div class="tf-oas-status tf-oas-exphead">
+          <span class="tf-oas-code3 tf-{statusTone(shown.answer.status)}">{shown.answer.status}</span>
+          <span>{shown.answer.reason}</span>
+          <span class="tf-oas-code tf-oas-expline" title={shown.line}>{shown.line}</span>
+        </div>
+        <TfOasBody answer={shown.answer} view={shown.view} full oncollapse={collapse} />
+      </div>
     {/if}
   </div>
 {/if}
@@ -489,7 +524,7 @@
   {#if view === "request" && shownOp !== null && st !== null}
     {#key st.shown.place}
       <TfOasRequest st={st} op={shownOp} place={st.shown.place} index={index!} file={fileKey} {saved} {bodies} onsent={readSent} bind:sendKey />
-      <TfOasAnswer sending={st.answers.get(st.shown.place)} {sent} onopen={openSent} />
+      <TfOasAnswer sending={st.answers.get(st.shown.place)} {sent} onopen={openSent} onexpand={expand} />
     {/key}
   {/if}
 {/snippet}

@@ -452,3 +452,39 @@ test("an XML body and answer: the Reference shows XML made from the schema, and 
   // What goes out says it is XML.
   expect(text(target.querySelector(".tf-oas-hdrs"))).toContain("application/xml");
 });
+
+test("an answer's body: the compact JSON view in its column; Expand lays it over the explorer with the rail, Esc and Back return (#2533)", async () => {
+  await openRequest("get /orders/{id}");
+  input(target.querySelector<HTMLInputElement>('[id$="-path-id"]')!, "7");
+  button("Send")!.click();
+  await settle();
+  // The answer's JSON, read indented, in the compact view: its query, no rail.
+  await vi.waitFor(() => expect(target.querySelector(".tf-oas-ans .tf-xv-compactview .tf-xv-lines")).not.toBeNull(), { timeout: 10_000, interval: 20 });
+  expect(target.querySelector(".tf-oas-ans .tf-xv-rail")).toBeNull();
+  expect(text(target.querySelector(".tf-oas-ans .tf-xv-lang"))).toBe("jq");
+  expect(target.querySelector(".tf-oas-expanded")).toBeNull();
+
+  const expandButton = button("Expand")!;
+  expandButton.focus();
+  expandButton.click();
+  await settle();
+  const over = target.querySelector<HTMLElement>(".tf-oas > .tf-oas-expanded")!;
+  expect(over).not.toBeNull();
+  expect(text(over.querySelector(".tf-oas-exphead"))).toContain("201");
+  expect(text(over.querySelector(".tf-oas-exphead"))).toContain("GET https://shop.example.com/api/orders/7");
+  await vi.waitFor(() => expect(over.querySelector(".tf-xv-rail")).not.toBeNull(), { timeout: 10_000, interval: 20 });
+  expect(over.querySelector(".tf-xv-compactview")).toBeNull();
+  expect(document.activeElement?.textContent).toBe("Back to the explorer");
+
+  // Esc puts it away; focus goes back to Expand.
+  over.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  expect(target.querySelector(".tf-oas-expanded")).toBeNull();
+  expect(document.activeElement).toBe(expandButton);
+
+  button("Expand")!.click();
+  await settle();
+  button("Back to the explorer")!.click();
+  await settle();
+  expect(target.querySelector(".tf-oas-expanded")).toBeNull();
+});

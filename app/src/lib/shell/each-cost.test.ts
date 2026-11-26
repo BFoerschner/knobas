@@ -276,7 +276,6 @@ const SMALL: Record<string, string> = {
   // The API explorer (ux31): its long lists (the rail, an answer's lines, the inline form) are windowed; these are not.
   "tf/openin/TfOpenIn.svelte  clients": "a handful by what it is: the API clients an application list names, Bruno and those the person added",
   "tf/render/TfOasAnswer.svelte  ok.headers": "a handful by what it is: one answer's headers",
-  "tf/render/TfOasAnswer.svelte  jsonTokens(l)": "the runs of one line's or one name's words",
   "tf/render/TfOasAnswer.svelte  sent": "capped where it is read or drawn: the sends kept in memory, 50 at most (`api/kept.rs`)",
   "tf/render/TfOasField.svelte  nameParts(name)": "the runs of one line's or one name's words",
   "tf/render/TfOasField.svelte  facts": "a handful by what it is: one field's facts (format, bounds, default, enum's first values)",

@@ -414,6 +414,9 @@ vi.mock("../ipc/api", () => ({
   apiCancel: () => deferred(undefined),
   apiAnswerBody: () => deferred(new Uint8Array()),
   apiSaveAnswer: () => deferred(""),
+  apiAnswerPiped: () => deferred({ outcome: "done", name: "answer-200.json", output: { kind: "text", text: "{}" } }),
+  apiAnswerPipedSave: () => deferred(""),
+  jsonQueryOpen: () => deferred(1),
   imageFetch: () => deferred({ url: "", mime: "image/png", size: 0, base64: "" }),
   imageHosts: () => deferred({ hosts: [] }),
   xmlCheck: () => deferred({ on: true }),
@@ -558,6 +561,7 @@ const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
 const TfOasAnswer = (await import("../tf/render/TfOasAnswer.svelte")).default;
+const TfOasBody = (await import("../tf/render/TfOasBody.svelte")).default;
 const TfLines = (await import("../tf/code/TfLines.svelte")).default;
 const TfDocView = (await import("../tf/render/doc/TfDocView.svelte")).default;
 const TfDocRail = (await import("../tf/render/doc/TfDocRail.svelte")).default;
@@ -2091,6 +2095,12 @@ const CASES: Case[] = [
     name: "TfOasAnswer",
     source: "lib/tf/render/TfOasAnswer.svelte",
     open: (target) => ({ app: mount(TfOasAnswer, { target, props: { sending: undefined } }) }),
+  },
+  {
+    /** An answer's body (#2533): its bytes, and a pipeline's run, answer late. */
+    name: "TfOasBody",
+    source: "lib/tf/render/TfOasBody.svelte",
+    open: (target) => ({ app: mount(TfOasBody, { target, props: { answer: { id: 1, status: 200, content_type: "application/json", bytes: 2 }, view: { steps: [{ step: "gunzip" }], as: null } } }) }),
   },
   {
     /** A spec drawn small (ux31): its parse answers late. */
