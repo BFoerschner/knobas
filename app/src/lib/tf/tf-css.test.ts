@@ -462,6 +462,23 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
   expect(used.filter((token) => rooms.includes(token))).toEqual([]);
 });
 
+test("the launcher draws its primary title/name column in semibold (600) while keeping compact single-line rows and muted evidence underneath (#2520)", () => {
+  const rules = (selector: string) => launcherRules.filter(([s]) => s === selector).map(([, body]) => body).join(";");
+  expect(rules(".tf-ln-t")).toMatch(/font-weight:\s*600/);
+  expect(rules(".tf-ln-opt .tf-ln-nm")).toMatch(/font-weight:\s*600/);
+  // Compact single-line density on result rows is preserved.
+  const row = rules(".tf .tf-ln-res");
+  expect(row).toMatch(/min-height:\s*38px/);
+  const cells = rules(".tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord, .tf-ln-src)");
+  expect(cells).toMatch(/white-space:\s*nowrap/);
+  expect(cells).toMatch(/overflow:\s*hidden/);
+  expect(cells).toMatch(/text-overflow:\s*ellipsis/);
+  // The evidence line stays muted and regular weight underneath.
+  const why = rules(".tf-ln-res > .tf-ln-why");
+  expect(why).toMatch(/color:\s*var\(--ink-2\)/);
+  expect(why).not.toMatch(/font-weight:\s*600/);
+});
+
 /*
  * #1445: JetBrains Mono's contextual ligatures draw `->`, `=>`, `<=` and `==`
  * as single glyphs, so source text would show characters the file does not
