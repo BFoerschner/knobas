@@ -60,6 +60,7 @@
     panels,
     plural,
     indexBuild,
+    scopedEntries,
     searchIndex,
     sourceNode,
     sourceWord,
@@ -223,25 +224,27 @@
     shownFolder = id;
   });
   /**
-   * The filter's words are ranked by the app over every entry's text (#2535), held once per model; `panels` holds the
-   * answer to the folder's scope (`scopeOf`). The index is read on the first word, as before, never on the page's open.
+   * The filter's words are ranked by the app (#2535) over the text of every entry the folder's filter reads
+   * (`scopeOf`), a list held once per folder. The index is read on the first word, as before, never on the page's open.
    * Until a key's answer lands the page keeps what it drew, so the first key draws no list the answer then redraws.
    */
   const order = heldOrder<Entry>("secrets");
   const index = $derived(m && query.trim() !== "" ? searchIndex(m) : null);
+  /** The entries the folder's filter reads (`scopeOf`), by title: what the app holds and ranks. */
+  const scoped = $derived(index !== null && m && node ? scopedEntries(m, node) : []);
   $effect(() => {
     if (index === null) order.ask("", [], () => "");
-    else order.ask(query, index.all, index.textOf);
+    else order.ask(query, scoped, index.textOf);
   });
   /** What the page drew last, which a key keeps until its answer lands. */
   let drawnPanels: Panel[] | null = null;
   const shownPanels = $derived.by((): Panel[] => {
     if (!m || !node) return (drawnPanels = []);
     if (index === null) return (drawnPanels = panels(m, node, query));
-    if (drawnPanels !== null && !order.settled(query, index.all)) return drawnPanels;
-    return (drawnPanels = panels(m, node, query, order.rows(query, index.all, index.textOf)));
+    if (drawnPanels !== null && !order.settled(query, scoped)) return drawnPanels;
+    return (drawnPanels = panels(m, node, query, order.rows(query, scoped, index.textOf)));
   });
-  const marking = $derived(index === null ? "" : order.typed(query, index.all));
+  const marking = $derived(index === null ? "" : order.typed(query, scoped));
 
   // ---- the tree ----
   /** Folds the reader opened, kept for the session. */

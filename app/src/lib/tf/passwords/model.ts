@@ -450,6 +450,24 @@ export function scopeOf(m: Model, node: Node): ReadonlySet<Entry> | null {
   return scope;
 }
 
+const scopedLists = new WeakMap<Node, Entry[]>();
+
+/**
+ * The entries the filter ranks at `node`, by title (#2535): every entry at All entries, else those of {@link scopeOf}.
+ * Kept per node, so the app holds a folder's list once and a key in it sends only its words.
+ */
+export function scopedEntries(m: Model, node: Node): Entry[] {
+  const { all } = searchIndex(m);
+  const scope = scopeOf(m, node);
+  if (scope === null) return all;
+  let list = scopedLists.get(node);
+  if (list === undefined) {
+    list = all.filter((e) => scope.has(e));
+    scopedLists.set(node, list);
+  }
+  return list;
+}
+
 /**
  * What a folder lists: at the top, the recent entries; then its own entries; then one panel for each folder below
  * that holds entries, in tree order. With a filter, one panel of every match inside the folder and the folders under

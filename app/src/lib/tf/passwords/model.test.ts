@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { Held, PwRow } from "../../ipc/passwords";
-import { CUT, chainOf, commentFolder, expiry, holding, homesOf, entryMarks, indexBuild, model, ordered, panels, pathOf, searchIndex, sourceNode, sourceWord, treeRows } from "./model";
+import { CUT, chainOf, commentFolder, expiry, holding, homesOf, entryMarks, indexBuild, model, ordered, panels, pathOf, scopedEntries, searchIndex, sourceNode, sourceWord, treeRows } from "./model";
 
 const offers = { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] };
 
@@ -81,6 +81,9 @@ test("the app's ranking is held to the folder's scope and keeps its order, best 
   expect(panels(m, m.nodes.get("pw:pay")!, "x", ranked)[0]!.rows.map((r) => r.id)).toEqual(["pw:shared", "pw:p1", "pw:d3"]);
   expect(panels(m, m.nodes.get("pw:plat")!, "x", ranked)[0]!.rows.map((r) => r.id)).toEqual(["pw:pl1", "pw:shared"]);
   expect(panels(m, m.nodes.get("pw:plat")!, "x", ranked)[0]!.count).toBe(2);
+  // What the app holds at a folder: the entries of its scope, by title; every entry at All entries.
+  expect(scopedEntries(m, m.nodes.get("pw:plat")!).map((r) => r.id)).toEqual(["pw:pl1", "pw:shared"]);
+  expect(scopedEntries(m, m.root)).toHaveLength(m.entries.size);
 });
 
 test("an entry's text is its title, username, address and path, a line each, and its marks fall on the cells drawn (#2535)", () => {
