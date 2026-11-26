@@ -312,7 +312,7 @@ async fn a_held_secret_is_attached_for_its_origin_and_refused_for_another() {
 async fn a_send_is_kept_with_its_answer_and_no_secret() {
     let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("{\"b\":[1,2]}"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{\"b\":[1,2],\"a\":1.50}"))
         .mount(&server)
         .await;
     held().hold(
@@ -332,9 +332,10 @@ async fn a_send_is_kept_with_its_answer_and_no_secret() {
     assert_eq!(lines.len(), 1);
     let printed = serde_json::to_string(&lines).unwrap();
     assert!(!printed.contains("never-kept"), "{printed}");
+    // Indented (#2533), the keys in the server's order and the numbers as written.
     assert_eq!(
         send::body(1000, true).as_deref(),
-        Some(&b"{\n  \"b\": [\n    1,\n    2\n  ]\n}"[..])
+        Some(&b"{\n  \"b\": [\n    1,\n    2\n  ],\n  \"a\": 1.50\n}"[..])
     );
     held().forget(&server.uri());
 }
