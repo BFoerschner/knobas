@@ -3,10 +3,12 @@
   and where it came from, its actions (Code colours' own), then the role list written in the theme's own colours (22
   rows under seven headings, a ground and its text in one row with one figure) and the preview beside it.
 
-  A row's swatch sets its key, on a built-in too: its first change goes to a copy in the window's slot (#2516); *Auto* leaves it out, so it is derived again and says *auto*. A row's figure is its
+  A row's swatch sets its key; *Auto* leaves it out, so it is derived again and says *auto*. A row's figure is its
   lowest contrast against what it needs; under it the row says the pair and offers the fix, which moves lightness
   alone, and for a filled pair the ground. Under the States, how far apart the states are for a colour-blind reader,
-  and on a theme of one's own *Tell them apart*. Under a fold, the 19 colours knobas works out from the rows.
+  and *Tell them apart*. Under a fold, the 19 colours knobas works out from the rows. A built-in shows all of it too:
+  its first change, by a swatch, a quick pick or a fix, goes to a copy in the window's slot, so nothing on the page
+  moves when the copy takes its place (#2516).
 -->
 <script lang="ts">
   import { tick, untrack, type Snippet } from "svelte";
@@ -119,7 +121,7 @@
    */
   function pickRow(which: "ink" | "accent" | "own"): void {
     settle();
-    themes.update(theme.id, (t) => {
+    const change = (t: Theme): Theme => {
       const app = { ...t.app };
       delete app.selRow;
       delete app.onSelRow;
@@ -129,13 +131,21 @@
         if (t.offers.onSelRow) app.onSelRow = t.offers.onSelRow;
       }
       return { ...t, app };
-    });
+    };
+    // On a built-in, the pick it shows already is no change, so it makes no copy (#2516).
+    const after = change(theme).app ?? {};
+    const same = (["selRow", "onSelRow"] as const).every((k) => after[k] === theme.app?.[k]);
+    const id = own ? theme.id : same ? null : onfork(theme);
+    if (id === null) return;
+    themes.update(id, change);
   }
 
   function setMany(next: Partial<Record<AppKey, string>>, words: string): void {
     settle();
     const was = { ...set };
-    const id = theme.id;
+    // A built-in's fix goes to a copy, as its swatches' changes do (#2516).
+    const id = own ? theme.id : onfork(theme);
+    if (id === null) return;
     themes.update(id, (t) => ({ ...t, app: next }));
     themes.flush();
     undoable(words, () => (themes.update(id, (t) => ({ ...t, app: was })), themes.flush()), { subject: `app-theme-fix-${id}` });
@@ -255,7 +265,7 @@
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
-      {#if own && failures(colours).length > 0}
+      {#if failures(colours).length > 0}
         <button type="button" class="tf-btn tf-sm" onclick={() => (settle(), setMany(fixAll(theme.kind, set), `${failures(colours).length === 1 ? "1 colour" : `${failures(colours).length} colours`} fixed by lightness.`))}>Fix all</button>
       {/if}
       {#if own}
@@ -329,7 +339,7 @@
             >{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span
           >
           <span class="tf-thm-cr">{fig ? ratioText(fig.ratio) : ""}</span>
-          {#if own && row.example === "selrow"}
+          {#if row.example === "selrow"}
             <div class="tf-apt-picks" role="group" aria-label="Selected row's colours">
               <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow === undefined} onclick={() => pickRow("ink")}>knobas (ink)</button>
               <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow !== undefined && set.selRow === colours.primary} onclick={() => pickRow("accent")}>The theme's accent</button>
@@ -341,7 +351,7 @@
           {#if low && fig}
             <div class="tf-thm-why">
               {lowSentence(fig)}
-              {#if own}<button type="button" class="tf-btn tf-sm" onclick={() => fixIt(row)}>{fixWords(theme.kind, colours, fig)}</button>{/if}
+              <button type="button" class="tf-btn tf-sm" onclick={() => fixIt(row)}>{fixWords(theme.kind, colours, fig)}</button>
             </div>
           {/if}
         </div>
@@ -354,7 +364,7 @@
         {/if}
         <div class="tf-apt-told">
           <span>{apartLine(colours)}</span>
-          {#if own && closestStates(colours).delta < APART}<button type="button" class="tf-btn tf-sm" onclick={apart}>Tell them apart</button>{/if}
+          {#if closestStates(colours).delta < APART}<button type="button" class="tf-btn tf-sm" onclick={apart}>Tell them apart</button>{/if}
         </div>
       {/if}
     {/each}

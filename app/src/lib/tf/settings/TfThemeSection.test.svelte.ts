@@ -482,3 +482,17 @@ test("a drag on a panel's square colours the preview each frame, on a built-in's
   expect(themes.own).toHaveLength(1);
   expect(themes.moving).toBeNull();
 });
+
+test("a built-in shows the Selected row's quick picks: the one it has makes no copy, another goes to a copy (#2516)", () => {
+  draw();
+  const picks = () => q('[aria-label="Selected row\'s colours"]')!;
+  expect(picks()).not.toBeNull();
+  [...picks().querySelectorAll("button")].find((b) => b.textContent === "knobas (ink)")!.click();
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  [...picks().querySelectorAll("button")].find((b) => b.textContent === "The theme's accent")!.click();
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  expect(themes.own[0]!.app!.selRow).toBe(derive("light", {}).colours.primary);
+  expect(storage.data.get(APP_SLOT_KEY.light)).toBe(themes.own[0]!.id);
+});
