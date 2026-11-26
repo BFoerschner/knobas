@@ -25,6 +25,7 @@
   import type { RunPorts } from "./pipeline-ports";
   import { downloadAndSay, drawnWhole, filesText, previewable, sizeText } from "./run-reads";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { expandLazy, isAltClick, LAZY_FETCH_CAP, prefixDescendants, TREE_EXPAND_CAP } from "../tree-alt";
 
   let {
     runId,
@@ -52,33 +53,49 @@
   type Answer = ArtifactPreview | { drawn: "image" | "pdf"; src: string } | "reading" | "too-large" | { failed: string };
   let preview = $state<{ entry: ArtifactEntry; answer: Answer } | null>(null);
   let token = 0;
+  let folderReads = new Map<string, Promise<readonly ArtifactEntry[] | null>>();
 
-  function readFolder(path: string) {
-    if (untrack(() => folders[path]) !== undefined) return;
+  function readFolder(path: string): Promise<readonly ArtifactEntry[] | null> {
+    const existing = untrack(() => folders[path]);
+    if (Array.isArray(existing)) return Promise.resolve(existing);
+    const pending = folderReads.get(path);
+    if (pending !== undefined) return pending;
+    if (existing !== undefined) return Promise.resolve(null);
     folders[path] = "reading";
     const mine = token;
-    ports.artifacts(runId, path).then(
-      (entries) => {
-        if (mine !== token) return;
-        folders[path] = entries ?? [];
-        if (path === "") {
-          for (const entry of (entries ?? []).filter((e) => e.folder).slice(0, OPEN_TOP)) toggle(entry.path, true);
-        }
-      },
-      (cause: unknown) => {
-        if (mine === token) folders[path] = { failed: ipcErrorMessage(cause) };
-      },
-    );
+    const read = ports
+      .artifacts(runId, path)
+      .then(
+        (entries) => {
+          if (mine !== token) return null;
+          const list = entries ?? [];
+          folders[path] = list;
+          if (path === "") {
+            for (const entry of list.filter((e) => e.folder).slice(0, OPEN_TOP)) toggle(entry.path, true);
+          }
+          return list;
+        },
+        (cause: unknown) => {
+          if (mine === token) folders[path] = { failed: ipcErrorMessage(cause) };
+          return null;
+        },
+      )
+      .finally(() => {
+        if (folderReads.get(path) === read) folderReads.delete(path);
+      });
+    folderReads.set(path, read);
+    return read;
   }
 
   $effect(() => {
     void runId;
     ++token;
     untrack(() => {
+      folderReads = new Map();
       folders = {};
       open = {};
       preview = null;
-      readFolder("");
+      void readFolder("");
     });
   });
 
@@ -102,9 +119,34 @@
     });
   });
 
-  function toggle(path: string, to = !(open[path] ?? false)) {
-    open[path] = to;
-    if (to) readFolder(path);
+  function toggle(path: string, to = !(open[path] ?? false), all = false) {
+    if (!all) {
+      open[path] = to;
+      if (to) void readFolder(path);
+      return;
+    }
+    if (!to) {
+      for (const k of prefixDescendants(Object.keys(open), path)) open[k] = false;
+      return;
+    }
+    const mine = token;
+    open[path] = true;
+    void expandLazy(path, {
+      nodeCap: TREE_EXPAND_CAP,
+      fetchCap: LAZY_FETCH_CAP,
+      alive: () => mine === token && open[path] === true,
+      cached: (p) => {
+        const held = folders[p];
+        return Array.isArray(held) ? held.filter((e) => e.folder).map((e) => e.path) : undefined;
+      },
+      fetch: async (p) => {
+        const entries = await readFolder(p);
+        return entries === null ? undefined : entries.filter((e) => e.folder).map((e) => e.path);
+      },
+      open: (p) => {
+        open[p] = true;
+      },
+    });
   }
 
   /** One drawn line of the tree: an entry, or a folder's own line while it reads or after it failed. */
@@ -193,7 +235,7 @@
     {@const entry = item.entry}
     {@const isOpen = open[entry.path] ?? false}
     <div class={`tf-arow tf-rowhost tf-dir ${indent}`} {@attach win.row(item.key)}>
-      <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={() => toggle(entry.path)}
+      <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={(event) => toggle(entry.path, undefined, isAltClick(event))}
         >{entry.name}/</button
       >
       <span class="tf-sz tf-rowval">{filesText(entry) ?? ""}</span>

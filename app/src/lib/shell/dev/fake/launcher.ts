@@ -709,12 +709,12 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   longFiles = params.has("fake-long-paths");
   return {
     fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
-    // Held lists (ux31): the same ranking over texts sent once, four at most, the least lately used dropped.
+    // Held lists (ux31, #2520): the same ranking over texts sent once, 32 at most, the least lately used dropped.
     fuzzy_hold: (args) => {
       const id = String(args["id"] ?? "");
       fakeHeld.delete(id);
       fakeHeld.set(id, (args["haystacks"] as string[] | undefined) ?? []);
-      while (fakeHeld.size > 4) fakeHeld.delete(fakeHeld.keys().next().value!);
+      while (fakeHeld.size > 32) fakeHeld.delete(fakeHeld.keys().next().value!);
     },
     fuzzy_rank_held: (args) => {
       const id = String(args["id"] ?? "");

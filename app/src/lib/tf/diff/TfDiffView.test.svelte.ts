@@ -456,7 +456,7 @@ test("the filter narrows the tree and the diff together", () => {
 test("the diffs are drawn in the rail's order, so j walks the rail down", () => {
   draw({ files: [file("tests/z.rs"), file("src/b.rs"), file("docs/a.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
   expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
-  const titles = [...target.querySelectorAll(".tf-flist button")].map((row) => row.getAttribute("title"));
+  const titles = [...target.querySelectorAll(".tf-flist button.tf-ffile")].map((row) => row.getAttribute("title"));
   expect(titles).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
 });
 
@@ -953,4 +953,76 @@ test("a generated file over the Load diff limit starts open on its Load diff lin
     "Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut. Load diff",
   );
   expect(cardOf("src/generated/small.rs").querySelector(".tf-fh-caret")!.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("changed-files folder headers collapse on click and recursively on Alt+click without hiding diff cards", () => {
+  draw({
+    files: [file("README.md"), file("src/a.rs"), file("src/sub/b.rs"), file("lib/c.rs")],
+    layout: createDiffLayout(() => null),
+  });
+  const dirBtn = (path: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>(".tf-flist button.tf-fdir")].find((b) => b.textContent?.trim() === path)!;
+  const railFiles = () => [...target.querySelectorAll(".tf-flist .tf-fname")].map((el) => el.textContent);
+
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("true");
+
+  // Plain click collapses only src, leaving src/sub open and diff cards intact.
+  dirBtn("src").click();
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("false");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("true");
+  expect(railFiles()).toEqual(["README.md", "c.rs", "b.rs"]);
+  expect(target.querySelectorAll(".tf-diff")).toHaveLength(4);
+
+  // Plain click expands src again.
+  dirBtn("src").click();
+  flushSync();
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+
+  // Alt+click collapses src and src/sub together.
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("false");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("false");
+  expect(railFiles()).toEqual(["README.md", "c.rs"]);
+
+  // Alt+click again expands src and src/sub together.
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("true");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("true");
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+});
+
+test("pressing T focuses Filter changed files, opens the narrow rail, and ignores text fields and modals", () => {
+  draw({ files: [RETRY, file("src/other.rs")], layout: createDiffLayout(() => null) });
+  const input = target.querySelector<HTMLInputElement>('input[aria-label="Filter changed files"]')!;
+  const grid = target.querySelector<HTMLElement>(".tf-dgrid")!;
+  expect(grid.classList.contains("tf-rail-shut")).toBe(true);
+
+  // Pressing T outside fields opens the rail and focuses the filter input.
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(grid.classList.contains("tf-rail-shut")).toBe(false);
+  expect(document.activeElement).toBe(input);
+
+  // While a modal layer is open, T does not steal focus.
+  input.blur();
+  const off = layers.add({ kind: "dialog", close: () => {} });
+  try {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", bubbles: true, cancelable: true }));
+    flushSync();
+    expect(document.activeElement).not.toBe(input);
+  } finally {
+    off();
+  }
+
+  // While focus is inside another text field, T does not steal focus.
+  const other = document.createElement("input");
+  target.appendChild(other);
+  other.focus();
+  other.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.activeElement).toBe(other);
 });

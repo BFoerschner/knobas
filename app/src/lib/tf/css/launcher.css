@@ -120,7 +120,7 @@
   display: grid; grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr); gap: var(--ln-gap); align-items: baseline; width: 100%; text-align: left;
   padding: 7px 18px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2);
 }
-.tf-ln-opt .tf-ln-nm { color: var(--ink); }
+.tf-ln-opt .tf-ln-nm { color: var(--ink); font-weight: 600; }
 /* Among results, what a *Go to* or *Search everything* row says starts where a title does, however long its name (F-625): a long name takes a second line. */
 .tf .tf-ln-opt.tf-ln-go { grid-template-columns: var(--ln-name) minmax(0, 1fr); }
 .tf-ln-go .tf-ln-nm { overflow-wrap: anywhere; }
@@ -191,6 +191,7 @@
 .tf-ln-mg[data-tone="muted"] { color: var(--muted); background: var(--muted-bg); border-color: transparent; }
 .tf-ln-k { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-ln-k.tf-ln-mono { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-weight: 600; color: var(--ink); }
+.tf-ln-t { font-weight: 600; }
 
 /* The evidence line (the everything-search decisions, 2026-11-20, D10): where the words are, for a row its name does not
    explain. The second grid row, under the title and what trails it; the monogram and the key cell stay centred on the

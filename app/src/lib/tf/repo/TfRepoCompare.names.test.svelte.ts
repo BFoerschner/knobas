@@ -90,8 +90,8 @@ async function settle() {
 }
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button")].map((b) => b.getAttribute("title"));
-const railCounts = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button .tf-n")].map((n) => text(n));
+const railNames = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")].map((b) => b.getAttribute("title"));
+const railCounts = () => [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile .tf-n")].map((n) => text(n));
 const note = () => text(target.querySelector(".tf-cdiff p.tf-cnote"));
 
 test("the clone's names draw at once under the clone's line, and the counted list fills them in place", async () => {
@@ -110,13 +110,13 @@ test("the clone's names draw at once under the clone's line, and the counted lis
     ["pay.py", BASE, HEAD],
     ["retry.py", BASE, HEAD],
   ]);
-  const rows = [...target.querySelectorAll(".tf-cdiff .tf-flist button")];
+  const rows = [...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")];
 
   lists[0]!.answer(counted([listed("pay.py", 4, 2), listed("retry.py", 1, 0)], "2026-11-12T08:00:00Z"));
   await settle();
   expect(railNames()).toEqual(["pay.py", "retry.py"]);
   expect(railCounts()).toEqual(["+4 −2", "+1 −0"]);
-  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button")], "the same rows, filled in place").toEqual(rows);
+  expect([...target.querySelectorAll(".tf-cdiff .tf-flist button.tf-ffile")], "the same rows, filled in place").toEqual(rows);
   expect(pages.map((p) => p.path), "the lines read stay").toEqual(["pay.py", "retry.py"]);
   expect(text(target.querySelector(".tf-cdiff .tf-diff[data-file='pay.py'] .tf-fh")), "the card's counts come with the list").toContain("+4");
   // The clone's list is checked against the source behind, under the same line, which says so once it answered.

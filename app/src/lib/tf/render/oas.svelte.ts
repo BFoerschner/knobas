@@ -16,6 +16,7 @@ import { refTarget, type OpRow, type PageAnswer, type Prop, type Resolved, type 
 import { factsOf, firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
 import type { SpecSession } from "../../render/openapi-port";
 import type { RequestDraft } from "../../render/openapi-request";
+import { collectDescendants, TREE_EXPAND_CAP } from "../tree-alt";
 
 /** A send as the request column draws it: running, answered or failed, refused before it went. */
 export type Sending =
@@ -214,6 +215,19 @@ export class OasState {
     const next = new Set(this.folds);
     if (open ?? !next.has(key)) next.add(key);
     else next.delete(key);
+    this.folds = next;
+  }
+
+  /** Opens or shuts a Paths directory fold and every nested directory beneath it (Alt+click). */
+  foldDir(dir: Dir, open?: boolean): void {
+    const rootKey = `p:${dir.path}`;
+    const want = open ?? !this.folds.has(rootKey);
+    const next = new Set(this.folds);
+    for (const d of collectDescendants([dir], (x) => x.dirs, TREE_EXPAND_CAP)) {
+      const k = `p:${d.path}`;
+      if (want) next.add(k);
+      else next.delete(k);
+    }
     this.folds = next;
   }
 

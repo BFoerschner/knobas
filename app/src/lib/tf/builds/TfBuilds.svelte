@@ -117,6 +117,7 @@
   import { RUN_BRIDGE } from "./pipeline-ports";
   import { QUEUED_RUN, withQueued } from "./pipeline";
   import { echoesOn, type EchoListen } from "../queued.svelte";
+  import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { windowListen } from "../../ipc/shared-listen";
   import { EVENTS } from "../../ipc";
   import type { RefreshEnded } from "../../ipc/sources";
@@ -503,6 +504,14 @@
     if (open !== foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)) remembered.set(f.key, open);
   }
 
+  /** Alt+click on a Builds folder toggles it and every nested folder under it. */
+  function altFold(f: Fold, isOpen: boolean, event: MouseEvent) {
+    if (!isAltClick(event)) return;
+    event.preventDefault();
+    const want = !isOpen;
+    for (const node of collectDescendants([f], (x) => x.folds, TREE_EXPAND_CAP)) remembered.set(node.key, want);
+  }
+
   /**
    * *Collapse all* / *Expand all*: every fold, as if the reader had toggled each. The unfiltered tree's too, so a fold
    * a chip or *This job* hides is set when it comes back (a filter can join single children another way).
@@ -683,7 +692,8 @@
 {#snippet foldView(f: Fold, depth: number, open: boolean, key: string)}
   <!-- The summary alone: a fold's rows follow it while it is open, and a closed one has none (#2200's class, #2211). -->
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
-    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} onclick={(event) => altFold(f, open, event)}
       ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
         >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
             class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span

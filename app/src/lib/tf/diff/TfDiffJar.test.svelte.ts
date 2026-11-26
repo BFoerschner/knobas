@@ -191,3 +191,49 @@ test("an added JAR lists every entry added", async () => {
   expect(rowTexts()).toEqual(AFTER.map(([n]) => `A ${n}`).sort((a, b) => (a < b ? -1 : 1)));
   expect(card().querySelector(".tf-rfoot-say")?.textContent).toBe("5 entries, all added");
 });
+
+test("Alt+click on a nested archive in JAR diff recursively expands and collapses nested archives", async () => {
+  const nestedCalls: string[] = [];
+  const earOld = jar("ear-old", [["app.war", "war-v1"]], "1.0.0");
+  const earNew = jar("ear-new", [["app.war", "war-v2"]], "1.0.1");
+  const warOld = jar("war-old", [["lib/core.jar", "core-v1"]], "1.0.0");
+  const warNew = jar("war-new", [["lib/core.jar", "core-v2"]], "1.0.1");
+  const coreOld = jar("core-old", [["a.txt", "before"]], "1.0.0");
+  const coreNew = jar("core-new", [["a.txt", "after"]], "1.0.1");
+  const archives: Omit<ArchivePorts, "open"> = {
+    nested: (handle, entry) => {
+      nestedCalls.push(`${handle}:${entry}`);
+      if (handle === "ear-old") return Promise.resolve(warOld);
+      if (handle === "ear-new") return Promise.resolve(warNew);
+      if (handle === "war-old") return Promise.resolve(coreOld);
+      if (handle === "war-new") return Promise.resolve(coreNew);
+      return Promise.reject(new Error("unexpected"));
+    },
+    entry: () => Promise.resolve(new Uint8Array()),
+    cls: () => Promise.resolve(outline("A", "m")),
+    decompile: () => Promise.resolve(""),
+    download: () => Promise.resolve(""),
+    java: () => Promise.resolve(JAVA),
+  };
+  const context = {
+    text: () => Promise.resolve(null),
+    bytes: () => Promise.resolve(new Uint8Array()),
+    archive: (_f: DiffFile, side: "old" | "new") => Promise.resolve(side === "old" ? earOld : earNew),
+  };
+  views.push(mount(TfDiffView, { target, props: { files: [JAR("app.ear")], context, archives, render: plainPort, layout: createDiffLayout(() => null), defaults: { list: [] } } as never }));
+  flushSync();
+  await settle();
+
+  rowOf("app.war").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  await settle();
+  expect(rowTexts()).toEqual(["M app.war", "M lib/core.jar", "M a.txt"]);
+  expect(nestedCalls).toHaveLength(4);
+
+  // Alt+click again collapses app.war and lib/core.jar together.
+  rowOf("app.war").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(rowTexts()).toEqual(["M app.war"]);
+  rowOf("app.war").click();
+  await settle();
+  expect(rowTexts()).toEqual(["M app.war", "M lib/core.jar"]);
+});
