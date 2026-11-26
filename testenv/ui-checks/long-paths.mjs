@@ -162,7 +162,7 @@ const SCREENS = [
   { id: "xsd-example-open", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", press: "opentrans_2_1.xsd", then: ["~ORDER", ".tf-xsd .tf-oas-pageseg button:last-child", "~Open in XML view"], wait: 3000, whole: ".tf-fileview header .tf-trail, .tf-xsd-opened .tf-xv-head", sizes: SMALLEST },
   // Zen mode everywhere in Code (Z1): its button in the top bar whole, and a file in Zen, its header's path whole.
   { id: "zen-code-file", route: `${REPO}/files/src/sepa/retry.rs`, press: ".tf-top > .tf-zenbtn", wait: 500, whole: ".tf-top, .tf-fileview header", sizes: SMALLEST },
-  { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
+  { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-bar, .tf-xv-qbar, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   // Commands (ADR-0060): Settings › Commands with a command whose program is deep under folders with spaces, its page, and
   // a run's dialog in a long Windows checkout, its run line naming the program, the checkout and the file by their whole paths.
   { id: "settings-commands", route: "settings/commands", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },

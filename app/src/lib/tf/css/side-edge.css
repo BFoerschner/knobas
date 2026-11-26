@@ -34,7 +34,8 @@
 .tf-sedge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; pointer-events: none; }
 .tf-sedge:hover::after { background: var(--ink-2); transition: background-color 0s .12s; }
 .tf .tf-sedge:focus-visible { outline: none; }
-.tf-sedge:focus-visible::after { background: var(--focus); transition: none; }
+:where(:root[data-focus-ring]) .tf-sedge:focus-visible::after { background: color-mix(in srgb, var(--focus) var(--focus-a), transparent); transition: none; }
+:where(:root[data-focus-ring="fade"]) .tf-sedge:focus-visible::after { transition: background-color var(--focus-fade) ease-out; }
 /* Held wins over focused: a press focuses the edge (for the keys after it), and after a key elsewhere WebKit and
    Chromium count that focus as the keyboard's. A ghost's line (`side-pace.ts`) is this one, moved. */
 .tf-sedge.tf-sedge-on::after { background: var(--ink); transition: none; }
