@@ -1,6 +1,6 @@
 /** A folder render's ask and listen loop (ADR-0044, ADR-0046): open while shown, look when not, again on a run's end. */
 import { flushSync } from "svelte";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import type { FolderAsk, FolderRenderView } from "../ipc/app";
 import { FolderRun, type FolderRenderPorts, type FolderRunAt } from "./folder-run.svelte";
@@ -143,5 +143,100 @@ test("a folder the backend dropped (a command changed it) is made again where it
     await settle();
     expect(h.asked.slice(before).map((a) => a.ask)).toEqual([want]);
     h.stop();
+  }
+});
+
+test("elapsed timer resets to 0s on re-run after completion or stop, and never double-counts backend elapsed_ms updates (#2523)", async () => {
+  vi.useFakeTimers();
+  try {
+    let nextView: FolderRenderView | null = null;
+    const asked: FolderAsk[] = [];
+    let heard: ((event: { payload: unknown }) => void) | null = null;
+    const ports: FolderRenderPorts = {
+      render: (at) => {
+        asked.push(at);
+        return Promise.resolve(
+          nextView ?? {
+            renderer: at.renderer,
+            folder: at.folder,
+            drawn: null,
+            current: false,
+            running: null,
+            failure: null,
+            from: "clone",
+            commit: null,
+          },
+        );
+      },
+      stop: () => Promise.resolve(),
+      leave: () => Promise.resolve(),
+      output: () => Promise.resolve(new Uint8Array()),
+      frame: () => Promise.resolve("t"),
+      listen: (_event, handler) => {
+        heard = handler;
+        return Promise.resolve(() => {});
+      },
+    };
+    const at: FolderRunAt = $state({ entityId: "r", renderer: "site", command: "", folder: "flows", commit: null, paths: null, start: true });
+    let run!: FolderRun;
+    const stop = $effect.root(() => {
+      run = new FolderRun(() => at, ports);
+    });
+    flushSync();
+    await settle();
+    const tell = (running: unknown) => heard?.({ payload: { entity_id: "r", renderer: "site", folder: "flows", running, lane: "" } });
+
+    // Run 1: starts running at 0ms and ticks for 5 seconds.
+    tell({ state: "running", elapsed_ms: 0 });
+    flushSync();
+    expect(run.elapsed).toBe(0);
+    vi.advanceTimersByTime(5000);
+    flushSync();
+    expect(run.elapsed).toBe(5000);
+
+    // Mid-run backend elapsed_ms update must replace the baseline, not double-count against stale local ticks.
+    tell({ state: "running", elapsed_ms: 5200 });
+    flushSync();
+    expect(run.elapsed).toBe(5200);
+    vi.advanceTimersByTime(1000);
+    flushSync();
+    expect(run.elapsed).toBe(6200);
+
+    // Run 1 finishes.
+    tell(null);
+    await settle();
+    expect(run.elapsed).toBe(0);
+
+    // Re-run via press(): Run 2 must start from 0s, not carry over Run 1's ticks.
+    nextView = { renderer: "site", folder: "flows", drawn: null, current: false, running: { state: "running", elapsed_ms: 0 }, failure: null, from: "clone", commit: null };
+    run.press();
+    await settle();
+    expect(run.elapsed).toBe(0);
+    vi.advanceTimersByTime(2000);
+    flushSync();
+    expect(run.elapsed).toBe(2000);
+
+    // Fresh backend answer during a running state resets local ticks too (no double-count).
+    nextView = { renderer: "site", folder: "flows", drawn: null, current: false, running: { state: "running", elapsed_ms: 2300 }, failure: null, from: "clone", commit: null };
+    run.look();
+    await settle();
+    expect(run.elapsed).toBe(2300);
+
+    // Stop via press() mid-run, wait past PressHold, then re-run: starts from 0s again.
+    vi.advanceTimersByTime(3000);
+    flushSync();
+    expect(run.elapsed).toBe(5300);
+    run.press();
+    flushSync();
+    expect(run.elapsed).toBe(0);
+    vi.advanceTimersByTime(1000);
+    nextView = { renderer: "site", folder: "flows", drawn: null, current: false, running: { state: "running", elapsed_ms: 0 }, failure: null, from: "clone", commit: null };
+    run.press();
+    await settle();
+    expect(run.elapsed).toBe(0);
+
+    stop();
+  } finally {
+    vi.useRealTimers();
   }
 });
