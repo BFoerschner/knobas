@@ -15,8 +15,9 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::search::{
-    create_smart_list_inner, delete_smart_list_inner, filter_suggestions_inner,
-    launcher_home_inner, rename_smart_list_inner, search_inner, smart_lists_inner,
+    create_smart_list_inner, delete_smart_list_inner, filter_suggestions_inner, fuzzy_drop,
+    fuzzy_hold, fuzzy_rank_held, launcher_home_inner, rename_smart_list_inner, search_inner,
+    smart_lists_inner,
 };
 use knobas_app::sources::Registry;
 use knobas_search::{SearchFilters, SearchQuery};
@@ -2006,4 +2007,48 @@ async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
     let broken = state("broken").expect("the broken list says so");
     assert_eq!(broken.tone, Some(knobas_core::tone::Tone::Warn));
     assert!(broken.text.starts_with("Needs attention"), "{broken:?}");
+}
+
+/// Multiple mounted kept pages hold their own fuzzy filter lists at once (#2520):
+/// holding well over 4 simultaneous lists (up to `HeldLists::BOUND`, 32) never
+/// evicts earlier lists, and each answers with UTF-16 code-unit highlight marks.
+#[test]
+fn fuzzy_held_ipc_keeps_more_than_four_simultaneous_lists_without_eviction() {
+    let prefix = token("held");
+    let count = knobas_search::picker::HeldLists::BOUND;
+    assert!(count >= 32, "HeldLists::BOUND must be raised well above 4, got {count}");
+
+    let ids: Vec<String> = (0..count).map(|i| format!("{prefix}-{i}")).collect();
+    for (i, id) in ids.iter().enumerate() {
+        let rows = vec![
+            format!("🚀 page-{i}/ADProxy"),
+            format!("page-{i}/routing"),
+        ];
+        fuzzy_hold(id.clone(), rows).expect("fuzzy_hold succeeds");
+    }
+
+    // All held lists — including the earliest ones past the old cap of 4 — still rank.
+    for (i, id) in ids.iter().enumerate() {
+        let ranked = fuzzy_rank_held(id.clone(), "proxy".into())
+            .unwrap_or_else(|e| panic!("list {i} ({id}) should not be evicted: {e:?}"));
+        assert_eq!(ranked.len(), 1, "list {i} should match ADProxy");
+        assert_eq!(ranked[0].index, 0);
+        // `🚀` is 2 UTF-16 code units, so `Proxy` starts at UTF-16 offset `2 + 1 + "page-{i}/AD".len()`.
+        let expected_start = u32::try_from(format!("🚀 page-{i}/AD").encode_utf16().count()).unwrap();
+        assert_eq!(
+            ranked[0].marks,
+            vec![expected_start, expected_start + 5],
+            "UTF-16 marks for list {i}"
+        );
+    }
+
+    for id in &ids {
+        fuzzy_drop(id.clone());
+    }
+    assert_eq!(
+        fuzzy_rank_held(ids[0].clone(), "proxy".into())
+            .unwrap_err()
+            .code,
+        IpcErrorCode::NotFound
+    );
 }
