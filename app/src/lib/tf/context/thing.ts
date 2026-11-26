@@ -315,7 +315,6 @@ export function webUrl(href: string, origin: string): string | null {
 export function repoOfSelection(node: Element | null, hash: string = location.hash): string | null {
   for (let at: Element | null = node; at !== null; at = at.parentElement) {
     if (!(at instanceof HTMLElement)) continue;
-    if (at.dataset["made"] !== undefined) return null;
     const named = at.dataset["searchRepo"];
     if (named) return named;
     if (at.classList.contains("tf-fileview")) {
