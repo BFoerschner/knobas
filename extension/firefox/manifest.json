@@ -1,0 +1,37 @@
+{
+  "manifest_version": 2,
+  "name": "knobas link handoff",
+  "version": "1.0.0",
+  "description": "Opens links to your knobas sources in knobas instead of a new tab, over knobas's Native Messaging host.",
+  "homepage_url": "https://github.com/BFoerschner/knobas",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "link-handoff@knobas.dev",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "icons": {
+    "48": "icons/on.svg",
+    "96": "icons/on.svg"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "webRequest",
+    "webRequestBlocking",
+    "tabs",
+    "storage",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "page": "background.html",
+    "persistent": true
+  },
+  "browser_action": {
+    "default_icon": "icons/on.svg",
+    "default_title": "knobas link handoff"
+  }
+}

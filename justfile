@@ -57,7 +57,7 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
 # `check`'s script half, and with `docs-check` all of `check-scripts`: one
 # list, so the two cannot drift apart (#2334). None takes an argument.
-script_recipes := "shell test-layout witness-unit conflict-markers"
+script_recipes := "shell test-layout witness-unit conflict-markers extension-test"
 
 check:
     #!/usr/bin/env bash
@@ -629,6 +629,21 @@ conflict-markers:
 # disk, not with `git ls-files`, because cargo compiles an untracked one too.
 test-layout:
     scripts/test-layout.sh guard
+
+# The Firefox link-handoff extension's tests (#2534, ADR-0061): node's own
+# test runner over `extension/firefox/test/`, no `node_modules`, about a
+# second. In `check`'s script half: nothing in it builds or reads `target/`
+# but the `.xpi` test, which packs into a temporary directory. Its protocol
+# test reads `crates/knobas-app/src/link_handoff/protocol.rs`, so a change to
+# the host name, add-on ID or protocol version on the Rust side fails here.
+extension-test:
+    node --test extension/firefox/test/*.test.js
+
+# Packs the Firefox extension into `target/extension/knobas-link-handoff-<version>.xpi`,
+# unsigned and byte for byte the same for the same sources; signing and
+# loading it are in `extension/firefox/README.md`.
+extension-xpi:
+    python3 -I extension/firefox/build.py
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
