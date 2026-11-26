@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { ArchiveIndex, ClassOutline } from "../ipc/entity";
-import { bytes, chain, declaration, entriesOf, filteredRows, head, kindOf, libRows, libText, listing, memberLine, supers, textOf, topClass, treeRows, type Nested, type Row } from "./jar";
+import { bytes, chain, declaration, entriesOf, filteredRows, head, kindOf, labelMarks, libRows, libText, listing, memberLine, supers, textOf, topClass, treeRows, type Nested, type Row } from "./jar";
 
 function index(names: string[], over: Partial<ArchiveIndex> = {}): ArchiveIndex {
   const sorted = [...names].sort();
@@ -93,12 +93,14 @@ test("the filter ranks every entry, the open nested archives' too, and draws the
   // The ranking kept the nested helper first, then a top entry; their marks are pairs in each one's path.
   const helper = entries.find((e) => e.name === "org/p/PayoutHelper.class")!;
   const service = entries.find((e) => e.name === "com/x/PayoutService.class")!;
-  const marks = new Map([[helper, [6, 12]], [service, [6, 12]]]);
-  const { rows, hits } = filteredRows([helper, service], (e) => marks.get(e) ?? [], NONE, nested);
+  const { rows, hits } = filteredRows([helper, service], NONE, nested);
   expect(rows.map(label)).toEqual(["BOOT-INF/lib/p-1.jar!org/p/PayoutHelper.class", "com/x/PayoutService.class"]);
-  // A nested entry's label names its archive first: its marks move past `BOOT-INF/lib/p-1.jar!` (21 units).
-  expect(rows.map((r) => (r.kind === "file" ? r.marks : null))).toEqual([[27, 33], [6, 12]]);
-  expect(rows.map((r) => (r.kind === "file" ? r.label.slice(...(r.marks as [number, number])) : null))).toEqual(["Payout", "Payout"]);
+  // Each row carries what was ranked, for the rows drawn to read its marks.
+  expect(rows.map((r) => (r.kind === "file" ? r.entry : null))).toEqual([helper, service]);
+  // A nested entry's label names its archive first: its path's marks move past `BOOT-INF/lib/p-1.jar!` (21 units).
+  const onLabel = rows.map((r) => (r.kind === "file" ? labelMarks(r.label, r.path, [6, 12]) : []));
+  expect(onLabel).toEqual([[27, 33], [6, 12]]);
+  expect(rows.map((r, n) => (r.kind === "file" ? r.label.slice(onLabel[n]![0], onLabel[n]![1]) : null))).toEqual(["Payout", "Payout"]);
   expect(hits).toBe(1);
 });
 

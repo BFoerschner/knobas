@@ -126,6 +126,16 @@ export function matchesAll(haystack: string, text: string): boolean {
   return words(text).every((word) => lower.includes(word));
 }
 
+/** {@link matchesAll} for one text over many rows, its words read once (#2532: a key's fallback over 10,000 rows). */
+export function matcherOf(text: string): (haystack: string) => boolean {
+  const typed = words(text);
+  return (haystack) => {
+    const lower = haystack.toLowerCase();
+    for (const word of typed) if (!lower.includes(word)) return false;
+    return true;
+  };
+}
+
 /** A run of drawn text, and whether a typed word matched it. */
 export interface Mark {
   text: string;

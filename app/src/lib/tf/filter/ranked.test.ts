@@ -68,6 +68,24 @@ test("`typed` is the text while its answer is out and nothing once it lands, for
   pending.length = 0;
 });
 
+test("`ready` waits for a fresh list's first answer, then holds while what it drew stands (#2532)", async () => {
+  const order = new FuzzyOrder<string>();
+  order.ask("prox", rows, same);
+  // Nothing drawn for these rows and no answer: a page keeps what it drew.
+  expect(order.ready("prox", rows)).toBe(false);
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [] }]);
+  await flush();
+  expect(order.ready("prox", rows)).toBe(true);
+  expect(order.rows("prox", rows, same)).toEqual(["acme/auth-proxy"]);
+  // The next key: its answer is out, and the rows drawn for these rows stand meanwhile.
+  order.ask("proxy", rows, same);
+  expect(order.ready("proxy", rows)).toBe(true);
+  expect(order.rows("proxy", rows, same)).toEqual(["acme/auth-proxy"]);
+  // Other rows are a fresh list again.
+  expect(order.ready("proxy", rows.slice(1))).toBe(false);
+  pending.length = 0;
+});
+
 test("inOrder keeps the rows the answer kept in the page's order, the same list where it kept every one (#2532)", () => {
   expect(inOrder(rows, ["acme/routing", "acme/auth-proxy"])).toEqual(["acme/auth-proxy", "acme/routing"]);
   expect(inOrder(rows, [...rows].reverse())).toBe(rows);

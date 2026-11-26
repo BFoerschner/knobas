@@ -486,7 +486,7 @@
    * name was kept stays with none.
    */
   const groupsShown = $derived.by((): ShownGroup[] => {
-    if (!filtering) return groupsAll;
+    if (!flat) return groupsAll;
     const kept = new Map<ShownGroup, DrawnFile[]>();
     const named = new Set<ShownGroup>();
     for (const hit of rankedHits) {
@@ -674,18 +674,24 @@
   const hitText = (hit: Hit) => (hit.file === undefined ? hit.group.folder : hit.group === undefined ? keyOf(hit.file) : hit.file.path);
   const fileOrder = heldOrder<Hit>("diff-files");
   $effect(() => fileOrder.ask(filter, hits, hitText));
+  /**
+   * Whether the rail is the ranking's flat list: from the first answer on (`FuzzyOrder.ready`). Until the first key's
+   * answer lands the tree stays as drawn, as a list held before keeps its rows, so no pass of the filter as it was
+   * runs over every file and nothing drawn moves when the answer comes.
+   */
+  const flat = $derived(filtering && fileOrder.ready(filter, hits));
   /** The hits the ranking kept, best first; none with no words. */
-  const rankedHits = $derived(filtering ? fileOrder.rows(filter, hits, hitText) : NO_HITS);
+  const rankedHits = $derived(flat ? fileOrder.rows(filter, hits, hitText) : NO_HITS);
   /** Each kept file's hit, for its row's marks. */
   const hitOf = $derived(new Map(rankedHits.flatMap((hit) => (hit.file === undefined ? [] : [[hit.file, hit] as const]))));
   const fileMarking = $derived(fileOrder.typed(filter, hits));
   /** The files the rail lists: every one, or the ones the ranking kept, best first. */
-  const shown = $derived(filtering ? rankedHits.flatMap((hit) => (hit.file !== undefined && hit.group === undefined ? [hit.file] : [])) : realFiles);
+  const shown = $derived(flat ? rankedHits.flatMap((hit) => (hit.file !== undefined && hit.group === undefined ? [hit.file] : [])) : realFiles);
   /**
    * Expanded rail tree used to derive diff card ordering; unaffected by sidebar folder collapse. While the filter has
    * words it is flat, the ranking's order (#2532); cleared, the folders come back as they were left.
    */
-  const allTree = $derived(list ? (filtering ? flatOf(shown, groupsShown) : treeOf(shown, groupsShown)) : []);
+  const allTree = $derived(list ? (flat ? flatOf(shown, groupsShown) : treeOf(shown, groupsShown)) : []);
   /** Folder headers collapsed by hand in the changed-files rail (`d:<path>` / `g:<folder>`). */
   const collapsedDirs = new SvelteSet<string>();
   const tree = $derived(collapseTree(allTree, collapsedDirs));
@@ -2199,7 +2205,7 @@
             {@const how = / \((?:[^()]*, )?(not staged|staged|untracked)\)$/.exec(row.name)?.[1] ?? null}
             {@const counts = file.made === undefined ? file : (lined[keyOf(file)]?.file ?? null)}
             {@const named = how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}
-            {@const hit = filtering ? hitOf.get(file) : undefined}
+            {@const hit = flat ? hitOf.get(file) : undefined}
             <button
               type="button"
               class="tf-ffile"

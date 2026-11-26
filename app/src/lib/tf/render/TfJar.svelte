@@ -69,6 +69,7 @@
     listing,
     scopeOf,
     entriesOf,
+    labelMarks,
     libText,
     textOf,
     treeRows,
@@ -188,14 +189,20 @@
   const libOrder = heldOrder<(typeof allLibs)[number]>("jar-libs");
   $effect(() => libOrder.ask(tab === "deps" ? typed : "", allLibs, libText));
 
+  /** What the list drew last: kept while a first key's ranking is out (`FuzzyOrder.ready`). */
+  let drewLast: { rows: Row[]; hits: number | null } | null = null;
   // Plain copies of what is open, read once a pass: the rows ask for each of thousands.
   const filtered = $derived.by(() => {
     if (top === null || !top.ok) return null;
     const open = { dirs: new Set(openDirs), files: new Set(openFiles) };
     const got = new Map(nested);
-    if (tab === "deps") return { rows: libRows(libOrder.rows(typed, allLibs, libText), open, got, (lib) => libOrder.marks(lib)), hits: null };
-    if (filtering) return filteredRows(entryOrder.rows(typed, entries, entryName), (entry) => entryOrder.marks(entry), open, got);
-    return { rows: treeRows(top.listing, "", 0, open, got), hits: null };
+    let made: { rows: Row[]; hits: number | null };
+    if (tab === "deps") made = { rows: libRows(libOrder.rows(typed, allLibs, libText), open, got, (lib) => libOrder.marks(lib)), hits: null };
+    else if (filtering && !entryOrder.ready(typed, entries) && drewLast !== null) made = drewLast;
+    else if (filtering) made = filteredRows(entryOrder.rows(typed, entries, entryName), open, got);
+    else made = { rows: treeRows(top.listing, "", 0, open, got), hits: null };
+    drewLast = made;
+    return made;
   });
   /** What a row's `<Marked>` marks by its words while the ranking's answer is out (`FuzzyOrder.typed`). */
   const marking = $derived(tab === "deps" ? libOrder.typed(typed, allLibs) : entryOrder.typed(typed, entries));
@@ -450,7 +457,7 @@
       </label>
       <span class="tf-jar-count" aria-live="polite">
         {#if tab === "deps"}{!filtering ? `${libs} ${libs === 1 ? "JAR" : "JARs"}` : `${rows.filter((r) => r.kind === "lib").length} of ${libs}`}
-        {:else if !filtering}{total.toLocaleString("en")} {total === 1 ? "entry" : "entries"}
+        {:else if !filtering || filtered?.hits == null}{total.toLocaleString("en")} {total === 1 ? "entry" : "entries"}
         {:else}{(filtered?.hits ?? 0).toLocaleString("en")} of {total.toLocaleString("en")}{/if}
       </span>
       {#if libs > 0}
@@ -496,7 +503,7 @@
     <div class="tf-jar-row" data-k={row.k} {@attach win.row(row.k)} {@attach indent(row.depth)}>
       <button type="button" class="tf-jar-rbtn" class:tf-jar-bad-name={(flags & UNSAFE) !== 0} aria-expanded={row.open} onclick={(event) => void openEntry(row.scope, row.path, flags, isAltClick(event))}>
         {#if kind === "archive"}{@render caret(row.open)}{:else}<span class="tf-jar-nocaret"></span>{/if}
-        <span class="tf-jar-fname" class:tf-jar-class={kind === "class"}><Marked text={row.label} typed={marking} pairs={row.marks ?? []} /></span>
+        <span class="tf-jar-fname" class:tf-jar-class={kind === "class"}><Marked text={row.label} typed={marking} pairs={row.entry === undefined ? [] : labelMarks(row.label, row.path, entryOrder.marks(row.entry))} /></span>
         <span class="tf-jar-meta">
           {#if (flags & UNSAFE) !== 0}<span class="tf-jar-warn">Unsafe name</span>
           {:else if (flags & UNREADABLE) !== 0}<span class="tf-jar-warn">Encrypted</span>

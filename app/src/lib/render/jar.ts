@@ -120,8 +120,8 @@ export function scopeOf(parent: string, entry: string): string {
 /** One row the list draws. `k` is unique across scopes and kinds. */
 export type Row =
   | { k: string; kind: "dir"; depth: number; scope: string; label: string; dir: Dir; open: boolean }
-  /** `marks`: the filter's matched letters in `label`, pairs of start and end (#2532); none outside a filter. */
-  | { k: string; kind: "file"; depth: number; scope: string; i: number; label: string; path: string; open: boolean; marks?: readonly number[] }
+  /** `entry`: what the filter ranked for it (#2532), whose marks are in `path`, which ends `label`; none outside a filter. */
+  | { k: string; kind: "file"; depth: number; scope: string; i: number; label: string; path: string; open: boolean; entry?: Entry }
   | { k: string; kind: "detail"; depth: number; scope: string; path: string }
   /** `marks`: the filter's matched letters in {@link libText}, pairs of start and end (#2532). */
   | { k: string; kind: "lib"; depth: number; scope: string; path: string; name: string; version: string | null; size: number; open: boolean; marks?: readonly number[] }
@@ -157,8 +157,11 @@ export function entriesOf(top: Listing, nested: ReadonlyMap<string, Nested>): En
   return out;
 }
 
-/** A pairs list moved `by` units right: a path's marks onto the label that names its archive first. */
-const shifted = (pairs: readonly number[], by: number) => (by === 0 ? pairs : pairs.map((at) => at + by));
+/** A path's marks moved onto the label that names its archive first (`scope!path`): what a drawn row marks. */
+export function labelMarks(label: string, path: string, pairs: readonly number[]): readonly number[] {
+  const by = label.length - path.length;
+  return by === 0 || pairs.length === 0 ? pairs : pairs.map((at) => at + by);
+}
 
 /**
  * The rows of the archive at `scope` (its listing `l`) below `depth`, for what `open` holds. A nested archive opened
@@ -178,11 +181,13 @@ export function treeRows(l: Listing, scope: string, depth: number, open: Open, n
   return out;
 }
 
-function fileRow(l: Listing, scope: string, i: number, depth: number, open: Open, nested: ReadonlyMap<string, Nested>, out: Row[], label: string, marks?: readonly number[]) {
+function fileRow(l: Listing, scope: string, i: number, depth: number, open: Open, nested: ReadonlyMap<string, Nested>, out: Row[], label: string, entry?: Entry) {
   const path = l.names[i]!;
   const key = `${scope}|${path}`;
   const isOpen = open.files.has(key);
-  out.push({ k: `f${key}#${i}`, kind: "file", depth, scope, i, label, path, open: isOpen, ...(marks === undefined || marks.length === 0 ? {} : { marks }) });
+  const row: Extract<Row, { kind: "file" }> = { k: `f${key}#${i}`, kind: "file", depth, scope, i, label, path, open: isOpen };
+  if (entry !== undefined) row.entry = entry;
+  out.push(row);
   if (!isOpen) return;
   if (kindOf(path) === "archive") nestedRows(scopeOf(scope, path), depth + 1, open, nested, out);
   else out.push({ k: `d${key}#${i}`, kind: "detail", depth, scope, path });
@@ -201,17 +206,18 @@ function nestedRows(scope: string, depth: number, open: Open, nested: ReadonlyMa
 
 /**
  * The filter's rows: the entries the ranking `kept`, in its order, each named by its path (a nested one's after its
- * archive's, `!` between) and marked by `marksOf` (pairs in its path); `hits` counts the top archive's.
+ * archive's, `!` between) and carrying its entry, whose marks a drawn row reads ({@link labelMarks}): of thousands
+ * kept, only the rows drawn ask; `hits` counts the top archive's.
  */
-export function filteredRows(kept: readonly Entry[], marksOf: (entry: Entry) => readonly number[], open: Open, nested: ReadonlyMap<string, Nested>): { rows: Row[]; hits: number } {
+export function filteredRows(kept: readonly Entry[], open: Open, nested: ReadonlyMap<string, Nested>): { rows: Row[]; hits: number } {
   const out: Row[] = [];
   let hits = 0;
+  const shut: Open = { dirs: open.dirs, files: new Set<string>() };
   for (const entry of kept) {
     const { l, scope, i, name } = entry;
     if (scope === "") hits += 1;
     const label = scope === "" ? name : `${scope}!${name}`;
-    const files = kindOf(name) === "archive" ? new Set<string>() : open.files;
-    fileRow(l, scope, i, 0, { dirs: open.dirs, files }, nested, out, label, shifted(marksOf(entry), label.length - name.length));
+    fileRow(l, scope, i, 0, kindOf(name) === "archive" ? shut : open, nested, out, label, entry);
   }
   return { rows: out, hits };
 }
