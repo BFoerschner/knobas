@@ -63,6 +63,8 @@ export type Act =
   /** The document's own copy of the selection, so a page's `copy` handler still shapes what lands. */
   | { do: "copy-selection" }
   | { do: "search"; text: string }
+  /** *Search in repository* (ADR-0062): the repository's Files tab, *Text* filled with the words. */
+  | { do: "search-repo"; repoId: string; text: string }
   /** The browser, on purpose: an item named *Open in browser*. */
   | { do: "browser"; url: Text }
   /** *Open in ⟨source⟩*: its site inside knobas when the source's pages open there (ADR-0050), else the browser. */
@@ -145,6 +147,8 @@ export interface MenuContext {
   docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
   /** Whether a failed run is marked read (`runs-read.svelte.ts`, ux18); absent, no mark is offered. */
   runs?: { isRead(runId: string): boolean };
+  /** The repository the selected words are code of (`repoOfSelection`): *Search in repository* is offered for it. */
+  searchRepo?: string | null;
   /** Whether a repository is known to be cloned here (ux26): a commit offers *Compare with working tree* only then. */
   checkout?: (repoId: string) => boolean;
   /**
@@ -231,6 +235,7 @@ export function menuFor(thing: Thing | null, selection: string | null, ctx: Menu
   if (searchable(selection)) {
     const shown = selection.length > 24 ? `${selection.slice(0, 23)}…` : selection;
     words.push({ id: "search-sel", label: `Search knobas for “${shown}”`, act: { do: "search", text: selection } });
+    if (ctx.searchRepo) words.push({ id: "search-repo", label: "Search in repository", act: { do: "search-repo", repoId: ctx.searchRepo, text: selection } });
   }
   return own.length === 0 ? words : [...words, RULE, ...own];
 }
