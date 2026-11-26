@@ -173,13 +173,13 @@ const sources = files(ROOT, /\.(css|svelte)$/).map((file) => ({ file, text: read
 const sheets = sources.map(({ file, text }) => ({ file, rules: rules(stylesheet(file, text)) }));
 const codeClasses = new Set([...CODE_CLASSES, ...sources.filter(({ file }) => file.endsWith(".svelte")).flatMap(({ text }) => markupCodeClasses(text))]);
 
-test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are off until turned on", () => {
+test("(a) --mono is the chosen family, then the bundled face, its stand-ins and the system's monospace; ligatures are on until turned off (#2516)", () => {
   const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
-  expect(tokens).toMatch(/--mono-bundled: "knobas Cascadia Mono";/);
+  expect(tokens).toMatch(/--mono-bundled: "knobas Cascadia Code 2009";/);
   expect(tokens).toMatch(
     /--mono: var\(--mono-chosen, var\(--mono-bundled\)\), var\(--mono-bundled\), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;/,
   );
-  expect(tokens).toMatch(/--mono-ligatures: none;/);
+  expect(tokens).toMatch(/--mono-ligatures: normal;/);
   // Both Cascadias at 105 %, and each stand-in a local face sized to its advance there, so nothing moves when one lands.
   const faces = readFileSync(join(ROOT, FACES), "utf8");
   // Under names of their own (2026-11-21), so an installed font of the plain name never stands in for the bundled file.
@@ -508,10 +508,10 @@ test("(n) every area that stacks code lines draws its rows at Code's line spacin
       for (const [prop, value] of decls)
         if (prop === "font" && /\)\/1\.[56]5? var\(--mono\)/.test(value) && !LINES_OF_STATUS.has(`${file} ${selectors.join(", ")}`)) other.push(`${file} ${selectors.join(", ")}`);
   expect(other).toEqual([]);
-  // The tokens: Joined is the face's own line, rounded to whole device pixels; the areas take Code's letter spacing,
-  // and their line numbers, a log's times and an editor's numbers keep their own.
+  // The tokens: 1.60 by default (#2516), rounded to whole device pixels; the areas take Code's letter spacing, and
+  // their line numbers, a log's times and an editor's numbers keep their own.
   const tokens = readFileSync(join(ROOT, TOKENS), "utf8");
-  expect(tokens).toMatch(/--code-lh-face: 1\.2202;/);
+  expect(tokens).toMatch(/--code-lh-face: 1\.6;/);
   expect(tokens).toMatch(/--code-lh: round\(calc\(var\(--code-lh-face\) \* 1em\), calc\(1px \/ var\(--dpr\)\)\);/);
   const areas = /\n:is\(([^)]*(?:\([^)]*\))?[^)]*)\), :is\(\1\) > :is\(code, kbd, samp, tt\) \{ letter-spacing: var\(--ls-code, normal\); word-spacing: normal; \}/.exec(tokens);
   expect(areas, "the areas' letter spacing rule").not.toBeNull();

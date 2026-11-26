@@ -7,6 +7,12 @@ like meant to be, yeah."
 
 Amends `2026-11-20-the-faces-knobas-brings.md` for code. Two calls went to Fable (xhigh), whose rulings are below.
 
+**Amended 2026-11-26** by #2516 (spec #2514: "The default code font and line height are not `Cascadia Code 2009.22`
+at `1.60`"): with nothing kept, code draws in Cascadia Code 2009.22 with its ligatures, rows 1.60 of the size, which
+`css/tokens.css` now draws itself. Ligatures are on until turned off (kept as `off`), the newer release is kept as
+`2407.24`, and *Joined* as `joined`. A choice kept before stays as it was; a default that was kept as nothing before
+reads as the new default.
+
 **Amended the same day** by `2026-11-21-fonts-you-can-tune.md`: code rows are the face's own line height (*Joined*) by
 default, Settings › Fonts lists the bundled Cascadias apart from installed ones under CSS names of their own ("knobas
 Cascadia Mono", "knobas Cascadia Code"), so "Both names are the bundled face" below holds for a name typed bare and

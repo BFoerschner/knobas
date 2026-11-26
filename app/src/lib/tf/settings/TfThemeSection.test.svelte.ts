@@ -2,7 +2,7 @@
  * Settings › Appearance › Theme (`TfThemeSection.svelte`, ADR-0055): the window slots, the editor's rows, their fixes
  * and *Auto*, the code line, the preview, the import band, and a theme that cannot be read asking first.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
@@ -65,13 +65,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("choosing in a slot keeps the id and writes the properties; a built-in has no swatch buttons, and Duplicate and edit puts the copy in that slot", () => {
+test("choosing in a slot keeps the id and writes the properties; a built-in's swatches are buttons, and Duplicate and edit puts the copy in that slot", () => {
   draw();
   choose("dark", "dracula");
   expect(storage.data.get(APP_SLOT_KEY.dark)).toBe("dracula");
   expect(html.props.get("--sheet-dark")).toBe("#282A36");
   expect(q(".tf-thm-edh h2")?.textContent).toBe("Dracula");
-  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(0);
+  expect(target.querySelectorAll("button.tf-thm-sw")).toHaveLength(32);
   button("Duplicate and edit")!.click();
   flushSync();
   const copy = themes.own[0]!;
@@ -376,4 +376,123 @@ test("colour-blind mode names the pairs that read alike under the States, and no
   const lines = [...target.querySelectorAll(".tf-apt-cb")].map((l) => l.textContent);
   expect(lines).toContain("Attention and Failed read the same under deuteranopia.");
   colourBlind.set(false);
+});
+
+test("light or dark chosen while the page is open puts that side's window theme in the editor and its preview (#2516)", () => {
+  storage = memory();
+  html = root();
+  themes = createThemes(() => storage, () => html, { set: setTimeout, clear: clearTimeout, frame: (run) => run() });
+  const mode = createTheme();
+  views.push(mount(TfThemeSection, { target, props: { themes, mode, prefersDark: () => false } }));
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+  mode.set("dark");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Dark");
+  expect(target.querySelector(".tf-thm-side")?.textContent).not.toMatch(/Shown as it draws while the window is/);
+  mode.set("light");
+  flushSync();
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+});
+
+test("Edit on a slot scrolls smoothly to the editor and focuses its heading, the theme already shown included (#2516)", async () => {
+  draw();
+  const scrolled: { el: Element; how: unknown }[] = [];
+  const was = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, how?: unknown) {
+    scrolled.push({ el: this, how });
+  };
+  try {
+    button("Edit")!.click();
+    flushSync();
+    await tick();
+    expect(document.activeElement).toBe(q(".tf-thm-edh h2"));
+    expect(scrolled.at(-1)).toEqual({ el: q(".tf-thm-ed"), how: { behavior: "smooth", block: "start" } });
+  } finally {
+    HTMLElement.prototype.scrollIntoView = was;
+  }
+});
+
+test("a built-in's first colour change makes a copy with it, in the window's slot; opening the panel makes none, and Undo takes it back (#2516)", () => {
+  draw();
+  q('[data-row="ok"]')!.querySelector<HTMLButtonElement>("button.tf-thm-sw")!.click();
+  flushSync();
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  expect(themes.own).toHaveLength(0);
+  const field = q<HTMLInputElement>(".tf-thm-pop .tf-stg-in")!;
+  field.value = "#2E7D32";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  const copy = themes.own[0]!;
+  expect(copy.app!.ok).toBe("#2E7D32");
+  expect(storage.data.get(APP_SLOT_KEY.light)).toBe(copy.id);
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light copy");
+  expect(stage().style.getPropertyValue("--ok")).toBe("#2E7D32");
+  expect(q(".tf-thm-pop")).not.toBeNull();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("knobas Light comes with knobas, so your change went to a copy, knobas Light copy.");
+  toast.action!.run();
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  expect(storage.data.has(APP_SLOT_KEY.light)).toBe(false);
+  expect(q(".tf-thm-edh h2")?.textContent).toBe("knobas Light");
+});
+
+test("a row of a ground and its text shows both hex values, and a press on either opens that colour's panel at its hex field (#2516)", async () => {
+  draw();
+  const colours = derive("light", themes.find("knobas-light")!.app ?? {}).colours;
+  const hexes = [...q('[data-row="primary"]')!.querySelectorAll<HTMLButtonElement>("button.tf-thm-hex")];
+  expect(hexes.map((b) => b.textContent?.trim())).toEqual([colours.primary, colours.onPrimary]);
+  hexes[1]!.click();
+  flushSync();
+  await tick();
+  const pop = q(".tf-thm-pop")!;
+  expect(pop.getAttribute("aria-label")).toBe("Text on a primary button");
+  expect(document.activeElement).toBe(pop.querySelector(".tf-stg-in"));
+  // Looking made no copy.
+  expect(themes.own).toHaveLength(0);
+  (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+  await tick();
+  expect(q(".tf-thm-pop")).toBeNull();
+  expect(document.activeElement).toBe(hexes[1]);
+});
+
+test("a drag on a panel's square colours the preview each frame, on a built-in's copy made by its first move (#2516)", async () => {
+  draw();
+  q('[data-row="ok"]')!.querySelector<HTMLButtonElement>("button.tf-thm-sw")!.click();
+  flushSync();
+  const square = q('.tf-thm-pop [role="slider"][aria-label="Passed: saturation and brightness"]')!;
+  square.getBoundingClientRect = () => ({ left: 0, top: 0, x: 0, y: 0, width: 100, height: 100, right: 100, bottom: 100, toJSON: () => ({}) });
+  square.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 0 }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  const first = themes.own[0]!.app!.ok!;
+  expect(stage().style.getPropertyValue("--ok")).toBe(first);
+  square.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 50, clientY: 50 }));
+  await new Promise((done) => requestAnimationFrame(() => done(true)));
+  flushSync();
+  const second = themes.own[0]!.app!.ok!;
+  expect(second).not.toBe(first);
+  expect(stage().style.getPropertyValue("--ok")).toBe(second);
+  square.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 50, clientY: 50 }));
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  expect(themes.moving).toBeNull();
+});
+
+test("a built-in shows the Selected row's quick picks: the one it has makes no copy, another goes to a copy (#2516)", () => {
+  draw();
+  const picks = () => q('[aria-label="Selected row\'s colours"]')!;
+  expect(picks()).not.toBeNull();
+  [...picks().querySelectorAll("button")].find((b) => b.textContent === "knobas (ink)")!.click();
+  flushSync();
+  expect(themes.own).toHaveLength(0);
+  [...picks().querySelectorAll("button")].find((b) => b.textContent === "The theme's accent")!.click();
+  flushSync();
+  expect(themes.own).toHaveLength(1);
+  expect(themes.own[0]!.app!.selRow).toBe(derive("light", {}).colours.primary);
+  expect(storage.data.get(APP_SLOT_KEY.light)).toBe(themes.own[0]!.id);
 });

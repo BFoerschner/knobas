@@ -12,10 +12,10 @@
  *   `font-stretch: N%` too, so a chosen face narrows through its own width axis or condensed members, and one that
  *   has neither, Inter among them, draws at its normal width.
  * - **Reading** (`read`, Inter; Source Serif 4 before): Docs pages. `--serif`.
- * - **Code** (`code`, Cascadia Mono since 2026-11-21, Cascadia Code from 2026-11-20): code everywhere (`code-face`
- *   before this pass). `--mono`. *Ligatures in code* is off until turned on; on, the bundled face is Cascadia Code,
- *   whose ligatures draw `=>` and `->` as one sign, and a chosen face draws its own
- *   (`docs/decisions/2026-11-21-code-is-cascadia-mono.md`).
+ * - **Code** (`code`, Cascadia Code 2009.22 with ligatures since #2516, Cascadia Mono from 2026-11-21, Cascadia Code
+ *   from 2026-11-20): code everywhere (`code-face` before this pass). `--mono`. *Ligatures in code* is on until turned
+ *   off; on, the bundled face is a release's Cascadia Code, whose ligatures draw `=>` and `->` as one sign, off its
+ *   Cascadia Mono, and a chosen face draws its own (`docs/decisions/2026-11-21-code-is-cascadia-mono.md`, `DEFAULT_RELEASE`).
  *
  * Each family token (`css/tokens.css`) is `var(--<role>-chosen, <bundled>)` first, then the bundled face and its
  * stand-ins, so a family missing on this machine draws in the bundled face. A size is `--size-<role>`, a number, which
@@ -26,12 +26,12 @@
  * Each role is tuned too (2026-11-21, Björn: "maybe add a setting for line height, spacing etc so I can tweak fonts
  * to my liking?"; `docs/decisions/2026-11-21-fonts-you-can-tune.md`, Fable's rulings): letter spacing for every role,
  * the weight of regular text for Interface, Reading and Code, Reading's line spacing, and code's line spacing, *Joined*
- * (the drawn face's own line height, rounded to whole device pixels, so box drawing joins; the default), *Open* (1.6,
- * 1.55 and 1.5 as before) or a notch. Each is one custom property on `<html>` (`--ls-<role>`, `--wt-<role>`,
+ * (the drawn face's own line height, rounded to whole device pixels, so box drawing joins), *Open* (1.6, 1.55 and 1.5
+ * as before) or a notch, 1.60 by default (#2516). Each is one custom property on `<html>` (`--ls-<role>`, `--wt-<role>`,
  * `--lh-read`, `--code-lh-face`), absent at its default, so a default draws what it drew.
  *
  * Kept in the webview's `localStorage` (`knobas.<role>.font`, `knobas.<role>.size` a whole percent, absent for 100,
- * `knobas.code.ligatures`, `on` when turned on, `knobas.code.release`, `2009.22` for the older Cascadia, and the
+ * `knobas.code.ligatures`, `off` when turned off, `knobas.code.release`, `2407.24` for the newer Cascadia, and the
  * knobs as whole numbers, absent at their default), and applied before the shell mounts (`main.ts`), as the code face
  * was: read from the database, a choice would land after the first draw. It names fonts installed on this machine, so
  * it is this machine's, not the profile's a backup carries.
@@ -84,6 +84,13 @@ export const CASCADIA_LINE = 1.2202;
 export type Release = "2407.24" | "2009.22";
 export const CURRENT_RELEASE: Release = "2407.24";
 export const OLDER_RELEASE: Release = "2009.22";
+/**
+ * What code draws in with nothing kept (#2516, spec #2514: "The default code font and line height are not `Cascadia
+ * Code 2009.22` at `1.60`"): the older release with its ligatures, its rows 1.60 of the size, the tallest at which its
+ * `│` still joins. `css/tokens.css` draws it with nothing written on <html>. A choice kept before stays as it was.
+ */
+export const DEFAULT_RELEASE: Release = OLDER_RELEASE;
+export const DEFAULT_LINES = 160;
 
 /** A code face that comes with knobas: its name in Settings, its CSS name, what follows its name in the list. */
 export interface BundledCode {
@@ -143,9 +150,9 @@ export const sizeKey = (role: Role) => `knobas.${role}.size`;
 export const LIGATURES_KEY = "knobas.code.ligatures";
 /** Set once this machine's code settings have been carried over to Cascadia Mono (`toCascadiaMono`). */
 export const MONO_KEY = "knobas.code.mono";
-/** The bundled Cascadia's release: nothing kept for the current one, `2009.22` for the older. */
+/** The bundled Cascadia's release: nothing kept for the default (`DEFAULT_RELEASE`, 2009.22), `2407.24` for the newer. */
 export const RELEASE_KEY = "knobas.code.release";
-/** Code's line spacing (`CodeLines`): nothing kept for *Joined*, `open`, or a notch in hundredths (110 to 180). */
+/** Code's line spacing (`CodeLines`): nothing kept for 1.60 (`DEFAULT_LINES`), `joined`, `open`, or another notch in hundredths (110 to 180). */
 export const LINES_KEY = "knobas.code.lines";
 /** An installed code face's own line height and `│` over its size with its family, measured when it was picked. */
 export const MEASURE_KEY = "knobas.code.measure";
@@ -399,11 +406,10 @@ const whenIdle: Later = (go) => {
   else setTimeout(go, 1500);
 };
 
-/** What a kept line spacing reads as: nothing is *Joined*. */
+/** What a kept line spacing reads as: nothing is 1.60 (#2516). */
 function linesOf(kept: string | null): CodeLines {
-  if (kept === null) return "joined";
-  if (kept === "open") return "open";
-  return onNotch(CODE_LINES, kept) ?? "joined";
+  if (kept === "joined" || kept === "open") return kept;
+  return onNotch(CODE_LINES, kept) ?? DEFAULT_LINES;
 }
 
 /** A kept measure, if it is one and of `family`. */
@@ -444,9 +450,10 @@ export function createFonts(
 
   const families = $state(Object.fromEntries(ROLES.map((role) => [role, keptFamilyName(keptFamily[role].read(), role)])) as Record<Role, string | null>);
   const sizes = $state(Object.fromEntries(ROLES.map((role) => [role, sizeStep(keptSize[role].read())])) as Record<Role, number>);
-  // On only when turned on (2026-11-21); `toCascadiaMono` cleared what earlier builds kept.
-  let ligatures = $state(keptLigatures.read() === "on");
-  let release = $state<Release>(keptRelease.read() === OLDER_RELEASE ? OLDER_RELEASE : CURRENT_RELEASE);
+  // On unless turned off (#2516; off until turned on from 2026-11-21, whose `on` reads on still).
+  let ligatures = $state(keptLigatures.read() !== "off");
+  const keptRel = keptRelease.read();
+  let release = $state<Release>(keptRel === CURRENT_RELEASE || keptRel === OLDER_RELEASE ? keptRel : DEFAULT_RELEASE);
   /** The release and switch drawn now: they follow a press once its face has landed. */
   // A snapshot on purpose (untracked): what is drawn trails what is kept until the face lands.
   let drawn = untrack(() => ({ release, ligatures }));
@@ -484,15 +491,15 @@ export function createFonts(
   }
 
   /**
-   * The bundled face drawn (`--mono-bundled`, the sheet's Cascadia Mono when absent) and every face's ligatures
-   * (`--mono-ligatures`, `css/tokens.css`).
+   * The bundled face drawn (`--mono-bundled`, the sheet's Cascadia Code 2009.22 when absent) and every face's
+   * ligatures (`--mono-ligatures`, the sheet's `normal` when absent; `css/tokens.css`).
    */
   function applyBundled(style: RootStyle): void {
     const face = bundledCodeFace(drawn.release, drawn.ligatures);
-    if (face.css === CASCADIA_MONO_CSS) style.removeProperty("--mono-bundled");
+    if (face === bundledCodeFace(DEFAULT_RELEASE, true)) style.removeProperty("--mono-bundled");
     else style.setProperty("--mono-bundled", cssFamily(face.css));
-    if (drawn.ligatures) style.setProperty("--mono-ligatures", "normal");
-    else style.removeProperty("--mono-ligatures");
+    if (drawn.ligatures) style.removeProperty("--mono-ligatures");
+    else style.setProperty("--mono-ligatures", "none");
     applySynthesis(style);
   }
 
@@ -501,8 +508,9 @@ export function createFonts(
    * lean every `│` in a comment (Fable's ruling 7).
    */
   function applySynthesis(style: RootStyle): void {
-    if (drawn.release === OLDER_RELEASE && families.code === null) style.setProperty("--mono-synth", "none");
-    else style.removeProperty("--mono-synth");
+    // The sheet's `none` is 2009.22's, the default (#2516); any other face slants as it may.
+    if (drawn.release === OLDER_RELEASE && families.code === null) style.removeProperty("--mono-synth");
+    else style.setProperty("--mono-synth", "auto");
   }
 
   function applyKnob(style: RootStyle, role: Role, knob: Knob): void {
@@ -521,7 +529,7 @@ export function createFonts(
     }
     style.removeProperty("--code-lh");
     const ratio = lines === "joined" ? faceLine() : lines / 100;
-    if (ratio === CASCADIA_LINE) style.removeProperty("--code-lh-face");
+    if (ratio === DEFAULT_LINES / 100) style.removeProperty("--code-lh-face");
     else style.setProperty("--code-lh-face", String(ratio));
   }
 
@@ -534,10 +542,11 @@ export function createFonts(
   function turn(to: { release: Release; ligatures: boolean }): void {
     ligatures = to.ligatures;
     release = to.release;
-    if (to.ligatures) keptLigatures.write("on");
-    else keptLigatures.clear();
-    if (to.release === OLDER_RELEASE) keptRelease.write(OLDER_RELEASE);
-    else keptRelease.clear();
+    // Nothing kept for the defaults (#2516): on, and 2009.22.
+    if (to.ligatures) keptLigatures.clear();
+    else keptLigatures.write("off");
+    if (to.release === DEFAULT_RELEASE) keptRelease.clear();
+    else keptRelease.write(to.release);
     const press = ++pressed;
     const apply = () => {
       if (press !== pressed) return;
@@ -657,8 +666,8 @@ export function createFonts(
       return lines;
     },
     setLines(next) {
-      const to = next === "joined" || next === "open" ? next : (onNotch(CODE_LINES, next) ?? "joined");
-      if (to === "joined") keptLines.clear();
+      const to = next === "joined" || next === "open" ? next : (onNotch(CODE_LINES, next) ?? DEFAULT_LINES);
+      if (to === DEFAULT_LINES) keptLines.clear();
       else keptLines.write(String(to));
       if (to === lines) return;
       lines = to;
@@ -692,11 +701,11 @@ export function createFonts(
     reset() {
       listeners.clear();
       rowListeners.clear();
-      ligatures = false;
-      release = CURRENT_RELEASE;
+      ligatures = true;
+      release = DEFAULT_RELEASE;
       drawn = { release, ligatures };
       pressed += 1;
-      lines = "joined";
+      lines = DEFAULT_LINES;
       measure = null;
       keptLigatures.clear();
       keptRelease.clear();
@@ -733,9 +742,8 @@ export function createFonts(
  *   face, drawn at 105 % (`CASCADIA_SIZE_ADJUST`), its size divided by 1.05 onto the nearest step so it draws as large
  *   as it did: an installed Cascadia Mono at 105 % is the bundled one at 100 %. (From 2026-11-20 this ran on every
  *   start, so a Cascadia picked after it was taken away again at the next; now it runs once and a pick stays.)
- * - Ligatures: the bundled face draws Cascadia Mono, whatever an earlier build kept (an `on` kept before 2026-11-20 was
- *   never cleared, and Björn asked for Mono). A chosen face keeps its ligatures as they drew, on unless turned off,
- *   kept as this build's `on`.
+ * - Ligatures: on unless turned off, the default since #2516, so an `on` kept by an earlier build is cleared and an
+ *   `off` stays.
  *
  * Sizes stay as they are: code's 100 % is the same size as before.
  */
@@ -748,9 +756,8 @@ function toCascadiaMono(family: KeptValue, size: KeptValue, ligatures: KeptValue
     if (now === 100) size.clear();
     else size.write(String(now));
   }
-  const chosen = familyName(family.read(), "code") !== null;
-  if (chosen && ligatures.read() !== "off") ligatures.write("on");
-  else ligatures.clear();
+  // Ligatures are on unless turned off (#2516): nothing kept is on, and an off kept stays off.
+  if (ligatures.read() !== "off") ligatures.clear();
   done.write("1");
 }
 

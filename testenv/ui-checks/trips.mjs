@@ -332,6 +332,25 @@ const SLOT_CHECK = String.raw`(b) => {
   return null;
 }`;
 // Settings › Appearance › Theme (ADR-0055).
+/**
+ * Code colours with a theme in the editor that has window colours the window does not draw (#2516): the line saying so
+ * spans the editor's grid above the role list and the preview, which stay side by side; *Edit* focused the editor.
+ */
+const BANNER_CHECK = String.raw`() => {
+  const page = document.querySelector(".tf-kept:not([hidden])");
+  const ed = page.querySelector(".tf-thm-ed");
+  const line = ed?.querySelector(":scope > .tf-thm-app");
+  const roles = ed?.querySelector(":scope > .tf-thm-roles");
+  const side = ed?.querySelector(":scope > .tf-thm-side");
+  if (!line || !roles || !side) return "the editor has no window-colours line, role list or preview";
+  const [l, r, s] = [line, roles, side].map((el) => el.getBoundingClientRect());
+  if (Math.abs(l.left - r.left) > 1 || Math.abs(l.right - s.right) > 1) return "the line runs " + l.left + " to " + l.right + ", the list starts at " + r.left + " and the preview ends at " + s.right;
+  if (l.bottom > r.top + 1 || l.bottom > s.top + 1) return "the line's foot at " + l.bottom + " is under the list's top " + r.top + " or the preview's " + s.top;
+  if (Math.abs(r.top - s.top) > 1 || s.left <= r.right) return "the list (" + r.left + ", " + r.top + ") and the preview (" + s.left + ", " + s.top + ") are not side by side";
+  const h = ed.querySelector(".tf-thm-edh h2");
+  if (document.activeElement !== h) return "Edit left focus on " + (document.activeElement?.outerHTML.slice(0, 80) ?? "nothing");
+  return null;
+}`;
 const APP_BEFORE = String.raw`() => ({ own: JSON.parse(localStorage.getItem("knobas.themes") ?? "[]").length, sheet: getComputedStyle(document.documentElement).getPropertyValue("--sheet").trim() })`;
 const appPage = String.raw`document.querySelector(".tf-kept:not([hidden])")`;
 const APP_SLOT_CHECK = String.raw`(b) => {
@@ -755,6 +774,9 @@ const PAGES = [
     // The light slot by its own select: focused, then "gi" typed, knobas Light to GitHub Light. Not a press and ↓: on macOS
     // both open the native menu, which headless Chrome can't drive; typing a name's first letters chooses on every platform.
     { id: "theme-slot", kind: "press-result", finding: "themes", before: SLOT_BEFORE, steps: [{ focus: ".tf-thm-slot[data-slot=light] select" }, { chars: "gi" }], check: SLOT_CHECK },
+    // GitHub Light for code while the window draws knobas Light (#2516): Edit on the slot, and the line on its window
+    // colours spans the editor, the list and the preview in their columns.
+    { id: "theme-banner", kind: "press-result", finding: "themes", store: { "knobas.theme.light": "github-light" }, before: THEMES_BEFORE, steps: [{ press: { sel: ".tf-thm-slot[data-slot=light] button", text: "Edit" } }], check: BANNER_CHECK },
     // A colour of one's own theme changed through its swatch's hex field, and its contrast row with it.
     { id: "theme-swatch", kind: "press-result", finding: "themes", store: OWN_THEME_STORE, before: SWATCH_BEFORE, steps: [{ press: { sel: "button.tf-thm-sw[aria-label='Change Keyword']" } }, { press: { sel: "input[aria-label='Keyword as hex']" } }, { selectAll: true }, { type: "#C8B6E2" }], check: SWATCH_CHECK },
   ] },

@@ -6,7 +6,9 @@
   A row's swatch sets its key; *Auto* leaves it out, so it is derived again and says *auto*. A row's figure is its
   lowest contrast against what it needs; under it the row says the pair and offers the fix, which moves lightness
   alone, and for a filled pair the ground. Under the States, how far apart the states are for a colour-blind reader,
-  and on a theme of one's own *Tell them apart*. Under a fold, the 19 colours knobas works out from the rows.
+  and *Tell them apart*. Under a fold, the 19 colours knobas works out from the rows. A built-in shows all of it too:
+  its first change, by a swatch, a quick pick or a fix, goes to a copy in the window's slot, so nothing on the page
+  moves when the copy takes its place (#2516).
 -->
 <script lang="ts">
   import { tick, untrack, type Snippet } from "svelte";
@@ -31,6 +33,7 @@
     drawnSide,
     onduplicate,
     ondelete,
+    onfork,
     band,
   }: {
     theme: Theme;
@@ -38,11 +41,17 @@
     drawnSide: ThemeKind;
     onduplicate: (theme: Theme) => void;
     ondelete: (theme: Theme) => void;
+    /** A built-in's first colour change: a copy of it in the window's slot, whose id the change goes to; `null` when none could be made (#2516). */
+    onfork: (theme: Theme) => string | null;
     /** What shows over the role list: the import's band (`TfThemeSection.svelte`). */
     band?: Snippet;
   } = $props();
 
   const own = $derived(theme.id.startsWith("own-"));
+  /** Each colour's swatch, whose panel its hex value opens (#2516). */
+  const swatches: Record<string, { openFrom(from: HTMLElement): void } | undefined> = {};
+  /** A colour's hex value as its row shows it: the selection has none of its own unless set. */
+  const hexOf = (key: AppKey): string => (key === "selection" ? (set.selection ?? "system") : (colours[key as keyof typeof colours] ?? ""));
   /**
    * A colour picker's drag (the swatch hands on one colour a frame as a preview): the preview, the swatch in hand and
    * its panel follow each frame; the role list keeps the theme as it stood when the drag began and takes the colour
@@ -80,7 +89,7 @@
   let folded = $state(true);
   let list = $state<HTMLElement | null>(null);
 
-  /** A colour picked in the preview: its row scrolled to and, on a theme of one's own, its swatch's panel open. */
+  /** A colour picked in the preview: its row scrolled to and its swatch's panel open (a built-in's too, #2516). */
   async function pickKey(key: AppKey): Promise<void> {
     if (FOLD.includes(key)) folded = false;
     await tick();
@@ -91,8 +100,11 @@
   }
 
   function setKey(key: AppKey, next: string | undefined, preview = false): void {
+    // A built-in's first change goes to a copy (#2516); a colour it has already is no change, so looking makes none.
+    const id = own ? theme.id : next === theme.app?.[key] ? null : onfork(theme);
+    if (id === null) return;
     themes.update(
-      theme.id,
+      id,
       (t) => {
         const app = { ...t.app };
         if (next === undefined) delete app[key];
@@ -109,7 +121,7 @@
    */
   function pickRow(which: "ink" | "accent" | "own"): void {
     settle();
-    themes.update(theme.id, (t) => {
+    const change = (t: Theme): Theme => {
       const app = { ...t.app };
       delete app.selRow;
       delete app.onSelRow;
@@ -119,13 +131,21 @@
         if (t.offers.onSelRow) app.onSelRow = t.offers.onSelRow;
       }
       return { ...t, app };
-    });
+    };
+    // On a built-in, the pick it shows already is no change, so it makes no copy (#2516).
+    const after = change(theme).app ?? {};
+    const same = (["selRow", "onSelRow"] as const).every((k) => after[k] === theme.app?.[k]);
+    const id = own ? theme.id : same ? null : onfork(theme);
+    if (id === null) return;
+    themes.update(id, change);
   }
 
   function setMany(next: Partial<Record<AppKey, string>>, words: string): void {
     settle();
     const was = { ...set };
-    const id = theme.id;
+    // A built-in's fix goes to a copy, as its swatches' changes do (#2516).
+    const id = own ? theme.id : onfork(theme);
+    if (id === null) return;
     themes.update(id, (t) => ({ ...t, app: next }));
     themes.flush();
     undoable(words, () => (themes.update(id, (t) => ({ ...t, app: was })), themes.flush()), { subject: `app-theme-fix-${id}` });
@@ -153,6 +173,16 @@
       delete next.infoBg;
     }
     setMany(next, `${running ? "Passed, Attention, Failed and Running" : "Passed, Attention and Failed"} moved ${got.reached.toFixed(2)} apart.`);
+  }
+
+  // ---------- Edit on a slot (#2516) ----------
+  let root = $state<HTMLElement | null>(null);
+  let heading = $state<HTMLElement | null>(null);
+  /** A slot's *Edit*: the editor scrolled to, smoothly unless motion is reduced, and its heading focused. */
+  export function reveal(): void {
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    root?.scrollIntoView?.({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    (renaming ? nameField : heading)?.focus({ preventScroll: true });
   }
 
   // ---------- rename ----------
@@ -212,7 +242,7 @@
   const isAuto = (row: Row) => row.keys.every((k) => (k === "selection" ? set.selection === undefined : result.derived.has(k)));
 </script>
 
-<div class="tf-thm-ed tf-apt-ed">
+<div class="tf-thm-ed tf-apt-ed" bind:this={root}>
   <div class="tf-thm-edh">
     {#if renaming}
       <input
@@ -231,11 +261,11 @@
         onblur={() => endRename(true)}
       />
     {:else}
-      <h2>{theme.name}</h2>
+      <h2 tabindex="-1" bind:this={heading}>{theme.name}</h2>
     {/if}
     <span class="tf-lab">{own ? (theme.from && theme.from !== theme.name ? `yours, from ${theme.from}` : "yours") : "comes with knobas"}</span>
     <div class="tf-trail">
-      {#if own && failures(colours).length > 0}
+      {#if failures(colours).length > 0}
         <button type="button" class="tf-btn tf-sm" onclick={() => (settle(), setMany(fixAll(theme.kind, set), `${failures(colours).length === 1 ? "1 colour" : `${failures(colours).length} colours`} fixed by lightness.`))}>Fix all</button>
       {/if}
       {#if own}
@@ -260,10 +290,11 @@
           <span class="tf-apt-sws">
             {#each row.keys as key (key)}
               <TfThemeSwatch
+                bind:this={swatches[key]}
                 label={NAME[key]}
                 value={set[key]}
                 fallback={colours[key as keyof typeof colours] ?? colours.sheet}
-                editable={own}
+                editable
                 leave="Auto"
                 resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
                 resetName={source?.name ?? ""}
@@ -301,9 +332,14 @@
               <span class="tf-apt-plate" {@attach cssVars(() => exampleOf(row))}>{row.words}</span>
             {/if}
           </span>
-          <span class="tf-thm-hex tf-apt-hex">{row.keys[0] === "selection" ? (set.selection ?? "") : colours[row.keys[0] as keyof typeof colours]}{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span>
+          <span class="tf-apt-hex"
+            ><span class="tf-apt-hexes"
+              >{#each row.keys as key (key)}<button type="button" class="tf-thm-hex" aria-label="{NAME[key]}: {hexOf(key)}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{hexOf(key)}</button
+                >{/each}</span
+            >{#if isAuto(row)}<i class="tf-apt-auto">auto</i>{/if}</span
+          >
           <span class="tf-thm-cr">{fig ? ratioText(fig.ratio) : ""}</span>
-          {#if own && row.example === "selrow"}
+          {#if row.example === "selrow"}
             <div class="tf-apt-picks" role="group" aria-label="Selected row's colours">
               <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow === undefined} onclick={() => pickRow("ink")}>knobas (ink)</button>
               <button type="button" class="tf-btn tf-sm" aria-pressed={set.selRow !== undefined && set.selRow === colours.primary} onclick={() => pickRow("accent")}>The theme's accent</button>
@@ -315,7 +351,7 @@
           {#if low && fig}
             <div class="tf-thm-why">
               {lowSentence(fig)}
-              {#if own}<button type="button" class="tf-btn tf-sm" onclick={() => fixIt(row)}>{fixWords(theme.kind, colours, fig)}</button>{/if}
+              <button type="button" class="tf-btn tf-sm" onclick={() => fixIt(row)}>{fixWords(theme.kind, colours, fig)}</button>
             </div>
           {/if}
         </div>
@@ -328,7 +364,7 @@
         {/if}
         <div class="tf-apt-told">
           <span>{apartLine(colours)}</span>
-          {#if own && closestStates(colours).delta < APART}<button type="button" class="tf-btn tf-sm" onclick={apart}>Tell them apart</button>{/if}
+          {#if closestStates(colours).delta < APART}<button type="button" class="tf-btn tf-sm" onclick={apart}>Tell them apart</button>{/if}
         </div>
       {/if}
     {/each}
@@ -338,10 +374,11 @@
         <div class="tf-thm-role tf-apt-role tf-apt-fold" data-row={key}>
           <span class="tf-apt-sws">
             <TfThemeSwatch
+              bind:this={swatches[key]}
               label={NAME[key]}
               value={set[key]}
               fallback={colours[key as keyof typeof colours] ?? colours.sheet}
-              editable={own}
+              editable
               leave="Auto"
               resetTo={sourceColours ? (source?.app?.[key] ?? undefined) : null}
               resetName={source?.name ?? ""}
@@ -350,7 +387,10 @@
           </span>
           <span class="tf-apt-foldname">{NAME[key]}</span>
           <span></span>
-          <span class="tf-thm-hex tf-apt-hex">{colours[key as keyof typeof colours]}{#if result.derived.has(key)}<i class="tf-apt-auto">auto</i>{/if}</span>
+          <span class="tf-apt-hex"
+            ><button type="button" class="tf-thm-hex" aria-label="{NAME[key]}: {hexOf(key)}" onclick={(event) => swatches[key]?.openFrom(event.currentTarget)}>{hexOf(key)}</button
+            >{#if result.derived.has(key)}<i class="tf-apt-auto">auto</i>{/if}</span
+          >
           <span class="tf-thm-cr"></span>
         </div>
       {/each}

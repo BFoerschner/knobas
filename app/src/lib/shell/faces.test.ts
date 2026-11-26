@@ -24,9 +24,9 @@ test("the Cascadias the release and the ligature switch do not draw are left unl
     face("unloaded", '"knobas Cascadia Code 2009"'),
     face("unloaded"),
   ];
-  // The window's switch off and the current release: Cascadia Mono is the one drawn, the other three are not.
+  // Nothing kept: Cascadia Code 2009.22 is the one drawn (#2516), the other three are not.
   loadEveryFace(faces, (go) => go());
-  expect(faces.map((f) => f.load.mock.calls.length)).toEqual([1, 0, 0, 0, 0, 1]);
+  expect(faces.map((f) => f.load.mock.calls.length)).toEqual([0, 0, 0, 0, 1, 1]);
   const again = [face("unloaded", '"knobas Cascadia Mono"'), face("unloaded", '"knobas Cascadia Code"'), face("unloaded", '"knobas Cascadia Mono 2009"')];
   loadEveryFace(again, (go) => go(), () => ["knobas Cascadia Mono", "knobas Cascadia Mono 2009"]);
   expect(again.map((f) => f.load.mock.calls.length)).toEqual([0, 1, 0]);
