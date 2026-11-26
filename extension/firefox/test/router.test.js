@@ -182,9 +182,11 @@ test("with knobas closed the page loads, and so it does when the host is missing
   });
   await t.test("host drops mid-request, and the next request reconnects", async () => {
     const host = fakeHost({ answer: knobas([JIRA], opened) });
-    const { router, tabs } = await started({ host });
+    const { router, tabs } = await started({ host, timeouts: { rules: 50, handoff: 5000 } });
     host.answer = () => "disconnect";
+    const t0 = Date.now();
     assert.ok(loads(await router.onBeforeRequest(nav(PAY, { tabId: 1 }))));
+    assert.ok(Date.now() - t0 < 1000, "a dropped port answers at once, not at the timeout");
     assert.deepEqual(tabs.removed, []);
     host.answer = knobas([JIRA], opened);
     assert.deepEqual(await router.onBeforeRequest(nav(PAY, { tabId: 1 })), { cancel: true });
