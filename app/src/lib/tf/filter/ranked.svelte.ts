@@ -80,11 +80,14 @@ export class FuzzyOrder<T> {
   /** The held list's ranking of `text`, holding the texts first where they were not sent for `rows`, again once if dropped. */
   async #rankHeld(id: string, text: string, rows: readonly T[], texts: () => string[]): Promise<FuzzyRanked[]> {
     if (this.#heldFor?.rows !== rows) this.#heldFor = { rows, sent: fuzzyHold(id, texts()) };
-    await this.#heldFor.sent;
+    const holding = this.#heldFor;
+    await holding.sent;
     try {
       return await fuzzyRankHeld(id, text);
     } catch (cause) {
-      if ((cause as { code?: string } | null)?.code !== "not_found") throw cause;
+      // Held again only while this list is still the one held: not once the page dropped it (#2532), so a key out
+      // when the page closed leaves nothing held behind it.
+      if ((cause as { code?: string } | null)?.code !== "not_found" || this.#heldFor !== holding) throw cause;
       this.#heldFor = { rows, sent: fuzzyHold(id, texts()) };
       await this.#heldFor.sent;
       return fuzzyRankHeld(id, text);
