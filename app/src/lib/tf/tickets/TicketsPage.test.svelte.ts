@@ -1061,6 +1061,17 @@ test("Find a view narrows the pane by name and by query, and marks the name", as
   expect(target.querySelector(".tf-vlist")!.textContent).not.toContain("All tickets");
 });
 
+test("Find a view has the app rank every view, keeps letters in order and marks them in the name, each view in its place (#2535)", async () => {
+  await open(harness([], VIEWS));
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Find a view"]')!;
+  // No substring holds "pmtbk"; its letters stand in order in "Payments backlog".
+  find.value = "pmtbk";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(pane()).toEqual(["# Team", "Payments backlog 12"]);
+  expect([...target.querySelectorAll(".tf-vw-row mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("pmtbk");
+});
+
 test("the board head is the canonical header: title left, one group right with the switch, the actions at default size, Sync now last (#2293)", async () => {
   const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug" })]);
   const sync = createRawSnippet(() => ({ render: () => '<button type="button" class="tf-btn tf-syncnow">Sync now</button>' }));
