@@ -5,8 +5,8 @@
   A few values are a row of toggles. From `SEARCH_FROM` on (a source's
   projects, its people, its epics) a row of toggles wraps into a wall nobody
   reads, so the values are a list in a box that scrolls, under a field that
-  searches it: typed letters keep a value when they appear in it in order
-  (`fuzzyRank`), the closest first, the matched letters marked. The picked
+  searches it: the app ranks the values by what was typed (`fuzzy_rank_held`,
+  #2535), the closest first, the letters it matched marked. The picked
   values stay above the field as toggles, so a search that hides one from the
   list does not hide it from the condition.
 
@@ -18,7 +18,8 @@
 <script lang="ts">
   import { tick } from "svelte";
 
-  import { fuzzyRank } from "../filter/fuzzy";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
 
   /** The fewest values that are searched, not toggled. */
   const SEARCH_FROM = 9;
@@ -48,8 +49,31 @@
   let current = $state(0);
 
   const searched = $derived(options.length >= SEARCH_FROM);
-  const hits = $derived(fuzzyRank(options, typed, ([, shown]) => shown));
+  const shownOf = ([, shown]: [string, string]) => shown;
+  const order = heldOrder<[string, string]>("value-picker");
+  $effect(() => {
+    if (searched) order.ask(typed, options, shownOf);
+  });
+  const hits = $derived(order.rows(typed, options, shownOf));
   const drawn = $derived(hits.slice(0, DRAWN_MOST));
+  const marking = $derived(order.typed(typed, options));
+  /** `Enter` before the ranking answered what was typed picks the best of that answer, once it lands; typing on drops it. */
+  let entering = $state<string | null>(null);
+  $effect(() => {
+    if (entering === null) return;
+    if (entering !== typed) entering = null;
+    else if (order.settled(typed, options)) {
+      entering = null;
+      pickCurrent();
+    }
+  });
+
+  function pickCurrent() {
+    const option = drawn[current];
+    if (option === undefined) return;
+    ontoggle(option[0]);
+    search("");
+  }
   const picked = $derived(options.filter(([value]) => isPicked(value)));
   const words = $derived(`Search ${options.length} ${many}`);
   const optionId = (index: number) => `${uid}-opt-${index}`;
@@ -72,10 +96,8 @@
     } else if (event.key === "Enter") {
       // Always the field's: Enter here must never save the view.
       event.preventDefault();
-      const hit = drawn[current];
-      if (hit === undefined) return;
-      ontoggle(hit.option[0]);
-      search("");
+      if (order.settled(typed, options)) pickCurrent();
+      else entering = typed;
     } else if (event.key === "Escape" && typed !== "") {
       // The dialog leaves a key a field has taken alone (`TfDialog`).
       event.preventDefault();
@@ -114,7 +136,8 @@
       {onkeydown}
     />
     <div class="tf-vw-opts" id="{uid}-opts" role="listbox" aria-multiselectable="true" aria-label="{label} values" hidden={drawn.length === 0}>
-      {#each drawn as { option: [value], runs }, index (value)}
+      {#each drawn as option, index (option[0])}
+        {@const [value, shown] = option}
         <!-- Not a tab stop, and a click leaves focus in the field: the list is worked from there. -->
         <button
           type="button"
@@ -128,7 +151,7 @@
           onclick={() => ontoggle(value)}
         >
           <span class="tf-vw-tick" aria-hidden="true">{isPicked(value) ? "✓" : ""}</span>
-          <span>{#each runs as run, at (at)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
+          <span><Marked text={shown} typed={marking} pairs={order.marks(option)} /></span>
         </button>
       {/each}
     </div>

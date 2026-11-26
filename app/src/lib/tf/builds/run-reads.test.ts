@@ -5,6 +5,7 @@ import {
   filesText,
   findCount,
   historyLine,
+  failedFirst,
   keptTests,
   lineShown,
   logBlocks,
@@ -179,10 +180,11 @@ test("tests are failed first and filter by result, module and words", () => {
     t("sepa::retry::gives_up", "failed", "sepa::retry"),
     t("smoke", "ignored"),
   ];
-  expect(keptTests(tests, "", [], null).map((x) => x.name)).toEqual(["sepa::retry::gives_up", "sepa::retry::backs_off", "ledger::books", "smoke"]);
-  expect(keptTests(tests, "", ["failed"], null).map((x) => x.name)).toEqual(["sepa::retry::gives_up", "ledger::books"]);
-  expect(keptTests(tests, "", [], "sepa::retry").map((x) => x.name)).toEqual(["sepa::retry::gives_up", "sepa::retry::backs_off"]);
-  expect(keptTests(tests, "retry back", [], null).map((x) => x.name)).toEqual(["sepa::retry::backs_off"]);
+  expect(keptTests(tests, [], null).map((x) => x.name)).toEqual(["sepa::retry::gives_up", "sepa::retry::backs_off", "ledger::books", "smoke"]);
+  expect(keptTests(tests, ["failed"], null).map((x) => x.name)).toEqual(["sepa::retry::gives_up", "ledger::books"]);
+  expect(keptTests(tests, [], "sepa::retry").map((x) => x.name)).toEqual(["sepa::retry::gives_up", "sepa::retry::backs_off"]);
+  // A ranking's order holds inside each part (#2535): the failures that are not muted first, then the rest, each best first.
+  expect(failedFirst([tests[3]!, tests[2]!, tests[1]!, tests[0]!]).map((x) => x.name)).toEqual(["sepa::retry::gives_up", "smoke", "ledger::books", "sepa::retry::backs_off"]);
   expect(modulesOf(tests)).toEqual(["sepa::retry", "ledger"]);
 });
 

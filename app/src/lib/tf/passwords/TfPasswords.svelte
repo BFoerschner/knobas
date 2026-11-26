@@ -32,6 +32,8 @@
   import { keyHint } from "../../shell/platform";
   import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
   import TfPwEntry from "./TfPwEntry.svelte";
@@ -51,13 +53,16 @@
     commentFolder,
     expiry,
     holding,
+    entryMarks,
     homesOf,
-    marks,
     model,
     ordered,
     panels,
+    pathWords,
     plural,
     indexBuild,
+    scopedEntries,
+    searchIndex,
     sourceNode,
     sourceWord,
     treeRows,
@@ -219,7 +224,42 @@
     if (shownFolder !== null) query = "";
     shownFolder = id;
   });
-  const shownPanels = $derived(m && node ? panels(m, node, query) : []);
+  /**
+   * The filter's words are ranked by the app (#2535) over the text of every entry the folder's filter reads
+   * (`scopeOf`), a list held once per folder. The index is read on the first word, as before, never on the page's open.
+   * Until a key's answer lands the page keeps what it drew, so the first key draws no list the answer then redraws.
+   */
+  const order = heldOrder<Entry>("secrets");
+  const index = $derived(m && query.trim() !== "" ? searchIndex(m) : null);
+  /** The entries the folder's filter reads (`scopeOf`), by title: what the app holds and ranks. */
+  const scoped = $derived(index !== null && m && node ? scopedEntries(m, node) : []);
+  $effect(() => {
+    if (index === null) order.ask("", [], () => "");
+    else order.ask(query, scoped, index.textOf);
+  });
+  /** What the page drew last, which a key keeps until its answer lands. */
+  let drawnPanels: Panel[] | null = null;
+  const shownPanels = $derived.by((): Panel[] => {
+    if (!m || !node) return (drawnPanels = []);
+    if (index === null) return (drawnPanels = panels(m, node, query));
+    if (drawnPanels !== null && !order.settled(query, scoped)) return drawnPanels;
+    return (drawnPanels = panels(m, node, query, order.rows(query, scoped, index.textOf)));
+  });
+  const marking = $derived(index === null ? "" : order.typed(query, scoped));
+  /**
+   * `Enter` in the filter before the ranking answered its words (#2535): the row it opens is the answer's first, not
+   * one of the panels kept meanwhile, so it waits for that answer. Typing on drops it.
+   */
+  let entering = $state<string | null>(null);
+  $effect(() => {
+    if (entering === null) return;
+    if (entering !== query || index === null) entering = null;
+    else if (order.settled(query, scoped)) {
+      entering = null;
+      // After this flush: `focusOpenRow` draws the row it picks with `flushSync`, which an effect cannot.
+      void tick().then(focusOpenRow);
+    }
+  });
 
   // ---- the tree ----
   /** Folds the reader opened, kept for the session. */
@@ -593,7 +633,8 @@
     if (event.key === "Enter") {
       if (event.shiftKey || event.metaKey || event.ctrlKey) return false;
       event.preventDefault();
-      focusOpenRow();
+      if (index !== null && !order.settled(query, scoped)) entering = query;
+      else focusOpenRow();
       return true;
     }
     if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return false;
@@ -723,6 +764,7 @@
 
 {#snippet row(e: Entry, path: boolean, last: boolean)}
   {@const x = held?.sources[e.src]?.offers.expiry ? expiry(e.expires) : null}
+  {@const lit = query.trim() === "" ? null : entryMarks(e, order.marks(e))}
   <button
     type="button"
     class="tf-pw-row"
@@ -731,11 +773,11 @@
     onclick={() => pick(e)}
     onpointerenter={() => ahead(e.id)}
   >
-    <span class="tf-pw-t">{#each marks(e.title, query) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
+    <span class="tf-pw-t"><Marked text={e.title} typed={marking} pairs={lit?.title ?? []} /></span>
     <span class="tf-pw-s"
-      >{#if e.user}<span class="tf-mono">{#each marks(e.user, query) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>{/if}{#if path && m}<span
-          >{chainOf(m, e.folder !== null ? (m.nodes.get(e.folder) ?? null) : null).map((n) => n.name).join(" / ")}</span
-        >{:else if e.address}<span class="tf-mono">{#each marks(bare(e.address), query) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>{/if}{#if !e.user && !e.address && !path}&nbsp;{/if}</span
+      >{#if e.user}<span class="tf-mono"><Marked text={e.user} typed={marking} pairs={lit?.user ?? []} /></span>{/if}{#if path && m}<span
+          ><Marked text={pathWords(m, e.folder)} typed={marking} pairs={lit?.path ?? []} /></span
+        >{:else if e.address}<span class="tf-mono"><Marked text={bare(e.address)} typed={marking} pairs={lit?.address ?? []} /></span>{/if}{#if !e.user && !e.address && !path}&nbsp;{/if}</span
     >
     <span class="tf-pw-e"
       >{#if x && x.tone}<span class="tf-chip tf-{x.tone}">{x.text}</span>{/if}{#if e.flags & NEEDS_APPROVAL}<span class="tf-lab">approval</span>{/if}{#if e.flags & HAS_CODE}<span class="tf-lab">code</span>{/if}{#if e.flags & CANNOT_READ}<span class="tf-lab">no read</span>{/if}{#if e.changed}<span class="tf-num">{e.changed.slice(0, 10)}</span>{/if}</span

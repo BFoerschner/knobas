@@ -131,3 +131,30 @@ test("clearing the query drops stale highlight marks immediately, and marks slic
   expect(order.marks(emojiRows[0]!)).toEqual([]);
   pending.length = 0;
 });
+
+test("a list rebuilt with the same words typed keeps the rows its last answer kept, by their text and marks, until its own answer lands (#2535)", async () => {
+  type Row = { name: string };
+  const name = (row: Row) => row.name;
+  const first = [{ name: "Bump deps" }, { name: "Fix the build" }, { name: "Bump the docs" }];
+  const order = new FuzzyOrder<Row>();
+  order.ask("bmpdps", first, name);
+  pending[0]!.resolve([{ index: 0, loose: false, marks: [0, 1, 2, 4, 5, 6, 7, 9] }]);
+  await flush();
+  expect(order.rows("bmpdps", first, name).map(name)).toEqual(["Bump deps"]);
+  // A sync reads the list again: new rows, one more and one gone. The letters-in-order words hold no substring, so
+  // the filter as it was would draw nothing for a frame and the answer then redraw the row.
+  const again = [{ name: "Fix the build" }, { name: "Bump deps" }, { name: "Bump deps again" }];
+  order.ask("bmpdps", again, name);
+  expect(order.settled("bmpdps", again)).toBe(false);
+  expect(order.rows("bmpdps", again, name).map(name)).toEqual(["Bump deps"]);
+  expect(order.marks(again[1]!)).toEqual([0, 1, 2, 4, 5, 6, 7, 9]);
+  pending[1]!.resolve([
+    { index: 2, loose: false, marks: [0, 1] },
+    { index: 1, loose: false, marks: [0, 1] },
+  ]);
+  await flush();
+  expect(order.rows("bmpdps", again, name).map(name)).toEqual(["Bump deps again", "Bump deps"]);
+  // Other words over another list: the filter as it was, nothing carried.
+  expect(order.rows("fix", [{ name: "Fix it" }], name).map(name)).toEqual(["Fix it"]);
+  pending.length = 0;
+});

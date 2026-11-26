@@ -4,7 +4,10 @@
  * assertion, *Show in log* and history line.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filter ranks through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { RunTest, TestOutcome } from "../../ipc/entity";
 import TfRunTests from "./TfRunTests.svelte";
@@ -116,9 +119,21 @@ test("the filter bar keeps by result, module and words, and counts what it kept"
   const input = target.querySelector<HTMLInputElement>("input")!;
   input.value = "backs";
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  await settle();
   expect(names()).toEqual(["sepa::retry::backs_off_exponentially"]);
   expect(target.textContent).toContain("1 of 3 tests");
+});
+
+test("the words have the app rank the tests' names, letters in order, and mark the matched letters (#2535)", async () => {
+  draw();
+  await settle();
+  const input = target.querySelector<HTMLInputElement>("input")!;
+  // No substring holds "sprgvs"; its letters stand in order in "sepa::retry::gives_up_after_max_attempts".
+  input.value = "sprgvs";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(names()).toEqual(["sepa::retry::gives_up_after_max_attempts"]);
+  expect([...target.querySelectorAll(".tf-tres mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("sprgvs");
 });
 
 test("the tests filter draws no / hint: / belongs to the page's pipeline filter (#1453)", async () => {
@@ -151,7 +166,7 @@ test("a long run draws the tests near the viewport, open failures with their ass
   const input = target.querySelector<HTMLInputElement>("input")!;
   input.value = "case_1999";
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  await settle();
   expect(names()).toEqual(["bulk::case_1999"]);
   expect(list.style.getPropertyValue("padding-bottom")).toBe("");
 });
