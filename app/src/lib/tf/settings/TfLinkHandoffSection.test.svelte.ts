@@ -7,6 +7,8 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
+import { dismiss, reset as resetToasts, toasts } from "../../shell/toasts.svelte";
+
 import type { LinkHandoffScope, LinkHandoffSetting, NativeHostStatus } from "../../ipc/app";
 import TfLinkHandoffSection, { type LinkHandoffPorts } from "./TfLinkHandoffSection.svelte";
 
@@ -63,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetToasts();
   if (view) unmount(view);
   view = undefined;
   target.remove();
@@ -124,8 +127,39 @@ test("installs and removes the Firefox Native Messaging host manifest", async ()
 
   button("Remove")!.click();
   await settle();
+  // The removal rule: the row says so at once, the manifest goes when the toast ends.
+  expect(target.textContent).toContain("Not installed");
+  expect(hostCalls).toEqual(["install"]);
+  const toast = toasts.items.find((t) => t.text === "Firefox Native Messaging host removed.")!;
+  expect(toast.action?.label).toBe("Undo");
+  dismiss(toast.id);
+  await settle();
   expect(hostCalls).toEqual(["install", "uninstall"]);
   expect(target.textContent).toContain("Not installed");
+});
+
+test("Undo on the removal's toast keeps the Firefox host and never removes it", async () => {
+  view = mount(TfLinkHandoffSection, {
+    target,
+    props: {
+      source: "jira",
+      name: "Tidewater Jira",
+      openInside: true,
+      ports: makePorts(undefined, hostOf({ installed: true, matches_current: true, executable_path: "/Applications/knobas.app/Contents/MacOS/knobas" })),
+    },
+  });
+  await settle();
+
+  button("Remove")!.click();
+  await settle();
+  expect(target.textContent).toContain("Not installed");
+  const toast = toasts.items.find((t) => t.text === "Firefox Native Messaging host removed.")!;
+  toast.action!.run();
+  dismiss(toast.id);
+  await settle();
+  expect(hostCalls).toEqual([]);
+  expect(button("Remove")).toBeDefined();
+  expect(target.textContent).toContain("Installed");
 });
 
 /** Nothing moves once drawn: the Firefox host row is there before its status answers, so the rows under it keep their place. */

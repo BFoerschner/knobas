@@ -27,7 +27,7 @@
     sourceLinkHandoff,
     uninstallFirefoxHost,
   } from "../../ipc/app";
-  import { push } from "../../shell/toasts.svelte";
+  import { heldWrite, push } from "../../shell/toasts.svelte";
 
   const BRIDGE: LinkHandoffPorts = {
     read: (id) => sourceLinkHandoff(id),
@@ -133,17 +133,33 @@
     }
   }
 
-  async function uninstallHost() {
-    if (hostBusy) return;
+  /** The removal rule: the row reads *Not installed* at once, and the manifest goes when the toast ends, unless *Undo*. */
+  function uninstallHost() {
+    if (hostBusy || host === null) return;
+    const before = host;
     hostBusy = true;
-    try {
-      host = await ports.uninstallHost();
-      push({ text: "Firefox Native Messaging host removed.", subject: "firefox-host" });
-    } catch (cause) {
-      push({ text: `Could not remove Firefox host: ${ipcErrorMessage(cause)}`, tone: "err" });
-    } finally {
-      hostBusy = false;
-    }
+    host = { ...before, installed: false, matches_current: false };
+    heldWrite(
+      "Firefox Native Messaging host removed.",
+      () => {
+        ports
+          .uninstallHost()
+          .then((next) => {
+            host = next;
+          })
+          .catch((cause: unknown) => {
+            host = before;
+            push({ text: `Could not remove Firefox host: ${ipcErrorMessage(cause)}`, tone: "err" });
+          })
+          .finally(() => {
+            hostBusy = false;
+          });
+      },
+      () => {
+        host = before;
+        hostBusy = false;
+      },
+    );
   }
 </script>
 
@@ -152,7 +168,7 @@
   <div class="tf-stg-row">
     <div class="tf-stg-l">
       Open matching links in knobas
-      <small>Open {name} links from Firefox or knobas:// in knobas</small>
+      <small>Open {name} links you click in Firefox in knobas</small>
     </div>
     <div class="tf-stg-c">
       <button
@@ -201,11 +217,11 @@
         <span class="tf-stg-hint">Not supported on this system</span>
       {:else if host.installed && host.matches_current}
         <span>Installed</span>
-        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
+        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={uninstallHost}>Remove</button>
       {:else if host.installed}
         <span class="tf-stg-hint">Points to another knobas copy</span>
         <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Update host</button>
-        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={() => void uninstallHost()}>Remove</button>
+        <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={uninstallHost}>Remove</button>
       {:else}
         <span class="tf-stg-hint">Not installed</span>
         <button type="button" class="tf-btn tf-sm" disabled={hostBusy} onclick={() => void installHost()}>Install host</button>
