@@ -21,6 +21,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use sha2::{Digest as _, Sha256};
 
 use crate::link_handoff::protocol::{HostRequest, HostResponse, read_frame, write_frame};

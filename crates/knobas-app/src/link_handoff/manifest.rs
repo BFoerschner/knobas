@@ -237,55 +237,26 @@ mod windows_registry {
 
     use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-        RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+        HKEY, HKEY_CURRENT_USER, KEY_READ, RegCloseKey, RegDeleteTreeW, RegOpenKeyExW,
+        RegQueryValueExW,
     };
     use windows::core::PCWSTR;
 
     use crate::link_handoff::protocol::HOST_NAME;
 
+    fn subkey_path() -> String {
+        format!("Software\\Mozilla\\NativeMessagingHosts\\{HOST_NAME}")
+    }
+
     fn subkey() -> Vec<u16> {
-        let path = format!("Software\\Mozilla\\NativeMessagingHosts\\{HOST_NAME}");
-        OsStr::new(&path)
+        OsStr::new(&subkey_path())
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
     }
 
     pub fn register(manifest_path: &Path) -> Result<(), String> {
-        let key_path = subkey();
-        let value: Vec<u16> = manifest_path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), value.len() * 2) };
-        let mut hkey = HKEY::default();
-        let created = unsafe {
-            RegCreateKeyExW(
-                HKEY_CURRENT_USER,
-                PCWSTR(key_path.as_ptr()),
-                Some(0),
-                PCWSTR::null(),
-                REG_OPTION_NON_VOLATILE,
-                KEY_WRITE,
-                None,
-                &mut hkey,
-                None,
-            )
-        };
-        if created != ERROR_SUCCESS {
-            return Err(format!("RegCreateKeyExW failed: {created:?}"));
-        }
-        let set = unsafe { RegSetValueExW(hkey, PCWSTR::null(), Some(0), REG_SZ, Some(bytes)) };
-        unsafe {
-            let _ = RegCloseKey(hkey);
-        }
-        if set != ERROR_SUCCESS {
-            return Err(format!("RegSetValueExW failed: {set:?}"));
-        }
-        Ok(())
+        crate::win_registry::set_string(&subkey_path(), None, manifest_path.as_os_str())
     }
 
     pub fn unregister() -> Result<(), String> {
@@ -332,8 +303,10 @@ mod windows_registry {
             return false;
         }
         let words: Vec<u16> = buf[..(len as usize)]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&pair| u16::from_le_bytes(pair))
             .take_while(|&w| w != 0)
             .collect();
         String::from_utf16_lossy(&words) == manifest_path.to_string_lossy()

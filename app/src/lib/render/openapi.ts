@@ -20,7 +20,8 @@
 import { specChanges, type SpecChanges } from "./openapi-changes";
 import { JSON_SCHEMA, load } from "js-yaml";
 
-import { makeExample, type Direction } from "./openapi-example";
+import { makeExample, type Direction, type Reader } from "./openapi-example";
+import { isXmlMedia, xmlText } from "./openapi-xml";
 import { pathAtLine, placeOfPath } from "./openapi-line";
 import { collection as bruCollection } from "./openapi-bru";
 import { firstSchemeOf, startDraft, type RequestDraft } from "./openapi-request";
@@ -282,7 +283,7 @@ export type SpecCall =
   | { kind: "addFile"; path: string; text: string }
   | { kind: "shape"; base: string; node: unknown }
   | { kind: "uses"; name: string }
-  | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number }
+  | { kind: "sample"; base: string; node: unknown; direction?: Direction; choice?: number; media?: string }
   | { kind: "page"; place: string }
   | { kind: "placeAt"; line: number }
   | { kind: "collection"; specFile: string }
@@ -306,7 +307,7 @@ export function answerCall(sessions: Map<number, SpecFiles>, session: number, ca
   if (call.kind === "resolve") return files.resolve(call.base, call.ref);
   if (call.kind === "shape") return files.shape(call.base, call.node);
   if (call.kind === "uses") return files.uses(call.name);
-  if (call.kind === "sample") return files.sample(call.base, call.node, call.direction ?? "any", call.choice ?? 0);
+  if (call.kind === "sample") return files.sample(call.base, call.node, call.direction ?? "any", call.choice ?? 0, true, undefined, call.media);
   if (call.kind === "page") return files.page(call.place);
   if (call.kind === "placeAt") return files.placeAt(call.line);
   if (call.kind === "collection") return files.collection(call.specFile);
@@ -483,19 +484,25 @@ export class SpecFiles {
   }
   #uses: { ops: Map<string, number[]>; schemas: Map<string, string[]> } | null = null;
 
-  /**
-   * An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic.
-   * `name` is the name it stands under where it is no property's: a parameter's.
-   */
-  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true, name?: string): unknown {
-    const reader = {
+  /** What the example makers read of the spec: a ref resolved, a schema's merged shape. */
+  get reader(): Reader {
+    return {
       resolve: (b: string, ref: string) => {
         const r = this.resolve(b, ref);
         return "ok" in r && r.ok ? { node: r.node, base: r.base } : null;
       },
       shape: (b: string, n: unknown) => this.shape(b, n),
     };
-    return makeExample(reader, base, node, { direction, choice, given, name });
+  }
+
+  /**
+   * An example schema `node` allows, made from its shape where it names none (`openapi-example.ts`), deterministic.
+   * `name` is the name it stands under where it is no property's: a parameter's. For an XML `media` type it is the
+   * XML text (`openapi-xml.ts`, #2525).
+   */
+  sample(base: string, node: unknown, direction: Direction = "any", choice = 0, given = true, name?: string, media?: string): unknown {
+    const value = makeExample(this.reader, base, node, { direction, choice, given, name });
+    return media !== undefined && isXmlMedia(media) ? xmlText(this.reader, base, node, value, choice) : value;
   }
 
   /**
@@ -512,7 +519,7 @@ export class SpecFiles {
         if (op === null) made.set(i, null);
         else {
           const bodies: Record<string, unknown> = {};
-          for (const m of op.body?.content ?? []) bodies[m.type] = m.examples[0]?.value ?? (m.schema === null ? undefined : this.sample(op.base, m.schema, "request"));
+          for (const m of op.body?.content ?? []) bodies[m.type] = m.examples[0]?.value ?? (m.schema === null ? undefined : this.sample(op.base, m.schema, "request", 0, true, undefined, m.type));
           const resolve = (schema: unknown) => this.#local(op.base, schema);
           made.set(i, { op, draft: startDraft(op, bodies, firstSchemeOf(op, index.security), resolve) });
         }
@@ -556,8 +563,8 @@ export class SpecFiles {
    */
   pageSamples(op: Operation): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    for (const m of op.body?.content ?? []) if (m.examples.length === 0 && m.schema !== null) out[`b:${m.type}`] = this.sample(op.base, m.schema, "request");
-    for (const r of op.responses) for (const m of r.content) if (m.examples.length === 0 && m.schema !== null) out[`r:${r.status}:${m.type}`] = this.sample(op.base, m.schema, "response");
+    for (const m of op.body?.content ?? []) if (m.examples.length === 0 && m.schema !== null) out[`b:${m.type}`] = this.sample(op.base, m.schema, "request", 0, true, undefined, m.type);
+    for (const r of op.responses) for (const m of r.content) if (m.examples.length === 0 && m.schema !== null) out[`r:${r.status}:${m.type}`] = this.sample(op.base, m.schema, "response", 0, true, undefined, m.type);
     for (const p of op.parameters) if (p.ref === null && p.example === undefined && p.schema !== null) out[`p:${p.in}:${p.name}`] = this.sample(op.base, p.schema, "request", 0, true, p.name);
     return out;
   }
@@ -1006,8 +1013,18 @@ function contentOf(files: SpecFiles, base: string, content: unknown): Media[] {
   if (!isObj(content)) return [];
   return Object.entries(content).map(([type, raw]) => {
     const m = isObj(raw) ? raw : {};
-    return { type, schema: m.schema ?? null, examples: examplesOf(files, base, m) };
+    return xmlGiven(files, base, { type, schema: m.schema ?? null, examples: examplesOf(files, base, m) });
   });
+}
+
+/**
+ * An XML media type's examples as XML text (#2525): a spec that gives one as an object (a Swagger 2 `examples`, or a
+ * 3.x `example` written in YAML) shows and sends it written along the schema; text it gives stays as it is.
+ */
+function xmlGiven(files: SpecFiles, base: string, m: Media): Media {
+  if (!isXmlMedia(m.type) || !m.examples.some((e) => e.value !== undefined && typeof e.value !== "string")) return m;
+  const examples = m.examples.map((e) => (e.value === undefined || typeof e.value === "string" ? e : { ...e, value: xmlText(files.reader, base, m.schema, e.value) }));
+  return { ...m, examples };
 }
 
 function headersOf(files: SpecFiles, base: string, headers: unknown, swagger: boolean): Header[] {
@@ -1109,11 +1126,13 @@ function buildOperation(files: SpecFiles, doc: Obj, item: Obj, row: OpRow, base:
         content =
           node.schema === undefined && Object.keys(examples).length === 0
             ? []
-            : produces.map((type) => ({
-                type,
-                schema: node.schema ?? null,
-                examples: examples[type] === undefined ? [] : [{ name: "", summary: "", value: examples[type], external: null }],
-              }));
+            : produces.map((type) =>
+                xmlGiven(files, base, {
+                  type,
+                  schema: node.schema ?? null,
+                  examples: examples[type] === undefined ? [] : [{ name: "", summary: "", value: examples[type], external: null }],
+                }),
+              );
       } else content = contentOf(files, base, node.content);
       responses.push({ status, description: str(node.description), content, headers: headersOf(files, base, node.headers, swagger), links: linksOf(files, base, node.links), ref: null });
     }

@@ -348,10 +348,10 @@ export class OasState {
   }
 
   /** The example made for choice `choice` of the part at `key`, asked once (a switch over the top `oneOf`). */
-  async sampleChoice(key: string, base: string, node: unknown, direction: "request" | "response" | "any", choice: number): Promise<void> {
+  async sampleChoice(key: string, base: string, node: unknown, direction: "request" | "response" | "any", choice: number, media?: string): Promise<void> {
     const at = `${key}|${choice}`;
     if (this.samples.has(at)) return;
-    this.samples.set(at, await this.session.sample(base, node, direction, choice));
+    this.samples.set(at, await this.session.sample(base, node, direction, choice, media));
   }
 
   /** Opens or shuts the caret at `key`. */

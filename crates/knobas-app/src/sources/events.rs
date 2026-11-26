@@ -44,6 +44,12 @@ impl<R: tauri::Runtime> SyncEvents for TauriEvents<R> {
 }
 
 impl<R: tauri::Runtime> crate::notify::NotificationEvents for TauriEvents<R> {
+    /// The window path a second launch and a `knobas://` link take (#748,
+    /// #2530), so a click from a toast comes up the same way.
+    fn bring_forward(&self) {
+        crate::capture::focus_main_window(&self.app);
+    }
+
     fn notification_clicked(&self, address: String) {
         self.emit(
             crate::events::NOTIFICATION_CLICKED,
