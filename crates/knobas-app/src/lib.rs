@@ -1048,6 +1048,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::api_send,
         commands::api::api_cancel,
         commands::api::api_answer_body,
+        commands::api::api_answer_piped,
+        commands::api::api_answer_piped_save,
         commands::api::api_sent,
         commands::api::api_hold_secret,
         commands::api::api_held,

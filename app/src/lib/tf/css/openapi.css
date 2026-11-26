@@ -317,14 +317,6 @@
 .tf-oas-time { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-time select { height: var(--control-h-sm); }
 .tf-oas-send kbd { margin-left: 6px; }
-.tf-oas-anslines { padding: 6px 0; white-space: pre; overflow: auto; display: flex; flex-direction: column; background: var(--sheet-2); }
-.tf-oas-anslines > * { flex: none; }
-.tf-oas-al { display: grid; grid-template-columns: 5ch minmax(0, 1fr); column-gap: 10px; min-height: var(--code-lh, 1.6em); }
-.tf-oas-ln { text-align: right; color: var(--muted); user-select: none; padding-right: 4px; }
-.tf-oas-tk { color: var(--hl-prop, var(--ink)); }
-.tf-oas-ts { color: var(--hl-str, var(--ok)); }
-.tf-oas-tn { color: var(--hl-num, var(--warn)); }
-.tf-oas-tb { color: var(--hl-kw, var(--info)); }
 .tf-oas-anshdrs {
   display: grid; grid-template-columns: fit-content(42%) minmax(0, 1fr);
   margin: 0; border-top: 1px solid var(--rule-2); border-bottom: 1px solid var(--rule-2);
@@ -369,3 +361,15 @@
 .tf-oas-irow[data-mark="removed"] { --mark-edge: var(--err); }
 .tf-oas-irow[data-mark="changed"] { --mark-edge: var(--warn); }
 .tf-oas-iopen { padding: 4px 10px 14px 18px; }
+
+/* ---- An answer's body (#2533): Render as, Pipeline and Expand, the compact views, the body expanded over the pane ---- */
+.tf-oas-bodybar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* The compact view holds its room from the first frame: the box is the same height reading, drawn or failed. */
+.tf-oas-docbox { height: clamp(260px, 52vh, 560px); min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; overflow: hidden; background: var(--sheet); }
+.tf-oas-ans .tf-pipe { border: 1px solid var(--rule-2); border-radius: 4px; }
+.tf-oas-ans .tf-stepfail { border: 1px solid var(--rule-2); border-radius: 4px; }
+.tf-oas-expanded { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 0; background: var(--sheet); overflow: hidden; }
+.tf-oas-exphead { flex: none; }
+.tf-oas-expline { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-oas-docbox.tf-oas-full { flex: 1; height: auto; margin: 0 -16px; border: 0; border-top: 1px solid var(--rule); border-radius: 0; }
+.tf-oas-ansbody.tf-oas-full { flex: 1; max-height: none; margin-bottom: 14px; }

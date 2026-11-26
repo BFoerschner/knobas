@@ -474,25 +474,132 @@ async fn exchange(
     }
 }
 
-/// The body of send `id` as kept: its bytes, or JSON indented where `pretty` and it parses (up to 8 MiB).
+/// The body of send `id` as kept: its bytes, or JSON indented where `pretty` and it parses (up to 8 MiB). Indenting
+/// changes only the whitespace between tokens ([`indent_json`]): the keys keep the server's order and the numbers and
+/// strings stay as written, so what the JSON view draws, copies and queries is the answer's JSON.
 #[must_use]
 pub fn body(id: u64, pretty: bool) -> Option<Bytes> {
     let kept = kept();
     let bytes = kept.body(id)?.clone();
     if pretty
         && bytes.len() <= 8 * 1024 * 1024
-        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
-        && let Ok(text) = serde_json::to_vec_pretty(&value)
+        && serde_json::from_slice::<serde::de::IgnoredAny>(&bytes).is_ok()
     {
-        return Some(Bytes::from(text));
+        return Some(Bytes::from(indent_json(&bytes)));
     }
     Some(bytes)
 }
 
+/// JSON text `bytes` (it parses) indented two spaces a level, as `serde_json`'s pretty printer lays it out, but token
+/// for token: a `serde_json::Value` round trip sorts the keys and rewrites numbers (`1.50` → `1.5`, an integer past
+/// `u64` → a float), which would change what the person copies and what a jq query over the drawn text answers.
+fn indent_json(bytes: &[u8]) -> Vec<u8> {
+    fn line(out: &mut Vec<u8>, depth: usize) {
+        out.push(b'\n');
+        out.extend(std::iter::repeat_n(b' ', depth * 2));
+    }
+    let blank = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r');
+    let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 2);
+    let (mut depth, mut text, mut escaped) = (0usize, false, false);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        i += 1;
+        if text {
+            out.push(b);
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                text = false;
+            }
+            continue;
+        }
+        match b {
+            b if blank(b) => {}
+            b'"' => {
+                text = true;
+                out.push(b);
+            }
+            b'{' | b'[' => {
+                // An empty object or list stays `{}` or `[]`.
+                let shut = if b == b'{' { b'}' } else { b']' };
+                let next = i + bytes[i..].iter().take_while(|&&c| blank(c)).count();
+                out.push(b);
+                if bytes.get(next) == Some(&shut) {
+                    out.push(shut);
+                    i = next + 1;
+                } else {
+                    depth += 1;
+                    line(&mut out, depth);
+                }
+            }
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                line(&mut out, depth);
+                out.push(b);
+            }
+            b',' => {
+                out.push(b);
+                line(&mut out, depth);
+            }
+            b':' => out.extend_from_slice(b": "),
+            _ => out.push(b),
+        }
+    }
+    out
+}
+
+/// The body of send `id` through the file pipeline `steps` (#2533, ADR-0057), as a file's bytes are run: the bytes
+/// read from [`kept`] in this process's memory, the steps run in memory under their caps, `name` the file the answer
+/// goes by (it picks the steps' defaults and the renderer). Neither the body nor the run is written to a file, the
+/// database or a backup; nothing of it is kept beyond the answer. `None` once the body is no longer kept.
+pub async fn piped(
+    id: u64,
+    name: &str,
+    steps: &[crate::file_pipeline::PipeStep],
+    commands: &[crate::file_pipeline::saved::CommandStep],
+) -> Option<crate::file_pipeline::PipeRun> {
+    let bytes = kept().body(id)?.to_vec();
+    Some(
+        crate::file_pipeline::run_bytes_with(
+            steps,
+            commands,
+            bytes,
+            name,
+            crate::file_pipeline::Limits::default(),
+        )
+        .await,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ApiAuth, ApiSend, AuthPlace, changes, is_this_computer, needs_asking, prepare};
+    use super::{
+        ApiAuth, ApiSend, AuthPlace, changes, indent_json, is_this_computer, needs_asking, prepare,
+    };
     use crate::api::held::{Held, held};
+
+    /// #2533: an answer's JSON is indented token for token: the server's key order, its numbers as written, strings
+    /// (with their escapes, braces and commas) untouched, empty objects and lists kept short; laid out as
+    /// `serde_json`'s pretty printer lays out what it can round-trip.
+    #[test]
+    fn an_answer_is_indented_token_for_token() {
+        let raw = br#" {"z":1.50,"a":[12345678901234567890123,-0.0e+1],"s":"a \"q\" {x}, [y]: \\","e":{},"l":[ ],"n":null} "#;
+        let out = String::from_utf8(indent_json(raw)).unwrap();
+        assert_eq!(
+            out,
+            "{\n  \"z\": 1.50,\n  \"a\": [\n    12345678901234567890123,\n    -0.0e+1\n  ],\n  \"s\": \"a \\\"q\\\" {x}, [y]: \\\\\",\n  \"e\": {},\n  \"l\": [],\n  \"n\": null\n}"
+        );
+        // What serde_json round-trips (sorted keys, plain numbers) comes out as its pretty printer writes it.
+        let plain = br#"{"a":{"b":[1,{"c":true}],"d":"x"},"e":[]}"#;
+        let value: serde_json::Value = serde_json::from_slice(plain).unwrap();
+        assert_eq!(
+            indent_json(plain),
+            serde_json::to_vec_pretty(&value).unwrap()
+        );
+    }
 
     #[test]
     fn this_computer_is_read_from_the_name() {

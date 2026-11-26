@@ -124,6 +124,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       }
       return body;
     },
+    // An answer through a pipeline (#2533): the kept body's text through the steps the fake runs on a value.
+    api_answer_piped: (args) => {
+      const body = fakeBodies.get(Number(args["id"]));
+      if (body === undefined) throw { code: "not_found", message: "The answer is no longer kept." };
+      return fakeValuePiped(new TextDecoder().decode(body), (args["steps"] as PipeStep[] | undefined) ?? []);
+    },
+    api_answer_piped_save: (args) => `~/Downloads/${String(args["saveAs"])}`,
     api_sent: (args) => fakeSent.filter((s) => s.send.file === args["file"]).reverse(),
     api_hold_secret: (args) => {
       const origin = String(args["origin"]);
