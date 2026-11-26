@@ -31,6 +31,11 @@ export interface SourceReading {
    * password* or *Re-enter token*. `null` for a source that needs nothing.
    */
   fix: string | null;
+  /**
+   * The source syncs only when pressed (ADR-0056), so its age says nothing
+   * about the scheduler: the rollup leaves it out (#2527). Absent for the rest.
+   */
+  byHand?: true;
 }
 
 /** What a credential the reader has to fix is called, by state, in the source's noun. */
@@ -53,6 +58,11 @@ export function sourceReadings(
   const named: Named[] =
     sources ?? health.map((row) => ({ id: row.source_id, display_name: row.source_id }));
   return named.map((source, index) => {
+    const reading = readingOf(source, index);
+    return source.sync_by_hand ? { ...reading, byHand: true } : reading;
+  });
+
+  function readingOf(source: Named, index: number): SourceReading {
     const state = health.find((row) => row.source_id === source.id);
     const run = sync.find((row) => row.source_id === source.id);
     const name = source.display_name || source.id;
@@ -79,7 +89,7 @@ export function sourceReadings(
     // A good credential that left part of the source out (#2374): amber here as on its Settings row, so the two agree.
     if (state?.state === "ok" && state.detail) return { id: source.id, text: `${synced}, ${state.detail}`, tone: "warn", syncedAt, fix: null };
     return { id: source.id, text: synced, tone: "ok", syncedAt, fix: null };
-  });
+  }
 }
 
 /**
@@ -90,11 +100,20 @@ export function sourceReadings(
  * looked at for and the page's rows say the same. `text` is the part that has
  * to fit and `rest` what may drop out of sight. `null` for two or fewer, which
  * the bar names one by one.
+ *
+ * A source synced by hand counts in neither *N synced* nor *oldest*: its age
+ * is when it was last pressed, and a week-old press would make the scheduled
+ * sources look stale (#2527). Only when every reading is such a source does the
+ * line say *N synced by hand*.
  */
 export function healthyRollup(healthy: readonly SourceReading[], now: Date = new Date()): { text: string; rest: string | null; tone: ReadingTone } | null {
   if (healthy.length <= 2) return null;
   const having = (tone: ReadingTone) => healthy.filter((reading) => reading.tone === tone);
-  const synced = having("ok");
+  const settled = having("ok");
+  const synced = settled.filter((reading) => !reading.byHand);
+  if (synced.length === 0 && settled.length === healthy.length) {
+    return { text: `${settled.length} synced by hand`, rest: null, tone: "ok" };
+  }
   const oldest = synced.map((reading) => reading.syncedAt).filter((at) => at !== null).sort()[0];
   const looks = having("warn").length;
   // What must stay: how many synced, and anything that wants the reader. The rest may drop out of sight.

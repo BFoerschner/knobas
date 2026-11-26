@@ -84,6 +84,7 @@
   import { sideWidth } from "../side-width.svelte";
   import TfScope from "../filter/TfScope.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import { menuThing } from "../context/thing";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import { afterLayout } from "../../shell/after-layout";
@@ -129,7 +130,8 @@
     groupsOf,
     recentNewestFirst,
     asksAttention,
-    unreadRun,
+    unreadRunsOf,
+    foldPipelines,
     keptPipelines,
     latestTime,
     listRows,
@@ -439,7 +441,7 @@
    */
   function markAllRead() {
     void runsRead.markAll({
-      runs: kept.flatMap((p) => p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id)),
+      runs: unreadRunsOf(kept, read),
       pipelines: kept.map((p) => p.entity_id),
     });
   }
@@ -678,6 +680,7 @@
     class={`tf-tr tf-pi ${indent(depth)}`}
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
+    {@attach menuThing(() => ({ kind: "pipeline", id: pipeline.entity_id, hash: pipelineHash(pipeline.entity_id), unread: unreadRunsOf([pipeline], read) }))}
     title={`${[...groupsOf(pipeline), pipeline.name].join(" › ")}\n${glyph.word}${latest !== "" ? ` ${latest}` : ""}`}
     {@attach win.row(key)}
   >
@@ -694,6 +697,7 @@
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} onclick={(event) => altFold(f, open, event)}
+      {@attach menuThing(() => ({ kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(foldPipelines(f), read) }))}
       ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
         >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
             class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span

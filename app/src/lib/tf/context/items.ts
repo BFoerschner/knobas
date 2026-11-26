@@ -25,6 +25,7 @@ import { commandFor, joinInside, menuOrder, objectMenu, repoName } from "../open
 import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
+import { counted } from "../counted";
 import type { Thing } from "./thing";
 import type { OneOff } from "../../ipc/oneoff";
 import { takesCommit, takesFile, takesFolder, takesMadeFile, takesMadeFolder, takesRepository } from "../../render/oneoff";
@@ -86,6 +87,8 @@ export type Act =
   | { do: "run-read"; id: string; read: boolean }
   /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
   | { do: "pipeline-read"; id: string }
+  /** *Mark N runs as read* (#2527): exactly these runs, with *Undo* on the toast. */
+  | { do: "runs-read"; runs: readonly string[] }
   /** *Move to ▸ ⟨status⟩* on a ticket (ADR-0054): the page offering moves makes it. */
   | { do: "move"; entityId: string; status: string }
   /** *Assign to…* on a ticket (ADR-0054, section 26): the page offering field edits opens its people picker at the card. */
@@ -319,6 +322,11 @@ function grouped(...groups: Entry[][]): Entry[] {
   return out;
 }
 
+/** *Mark 3 runs as read*, *Mark 1 run as read*; nothing at none (#2527). */
+function readRuns(runs: readonly string[]): Item[] {
+  return runs.length === 0 ? [] : [{ id: "read-runs", label: `Mark ${counted(runs.length, "run", "runs")} as read`, act: { do: "runs-read", runs } }];
+}
+
 function open(hash: string, ctx: MenuContext): Item[] {
   return ctx.own ? [] : [{ id: "open", label: "Open", act: { do: "go", hash } }];
 }
@@ -440,8 +448,13 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         [
           ...open(thing.hash, ctx),
           ...fromSheet("pipeline", thing.id, title, ctx),
-          // Every failed run of it, older ones too (ux18), with *Undo* on the toast.
-          ...(ctx.runs !== undefined ? [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item] : []),
+          // On the Builds rail, the unread failures it holds, counted (#2527); elsewhere every failed run of it, older ones
+          // too (ux18). Both with *Undo* on the toast.
+          ...(ctx.runs === undefined
+            ? []
+            : thing.unread !== undefined
+              ? readRuns(thing.unread)
+              : [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item]),
         ],
         inSource(thing.id, ctx),
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied the name" } }, copyLink()],
@@ -581,6 +594,10 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       }
       return grouped([...(thing.open === null ? [] : [{ id: "open", label: "Open", act: { do: "go", hash: thing.open } } satisfies Item]), ...acts]);
     }
+    case "pipeline-folder":
+      return grouped(ctx.runs === undefined ? [] : readRuns(thing.unread), [
+        { id: "copy-name", label: "Copy name", act: { do: "copy", text: thing.name, said: "Copied the name" } },
+      ]);
     case "test":
       return [{ id: "copy-name", label: "Copy name", hint: thing.name, act: { do: "copy", text: thing.name, said: "Copied the test's name" } }];
     case "web": {
