@@ -406,6 +406,20 @@ impl FileIndex {
         }
     }
 
+    /// Every file of repository `no` whose text the index keeps, given to
+    /// `each` with that text, in no order, until `each` answers `false`:
+    /// what *Text search* scans line by line where no clone holds the
+    /// default branch (ADR-0062). A file kept by its path alone (binary,
+    /// too large, text not kept) is not given.
+    pub fn each_text(&self, no: u64, each: &mut dyn FnMut(&str, &str) -> bool) {
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        if let Err(error) = read::each_text(&inner.reader.searcher(), &inner.fields, no, each) {
+            tracing::warn!(%error, "the files index could not be read");
+        }
+    }
+
     /// The `.xsd` files of every repository whose text declares `namespace`
     /// as its target (the XSD design, 2026-11-23, section 16, step 6), at
     /// most `most`, the shortest paths first. Of the files whose text holds

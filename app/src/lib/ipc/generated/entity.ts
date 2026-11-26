@@ -4952,6 +4952,119 @@ export type TestStatus = "failed" | "passed" | "ignored";
 export type TestSummary = { failed: number, passed: number, ignored: number, };
 
 /**
+ * One file with matching lines.
+ */
+export type TextFile = { 
+/**
+ * From the repository's top.
+ */
+path: string, 
+/**
+ * Its first [`MOST_PER_FILE`] matching lines.
+ */
+hits: Array<TextHit>, 
+/**
+ * How many more lines of it match.
+ */
+more: number, };
+
+/**
+ * What a search found.
+ */
+export type TextFound = { from: TextFrom, 
+/**
+ * The commit read: the clone's, or the working tree's `HEAD`.
+ */
+commit: string | null, 
+/**
+ * The branch the files index reads, for [`TextFrom::Index`].
+ */
+branch: string | null, 
+/**
+ * The files whose lines match, in path order.
+ */
+files: Array<TextFile>, 
+/**
+ * Paths whose name holds the text, when asked ([`TextQuery::names`]).
+ */
+names: Array<string>, 
+/**
+ * How many files were read.
+ */
+searched: number, 
+/**
+ * How many were skipped: binary, or over [`FILE_CAP`].
+ */
+skipped: number, 
+/**
+ * The search stopped at [`MOST_HITS`] lines (or the names at
+ * [`MOST_NAMES`]): there are more.
+ */
+cut: boolean, 
+/**
+ * The pattern does not parse: what is wrong with it.
+ */
+invalid: string | null, 
+/**
+ * Why nothing could be searched, for [`TextFrom::None`].
+ */
+why: string | null, 
+/**
+ * A newer search stopped this one: draw nothing of it.
+ */
+stale: boolean, };
+
+/**
+ * Where an answer's lines were read.
+ */
+export type TextFrom = "clone" | "working_tree" | "index" | "none";
+
+/**
+ * One matching line.
+ */
+export type TextHit = { 
+/**
+ * From 1.
+ */
+line: number, 
+/**
+ * The line, cut around its first hit when long, in parts.
+ */
+parts: Array<TextPart>, };
+
+/**
+ * One part of a line shown: matched or not.
+ */
+export type TextPart = { 
+/**
+ * Raw file text: drawn as text, never as markup.
+ */
+text: string, hit: boolean, };
+
+/**
+ * What the reader asked: the words, and the two switches beside them.
+ */
+export type TextQuery = { 
+/**
+ * What is typed: a literal, or a pattern when `regex` is on.
+ */
+text: string, 
+/**
+ * *Aa*: match the case typed. Off, the case is smart: a query with an
+ * upper-case letter matches its case, one without matches every case.
+ */
+case_sensitive: boolean, 
+/**
+ * *.\**: `text` is a regular expression (Rust's `regex` syntax).
+ */
+regex: boolean, 
+/**
+ * Also answer the paths whose name holds `text` (*Search in
+ * repository*, which may be a file's name as well as its text).
+ */
+names: boolean, };
+
+/**
  * A ticket's thread, oldest first.
  *
  * Issue #819.

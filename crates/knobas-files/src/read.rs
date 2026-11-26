@@ -385,6 +385,38 @@ pub(crate) fn in_repo(
     })
 }
 
+/// [`crate::FileIndex::each_text`].
+pub(crate) fn each_text(
+    searcher: &Searcher,
+    fields: &Fields,
+    no: u64,
+    each: &mut dyn FnMut(&str, &str) -> bool,
+) -> Result<(), FilesError> {
+    for (ord, segment) in searcher.segment_readers().iter().enumerate() {
+        let ord = SegmentOrdinal::try_from(ord).unwrap_or(SegmentOrdinal::MAX);
+        let repo = segment.fast_fields().u64("repo")?;
+        let alive = segment.alive_bitset();
+        for doc in 0..segment.max_doc() {
+            if alive.is_some_and(|alive| !alive.is_alive(doc)) || repo.first(doc) != Some(no) {
+                continue;
+            }
+            let stored: TantivyDocument = searcher.doc(DocAddress::new(ord, doc))?;
+            let path = stored
+                .get_first(fields.path)
+                .and_then(|value| value.as_str());
+            let text = stored
+                .get_first(fields.text)
+                .and_then(|value| value.as_str());
+            if let (Some(path), Some(text)) = (path, text)
+                && !each(path, text)
+            {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Whether `text` declares `namespace` as its target: `targetNamespace`, an
 /// `=`, and the namespace quoted, as a schema's root writes it. A schema
 /// names one target; another attribute (an import's `namespace`) is not it.

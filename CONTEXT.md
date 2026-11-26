@@ -589,6 +589,10 @@ _Avoid_: command palette, spotlight
 The names and the text of every mirrored repository's files, at its default branch's head, in a tantivy index in the profile (`<profile>/files-1/`, `knobas-files`, ADR-0050), read after each sync from a checkout on this machine where one holds the file, else from the forge. PostgreSQL keeps what it stands at (`sync.code_repo`, `sync.code_file`); bring-up compares the two. A backup does not carry it, as it carries nothing of `sync`: the next syncs read it again. What it keeps of file text is bounded in Settings › Search.
 _Avoid_: code search, grep
 
+**Text search**:
+A repository's Files tab searching the text of its files, every line holding a literal or a pattern, in the tree the tab shows: the branch's commit in a clone on this computer, the working tree as git lists it, or, where no clone holds the default branch, the [files index](#files-index)'s copy of it, which the answer names. Smart case unless *Aa*; *.\** for a pattern. *Files | Text* in the tree's search box, `Mod+Shift+F`, and *Search in repository* on selected code in a file or a diff (ADR-0062). Not the launcher's search, which finds a repository by its files and never a line in one branch.
+_Avoid_: grep, code search, find in files (*Find in file* is ⌘F in one file)
+
 **Section's place**:
 The last address a reader stood on in a section of the nav, however deep (a Docs page or space, a ticket, a pull request at its tab, a run at its tab, a marked monitor, a link set, a source's page in Settings): where the section's nav entry, the gear or `⌘,` comes back to from another section, as the kept page that was left (2026-11-13, `docs/decisions/2026-11-13-a-nav-entry-comes-back-to-where-you-were.md`). Pressed inside the section, the entry goes to the section's own page as it was left instead (its tab, saved view, pipeline or search). Not a card row's narrowing and not home. A launcher row naming a section opens the section's own page, not its place.
 _Avoid_: last page, history (Back steps through history; a place is one per section)

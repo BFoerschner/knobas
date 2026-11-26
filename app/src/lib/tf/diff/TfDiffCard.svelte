@@ -557,7 +557,7 @@
   {/if}
 {/snippet}
 
-<div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root} {@attach place}>
+<div class="tf-diff" data-file={keyOf(file)} data-search-repo={openAt?.entityId} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root} {@attach place}>
   <!-- A right-click on the header is the file's (2026-11-16), where the diff names its repository and the file is still there. -->
   <div class="tf-fh" {@attach menuThing(() => (openAt !== null && file.change !== "deleted" ? { kind: "file", repoId: openAt.entityId, path: file.path } : null))}>
     <!-- Who the file is, in one group that gives up its path's start before its controls go to a second line (ux26). -->

@@ -4,6 +4,7 @@
 mod ask;
 mod declaring;
 mod read_alone;
+mod texts;
 mod writes;
 
 use knobas_files::{FileIndex, Repo, Repos};

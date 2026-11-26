@@ -3,6 +3,7 @@
  * menu stays only in a field, its keys and its closing, and what each pick sends, through fake ports.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
+import { takeAsked } from "../repo/text-search.svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutSettings, CheckoutView, EntityDetail } from "../../ipc/entity";
@@ -394,6 +395,35 @@ test("selected words: Copy is the document's own copy, Search opens the launcher
   rightClick(words);
   row("search-sel").click();
   expect(searched).toEqual(["retry the payout"]);
+});
+
+test("Search in repository on a diff's selection hands the words to the repository's Files tab and goes there", async () => {
+  location.hash = "#/pr/gitea%3Aacme%2Fpay%2312/files";
+  await draw(`<div class="tf-diff" data-search-repo="gitea:acme/pay"><span class="words">retry_on</span></div>`);
+  const words = page.querySelector(".words")!;
+  const range = document.createRange();
+  range.selectNodeContents(words);
+  getSelection()!.removeAllRanges();
+  getSelection()!.addRange(range);
+  rightClick(words);
+  expect(rows()).toEqual(["copy-sel", "search-sel", "search-repo"]);
+  row("search-repo").click();
+  expect(calls["go"]).toEqual([["#/repo/gitea%3Aacme%2Fpay/files"]]);
+  expect(takeAsked("gitea:acme/pay")).toBe("retry_on");
+});
+
+test("Search in repository on the repository's own file stays on the file", async () => {
+  location.hash = "#/repo/gitea%3Aacme%2Fpay/files/src/a.rs";
+  await draw(`<div class="tf-fileview"><div class="tf-l" data-n="1"><span class="words">retry_on</span></div></div>`);
+  const words = page.querySelector(".words")!;
+  const range = document.createRange();
+  range.selectNodeContents(words);
+  getSelection()!.removeAllRanges();
+  getSelection()!.addRange(range);
+  rightClick(words);
+  row("search-repo").click();
+  expect(calls["go"]).toBeUndefined();
+  expect(takeAsked("gitea:acme/pay")).toBe("retry_on");
 });
 
 test("a tagged row: a monitor with an open alert offers Acknowledge, with Undo on its toast", async () => {
