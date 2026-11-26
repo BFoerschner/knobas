@@ -40,6 +40,8 @@ import type { Tone } from "../../../ipc/generated/entity";
 import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
+/** `?fake-long-paths`' backup folder (#2518): a Windows profile's, deep under folders with spaces. */
+const LONG_DIRECTORY = String.raw`C:\Users\someone with a long name\AppData\Roaming\knobas\folders with spaces in them\and a profile with a long name\backups`;
 
 /** Today at `hour:minute` by the browser's clock, so "today 02:00" stays today. */
 function todayAt(hour: number, minute: number): Date {
@@ -53,8 +55,9 @@ function archiveName(at: Date): string {
   return `knobas-${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}.knobas`;
 }
 
-function record(at: Date, bytes: number): BackupRecord {
-  return { taken_at: at.toISOString(), file: `${DIRECTORY}/${archiveName(at)}`, bytes };
+/** An archive taken at `at` in `dir`: the Mac's folder, or `?fake-long-paths`' Windows one. */
+function record(at: Date, bytes: number, dir = DIRECTORY): BackupRecord {
+  return { taken_at: at.toISOString(), file: `${dir}${dir === DIRECTORY ? "/" : "\\"}${archiveName(at)}`, bytes };
 }
 
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
@@ -159,10 +162,17 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
   const taken = todayAt(2, 0);
   const MB = 1024 * 1024;
-  const archives = [record(taken, 48 * MB)];
+  /** Where this run's archives are. */
+  const backupDir = params.has("fake-long-paths") ? LONG_DIRECTORY : DIRECTORY;
+  const archives: (BackupRecord & { share?: boolean })[] = [record(taken, 48 * MB, backupDir)];
   for (const back of [1, 2, 3]) {
     const earlier = new Date(taken.getTime() - back * 86_400_000);
-    archives.push(record(earlier, 47 * MB - back * 200_000));
+    archives.push(record(earlier, 47 * MB - back * 200_000, backupDir));
+  }
+  // `?fake-long-paths` (#2518): a backup and a share export named at length, so the restore and import dialogs hold them.
+  if (params.has("fake-long-paths")) {
+    archives.push({ ...record(new Date(taken.getTime() - 9 * 86_400_000), 46 * MB), file: `${LONG_DIRECTORY}\\knobas-backup-of-the-payments-team-laptop-before-the-move-2026-11-17-0200.knobas` });
+    archives.push({ ...record(taken, 3 * MB), file: `${LONG_DIRECTORY}\\knobas-share-export-for-the-new-colleagues-in-payments-2026-11-26.knobas`, share: true });
   }
 
   const status = (): BackupStatus => {
@@ -170,13 +180,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
     return {
       schedule,
-      directory: DIRECTORY,
+      directory: backupDir,
       last: archives[0] ?? null,
       next_due_at: schedule.enabled ? next.toISOString() : null,
       archives: archives.slice(0, Math.max(1, schedule.keep)).map((made) => ({
         file: made.file,
         bytes: made.bytes,
-        share: false,
+        share: made.share === true,
       })),
     };
   };
@@ -306,7 +316,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     },
     backup_status: () => status(),
     backup_now: () => {
-      const made = record(new Date(), 48 * MB + 100_000);
+      const made = record(new Date(), 48 * MB + 100_000, backupDir);
       archives.unshift(made);
       return made;
     },

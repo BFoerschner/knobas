@@ -81,7 +81,7 @@ function type(label: string, value: string) {
 }
 
 const cells = (selector: string) => [...target.querySelectorAll(`${selector} tbody tr`)].map((tr) => [...tr.querySelectorAll("td")].slice(0, -1).map((td) => text(td)));
-const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const button = (name: string) => [...target.querySelectorAll("button")].find((b) => text(b) === name || b.getAttribute("aria-label") === name)!;
 
 test("a command step added here is saved whole with its name, command and timeout", async () => {
@@ -174,13 +174,13 @@ test("a command step's command and a pipeline's steps and patterns keep to one l
 
 test("Schemas: a namespace, a location and the file that answers it each keep to one line, cut in the middle, whole on hover (#2518)", async () => {
   const location = String.raw`C:\Users\some one\source\repos\folders with spaces in them\schemas\opentrans_2_1.xsd`;
-  const namespace = "http://www.opentrans.org/XMLSchema/2.1/with/a/namespace/that/is/long";
+  const namespace = "http://www.opentrans.example/XMLSchema/2.1/with/a/namespace/that/is/long";
   const path = "schemas/vendors/opentrans/a folder with a long name/opentrans_2_1.xsd";
   schemas.pointed = [{ namespace, location, to: { repo: "tidewater/edi-schemas", path } }];
   app = mount(TfPipelinesSettings, { target, props: stores([], [], []) });
   await settle();
   const row = [...target.querySelectorAll(".tf-rnd-schemas tbody tr")][0]!;
-  const [ns, at, by] = [...row.querySelectorAll("td")].map((td) => td.querySelector(".tf-path"));
+  const [ns, at, by] = [...row.querySelectorAll("td")].map((td) => td.querySelector(".tf-path") ?? null);
   expect(ns?.getAttribute("title")).toBe(namespace);
   expect(text(ns?.querySelector(".tf-path-tail"))).toBe("long");
   expect(at?.getAttribute("title")).toBe(location);

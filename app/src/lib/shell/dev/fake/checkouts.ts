@@ -378,6 +378,16 @@ const SHIPPED: FakeApp[] = [
   { id: "bruno", name: "Bruno", command: "", file_command: null, api_command: "open -a Bruno {collection}" },
 ];
 
+/** `?fake-long-paths`' application (#2518): JetBrains Rider as a Windows user installs it, under their profile. */
+const LONG_PROGRAM = String.raw`"C:\Users\someone with a long name\AppData\Local\Programs\folders with spaces in them\JetBrains Rider 2026.2\bin\rider64.exe"`;
+const LONG_APP: FakeApp = {
+  id: "rider",
+  name: "JetBrains Rider",
+  command: `${LONG_PROGRAM} "{path}"`,
+  file_command: `${LONG_PROGRAM} --line {line} "{file}"`,
+  pull_request_command: `${LONG_PROGRAM} "{path}"`,
+};
+
 let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
 let fakeDefault: string | null = "vscode";
 
@@ -830,6 +840,9 @@ export function seed(params: URLSearchParams): void {
   // Settings' worktree list, which is empty until a pull request opens in one, holds one under the long root.
   const tree = params.has("fake-long-paths") ? worktreeOf(fakeClonesRoot, "mock:tidewater/payout-service", 142) : null;
   if (tree !== null) fakeWorktrees = [{ repo_entity_id: "mock:tidewater/payout-service", number: 142, path: tree, closed: false }];
+  // And an application whose program is deep under folders with spaces (#2518), so Settings' Open in… table, its page and every
+  // Open in… menu hold a long program and a long checkout on one line.
+  if (params.has("fake-long-paths") && !fakeApps.some((app) => app.id === LONG_APP.id)) fakeApps = [...fakeApps, { ...LONG_APP }];
   seedOpenState(params);
   seedClones(params);
 }
