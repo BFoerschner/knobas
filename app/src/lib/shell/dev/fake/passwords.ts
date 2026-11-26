@@ -8,6 +8,7 @@
  * - `?pw-comment`: every folder asks for a usage comment.
  * - `?pw-slow=<ms>`: a secret read takes that long.
  * - `?pw-scale=<n>`: about `n` entries (the mock Pleasant's 2,000: eight levels, folders of 610, 530 and 515).
+ * - `?fake-long-paths`: the payout database's entry holds two attachments with long names (`long-paths.mjs`, #2531).
  */
 import TIDEWATER from "./passwords-tidewater.json";
 import type { ClipState, CodeAnswer, Held, PwEntry, PwFolder, PwRow, ReadAnswer } from "../../../ipc/passwords";
@@ -124,9 +125,15 @@ function held(entries: Raw[], params: URLSearchParams): Held {
   };
 }
 
+/** Two attachments with long names, which `long-paths.mjs` holds to one line each (#2531). */
+const LONG_FILES = [
+  { name: "payout-db service-account-with-a-long-name client certificate bundle for the payments team 2026-11.p12", size: "4.1 KB", kind: "P12" },
+  { name: "tidewater-payments-prod-service-account-with-a-long-name-kubeconfig-for-the-eu-central-cluster.yaml", size: "2.7 KB", kind: "YAML" },
+];
+
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const scale = Number(params.get("pw-scale") ?? 0);
-  const entries = corpus(scale);
+  const entries = params.has("fake-long-paths") ? corpus(scale).map((e) => (e.id === "pl-payout-db" ? { ...e, files: LONG_FILES } : e)) : corpus(scale);
   const byId = new Map(entries.map((e) => [`${SOURCE}:${e.id}`, e]));
   const view = held(entries, params);
   const slow = Number(params.get("pw-slow") ?? 400);

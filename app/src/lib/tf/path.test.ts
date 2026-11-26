@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { commandParts, pathParts, programOf, wordsShown } from "./path";
+import { commandParts, nameParts, pathParts, programOf, wordsShown } from "./path";
 
 test("a path splits after its last separator, so the folder or file it names is its end", () => {
   expect(pathParts("/Users/mara/src/payout-service")).toEqual({ head: "/Users/mara/src/", tail: "payout-service" });
@@ -46,4 +46,21 @@ test("a list shows its first three and counts the rest", () => {
   expect(wordsShown(["a", "b", "c"])).toEqual({ shown: ["a", "b", "c"], more: 0 });
   expect(wordsShown(["a"])).toEqual({ shown: ["a"], more: 0 });
   expect(wordsShown([])).toEqual({ shown: [], more: 0 });
+});
+
+test("a file's name gives up its middle and keeps its last characters and its extension (#2531)", () => {
+  // The end keeps the extension and the twelve characters before it, so a version or a date at the end still shows.
+  expect(nameParts("payout-db client certificate bundle 2026-11.p12")).toEqual({ head: "payout-db client certificate bu", tail: "ndle 2026-11.p12" });
+  expect(nameParts("wg.conf")).toEqual({ head: "", tail: "wg.conf" });
+  // No extension: the last twelve characters.
+  expect(nameParts("a-very-long-name-without-any-extension")).toEqual({ head: "a-very-long-name-without-a", tail: "ny-extension" });
+  // A dot that starts the name, or words after the last dot, is no extension.
+  expect(nameParts(".config-for-the-payments-team-hub")).toEqual({ head: ".config-for-the-payme", tail: "nts-team-hub" });
+  expect(nameParts("release.notes-for-the-whole-payments-team")).toEqual({ head: "release.notes-for-the-whole-p", tail: "ayments-team" });
+  // Head and tail always make the whole name, a character outside the BMP never split.
+  for (const name of ["x.tar.gz", "ledger-signing.pem", "Ünïcödé file name with spaces and more words.docx", "a long name with an emoji 🔑🔑🔑 at the end.txt"]) {
+    const { head, tail } = nameParts(name);
+    expect(head + tail).toBe(name);
+    expect(tail.charCodeAt(0) >= 0xdc00 && tail.charCodeAt(0) <= 0xdfff).toBe(false);
+  }
 });

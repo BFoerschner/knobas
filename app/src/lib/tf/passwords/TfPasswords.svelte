@@ -6,13 +6,16 @@
   A return to the page draws from what was read last (`held.svelte.ts`) and reads again behind.
 
   - **The tree** is one flat list of the rows on show (All entries, then each open fold's folders), one `Windowed`,
-    with the Docs rail's look. A press opens the folder and its fold; the chevron folds alone; a first press never
-    closes. ↑ ↓ walk it, → opens a fold and steps in, ← closes it and steps out. One `Tab` stop.
+    with the Docs rail's look, the folder on show drawn selected. A press selects the folder and leaves its fold as it
+    is (#2531); the chevron folds alone; Alt+click folds everything under it. ↑ ↓ walk it, → opens a fold and
+    steps in, ← closes it and steps out. One `Tab` stop.
   - **The list**: a folder lists everything under it, its own entries first, then a panel per folder below that holds
     entries; one further down with more than six rows draws five and *Show all*. At the top, *Used recently* first. One
     flat list of lines (a panel's head, a row, *Show all*), one `Windowed`.
   - **The entry** beside it, the list and the entry one block capped at 1,438 px and centred (`TfPwEntry`).
-  - **Keys:** `/` filter; ↑ ↓ or `j` `k` move in the list; `c` copy the password, `s` show it, `u` the username, `o`
+  - **The filter** (`⌘F`) reads the folder on show and the folders under it, every entry at the top; another folder
+    clears it. In it ⌘⇧C, S, U, O and A act on the open entry and `Enter` goes to its row (#2531).
+  - **Keys:** ↑ ↓ or `j` `k` move in the list; `c` copy the password, `s` show it, `u` the username, `o`
     the one-time code, `a` the address; `Esc` clears the filter, else goes up a folder. `r` does nothing here: a sync
     is something somebody else can read in a log, so it is a button a person aims at.
   - **Leaving the page** hides everything shown. It does not clear the clipboard: the person copied to paste elsewhere.
@@ -22,11 +25,12 @@
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { tick, untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import type { Held, PwEntry, PwSource } from "../../ipc/passwords";
   import { Windowed } from "../../shell/windowed.svelte";
   import { inTextField } from "../../shell/keys";
   import { keyHint } from "../../shell/platform";
+  import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { filterKeys } from "../filter-keys";
   import { push } from "../../shell/toasts.svelte";
   import { stampLabel, clockLabel } from "../../time/format";
@@ -204,6 +208,17 @@
   });
 
   let query = $state("");
+  /**
+   * Another folder clears the filter (#2531), whichever way it came: a press of the tree, a panel's head, a crumb, the
+   * address or Back. Read as the folder's id, so the address catching up with a press (`going`) changes nothing.
+   */
+  let shownFolder: string | null = null;
+  $effect.pre(() => {
+    const id = node?.id ?? null;
+    if (id === shownFolder) return;
+    if (shownFolder !== null) query = "";
+    shownFolder = id;
+  });
   const shownPanels = $derived(m && node ? panels(m, node, query) : []);
 
   // ---- the tree ----
@@ -218,18 +233,39 @@
   const holds = $derived(m && openEntry ? holding(m, openEntry) : new Set<string>());
   const treeWin = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.node.id || "~", estimate: 26, from: 40, scrolls: true });
 
+  /**
+   * A press of a folder's row selects it and leaves every fold as it is (#2531, spec #2514's "select-only": a second
+   * press on the folder on show folded it away). The chevron and ← → fold one folder; Alt+click folds everything under
+   * it (`tree-alt.ts`).
+   */
   function pressNode(event: MouseEvent, target: Node): void {
+    if (isAltClick(event)) {
+      event.preventDefault();
+      foldAll(target);
+      return;
+    }
     const chevron = (event.target as HTMLElement | null)?.closest("[data-twist]") !== null;
     if (chevron) {
       if (opened.has(target.id)) opened.delete(target.id);
       else opened.add(target.id);
       return;
     }
-    if (target === node && target.kids.length > 0) {
-      if (opened.has(target.id)) opened.delete(target.id);
-      else opened.add(target.id);
-    } else if (target.kids.length > 0) opened.add(target.id);
     go(target);
+  }
+
+  /**
+   * Alt+click: `target` and every folder under it open, or close when `target` is open (All entries, always open: when
+   * any folder under it is). Selects nothing. An opening is bounded as every tree's is (`TREE_EXPAND_CAP`); a closing
+   * reaches every folder, so none stays open under a closed one.
+   */
+  function foldAll(target: Node): void {
+    const isOpen = target.id === "" ? target.kids.some((k) => opened.has(k.id)) : opened.has(target.id);
+    const cap = isOpen ? Number.POSITIVE_INFINITY : TREE_EXPAND_CAP;
+    for (const at of collectDescendants([target], (n) => n.kids.filter((k) => k.kids.length > 0), cap)) {
+      if (at.id === "") continue;
+      if (isOpen) opened.delete(at.id);
+      else opened.add(at.id);
+    }
   }
 
   function hashOf(target: Node): string {
@@ -305,10 +341,17 @@
     shownPanels.forEach((p, i) => {
       if (p.kind === "hits") {
         if (p.count === 0) {
-          out.push({ kind: "none", key: "none", text: `Nothing matches "${query}". The filter looks at titles, usernames, addresses and folder names.` });
+          out.push({
+            kind: "none",
+            key: "none",
+            text:
+              node.id === ""
+                ? `Nothing matches "${query}". The filter looks at titles, usernames, addresses and folder names.`
+                : `Nothing in ${node.name} matches "${query}". The filter looks at titles, usernames, addresses and folder names, here and in the folders under it.`,
+          });
           return;
         }
-        out.push({ kind: "head", key: "h:hits", panel: i, title: `${plural(p.count, "entry", "entries")} in every folder`, pre: "", href: null, count: p.count, comment: false, first: true });
+        out.push({ kind: "head", key: "h:hits", panel: i, title: `${plural(p.count, "entry", "entries")} in ${node.id === "" ? "every folder" : node.name}`, pre: "", href: null, count: p.count, comment: false, first: true });
         for (let n = 0; n < p.count; n++) out.push({ kind: "row", key: n, p, n, path: true, last: n === p.count - 1 });
         return;
       }
@@ -428,7 +471,11 @@
   function pick(e: Entry): void {
     waiting = null;
     picked = e.id;
-    if (where.entry !== null) location.hash = node ? hashOf(node) : "#/secrets";
+    if (where.entry === null) return;
+    // Drawn now, as a press of the tree is (`going`), so the row picked is the open one before the address answers:
+    // `Enter` in the filter focuses it (#2531).
+    if (node) going = node.id;
+    location.hash = node ? hashOf(node) : "#/secrets";
   }
 
   function move(step: number): void {
@@ -500,11 +547,7 @@
       ArrowUp: () => move(-1),
       j: () => move(1),
       k: () => move(-1),
-      c: () => entryPane?.copyPassword(),
-      s: () => entryPane?.togglePassword(),
-      u: () => void entryPane?.copyUsername(),
-      o: () => entryPane?.copyCode(),
-      a: () => void entryPane?.address(),
+      ...onEntry,
       e: () => {
         if (record && source && record.can_modify && source.offers.writes.includes("edit_entry") && source.down_at === null) writing = "edit";
       },
@@ -517,11 +560,67 @@
     const run = act[key];
     if (!run) return;
     event.preventDefault();
-    if ("csuoae".includes(key) && openId !== null && record?.id !== openId) {
+    if (key === "e" || Object.hasOwn(onEntry, key)) actOnEntry(run);
+    else run();
+  }
+
+  /** What C, S, U, O and A do to the open entry: by their bare key outside a field, by ⌘⇧ and the key in the filter. */
+  const onEntry: Record<string, () => void> = {
+    c: () => entryPane?.copyPassword(),
+    s: () => entryPane?.togglePassword(),
+    u: () => void entryPane?.copyUsername(),
+    o: () => entryPane?.copyCode(),
+    a: () => void entryPane?.address(),
+  };
+
+  /** Runs `run` on the open entry, or once it is read when the pane still draws another (`waiting`). */
+  function actOnEntry(run: () => void): void {
+    if (openId !== null && record?.id !== openId) {
       waiting = run;
       return;
     }
     run();
+  }
+
+  /**
+   * The filter's own keys (#2531), before ↑ ↓: ⌘⇧C, S, U, O and A do what C, S, U, O and A do outside a field, so a
+   * match is acted on without leaving the box; ⌘C, ⌘A and the rest stay the box's own. ⌘ is ⌘ or Ctrl, as the shell
+   * reads it (`isBoxChord`), and a layout without Latin letters is read by the key's place. `Enter` takes focus to the
+   * open entry's row, where the bare keys answer. Answers whether it took the key.
+   */
+  function filterChord(event: KeyboardEvent): boolean {
+    if (event.altKey || event.isComposing) return false;
+    if (event.key === "Enter") {
+      if (event.shiftKey || event.metaKey || event.ctrlKey) return false;
+      event.preventDefault();
+      focusOpenRow();
+      return true;
+    }
+    if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return false;
+    const letter = /^[a-z]$/i.test(event.key) ? event.key.toLowerCase() : /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : "";
+    const run = Object.hasOwn(onEntry, letter) ? onEntry[letter] : undefined;
+    if (!run) return false;
+    event.preventDefault();
+    actOnEntry(run);
+    return true;
+  }
+
+  /**
+   * Focus on the open entry's row, drawn first where the window has not drawn it; with none open, or the open one not
+   * among the matches, the first row's, which it opens.
+   */
+  let rowsBox = $state<HTMLElement | null>(null);
+  function focusOpenRow(): void {
+    let at = lineOf(openId);
+    if (at < 0) {
+      at = rowFrom(0, 1);
+      const line = at >= 0 ? lines[at] : undefined;
+      if (line?.kind !== "row") return;
+      pick(entryOf(line));
+    }
+    listWin.reveal(at);
+    flushSync();
+    rowsBox?.querySelector<HTMLElement>('.tf-pw-row[aria-current="true"]')?.focus();
   }
 
   // ---- words ----
@@ -676,7 +775,7 @@
         <div class="tf-dl-body" role="tree" aria-label="Folders" tabindex="-1" onkeydown={treeKey} {@attach treeWin.list}>
           {#if treeWin.before > 0}<div class="tf-wgap" aria-hidden="true" {@attach treeWin.room("before")}></div>{/if}
           {#each treeWin.slice(rows) as r (r.node.id || "~")}
-            {@const here = r.node === node && query === ""}
+            {@const here = r.node === node}
             {@const src = r.node.src >= 0 ? held.sources[r.node.src] : null}
             <button
               type="button"
@@ -688,6 +787,7 @@
               aria-level={Math.max(0, r.node.depth) + 1}
               aria-expanded={r.node.kids.length > 0 && r.node.id !== "" ? r.open : undefined}
               aria-selected={here}
+              aria-current={here ? "true" : undefined}
               tabindex={here ? 0 : -1}
               data-id={r.node.id || "~"}
               onclick={(event) => pressNode(event, r.node)}
@@ -725,13 +825,14 @@
                   ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
                 ><input
                   type="text"
-                  placeholder="Filter every folder"
-                  aria-label="Filter the entries of every folder"
+                  placeholder={node.id === "" ? "Filter every folder" : `Filter ${node.name}`}
+                  aria-label={node.id === "" ? "Filter the entries of every folder" : `Filter the entries of ${node.name} and the folders under it`}
                   autocomplete="off"
                   spellcheck="false"
                   bind:value={query}
                   {@attach filterKeys()}
                   onkeydown={(event) => {
+                    if (filterChord(event)) return;
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
                       move(1);
@@ -742,7 +843,7 @@
                   }}
                 /><kbd>{keyHint("⌘F")}</kbd></label
               >
-              <div class="tf-pw-rows" {@attach listWin.list}>
+              <div class="tf-pw-rows" bind:this={rowsBox} {@attach listWin.list}>
                 {#each listWin.slice(lines) as line (line.key)}
                   {#if line.kind === "head"}
                     <header class="tf-pw-lhead" class:tf-pw-first={line.first} {@attach listWin.row(line.key)}>
