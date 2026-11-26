@@ -469,11 +469,11 @@ test("the sections draw before the generated folders are counted, their row held
   expect(target.querySelector(".tf-rnd-folders"), "the folder renderers' table with them").not.toBeNull();
   const row = () => target.querySelector<HTMLElement>(".tf-made-row");
   expect(row(), "the row's room is there from the first frame").not.toBeNull();
-  expect(row()!.style.visibility, "held unseen until the store answers").toBe("hidden");
+  expect(row()!.classList, "held unseen until the store answers").toContain("tf-made-held");
   expect(row()!.querySelectorAll("button:not([disabled])"), "nothing in it can be pressed").toHaveLength(0);
   count({ dir: "/home/me/code/knobas-rendered", set: null, default_dir: "/home/me/code", place: "clones", folders: 2, bytes: 3 * 1024 ** 2, cap_bytes: 4 * 1024 ** 3 });
   await settle();
-  expect(row()!.style.visibility).toBe("");
+  expect(row()!.classList).not.toContain("tf-made-held");
   expect(row()!.textContent).toContain("2 folders, 3.0 MB of 4 GB. Beside your clones.");
   expect(reads, "one read of the folder renderers, not one more when their table mounts").toBe(1);
 });

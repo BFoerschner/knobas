@@ -364,6 +364,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
    count is two lines high and its path is cut, never wrapped under the buttons. */
 .tf-made-l small { min-height: 2.8em; }
 .tf-stg-c.tf-made-c { flex-wrap: nowrap; }
+.tf-made-row.tf-made-held { visibility: hidden; }
 .tf-dec-at > span { flex: none; white-space: pre; }
 .tf-dec-why { margin: 0; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-dec-path { margin-top: 8px; }

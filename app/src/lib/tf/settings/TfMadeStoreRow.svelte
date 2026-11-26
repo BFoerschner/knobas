@@ -82,7 +82,7 @@
   }
 </script>
 
-<div class="tf-stg-row tf-made-row" style:visibility={store === null ? "hidden" : undefined}>
+<div class="tf-stg-row tf-made-row" class:tf-made-held={store === null}>
   <div class="tf-stg-l tf-made-l">
     Generated folders<small>{#if store !== null}{counted(store.folders)}, {sizeLabel(store.bytes)} of {capLabel(store.cap_bytes)}. {PLACE[store.place]}{/if}</small>
   </div>
