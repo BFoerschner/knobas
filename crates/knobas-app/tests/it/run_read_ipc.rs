@@ -351,3 +351,60 @@ async fn a_withdrawn_runs_mark_is_not_answered() {
         .unwrap();
     assert!(read(&pool).await.is_empty());
 }
+
+/// The Builds list names each pipeline's unread failed runs over its whole
+/// history (#2543), not only the twelve its row draws: what the rail's
+/// right-click counts and marks. Not a pass, not a run still going, not a
+/// failure already read, not another pipeline's. A pipeline's mark empties
+/// it, and *Undo* brings back exactly those.
+#[tokio::test]
+async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
+    let (pool, tc) = scratch("run-read-list-unread").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    let lint = configuration(&pool, &tc, "Payout_Lint").await;
+    let mut failures = Vec::new();
+    for n in 0..14_i64 {
+        let at = format!("2026-08-01T{:02}:00:00Z", n);
+        failures.push(build(&pool, &tc, 1000 + n, "Payout_Tests", "FAILURE", &at).await);
+    }
+    // Twelve newer passes push every failure out of the row's twelve.
+    for n in 0..12_i64 {
+        let at = format!("2026-08-02T{:02}:00:00Z", n);
+        build(&pool, &tc, 1100 + n, "Payout_Tests", "SUCCESS", &at).await;
+    }
+    build(&pool, &tc, 1200, "Payout_Tests", "running", "2026-08-03T00:00:00Z").await;
+    let other = build(&pool, &tc, 2001, "Payout_Lint", "FAILURE", "2026-08-03T00:00:00Z").await;
+    let read_one = failures.remove(0);
+    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&read_one), &[])
+        .await
+        .unwrap();
+
+    let unread_of = |pool: sqlx::PgPool, id: String| async move {
+        let listed = knobas_app::commands::entity::pipelines_inner(&pool, &registry())
+            .await
+            .unwrap();
+        let row = listed
+            .into_iter()
+            .find(|p| p.entity_id == id)
+            .expect("the pipeline is listed");
+        let mut unread = row.unread;
+        unread.sort();
+        (row.recent.len(), unread)
+    };
+    let (drawn, unread) = unread_of(pool.clone(), tests.clone()).await;
+    assert_eq!(drawn, 12, "the row draws its last twelve");
+    let mut expected = failures.clone();
+    expected.sort();
+    assert_eq!(unread, expected, "thirteen unread failures, none of them drawn");
+    assert_eq!(unread_of(pool.clone(), lint.clone()).await.1, [other.clone()]);
+
+    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &[], std::slice::from_ref(&tests))
+        .await
+        .unwrap();
+    assert_eq!(wrote.len(), 13, "the pipeline's mark writes what the list named");
+    assert!(unread_of(pool.clone(), tests.clone()).await.1.is_empty());
+    assert_eq!(unread_of(pool.clone(), lint).await.1, [other], "another pipeline's stays");
+
+    mark_runs_unread_inner(&pool, &wrote).await.unwrap();
+    assert_eq!(unread_of(pool.clone(), tests).await.1, expected, "Undo brings them back");
+}
