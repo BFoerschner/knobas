@@ -81,6 +81,15 @@
     "kind": "inbox"
   },
   {
+    "token": "#s",
+    "insert": "#s ",
+    "summary": "secrets",
+    "probe": "#s",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "password_entry"
+  },
+  {
     "token": "@me",
     "insert": "@me ",
     "summary": "items your configured accounts wrote",

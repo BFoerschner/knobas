@@ -120,7 +120,7 @@ test("the tree lists the folders under the skipped root, with their totals and t
   expect(text(".tf-pw-node .tf-pw-nm")).toEqual(["All entries", "Payments", "Platform"]);
   expect(text(".tf-pw-node .tf-pw-n")).toEqual(["10", "9", "1"]);
   expect(target.querySelectorAll(".tf-pw-node .tf-pw-mark")).toHaveLength(1);
-  expect(target.querySelector("h1")?.textContent).toBe("Passwords");
+  expect(target.querySelector("h1")?.textContent).toBe("Secrets");
   expect(target.querySelector(".tf-sub")?.textContent).toContain("10 entries in 3 folders. Synced by hand at");
 });
 
@@ -196,7 +196,7 @@ test("a source that does not answer keeps its entries; reads are turned off and 
   // With one source there is no top row to dot: the header says it.
 });
 
-test("the keys: c copies the password, u the username, o the code; r does nothing", async () => {
+test("the keys: c copies the password, u the username, o the code; r does nothing; / does not swallow section search", async () => {
   const p = ports();
   await open(p, ["entry", "pw:graf"]);
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }));
@@ -208,11 +208,19 @@ test("the keys: c copies the password, u the username, o the code; r does nothin
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true }));
   await settle();
   expect(p.held).toHaveBeenCalledTimes(1);
+  // `/` belongs to the shell's section search (#2515), not the local filter.
+  const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  window.dispatchEvent(slash);
+  await settle();
+  expect(slash.defaultPrevented).toBe(false);
+  expect(document.activeElement).not.toBe(target.querySelector(".tf-pw-filter input"));
+  expect(target.querySelector(".tf-pw-filter kbd")?.textContent).toMatch(/^(⌘F|Ctrl\+F)$/);
 });
 
-test("no password source says how to add one; one never synced offers its sync", async () => {
+test("no secrets source says how to add one; one never synced offers its sync", async () => {
   await open(ports({}, { sources: [], folders: [], entries: [], recent: [] }));
-  expect(target.querySelector("h1")?.textContent).toBe("No password source yet");
+  expect(target.querySelector("h1")?.textContent).toBe("No secrets source yet");
+  expect(target.querySelector(".tf-empty a")?.textContent).toBe("Add a secrets source");
   unmount(app!);
   app = null;
   forgetHeld();

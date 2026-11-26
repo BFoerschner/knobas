@@ -55,7 +55,12 @@ test("Dependencies and Proposed links have no address and no nav entry (2026-11-
     expect(parseTfHash(hash), hash).toEqual({ view: "unknown", hash });
     expect(sectionOf(parseTfHash(hash)), hash).toBeNull();
   }
-  expect(NAV).toEqual(["tickets", "inbox", "code", "builds", "docs", "passwords", "monitors", "assets", "sets", "time"]);
+  expect(NAV).toEqual(["tickets", "inbox", "code", "builds", "docs", "secrets", "monitors", "assets", "sets", "time"]);
+  expect(SECTION_NAME.secrets).toBe("Secrets");
+  expect(parseTfHash("#/secrets/entry/pw%3Ae1")).toEqual({ view: "full", section: "secrets", head: "secrets", rest: ["entry", "pw:e1"] });
+  expect(sectionOf(parseTfHash("#/secrets/in/pw%3Af1"))).toBe("secrets");
+  expect(parseTfHash("#/passwords")).toEqual({ view: "unknown", hash: "#/passwords" });
+  expect(parseTfHash("#/passwords/entry/pw%3Ae1")).toEqual({ view: "unknown", hash: "#/passwords/entry/pw%3Ae1" });
 });
 
 test("a rooms-UI address is unknown here, not Tickets", () => {

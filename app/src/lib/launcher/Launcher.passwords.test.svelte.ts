@@ -26,7 +26,7 @@ function hit(entity_id: string, kind: string, title: string, path: string | null
 function response(raw: string): SearchResponse {
   return {
     interpreted: { text: raw, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
-    groups: [{ kind: "password_entry", label: "Password entry", plural: "Password entries", monogram: "PW", total: 1, hits: [hit("pw:e1", "password_entry", "payout db", "Payments / Prod")] }],
+    groups: [{ kind: "password_entry", label: "Secret entry", plural: "Secret entries", monogram: "SE", total: 1, hits: [hit("pw:e1", "password_entry", "payout db", "Payments / Prod")] }],
     total: 1,
     took_ms: 2,
     coverage: [],
@@ -152,7 +152,7 @@ test("Copy password on an entry that asks a usage comment opens the entry and re
   press("Enter");
   await settle();
   expect(calls.copy).not.toHaveBeenCalled();
-  expect(calls.navigate).toHaveBeenCalledWith("#/passwords/entry/pw%3Ae1");
+  expect(calls.navigate).toHaveBeenCalledWith("#/secrets/entry/pw%3Ae1");
 });
 
 test("Copy username and Copy one-time code copy what the mirror and the keychain hold", async () => {
