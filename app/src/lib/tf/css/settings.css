@@ -436,7 +436,9 @@ button.tf-thm-sw { cursor: pointer; }
 /* A swatch's own picker (#2516): saturation across the square and brightness up it, over the hue the strip under it
    picks; a ring marks where each stands. Its colours are the picture of every colour, not a theme's. */
 .tf-cp { display: grid; gap: 8px; }
-.tf-cp-sv, .tf-cp-hue { position: relative; border: 1px solid var(--rule); touch-action: none; }
+/* Each is its own layout root (`contain`; their sizes are set), as the Hex field is: a native picker's drag moves both
+   rings every frame, which otherwise laid out the whole editor (6x worst pick 343 ms against 100 without them). */
+.tf-cp-sv, .tf-cp-hue { position: relative; border: 1px solid var(--rule); touch-action: none; contain: strict; }
 .tf-cp-sv { height: 120px; border-radius: 4px; cursor: crosshair; background: linear-gradient(to top, #000000, transparent), linear-gradient(to right, #FFFFFF, transparent), var(--cp-hue); }
 .tf-cp-hue { height: 12px; border-radius: 4px; cursor: ew-resize; background: linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000); }
 .tf-cp-at { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #000000; pointer-events: none; }
