@@ -244,7 +244,7 @@ const UNDER = ([control, table]) => String.raw`(() => {
 const CHECK = String.raw`(() => {
   const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer|service-account-with-a-long-name/;
   // What gives way on purpose, its whole in a title: a path's start, a toast's middle, and a command's program start and its
-  // arguments after the program's file (TfCommand, the renderers-columns pass), and with `keepEnd` the words after the last path's
+  // arguments after the program's file (TfCommand, the renderers-columns pass), and with keepEnd the words after the last path's
   // end (#2518).
   const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-cmd-after", "tf-site-path"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
