@@ -90,12 +90,17 @@ pub struct NotificationClicked {
     pub address: String,
 }
 
-/// The one thing a click does: leave the process as an event.
+/// What a click does to the app: bring its window up, then leave the process
+/// as an event.
 ///
 /// A trait rather than an `AppHandle` for the reason `knobas_sync`'s
 /// `SyncEvents` is one: the registry's tests observe the emit without Tauri.
 /// `sources::events::TauriEvents` is the real implementation.
 pub trait NotificationEvents: Send + Sync + 'static {
+    /// Unminimize, show and focus the main window. Called before
+    /// [`Self::notification_clicked`], so the reader sees the item open
+    /// rather than a navigation behind another app's window (#2529).
+    fn bring_forward(&self);
     fn notification_clicked(&self, address: String);
 }
 
@@ -271,6 +276,7 @@ impl Notifier {
                     );
                 } else {
                     tracing::info!(address = draft.address, action, "notification clicked");
+                    events.bring_forward();
                     events.notification_clicked(draft.address.clone());
                 }
                 // Released after the emit, so a registry that reads as empty
@@ -373,6 +379,9 @@ mod tests {
     #[derive(Default)]
     struct FakeEvents {
         clicked: Mutex<Vec<String>>,
+        /// Everything the click did to the app, in order: `forward` for the
+        /// window brought up, `open <address>` for the address handed on.
+        steps: Mutex<Vec<String>>,
         /// When set, the first emit records its address and then blocks
         /// until the test opens the gate -- so the test can look at the
         /// registry while a click is still leaving.
@@ -380,7 +389,12 @@ mod tests {
     }
 
     impl NotificationEvents for FakeEvents {
+        fn bring_forward(&self) {
+            self.steps.lock().unwrap().push("forward".to_owned());
+        }
+
         fn notification_clicked(&self, address: String) {
+            self.steps.lock().unwrap().push(format!("open {address}"));
             let gate = self.hold.lock().unwrap().take();
             self.clicked.lock().unwrap().push(address);
             if let Some(gate) = gate {
@@ -450,6 +464,10 @@ mod tests {
             self.events.clicked.lock().unwrap().clone()
         }
 
+        fn steps(&self) -> Vec<String> {
+            self.events.steps.lock().unwrap().clone()
+        }
+
         fn shown(&self) -> Vec<String> {
             self.backend.shown.lock().unwrap().clone()
         }
@@ -486,6 +504,23 @@ mod tests {
         b.release("#/entity/x", "default");
         b.settled();
         assert_eq!(b.clicked(), vec!["#/entity/x"]);
+    }
+
+    /// A click brings the main window up -- unminimized, shown, in front --
+    /// before the address leaves for the frontend to navigate to (#2529),
+    /// and a clear brings up nothing.
+    #[test]
+    fn a_click_brings_the_window_forward_before_its_address_leaves() {
+        let b = Bench::new();
+        b.send("#/inbox");
+        b.release("#/inbox", CLOSED);
+        b.settled();
+        assert_eq!(b.steps(), Vec::<String>::new(), "a clear moves no window");
+
+        b.send("#/entity/x");
+        b.release("#/entity/x", "default");
+        b.settled();
+        assert_eq!(b.steps(), vec!["forward", "open #/entity/x"]);
     }
 
     /// One waiter per address: the second banner is shown, and its click --
