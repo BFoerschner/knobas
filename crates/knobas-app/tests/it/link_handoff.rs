@@ -331,7 +331,12 @@ fn frame_json(value: &Value) -> Vec<u8> {
     buf
 }
 
-#[tokio::test]
+/// Multi-thread on purpose: the bridge's worker thread `block_on`s database
+/// futures on this runtime while the test waits on the child process. On a
+/// current-thread runtime that wait parks the only thread that drives the
+/// pool's sockets, the bridge worker never finishes, and `server.stop()` joins
+/// it for ever (the hang #2530's first run met twice).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_messaging_host_binary_speaks_stdio_framing_over_authenticated_bridge() {
     let pool = pool("lh_native_stdio").await;
     let registry = Arc::new(knobas_app::sources::Registry::for_process());
@@ -399,49 +404,12 @@ async fn native_messaging_host_binary_speaks_stdio_framing_over_authenticated_br
     // Seed a one-shot bypass for a URL before spawning the native-messaging child.
     bypass.record("https://jira.example/browse/PAY-231");
 
-    // Drive the actual compiled `knobas-app native-messaging-host` binary over stdin/stdout pipes.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_knobas-app"))
-        .arg(NATIVE_HOST_ARG)
-        .env(BRIDGE_ENV, &endpoint_file)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn knobas-app native-messaging-host");
-
-    let mut stdin = child.stdin.take().unwrap();
-    use std::io::Write as _;
-    stdin
-        .write_all(&frame_json(&json!({ "id": 1, "type": "ping" })))
+    // Drive the actual compiled `knobas-app native-messaging-host` binary over
+    // stdin/stdout pipes, off the runtime's threads, with a deadline.
+    let child_endpoint = endpoint_file.clone();
+    let output = tokio::task::spawn_blocking(move || run_host_child(&child_endpoint))
+        .await
         .unwrap();
-    stdin
-        .write_all(&frame_json(&json!({ "id": 2, "type": "get_rules" })))
-        .unwrap();
-    stdin
-        .write_all(&frame_json(&json!({
-            "id": 3,
-            "type": "check_bypass",
-            "url": "https://jira.example/browse/PAY-231",
-            "consume": false
-        })))
-        .unwrap();
-    stdin
-        .write_all(&frame_json(&json!({
-            "id": 4,
-            "type": "handoff",
-            "url": "https://jira.example/browse/PAY-231"
-        })))
-        .unwrap();
-    stdin
-        .write_all(&frame_json(&json!({
-            "id": 5,
-            "type": "handoff",
-            "url": "https://jira.example/browse/PAY-231"
-        })))
-        .unwrap();
-    drop(stdin);
-
-    let output = child.wait_with_output().expect("child exits on EOF");
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -480,7 +448,9 @@ async fn native_messaging_host_binary_speaks_stdio_framing_over_authenticated_br
     assert_eq!(opened.lock().unwrap().len(), 1);
 
     // Stop the bridge and verify fallback when knobas is closed.
-    server.stop();
+    tokio::task::spawn_blocking(move || server.stop())
+        .await
+        .unwrap();
     let mut offline_in = Vec::new();
     offline_in.extend_from_slice(&frame_json(&json!({ "id": 10, "type": "ping" })));
     offline_in.extend_from_slice(&frame_json(&json!({ "id": 11, "type": "get_rules" })));
@@ -496,6 +466,70 @@ async fn native_messaging_host_binary_speaks_stdio_framing_over_authenticated_br
     assert_eq!(p["running"], false);
     assert_eq!(r["ok"], false);
     assert_eq!(r["error"], "knobas_not_running");
+}
+
+/// Spawn `knobas-app native-messaging-host`, write five framed requests, close
+/// stdin, and collect its output. Kills the child and panics after 60 s rather
+/// than hanging the test binary.
+fn run_host_child(endpoint_file: &std::path::Path) -> std::process::Output {
+    use std::io::{Read as _, Write as _};
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_knobas-app"))
+        .arg(NATIVE_HOST_ARG)
+        .env(BRIDGE_ENV, endpoint_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn knobas-app native-messaging-host");
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let out_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        buf
+    });
+
+    let mut stdin = child.stdin.take().unwrap();
+    for request in [
+        json!({ "id": 1, "type": "ping" }),
+        json!({ "id": 2, "type": "get_rules" }),
+        json!({
+            "id": 3,
+            "type": "check_bypass",
+            "url": "https://jira.example/browse/PAY-231",
+            "consume": false
+        }),
+        json!({ "id": 4, "type": "handoff", "url": "https://jira.example/browse/PAY-231" }),
+        json!({ "id": 5, "type": "handoff", "url": "https://jira.example/browse/PAY-231" }),
+    ] {
+        stdin.write_all(&frame_json(&request)).unwrap();
+    }
+    drop(stdin);
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("native-messaging-host did not exit within 60 s of stdin EOF");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    std::process::Output {
+        status,
+        stdout: out_reader.join().unwrap(),
+        stderr: err_reader.join().unwrap(),
+    }
 }
 
 #[test]
