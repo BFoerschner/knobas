@@ -6,7 +6,11 @@
  * string that spans hunks is witnessed by the engine the app runs.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filter ranks through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+const { ranked } = await import("../filter/test-fuzzy");
 
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createPendingComments } from "../../detail/view/pending-comments.svelte";
@@ -443,14 +447,38 @@ test("the file filter is a box beside the diff, so ⌘F passes it for the find b
   stop();
 });
 
-test("the filter narrows the tree and the diff together", () => {
-  draw({ files: [file("src/retry.rs"), file("docs/retry.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+test("the filter narrows the rail and the diff together: a flat list by whole path while it has words, the folders back once cleared (#2532)", async () => {
+  draw({ files: [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+  // A folder folded by hand before the filter.
+  target.querySelector<HTMLButtonElement>(".tf-flist button.tf-fdir[aria-expanded=true]")!.click();
+  flushSync();
+  const folded = treeRows();
+  expect(folded).toEqual(["M Cargo.toml +1 −1", "docs", "src", "M a.rs +1 −1", "M retry.rs +1 −1"]);
   const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
   input.value = "retry";
   input.dispatchEvent(new Event("input"));
   flushSync();
-  expect(treeRows()).toEqual(["docs", "M retry.md +1 −1", "src", "M retry.rs +1 −1"]);
-  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["docs/retry.md", "src/retry.rs"]);
+  await ranked();
+  // No directory row: each kept file by its whole path, the folded folder's too.
+  const flat = treeRows();
+  expect([...flat].sort()).toEqual(["M docs/retry.md +1 −1", "M src/retry.rs +1 −1"]);
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
+  // The cards follow the rail's order, so j walks it down.
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(flat.map((row) => row.slice(2, -" +1 −1".length)));
+  // No substring holds "srcrt": its letters stand in order in one path only, and are marked there.
+  input.value = "srcrt";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(treeRows()).toEqual(["M src/retry.rs +1 −1"]);
+  expect([...target.querySelectorAll(".tf-flist .tf-fname mark")].map(squash).join("")).toBe("srcrt");
+  // Cleared: the tree as it was left, the folded folder still folded, nothing marked.
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(treeRows()).toEqual(folded);
+  expect(target.querySelectorAll(".tf-flist mark")).toHaveLength(0);
 });
 
 test("the diffs are drawn in the rail's order, so j walks the rail down", () => {

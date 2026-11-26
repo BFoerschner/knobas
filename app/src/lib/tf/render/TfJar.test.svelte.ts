@@ -7,6 +7,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+
 import TfJar, { type JarPorts } from "./TfJar.svelte";
 import { jarAnswers } from "../../render/jar-fixture";
 import type { ArchiveIndex, ClassOutline } from "../../ipc/entity";
@@ -69,11 +72,13 @@ const rows = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-jar-rbtn"
 const row = (start: string) => rows().find((b) => text(b).startsWith(start));
 const button = (label: string) => [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label);
 
-function type(value: string) {
+/** Types `value` into the filter and waits for the ranking's answer. */
+async function type(value: string) {
   const box = target.querySelector<HTMLInputElement>(".tf-jar-band input")!;
   box.value = value;
   box.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await settle();
 }
 
 test("a library JAR opens on its name, version, coordinates and facts, and its tree", async () => {
@@ -198,22 +203,36 @@ test("a fat JAR lists its dependencies with their versions, and one opens to its
   expect(first.getAttribute("aria-expanded")).toBe("true");
   // Its tree one level in.
   expect(rows().slice(1, 3).map((b) => text(b.querySelector(".tf-jar-dname")))).toEqual(["META-INF/", "org/springboot/"]);
-  type("jackson");
+  await type("jackson");
   expect(text(target.querySelector(".tf-jar-count"))).toBe("20 of 150");
+  // A dependency's name and version mark the letters the ranking matched in each (#2532).
+  await type("jcksn 2");
+  const lib = rows()[0]!;
+  expect([...lib.querySelectorAll(".tf-jar-fname mark")].map(text).join("")).toBe("jcksn");
+  expect([...lib.querySelectorAll(".tf-jar-vers mark")].map(text).join("")).toBe("2");
 });
 
 test("10,000 entries draw a window of rows; the filter counts every match", async () => {
   draw(FAT, portsFor(FAT));
   await settle();
   expect(text(target.querySelector(".tf-jar-count"))).toBe("10,000 entries");
-  type("payout");
+  await type("payout");
   expect(text(target.querySelector(".tf-jar-count"))).toMatch(/^\d{1,3}(,\d{3})* of 10,000$/);
   const drawn = rows().length;
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThan(300);
-  type("payoutevent5.class");
-  expect(rows().map((b) => text(b.querySelector(".tf-jar-fname")))).toEqual(["BOOT-INF/classes/com/tidewater/payout/domain/events/PayoutEvent5.class"]);
-  expect(text(target.querySelector(".tf-jar-count"))).toBe("1 of 10,000");
+  // Ranked best first (#2532): the whole name leads, its letters marked; the stand-in's letters in order keep more.
+  await type("payoutevent5.class");
+  const best = rows()[0]!.querySelector(".tf-jar-fname");
+  expect(text(best)).toBe("BOOT-INF/classes/com/tidewater/payout/domain/events/PayoutEvent5.class");
+  expect([...best!.querySelectorAll("mark")].map(text).join("").toLowerCase()).toBe("payoutevent5.class");
+  // No substring holds "pyevt5cls"; its letters stand in order in the event classes' paths.
+  await type("pyevt5cls");
+  expect(text(rows()[0]!.querySelector(".tf-jar-fname"))).toMatch(/PayoutEvent5\d*\.class$/);
+  // Cleared: the tree again, nothing marked.
+  await type("");
+  expect(text(target.querySelector(".tf-jar-count"))).toBe("10,000 entries");
+  expect(target.querySelectorAll(".tf-jar-list mark")).toHaveLength(0);
 });
 
 test("an archive that does not read says so, with why", async () => {

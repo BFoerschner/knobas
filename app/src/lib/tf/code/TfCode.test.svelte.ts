@@ -6,7 +6,10 @@
  * (`knobas-app`'s attention tests); here the reads are stand-ins.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filters rank through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
 import type { CodePorts } from "./TfCode.svelte";
@@ -373,7 +376,38 @@ test("a long Pull requests tab draws each group's pull requests near the viewpor
   field.value = "Bulk change 1999";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect([...target.querySelectorAll(".tf-cprs tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#6999"]);
+  await answered();
+  // Ranked best first: the stand-in's letters in order keep more (`#5199 … 199`), the whole match leads.
+  expect([...target.querySelectorAll(".tf-cprs tbody tr")].map((tr) => cells(tr)[0])[0]).toBe("#6999");
+});
+
+test("the Pull requests filter ranks through the app's ranking, letters in order, and marks each field's matched letters (#2532)", async () => {
+  await draw(["prs"]);
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  // No substring holds "sepbck" or "ldgr"; their letters stand in order in #142's title and #77's repository.
+  field.value = "sepbck";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await answered();
+  const rows = [...target.querySelectorAll(".tf-cprs tbody tr")];
+  expect(rows.map((tr) => cells(tr)[0])).toEqual(["#142"]);
+  expect([...rows[0]!.querySelectorAll(".tf-rowt mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("sepbck");
+  field.value = "77 ldgr";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await answered();
+  const ledger = [...target.querySelectorAll(".tf-cprs tbody tr")];
+  expect(ledger.map((tr) => cells(tr)[0])).toEqual(["#77"]);
+  // The number's cell marks its digits, the repository's its letters: each field's own place in what was ranked.
+  expect([...ledger[0]!.querySelectorAll(".tf-prno mark")].map((m) => m.textContent).join("")).toBe("77");
+  expect([...ledger[0]!.querySelectorAll(".tf-mono mark")].map((m) => m.textContent).join("")).toBe("ldgr");
+  // Cleared: every pull request again, nothing marked.
+  field.value = "";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await answered();
+  expect(target.querySelectorAll(".tf-cprs tbody tr").length).toBe(4);
+  expect(target.querySelectorAll(".tf-cprs mark").length).toBe(0);
 });
 
 test("2,500 repositories with the later pages held back: the first 1,000 draw at once, counted at the total (#2245)", async () => {
