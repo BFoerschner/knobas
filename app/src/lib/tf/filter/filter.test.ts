@@ -4,7 +4,7 @@
  */
 import { expect, test } from "vitest";
 
-import { countLine, emptyFilter, isFiltering, marks, matchesAll, toQuery, type FilterConfig } from "./filter";
+import { countLine, emptyFilter, isFiltering, markPairs, marks, matchesAll, sliceMarks, toQuery, type FilterConfig } from "./filter";
 
 const config: FilterConfig = {
   id: "tickets-all",
@@ -75,4 +75,42 @@ test("a value with a space or a quote is quoted, so the grammar reads it as one"
   const state = emptyFilter();
   state.chips["issuetype"] = ["Sub-task", "User Story"];
   expect(toQuery(config, state)).toBe('issuetype:Sub-task issuetype:"User Story"');
+});
+
+test("sliceMarks clips and rebases UTF-16 mark pairs onto a field slice", () => {
+  // Haystack: "get /repos/adproxy summary"
+  // Pairs:    "get" [0, 3], "ad" [11, 13], "proxy" [13, 18], "sum" [19, 22]
+  const pairs = [0, 3, 11, 13, 13, 18, 19, 22];
+  // Slice "/repos/adproxy" starts at 4, length 14 -> [4, 18)
+  expect(sliceMarks(pairs, 4, 14)).toEqual([7, 9, 9, 14]);
+  // Pair straddling both boundaries gets clipped cleanly
+  expect(sliceMarks([2, 20], 4, 10)).toEqual([0, 10]);
+  // Empty, out-of-range, or zero-length slices yield no marks
+  expect(sliceMarks([], 0, 10)).toEqual([]);
+  expect(sliceMarks([10, 12], 0, 5)).toEqual([]);
+  expect(sliceMarks([0, 5], 0, 0)).toEqual([]);
+  // Surrogate pair (emoji = 2 UTF-16 code units): "🚀 ADProxy" -> "Proxy" is [5, 10]
+  const emoji = "🚀 ADProxy";
+  expect(sliceMarks([5, 10], 3, emoji.length - 3)).toEqual([2, 7]);
+});
+
+test("markPairs splits text into plain and hit runs from UTF-16 pairs and an optional offset", () => {
+  expect(markPairs("ADProxy", [0, 2, 3, 4])).toEqual([
+    { text: "AD", hit: true },
+    { text: "P", hit: false },
+    { text: "r", hit: true },
+    { text: "oxy", hit: false },
+  ]);
+  // With `from` offset into a longer haystack `"acme/ADProxy"` (`"ADProxy"` starts at 5)
+  expect(markPairs("ADProxy", [0, 2, 7, 12], 5)).toEqual([
+    { text: "AD", hit: false },
+    { text: "Proxy", hit: true },
+  ]);
+  // Surrogate pair: `"🚀 ADProxy"` -> `"🚀 "` is 3 UTF-16 units, `"Proxy"` is [5, 10]
+  expect(markPairs("🚀 ADProxy", [5, 10])).toEqual([
+    { text: "🚀 AD", hit: false },
+    { text: "Proxy", hit: true },
+  ]);
+  // No overlapping marks returns one plain run
+  expect(markPairs("ADProxy", [20, 25])).toEqual([{ text: "ADProxy", hit: false }]);
 });
