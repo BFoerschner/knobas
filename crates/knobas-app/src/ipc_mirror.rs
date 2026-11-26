@@ -285,6 +285,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::local::LocalDir::export_all(cfg)?;
     crate::checkout::local::LocalPaths::export_all(cfg)?;
     crate::checkout::local::LocalEntry::export_all(cfg)?;
+    crate::checkout::text_search::TextQuery::export_all(cfg)?;
+    crate::checkout::text_search::TextFound::export_all(cfg)?;
     crate::checkout::fetch::Fetched::export_all(cfg)?;
     crate::checkout::clone_all::Plan::export_all(cfg)?;
     crate::checkout::clone_all::PlannedSource::export_all(cfg)?;
