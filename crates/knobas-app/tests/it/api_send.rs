@@ -546,9 +546,12 @@ async fn a_kept_answer_runs_through_a_file_pipeline_from_memory() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(wrapped.clone(), "text/plain"))
         .mount(&server)
         .await;
-    send::send(request(253_301, "GET", format!("{}/pets", server.uri())), None)
-        .await
-        .expect("sent");
+    send::send(
+        request(253_301, "GET", format!("{}/pets", server.uri())),
+        None,
+    )
+    .await
+    .expect("sent");
     let steps = [
         PipeStep::Base64Decode,
         PipeStep::Gunzip,
@@ -567,7 +570,10 @@ async fn a_kept_answer_runs_through_a_file_pipeline_from_memory() {
         other => panic!("not text: {other:?}"),
     }
     // The run took nothing from the kept body: it is still the answer as it came.
-    assert_eq!(send::body(253_301, false).as_deref(), Some(wrapped.as_bytes()));
+    assert_eq!(
+        send::body(253_301, false).as_deref(),
+        Some(wrapped.as_bytes())
+    );
     // A failed step is an answer, naming the step.
     let bad = send::piped(253_301, "answer-200.txt", &[PipeStep::Gunzip], &[])
         .await
@@ -603,17 +609,41 @@ fn nothing_on_an_answers_pipeline_writes_a_file() {
     let files: [(&str, &str); 9] = [
         ("api/kept.rs", include_str!("../../src/api/kept.rs")),
         ("api/send.rs piped", &piped[start..end]),
-        ("file_pipeline/mod.rs", include_str!("../../src/file_pipeline/mod.rs")),
-        ("file_pipeline/child.rs", include_str!("../../src/file_pipeline/child.rs")),
-        ("file_pipeline/jq.rs", include_str!("../../src/file_pipeline/jq.rs")),
-        ("file_pipeline/session.rs", include_str!("../../src/file_pipeline/session.rs")),
-        ("file_pipeline/steps.rs", include_str!("../../src/file_pipeline/steps.rs")),
-        ("file_pipeline/values.rs", include_str!("../../src/file_pipeline/values.rs")),
-        ("file_pipeline/saved.rs", include_str!("../../src/file_pipeline/saved.rs")),
+        (
+            "file_pipeline/mod.rs",
+            include_str!("../../src/file_pipeline/mod.rs"),
+        ),
+        (
+            "file_pipeline/child.rs",
+            include_str!("../../src/file_pipeline/child.rs"),
+        ),
+        (
+            "file_pipeline/jq.rs",
+            include_str!("../../src/file_pipeline/jq.rs"),
+        ),
+        (
+            "file_pipeline/session.rs",
+            include_str!("../../src/file_pipeline/session.rs"),
+        ),
+        (
+            "file_pipeline/steps.rs",
+            include_str!("../../src/file_pipeline/steps.rs"),
+        ),
+        (
+            "file_pipeline/values.rs",
+            include_str!("../../src/file_pipeline/values.rs"),
+        ),
+        (
+            "file_pipeline/saved.rs",
+            include_str!("../../src/file_pipeline/saved.rs"),
+        ),
     ];
     for (name, code) in files {
         for w in WRITES {
-            assert!(!code.contains(w), "{name} holds {w}: an answer's bytes must not reach a file (ADR-0057)");
+            assert!(
+                !code.contains(w),
+                "{name} holds {w}: an answer's bytes must not reach a file (ADR-0057)"
+            );
         }
     }
 }
