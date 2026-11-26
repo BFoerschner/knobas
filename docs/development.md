@@ -25,7 +25,8 @@ fails on a table below that lost step with the tree (`scripts/doc-lists.py`), th
 runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
-- the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
+- the scripts: `shell`, `test-layout`, `witness-unit`, `conflict-markers`
+  and `extension-test` (the Firefox extension's node tests).
 - the cargo chain: `fmt`, `clippy`, `clippy-libs`, `test-build`, `ipc-mirror`
   and `test`. `test` takes a slot under `$TMPDIR/knobas-gate-slots` (one test
   run at a time since #1892, four libtest threads per binary) and starts its
@@ -40,7 +41,8 @@ doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the c
 (`just front-changed`) and `vite build`. On a head that changes only scripts
 under `scripts/` or `testenv/` (and prose) it runs `check-scripts`: the
 doc-list check and `check`'s script half (`shell`, `test-layout`,
-`witness-unit`, `conflict-markers`), no cargo. `scripts/gate-scope.sh` says
+`witness-unit`, `conflict-markers`, `extension-test`), no cargo. A change
+under `extension/` takes the full gate. `scripts/gate-scope.sh` says
 which, and why.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
