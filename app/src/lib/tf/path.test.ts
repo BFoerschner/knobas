@@ -46,11 +46,20 @@ test("a command's arguments keep the folder or file at their end, and give up wh
   expect(argsParts(String.raw`"C:\Users\some one\source\repos\payout-service-the-repository-name-that-is-long"`)).toEqual({
     head: String.raw`"C:\Users\some one\source\repos\\`.slice(0, -1),
     tail: 'payout-service-the-repository-name-that-is-long"',
+    after: "",
   });
-  expect(argsParts("--goto /Users/mara/src/payout-service/src/sepa/retry.rs:12")).toEqual({ head: "--goto /Users/mara/src/payout-service/src/sepa/", tail: "retry.rs:12" });
+  expect(argsParts("--goto /Users/mara/src/payout-service/src/sepa/retry.rs:12")).toEqual({ head: "--goto /Users/mara/src/payout-service/src/sepa/", tail: "retry.rs:12", after: "" });
+  // A quoted last part with a space in it is kept whole, its closing quote too.
+  expect(argsParts(String.raw`--line 3 "C:\Users\mara\notes\a file of mine.md"`)).toEqual({ head: String.raw`--line 3 "C:\Users\mara\notes\\`.slice(0, -1), tail: 'a file of mine.md"', after: "" });
+  // Arguments after the path (the Diff tool's line): the path's folder is kept, and what follows it gives way at its end.
+  expect(argsParts(String.raw`-C C:\Users\mara\src\payout-service difftool --gui --no-prompt 5d77e1a c90d11e --`)).toEqual({
+    head: String.raw`-C C:\Users\mara\src\\`.slice(0, -1),
+    tail: "payout-service",
+    after: " difftool --gui --no-prompt 5d77e1a c90d11e --",
+  });
   // Arguments with no path in them have no end to keep: all of them give way, at their end.
-  expect(argsParts("--goto {file}:{line}")).toEqual({ head: "--goto {file}:{line}", tail: "" });
-  expect(argsParts("")).toEqual({ head: "", tail: "" });
+  expect(argsParts("--goto {file}:{line}")).toEqual({ head: "--goto {file}:{line}", tail: "", after: "" });
+  expect(argsParts("")).toEqual({ head: "", tail: "", after: "" });
 });
 
 test("a list shows its first three and counts the rest", () => {

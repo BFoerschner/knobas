@@ -192,6 +192,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-pipes th:nth-child(3) { width: 24%; }
 /* Schemas (#2518): a namespace, a location and the file answering them, each a `TfPath` that gives up its middle. */
 .tf-rnd-schemas th:nth-child(1), .tf-rnd-schemas th:nth-child(2) { width: 28%; }
+/* A downloaded file's row has *Download again* and *Forget*: both on one line at every UI size. */
+.tf-rnd-tbl.tf-rnd-schemas th:last-child { width: calc(212px * var(--size-ui)); }
 .tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
 .tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
 .tf-rnd-defaults .tf-select { max-width: 100%; }

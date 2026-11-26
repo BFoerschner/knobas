@@ -432,10 +432,12 @@ details:not([open])::details-content { content-visibility: visible; display: non
 .tf-cmd-head { flex: 1 1 0; min-width: 0; max-width: max-content; overflow: hidden; text-overflow: ellipsis; }
 .tf-cmd-file { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .tf-cmd-args { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); white-space: pre; }
-/* `keepEnd` (#2518): the arguments' middle grows into the room the program's file and the arguments' end leave, before the
-   program's folders do, and the end gives way only once everything before it has. */
-.tf-cmd-ends > .tf-cmd-args { flex: 1000 1 0; max-width: max-content; }
-.tf-cmd-end { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); white-space: pre; }
+/* `keepEnd` (#2518): the last path's end (`.tf-cmd-end`) never shrinks, as a path's end does not. The words after it shrink
+   first, cut at their end; then the arguments before it give their room back down to an ellipsis (a basis of 0, growing
+   to their own width before the program's folders do), so the line still shows something stands between. */
+.tf-cmd-ends > .tf-cmd-args { flex: 1000 1 0; min-width: 2ch; max-width: max-content; }
+.tf-cmd-end { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); white-space: pre; }
+.tf-cmd-after { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); white-space: pre; }
 /* A list on one line (`TfWords`): its first entries, cut at their end, and "+N" for the rest, never cut. */
 .tf-words { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; }
 .tf-words-shown { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

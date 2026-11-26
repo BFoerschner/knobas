@@ -190,7 +190,7 @@
           <tr class="tf-land" tabindex="-1" data-land={landKey("checkouts", app.id)}>
             <td><b>{app.name}</b>{#if app.id === settings.default_application}{" "}<TfStateChip text="default" />{/if}</td>
             <td class="tf-small"><TfCommand command={app.command} keepEnd /></td>
-            <td class="tf-small">{#if app.file_command}<TfCommand command={app.file_command} keepEnd />{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
+            <td class="tf-small">{#if app.file_command}<TfCommand command={app.file_command} keepEnd />{:else}<span class="tf-dim tf-cut" title="Opens the checkout">opens the checkout</span>{/if}</td>
             <td class="tf-right">
               <span class="tf-stg-appacts">
                 {#if app.id !== settings.default_application}

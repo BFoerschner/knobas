@@ -68,13 +68,40 @@ export function commandParts(command: string): { head: string; tail: string; res
 }
 
 /**
- * A command's arguments split where an *Open in…* line cuts them (#2518): up to and with the last separator, which gives
- * way, and the folder or file after it, which stays, so the line still says which checkout or file it opens. Arguments
- * with no separator have no end to keep: all of them are the part that gives way, cut at its end as `TfCommand` cuts them.
+ * A command's arguments split where an *Open in…* line cuts them (#2518): the part of the last path in them after its last
+ * separator is the `tail`, which stays, since it names the checkout or file the command opens; what comes before it is the
+ * `head`, which gives up its middle, and the words after it (the Diff tool's `difftool --gui …`) are `after`, cut at their
+ * end. The tail runs to the end of its word, where quotes group words as `commandParts` reads them, so a quoted name with a
+ * space in it stays whole, its closing quote too. A separator that ends its word is not the last path's. Arguments with no
+ * path in them have no tail: all of them are the head, cut at its end as `TfCommand` cuts arguments.
  */
-export function argsParts(rest: string): { head: string; tail: string } {
-  const parts = pathParts(rest);
-  return parts.head === "" ? { head: rest, tail: "" } : parts;
+export function argsParts(rest: string): { head: string; tail: string; after: string } {
+  let quote: string | null = null;
+  let at = -1;
+  let quoteAt: string | null = null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const ch = rest[i]!;
+    if ((ch === "/" || ch === "\\") && i + 1 < rest.length) {
+      const next = rest[i + 1]!;
+      if (next !== quote && (quote !== null || !/\s/.test(next))) {
+        at = i;
+        quoteAt = quote;
+      }
+    }
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") quote = ch;
+  }
+  if (at < 0) return { head: rest, tail: "", after: "" };
+  let end = at + 1;
+  for (quote = quoteAt; end < rest.length; end += 1) {
+    const ch = rest[end]!;
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (/\s/.test(ch)) break;
+  }
+  return { head: rest.slice(0, at + 1), tail: rest.slice(at + 1, end), after: rest.slice(end) };
 }
 
 /**
