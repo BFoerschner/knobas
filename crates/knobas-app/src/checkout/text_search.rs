@@ -1185,4 +1185,49 @@ mod tests {
             ""
         ));
     }
+    /// Timings on a real clone, for the PR's measurement: `KNOBAS_TEXT_BENCH=<clone>`
+    /// `cargo test -p knobas-app --lib text_search_timings -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "a measurement on a clone named by KNOBAS_TEXT_BENCH"]
+    async fn text_search_timings() {
+        let Some(clone) = std::env::var_os("KNOBAS_TEXT_BENCH") else {
+            return;
+        };
+        let at = Path::new(&clone);
+        let head = git(at, &["rev-parse", "HEAD"]);
+        let cases = [
+            ("rare literal", asked("zqxjkv_none", false, false)),
+            ("common literal", asked("return", false, false)),
+            ("smart-case literal", asked("Config", false, false)),
+            ("pattern", asked(r"fn\s+\w+_new\b|\bstd::\w+", false, true)),
+        ];
+        // The tree read once, as the tab has read it before anyone types.
+        let _ = super::super::local::tree(at, &head).await;
+        for (name, query) in &cases {
+            let matcher = Matcher::new(query).unwrap();
+            for run in 0..3 {
+                let started = std::time::Instant::now();
+                let found = scan_tree(at, &head, &matcher).await.unwrap();
+                println!(
+                    "tree {name} run {run}: {:?} searched {} skipped {} files {} cut {}",
+                    started.elapsed(),
+                    found.searched,
+                    found.skipped,
+                    found.files.len(),
+                    found.cut
+                );
+            }
+            for run in 0..2 {
+                let started = std::time::Instant::now();
+                let found = scan_disk(at, &matcher).await.unwrap();
+                println!(
+                    "disk {name} run {run}: {:?} searched {} files {} cut {}",
+                    started.elapsed(),
+                    found.searched,
+                    found.files.len(),
+                    found.cut
+                );
+            }
+        }
+    }
 }
