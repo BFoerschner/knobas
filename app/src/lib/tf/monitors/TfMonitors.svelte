@@ -160,6 +160,7 @@
   import { on } from "svelte/events";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
   import { staleLine, syncWith } from "../builds/pipeline";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
@@ -170,7 +171,10 @@
     isRoute,
     isRouteId,
     kindWord,
-    monitorMatches,
+    monitorMarks,
+    monitorText,
+    unwatchedMarks,
+    unwatchedText,
     prefill,
     routePrefill,
     type MonitorSubject,
@@ -524,7 +528,7 @@
     noun: "monitors",
     one: "monitor",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", count: roster === null ? null : visibleMonitors(roster, { scope: "job", job, states: [], type: "", text: "" }, index).shown.length, title: `The monitors ${job} reaches`, query: "" } satisfies FilterScope] : []),
+      ...(job !== null ? [{ id: "job", label: "This job", count: roster === null ? null : visibleMonitors(roster, { scope: "job", job, states: [], type: "" }, index).shown.length, title: `The monitors ${job} reaches`, query: "" } satisfies FilterScope] : []),
       { id: "mine", label: "Mine", title: "The monitors the jobs you work on reach", query: "" },
       { id: "all", label: "All", query: "" },
     ],
@@ -550,17 +554,24 @@
             job,
             states: filter.chips["st"] ?? [],
             type: filter.dropdowns["type"] ?? "",
-            text: "",
           },
           index,
         ),
   );
-  /** The monitors the typed words keep, or `null` while nothing is typed. */
+  /**
+   * The monitors the typed words keep, or `null` while nothing is typed: the app ranks every monitor's name, type and
+   * assets (#2535), and decides only what keeps; the roster keeps its own order.
+   */
+  const monitorOrder = heldOrder<MonitorRow>("monitors");
+  $effect(() => monitorOrder.ask(filter.text, roster ?? [], monitorText));
   const matched = $derived.by(() => {
     const text = filter.text;
     if (roster === null || text.trim() === "") return null;
-    return new Set(roster.filter((row) => monitorMatches(row, text)).map((row) => row.entity_id));
+    return new Set(monitorOrder.rows(text, roster, monitorText).map((row) => row.entity_id));
   });
+  const monitorMarking = $derived(monitorOrder.typed(filter.text, roster ?? []));
+  /** A drawn row's marks, per cell; none on a row the words did not keep (the open monitor). */
+  const marksOf = (row: MonitorRow) => monitorMarks(row, matched !== null && matched.has(row.entity_id) ? monitorOrder.marks(row) : []);
   /** Whether a drawn row shows: the typed words keep it, or it is the open monitor, whatever the filter says. */
   function shows(row: MonitorRow): boolean {
     return matched === null || matched.has(row.entity_id) || row.entity_id === openId;
@@ -576,7 +587,7 @@
   const heldRoster = $derived(
     roster === null
       ? { rows: [] as typeof kept.shown, waiting: 0, stale: false }
-      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text])),
+      : rosterHold.place(kept.shown, JSON.stringify([scope, job, filter.chips, filter.dropdowns, filter.text, monitorOrder.settled(filter.text, roster ?? [])])),
   );
   const heldBar = $derived({ waiting: heldRoster.waiting, stale: heldRoster.stale, show: () => rosterHold.release() });
   const rows = $derived(markedRow !== null && !markedRow.hidden && !heldRoster.rows.includes(markedRow) ? [markedRow, ...heldRoster.rows] : heldRoster.rows);
@@ -599,11 +610,11 @@
   /** Assets nothing watches: their own band, over their name, type and owner. */
   const unwatchedFilter = sessionFilter("monitors-unwatched");
   const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter assets", noun: "assets", one: "asset" };
-  const shownUnwatched = $derived.by(() => {
-    const words = unwatchedFilter.text.trim().toLowerCase();
-    if (unwatched === null || words === "") return unwatched ?? [];
-    return unwatched.filter((asset) => [asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""].join(" ").toLowerCase().includes(words));
-  });
+  /** The app ranks their name, type, owner and environment by the typed words (#2535), best first. */
+  const unwatchedOrder = heldOrder<UnmonitoredAsset>("monitors-unwatched");
+  $effect(() => unwatchedOrder.ask(unwatchedFilter.text, unwatched ?? [], unwatchedText));
+  const shownUnwatched = $derived(unwatchedOrder.rows(unwatchedFilter.text, unwatched ?? [], unwatchedText));
+  const unwatchedMarking = $derived(unwatchedOrder.typed(unwatchedFilter.text, unwatched ?? []));
 
   /** Below 1240 px half-hour bars would be under a pixel wide: one bar an hour, the worse of its two half-hours. */
   const hourlyBars = new MediaQuery("(max-width: 1240px)");
@@ -1008,7 +1019,7 @@
   >
     <!-- The name is the row's button, for the keyboard; the pointer may press anywhere on the row. -->
     <span class="tf-mon-name"
-      ><button type="button" class="tf-mon-open" aria-expanded={row.entity_id === openId}><Marked text={row.name} typed={shows(row) ? filter.text : ""} /></button
+      ><button type="button" class="tf-mon-open" aria-expanded={row.entity_id === openId}><Marked text={row.name} typed={shows(row) ? monitorMarking : ""} pairs={marksOf(row).name} /></button
       >{#if row.monitor_type}{" "}<span class="tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</span
     >
     <span class="tf-mon-state">
@@ -1028,7 +1039,7 @@
         >{/if}</span
     >
     <span class="tf-mon-watch" title={row.assets.length === 0 ? undefined : row.assets.map((asset) => asset.name).join(", ")}
-      >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={shows(row) ? filter.text : ""} /></a>{/each}</span
+      >{#each row.assets as asset, at (asset.id)}{#if at > 0}{", "}{/if}<a href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={shows(row) ? monitorMarking : ""} pairs={marksOf(row).assets[at] ?? []} /></a>{/each}</span
     >
   </div>
 {/snippet}
@@ -1059,11 +1070,12 @@
           <tbody>
             {#each shownUnwatched as asset (asset.id)}
               {@const word = createWord(asset)}
+              {@const lit = unwatchedMarks(asset, unwatchedOrder.marks(asset))}
               <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
-                <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
-                <td>{asset.type_label}</td>
-                <td>{asset.environment ?? ""}</td>
-                <td><span class="tf-rowval">{asset.owner ?? ""}</span></td>
+                <td><a href={addressOf(asset.id)}><Marked text={asset.name} typed={unwatchedMarking} pairs={lit.name} /></a></td>
+                <td><Marked text={asset.type_label} typed={unwatchedMarking} pairs={lit.type} /></td>
+                <td><Marked text={asset.environment ?? ""} typed={unwatchedMarking} pairs={lit.environment} /></td>
+                <td><span class="tf-rowval"><Marked text={asset.owner ?? ""} typed={unwatchedMarking} pairs={lit.owner} /></span></td>
                 <td class="tf-mon-acts">
                   {#if word !== null}
                     <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />

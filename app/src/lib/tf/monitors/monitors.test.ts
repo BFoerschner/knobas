@@ -23,6 +23,10 @@ import {
   uptimeText,
   STATE_CHIPS,
   visibleMonitors,
+  monitorMarks,
+  monitorText,
+  unwatchedMarks,
+  unwatchedText,
   type KeptMonitors,
 } from "./monitors";
 
@@ -164,7 +168,7 @@ describe("the filter", () => {
     { id: "jira:PAY-231", reached: [{ entity_id: "kuma:1" }] },
     { id: "jira:PAY-200", reached: [{ entity_id: "asset:db" }] },
   ]);
-  const base = { scope: "all" as const, job: null, states: [] as string[], type: "", text: "" };
+  const base = { scope: "all" as const, job: null, states: [] as string[], type: "" };
   const names = (kept: KeptMonitors) => kept.shown.map((r) => r.name);
   const hiddenNames = (kept: KeptMonitors) => kept.hidden.map((r) => r.name);
 
@@ -190,10 +194,15 @@ describe("the filter", () => {
     expect(hiddenNames(visibleMonitors(rows, { ...base, scope: "mine" }, index))).toEqual([]);
   });
 
-  test("the words match the monitor, the asset and the type", () => {
-    expect(names(visibleMonitors(rows, { ...base, text: "payments" }, index))).toEqual(["pg"]);
-    expect(names(visibleMonitors(rows, { ...base, text: "database" }, index))).toEqual(["pg"]);
-    expect(names(visibleMonitors(rows, { ...base, text: "ping" }, index))).toEqual(["vm ping"]);
+  test("the words are ranked over the monitor's name and type and each asset's name and type, its marks cut onto the cells (#2535)", () => {
+    const pg = row({ name: "pg", monitor_type: "port", assets: [
+      { id: "asset:db", name: "payments", path: null, type_label: "Database" },
+      { id: "asset:rep", name: "replica", path: null, type_label: "Database" },
+    ] });
+    expect(monitorText(pg)).toBe("pg TCP payments Database replica Database");
+    // "p" of the name, "pay" of the first asset, "rep" of the second; "TCP" and the types are read but not drawn here.
+    expect(monitorMarks(pg, [0, 1, 7, 10, 25, 28])).toEqual({ name: [0, 1], assets: [[0, 3], [0, 3]] });
+    expect(monitorMarks(pg, [3, 6])).toEqual({ name: [], assets: [[], []] });
   });
 });
 
@@ -209,6 +218,12 @@ describe("Assets nothing watches", () => {
     owner: null,
     url: null,
     monitor_on_its_way: null,
+  });
+
+  test("its filter ranks an asset's name, type, owner and environment, the marks cut onto each cell (#2535)", () => {
+    const asset = { ...gap("Database", "ledger-db"), owner: "payments", environment: "prod" };
+    expect(unwatchedText(asset)).toBe("ledger-db Database payments prod");
+    expect(unwatchedMarks(asset, [0, 3, 10, 12, 19, 22, 28, 30])).toEqual({ name: [0, 3], type: [0, 2], owner: [0, 3], environment: [0, 2] });
   });
 
   test("lists containers, services, routes, databases and VMs, nothing else", () => {
@@ -290,14 +305,14 @@ describe("the state pills read what the chips read", () => {
     const word = stateWord(stateChip(it).label);
     expect(STATE_CHIPS as readonly string[]).toContain(word);
     for (const pill of STATE_CHIPS) {
-      const kept = visibleMonitors([it], { scope: "all", job: null, states: [pill], type: "", text: "" }, NO_JOBS).shown;
+      const kept = visibleMonitors([it], { scope: "all", job: null, states: [pill], type: "" }, NO_JOBS).shown;
       expect(kept.length).toBe(pill === word ? 1 : 0);
     }
   });
 
   test("a paused monitor is kept by Paused whatever it last read, and slow needs no response to say so", () => {
     const paused = row({ state: "up", tombstoned: true });
-    expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "", text: "" }, NO_JOBS).shown).toEqual([paused]);
+    expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "" }, NO_JOBS).shown).toEqual([paused]);
     expect(stateChip(row({ state: "warn", response_time_ms: null })).label).toBe("slow");
   });
 });
