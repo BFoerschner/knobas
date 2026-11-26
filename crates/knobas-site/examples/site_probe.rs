@@ -39,7 +39,10 @@
 //!     (11b) the quit's wait returns once every named browser process has
 //!     ended, before its deadline (`win::wait_for_exit`, ux29);
 //! 12. a lasting cookie a site set one second before the quit is there in the
-//!     second run.
+//!     second run;
+//! 13. and 14. (macOS, `SITE_PROBE_TRAVEL=1`, real input through the HID tap):
+//!     the mouse's back and forward over a site and over the bar, and where
+//!     the keyboard is after ⌘Tab away and back (#2528; `travel` below).
 //!
 //! The first run quits with its two sites still open, as knobas quits, so the
 //! quit's own path (`Sites::shutdown`, then the host's `flush`) runs. Checks
@@ -603,6 +606,15 @@ fn steps(sites: Sites, proxy: EventLoopProxy<Task>, second: bool) {
     #[cfg(windows)]
     on_main(&proxy, post::note_shell);
     sleep(300);
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("SITE_PROBE_TRAVEL").is_some() {
+        travel::steps(&sites, &proxy, &rt);
+        // Nothing of the run stays on the machine: its session goes, as *Forget…* removes it.
+        let forgot = rt.block_on(sites.forget("a", true));
+        log("forgot", json!({ "source": "a", "answer": format!("{forgot:?}") }));
+        sleep(1500);
+        return quit(&sites, &proxy);
+    }
     let started = ms();
     let _ = open("a", url(if second { "a-second" } else { "a" }), false);
     sites.show("a", INSETS, true, true);
@@ -932,13 +944,18 @@ fn main() {
     });
 
     let event_loop = EventLoopBuilder::<Task>::with_user_event().build();
-    let window = Rc::new(
-        WindowBuilder::new()
-            .with_title("knobas site probe")
-            .with_inner_size(tao::dpi::LogicalSize::new(1200.0, 800.0))
-            .build(&event_loop)
-            .expect("the window"),
-    );
+    let mut builder = WindowBuilder::new()
+        .with_title("knobas site probe")
+        .with_inner_size(tao::dpi::LogicalSize::new(1200.0, 800.0));
+    // The travel run aims a real mouse at the window: all of it on the screen.
+    if std::env::var_os("SITE_PROBE_TRAVEL").is_some() {
+        builder = builder.with_position(tao::dpi::LogicalPosition::new(40.0, 40.0));
+    }
+    let window = Rc::new(builder.build(&event_loop).expect("the window"));
+    {
+        use tao::platform::macos::WindowExtMacOS;
+        NS_WINDOW.store(window.ns_window() as usize, Ordering::Relaxed);
+    }
     // The stand-in shell: a scheme of its own and an IPC handler, as knobas's page has.
     let shell_view = wry::WebViewBuilder::new()
         .with_html(SHELL)
@@ -961,6 +978,7 @@ fn main() {
         })
         .build(&*window)
         .expect("the shell's web view");
+    let shell_view = Rc::new(shell_view);
 
     let proxy = event_loop.create_proxy();
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
@@ -1006,7 +1024,14 @@ fn main() {
     let _ = focus_window;
     install_host(Box::new(ProbeHost(WryHost::new(
         Rc::clone(&window),
-        Rc::new(|| log("focus-shell", json!({}))),
+        {
+            // As knobas's `focus_shell`: the keyboard to the shell's own web view.
+            let shell_view = Rc::clone(&shell_view);
+            Rc::new(move || {
+                log("focus-shell", json!({}));
+                let _ = shell_view.focus();
+            })
+        },
     ))));
     #[cfg(target_os = "macos")]
     {
@@ -1030,6 +1055,11 @@ fn main() {
                 *shell.size.lock().unwrap() = (size.width, size.height);
                 relayout.relayout();
             }
+            // As knobas's `site::start` wires it (#2528).
+            Event::WindowEvent {
+                event: WindowEvent::Focused(focused),
+                ..
+            } => relayout.window_focused(focused),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
@@ -1037,4 +1067,365 @@ fn main() {
             _ => {}
         }
     });
+}
+
+// ------------------------------------------------- the mouse and the window (#2528)
+
+/// The window's content origin on the screen, in points, top-left: where the
+/// travel run aims its real mouse.
+static ORIGIN: Mutex<(f64, f64, f64, f64)> = Mutex::new((0.0, 0.0, 0.0, 0.0));
+/// The probe window's `NSWindow`, from tao (macOS).
+static NS_WINDOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+
+/// Read the window's content origin now, on the main thread: AppKit's
+/// content rectangle on the screen, flipped against the primary screen, the
+/// coordinates the HID tap takes.
+#[cfg(target_os = "macos")]
+fn note_origin() {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::NSRect;
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let _ = mtm;
+    let raw = NS_WINDOW.load(Ordering::Relaxed);
+    if raw == 0 {
+        return;
+    }
+    // SAFETY: the probe's own window, which lives as long as the event loop.
+    let window: &objc2_app_kit::NSWindow = unsafe { &*(raw as *const objc2_app_kit::NSWindow) };
+    let Some(content) = window.contentView() else {
+        return;
+    };
+    let rect = window.convertRectToScreen(content.frame());
+    // SAFETY: NSScreen's own class methods and properties, on the main thread.
+    let primary: NSRect = unsafe {
+        let screens: Retained<AnyObject> = objc2::msg_send![objc2::class!(NSScreen), screens];
+        let first: Option<Retained<AnyObject>> = objc2::msg_send![&*screens, firstObject];
+        let Some(first) = first else {
+            return;
+        };
+        objc2::msg_send![&*first, frame]
+    };
+    let top = primary.size.height - (rect.origin.y + rect.size.height);
+    log(
+        "window-rect",
+        json!({ "content": [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height], "primary": [primary.size.width, primary.size.height] }),
+    );
+    *ORIGIN.lock().unwrap() = (rect.origin.x, top, rect.size.width, rect.size.height);
+}
+
+/// `SITE_PROBE_TRAVEL=1` (macOS): real input through the HID event tap, as a
+/// person's mouse and keyboard give it (needs the Accessibility grant the
+/// desktop witness needs). Checks:
+///
+/// - 13a the mouse's back over a site with history steps back in the site,
+///   and knobas is told nothing;
+/// - 13b with no site history left, back is handed to knobas (`site:key back`);
+/// - 13c forward steps forward in the site;
+/// - 13d the back button over knobas's own bar is the page's: the site does
+///   not travel and nothing is handed over;
+/// - 14a a site clicked into (no key typed) and left by hiding gives the
+///   keyboard to knobas: ⌘K reaches knobas's page;
+/// - 14b knobas's window with no first responder, ⌘Tab away and back: ⌘K
+///   reaches knobas's page on the first press;
+/// - 14c a site clicked into, ⌘Tab away and back: ⌘K is the site's claimed
+///   key (`site:key search`), the site kept the keyboard.
+#[cfg(target_os = "macos")]
+mod travel {
+    use std::ffi::c_void;
+    use std::time::Duration;
+
+    use knobas_site::Sites;
+    use serde_json::{Value, json};
+    use tao::event_loop::EventLoopProxy;
+
+    use super::{INSETS, ORIGIN, Task, check, log, on_main, port, recorded, sleep};
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CgPoint {
+        x: f64,
+        y: f64,
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventCreateMouseEvent(source: *const c_void, kind: u32, at: CgPoint, button: u32) -> *mut c_void;
+        fn CGEventCreateKeyboardEvent(source: *const c_void, key: u16, down: bool) -> *mut c_void;
+        fn CGEventSetFlags(event: *mut c_void, flags: u64);
+        fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
+        fn CGEventPost(tap: u32, event: *mut c_void);
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(object: *const c_void);
+    }
+
+    const HID: u32 = 0;
+    const LEFT_DOWN: u32 = 1;
+    const LEFT_UP: u32 = 2;
+    const MOVED: u32 = 5;
+    const OTHER_DOWN: u32 = 25;
+    const OTHER_UP: u32 = 26;
+    const BUTTON_NUMBER: u32 = 3;
+    const COMMAND: u64 = 0x0010_0000;
+
+    fn post(event: *mut c_void) {
+        if event.is_null() {
+            return;
+        }
+        // SAFETY: an event this function was handed, posted then released.
+        unsafe {
+            CGEventPost(HID, event);
+            CFRelease(event);
+        }
+    }
+
+    /// A point `(x, y)` of the window's content, on the screen, where the
+    /// window is now.
+    /// `y` is from the content's top; `None` is the middle of the site's
+    /// rectangle (under the bar), whatever size the window manager gave.
+    fn at(proxy: &EventLoopProxy<Task>, y: Option<f64>) -> CgPoint {
+        let (tx, rx) = std::sync::mpsc::channel();
+        on_main(proxy, move || {
+            super::note_origin();
+            let _ = tx.send(());
+        });
+        let _ = rx.recv_timeout(Duration::from_secs(2));
+        let (ox, oy, width, height) = *ORIGIN.lock().unwrap();
+        let y = y.unwrap_or(INSETS.top + (height - INSETS.top) / 2.0);
+        CgPoint { x: ox + width / 2.0, y: oy + y }
+    }
+
+    fn mouse(kind: u32, point: CgPoint, button: i64) {
+        // SAFETY: CoreGraphics event constructors.
+        unsafe {
+            let event = CGEventCreateMouseEvent(std::ptr::null(), kind, point, 2);
+            if !event.is_null() {
+                CGEventSetIntegerValueField(event, BUTTON_NUMBER, button);
+            }
+            post(event);
+        }
+    }
+
+    /// The mouse's button `button` (3 back, 4 forward) pressed and released at `point`.
+    fn button(point: CgPoint, button: i64) {
+        mouse(MOVED, point, 0);
+        std::thread::sleep(Duration::from_millis(60));
+        mouse(OTHER_DOWN, point, button);
+        std::thread::sleep(Duration::from_millis(40));
+        mouse(OTHER_UP, point, button);
+    }
+
+    fn click(point: CgPoint) {
+        // SAFETY: CoreGraphics event constructors.
+        unsafe {
+            post(CGEventCreateMouseEvent(std::ptr::null(), MOVED, point, 0));
+            std::thread::sleep(Duration::from_millis(60));
+            post(CGEventCreateMouseEvent(std::ptr::null(), LEFT_DOWN, point, 0));
+            std::thread::sleep(Duration::from_millis(40));
+            post(CGEventCreateMouseEvent(std::ptr::null(), LEFT_UP, point, 0));
+        }
+    }
+
+    /// A key with ⌘ held, as the keyboard sends it.
+    fn command_key(code: u16) {
+        // SAFETY: CoreGraphics event constructors.
+        unsafe {
+            let command = CGEventCreateKeyboardEvent(std::ptr::null(), 55, true);
+            CGEventSetFlags(command, COMMAND);
+            post(command);
+            for down in [true, false] {
+                let key = CGEventCreateKeyboardEvent(std::ptr::null(), code, down);
+                CGEventSetFlags(key, COMMAND);
+                post(key);
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            post(CGEventCreateKeyboardEvent(std::ptr::null(), 55, false));
+        }
+    }
+
+    /// The key window's first responder, by class, in the log.
+    fn responder(proxy: &EventLoopProxy<Task>, when: &'static str) {
+        on_main(proxy, move || {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                return;
+            };
+            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            let name = app
+                .keyWindow()
+                .or_else(|| app.mainWindow())
+                .and_then(|window| window.firstResponder())
+                .map(|responder| format!("{:?}", responder.class()));
+            log("responder", json!({ "when": when, "class": name }));
+        });
+    }
+
+    const KEY_K: u16 = 40;
+    const KEY_TAB: u16 = 48;
+
+    /// Another application in front, then ⌘Tab back, as a person does.
+    fn away_and_back() {
+        let _ = std::process::Command::new("open").args(["-a", "Finder"]).status();
+        sleep(1500);
+        command_key(KEY_TAB);
+        sleep(1500);
+    }
+
+    fn activate(proxy: &EventLoopProxy<Task>) {
+        on_main(proxy, || {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                return;
+            };
+            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            // SAFETY: NSApplication's own method on the main thread.
+            let () = unsafe { objc2::msg_send![&*app, activateIgnoringOtherApps: true] };
+        });
+    }
+
+    fn url(source: &Sites, rt: &tokio::runtime::Runtime, name: &str) {
+        let at = format!("http://127.0.0.1:{}/page?name={name}", port());
+        let answer = rt.block_on(source.open("a", Some(at.clone()), INSETS, true));
+        log("open", json!({ "source": "a", "url": at, "answer": format!("{answer:?}") }));
+    }
+
+    fn since(t: u64, kind: &str, pick: impl Fn(&Value) -> bool) -> usize {
+        recorded(kind, pick)
+            .iter()
+            .filter(|line| line["t"].as_u64().unwrap_or(0) >= t)
+            .count()
+    }
+
+    fn mark() -> u64 {
+        super::ms()
+    }
+
+    fn site_url(sites: &Sites) -> String {
+        sites
+            .statuses()
+            .into_iter()
+            .find(|s| s.source == "a")
+            .and_then(|s| s.url)
+            .unwrap_or_default()
+    }
+
+    fn key_said(t: u64, key: &str) -> usize {
+        since(t, "site:key", |d| d["key"] == key)
+    }
+
+    fn shell_heard_k(t: u64) -> usize {
+        since(t, "shell-ipc", |d| d["shellKey"] == "k")
+    }
+
+    pub fn steps(sites: &Sites, proxy: &EventLoopProxy<Task>, rt: &tokio::runtime::Runtime) {
+        activate(proxy);
+        sleep(800);
+        // A press on the bar first: the window in front for certain, as a person's first click puts it.
+        click(at(proxy, Some(44.0)));
+        sleep(400);
+        url(sites, rt, "t1");
+        sites.show("a", INSETS, false, true);
+        sleep(2500);
+        url(sites, rt, "t2");
+        sleep(2500);
+        let site = at(proxy, None);
+        let bar = at(proxy, Some(44.0));
+        log("aim", json!({ "site": [site.x, site.y], "bar": [bar.x, bar.y] }));
+
+        let t = mark();
+        button(site, 3);
+        sleep(2000);
+        let now = site_url(sites);
+        check(
+            "13a the mouse's back over a site with history steps back in the site",
+            now.ends_with("name=t1") && key_said(t, "back") == 0,
+            json!({ "url": now, "handed_over": key_said(t, "back") }),
+        );
+
+        let t = mark();
+        button(site, 3);
+        sleep(1500);
+        check(
+            "13b with no site history left, back is handed to knobas",
+            key_said(t, "back") == 1 && site_url(sites).ends_with("name=t1"),
+            json!({ "handed_over": key_said(t, "back"), "url": site_url(sites) }),
+        );
+
+        let t = mark();
+        button(site, 4);
+        sleep(2000);
+        let now = site_url(sites);
+        check(
+            "13c the mouse's forward steps forward in the site",
+            now.ends_with("name=t2") && key_said(t, "forward") == 0,
+            json!({ "url": now }),
+        );
+
+        let t = mark();
+        button(bar, 3);
+        sleep(1500);
+        let now = site_url(sites);
+        check(
+            "13d the back button over knobas's own bar is the page's",
+            now.ends_with("name=t2") && key_said(t, "back") == 0,
+            json!({ "url": now, "handed_over": key_said(t, "back") }),
+        );
+
+        // 14a: clicked into, never typed in, then hidden (left by the mouse, say).
+        click(site);
+        sleep(600);
+        let t = mark();
+        sites.hide("a");
+        sleep(600);
+        command_key(KEY_K);
+        sleep(800);
+        check(
+            "14a a site clicked into and hidden gives the keyboard to knobas",
+            shell_heard_k(t) >= 1,
+            json!({ "shell_heard_k": shell_heard_k(t), "focus_shell": since(t, "focus-shell", |_| true) }),
+        );
+
+        // 14b: the window's first responder is nothing, then ⌘Tab away and back.
+        on_main(proxy, || {
+            let Some(mtm) = objc2::MainThreadMarker::new() else {
+                return;
+            };
+            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            if let Some(window) = app.keyWindow().or_else(|| app.mainWindow()) {
+                let _ = window.makeFirstResponder(None);
+            }
+        });
+        sleep(300);
+        let t = mark();
+        away_and_back();
+        command_key(KEY_K);
+        sleep(800);
+        check(
+            "14b back in the window with no first responder, ⌘K reaches knobas on the first press",
+            shell_heard_k(t) >= 1,
+            json!({ "shell_heard_k": shell_heard_k(t), "focus_shell": since(t, "focus-shell", |_| true) }),
+        );
+
+        // 14c: a site clicked into keeps the keyboard across ⌘Tab.
+        sites.show("a", INSETS, false, true);
+        sleep(1200);
+        click(site);
+        sleep(600);
+        responder(proxy, "clicked into the site");
+        sleep(200);
+        let t = mark();
+        away_and_back();
+        responder(proxy, "back");
+        command_key(KEY_K);
+        sleep(800);
+        check(
+            "14c a site clicked into keeps the keyboard across ⌘Tab: ⌘K is its claimed key",
+            key_said(t, "search") == 1 && shell_heard_k(t) == 0,
+            json!({ "claimed_search": key_said(t, "search"), "shell_heard_k": shell_heard_k(t) }),
+        );
+    }
 }
