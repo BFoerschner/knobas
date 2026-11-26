@@ -69,6 +69,18 @@ pub enum ViewEvent {
 
 /// A view's key hook: what to do with a key going down.
 pub type KeyHook = Rc<dyn Fn(&Press) -> Claim>;
+
+/// The mouse's back button (3, `XButton1`) or forward button (4,
+/// `XButton2`), released over a view (#2528).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Travel {
+    Back,
+    Forward,
+}
+
+/// A view's mouse hook: the back or forward button released over it. The
+/// platform swallows the press, so the page never travels on its own.
+pub type MouseHook = Rc<dyn Fn(Travel)>;
 /// A view's download hook: from the address and the suggested name, where
 /// to save and the id knobas gave it, or `None` to refuse.
 pub type DownloadHook = Rc<dyn Fn(&str, &str) -> Option<(PathBuf, u64)>>;
@@ -86,6 +98,11 @@ pub struct Hooks {
     pub new_window: Rc<dyn Fn(&str)>,
     /// A key going down while the view holds the keyboard.
     pub key: KeyHook,
+    /// The mouse's back or forward button released over the view.
+    pub mouse: MouseHook,
+    /// The view took the keyboard (`true`) or lost it, where the platform
+    /// says so (Windows: the controller's `GotFocus` and `LostFocus`).
+    pub focus: Rc<dyn Fn(bool)>,
     /// Everything else the view reports.
     pub event: Rc<dyn Fn(ViewEvent)>,
     /// A download starts from `url` with the name the site suggested: the
@@ -126,6 +143,11 @@ pub trait SiteView {
     /// Read the address, history and loading state now (the Mac has no
     /// event for `pushState`).
     fn poll(&self) -> Option<ViewEvent>;
+    /// Whether the view holds the keyboard now, read from the platform:
+    /// `None` where it cannot say, and the controller's own record counts.
+    fn holds_keyboard(&self) -> Option<bool> {
+        None
+    }
     /// The main window moved (Windows: a page's drop-down follows it).
     fn window_moved(&self) {}
     /// What the site may load changed (the allow-list, ux30): the platform's
@@ -175,6 +197,13 @@ pub trait SiteHost {
     fn make(&self, spec: &ViewSpec, hooks: Hooks) -> Result<Box<dyn SiteView>, HostError>;
     /// The keyboard to knobas's own web view.
     fn focus_shell(&self);
+    /// Whether the main window is the one in front now: `None` where the
+    /// window's focus events already say (the Mac). Windows answers, since
+    /// Tauri makes the window's focus events out of knobas's own web view's
+    /// (a click into a site is a "blur" there).
+    fn window_active(&self) -> Option<bool> {
+        None
+    }
     /// Remove `source`'s session, after its view was dropped. `true` when it
     /// is gone; `false` when it must wait for the next start (the folder is
     /// still held).

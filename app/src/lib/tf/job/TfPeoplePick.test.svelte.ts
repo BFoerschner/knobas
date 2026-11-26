@@ -6,6 +6,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The picker ranks through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+import { ranked } from "../filter/test-fuzzy";
+
 import { createLayers } from "../layers.svelte";
 import TfPeoplePick, { ASK_AFTER_MS, initials } from "./TfPeoplePick.svelte";
 import type { FieldOption } from "../../ipc/entity";
@@ -92,17 +96,37 @@ test("a required field leads with no Unassigned", () => {
   expect(names()).not.toContain("Unassigned");
 });
 
-test("typing ranks by name and account, marks the letters, and Enter picks and closes", () => {
+test("typing ranks by name and account, marks the letters, and Enter picks and closes", async () => {
   const p = props({ options: PEOPLE, complete: true, asking: false });
   view = mount(TfPeoplePick, { target, props: p });
   flushSync();
   type("le");
+  await ranked();
   expect(names()[0]).toBe("Lena Hoffmann");
   expect(document.querySelector(".tf-fpick-opt mark")?.textContent).toBe("Le");
   key("Enter");
   expect(p.onpick).toHaveBeenCalledWith("lena", "Lena Hoffmann");
   expect(p.open).toBe(false);
   expect(document.activeElement).toBe(opener);
+});
+
+test("the app ranks the people: letters in order are kept, marked in the name, and an Enter before its answer picks from it (#2535)", async () => {
+  const p = props({ options: PEOPLE, complete: true, asking: false });
+  view = mount(TfPeoplePick, { target, props: p });
+  flushSync();
+  // No substring holds "lnhf"; its letters stand in order in "Lena Hoffmann".
+  type("lnhf");
+  // The answer is out: the rows drawn are still the whole list, Me first.
+  key("Enter");
+  expect(p.onpick).not.toHaveBeenCalled();
+  await ranked();
+  expect(p.onpick).toHaveBeenCalledWith("lena", "Lena Hoffmann");
+  p.open = true;
+  flushSync();
+  type("lnhf");
+  await ranked();
+  expect(names()).toEqual(["Lena Hoffmann"]);
+  expect([...document.querySelectorAll(".tf-fpick-opt mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("lnhf");
 });
 
 test("Unassigned picks nobody, and ↓ moves to it", () => {

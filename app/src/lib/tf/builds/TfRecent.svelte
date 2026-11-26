@@ -81,13 +81,14 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, everyWhileShown } from "../while-shown.svelte";
   import TfRunRow from "./TfRunRow.svelte";
+  import { heldOrder, inOrder } from "../filter/ranked.svelte";
   import { failedRun, runHash, unreadRun } from "./builds";
   import { RESULTS, byDay } from "./pipeline";
   import { readJobBranches } from "./pipeline-ports";
   import { runsRead } from "./runs-read.svelte";
   import { InFlightReads, IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, runsInFlight } from "./runs-in-flight";
   import { askRunAgain } from "./run-again";
-  import { RECENT_HOLD, RECENT_PAGE, placeWords, recentFilterOf, recentKept, withHead, withOlder, withPipelines } from "./recent";
+  import { RECENT_HOLD, RECENT_PAGE, placeWords, recentFilterOf, recentMarks, recentText, withHead, withOlder, withPipelines } from "./recent";
 
   const BRIDGE: RecentPorts = {
     recent: (filter, before, limit) => recentRuns(filter, before, limit),
@@ -325,10 +326,24 @@
   onFocusWhileShown(shown, () => void askSources());
 
   // -- what is drawn -----------------------------------------------------------
-  const typed = $derived(recentKept(held ?? [], pipelines, filter.text));
+  /**
+   * The typed words rank the runs held through the app's ranking (#2535), each by its own words and its pipeline's
+   * name and place, and decide only what keeps: the runs stay newest first, in their days. A new list whenever the
+   * pipelines or how the place reads change, since both are in each run's text.
+   */
+  const runs = $derived.by(() => {
+    void pipelines;
+    void manySources;
+    return [...(held ?? [])];
+  });
+  const runText = (one: RecentRun) => recentText(one, pipelines, manySources);
+  const runOrder = heldOrder<RecentRun>("recent-runs");
+  $effect(() => runOrder.ask(filter.text, runs, runText));
+  const typed = $derived(inOrder(runs, runOrder.rows(filter.text, runs, runText)));
+  const runMarking = $derived(runOrder.typed(filter.text, runs));
   const byId = $derived(new Map((held ?? []).map((one) => [one.run.entity_id, one])));
   const runHold = new HeldOrder<RecentRun>((one) => one.run.entity_id);
-  const holdBasis = $derived(JSON.stringify([basis, filter.text]));
+  const holdBasis = $derived(JSON.stringify([basis, filter.text, runOrder.settled(filter.text, runs)]));
   const placed = $derived(held === null ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
   const heldBar = $derived({ waiting: placed.waiting, stale: placed.stale, show: () => runHold.release() });
 
@@ -545,7 +560,8 @@
                 {run}
                 {attach}
                 href={runHash(one.pipeline_id, run.entity_id)}
-                typed={filter.text}
+                typed={runMarking}
+                marks={filter.text.trim() === "" ? null : recentMarks(one, pipelines, manySources, runOrder.marks(one))}
                 {job}
                 jobBranches={jobBranches ?? []}
                 max={longest.get(one.pipeline_id) ?? 0}

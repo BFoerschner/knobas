@@ -335,3 +335,36 @@ test("arrow navigation inside a composite listbox restarts the ring without trig
     button.remove();
   }
 });
+
+// #2528: Alt+Tab back into knobas. The engine sends the window's `focus`, then the focused element's `focus` and
+// `focusin` again in the same task (Chromium and WebKit alike); knobas's own call that puts the keyboard back in its
+// web view does the same. Nobody pressed a key in knobas: no ring.
+test("focus restored with the window coming back draws no ring; a focus move after it still does", () => {
+  vi.useFakeTimers();
+  setReducedMotion(false);
+  off = installInputModality();
+  const root = document.documentElement;
+  const input = document.createElement("input");
+  const row = document.createElement("div");
+  row.tabIndex = -1;
+  document.body.append(input, row);
+  try {
+    key("k");
+    input.focus();
+    vi.advanceTimersByTime(FOCUS_HOLD_MS + FOCUS_FADE_MS);
+    expect(root.dataset.focusRing).toBeUndefined();
+
+    window.dispatchEvent(new FocusEvent("blur"));
+    window.dispatchEvent(new FocusEvent("focus"));
+    input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(root.dataset.focusRing, "the window's return is not a focus move").toBeUndefined();
+
+    vi.advanceTimersByTime(0);
+    key("ArrowDown");
+    row.focus();
+    expect(root.dataset.focusRing, "a move after the return rings as before").toBe("on");
+  } finally {
+    input.remove();
+    row.remove();
+  }
+});

@@ -1,7 +1,9 @@
 /**
- * The fuzzy finder for a list of options the browser already holds (the view
- * editor's condition values): typed letters keep an option when they appear in
- * it in order, not only side by side.
+ * A fuzzy finder in the browser: typed letters keep an option when they appear
+ * in it in order, not only side by side. No page ranks with it any more: every
+ * local filter and picker asks the app's ranking (`fuzzy_rank`, frizbee, #2535).
+ * It stands in for that ranking where there is no app: the dev fake
+ * (`shell/dev/fake/launcher.ts`) and the suites' `test-fuzzy.ts`.
  *
  * Pure. Not the filter bar's rule ({@link matchesAll}, whole words in any
  * order), which filters rows of prose, where letters scattered over a

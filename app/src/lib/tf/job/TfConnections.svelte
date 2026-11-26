@@ -40,7 +40,8 @@
   import { prStateOver } from "../pr/pr-state.svelte";
   import { toneClass } from "../tone";
   import type { Tone } from "../../ipc/entity";
-  import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
+  import { connectionHits, connectionText, kindWord, type ConnectionHit, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { itemHash } from "./job";
   import { filterKeys } from "../filter-keys";
   import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
@@ -92,7 +93,25 @@
   // Read once: the drawer opens at its place, and is the reader's after that.
   let text = $state(place?.text ?? "");
 
-  const shown = $derived(filterLinks(links, text));
+  /** The typed words rank every row of the drawer, the ticket's links and each group's, best first, through the app's ranking (#2535). */
+  const hits = $derived(connectionHits(links, groups));
+  const order = heldOrder<ConnectionHit>("connections");
+  $effect(() => order.ask(text, hits, connectionText));
+  const kept = $derived(order.rows(text, hits, connectionText));
+  const marking = $derived(order.typed(text, hits));
+  /** Each row's hit, for its marks. */
+  const hitOf = $derived(new Map<unknown, ConnectionHit>(hits.map((hit) => ["entry" in hit ? hit.entry : hit.row, hit])));
+  const marksOf = (row: LinkEntry | GroupRow, title: string) => {
+    const hit = hitOf.get(row);
+    return hit === undefined ? [] : order.marks(hit, 0, title.length);
+  };
+  const shown = $derived(kept.flatMap((hit) => ("entry" in hit ? [hit.entry] : [])));
+  /** Each group's kept rows, best first. */
+  const rowsByGroup = $derived.by(() => {
+    const by = new Map<string, GroupRow[]>();
+    for (const hit of kept) if ("row" in hit) by.set(hit.list, [...(by.get(hit.list) ?? []), hit.row]);
+    return by;
+  });
 
   /** The words a row drew, which its held place keeps. */
   type RowWords = { title: string; how: string; mono: boolean };
@@ -196,7 +215,7 @@
       {@render heldRow("links", at, shown.some((one) => one.link.id === holding?.id))}
       <div class="tf-lk" data-row="link:{entry.link.id}">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
-          ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{how}</span></span
+          ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={marking} pairs={marksOf(entry, entry.other.title)} /></span>{" "}<span class="tf-how">{how}</span></span
           >{@render stateOf(prStateOver(entry.other.entity_id, entry.other.state ?? null))}<span class="tf-chev" aria-hidden="true">›</span></a
         >
         <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { if (entry.link.origin === "manual") hold(event, "links", shown.indexOf(entry), entry.link.id, { title: entry.other.title, how, mono: entry.other.kind === "repo" }); onunlink(entry); }} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
@@ -210,7 +229,7 @@
     {/each}
     {#if shown.length > 0}{@render heldRow("links", shown.length, shown.some((one) => one.link.id === holding?.id))}{/if}
     {#each groups as group (group.key)}
-      {@const rows = filterRows(group.rows, text)}
+      {@const rows = rowsByGroup.get(group.key) ?? []}
       <!-- A filter that leaves a group empty takes its heading too (F-563), unless a row there is holding its place under the pointer. -->
       {#if rows.length > 0 || text.trim() === "" || holding?.list === group.key}
       <h3 data-group={group.key}>
@@ -222,10 +241,10 @@
         <div class="tf-lk" data-row="{group.key}:{row.id}">
           {#if row.href !== null}
             <a class="tf-lk-go" href={row.href} onclick={onclose}
-              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}<span class="tf-chev" aria-hidden="true">›</span></a
+              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={marking} pairs={marksOf(row, row.title)} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}<span class="tf-chev" aria-hidden="true">›</span></a
             >
           {:else}
-            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}</div>
+            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={marking} pairs={marksOf(row, row.title)} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(prStateOver(row.id, row.state))}</div>
           {/if}
           {#if group.setId !== null}
             <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { hold(event, group.key, rows.indexOf(row), row.id, { title: row.title, how: row.kind, mono: row.kind === kindWord("repo") }); onhide(row); }} aria-label="Hide here: {row.title}">Hide here</button>

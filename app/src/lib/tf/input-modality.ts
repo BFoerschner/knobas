@@ -8,6 +8,8 @@
  *   ring out smoothly, then removed (~1.5 s total). Under `prefers-reduced-motion: reduce`, it clears cleanly right after
  *   the hold without entering `"fade"`.
  * - Pointer presses clear any active ring immediately and keep `focusin` silent so mouse clicks never draw a blue ring.
+ * - The window coming back (Alt+Tab, #2528) gives the focused element its `focusin` again, in the task of the window's
+ *   own `focus`: that is no focus move, and draws no ring.
  *
  * Capture listeners on `window`, so a handler that stops an event can't hide it. Attributes are written only when they
  * change, so a run of keys or presses costs one write.
@@ -43,6 +45,9 @@ export function installInputModality(root: HTMLElement = document.documentElemen
   let hand: InputHand | null = null;
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The window's `focus` came in this task: a `focusin` now is the focus it had, given back. */
+  let returning = false;
+  let returnTimer: ReturnType<typeof setTimeout> | null = null;
 
   const setHand = (next: InputHand | null): void => {
     if (next === null) return;
@@ -103,8 +108,19 @@ export function installInputModality(root: HTMLElement = document.documentElemen
     if (event.key === "Tab" || (NAV_KEYS.has(event.key) && isCompositeFocus(document.activeElement))) showRing();
   };
 
+  const onWindowFocus = (event: FocusEvent): void => {
+    // The window's own `focus`, not an element's passing through the capture phase.
+    if (event.target instanceof Node) return;
+    returning = true;
+    if (returnTimer !== null) clearTimeout(returnTimer);
+    returnTimer = setTimeout(() => {
+      returnTimer = null;
+      returning = false;
+    }, 0);
+  };
+
   const onFocusIn = (event: FocusEvent): void => {
-    if (hand === "pointer") return;
+    if (hand === "pointer" || returning) return;
     const target = event.target;
     if (target === null || target === window || target === document || target === document.body || target === document.documentElement) return;
     showRing();
@@ -118,12 +134,15 @@ export function installInputModality(root: HTMLElement = document.documentElemen
   window.addEventListener("keydown", onKey, true);
   window.addEventListener("focusin", onFocusIn, true);
   window.addEventListener("focusout", onFocusOut, true);
+  window.addEventListener("focus", onWindowFocus, true);
   return () => {
     clearTimers();
+    if (returnTimer !== null) clearTimeout(returnTimer);
     window.removeEventListener("pointerdown", onPointer, true);
     window.removeEventListener("keydown", onKey, true);
     window.removeEventListener("focusin", onFocusIn, true);
     window.removeEventListener("focusout", onFocusOut, true);
+    window.removeEventListener("focus", onWindowFocus, true);
     delete root.dataset.input;
     delete root.dataset.focusRing;
   };

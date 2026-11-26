@@ -28,10 +28,11 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { draftOf } from "./apply";
   import { firstHint, notNow } from "./hints.svelte";
   import { defaultPorts, type SetPorts } from "./ports";
-  import { APPLIES_BY, contentLines, hintTickets, keyWords, NEW_SET, ruleWords, visibleSets } from "./sets";
+  import { APPLIES_BY, contentLines, hintTickets, keyWords, NEW_SET, ruleWords, setText, visibleSets } from "./sets";
   import TfKey from "../TfKey.svelte";
   import TfSetEditor from "./TfSetEditor.svelte";
 
@@ -101,7 +102,12 @@
     one: "link set",
     chips: [{ key: "by", label: "Applies by", options: APPLIES_BY.map(({ value, label }) => ({ value, label })) }],
   };
-  const rows = $derived(sets === null ? [] : visibleSets(sets, filter.text, filter.chips["by"] ?? []));
+  const chipped = $derived(sets === null ? [] : visibleSets(sets, filter.chips["by"] ?? []));
+  /** The typed words rank what the chips keep, best first, through the app's ranking (#2535). */
+  const order = heldOrder<LinkSetRow>("sets");
+  $effect(() => order.ask(filter.text, chipped, setText));
+  const rows = $derived(order.rows(filter.text, chipped, setText));
+  const marking = $derived(order.typed(filter.text, chipped));
 
   async function switchInherit(on: boolean) {
     try {
@@ -213,8 +219,8 @@
             {#each rows as set (set.id)}
               <tr class="tf-row" onclick={(event) => open(event, set.id)}>
                 <td
-                  ><a class="tf-set-name" href="#/sets/{encodeURIComponent(set.id)}"><Marked text={set.name} typed={filter.text} /></a
-                  >{#if set.description}<span class="tf-sub">{set.description}</span>{/if}</td
+                  ><a class="tf-set-name" href="#/sets/{encodeURIComponent(set.id)}"><Marked text={set.name} typed={marking} pairs={order.marks(set, 0, set.name.length)} /></a
+                  >{#if set.description}<span class="tf-sub"><Marked text={set.description} typed={marking} pairs={order.marks(set, set.name.length + 1, set.description.length)} /></span>{/if}</td
                 >
                 <td>{#if set.members.length + set.patterns.length > 0}{@const lines = contentLines(set)}{#each lines as line, at (line)}<span class="tf-sets-item">{line}{at < lines.length - 1 ? "," : ""}</span>{" "}{/each}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
                 <td>

@@ -3,7 +3,7 @@
 //! calls into a web view or the OS, witnessed in the real windows; what it
 //! decides is here (the final suite's mutants, 2026-11-22).
 
-use crate::host::Rect;
+use crate::host::{Rect, Travel};
 
 /// `bounds`, measured in knobas's page, moved down by `down` (the room the
 /// page starts below its window's content view, the macOS title bar) and
@@ -92,6 +92,97 @@ pub fn origin_text(url: &str) -> String {
             )
         })
         .unwrap_or_else(|| "unparsed".to_owned())
+}
+
+/// The travel an AppKit mouse button number stands for: 3 back, 4 forward
+/// (#2528). The middle button (2) stays the page's.
+#[must_use]
+pub fn travel_of_button(button: isize) -> Option<Travel> {
+    match button {
+        3 => Some(Travel::Back),
+        4 => Some(Travel::Forward),
+        _ => None,
+    }
+}
+
+/// `WM_XBUTTONDOWN`: an `XButton` pressed.
+pub const WM_XBUTTONDOWN: u32 = 0x020B;
+/// `WM_XBUTTONUP`: an `XButton` released.
+pub const WM_XBUTTONUP: u32 = 0x020C;
+/// `WM_XBUTTONDBLCLK`: an `XButton`'s second press of a double click.
+pub const WM_XBUTTONDBLCLK: u32 = 0x020D;
+
+/// What a Windows low-level mouse message is to a site (#2528): the travel
+/// of `XButton1` (back) or `XButton2` (forward), and whether this is the
+/// release, the moment a browser travels. The button is the high word of
+/// `MSLLHOOKSTRUCT::mouseData`. `None` for every other message.
+#[must_use]
+pub fn xbutton(message: u32, mouse_data: u32) -> Option<(Travel, bool)> {
+    let release = match message {
+        WM_XBUTTONUP => true,
+        WM_XBUTTONDOWN | WM_XBUTTONDBLCLK => false,
+        _ => return None,
+    };
+    let travel = match mouse_data >> 16 {
+        1 => Travel::Back,
+        2 => Travel::Forward,
+        _ => return None,
+    };
+    Some((travel, release))
+}
+
+/// What the Windows mouse hook does with one `XButton` message (#2528).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XButtonStep {
+    /// Kept from every other hook and window.
+    pub swallow: bool,
+    /// The site travels, now.
+    pub travel: Option<Travel>,
+    /// The press the hook swallowed and whose release it still owes itself.
+    pub pressed: Option<Travel>,
+}
+
+/// The hook's step for `travel`'s press or `release`, `over_site` when the
+/// pointer is over a shown site, with `pressed` the press it swallowed
+/// before. A press over a site is swallowed; a release is swallowed only
+/// when its press was, so no other window ever gets half of a click, and it
+/// travels only when it is still over the site (moved off, the click is
+/// cancelled, as a browser does).
+#[must_use]
+pub fn xbutton_step(
+    pressed: Option<Travel>,
+    travel: Travel,
+    release: bool,
+    over_site: bool,
+) -> XButtonStep {
+    if !release {
+        return if over_site {
+            XButtonStep {
+                swallow: true,
+                travel: None,
+                pressed: Some(travel),
+            }
+        } else {
+            XButtonStep {
+                swallow: false,
+                travel: None,
+                pressed,
+            }
+        };
+    }
+    if pressed == Some(travel) {
+        XButtonStep {
+            swallow: true,
+            travel: over_site.then_some(travel),
+            pressed: None,
+        }
+    } else {
+        XButtonStep {
+            swallow: false,
+            travel: None,
+            pressed,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -198,5 +289,102 @@ mod tests {
             "http://10.0.0.5:8080"
         );
         assert_eq!(origin_text("not a url"), "unparsed");
+    }
+
+    #[test]
+    fn the_mouse_buttons_past_the_middle_one_are_back_and_forward() {
+        assert_eq!(travel_of_button(3), Some(Travel::Back));
+        assert_eq!(travel_of_button(4), Some(Travel::Forward));
+        assert_eq!(travel_of_button(0), None);
+        assert_eq!(
+            travel_of_button(2),
+            None,
+            "the middle button stays the page's"
+        );
+        assert_eq!(travel_of_button(5), None);
+    }
+
+    #[test]
+    fn xbutton1_is_back_xbutton2_forward_and_the_release_travels() {
+        // `mouseData`'s high word names the button; its low word is unused.
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0001_0000),
+            Some((Travel::Back, true))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0002_0000),
+            Some((Travel::Forward, true))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONDOWN, 0x0001_0000),
+            Some((Travel::Back, false))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONDBLCLK, 0x0002_0000),
+            Some((Travel::Forward, false))
+        );
+        assert_eq!(
+            xbutton(WM_XBUTTONUP, 0x0000_0001),
+            None,
+            "no button in the high word"
+        );
+        // WM_LBUTTONUP, WM_MOUSEMOVE, WM_MBUTTONUP: not a site's travel.
+        for other in [0x0202, 0x0200, 0x0208] {
+            assert_eq!(xbutton(other, 0x0001_0000), None);
+        }
+    }
+
+    #[test]
+    fn a_release_is_swallowed_only_with_its_press_and_travels_only_over_the_site() {
+        use Travel::{Back, Forward};
+        // Pressed and released over the site: swallowed, the release travels.
+        let press = xbutton_step(None, Back, false, true);
+        assert_eq!(
+            press,
+            XButtonStep {
+                swallow: true,
+                travel: None,
+                pressed: Some(Back)
+            }
+        );
+        assert_eq!(
+            xbutton_step(press.pressed, Back, true, true),
+            XButtonStep {
+                swallow: true,
+                travel: Some(Back),
+                pressed: None
+            }
+        );
+        // Pressed over the site, released off it: the release is swallowed
+        // with its press, and nothing travels.
+        assert_eq!(
+            xbutton_step(Some(Forward), Forward, true, false),
+            XButtonStep {
+                swallow: true,
+                travel: None,
+                pressed: None
+            }
+        );
+        // Pressed elsewhere: the press and its release are that window's,
+        // even when the release comes over the site.
+        let elsewhere = xbutton_step(None, Back, false, false);
+        assert!(!elsewhere.swallow);
+        assert_eq!(
+            xbutton_step(elsewhere.pressed, Back, true, true),
+            XButtonStep {
+                swallow: false,
+                travel: None,
+                pressed: None
+            }
+        );
+        // Another button's release leaves the press it owes alone.
+        assert_eq!(
+            xbutton_step(Some(Back), Forward, true, true),
+            XButtonStep {
+                swallow: false,
+                travel: None,
+                pressed: Some(Back)
+            }
+        );
     }
 }

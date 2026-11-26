@@ -5,6 +5,11 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2535): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+import { ranked } from "../filter/test-fuzzy";
+import type { LinkEntry } from "../../ipc/entity";
+
 import { createLayers } from "../layers.svelte";
 import type { JobGroup } from "./connections";
 import TfConnections from "./TfConnections.svelte";
@@ -26,7 +31,7 @@ const real = Element.prototype.scrollIntoView;
 function open() {
   const props = $state({
     jobKey: "PAY-231",
-    links: [],
+    links: [] as LinkEntry[],
     groups: [GROUP],
     layers: createLayers(),
     onclose: () => {},
@@ -147,7 +152,7 @@ test("a place whose group has gone falls back to the filter (F-557)", () => {
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Filter connections");
 });
 
-test("a filter that leaves a group empty hides the group, and clearing it brings the group back (F-563)", () => {
+test("a filter that leaves a group empty hides the group, and clearing it brings the group back (F-563)", async () => {
   const props = open();
   props.groups = [GROUP, { ...NEW_GROUP, rows: [{ ...GROUP.rows[0]!, id: "kuma:3", title: "jira" }] }];
   flushSync();
@@ -158,16 +163,45 @@ test("a filter that leaves a group empty hides the group, and clearing it brings
   field.value = "jira";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await ranked();
   expect(heads()).toEqual(["set:sepa-kit"]);
 
   field.value = "nothing has this";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await ranked();
   expect(heads()).toEqual([]);
   expect(document.querySelector(".tf-dnone")?.textContent).toContain("No links match");
 
   field.value = "";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await ranked();
   expect(heads()).toEqual(["set:payout-stack", "set:sepa-kit"]);
+});
+
+test("the filter ranks the ticket's links and each group's rows through the app's ranking and marks the letters it matched (#2535)", async () => {
+  const link = {
+    link: { id: 7, origin: "manual" },
+    other: { entity_id: "jira:PAY-228", kind: "ticket", title: "Idempotency key for payouts", deleted_at: null, state: null },
+  } as unknown as LinkEntry;
+  const props = open();
+  props.links = [link];
+  props.groups = [GROUP, { ...NEW_GROUP, rows: [{ ...GROUP.rows[0]!, id: "kuma:3", title: "SEPA gateway" }] }];
+  flushSync();
+  const field = document.querySelector<HTMLInputElement>(".tf-dfilter input")!;
+  const names = () => [...document.querySelectorAll(".tf-lk:not(.tf-lk-held) .tf-lk-name")];
+  const spelled = (el: Element) => [...el.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase();
+  // No substring holds "pysrv"; its letters stand in order in "tidewater/payout-service".
+  field.value = "pysrv";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await ranked();
+  expect(names().map((el) => el.textContent)).toEqual(["tidewater/payout-service"]);
+  expect(spelled(names()[0]!)).toBe("pysrv");
+  // "idmkey" holds only in the ticket's own link.
+  field.value = "idmkey";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await ranked();
+  expect(names().map((el) => el.textContent)).toEqual(["Idempotency key for payouts"]);
+  expect(spelled(names()[0]!)).toBe("idmkey");
 });

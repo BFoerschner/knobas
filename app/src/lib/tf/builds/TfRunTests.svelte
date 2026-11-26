@@ -23,7 +23,8 @@
   import type { RunPorts } from "./pipeline-ports";
   import { stateWord } from "../state-word";
   import { jumpAcross } from "../opener";
-  import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
+  import { RESULT_CHIPS, failedFirst, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { menuThing } from "../context/thing";
   import { thousands } from "../counted";
 
@@ -97,7 +98,13 @@
     chips: [{ key: "st", label: "Result", options: RESULT_CHIPS.map((c) => ({ ...c })) }],
     dropdowns: [{ key: "mod", label: "Module", options: modulesOf(tests).map((m) => ({ value: m, label: m })) }],
   });
-  const shown = $derived(keptTests(tests, filter.text, filter.chips["st"] ?? [], filter.dropdowns["mod"] ?? null));
+  const chipped = $derived(keptTests(tests, filter.chips["st"] ?? [], filter.dropdowns["mod"] ?? null));
+  /** The typed words rank the names the chips keep through the app's ranking (#2535): failures still first, each part best first. */
+  const testName = (test: RunTest) => test.name;
+  const order = heldOrder<RunTest>("run-tests");
+  $effect(() => order.ask(filter.text, chipped, testName));
+  const shown = $derived(filter.text.trim() === "" ? chipped : failedFirst(order.rows(filter.text, chipped, testName)));
+  const marking = $derived(order.typed(filter.text, chipped));
   const firstFailed = $derived(new Set(tests.filter((t) => t.status === "failed").slice(0, OPEN_FAILED).map((t) => t.name)));
 
   function isOpen(test: RunTest): boolean {
@@ -159,8 +166,8 @@
           <span class={`tf-dot ${test.status === "failed" ? "tf-err" : test.status === "passed" ? "tf-ok" : ""}`}></span>
           <span class="tf-nm"
             >{#if test.status === "failed"}<button type="button" aria-label={test.name} aria-expanded={open} onclick={() => (opened[test.name] = !open)}
-                ><Marked text={test.name} typed={filter.text} /></button
-              >{:else}<Marked text={test.name} typed={filter.text} />{/if}</span
+                ><Marked text={test.name} typed={marking} pairs={order.marks(test)} /></button
+              >{:else}<Marked text={test.name} typed={marking} pairs={order.marks(test)} />{/if}</span
           >
           <span class="tf-dim">{time ?? ""}</span>
           <span

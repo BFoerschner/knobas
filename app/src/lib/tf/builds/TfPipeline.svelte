@@ -82,6 +82,7 @@
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
   import TfRunRow from "./TfRunRow.svelte";
+  import { heldOrder, inOrder } from "../filter/ranked.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import {
     BAR_STEP,
@@ -100,6 +101,8 @@
     isStartedHere,
     jobBranchFor,
     keptRuns,
+    runMarks,
+    runText,
     longest,
     echoRun,
     pipelineWord,
@@ -508,7 +511,7 @@
             {
               id: "job",
               label: "This job",
-              count: all === null ? null : keptRuns(all, { text: "", scope: "job", results: [], branch: null }, jobBranches).length,
+              count: all === null ? null : keptRuns(all, { scope: "job", results: [], branch: null }, jobBranches).length,
               title: `Runs on ${job}'s branches`,
               query: "",
             },
@@ -520,13 +523,12 @@
     chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
     dropdowns: [{ key: "branch", label: "Branch", options: branchesOf(all ?? []).map((value) => ({ value, label: value })) }],
   });
-  const kept = $derived(
+  const chipped = $derived(
     all === null
       ? []
       : keptRuns(
           all,
           {
-            text: filter.text,
             // *This job* is only offered with a job; a remembered one without reads as *All*.
             scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
@@ -536,13 +538,21 @@
         ),
   );
   /**
+   * The typed words rank what the scope and chips keep through the app's ranking (#2535), which decides only what
+   * keeps: the runs stay newest first, in their days, as the page lists them.
+   */
+  const runOrder = heldOrder<RunRow>("pipeline-runs");
+  $effect(() => runOrder.ask(filter.text, chipped, runText));
+  const kept = $derived(inOrder(chipped, runOrder.rows(filter.text, chipped, runText)));
+  const runMarking = $derived(runOrder.typed(filter.text, chipped));
+  /**
    * The runs stay where they first drew (the still-rows pass, 2026-11-11): a run a sync brings, a build that just
    * finished, waits behind *Show N new* rather than pushing the list down under the pointer. A run you started is your
    * own press: its echo sorts the list again, so it shows at once.
    */
   const runHold = new HeldOrder<RunRow>((run) => run.entity_id);
   /** What the person chose, and the runs they started: a change sorts the list again. */
-  const runBasis = $derived(JSON.stringify([id, filter.text, filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)]));
+  const runBasis = $derived(JSON.stringify([id, filter.text, runOrder.settled(filter.text, chipped), filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)]));
   const heldRuns = $derived(all === null ? { rows: [] as RunRow[], waiting: 0, stale: false } : runHold.place(kept, runBasis));
   const heldBar = $derived({ waiting: heldRuns.waiting, stale: heldRuns.stale, show: () => runHold.release() });
 
@@ -866,7 +876,8 @@
               {run}
               {attach}
               href={runHash(id, run.entity_id)}
-              typed={filter.text}
+              typed={runMarking}
+              marks={filter.text.trim() === "" ? null : runMarks(run, runOrder.marks(run))}
               {job}
               {jobBranches}
               {max}

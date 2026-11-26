@@ -5,7 +5,11 @@
  * line; `a` and `e` open the assignee and the summary; the facts do not move when the fields land late.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The pickers rank through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+import { ranked } from "../filter/test-fuzzy";
 
 import type { EntityDetail, TicketFields } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -205,6 +209,49 @@ test("each label ticked is one write of the name added or removed, and the picke
   ]);
   expect(pick(".tf-fpick"), "the picker stays open").not.toBeNull();
   expect([...fact("Labels")!.querySelectorAll(".tf-lab")].map((l) => l.textContent)).toEqual(["psp"]);
+});
+
+test("the labels picker has the app rank the names, keeps letters in order and marks them (#2535)", async () => {
+  open(ports(fieldPorts()));
+  await settle();
+  control("Labels")!.click();
+  await settle();
+  const field = document.querySelector<HTMLInputElement>(".tf-fpick input")!;
+  // No substring holds "spa"; its letters stand in order in "sepa", the label the ticket carries.
+  field.value = "spa";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await ranked();
+  const rows = [...document.querySelectorAll<HTMLElement>(".tf-fpick-opt .tf-fpick-name")];
+  expect(rows.map((row) => row.textContent)).toEqual(["sepa", "Add “spa”"]);
+  expect([...rows[0]!.querySelectorAll("mark")].map((m) => m.textContent).join("")).toBe("spa");
+});
+
+test("Enter in the labels picker before the ranking answers picks from that answer, and is dropped when more is typed (#2535)", async () => {
+  open(ports(fieldPorts()));
+  await settle();
+  control("Labels")!.click();
+  await settle();
+  const field = document.querySelector<HTMLInputElement>(".tf-fpick input")!;
+  const enter = () => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  // Typed on before an answer: that Enter was for "spa", so neither "spa" nor what "psp" ranks first is written.
+  field.value = "spa";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  enter();
+  field.value = "psp";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await ranked();
+  await settle();
+  expect(writes).toEqual([]);
+  // No answer yet: no substring holds "spa", so the rows drawn offer only *Add “spa”*; the answer leads with sepa.
+  field.value = "spa";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  enter();
+  await ranked();
+  await settle();
+  expect(writes.map((w) => (w as { EditTicket: { labels: unknown } }).EditTicket.labels)).toEqual([{ add: [], remove: ["sepa"] }]);
 });
 
 test("a read-only field has no chevron and its reason as its title; a refused credential names the permission", async () => {

@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::host::{Hooks, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
+use crate::host::{Hooks, Rect, SiteHost, SiteView, Travel, ViewEvent, ViewSpec};
 use crate::keys::{Claim, KeyName, Keyboard, Platform, Press};
 use crate::policy::{Decision, Origin, Refusal, SiteRules, decide, download_name};
 use crate::scripts::{Dirty, FillMode, SignInCall};
@@ -296,6 +296,9 @@ struct Book {
     sent: HashMap<String, SiteStatus>,
     /// The site that held the keyboard when the window lost focus.
     keyboard_on_blur: Option<String>,
+    /// The window went behind another and has not come back yet: only then
+    /// is a focus event a return (#2528).
+    away: bool,
     /// Where each source's site asks for a sign-in, and whether one is
     /// saved (ux29).
     sign_ins: HashMap<String, SignInRule>,
@@ -318,6 +321,15 @@ fn view(source: &str) -> Option<Rc<dyn SiteView>> {
 
 fn host() -> Option<Rc<dyn SiteHost>> {
     HOST.with(|host| host.borrow().clone())
+}
+
+/// Whether `source`'s view holds the keyboard: the platform's answer, or
+/// `recorded` (the controller's record) where it has none. On the main
+/// thread.
+fn holds_keyboard(source: &str, recorded: bool) -> bool {
+    view(source)
+        .and_then(|view| view.holds_keyboard())
+        .unwrap_or(recorded)
 }
 
 /// Install the platform. On the main thread, once, before any site opens.
@@ -804,10 +816,16 @@ impl Sites {
         let dl_source = source.to_owned();
         let win = self.clone();
         let win_source = source.to_owned();
+        let mouse = self.clone();
+        let mouse_source = source.to_owned();
+        let focus = self.clone();
+        let focus_source = source.to_owned();
         Hooks {
             navigate: Rc::new(move |url| nav.navigate(&nav_source, url)),
             new_window: Rc::new(move |url| win.new_window(&win_source, url)),
             key: Rc::new(move |press| key.key(&key_source, press)),
+            mouse: Rc::new(move |travel| mouse.travel(&mouse_source, travel)),
+            focus: Rc::new(move |focused| focus.view_focused(&focus_source, focused)),
             event: Rc::new(move |event| ev.event(&ev_source, event)),
             download: Rc::new(move |_url, suggested| dl.download(&dl_source, suggested)),
         }
@@ -905,6 +923,43 @@ impl Sites {
             self.claimed(source, name);
         }
         claim
+    }
+
+    /// The mouse's back or forward button released over `source`'s view
+    /// (#2528): in the site while it has somewhere to go, else knobas's own
+    /// history. Decided on the main thread after the hook returns, from the
+    /// history read off the view at that moment; the status that says the
+    /// site cannot go reaches the page before the key that hands the step
+    /// to knobas, so the shell's `back` (`siteBack`, then `nav.back`) does
+    /// not step in the site on a stale status.
+    fn travel(&self, source: &str, travel: Travel) {
+        let this = self.clone();
+        let source = source.to_owned();
+        self.shell().later(Box::new(move || {
+            let Some(view) = view(&source) else {
+                return;
+            };
+            if let Some(read) = view.poll() {
+                this.event(&source, read);
+            }
+            this.sync(&source);
+            let can = {
+                let book = this.book();
+                let Some(site) = book.sites.get(&source).filter(|site| site.visible()) else {
+                    return;
+                };
+                match travel {
+                    Travel::Back => site.can_back,
+                    Travel::Forward => site.can_forward,
+                }
+            };
+            match (travel, can) {
+                (Travel::Back, true) => view.back(),
+                (Travel::Forward, true) => view.forward(),
+                (Travel::Back, false) => this.claimed(&source, KeyName::Back),
+                (Travel::Forward, false) => this.claimed(&source, KeyName::Forward),
+            }
+        }));
     }
 
     fn claimed(&self, source: &str, name: KeyName) {
@@ -1289,6 +1344,9 @@ impl Sites {
         let this = self.clone();
         let source = source.to_owned();
         self.shell().on_main(Box::new(move || {
+            // Read before the view goes off screen, which takes the keyboard
+            // from it: a site clicked into holds it with no key pressed.
+            let had_keyboard = holds_keyboard(&source, had_keyboard);
             this.sync(&source);
             if had_keyboard && let Some(host) = host() {
                 host.focus_shell();
@@ -1322,26 +1380,93 @@ impl Sites {
         }
     }
 
-    /// The main window gained or lost the keyboard. Regained, the shown site
-    /// takes it back if it had it (decisions §8: wry gives it to the main web
-    /// view). On the main thread.
+    /// The main window gained or lost the keyboard. Back in front, the shown
+    /// site takes it back if it held it, and knobas's own web view takes it
+    /// otherwise (decisions §8; #2528: the window's first responder may be
+    /// nothing, and ⌘K would reach no web view until a click). A focus
+    /// event while the window stays in front moves nothing: on Windows Tauri
+    /// makes the window's focus events out of knobas's own web view's, so a
+    /// click into a site is a "blur" and the click back onto the bar a
+    /// "focus". On the main thread.
     pub fn window_focused(&self, focused: bool) {
+        let active = host()
+            .and_then(|host| host.window_active())
+            .unwrap_or(focused);
         if focused {
+            if !active || !std::mem::take(&mut self.book().away) {
+                return;
+            }
             let back = self.book().keyboard_on_blur.take();
-            if let Some(source) = back {
-                let visible = self.book().sites.get(&source).is_some_and(Site::visible);
-                if visible && let Some(view) = view(&source) {
-                    view.focus();
+            let site =
+                back.filter(|source| self.book().sites.get(source).is_some_and(Site::visible));
+            tracing::debug!(site = ?site, "window back in front: the keyboard to the site, else to knobas");
+            match site.and_then(|source| view(&source)) {
+                Some(view) => view.focus(),
+                // A click straight into a site's page brought the window
+                // back: that site keeps the keyboard the click gave it.
+                None if self.keyboard_holder().is_some() => {}
+                None => {
+                    if let Some(host) = host() {
+                        host.focus_shell();
+                    }
                 }
             }
-        } else {
+        } else if !active {
+            if self.book().away {
+                return;
+            }
+            let holder = self.keyboard_holder();
+            tracing::debug!(holder = ?holder, "window went behind another");
             let mut book = self.book();
-            book.keyboard_on_blur = book
-                .sites
-                .values()
-                .find(|site| site.visible() && site.keyboard == SiteKeyboard::Site)
-                .map(|site| site.source.clone());
+            book.away = true;
+            book.keyboard_on_blur = holder;
         }
+    }
+
+    /// The shown site that holds the keyboard now: the platform's answer,
+    /// else the controller's record. On the main thread.
+    fn keyboard_holder(&self) -> Option<String> {
+        let shown: Vec<(String, bool)> = {
+            let book = self.book();
+            book.sites
+                .values()
+                .filter(|site| site.visible())
+                .map(|site| (site.source.clone(), site.keyboard == SiteKeyboard::Site))
+                .collect()
+        };
+        shown
+            .into_iter()
+            .find(|(source, recorded)| holds_keyboard(source, *recorded))
+            .map(|(source, _)| source)
+    }
+
+    /// `source`'s view took the keyboard or lost it, as the platform says
+    /// (Windows). Lost to another application, it is the window's blur that
+    /// knobas's own web view, which had no focus to lose, never reports.
+    fn view_focused(&self, source: &str, focused: bool) {
+        let active = host().and_then(|host| host.window_active()).unwrap_or(true);
+        {
+            let mut book = self.book();
+            let Some(site) = book.sites.get_mut(source) else {
+                return;
+            };
+            site.keyboard = if focused {
+                SiteKeyboard::Site
+            } else {
+                SiteKeyboard::Shell
+            };
+            let visible = site.visible();
+            if focused && active {
+                // Taken in a window in front: whatever blur came before has
+                // ended, even one whose return no focus event reported.
+                book.away = false;
+                book.keyboard_on_blur = None;
+            } else if !focused && !active && !book.away && visible {
+                book.away = true;
+                book.keyboard_on_blur = Some(source.to_owned());
+            }
+        }
+        self.sync_later(source);
     }
 
     /// Back, forward, reload, stop, or the keyboard to the site or to
@@ -1540,6 +1665,7 @@ impl Sites {
         let this = self.clone();
         let source = source.to_owned();
         self.shell().on_main(Box::new(move || {
+            let had_keyboard = holds_keyboard(&source, had_keyboard);
             this.drop_view(&source, why);
             if had_keyboard && let Some(host) = host() {
                 host.focus_shell();

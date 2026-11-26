@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 
 import type { RecentPipeline, RecentRun, RunRow } from "../../ipc/entity";
 import { pipelineHash } from "./builds";
+import { runText } from "./pipeline";
 import {
   RECENT,
   RECENT_HASH,
@@ -13,7 +14,8 @@ import {
   isRecent,
   placeWords,
   recentFilterOf,
-  recentKept,
+  recentMarks,
+  recentText,
   recentOrder,
   withHead,
   withOlder,
@@ -119,15 +121,20 @@ test("a pipeline's place is its folders, its source first where two or more list
   expect(placeWords(undefined, true)).toBe("");
 });
 
-test("typed words keep runs by their own words and their pipeline's name and folders", () => {
+test("a run's text is its own words, then its pipeline's name and place as the row draws them, and its source (#2535)", () => {
   const pipes = withPipelines(new Map(), [lint, { ...lint, entity_id: "tc:buildType:Deploy", name: "Deploy", path: ["Ops"] }]);
-  const runs = [at("1", 1), at("2", 2, "tc:buildType:Deploy"), { pipeline_id: "tc:buildType:Lint", run: run("tc:build:3", null, { branch: "feature/PAY-231" }) }];
-  expect(ids(recentKept(runs, pipes, ""))).toEqual(["1", "2", "3"]);
-  expect(ids(recentKept(runs, pipes, "deploy"))).toEqual(["2"]);
-  expect(ids(recentKept(runs, pipes, "payments lint"))).toEqual(["1", "3"]);
-  expect(ids(recentKept(runs, pipes, "PAY-231"))).toEqual(["3"]);
-  expect(ids(recentKept(runs, pipes, "#2"))).toEqual(["2"]);
-  expect(ids(recentKept(runs, pipes, "teamcity ops"))).toEqual(["2"]);
+  const deploy = at("2", 2, "tc:buildType:Deploy");
+  const own = runText(deploy.run);
+  const name = own.length + 1;
+  expect(recentText(deploy, pipes, false)).toBe(`${own} Deploy ${placeWords(pipes.get("tc:buildType:Deploy"), false)} Tidewater TeamCity`);
+  expect(recentText(deploy, pipes, true)).toBe(`${own} Deploy ${placeWords(pipes.get("tc:buildType:Deploy"), true)}`);
+  // "De" of the name and "Op" of its place, past the run's own words.
+  const place = name + "Deploy".length + 1;
+  const marks = recentMarks(deploy, pipes, false, [name, name + 2, place, place + 2]);
+  expect(marks.name).toEqual([0, 2]);
+  expect(marks.place).toEqual([0, 2]);
+  expect(marks.branch).toEqual([]);
+  expect(recentText({ pipeline_id: "gone", run: deploy.run }, pipes, false)).toBe(`${own}  `);
 });
 
 test("a page's pipelines are laid over those held", () => {
