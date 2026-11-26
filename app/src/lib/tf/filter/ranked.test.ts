@@ -12,7 +12,7 @@ vi.mock("../../ipc/search", () => ({
     }),
 }));
 
-const { FuzzyOrder } = await import("./ranked.svelte");
+const { FuzzyOrder, inOrder } = await import("./ranked.svelte");
 
 const rows = ["acme/auth-proxy", "acme/ADProxy", "acme/routing"];
 const same = (row: string) => row;
@@ -43,15 +43,35 @@ test("the answer's rows are drawn once it lands, what was drawn until then, and 
   pending.length = 0;
 });
 
-test("a list drawn for the first time with words kept draws the filter as it was, and a failed ask is that filter", async () => {
+test("a list drawn for the first time with words kept draws the filter as it was, and a failed ask is that filter, marked", async () => {
   const order = new FuzzyOrder<string>();
   expect(order.rows("routing", rows, same)).toEqual(["acme/routing"]);
   order.ask("auth", rows, same);
   pending[0]!.reject(new Error("no such command"));
   await flush();
   expect(order.rows("auth", rows, same)).toEqual(["acme/auth-proxy"]);
-  expect(order.marks("acme/auth-proxy")).toEqual([]);
+  // Each typed word is marked where it stands (#2532), so a field marks what the filter kept it by.
+  expect(order.marks("acme/auth-proxy")).toEqual([5, 9]);
   pending.length = 0;
+});
+
+test("`typed` is the text while its answer is out and nothing once it lands, for a field's words to mark (#2532)", async () => {
+  const order = new FuzzyOrder<string>();
+  expect(order.typed("", rows)).toBe("");
+  order.ask("prox", rows, same);
+  expect(order.typed("prox", rows)).toBe("prox");
+  pending[0]!.resolve([{ index: 1, loose: false, marks: [7, 11] }]);
+  await flush();
+  expect(order.typed("prox", rows)).toBe("");
+  // An answer for other rows is not theirs: the words mark until theirs lands.
+  expect(order.typed("prox", rows.slice(1))).toBe("prox");
+  pending.length = 0;
+});
+
+test("inOrder keeps the rows the answer kept in the page's order, the same list where it kept every one (#2532)", () => {
+  expect(inOrder(rows, ["acme/routing", "acme/auth-proxy"])).toEqual(["acme/auth-proxy", "acme/routing"]);
+  expect(inOrder(rows, [...rows].reverse())).toBe(rows);
+  expect(inOrder(rows, [])).toEqual([]);
 });
 
 test("an older text's answer that lands after a newer one's never replaces it", async () => {

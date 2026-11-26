@@ -34,7 +34,6 @@ import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
 import type { DrawnFile } from "../diff/diff";
 import { WORKING_TREE } from "../diff/address";
-import { matchesAll } from "../filter/filter";
 
 /**
  * The header's first line (R-8.3), prototype-6's `repoHead`: the declared
@@ -428,18 +427,21 @@ export function viewRows(section: ViewSection | null | undefined): ViewRow[] {
   return (section?.blocks ?? []).flatMap((block) => (block.type === "entities" ? block.rows : []));
 }
 
-/** The rows that hold every word typed, across sha, title and meta. */
+/**
+ * The rows *Author: Mine* keeps (#973), in the source's order: the typed words are ranked over {@link commitText} by
+ * the page (#2532).
+ */
 export function visibleViewRows(
   rows: readonly ViewRow[],
-  text: string,
   /** Commits' *Author: Mine* (#973): the ids whose declared author is mine, or `null` with the chip off. */
   mine: ReadonlySet<string> | null = null,
 ): ViewRow[] {
-  return rows.filter(
-    (row) =>
-      (mine === null || (row.entity_id !== null && mine.has(row.entity_id))) &&
-      matchesAll(`${row.chip ?? ""} ${row.title} ${row.meta ?? ""}`, text),
-  );
+  return mine === null ? (rows as ViewRow[]) : rows.filter((row) => row.entity_id !== null && mine.has(row.entity_id));
+}
+
+/** What the Commits filter ranks a row by: its sha, title and meta, one space between each (#2532). */
+export function commitText(row: ViewRow): string {
+  return `${row.chip ?? ""} ${row.title} ${row.meta ?? ""}`;
 }
 
 /**
@@ -597,13 +599,15 @@ export function repoPrs(rows: readonly EntityRow[], repo: Pick<EntityRow, "sourc
   return rows.filter((row) => row.kind === "pr" && row.source_id === repo.source_id && row.path === repo.title);
 }
 
-/** The pull requests the *Pull requests* tab's filter keeps. */
-export function visibleRepoPrs(rows: readonly EntityRow[], states: readonly string[], text: string): EntityRow[] {
+/** The pull requests the *Pull requests* tab's state chips keep; the typed words rank {@link repoPrText} (#2532). */
+export function visibleRepoPrs(rows: readonly EntityRow[], states: readonly string[]): EntityRow[] {
   const wanted = states.map((state) => state.toLowerCase());
-  return rows.filter((row) => {
-    if (wanted.length > 0 && !wanted.includes(row.state?.text.toLowerCase() ?? "")) return false;
-    return matchesAll(`${prNumber(row.entity_id) ?? ""} ${row.title}`, text);
-  });
+  return wanted.length === 0 ? (rows as EntityRow[]) : rows.filter((row) => wanted.includes(row.state?.text.toLowerCase() ?? ""));
+}
+
+/** What the *Pull requests* tab's filter ranks a row by: its number, a space, its title (#2532). */
+export function repoPrText(row: EntityRow): string {
+  return `${prNumber(row.entity_id) ?? ""} ${row.title}`;
 }
 
 /** The edit of a file (#845): the Files tab's file, turned into an editor. */
@@ -784,13 +788,13 @@ export interface BranchRow {
   mine: boolean;
 }
 
-/** The rows the *Branches* filter keeps: every word typed in the name, and each chip set. */
-export function visibleBranches(rows: readonly BranchRow[], show: readonly string[], text: string): BranchRow[] {
+/** The rows each *Branches* chip set keeps; the typed words rank the names that are left (#2532). */
+export function visibleBranches(rows: readonly BranchRow[], show: readonly string[]): BranchRow[] {
   return rows.filter((row) => {
     if (show.includes("Mine") && !row.mine) return false;
     if (show.includes("No PR") && (row.isDefault || row.standing === null || row.standing.pr !== null)) return false;
     if (show.includes("Merged") && !row.standing?.merged) return false;
-    return matchesAll(row.name, text);
+    return true;
   });
 }
 

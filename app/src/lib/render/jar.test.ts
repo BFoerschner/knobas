@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { ArchiveIndex, ClassOutline } from "../ipc/entity";
-import { bytes, chain, declaration, filteredRows, head, kindOf, libRows, listing, memberLine, supers, terms, textOf, topClass, treeRows, type Nested, type Row } from "./jar";
+import { bytes, chain, declaration, entriesOf, filteredRows, head, kindOf, libRows, libText, listing, memberLine, supers, textOf, topClass, treeRows, type Nested, type Row } from "./jar";
 
 function index(names: string[], over: Partial<ArchiveIndex> = {}): ArchiveIndex {
   const sorted = [...names].sort();
@@ -81,28 +81,38 @@ test("an entry opened has its detail row below it; a nested JAR opened draws its
   expect(withNote.find((r) => r.kind === "note")).toMatchObject({ text: "not a zip archive", depth: 2 });
 });
 
-test("the filter lists every entry whose path holds every word, the open nested archives' too", () => {
+test("the filter ranks every entry, the open nested archives' too, and draws the kept ones in the ranking's order, marked (#2532)", () => {
   const l = listing(index(["com/x/PayoutService.class", "com/x/PayoutMapper.class", "com/y/Other.class", "BOOT-INF/lib/p-1.jar"]));
   const inner = listing(index(["org/p/PayoutHelper.class"]));
   const nested = new Map<string, Nested>([["BOOT-INF/lib/p-1.jar", { ok: true, listing: inner }]]);
-  const { rows, hits } = filteredRows(l, terms("payout SERVICE"), NONE, nested);
-  expect(rows.map(label)).toEqual(["com/x/PayoutService.class"]);
+  const entries = entriesOf(l, nested);
+  expect(entries.map((e) => `${e.scope}|${e.name}`)).toEqual([
+    ...l.names.map((name) => `|${name}`),
+    "BOOT-INF/lib/p-1.jar|org/p/PayoutHelper.class",
+  ]);
+  // The ranking kept the nested helper first, then a top entry; their marks are pairs in each one's path.
+  const helper = entries.find((e) => e.name === "org/p/PayoutHelper.class")!;
+  const service = entries.find((e) => e.name === "com/x/PayoutService.class")!;
+  const marks = new Map([[helper, [6, 12]], [service, [6, 12]]]);
+  const { rows, hits } = filteredRows([helper, service], (e) => marks.get(e) ?? [], NONE, nested);
+  expect(rows.map(label)).toEqual(["BOOT-INF/lib/p-1.jar!org/p/PayoutHelper.class", "com/x/PayoutService.class"]);
+  // A nested entry's label names its archive first: its marks move past `BOOT-INF/lib/p-1.jar!` (21 units).
+  expect(rows.map((r) => (r.kind === "file" ? r.marks : null))).toEqual([[27, 33], [6, 12]]);
+  expect(rows.map((r) => (r.kind === "file" ? r.label.slice(...(r.marks as [number, number])) : null))).toEqual(["Payout", "Payout"]);
   expect(hits).toBe(1);
-  const all = filteredRows(l, terms("payout"), NONE, nested);
-  expect(all.rows.map(label)).toEqual(["com/x/PayoutMapper.class", "com/x/PayoutService.class", "BOOT-INF/lib/p-1.jar!org/p/PayoutHelper.class"]);
-  expect(all.hits).toBe(2);
-  expect(terms("  ")).toEqual([]);
 });
 
-test("the dependency list is the archive's nested JARs by name and version, filtered by either", () => {
+test("the dependency list is the nested JARs given, ranked by name, version and entry, each marked (#2532)", () => {
   const ix = index(["BOOT-INF/lib/a-1.jar", "BOOT-INF/lib/b-2.0.jar"], {
     libs: [
       { entry: "BOOT-INF/lib/a-1.jar", name: "a", version: "1", size: 10 },
       { entry: "BOOT-INF/lib/b-2.0.jar", name: "b", version: "2.0", size: 20 },
     ],
   });
-  expect(libRows(ix, [], NONE, new Map()).map((r) => [label(r), r.kind === "lib" ? r.version : null])).toEqual([["a", "1"], ["b", "2.0"]]);
-  expect(libRows(ix, terms("2.0"), NONE, new Map()).map(label)).toEqual(["b"]);
+  expect(libRows(ix.libs, NONE, new Map()).map((r) => [label(r), r.kind === "lib" ? r.version : null])).toEqual([["a", "1"], ["b", "2.0"]]);
+  expect(ix.libs.map(libText)).toEqual(["a 1 BOOT-INF/lib/a-1.jar", "b 2.0 BOOT-INF/lib/b-2.0.jar"]);
+  const kept = libRows([ix.libs[1]!], NONE, new Map(), () => [2, 5]);
+  expect(kept.map((r) => [label(r), r.kind === "lib" ? r.marks : null])).toEqual([["b", [2, 5]]]);
 });
 
 test("the head names the artifact, its version and coordinates, and the manifest's facts", () => {

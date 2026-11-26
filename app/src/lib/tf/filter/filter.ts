@@ -143,6 +143,17 @@ export function marks(text: string, typed: string): Mark[] {
   return markNeedles(text, words(typed));
 }
 
+/** {@link marks} as pairs of start and end (#2532): what a ranked list's rows mark where the ranking did not answer. */
+export function wordPairs(text: string, typed: string): number[] {
+  const pairs: number[] = [];
+  let at = 0;
+  for (const run of marks(text, typed)) {
+    if (run.hit) pairs.push(at, at + run.text.length);
+    at += run.text.length;
+  }
+  return pairs;
+}
+
 /** {@link marks} for needles already read (lowercased); a needle may hold spaces, as a phrase does. */
 export function markNeedles(text: string, needles: readonly string[]): Mark[] {
   const hit = new Array<boolean>(text.length).fill(false);

@@ -125,6 +125,20 @@ export function treeOf(files: readonly DrawnFile[], groups: readonly TreeGroup[]
   return rows;
 }
 
+/**
+ * The rail's rows while its filter has words (#2532): the files in the order given (the ranking's, best first), each
+ * by its whole path at the top level, no directory over it; then each grouped folder as its row, its band and its
+ * generated files, as {@link treeOf} draws one. The filter cleared, the rail is {@link treeOf}'s again.
+ */
+export function flatOf(files: readonly DrawnFile[], groups: readonly TreeGroup[] = []): TreeRow[] {
+  const rows: TreeRow[] = files.map((file) => ({ kind: "file", file, name: keyOf(file), depth: 0 }));
+  for (const group of groups) {
+    rows.push({ kind: "gdir", group, open: true }, { kind: "gband", group });
+    for (const file of group.files) rows.push({ kind: "file", file, name: file.path, depth: 1, made: true });
+  }
+  return rows;
+}
+
 const EXEC = 0o111;
 
 export function badgeOf(file: DiffFile): string {

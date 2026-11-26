@@ -81,6 +81,8 @@
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder, MOST_RANKED } from "../filter/ranked.svelte";
   import { goAcross, replaceAddress } from "../opener";
   import type { SpecOpener } from "../render/oas-open.svelte";
   import { explorerModule } from "../render/oas-module";
@@ -168,6 +170,7 @@
     checkoutListing,
     diskListings,
     fileMeta,
+    GO_TO_FILE_SHOWN,
     goToFile,
     graftedListings,
     graftedPaths,
@@ -2022,11 +2025,26 @@
     Object.entries(listings).flatMap(([dir, entries]) => entries.filter((entry) => entry.kind !== "dir" && entry.section !== null).map((entry) => join(dir, entry.name))),
   );
   const searched = $derived(every !== null && every.section === pathsSection ? every : null);
-  const goFound = $derived.by(() => {
-    const paths = searched?.paths ?? known;
-    return goToFile(grafts.size === 0 ? paths : graftedPaths(paths, grafted), goTyped);
-  });
   const going = $derived(goTyped.trim() !== "");
+  /** Every path Go to file looks through: the whole tree once read, the directories read so far meanwhile. */
+  const goPaths = $derived.by(() => {
+    const paths = searched?.paths ?? known;
+    return grafts.size === 0 ? paths : graftedPaths(paths, grafted);
+  });
+  /**
+   * Go to file ranks the paths through the app's ranking (#2532), best first, the first {@link GO_TO_FILE_SHOWN}
+   * drawn. A tree past what the app ranks (`MOST_RANKED`) keeps Go to file's own word ranking (`goToFile`).
+   */
+  const samePath = (path: string) => path;
+  const NO_PATHS: string[] = [];
+  const goOrder = heldOrder<string>("repo-go-to-file");
+  const goRanked = $derived(going && goPaths.length <= MOST_RANKED);
+  $effect(() => {
+    if (!goRanked) return void goOrder.ask("", NO_PATHS, samePath);
+    goOrder.ask(goTyped, goPaths, samePath);
+  });
+  const goFound = $derived(!going ? NO_PATHS : goRanked ? goOrder.rows(goTyped, goPaths, samePath).slice(0, GO_TO_FILE_SHOWN) : goToFile(goPaths, goTyped));
+  const goMarking = $derived(goRanked ? goOrder.typed(goTyped, goPaths) : goTyped);
 
   /** The repository's paths at the commit, as a set: what a path in an XML file is tried against (the XML view, section 13). */
   const pathSet = $derived(searched === null ? null : new Set(searched.paths));
@@ -2357,7 +2375,13 @@
         {#each goFound as found (found)}
           {@const cut = found.lastIndexOf("/") + 1}
           <a class="tf-gotof" href={hrefOf(found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
-            >{@render icon("file")}<span>{#if cut > 0}<span class="tf-pdir">{found.slice(0, cut)}</span>{/if}{found.slice(cut)}</span></a
+            >{@render icon("file")}<span
+              >{#if cut > 0}<span class="tf-pdir"><Marked text={found.slice(0, cut)} typed={goMarking} pairs={goOrder.marks(found, 0, cut)} /></span>{/if}<Marked
+                text={found.slice(cut)}
+                typed={goMarking}
+                pairs={goOrder.marks(found, cut)}
+              /></span
+            ></a
           >
         {/each}
         {#if everyFailed !== null}

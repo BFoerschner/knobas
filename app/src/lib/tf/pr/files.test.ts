@@ -6,7 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { DiffFile, DiffLine, LineThread, SourceView } from "../../ipc/entity";
-import { diffOf, matchesPath, placeThreads, rangeOf, targetOf } from "./files";
+import { diffOf, placeThreads, rangeOf, targetOf } from "./files";
 
 const ctx = (old: number, nu: number, text = ""): DiffLine => ({ kind: "context", old, new: nu, text });
 const add = (nu: number, text = ""): DiffLine => ({ kind: "add", old: null, new: nu, text });
@@ -68,13 +68,6 @@ test("the diff is the Files section's diff block, or nothing before it answered"
   expect(diffOf(view)).toMatchObject({ files: [{ path: "src/sepa/retry.rs" }], commentable: { write_op: "submit_review", reply: null, resolve: null, head: null } });
   expect(diffOf({ sections: [{ id: "files", title: "Files", count: 3, deferred: true, blocks: [] }], actions: [] })).toBeNull();
   expect(diffOf(null)).toBeNull();
-});
-
-test("the filter matches any part of the path, in any case", () => {
-  expect(matchesPath("src/sepa/retry.rs", "")).toBe(true);
-  expect(matchesPath("src/sepa/retry.rs", "RETRY")).toBe(true);
-  expect(matchesPath("src/sepa/retry.rs", "sepa/re")).toBe(true);
-  expect(matchesPath("docs/backoff.md", "retry")).toBe(false);
 });
 
 test("the Diff tool's ends are the Files diff's range, or nothing without one (#2275)", () => {

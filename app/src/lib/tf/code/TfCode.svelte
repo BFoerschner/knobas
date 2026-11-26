@@ -70,7 +70,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { isFiltering, type FilterConfig, type FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
-  import { FuzzyOrder } from "../filter/ranked.svelte";
+  import { FuzzyOrder, heldOrder } from "../filter/ranked.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfCloneAll from "../openin/TfCloneAll.svelte";
@@ -102,6 +102,7 @@
     repoTeams,
     twinRows,
     visiblePrs,
+    prText,
     visibleRepos,
     type PrGroup,
     type PrLine,
@@ -547,15 +548,20 @@
           text: "",
         }),
   );
-  /** What a repository's row is matched against: the text `visibleRepos` joined for its word filter. */
+  /**
+   * What a repository's row is ranked by: its name, its teams as the row writes them, its language, a space between
+   * each, so a cell's marks are the ranking's at its place (#2532).
+   */
   const repoHaystack = (row: EntityRow) => {
     const fact = known.get(row.entity_id);
-    return `${row.title} ${fact?.teams.join(" ") ?? ""} ${fact?.language ?? ""}`;
+    return `${row.title} ${fact?.teams.join(", ") ?? ""} ${fact?.language ?? ""}`;
   };
   const repoOrder = new FuzzyOrder<EntityRow>();
   $effect(() => repoOrder.ask(repoFilter.text, repoCandidates, repoHaystack));
   const shownRepos = $derived(repoOrder.rows(repoFilter.text, repoCandidates, repoHaystack) as EntityRow[]);
-  const shownPrs = $derived(
+  const repoMarking = $derived(repoOrder.typed(repoFilter.text, repoCandidates));
+  /** The pull requests every filter but the text keeps; the text ranks them through the app's ranking (#2532). */
+  const prCandidates = $derived(
     lines === null
       ? []
       : visiblePrs(
@@ -567,11 +573,14 @@
             flags: prFilter.chips["flag"] ?? [],
             repo: prFilter.dropdowns["repo"] ?? "",
             team: prFilter.dropdowns["team"] ?? "",
-            text: prFilter.text,
           },
           teamsByRepo,
         ),
   );
+  const prOrder = heldOrder<PrLine>("code-prs");
+  $effect(() => prOrder.ask(prFilter.text, prCandidates, prText));
+  const shownPrs = $derived(prOrder.rows(prFilter.text, prCandidates, prText));
+  const prMarking = $derived(prOrder.typed(prFilter.text, prCandidates));
 
   // -- rows stay where they first drew ---------------------------------------
 
@@ -580,17 +589,16 @@
   const prsOrdered = $derived(lines !== null && attentionRead && sourcesRead);
   /** What the person chose: a change sorts the list again (`HeldOrder`). */
   // The ranking's answer is part of the filter: its rows are placed when it lands, as a key's are.
-  const basisOf = (chosen: typeof repoFilter) =>
-    JSON.stringify([chosen.scope, chosen.text, chosen.chips, chosen.dropdowns, job, repoOrder.settled(chosen.text, repoCandidates)]);
+  const basisOf = (chosen: typeof repoFilter, settled: boolean) => JSON.stringify([chosen.scope, chosen.text, chosen.chips, chosen.dropdowns, job, settled]);
   const repoHold = new HeldOrder<EntityRow>((row) => row.entity_id);
   const prHold = new HeldOrder<PrLine>((line) => line.row.entity_id, (line) => line.group ?? "open");
   const none = <T,>(): Placed<T> => ({ rows: [], waiting: 0, stale: false });
-  const placedRepos = $derived(reposOrdered ? repoHold.place(shownRepos, basisOf(repoFilter)) : none<EntityRow>());
+  const placedRepos = $derived(reposOrdered ? repoHold.place(shownRepos, basisOf(repoFilter, repoOrder.settled(repoFilter.text, repoCandidates))) : none<EntityRow>());
   /** The groups' rows as one list in draw order, so a later read's row joins the end of the last group, never above one. */
   const flatPrs = $derived(
     [null, ...GROUP_ORDER].flatMap((group) => shownPrs.filter((line) => line.group === group)),
   );
-  const placedPrs = $derived(prsOrdered ? prHold.place(flatPrs, basisOf(prFilter)) : none<PrLine>());
+  const placedPrs = $derived(prsOrdered ? prHold.place(flatPrs, basisOf(prFilter, prOrder.settled(prFilter.text, prCandidates))) : none<PrLine>());
 
   /** The pull requests by group, in draw order, each in the group it drew in; open ones with no group come first, unheaded. */
   const groups = $derived.by(() => {
@@ -709,13 +717,13 @@
               <td
                 ><span class="tf-crname"
                   ><a class="tf-mono" href={itemHash(row)} title={row.title}
-                    ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} /></span
-                    ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} pairs={repoOrder.marks(row)} from={row.title.lastIndexOf("/") + 1} /></a
+                    ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoMarking} pairs={repoOrder.marks(row)} /></span
+                    ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoMarking} pairs={repoOrder.marks(row)} from={row.title.lastIndexOf("/") + 1} /></a
                   >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</span
                 ></td
               >
-              <td title={teams || undefined}><Marked text={teams} typed={repoFilter.text} /></td>
-              <td title={fact?.language || undefined}><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
+              <td title={teams || undefined}><Marked text={teams} typed={repoMarking} pairs={repoOrder.marks(row, row.title.length + 1, teams.length)} /></td>
+              <td title={fact?.language || undefined}><Marked text={fact?.language ?? ""} typed={repoMarking} pairs={repoOrder.marks(row, row.title.length + teams.length + 2)} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim} title={isPath ? undefined : local?.text || undefined}>{#if isPath}<TfPath path={local!.text} />{:else}{local?.text ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
@@ -741,14 +749,23 @@
         <colgroup><col class="tf-cp-no" /><col /><col class="tf-cp-state" /><col class="tf-cp-job" /><col class="tf-cp-at" /></colgroup>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
-          {#each win.slice(kept) as { row, number, idle, author, mine } (row.entity_id)}
+          {#each win.slice(kept) as line (line.row.entity_id)}
+            {@const { row, number, idle, author, mine } = line}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
+            <!-- Where each field starts in what the filter ranked (`prText`): number, title, repository, author. -->
+            {@const atTitle = (number ?? "").length + 1}
+            {@const atPath = atTitle + row.title.length + 1}
+            {@const atAuthor = atPath + (row.path ?? "").length + 1}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
-              <td class="tf-prno"><Marked text={number ?? ""} typed={prFilter.text} /></td>
+              <td class="tf-prno"><Marked text={number ?? ""} typed={prMarking} pairs={prOrder.marks(line, 0, (number ?? "").length)} /></td>
               <td
-                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
-                  >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
-                    >{/if}{#if twinPrs.has(row.entity_id)}{row.path ? " " : ""}on {sourceName(row.source_id)}{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked text={author} typed={prFilter.text} />{/if}{/if}{#if idle}{row.path ||
+                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prMarking} pairs={prOrder.marks(line, atTitle, row.title.length)} /></a><span class="tf-sub"
+                  >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prMarking} pairs={prOrder.marks(line, atPath, row.path.length)} /></span
+                    >{/if}{#if twinPrs.has(row.entity_id)}{row.path ? " " : ""}on {sourceName(row.source_id)}{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked
+                        text={author}
+                        typed={prMarking}
+                        pairs={prOrder.marks(line, atAuthor, author.length)}
+                      />{/if}{/if}{#if idle}{row.path ||
                     author
                       ? ", "
                       : ""}idle for more than 5 days{/if}</span
