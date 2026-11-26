@@ -381,6 +381,21 @@ test("a long Pull requests tab draws each group's pull requests near the viewpor
   expect([...target.querySelectorAll(".tf-cprs tbody tr")].map((tr) => cells(tr)[0])[0]).toBe("#6999");
 });
 
+test("a repository's team and language cells mark the letters the ranking matched in each (#2532)", async () => {
+  await draw(["repos"]);
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  // No substring holds "pltfrm": its letters stand in order in fx-rates' team, marked there, and "go" in its language.
+  field.value = "pltfrm go";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await answered();
+  const rows = [...target.querySelectorAll(".tf-tbl tbody tr:not(.tf-wgap)")];
+  expect(rows.map((tr) => cells(tr)[0])).toEqual(["tidewater/fx-rates"]);
+  const [, team, language] = [...rows[0]!.querySelectorAll("td")];
+  expect([...team!.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("pltfrm");
+  expect([...language!.querySelectorAll("mark")].map((m) => m.textContent).join("")).toBe("Go");
+});
+
 test("the Pull requests filter ranks through the app's ranking, letters in order, and marks each field's matched letters (#2532)", async () => {
   await draw(["prs"]);
   const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
