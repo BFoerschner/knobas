@@ -97,9 +97,9 @@ for (const throttle of throttles) {
   await sleep(1500);
   await c.send("Emulation.setCPUThrottlingRate", { rate: throttle });
 
-  // First open: the bar's Passwords, to its rows drawn.
+  // First open: the bar's Secrets, to its rows drawn.
   await js("__pw.reset()");
-  const nav = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Passwords")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const nav = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Secrets")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   const opened = js(`__pw.until(() => document.querySelectorAll(".tf-pw-row").length > 0 && document.querySelector(".tf-pw-node"))`);
   await click(nav);
   record(throttle, "first open", await opened, LINES.open[throttle]);
@@ -110,7 +110,7 @@ for (const throttle of throttles) {
   await sleep(500);
   await js("__pw.reset()");
   const back = js(`__pw.until(() => document.querySelectorAll(".tf-pw-row").length > 0)`);
-  const nav2 = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Passwords")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const nav2 = await js(`(() => { const a = [...document.querySelectorAll(".tf-nav a, .tf-nav button")].find((e) => e.textContent.trim().startsWith("Secrets")); const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   await click(nav2);
   record(throttle, "return", await back, LINES.open[throttle]);
   await sleep(600);

@@ -71,6 +71,11 @@ export function legacyAddress(hash: string): Legacy {
   if (head === "sources") return { go: "#/settings/sources" };
   // The standup digest is a tab of Time.
   if (head === "standup") return { go: "#/time/standup" };
+  // Secrets replaced Passwords (#2515): redirect `#/passwords` and `#/passwords/...` cleanly.
+  if (head === "passwords") {
+    const tail = rest.join("/");
+    return { go: tail === "" ? "#/secrets" : `#/secrets/${tail}` };
+  }
   // The Assets view's *Monitors* tab (#448): Monitors is a section of its own
   // since #864, and the tab's roster went with the rooms UI (#1087, #1459).
   if (head === "assets" && rest[0] === "monitors") return { go: "#/monitors" };

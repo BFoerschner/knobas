@@ -367,7 +367,7 @@ export function syncsPatch(value: string): { sync_interval_secs?: number; sync_b
 export function byHandNote(name: string, passwords: boolean): string {
   const first = `Nothing is read from ${name} in the background.`;
   return passwords
-    ? `${first} It syncs when you press Sync now, here or on the Passwords page. One-time codes keep working between syncs.`
+    ? `${first} It syncs when you press Sync now, here or on the Secrets page. One-time codes keep working between syncs.`
     : `${first} It syncs when you press Sync now.`;
 }
 

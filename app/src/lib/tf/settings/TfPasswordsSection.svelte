@@ -75,9 +75,9 @@
 </script>
 
 <section class="tf-stg-sec">
-  <h2>Passwords</h2>
+  <h2>Secrets</h2>
   <p class="tf-stg-p">
-    What {name} offers the Passwords page. A control is drawn there only where its source offers it. Entries sync into the mirror; a password is read only when you show or copy
+    What {name} offers the Secrets page. A control is drawn there only where its source offers it. Entries sync into the mirror; a password is read only when you show or copy
     it.{#if facts && synced}{" "}It lists {plural(facts.entries, "entry", "entries")} in {plural(facts.folders, "folder", "folders")}.{/if}
   </p>
   {#if !offers.marks_protected_fields}

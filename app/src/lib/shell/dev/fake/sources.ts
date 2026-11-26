@@ -351,8 +351,8 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     roles: [{ role: "passwords", reads: ["read_secret"] }],
     write_ops: [],
     entity_kinds: [
-      { id: "password_entry", label: "Password entry", plural: "Password entries", monogram: "PW", full_sync_exhaustive: true },
-      { id: "password_folder", label: "Password folder", plural: "Password folders", monogram: "PF", full_sync_exhaustive: true },
+      { id: "password_entry", label: "Secret entry", plural: "Secret entries", monogram: "SE", full_sync_exhaustive: true },
+      { id: "password_folder", label: "Secret folder", plural: "Secret folders", monogram: "SF", full_sync_exhaustive: true },
     ],
     config_schema: {
       type: "object",

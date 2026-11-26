@@ -81,6 +81,43 @@ vi.mock("../ipc/sources", async (importOriginal) => ({
   },
 }));
 
+// The Secrets page (#2515, ADR-0056) reads `passwords_held` and `password_entry`.
+vi.mock("../ipc/passwords", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/passwords")>()),
+  passwordsHeld: () =>
+    Promise.resolve({
+      sources: [
+        {
+          id: "pw",
+          name: "Team vault",
+          account: "mara",
+          by_hand: true,
+          never_synced: false,
+          synced_at: "2026-11-22T10:22:00Z",
+          down_at: null,
+          skipped_root: null,
+          adapter_name: "Pleasant Password Server",
+          offers: {
+            one_time_codes: false,
+            expiry: false,
+            usage_comments: false,
+            audit_log: false,
+            history: null,
+            attachments: false,
+            access_requests: false,
+            marks_protected_fields: false,
+            writes: [],
+          },
+          web: null,
+        },
+      ],
+      folders: [{ id: "pw:f1", source: 0, parent: null, name: "Prod", comment_read: false, can_add: false }],
+      entries: [["pw:e1", 0, "pw:f1", "payout db", "payout_svc", "https://pay.example", null, 0, null, []]],
+      recent: [],
+    }),
+  passwordsEntry: () => Promise.resolve(null),
+}));
+
 // The Day tab reads the real bridge; its one read here is an open stretch.
 vi.mock("../ipc/time", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../ipc/time")>()),
@@ -1345,7 +1382,7 @@ test("badges: inbox and failing builds in err tone; nothing drawn at zero", asyn
     Code: null,
     Builds: "2 err",
     Docs: null,
-    Passwords: null,
+    Secrets: null,
     Monitors: null,
     Assets: null,
     "Link sets": null,
@@ -1359,7 +1396,7 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Passwords", "Monitors", "Assets", "Link sets", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Secrets", "Monitors", "Assets", "Link sets", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 
@@ -2757,4 +2794,33 @@ test("Zen mode: Z typed in a field is a letter, and a dialog over the page keeps
   press("z");
   expect(zen.on).toBe(true);
   zen.on = false;
+});
+
+test("Secrets: #/passwords/... redirects cleanly, / and Mod+/ open launcher with #s , and Mod+F focuses the local filter (#2515)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/passwords");
+  expect(location.hash).toBe("#/secrets");
+  expect(navEntry("Secrets").getAttribute("aria-current")).toBe("page");
+  expect(target.querySelector(".tf-pw-page h1")?.textContent).toBe("Secrets");
+  await at("#/passwords/entry/pw%3Ae1");
+  expect(location.hash).toBe("#/secrets/entry/pw%3Ae1");
+  // `/` outside a text input is not swallowed by TfPasswords and opens the launcher seeded with `#s `.
+  press("/");
+  expect(onsearch).toHaveBeenLastCalledWith("#s ");
+  // The real Secrets filter input rendered by TfPasswords: jsdom lacks layout, so stub `getClientRects` for `shownBox()`.
+  const field = target.querySelector<HTMLInputElement>(".tf-pw-filter input")!;
+  expect(field).not.toBeNull();
+  field.getClientRects = () => [{ width: 120, height: 24 }] as unknown as DOMRectList;
+  // `Mod+/` opens the launcher seeded with `#s ` even from inside the filter input.
+  field.focus();
+  onsearch.mockClear();
+  press("/", { metaKey: true });
+  expect(onsearch).toHaveBeenLastCalledWith("#s ");
+  field.blur();
+  // `Mod+F` focuses the real local filter box instead of opening the launcher.
+  onsearch.mockClear();
+  press("f", { metaKey: true });
+  expect(document.activeElement).toBe(field);
+  expect(onsearch).not.toHaveBeenCalled();
 });

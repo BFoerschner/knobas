@@ -2009,6 +2009,77 @@ async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
     assert!(broken.text.starts_with("Needs attention"), "{broken:?}");
 }
 
+/// `#s` restricts launcher results to secret entries (`password_entry`) only,
+/// never secret folders (`password_folder`) or other kinds (#2515).
+#[tokio::test]
+async fn hash_s_narrows_to_secret_entries_only() {
+    let pool = pool().await;
+    let t = seed(&pool, "secrets").await;
+
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('pleasant', 'pleasant', 'Team vault', 'http://pw.example', 'UserPassword')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let entry_id = format!("pleasant:{t}-entry");
+    let folder_id = format!("pleasant:{t}-folder");
+    for (id, kind, title) in [
+        (&entry_id, "password_entry", format!("Payout {t} db")),
+        (&folder_id, "password_folder", format!("Payout {t} folder")),
+    ] {
+        // ADR-0056: titles stay in sync.item; knobas.entity gets an empty title.
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, '')")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item
+               (entity_id, source_id, kind, title, body_text, author, item_updated_at,
+                synced_at, payload)
+             values ($1,'pleasant',$2,$3,'',null, now() - interval '1 hour',
+                     now() - interval '2 minutes', '{}'::jsonb)",
+        )
+        .bind(id)
+        .bind(kind)
+        .bind(&title)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let found = search_inner(&pool, &Registry::for_process(), query(&format!("#s {t}")))
+        .await
+        .expect("#s query answers");
+    assert_eq!(found.interpreted.filters.kinds, ["password_entry"]);
+    assert_eq!(
+        found
+            .groups
+            .iter()
+            .map(|g| g.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["password_entry"],
+        "only secret entries match #s: {found:?}"
+    );
+    let group = &found.groups[0];
+    assert_eq!(group.label, "Secret entry");
+    assert_eq!(group.plural, "Secret entries");
+    assert_eq!(group.monogram, "SE");
+    assert_eq!(
+        group
+            .hits
+            .iter()
+            .map(|h| h.row.entity_id.as_str())
+            .collect::<Vec<_>>(),
+        [entry_id.as_str()]
+    );
+}
+
 /// Multiple mounted kept pages hold their own fuzzy filter lists at once (#2520):
 /// holding well over 4 simultaneous lists (up to `HeldLists::BOUND`, 32) never
 /// evicts earlier lists, and each answers with UTF-16 code-unit highlight marks.
