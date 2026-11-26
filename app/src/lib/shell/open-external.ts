@@ -17,6 +17,8 @@
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { recordBrowserBypass } from "../ipc/app";
+
 /**
  * The only two schemes a mirrored URL may carry.
  *
@@ -43,5 +45,8 @@ export async function openExternal(url: string): Promise<void> {
   if (!ALLOWED.has(parsed.protocol)) {
     throw new Error(`refused: ${parsed.protocol} is not http or https`);
   }
+  // Record a short-lived one-shot bypass before launching the OS browser so the
+  // Firefox extension does not bounce this navigation back into knobas (ADR-0061).
+  await recordBrowserBypass(url).catch(() => {});
   await openUrl(url);
 }

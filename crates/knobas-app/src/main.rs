@@ -11,5 +11,9 @@ fn main() {
     if let Some(code) = knobas_app::live_sources::main_if_asked() {
         std::process::exit(code);
     }
+    // Firefox Native Messaging stdio host (ADR-0061, #2530): exits before Tauri starts.
+    if let Some(code) = knobas_app::link_handoff::main_if_asked() {
+        std::process::exit(code);
+    }
     knobas_app::run();
 }

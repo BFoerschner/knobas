@@ -150,6 +150,11 @@ tauri-plugin-global-shortcut = "=2.3.2"
 # starts. Rust-only (no npm half, no capability). Pinned exactly, the discipline
 # of the plugins above; 2.4.5 is the newest release older than two weeks.
 tauri-plugin-single-instance = "=2.4.5"
+# `knobas://open?url=...` deep-link scheme (ADR-0061, #2530): registers the
+# custom OS scheme at bundle/install time and delivers macOS AppleEvent open-URL
+# events to Rust. Rust-only (no npm half, no capability): deep links resolve in
+# Rust and reach the webview via `link-handoff:open`.
+tauri-plugin-deep-link = "=2.4.10"
 # The click (#339). The plugin's desktop `notify` drops the `notify-rust` handle,
 # so knobas sends through the crate itself and waits on the handle (`notify.rs`).
 # Pinned exactly to the version `Cargo.lock` already carried for the plugin, so

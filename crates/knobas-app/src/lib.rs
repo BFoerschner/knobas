@@ -48,6 +48,7 @@ pub mod frame_rate;
 pub mod inbox;
 #[cfg(test)]
 mod ipc_mirror;
+pub mod link_handoff;
 pub mod link_sets;
 pub mod live_sources;
 pub mod logging;
@@ -172,6 +173,10 @@ pub mod events {
     /// install's step (ADR-0052). Broadcast: the cog's dot and Settings ›
     /// Updates draw it.
     pub const UPDATE_STATE: &str = "update:state";
+    /// Payload: `link_handoff::LinkHandoffTarget` -- an external URL handed off
+    /// via `knobas://open?url=...` or the Firefox Native Messaging host
+    /// (ADR-0061). Sent to the `main` window by label.
+    pub const LINK_HANDOFF_OPEN: &str = "link-handoff:open";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -335,11 +340,15 @@ pub fn run() {
     let builder = if demo {
         builder
     } else {
-        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            capture::focus_main_window(app)
+        builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            capture::focus_main_window(app);
+            link_handoff::handle_args(app, &args);
         }))
     };
     builder
+        // `knobas://open?url=...` deep links (ADR-0061): Rust-only, no npm half,
+        // no capability grant. Delivers macOS AppleEvent open-URL events here.
+        .plugin(tauri_plugin_deep_link::init())
         // *Open in browser*. Its permission is granted in
         // `capabilities/default.json`; without that entry the command is
         // registered and every call is denied at run time.
@@ -387,6 +396,34 @@ pub fn run() {
                     // The sites ride on the main window (ADR-0050).
                     if let Some(profile) = app.try_state::<Profile>() {
                         site::start(app, &profile);
+                    }
+                    // `knobas://open?url=...` deep links (ADR-0061): warm macOS
+                    // AppleEvents arrive via `on_open_url`; cold-start argv URLs
+                    // are queued until both DB and webview are ready.
+                    {
+                        use tauri_plugin_deep_link::DeepLinkExt as _;
+                        let handle = app.handle().clone();
+                        app.deep_link().on_open_url(move |event| {
+                            for url in event.urls() {
+                                link_handoff::handle_deep_link(&handle, url.as_str());
+                            }
+                        });
+                        // An open-URL event macOS sent before the listener
+                        // above existed is not replayed to it; the plugin
+                        // keeps it as the current link. Windows and Linux
+                        // carry theirs in argv, read below.
+                        #[cfg(target_os = "macos")]
+                        if let Ok(Some(urls)) = app.deep_link().get_current() {
+                            for url in urls {
+                                link_handoff::handle_deep_link(app.handle(), url.as_str());
+                            }
+                        }
+                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        {
+                            let _ = app.deep_link().register_all();
+                        }
+                        let cold_args: Vec<String> = std::env::args().skip(1).collect();
+                        link_handoff::handle_args(app.handle(), &cold_args);
                     }
                     tracing::info!(
                         ms = started.elapsed().as_millis(),
@@ -469,6 +506,9 @@ pub fn manage_app_state<R: tauri::Runtime>(
     // before the database is up, and "state not managed" is not an
     // answer anything can branch on.
     handle.manage(capture::CaptureState::new());
+    // Per-source external link handoff, one-shot *Open in browser* bypasses,
+    // cold-start deep-link queue, and the local Native Messaging bridge (ADR-0061).
+    handle.manage(link_handoff::LinkHandoffState::new());
     // The clones running in this process, which `clone_repo` starts
     // and stops and the quit stops with their folders (#1633).
     handle.manage(checkout::clone::Clones::global());
@@ -1093,6 +1133,14 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // Builds' *Recent* (2026-11-25), appended at the foot: the list is
         // append-only (§10.8).
         commands::entity::recent_runs,
+        // External URL handoff, Firefox Native Messaging host, and one-shot
+        // *Open in browser* bypass (ADR-0061, #2530), appended at the foot (§10.8).
+        commands::app::source_link_handoff,
+        commands::app::set_source_link_handoff,
+        commands::app::firefox_host_status,
+        commands::app::install_firefox_host,
+        commands::app::uninstall_firefox_host,
+        commands::app::record_browser_bypass,
     ]
 }
 
@@ -1114,6 +1162,8 @@ pub fn invoke_handler<R: tauri::Runtime>()
 /// Blocks: it runs from the event loop's exit handler, which is not async.
 /// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    // Stop the local Firefox Native Messaging bridge and remove its endpoint (ADR-0061).
+    link_handoff::shutdown(app);
     // Every site's view first, on the main thread the exit handler runs on
     // (ADR-0050).
     site::shutdown(app);
@@ -1555,6 +1605,10 @@ async fn bring_up_app<R: tauri::Runtime>(
             // that reacted to `ready` by fetching would otherwise race the
             // pool it was told about.
             set_db_state(handle, DbState::Ready);
+            // Local bridge for the Firefox Native Messaging host and any
+            // cold-start `knobas://open?url=...` deep links (ADR-0061).
+            link_handoff::start_bridge(handle, profile);
+            link_handoff::drain_pending(handle);
             if let Some(watch) = watch {
                 spawn_watch(handle.clone(), watch, generation);
             }
@@ -1711,6 +1765,7 @@ async fn restart_server<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
         Ok(()) => {
             lifecycle.resume();
             set_db_state(handle, DbState::Ready);
+            link_handoff::drain_pending(handle);
             if let Some(watch) = watch {
                 spawn_watch(handle.clone(), watch, lifecycle.generation());
             }
@@ -2119,6 +2174,7 @@ mod tests {
             super::events::SITE_QUIT,
             super::events::UPDATE_STATE,
             super::events::CLIPBOARD_STATE,
+            super::events::LINK_HANDOFF_OPEN,
         ];
         names.sort_unstable();
         declared.sort_unstable();

@@ -615,3 +615,45 @@ fn the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half() {
          from the machine"
     );
 }
+
+/// The deep-link plugin (ADR-0061) is registered in `run()`, pinned exactly,
+/// and has **no npm half** (and no capability grant): deep links resolve in
+/// Rust and arrive in the webview on `link-handoff:open`.
+#[test]
+fn the_deep_link_plugin_is_registered_pinned_and_has_no_javascript_half() {
+    let code = strip_comments(include_str!("../../src/lib.rs"));
+    assert!(
+        code.contains(".plugin(tauri_plugin_deep_link::init())"),
+        "the deep-link plugin is not registered in `run()`, so `knobas://` URLs \
+         delivered via macOS AppleEvents never reach `link_handoff`"
+    );
+
+    let manifest = include_str!("../../Cargo.toml");
+    let pin = manifest
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("tauri-plugin-deep-link = "))
+        .expect("`tauri-plugin-deep-link` is not a dependency")
+        .trim()
+        .trim_matches('"')
+        .to_owned();
+    assert!(
+        pin.starts_with('='),
+        "`tauri-plugin-deep-link = {pin:?}` is not an exact pin"
+    );
+
+    let package = include_str!("../../../../app/package.json");
+    assert!(
+        !package.contains("@tauri-apps/plugin-deep-link"),
+        "the npm half of the deep-link plugin was added; link handoff resolves in Rust only"
+    );
+
+    let config: Value =
+        serde_json::from_str(include_str!("../../tauri.conf.json")).expect("tauri.conf.json");
+    let schemes: Vec<&str> = config["plugins"]["deep-link"]["desktop"]["schemes"]
+        .as_array()
+        .expect("plugins.deep-link.desktop.schemes is configured")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(schemes, vec!["knobas"]);
+}
