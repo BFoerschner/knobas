@@ -150,7 +150,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       source,
       {
         source,
-        enabled: source === "jira",
+        enabled: false,
         scope: "known_items" as LinkHandoffScope,
       },
     ]),
