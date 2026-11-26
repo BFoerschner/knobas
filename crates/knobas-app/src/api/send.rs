@@ -576,7 +576,9 @@ pub async fn piped(
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiAuth, ApiSend, AuthPlace, changes, indent_json, is_this_computer, needs_asking, prepare};
+    use super::{
+        ApiAuth, ApiSend, AuthPlace, changes, indent_json, is_this_computer, needs_asking, prepare,
+    };
     use crate::api::held::{Held, held};
 
     /// #2533: an answer's JSON is indented token for token: the server's key order, its numbers as written, strings
