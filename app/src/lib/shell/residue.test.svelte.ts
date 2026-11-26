@@ -517,6 +517,8 @@ const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const StatusMenu = (await import("../tf/tickets/StatusMenu.svelte")).default;
 const TfPeoplePick = (await import("../tf/job/TfPeoplePick.svelte")).default;
 const TfLabelsPick = (await import("../tf/job/TfLabelsPick.svelte")).default;
+const ValuePicker = (await import("../tf/tickets/ValuePicker.svelte")).default;
+const TfXsdPoint = (await import("../tf/render/xsd/TfXsdPoint.svelte")).default;
 const TfFactControl = (await import("../tf/job/TfFactControl.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -1112,6 +1114,34 @@ const CASES: Case[] = [
     source: "lib/tf/job/TfLabelsPick.svelte",
     open: (target) => ({
       app: mount(TfLabelsPick, { target, props: { open: true, opener: null, label: "Labels", carried: ["sepa"], offered: ["bank"], create: true, ontoggle: () => {} } }),
+    }),
+  },
+  {
+    /** The view editor's value search (#2535): its ranked list, held by the app while it stands. */
+    name: "ValuePicker",
+    source: "lib/tf/tickets/ValuePicker.svelte",
+    open: (target) => ({
+      app: mount(ValuePicker, {
+        target,
+        props: {
+          options: Array.from({ length: 12 }, (_, n) => [`P${n}`, `Project ${n}`] as [string, string]),
+          label: "Project",
+          many: "projects",
+          isPicked: () => false,
+          ontoggle: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** *Point to a file…* (#2535): its ranked list, held by the app while it stands. */
+    name: "TfXsdPoint",
+    source: "lib/tf/render/xsd/TfXsdPoint.svelte",
+    open: (target) => ({
+      app: mount(TfXsdPoint, {
+        target,
+        props: { namespace: "urn:a", location: "a.xsd", candidates: [{ repo: "r", repoName: null, path: "a.xsd", declares: "urn:a" }], onpick: () => {}, onclose: () => {} },
+      }),
     }),
   },
   {

@@ -9,10 +9,10 @@
   import { tick, untrack } from "svelte";
   import { HOLD_MS } from "../still-press";
 
-  import { fuzzyRank } from "../filter/fuzzy";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { inFloatHost, placeFloat } from "../floats";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { cut } from "./TfPeoplePick.svelte";
 
   let {
     open = $bindable(false),
@@ -65,8 +65,29 @@
 
   /** The most rows drawn at once; typing narrows the rest into reach. */
   const DRAWN_MOST = 60;
-  const hits = $derived(fuzzyRank(names, typed, (name) => name).slice(0, DRAWN_MOST));
+  /** The app ranks the names by what was typed (#2535), the closest first. */
+  const nameOf = (name: string) => name;
+  const order = heldOrder<string>("labels-pick");
+  $effect(() => order.ask(typed, names, nameOf));
+  const hits = $derived(order.rows(typed, names, nameOf).slice(0, DRAWN_MOST));
   const drawn = $derived(hits);
+  const marking = $derived(order.typed(typed, names));
+  /** `Enter` before the ranking answered what was typed picks from that answer, once it lands; typing on drops it. */
+  let entering = $state<string | null>(null);
+  $effect(() => {
+    if (entering === null) return;
+    if (entering !== typed) entering = null;
+    else if (order.settled(typed, names)) {
+      entering = null;
+      pickAt();
+    }
+  });
+
+  function pickAt() {
+    const hit = hits[at];
+    if (hit !== undefined) toggle(hit);
+    else if (adds) addFresh();
+  }
   const fresh = $derived(typed.trim());
   const adds = $derived(create && fresh !== "" && !names.some((name) => name.toLowerCase() === fresh.toLowerCase()));
   const count = $derived(hits.length + (adds ? 1 : 0));
@@ -108,9 +129,8 @@
       event.preventDefault();
       // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
       if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
-      const hit = hits[at];
-      if (hit !== undefined) toggle(hit.option);
-      else if (adds) addFresh();
+      if (order.settled(typed, names)) pickAt();
+      else entering = typed;
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -182,7 +202,7 @@
       {onkeydown}
     />
     <div class="tf-fpick-opts" id="{uid}-opts" role="listbox" aria-multiselectable="true" aria-label={label}>
-      {#each drawn as { option: name, runs }, index (name)}
+      {#each drawn as name, index (name)}
         <button
           type="button"
           role="option"
@@ -195,7 +215,7 @@
           onclick={() => toggle(name)}
         >
           <span class="tf-fpick-tick" aria-hidden="true">{carried.includes(name) ? "✓" : ""}</span>
-          <span class="tf-fpick-name">{#each cut(runs, name.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
+          <span class="tf-fpick-name"><Marked text={name} typed={marking} pairs={order.marks(name)} /></span>
         </button>
       {/each}
       {#if adds}

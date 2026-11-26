@@ -7,6 +7,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filters rank through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+
 import type { AssetDetail, AssetEdit, AssetRow, AssetType, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
 import { EVENTS } from "../../ipc";
@@ -524,6 +527,32 @@ test("#/monitors/unmonitored lists the assets and routes worth a check with env 
   expect(rows()[1]!.querySelector("td a")?.getAttribute("href")).toBe("#/route/route%3Agitea");
   // Its own band, over its own rows.
   expect(target.querySelector<HTMLInputElement>(".tf-fbar input")?.placeholder).toBe("Filter assets");
+});
+
+test("both filters have the app rank their rows and mark the letters it matched, the roster in its own order (#2535)", async () => {
+  await draw([], null);
+  const spelled = (el: Element) => [...el.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase();
+  // No substring holds "pgpyts"; its letters stand in order in "pg-payments".
+  sessionFilter("monitors").text = "pgpyts";
+  await settle();
+  expect(rows().map((tr) => text(tr.querySelector(".tf-mon-open")))).toEqual(["pg-payments"]);
+  expect(spelled(rows()[0]!.querySelector(".tf-mon-open")!)).toBe("pgpyts");
+  // An asset's name is marked where the ranking matched it: "flows-stage" the monitor and its container both hold "flwstg".
+  sessionFilter("monitors").text = "flwstg";
+  await settle();
+  expect(spelled(rows()[0]!.querySelector(".tf-mon-open")!)).toBe("flwstg");
+  sessionFilter("monitors").text = "";
+  unmount(view!);
+  view = null;
+
+  await draw(["unmonitored"]);
+  const field = target.querySelector<HTMLInputElement>(".tf-fbar input")!;
+  // No substring holds "gtrt"; its letters stand in order in "Gitea Route".
+  field.value = "gtrt";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["Gitea"]);
+  expect(spelled(rows()[0]!)).toBe("gtrt");
 });
 
 test("Create monitor on a route opens as HTTP on its URL plus /health and records the name on the route", async () => {

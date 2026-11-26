@@ -5,8 +5,10 @@
  *
  * - **The latest answer only**: an answer to a text or a list the page has since moved past is dropped.
  * - **What was drawn stays until the answer lands**: {@link FuzzyOrder.rows} gives the rows drawn before while an
- *   answer is out, so a key never empties the list for a frame. A list drawn for the first time with words already
- *   typed (a return to the page) draws the filter as it was until its answer lands.
+ *   answer is out, so a key never empties the list for a frame. A list read again with the same words typed (a sync,
+ *   a row gone) keeps the rows whose text the last answer kept, in its order and with its marks (#2535). A list drawn
+ *   for the first time with words already typed (a return to the page) draws the filter as it was until its answer
+ *   lands.
  * - **No text, the rows as given**, in the page's own order.
  * - **A failed ask is the filter as it was**: every typed word somewhere in the row, any order, any case
  *   ({@link matcherOf}), each marked where it stands, so the page keeps working if the command does not answer.
@@ -55,6 +57,10 @@ interface Answer<T> {
   from: readonly T[];
   rows: T[];
   marks: Map<T, readonly number[]>;
+  /** The texts of `from`, made only once a list read again asks for them (a held list does not send them per key). */
+  texts: () => string[];
+  /** Each kept text's place in `rows` and its marks, made once from `texts` when first carried. */
+  kept?: Map<string, { at: number; marks: readonly number[] }>;
 }
 
 export class FuzzyOrder<T> {
@@ -97,6 +103,8 @@ export class FuzzyOrder<T> {
   #drawn: readonly T[] = [];
   /** The rows {@link FuzzyOrder.rows} was last given: what was drawn stands for those rows only. */
   #drawnFrom: readonly T[] | null = null;
+  /** The marks of rows carried over from the last answer onto a list read again (#2535), until that list's answer. */
+  #carried = new Map<T, readonly number[]>();
   /** Whether the latest query seen by {@link rows} or {@link ask} was empty, hiding stale marks on the same frame. */
   #cleared = false;
 
@@ -121,7 +129,8 @@ export class FuzzyOrder<T> {
         kept.push(row);
         marks.set(row, at);
       }
-      this.#answer = { text, from: rows, rows: kept, marks };
+      this.#carried = new Map();
+      this.#answer = { text, from: rows, rows: kept, marks, texts: textsOf };
     };
     const asked = this.#held === null ? fuzzyRank(text, textsOf()) : this.#rankHeld(this.#held, text, rows, textsOf);
     asked.then(answered, () => {
@@ -141,6 +150,7 @@ export class FuzzyOrder<T> {
       const answer = this.#answer;
       if (answer !== null && answer.text === text && answer.from === rows) shown = answer.rows;
       else if (this.#drawnFrom === rows) shown = this.#drawn;
+      else if (answer !== null && answer.text === text) shown = this.#carry(answer, rows, haystack);
       else {
         const holds = matcherOf(text);
         shown = rows.filter((row) => holds(haystack(row)));
@@ -149,6 +159,33 @@ export class FuzzyOrder<T> {
     this.#drawn = shown;
     this.#drawnFrom = rows;
     return shown;
+  }
+
+  /**
+   * The rows of a list read again with the same words (`rows`, new objects) whose text `answer` kept, in its order, each
+   * with its marks: a sync or a removed row never draws the filter as it was over the rest for a frame (#2535).
+   */
+  #carry(answer: Answer<T>, rows: readonly T[], haystack: (row: T) => string): T[] {
+    if (answer.kept === undefined) {
+      const texts = answer.texts();
+      const kept = new Map<string, { at: number; marks: readonly number[] }>();
+      const index = new Map<T, number>(answer.from.map((row, at) => [row, at]));
+      answer.rows.forEach((row, at) => {
+        const text = texts[index.get(row)!]!;
+        if (!kept.has(text)) kept.set(text, { at, marks: answer.marks.get(row) ?? [] });
+      });
+      answer.kept = kept;
+    }
+    const kept = answer.kept;
+    const carried: { row: T; at: number }[] = [];
+    this.#carried = new Map();
+    for (const row of rows) {
+      const hit = kept.get(haystack(row));
+      if (hit === undefined) continue;
+      carried.push({ row, at: hit.at });
+      this.#carried.set(row, hit.marks);
+    }
+    return carried.sort((a, b) => a.at - b.at).map(({ row }) => row);
   }
 
   /** Whether the answer for `text` over `rows` has landed: what a page's row hold reads as part of its filter. */
@@ -183,7 +220,7 @@ export class FuzzyOrder<T> {
     // Read `#answer` before `#cleared` so Svelte reactive readers always subscribe even when mounted cleared.
     const answer = this.#answer;
     if (this.#cleared || answer === null) return [];
-    const pairs = answer.marks.get(row) ?? [];
+    const pairs = answer.marks.get(row) ?? this.#carried.get(row) ?? [];
     if (from === undefined && length === undefined) return pairs;
     return sliceMarks(pairs, from ?? 0, length);
   }

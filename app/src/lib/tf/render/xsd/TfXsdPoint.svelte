@@ -9,7 +9,9 @@
   import "../../css/xsd.css";
   import TfDialog from "../../settings/TfDialog.svelte";
   import { filterKeys } from "../../filter-keys";
-  import type { Candidate } from "./xsd-point";
+  import Marked from "../../filter/Marked.svelte";
+  import { heldOrder } from "../../filter/ranked.svelte";
+  import { pointSorted, pointText, type Candidate } from "./xsd-point";
 
   let {
     namespace,
@@ -31,14 +33,24 @@
   // svelte-ignore state_referenced_locally
   let typed = $state(location === null ? "" : base(location.replace(/[?#].*$/, "")));
   const fits = (c: Candidate) => namespace === null || c.declares === namespace;
-  /** The candidates the words keep: those that fit first, this repository's before another's, then the shorter path. */
+  /**
+   * The candidates the words keep, ranked by the app (#2535): those that fit first, this repository's before
+   * another's, then best first (nothing typed: the shorter path). The dialog opens with the location's name typed, so
+   * the list waits for its first answer rather than drawing the old filter and moving when the answer lands.
+   */
+  const all = $derived(candidates ?? []);
+  const order = heldOrder<Candidate>("xsd-point");
+  $effect(() => order.ask(typed, all, pointText));
+  const typedNow = $derived(typed.trim() !== "");
   const shown = $derived.by(() => {
-    const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
-    const kept = (candidates ?? []).filter((c) => words.every((w) => `${c.repoName ?? ""} ${c.path}`.toLowerCase().includes(w)));
+    if (!order.ready(typed, all)) return null;
+    const kept = order.rows(typed, all, pointText);
     // A name typed that matches nothing still lists every file: the location's own name may not be the file's.
-    const list = kept.length === 0 && words.length > 0 ? [...(candidates ?? [])] : kept;
-    return list.sort((a, b) => Number(fits(b)) - Number(fits(a)) || Number(a.repoName !== null) - Number(b.repoName !== null) || a.path.length - b.path.length || (a.path < b.path ? -1 : 1));
+    return kept.length === 0 && typedNow ? pointSorted(all, fits, false) : pointSorted(kept, fits, typedNow);
   });
+  const marking = $derived(order.typed(typed, all));
+  /** Where a file's path starts in its ranked text. */
+  const pathAt = (c: Candidate) => (c.repoName ?? "").length + 1;
   /** The rows drawn: a repository's schemas, at most this many (the index's own bound). */
   const SHOWN = 300;
 </script>
@@ -56,14 +68,16 @@
     <div class="tf-xsd-pointlist" role="listbox" aria-label="Schema files">
       {#if candidates === null}
         <p class="tf-oas-fnote" role="status">Reading the repository's schemas…</p>
+      {:else if shown === null}
+        <!-- The first answer is out: nothing drawn yet, so nothing moves when it lands. -->
       {:else if shown.length === 0}
         <p class="tf-oas-fnote">No schema file here.</p>
       {:else}
         {#each shown.slice(0, SHOWN) as c (`${c.repo}\n${c.path}`)}
           {@const ok = fits(c)}
           <button type="button" role="option" aria-selected="false" class="tf-xsd-pointrow" class:tf-xsd-pointno={!ok} disabled={!ok} title={ok ? `Use ${c.path}` : `It declares ${c.declares === "" ? "no namespace" : c.declares}`} onclick={() => onpick(c)}>
-            <span class="tf-xsd-pointname">{base(c.path)}</span>
-            <span class="tf-xsd-pointpath">{c.repoName === null ? "" : `${c.repoName}${c.branch ? `, at ${c.branch}` : ""}: `}{c.path}</span>
+            <span class="tf-xsd-pointname"><Marked text={base(c.path)} typed={marking} pairs={order.marks(c, pathAt(c) + c.path.lastIndexOf("/") + 1)} /></span>
+            <span class="tf-xsd-pointpath">{c.repoName === null ? "" : `${c.repoName}${c.branch ? `, at ${c.branch}` : ""}: `}<Marked text={c.path} typed={marking} pairs={order.marks(c, pathAt(c), c.path.length)} /></span>
             {#if !ok}<span class="tf-xsd-pointns">declares {c.declares === "" ? "no namespace" : c.declares}</span>{/if}
           </button>
         {/each}

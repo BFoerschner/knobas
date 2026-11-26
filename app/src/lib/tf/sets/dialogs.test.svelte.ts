@@ -5,6 +5,10 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filters rank through the app's ranking (#2535): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+import { ranked } from "../filter/test-fuzzy";
+
 import type { EntityRow, LinkSetRow } from "../../ipc/entity";
 import TfApplySet from "../job/TfApplySet.svelte";
 import TfSaveSet from "../job/TfSaveSet.svelte";
@@ -186,4 +190,42 @@ test("Add…: Enter on a row adds what is ticked, and with nothing ticked sends 
   await settle();
   press(first!, "Enter");
   expect(added).toEqual([["x"]]);
+});
+
+/** Types `words` into `field` and waits for the ranking's answer. */
+async function typeInto(field: HTMLInputElement, words: string) {
+  field.value = words;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await ranked();
+}
+const spelled = (el: Element) => [...el.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase();
+
+test("Apply: the filter ranks the sets through the app's ranking, marks the letters it matched, and Enter applies the best (#2535)", async () => {
+  const onapply = apply();
+  await settle();
+  const filter = target.querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
+  // No substring holds "ldgstk"; its letters stand in order in "Ledger stack".
+  await typeInto(filter, "ldgstk");
+  const names = [...target.querySelectorAll(".tf-pickrow b")];
+  expect(names.map((b) => b.textContent)).toEqual(["Ledger stack"]);
+  expect(spelled(names[0]!)).toBe("ldgstk");
+  filter.form!.requestSubmit();
+  flushSync();
+  expect(onapply).toHaveBeenCalledWith(SETS[1]);
+});
+
+test("Add…: the filter ranks the candidates through the app's ranking and marks the letters it matched (#2535)", async () => {
+  const candidates = [
+    { entity_id: "x", name: "tidewater/payout-service", sub: "" },
+    { entity_id: "y", name: "tidewater/psp-client", sub: "" },
+  ];
+  view = mount(TfSetPicker, {
+    target,
+    props: { kind: "repo", setName: "Payout stack", have: new Set<string>(), read: async () => candidates, onadd: () => {}, onclose: () => {} },
+  });
+  await settle();
+  await typeInto(target.querySelector<HTMLInputElement>("input[aria-label='Filter']")!, "pysvc");
+  const names = [...target.querySelectorAll(".tf-pick-name")];
+  expect(names.map((el) => el.textContent)).toEqual(["tidewater/payout-service"]);
+  expect(spelled(names[0]!)).toBe("pysvc");
 });

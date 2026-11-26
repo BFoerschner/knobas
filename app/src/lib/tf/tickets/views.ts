@@ -15,7 +15,6 @@ import type {
   TicketViewRow,
   ViewColumn,
 } from "../../ipc/search";
-import { matchesAll } from "../filter/filter";
 import { CONDITION_FIELDS, conditionsText } from "./editor";
 import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
@@ -89,6 +88,11 @@ export interface ViewGroup {
   system: string | null;
 }
 
+/** What *Find a view* ranks a view by: its name, then the query it reads (its source's own, for a synced view, #1273). */
+export function viewText(view: TicketViewRow): string {
+  return `${view.name} ${view.saved_view_source?.source_query ?? view.query}`;
+}
+
 /**
  * The views pane's groups (R-3.2): *Mine*, *Team*, *Epics* and *Projects*
  * first, then every group somebody typed in the order its first view sits,
@@ -96,19 +100,20 @@ export interface ViewGroup {
  * sources bring in at every sync (#877, R-3.20): per ticket system in the
  * order its first view sits, boards before filters. A group is a synced one
  * when a view in it has a `saved_view_source`, whatever it is called (#2032).
- * Only views `find` admits (by name and by query, every word somewhere); a
- * group left empty is not drawn.
+ * Only the views `found` holds, where it is given (the ranking of what *Find a
+ * view* holds over {@link viewText}, #2535), each still in its group and place;
+ * a group left empty is not drawn.
  */
-export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
-  const found = views
+export function groupViews(views: TicketViewRow[], found: ReadonlySet<TicketViewRow> | null): ViewGroup[] {
+  const kept = views
     .filter((view) => view.saved_view_source?.hidden !== true)
-    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.saved_view_source?.source_query ?? view.query}`, find))
+    .filter((view) => found === null || found.has(view))
     .sort(listOrder);
-  const groups = [...new Set([...OWN_GROUPS, ...found.map((view) => view.group)])].map((name) => {
-    const held = found.filter((view) => view.group === name);
+  const groups = [...new Set([...OWN_GROUPS, ...kept.map((view) => view.group)])].map((name) => {
+    const held = kept.filter((view) => view.group === name);
     return { name, views: held, system: held.find((view) => view.saved_view_source !== null)?.saved_view_source?.system ?? null };
   });
-  const systems = savedViewSystems(found);
+  const systems = savedViewSystems(kept);
   /** Your own groups first (-1), then each ticket system's, in the order its first view sits. */
   const systemRank = (group: ViewGroup) => (group.system === null ? -1 : systems.indexOf(group.system));
   /** Within a system, its boards (0) before its filters (1). */
