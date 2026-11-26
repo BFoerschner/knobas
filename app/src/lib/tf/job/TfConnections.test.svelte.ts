@@ -31,7 +31,7 @@ const real = Element.prototype.scrollIntoView;
 function open() {
   const props = $state({
     jobKey: "PAY-231",
-    links: [],
+    links: [] as LinkEntry[],
     groups: [GROUP],
     layers: createLayers(),
     onclose: () => {},
