@@ -1444,6 +1444,17 @@ test("Enter in the value search before the ranking answers picks the best of tha
   expect(searchLine().textContent).toBe("project:TRK");
 });
 
+test("an Enter still waiting on the ranking is dropped when more is typed, never picking for the new words (#2535)", async () => {
+  await projectCondition();
+  input(valueSearch(), "trk");
+  key(valueSearch(), "Enter");
+  // Typed on before the answer: the Enter was for "trk", not for what the new words rank first.
+  input(valueSearch(), "sec");
+  await settle();
+  expect(searchLine().textContent).not.toContain("project:");
+  expect(valueSearch().value).toBe("sec");
+});
+
 test("a condition with few values stays a row of toggles, with no search", async () => {
   const h = harness();
   await open(h);

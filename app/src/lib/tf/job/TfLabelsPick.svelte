@@ -72,12 +72,15 @@
   const hits = $derived(order.rows(typed, names, nameOf).slice(0, DRAWN_MOST));
   const drawn = $derived(hits);
   const marking = $derived(order.typed(typed, names));
-  /** `Enter` before the ranking answered what was typed picks from that answer, once it lands. */
-  let entering = $state(false);
+  /** `Enter` before the ranking answered what was typed picks from that answer, once it lands; typing on drops it. */
+  let entering = $state<string | null>(null);
   $effect(() => {
-    if (!entering || !order.settled(typed, names)) return;
-    entering = false;
-    pickAt();
+    if (entering === null) return;
+    if (entering !== typed) entering = null;
+    else if (order.settled(typed, names)) {
+      entering = null;
+      pickAt();
+    }
   });
 
   function pickAt() {
@@ -127,7 +130,7 @@
       // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
       if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
       if (order.settled(typed, names)) pickAt();
-      else entering = true;
+      else entering = typed;
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();

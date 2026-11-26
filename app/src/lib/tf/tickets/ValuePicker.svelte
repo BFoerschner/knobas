@@ -57,12 +57,15 @@
   const hits = $derived(order.rows(typed, options, shownOf));
   const drawn = $derived(hits.slice(0, DRAWN_MOST));
   const marking = $derived(order.typed(typed, options));
-  /** `Enter` before the ranking answered what was typed picks the best of that answer, once it lands. */
-  let entering = $state(false);
+  /** `Enter` before the ranking answered what was typed picks the best of that answer, once it lands; typing on drops it. */
+  let entering = $state<string | null>(null);
   $effect(() => {
-    if (!entering || !order.settled(typed, options)) return;
-    entering = false;
-    pickCurrent();
+    if (entering === null) return;
+    if (entering !== typed) entering = null;
+    else if (order.settled(typed, options)) {
+      entering = null;
+      pickCurrent();
+    }
   });
 
   function pickCurrent() {
@@ -94,7 +97,7 @@
       // Always the field's: Enter here must never save the view.
       event.preventDefault();
       if (order.settled(typed, options)) pickCurrent();
-      else entering = true;
+      else entering = typed;
     } else if (event.key === "Escape" && typed !== "") {
       // The dialog leaves a key a field has taken alone (`TfDialog`).
       event.preventDefault();

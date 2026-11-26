@@ -99,18 +99,22 @@
 
   /**
    * `Enter` in the filter before the ranking answered what was typed (#2535): the set it applies is the first the
-   * answer leaves, not the first drawn for the words before, so the press waits for that answer.
+   * answer leaves, not the first drawn for the words before, so the press waits for that answer. It is for the words
+   * it was pressed on: typing on drops it, so it never applies what other words rank first.
    */
-  let waiting = $state(false);
+  let waiting = $state<string | null>(null);
   $effect(() => {
-    if (!waiting || !order.settled(typed, rows)) return;
-    waiting = false;
-    if (chosen !== null) onapply(chosen);
+    if (waiting === null) return;
+    if (waiting !== typed) waiting = null;
+    else if (order.settled(typed, rows)) {
+      waiting = null;
+      if (chosen !== null) onapply(chosen);
+    }
   });
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    if (!order.settled(typed, rows)) waiting = true;
+    if (!order.settled(typed, rows)) waiting = typed;
     else if (chosen !== null) onapply(chosen);
   }
 

@@ -363,6 +363,25 @@ test("Enter in the filter before the ranking answers applies the set the answer 
   expect(saved.at(-1)?.id).toBe("payout-stack");
 });
 
+test("an Enter still waiting on the ranking is dropped when more is typed, never applying for the new words (#2535)", async () => {
+  open();
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
+  field.value = "payout";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  field.form!.requestSubmit();
+  // Typed on before the answer: the press was for "payout", not for what "ledger" ranks first.
+  field.value = "ledger";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  await settle();
+  expect(saved).toEqual([]);
+});
+
 test("Apply is disabled when no set the filter leaves can apply", async () => {
   open(LEDGER_APPLIES);
   await settle();
