@@ -86,7 +86,7 @@
   <div class="tf-stg-l tf-made-l">
     Generated folders<small>{#if store !== null}{counted(store.folders)}, {sizeLabel(store.bytes)} of {capLabel(store.cap_bytes)}. {PLACE[store.place]}{/if}</small>
   </div>
-  <div class="tf-stg-c tf-made-c">
+  <div class="tf-stg-c">
     {#if store !== null}<TfPath path={store.dir} />{/if}
     <button type="button" class="tf-btn tf-sm" disabled={store === null} onclick={change}>Change…</button>
     <button type="button" class="tf-btn tf-sm tf-ghost" disabled={store === null || store.folders === 0 || clearing} onclick={() => void clearAll()}>Clear</button>

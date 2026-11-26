@@ -1227,6 +1227,11 @@ impl Runs {
             let pointer = source_dir.join("keys").join(&key);
             if std::fs::read_to_string(&pointer).is_ok_and(|named| named.trim() == leaf) {
                 let _ = std::fs::remove_file(&pointer);
+                // No key names the leaf now, so Settings counts it no more,
+                // even where a command still runs in it and it stays (#2519).
+                if let Some(root) = source_dir.parent() {
+                    store::changed(root);
+                }
             }
             store::remove_leaf(source_dir, &leaf);
         }
@@ -2154,6 +2159,8 @@ mod tests {
         let told = Arc::new(Mutex::new(Vec::<FolderRenderMoved>::new()));
         let heard = Arc::clone(&told);
         runs.on_moved(move |moved| heard.lock().unwrap().push(moved));
+        let root = runs.store().unwrap();
+        assert_eq!(store::usage(&root).0, 1, "Settings counts it");
         // A command still runs in it: memory forgets it, the leaf stays on disk.
         let hold = store::hold(&made.dir);
         assert!(runs.drop_made(&token));
@@ -2161,6 +2168,11 @@ mod tests {
         assert!(
             made.dir.exists(),
             "a leaf a command runs in is not removed under it"
+        );
+        assert_eq!(
+            store::usage(&root),
+            (0, 0),
+            "no key names the leaf left on disk, so the count kept in memory drops it (#2519)"
         );
         let heard = told.lock().unwrap().clone();
         assert_eq!(heard.len(), 1, "the slot that showed it is told");
