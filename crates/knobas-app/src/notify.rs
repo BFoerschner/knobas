@@ -5,8 +5,8 @@
 //! `notify` hands the desktop notification to `notify-rust` and drops the
 //! handle -- so nothing in the process could learn of a click, and the
 //! plugin's `register_listener` exists on mobile only. This module owns the
-//! send instead: `notify-rust` shows the desktop notification, the handle's
-//! `wait_for_action` runs on a thread of its own, and a click becomes the
+//! send instead: `notify-rust` shows the desktop notification (on Windows,
+//! WinRT itself: see *Platforms*), the wait runs on a thread of its own, and a click becomes the
 //! `notification:clicked` event with the item's address, which the store on
 //! the other side already knows how to navigate to. The decision to own the
 //! click on `notify-rust` rather than on a second wrapper is
@@ -18,7 +18,8 @@
 //!
 //! The prototype showed `wait_for_action` returning only on a click or on the
 //! user clearing the banner from Notification Center -- **never** on
-//! the banner sliding away. Every wait is therefore a thread blocked for as
+//! the banner sliding away (and the Windows wait reads past it on purpose,
+//! see *Platforms*). Every wait is therefore a thread blocked for as
 //! long as the reader ignores that banner, which could be the whole session,
 //! and knobas neither invents a timeout (the OS gives none, and a made-up one
 //! drops real clicks) nor lets the count grow without bound. Two rules:
@@ -43,12 +44,22 @@
 //! (`preview-macos-un`, Björn's ruling on the prototype's evidence: current
 //! API, a clean banner, and a body click reported without a button). Linux
 //! gets the freedesktop `default` action, which is what makes a body click
-//! reportable at all there; Windows uses the handle API as it stands, with
-//! one thing worth knowing: its `wait_for_action` answers [`CLOSED`] for a
-//! failed activation as well as for a dismiss (`windows.rs`, `Err(_) =>
-//! "__closed"`), so a broken click there reads as a clear. Both are written
-//! from `notify-rust` 4.18.0's sources and **neither has been witnessed** --
-//! the same disclosure `testenv/README.md` and the §10.8 entry carry.
+//! reportable at all there. Both wait on `notify-rust`'s handle.
+//!
+//! Windows does not (#2529). `notify-rust` 4.18.0's Windows handle reported a
+//! body click as [`CLOSED`] through `wait_for_action`, returned on the
+//! banner's timeout and so dropped the receiver a later click from Action
+//! Center was sent to, and sent under PowerShell's AUMID for want of one. The
+//! Windows backend ([`platform`]'s `toast`) sends on WinRT itself: under the
+//! bundle identifier, registered per user with knobas's name and icon at
+//! start ([`aumid_registration`]), holding the toast for the whole wait, and
+//! reading its reports through [`decide`], which reads past a timed-out
+//! banner. The rule is plain code tested on every OS; the WinRT shell around
+//! it compiles under `just clippy-windows` and **has not been witnessed** on
+//! Windows yet -- the check is in `testenv/README.md`.
+//!
+//! Whichever backend reports the click, the window comes up
+//! ([`NotificationEvents::bring_forward`]) before the address leaves.
 
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -570,31 +581,33 @@ pub mod platform {
                 .map_err(said)?;
             let dismissed = report.clone();
             toast
-                .Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(
-                    move |_, args| {
-                        let reason = args.as_ref().and_then(|args| args.Reason().ok());
-                        let _ = dismissed.send(reported_dismissal(
-                            reason == Some(ToastDismissalReason::TimedOut),
-                        ));
-                        Ok(())
-                    },
-                ))
+                .Dismissed(&TypedEventHandler::<
+                    ToastNotification,
+                    ToastDismissedEventArgs,
+                >::new(move |_, args| {
+                    let reason = args.as_ref().and_then(|args| args.Reason().ok());
+                    let _ = dismissed.send(reported_dismissal(
+                        reason == Some(ToastDismissalReason::TimedOut),
+                    ));
+                    Ok(())
+                }))
                 .map_err(said)?;
             toast
-                .Failed(&TypedEventHandler::<ToastNotification, ToastFailedEventArgs>::new(
-                    move |_, args| {
-                        let code = args.as_ref().and_then(|args| args.ErrorCode().ok());
-                        tracing::warn!(?code, "the Windows toast failed");
-                        let _ = report.send(Reported::Gone);
-                        Ok(())
-                    },
-                ))
+                .Failed(
+                    &TypedEventHandler::<ToastNotification, ToastFailedEventArgs>::new(
+                        move |_, args| {
+                            let code = args.as_ref().and_then(|args| args.ErrorCode().ok());
+                            tracing::warn!(?code, "the Windows toast failed");
+                            let _ = report.send(Reported::Gone);
+                            Ok(())
+                        },
+                    ),
+                )
                 .map_err(said)?;
 
-            let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-                app_id,
-            ))
-            .map_err(said)?;
+            let notifier =
+                ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
+                    .map_err(said)?;
             notifier.Show(&toast).map_err(said)?;
             Ok(Box::new(move || {
                 // Held until the wait ends: the handlers live on the toast,
@@ -965,7 +978,11 @@ mod tests {
         assert_eq!(reported_dismissal(false), Reported::Gone);
         assert_eq!(decided(vec![Reported::Gone]), (CLOSED.to_owned(), 1));
         assert_eq!(
-            decided(vec![Reported::BannerExpired, Reported::Gone, Reported::Body]),
+            decided(vec![
+                Reported::BannerExpired,
+                Reported::Gone,
+                Reported::Body
+            ]),
             (CLOSED.to_owned(), 2),
             "nothing after a dismiss is read"
         );
@@ -1004,7 +1021,10 @@ mod tests {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
         let identifier = config["identifier"].as_str().expect("an identifier");
-        assert_eq!(platform::Desktop::new(identifier).app_id(), "dev.knobas.desktop");
+        assert_eq!(
+            platform::Desktop::new(identifier).app_id(),
+            "dev.knobas.desktop"
+        );
     }
 
     /// The per-user registration that gives a toast knobas's name and icon
@@ -1015,16 +1035,22 @@ mod tests {
         let key = aumid_registration(
             "dev.knobas.desktop",
             "knobas",
-            std::path::Path::new("C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png"),
+            std::path::Path::new(
+                "C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png",
+            ),
         );
-        assert_eq!(key.subkey, "Software\\Classes\\AppUserModelId\\dev.knobas.desktop");
+        assert_eq!(
+            key.subkey,
+            "Software\\Classes\\AppUserModelId\\dev.knobas.desktop"
+        );
         assert_eq!(
             key.values,
             vec![
                 ("DisplayName", "knobas".to_owned()),
                 (
                     "IconUri",
-                    "C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png".to_owned()
+                    "C:\\Users\\b\\AppData\\Roaming\\dev.knobas.desktop\\notification-icon.png"
+                        .to_owned()
                 ),
             ]
         );

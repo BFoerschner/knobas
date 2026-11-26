@@ -75,9 +75,9 @@ pub mod ticket_views;
 pub mod time;
 pub mod update;
 pub mod webview_menu;
-pub mod window_look;
 #[cfg(windows)]
 mod win_registry;
+pub mod window_look;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};

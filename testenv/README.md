@@ -2289,6 +2289,21 @@ notarization warning is expected too. The check has two steps:
    `notification closed without a click` at `debug` instead
    (`RUST_LOG=knobas_app=debug` to see it).
 
+**On Windows** (#2529) the toast is sent on WinRT under the bundle
+identifier `dev.knobas.desktop`, registered at start under
+`HKCU\Software\Classes\AppUserModelId\dev.knobas.desktop` (`DisplayName`
+knobas, `IconUri` the `notification-icon.png` knobas writes into
+`%APPDATA%\dev.knobas.desktop`). The check, from an installed build and
+again from the bare release binary under `target\release` (`KNOBAS_UPDATE=off`
+for both): the toast and its Action Center entry say *knobas* with knobas's
+icon, not *Windows PowerShell*; minimize knobas, raise a toast and click its
+body: knobas comes up in front on that item's room; raise another, let the
+banner slide away (about 5 s), open Action Center and click it there: the
+same. The stderr lines are the macOS ones, and a dismissal from Action
+Center logs `notification closed without a click`. A toast that never shows
+logs `the Windows toast failed` with its `HRESULT`, or the registration's
+`the notification identity is not registered` at start.
+
 **The Launch Services caveat, and why the path matters.** knobas sends
 through `notify-rust`'s `UNUserNotificationCenter` backend, and a click on
 one of its banners activates *the bundle Launch Services has registered for
