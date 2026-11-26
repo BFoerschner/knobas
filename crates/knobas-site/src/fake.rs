@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::host::{Hooks, HostError, Rect, SiteHost, SiteView, ViewEvent, ViewSpec};
+use crate::host::{Hooks, HostError, Rect, SiteHost, SiteView, Travel, ViewEvent, ViewSpec};
 use crate::keys::{Claim, Press};
 use crate::scripts::{Dirty, SignInCall};
 use crate::sites::{Shell, SiteEvent};
@@ -42,6 +42,10 @@ pub struct FakeViewState {
     pub fill_answers: VecDeque<String>,
     /// Every fill script run, in order.
     pub sign_ins: Vec<SignInCall>,
+    /// What [`SiteView::poll`] reads from the view.
+    pub poll: Option<ViewEvent>,
+    /// What [`SiteView::holds_keyboard`] answers.
+    pub holds_keyboard: Option<bool>,
     /// What the view may load: made with, then each change (ux30).
     pub confine: Option<crate::confine::Confine>,
 }
@@ -108,7 +112,10 @@ impl SiteView for FakeView {
         }
     }
     fn poll(&self) -> Option<ViewEvent> {
-        None
+        self.state.borrow().poll.clone()
+    }
+    fn holds_keyboard(&self) -> Option<bool> {
+        self.state.borrow().holds_keyboard
     }
     fn url(&self) -> Option<String> {
         self.state.borrow().url.clone()
@@ -162,6 +169,8 @@ pub struct FakeHost {
     /// Views take a change of what they may load only when made, as on
     /// Windows (ux30).
     pub remakes: Rc<RefCell<bool>>,
+    /// What [`SiteHost::window_active`] answers.
+    pub active: Rc<RefCell<Option<bool>>>,
 }
 
 impl FakeHost {
@@ -215,6 +224,19 @@ impl FakeHost {
     }
 
     /// The view starts a download.
+    /// The mouse's back or forward button released over `source`'s view.
+    pub fn mouse(&self, source: &str, travel: Travel) {
+        let hooks = self.hooks(source);
+        (hooks.mouse)(travel);
+    }
+
+    /// `source`'s view took the keyboard or lost it, as Windows reports.
+    pub fn focus(&self, source: &str, focused: bool) {
+        self.view(source).borrow_mut().holds_keyboard = Some(focused);
+        let hooks = self.hooks(source);
+        (hooks.focus)(focused);
+    }
+
     #[must_use]
     pub fn download(&self, source: &str, suggested: &str) -> Option<(std::path::PathBuf, u64)> {
         let hooks = self.hooks(source);
@@ -245,6 +267,10 @@ impl SiteHost for FakeHost {
 
     fn focus_shell(&self) {
         self.calls.borrow_mut().push("focus shell".into());
+    }
+
+    fn window_active(&self) -> Option<bool> {
+        *self.active.borrow()
     }
 
     fn flush(&self, processes: &[u32], deadline: std::time::Instant) {
