@@ -4,6 +4,9 @@
  * push, the filter and its keys, refs into other files read only when asked, a broken spec, places an address
  * names, and 5,000 operations drawn as a window.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -660,4 +663,44 @@ test("a file view with no width, a page kept hidden, says nothing of its columns
   expect(columnsSeen(0)).toBeNull();
   expect(columnsSeen(1)).toBe(2);
   expect(columnsSeen(2560)).toBe(4);
+});
+
+test("Part of renders distinct parent schema chips with a Show all / Show fewer toggle", async () => {
+  const schemas: Record<string, unknown> = {
+    Shared: { type: "object", properties: { id: { type: "string" } } },
+  };
+  for (let i = 0; i < 16; i++) {
+    schemas[`Holder${i}`] = { type: "object", properties: { shared: { $ref: "#/components/schemas/Shared" } } };
+  }
+  const spec = JSON.stringify({ openapi: "3.0.3", info: { title: "Holders", version: "1" }, paths: {}, components: { schemas } });
+  draw("h.json", spec, { at: "schemas/Shared" });
+  await settle();
+  await drawnWhole();
+
+  const chips = () => [...page().querySelectorAll<HTMLButtonElement>(".tf-oas-chips .tf-oas-part")];
+  expect(text(page())).toContain("Part of 16");
+  expect(chips().map((b) => text(b))).toHaveLength(12);
+  expect(chips()[0]!.textContent?.trim()).toBe("Holder0");
+  expect(text(page())).not.toContain("and 4 more");
+
+  button("Show all", page())!.click();
+  flushSync();
+  expect(chips()).toHaveLength(16);
+  expect(button("Show fewer", page())).toBeDefined();
+
+  button("Show fewer", page())!.click();
+  flushSync();
+  expect(chips()).toHaveLength(12);
+
+  chips()[0]!.click();
+  await settle();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("Holder0");
+});
+
+test("schema markdown tables expand into available width without mid-word breaks or oversized typography", () => {
+  const css = readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8");
+  expect(css).toMatch(/\.tf-oas-desc:has\(table\),\s*\.tf-oas-fd:has\(table\)\s*\{\s*max-width:\s*none;/);
+  expect(css).toMatch(/\.tf-oas-prose \.tf-md table\s*\{[^}]*font-size:\s*calc\(var\(--t-sm\) \* var\(--fs\)\)/);
+  expect(css).toMatch(/\.tf-oas-prose \.tf-md table\s*\{[^}]*overflow-wrap:\s*break-word/);
+  expect(css).toMatch(/\.tf-oas-fd \.tf-md :is\(th, td\) code\s*\{[^}]*overflow-wrap:\s*break-word/);
 });

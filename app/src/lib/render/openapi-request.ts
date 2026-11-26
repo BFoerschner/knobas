@@ -29,13 +29,55 @@ export interface DraftParam {
   array: boolean;
 }
 
+/** Manual auth scheme ids (prefixed so they cannot collide with a spec's `securitySchemes` names). */
+export const MANUAL_BASIC = "__manual:basic";
+export const MANUAL_BEARER = "__manual:bearer";
+export const MANUAL_API_KEY = "__manual:apiKey";
+export type ManualSchemeId = typeof MANUAL_BASIC | typeof MANUAL_BEARER | typeof MANUAL_API_KEY;
+
+/** Placement and name for a manual API key in Try-it. */
+export interface ManualApiKey {
+  in: "header" | "query";
+  name: string;
+}
+
+export const DEFAULT_MANUAL_API_KEY: ManualApiKey = { in: "header", name: "X-API-Key" };
+
 export interface RequestDraft {
   server: DraftServer;
-  /** The security scheme signed in with, by name, or `null` for none. */
+  /** The security scheme signed in with, by spec name, a manual scheme id (`__manual:*`), or `null` for none. */
   scheme: string | null;
+  /** Placement and name for manual `API key` auth (defaults to `Header: X-API-Key`). */
+  manualKey?: ManualApiKey;
   params: DraftParam[];
   media: string | null;
   body: string;
+}
+
+/** Resolves `schemeId` to a spec-declared {@link Scheme} or one of the manual Try-it auth schemes. */
+export function resolveScheme(
+  schemeId: string | null,
+  specSchemes: readonly Scheme[],
+  manualKey: ManualApiKey = DEFAULT_MANUAL_API_KEY,
+): Scheme | null {
+  if (schemeId === null || schemeId === "") return null;
+  if (schemeId === MANUAL_BASIC) {
+    return { name: MANUAL_BASIC, type: "http", scheme: "basic", in: "", keyName: "", bearerFormat: "", description: "", flows: [] };
+  }
+  if (schemeId === MANUAL_BEARER) {
+    return { name: MANUAL_BEARER, type: "http", scheme: "bearer", in: "", keyName: "", bearerFormat: "", description: "", flows: [] };
+  }
+  if (schemeId === MANUAL_API_KEY) {
+    return { name: MANUAL_API_KEY, type: "apiKey", scheme: "", in: manualKey.in, keyName: manualKey.name.trim(), bearerFormat: "", description: "", flows: [] };
+  }
+  return specSchemes.find((s) => s.name === schemeId) ?? null;
+}
+
+/** Whether credentials typed for `scheme` have something to hold (`Basic` accepts a user name with an empty password). */
+export function hasTypedSecret(scheme: Scheme | null, secret: string, user: string): boolean {
+  if (scheme === null) return false;
+  if (scheme.type === "http" && scheme.scheme === "basic") return user !== "" || secret !== "";
+  return secret !== "";
 }
 
 /** A secret in an outgoing request: which scheme's, never its value. */
@@ -159,11 +201,15 @@ export function outgoing(op: Operation, draft: RequestDraft, base: string, schem
   const headers: [string, HeaderValue][] = [];
   for (const p of draft.params) if (p.in === "header" && (p.on || p.required) && p.value !== "") headers.push([p.name, p.value]);
   let secretQuery: Outgoing["secretQuery"] = null;
+  let authBlocked: string | null = null;
   if (scheme !== null) {
-    if (scheme.type === "apiKey" && scheme.in === "query") secretQuery = { name: scheme.keyName, scheme: scheme.name };
-    else if (scheme.type === "apiKey" && scheme.in === "header") headers.push([scheme.keyName, { secret: "key", scheme: scheme.name }]);
-    else if (scheme.type === "apiKey" && scheme.in === "cookie") headers.push(["Cookie", { secret: "key", scheme: scheme.name, cookie: scheme.keyName }]);
-    else if (scheme.type === "http" && scheme.scheme === "basic") headers.push(["Authorization", { secret: "basic", scheme: scheme.name }]);
+    if (scheme.type === "apiKey") {
+      const keyName = scheme.keyName.trim();
+      if (keyName === "") authBlocked = "Enter the API key name.";
+      else if (scheme.in === "query") secretQuery = { name: keyName, scheme: scheme.name };
+      else if (scheme.in === "header") headers.push([keyName, { secret: "key", scheme: scheme.name }]);
+      else if (scheme.in === "cookie") headers.push(["Cookie", { secret: "key", scheme: scheme.name, cookie: keyName }]);
+    } else if (scheme.type === "http" && scheme.scheme === "basic") headers.push(["Authorization", { secret: "basic", scheme: scheme.name }]);
     else headers.push(["Authorization", { secret: "bearer", scheme: scheme.name }]);
   }
   const method = op.method.toLowerCase();
@@ -185,6 +231,7 @@ export function outgoing(op: Operation, draft: RequestDraft, base: string, schem
       blocked = `${url} is not an address.`;
     }
   }
+  blocked ??= authBlocked;
   return { method: op.method.toUpperCase(), url, headers, body: sends ? draft.body : null, secretQuery, missing, local: host !== "" && isThisComputer(host), safe: SAFE.has(method), blocked, host };
 }
 

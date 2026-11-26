@@ -361,3 +361,148 @@ async fn a_ca_file_without_a_certificate_fails_the_send_before_it_goes() {
     assert!(failed.contains("CA file"), "{failed}");
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn basic_auth_with_empty_password_sends_user_colon_encoded() {
+    let server = MockServer::builder().start().await;
+    // base64("tok_live_abc:") == "dG9rX2xpdmVfYWJjOg=="
+    Mock::given(header("authorization", "Basic dG9rX2xpdmVfYWJjOg=="))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    held().hold(
+        &server.uri(),
+        "__manual:basic",
+        Held::new(String::new(), Some("tok_live_abc".into())),
+    );
+    let mut send = request(1100, "GET", format!("{}/token-as-user", server.uri()));
+    send.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:basic".into(),
+        place: AuthPlace::Basic,
+        name: String::new(),
+    });
+    let answer = send::send(send, None).await.expect("sent");
+    assert!(matches!(answer, ApiAnswer::Answered { status: 200, .. }));
+    let printed = serde_json::to_string(&kept().lines("repo\napi-1100.yaml")).unwrap();
+    assert!(!printed.contains("tok_live_abc"), "{printed}");
+    held().forget(&server.uri());
+}
+
+#[tokio::test]
+async fn manual_header_and_query_api_keys_attach_by_name_and_refuse_blank_name() {
+    let server = MockServer::builder().start().await;
+    Mock::given(path("/hdr"))
+        .and(header("x-custom-auth", "k-hdr"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/qry"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    held().hold(
+        &server.uri(),
+        "__manual:apiKey",
+        Held::new("k-hdr".into(), None),
+    );
+    let mut hdr = request(1200, "GET", format!("{}/hdr", server.uri()));
+    hdr.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:apiKey".into(),
+        place: AuthPlace::Header,
+        name: "X-Custom-Auth".into(),
+    });
+    assert!(matches!(
+        send::send(hdr, None).await.expect("sent"),
+        ApiAnswer::Answered { status: 200, .. }
+    ));
+
+    let mut qry = request(1201, "GET", format!("{}/qry?existing=1", server.uri()));
+    qry.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:apiKey".into(),
+        place: AuthPlace::Query,
+        name: "api_token".into(),
+    });
+    assert!(matches!(
+        send::send(qry, None).await.expect("sent"),
+        ApiAnswer::Answered { status: 200, .. }
+    ));
+    let got = server.received_requests().await.expect("recorded");
+    let qry_req = got.iter().find(|r| r.url.path() == "/qry").expect("qry");
+    assert_eq!(qry_req.url.query(), Some("existing=1&api_token=k-hdr"));
+
+    let mut blank_hdr = request(1202, "GET", format!("{}/hdr", server.uri()));
+    blank_hdr.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:apiKey".into(),
+        place: AuthPlace::Header,
+        name: "   ".into(),
+    });
+    assert!(
+        send::send(blank_hdr, None)
+            .await
+            .unwrap_err()
+            .message
+            .contains("no name")
+    );
+    let mut blank_qry = request(1203, "GET", format!("{}/qry", server.uri()));
+    blank_qry.auth = Some(ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:apiKey".into(),
+        place: AuthPlace::Query,
+        name: String::new(),
+    });
+    assert!(
+        send::send(blank_qry, None)
+            .await
+            .unwrap_err()
+            .message
+            .contains("no name")
+    );
+    held().forget(&server.uri());
+}
+
+#[tokio::test]
+async fn forgetting_held_secrets_clears_origin_and_refuses_next_send() {
+    let server = MockServer::builder().start().await;
+    Mock::given(header("authorization", "Bearer tok-once"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    held().hold(
+        &server.uri(),
+        "__manual:bearer",
+        Held::new("tok-once".into(), None),
+    );
+    let auth = ApiAuth {
+        origin: server.uri(),
+        scheme: "__manual:bearer".into(),
+        place: AuthPlace::Bearer,
+        name: String::new(),
+    };
+    let mut first = request(1300, "GET", format!("{}/once", server.uri()));
+    first.auth = Some(auth.clone());
+    assert!(matches!(
+        send::send(first, None).await.expect("sent"),
+        ApiAnswer::Answered { status: 200, .. }
+    ));
+
+    held().forget(&server.uri());
+    assert!(held().schemes(&server.uri()).is_empty());
+
+    let mut second = request(1301, "GET", format!("{}/once", server.uri()));
+    second.auth = Some(auth);
+    let refused = send::send(second, None).await.unwrap_err();
+    assert!(
+        refused.message.contains("No secret is held"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}

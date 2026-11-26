@@ -10,19 +10,28 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const calls: { cmd: string; args: unknown }[] = [];
+const heldByOrigin = new Map<string, Set<string>>();
 vi.mock("../../ipc/api", () => ({
   apiServers: async () => ({ servers: [], last: {} }),
   apiSent: async () => [],
-  apiHeld: async () => [],
+  apiHeld: async (origin: string) => [...(heldByOrigin.get(origin) ?? [])].sort(),
+  apiForgetHeld: async (origin: string) => {
+    calls.push({ cmd: "forget", args: { origin } });
+    heldByOrigin.delete(origin);
+  },
   apiCancel: async () => {},
   apiAnswerBody: async () => new TextEncoder().encode('{"ok":true}'),
   apiSaveAnswer: async () => "x",
   apiClientsFound: async () => ({ bruno: false }),
-  apiHoldSecret: async (origin: string, scheme: string, secret: string, user: string | null) => void calls.push({ cmd: "hold", args: { origin, scheme, secret, user } }),
+  apiHoldSecret: async (origin: string, scheme: string, secret: string, user: string | null) => {
+    calls.push({ cmd: "hold", args: { origin, scheme, secret, user } });
+    if (!heldByOrigin.has(origin)) heldByOrigin.set(origin, new Set());
+    heldByOrigin.get(origin)!.add(scheme);
+  },
   apiSend: async (send: { id: number; url: string; method: string }) => {
     calls.push({ cmd: "send", args: send });
     if (send.url.includes("refuse")) throw { code: "invalid", message: "This secret is kept for a.example.com. The request goes to b.example.com." };
-    return { kind: "answered", id: send.id, status: 201, reason: "Created", version: "HTTP/1.1", headers: [["content-type", "application/json"]], bytes: 11, wire_bytes: 11, to_headers_ms: 3, total_ms: 4, hops: [], cut: false, follow: null, content_type: "application/json" };
+    return { kind: "answered", id: send.id, status: 201, reason: "Created", version: "HTTP/1.1", headers: [["content-type", "application/json"], ["x-request-id", "req-42"]], bytes: 11, wire_bytes: 11, to_headers_ms: 3, total_ms: 4, hops: [], cut: false, follow: null, content_type: "application/json" };
   },
 }));
 
@@ -51,6 +60,7 @@ beforeEach(() => {
   document.body.appendChild(target);
   Element.prototype.scrollIntoView = function () {};
   calls.length = 0;
+  heldByOrigin.clear();
   confirmedHosts.clear();
 });
 afterEach(() => {
@@ -223,4 +233,134 @@ test("Copy as curl copies the request with the secret as a variable", async () =
   button("Copy as curl")!.click();
   await settle();
   expect(copied[0]).toBe("curl -X GET 'https://shop.example.com/api/orders/7' \\\n  -H \"Authorization: Bearer $TOKEN\"");
+});
+
+const NO_AUTH_SPEC = JSON.stringify({
+  openapi: "3.0.3",
+  info: { title: "Open", version: "1" },
+  servers: [{ url: "https://open.example.com/v1" }],
+  paths: { "/ping": { get: { responses: { "200": { description: "OK" } } } } },
+});
+
+function pickSelect(el: HTMLSelectElement, value: string) {
+  el.value = value;
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+
+test("Try-it always shows manual auth options (Nothing, Basic, Bearer, API key) when a spec declares none", async () => {
+  view = mount(TfOpenApi, { target, props: { path: "open.json", text: NO_AUTH_SPEC, engine: localEngine(), at: "get /ping", repo: "repo" } });
+  await vi.waitFor(() => expect(button("Request")).toBeDefined(), { timeout: 10_000, interval: 20 });
+  button("Request")!.click();
+  await settle();
+
+  const sel = target.querySelector<HTMLSelectElement>('[id^="oas-scheme-"]')!;
+  expect(sel).not.toBeNull();
+  expect([...sel.options].map((o) => o.textContent?.trim())).toEqual(["Nothing", "Basic", "Bearer", "API key"]);
+  expect(sel.value).toBe("");
+
+  // Manual API key defaults to Header: X-API-Key, allows editing name and toggling to Query.
+  pickSelect(sel, "__manual:apiKey");
+  expect(button("Header")!.getAttribute("aria-pressed")).toBe("true");
+  expect(button("Query")!.getAttribute("aria-pressed")).toBe("false");
+  const keyName = target.querySelector<HTMLInputElement>('[id^="oas-keyname-"]')!;
+  expect(keyName.value).toBe("X-API-Key");
+
+  input(keyName, "api_token");
+  button("Query")!.click();
+  flushSync();
+  const line = () => [...target.querySelectorAll(".tf-oas-line > span")].map((e) => text(e)).join(" ");
+  expect(line()).toBe("GET https://open.example.com/v1/ping?api_token=••••••••");
+
+  input(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')!, "k-secret");
+  button("Send")!.click();
+  await settle();
+  expect(calls).toEqual([
+    { cmd: "hold", args: { origin: "https://open.example.com", scheme: "__manual:apiKey", secret: "k-secret", user: null } },
+    expect.objectContaining({
+      cmd: "send",
+      args: expect.objectContaining({
+        auth: { origin: "https://open.example.com", scheme: "__manual:apiKey", place: "query", name: "api_token" },
+      }),
+    }),
+  ]);
+});
+
+test("Basic auth holds and sends credentials when the password is empty (token-as-username)", async () => {
+  view = mount(TfOpenApi, { target, props: { path: "open.json", text: NO_AUTH_SPEC, engine: localEngine(), at: "get /ping", repo: "repo" } });
+  await vi.waitFor(() => expect(button("Request")).toBeDefined(), { timeout: 10_000, interval: 20 });
+  button("Request")!.click();
+  await settle();
+
+  pickSelect(target.querySelector<HTMLSelectElement>('[id^="oas-scheme-"]')!, "__manual:basic");
+  input(target.querySelector<HTMLInputElement>('[id^="oas-user-"]')!, "tok_only_user");
+  button("Send")!.click();
+  await settle();
+
+  expect(calls[0]).toEqual({ cmd: "hold", args: { origin: "https://open.example.com", scheme: "__manual:basic", secret: "", user: "tok_only_user" } });
+  expect(calls[1]).toMatchObject({
+    cmd: "send",
+    args: { auth: { origin: "https://open.example.com", scheme: "__manual:basic", place: "basic", name: "" } },
+  });
+  expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
+});
+
+test("held origin secrets expose working Change and Forget controls", async () => {
+  heldByOrigin.set("https://shop.example.com", new Set(["bearer"]));
+  await openRequest("get /orders/{id}");
+  input(target.querySelector<HTMLInputElement>('[id$="-path-id"]')!, "7");
+
+  expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
+  expect(button("Change")).toBeDefined();
+  expect(button("Forget")).toBeDefined();
+
+  // Change reveals the input; Cancel returns to the masked held view without forgetting.
+  button("Change")!.click();
+  flushSync();
+  expect(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')).not.toBeNull();
+  button("Cancel")!.click();
+  flushSync();
+  expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
+  expect(calls).toEqual([]);
+
+  // Change + typing a replacement + Send updates the held secret and returns to masked view.
+  button("Change")!.click();
+  flushSync();
+  input(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')!, "rotated-tok");
+  button("Send")!.click();
+  await settle();
+  expect(calls[0]).toEqual({ cmd: "hold", args: { origin: "https://shop.example.com", scheme: "bearer", secret: "rotated-tok", user: null } });
+  expect(target.querySelector(".tf-oas-dots")).not.toBeNull();
+
+  // Forget calls apiForgetHeld and returns to the empty secret input.
+  calls.length = 0;
+  button("Forget")!.click();
+  await settle();
+  expect(calls).toEqual([{ cmd: "forget", args: { origin: "https://shop.example.com" } }]);
+  expect(target.querySelector(".tf-oas-dots")).toBeNull();
+  expect(target.querySelector<HTMLInputElement>('[id^="oas-secret-"]')).not.toBeNull();
+});
+
+test("the right column has no nested scroll container, response padding matches request without a stray 4-col top border, and response headers have dividers", async () => {
+  await openRequest("get /orders/{id}");
+  expect(target.querySelector(".tf-oas-col .tf-oas-col")).toBeNull();
+
+  input(target.querySelector<HTMLInputElement>('[id$="-path-id"]')!, "7");
+  button("Send")!.click();
+  await settle();
+  button("Headers 2")!.click();
+  flushSync();
+
+  const hdrRows = [...target.querySelectorAll(".tf-oas-anshdrs .tf-oas-anshdr")];
+  expect(hdrRows).toHaveLength(2);
+  expect(text(hdrRows[0]!.querySelector("dt"))).toBe("content-type");
+  expect(text(hdrRows[0]!.querySelector("dd"))).toBe("application/json");
+  expect(text(hdrRows[1]!.querySelector("dt"))).toBe("x-request-id");
+  expect(text(hdrRows[1]!.querySelector("dd"))).toBe("req-42");
+
+  const css = readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8");
+  expect(css).toMatch(/\n\.tf-oas-ans \{ padding: 14px 16px 30px;/);
+  expect(css).not.toMatch(/\n\.tf-oas-ans \{[^}]*border-top:/);
+  expect(css).toContain(".tf-oas-req + .tf-oas-ans { border-top: 1px solid var(--rule); }");
+  expect(css).toContain(".tf-oas-anshdr + .tf-oas-anshdr { border-top: 1px solid var(--rule-2); }");
 });

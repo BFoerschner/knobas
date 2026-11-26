@@ -18,9 +18,27 @@
   import { untrack } from "svelte";
 
   import type { Operation, SpecIndex } from "../../render/openapi";
-  import { authPlace, bodyText, curl, firstSchemeOf, outgoing, requestLine, serverUrl, shownHeaders, startDraft, type DraftParam, type RequestDraft } from "../../render/openapi-request";
+  import {
+    DEFAULT_MANUAL_API_KEY,
+    MANUAL_API_KEY,
+    MANUAL_BASIC,
+    MANUAL_BEARER,
+    authPlace,
+    bodyText,
+    curl,
+    firstSchemeOf,
+    hasTypedSecret,
+    outgoing,
+    requestLine,
+    resolveScheme,
+    serverUrl,
+    shownHeaders,
+    startDraft,
+    type DraftParam,
+    type RequestDraft,
+  } from "../../render/openapi-request";
   import { schemeWords } from "../../render/openapi-view";
-  import { apiCancel, apiHeld, apiHoldSecret, apiSend, type ApiSend, type SavedServer } from "../../ipc/api";
+  import { apiCancel, apiForgetHeld, apiHeld, apiHoldSecret, apiSend, type ApiSend, type SavedServer } from "../../ipc/api";
   import { ipcErrorMessage } from "../../ipc";
   import { push } from "../../shell/toasts.svelte";
   import { confirmedHosts, type OasState, type Place } from "./oas.svelte";
@@ -82,7 +100,8 @@
   const specServer = $derived(draft.server.kind === "spec" ? op.servers[draft.server.index] : undefined);
   const savedServer = $derived(draft.server.kind === "saved" ? saved.find((s) => s.id === (draft.server as { id: string }).id) : undefined);
   const base = $derived(specServer !== undefined ? serverUrl(specServer, draft.server.kind === "spec" ? draft.server.variables : {}) : (savedServer?.url ?? ""));
-  const scheme = $derived(index.security.find((s) => s.name === draft.scheme) ?? null);
+  const manualKey = $derived(draft.manualKey ?? DEFAULT_MANUAL_API_KEY);
+  const scheme = $derived(resolveScheme(draft.scheme, index.security, manualKey));
   const accepted = $derived(index.security.filter((s) => op.security.some((r) => r.includes(s.name))));
   const out = $derived(outgoing(op, draft, base, scheme));
   const line = $derived(requestLine(out));
@@ -97,15 +116,33 @@
   // ---- Secrets: typed here, handed to the app on the first send, never kept by the page ----
   let secret = $state("");
   let user = $state("");
+  let editing = $state(false);
   let held = $state<string[]>([]);
   $effect(() => {
     const at = origin;
-    if (at === "") return;
+    if (at === "") {
+      held = [];
+      return;
+    }
     void apiHeld(at).then((names) => {
       if (at === origin) held = names;
     }, () => {});
   });
   const isHeld = $derived(scheme !== null && held.includes(scheme.name));
+
+  async function forgetHeld() {
+    if (origin === "") return;
+    try {
+      await apiForgetHeld(origin);
+      held = [];
+      secret = "";
+      user = "";
+      editing = false;
+      push({ text: `Forgot the secret held for ${out.host || origin}`, subject: "api-forget" });
+    } catch (cause) {
+      push({ text: `Could not forget: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
 
   // ---- Sending ----
   const sending = $derived(st.answers.get(place));
@@ -131,11 +168,14 @@
     const id = ++nextId;
     st.answers.set(place, { state: "running", id, line });
     try {
-      if (scheme !== null && secret !== "") {
+      if (scheme !== null && hasTypedSecret(scheme, secret, user)) {
         await apiHoldSecret(origin, scheme.name, secret, scheme.type === "http" && scheme.scheme === "basic" ? user : null);
         secret = "";
         user = "";
+        editing = false;
         held = [...new Set([...held, scheme.name])];
+      } else if (editing) {
+        editing = false;
       }
       const auth = scheme !== null && (isHeld || held.includes(scheme.name)) ? { origin, scheme: scheme.name, ...authPlace(scheme) } : null;
       const send: ApiSend = {
@@ -194,7 +234,7 @@
   const WHERE = { path: "In the path", query: "In the query", header: "Headers" } as const;
 </script>
 
-<div class="tf-oas-col tf-oas-req" aria-label="Request">
+<div class="tf-oas-req" aria-label="Request">
   <h3>Request</h3>
   {#if op.webhook}
     <p class="tf-oas-fnote">A webhook is what the API sends to you; knobas has nothing to send.</p>
@@ -241,32 +281,89 @@
         <p class="tf-oas-hint">The spec names no server. Save one of yours in Settings › API servers.</p>
       {/if}
 
-      {#if accepted.length > 0}
-        <div class="tf-oas-prow">
+      <div class="tf-oas-prow">
         <label for="oas-scheme-{place}">Sign in with</label>
-        <select id="oas-scheme-{place}" value={draft.scheme ?? ""} onchange={(e) => edit((d) => (d.scheme = (e.currentTarget as HTMLSelectElement).value || null))}>
-          {#each accepted as s (s.name)}<option value={s.name}>{schemeWords(s)} ({s.name})</option>{/each}
+        <select
+          id="oas-scheme-{place}"
+          value={draft.scheme ?? ""}
+          onchange={(e) => {
+            const next = (e.currentTarget as HTMLSelectElement).value || null;
+            edit((d) => (d.scheme = next));
+            editing = false;
+            secret = "";
+            user = "";
+          }}
+        >
+          {#if accepted.length > 0}
+            <optgroup label="From the spec">
+              {#each accepted as s (s.name)}<option value={s.name}>{schemeWords(s)} ({s.name})</option>{/each}
+            </optgroup>
+          {/if}
           <option value="">Nothing</option>
-        </select>
-        </div>
-        {#if scheme !== null}
-          {#if isHeld && secret === ""}
-            <div class="tf-oas-prow">
-            <span class="tf-oas-k">Secret</span>
-            <div class="tf-oas-row2"><span class="tf-oas-inp tf-oas-dots" aria-label="Held">••••••••••••</span></div>
-            </div>
-            <p class="tf-oas-hint">Held for {out.host || origin} until knobas quits, and sent nowhere else. Type again to change it.</p>
+          {#if accepted.length > 0}
+            <optgroup label="Manual">
+              <option value={MANUAL_BASIC}>Basic</option>
+              <option value={MANUAL_BEARER}>Bearer</option>
+              <option value={MANUAL_API_KEY}>API key</option>
+            </optgroup>
           {:else}
-            {#if scheme.type === "http" && scheme.scheme === "basic"}
-              <div class="tf-oas-prow">
+            <option value={MANUAL_BASIC}>Basic</option>
+            <option value={MANUAL_BEARER}>Bearer</option>
+            <option value={MANUAL_API_KEY}>API key</option>
+          {/if}
+        </select>
+      </div>
+      {#if draft.scheme === MANUAL_API_KEY}
+        <div class="tf-oas-prow">
+          <span class="tf-oas-k">Send in</span>
+          <div class="tf-oas-row2">
+            <span class="tf-seg" role="group" aria-label="API key placement">
+              <button type="button" aria-pressed={manualKey.in === "header"} onclick={() => edit((d) => (d.manualKey = { ...(d.manualKey ?? DEFAULT_MANUAL_API_KEY), in: "header" }))}>Header</button>
+              <button type="button" aria-pressed={manualKey.in === "query"} onclick={() => edit((d) => (d.manualKey = { ...(d.manualKey ?? DEFAULT_MANUAL_API_KEY), in: "query" }))}>Query</button>
+            </span>
+          </div>
+        </div>
+        <div class="tf-oas-prow">
+          <label for="oas-keyname-{place}">{manualKey.in === "query" ? "Query name" : "Header name"}</label>
+          <input
+            class="tf-oas-inp"
+            id="oas-keyname-{place}"
+            autocomplete="off"
+            spellcheck="false"
+            value={manualKey.name}
+            placeholder="X-API-Key"
+            oninput={(e) => edit((d) => (d.manualKey = { ...(d.manualKey ?? DEFAULT_MANUAL_API_KEY), name: (e.currentTarget as HTMLInputElement).value }))}
+          />
+        </div>
+      {/if}
+      {#if scheme !== null}
+        {#if isHeld && !editing}
+          <div class="tf-oas-prow">
+            <span class="tf-oas-k">Secret</span>
+            <div class="tf-oas-row2">
+              <span class="tf-oas-inp tf-oas-dots" aria-label="Held">••••••••••••</span>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = true)}>Change</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void forgetHeld()}>Forget</button>
+            </div>
+          </div>
+          <p class="tf-oas-hint">Held for {out.host || origin} until knobas quits, and sent nowhere else.</p>
+        {:else}
+          {#if scheme.type === "http" && scheme.scheme === "basic"}
+            <div class="tf-oas-prow">
               <label for="oas-user-{place}">User name</label>
               <input class="tf-oas-inp" id="oas-user-{place}" autocomplete="off" bind:value={user} />
-              </div>
-            {/if}
-            <div class="tf-oas-prow">
-            <label for="oas-secret-{place}">{scheme.type === "http" && scheme.scheme === "basic" ? "Password" : scheme.type === "apiKey" ? scheme.keyName : "Token"}</label>
-            <input class="tf-oas-inp" id="oas-secret-{place}" type="password" autocomplete="off" spellcheck="false" bind:value={secret} />
             </div>
+          {/if}
+          <div class="tf-oas-prow">
+            <label for="oas-secret-{place}">{scheme.type === "http" && scheme.scheme === "basic" ? "Password" : scheme.type === "apiKey" ? (scheme.keyName || "API key") : "Token"}</label>
+            <input class="tf-oas-inp" id="oas-secret-{place}" type="password" placeholder={scheme.type === "http" && scheme.scheme === "basic" ? "optional" : ""} autocomplete="off" spellcheck="false" bind:value={secret} />
+          </div>
+          {#if editing && isHeld}
+            <p class="tf-oas-hint tf-oas-edithint">
+              <span>Type a new secret and press Send to replace it.</span>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => { editing = false; secret = ""; user = ""; }}>Cancel</button>
+            </p>
+          {:else}
             <p class="tf-oas-hint">Kept in memory until knobas quits, for {out.host || "this server"} only. Never saved.</p>
           {/if}
         {/if}
