@@ -2016,14 +2016,14 @@ async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
 fn fuzzy_held_ipc_keeps_more_than_four_simultaneous_lists_without_eviction() {
     let prefix = token("held");
     let count = knobas_search::picker::HeldLists::BOUND;
-    assert!(count >= 32, "HeldLists::BOUND must be raised well above 4, got {count}");
+    assert!(
+        count >= 32,
+        "HeldLists::BOUND must be raised well above 4, got {count}"
+    );
 
     let ids: Vec<String> = (0..count).map(|i| format!("{prefix}-{i}")).collect();
     for (i, id) in ids.iter().enumerate() {
-        let rows = vec![
-            format!("🚀 page-{i}/ADProxy"),
-            format!("page-{i}/routing"),
-        ];
+        let rows = vec![format!("🚀 page-{i}/ADProxy"), format!("page-{i}/routing")];
         fuzzy_hold(id.clone(), rows).expect("fuzzy_hold succeeds");
     }
 
@@ -2034,7 +2034,8 @@ fn fuzzy_held_ipc_keeps_more_than_four_simultaneous_lists_without_eviction() {
         assert_eq!(ranked.len(), 1, "list {i} should match ADProxy");
         assert_eq!(ranked[0].index, 0);
         // `🚀` is 2 UTF-16 code units, so `Proxy` starts at UTF-16 offset `2 + 1 + "page-{i}/AD".len()`.
-        let expected_start = u32::try_from(format!("🚀 page-{i}/AD").encode_utf16().count()).unwrap();
+        let expected_start =
+            u32::try_from(format!("🚀 page-{i}/AD").encode_utf16().count()).unwrap();
         assert_eq!(
             ranked[0].marks,
             vec![expected_start, expected_start + 5],
