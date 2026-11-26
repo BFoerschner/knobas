@@ -11,6 +11,7 @@ import {
   mirrorStanding,
   ancestors,
   branchOptions,
+  selectBranches,
   buildsHash,
   withMade,
   readAllRows,
@@ -180,6 +181,19 @@ test("a branch this session made is offered after the listed ones until a read l
     ]),
   ).toEqual([...listed, { name: "feature/new", entityId: null, isDefault: false, made: "queued" }]);
   expect(withMade(listed, [])).toEqual(listed);
+});
+
+test("selectBranches yields the placeholder branch before live branches arrive and hands back live options once known (#2523)", () => {
+  const live = [
+    { name: "main", entityId: "m", isDefault: true },
+    { name: "feature/x", entityId: "x", isDefault: false },
+  ];
+  expect(selectBranches(null, "main", false)).toEqual([{ name: "main", entityId: null, isDefault: true }]);
+  expect(selectBranches(null, "main", true)).toEqual([]);
+  expect(selectBranches(null, null, false)).toEqual([]);
+  expect(selectBranches(null, "", false)).toEqual([]);
+  expect(selectBranches(live, "main", false)).toBe(live);
+  expect(selectBranches([], "main", false)).toEqual([]);
 });
 
 const file = (path: string, old_path: string | null = null): DiffFile => ({
