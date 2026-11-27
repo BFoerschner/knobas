@@ -32,8 +32,8 @@ use knobas_app::sources::write_queue;
 use knobas_core::write_queue::WriteState;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::{
-    AuthMethod, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor,
-    SourceError, SyncItem, UnderAnswer, WriteOp, WriteReceipt,
+    AuthMethod, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
+    SyncItem, UnderAnswer, WriteOp, WriteReceipt,
 };
 use knobas_sync::scheduler::{
     AdapterRegistry, LookingAgain, RunConnections, SchedulerDeps, SchedulerTiming, SyncEvents,
@@ -173,8 +173,16 @@ impl World {
             } else {
                 json!({ "state": "queued" })
             };
-            payload.as_object_mut().unwrap().extend(state.as_object().unwrap().clone());
-            let mut build_item = item(&format!("ci:build:{}", build.id), "build", "Pay Build", payload);
+            payload
+                .as_object_mut()
+                .unwrap()
+                .extend(state.as_object().unwrap().clone());
+            let mut build_item = item(
+                &format!("ci:build:{}", build.id),
+                "build",
+                "Pay Build",
+                payload,
+            );
             // The newest build is the newest on its branch, as TeamCity's
             // queued date makes it.
             build_item.updated_at = chrono::DateTime::from_timestamp(1_800_000_000 + build.id, 0);
@@ -196,7 +204,12 @@ impl Fake {
         let mut emitted = self.shared.emitted.lock().unwrap();
         items
             .into_iter()
-            .filter(|each| emitted.insert(each.entity.to_string(), each.payload.clone()).as_ref() != Some(&each.payload))
+            .filter(|each| {
+                emitted
+                    .insert(each.entity.to_string(), each.payload.clone())
+                    .as_ref()
+                    != Some(&each.payload)
+            })
             .collect()
     }
 }
@@ -230,7 +243,10 @@ impl Source for Fake {
             (&self.shared.seen.ci_runs, &self.shared.ci_door)
         };
         count.fetch_add(1, Ordering::SeqCst);
-        door.acquire().await.expect("the door is never closed").forget();
+        door.acquire()
+            .await
+            .expect("the door is never closed")
+            .forget();
         let items = if self.id == FORGE {
             self.forge_changed()
         } else {
@@ -260,7 +276,12 @@ impl Source for Fake {
         entity: &str,
         _cursor: Option<&str>,
     ) -> Result<UnderAnswer, SourceError> {
-        self.shared.seen.walked.lock().unwrap().push(entity.to_owned());
+        self.shared
+            .seen
+            .walked
+            .lock()
+            .unwrap()
+            .push(entity.to_owned());
         let items = match entity {
             REPO => self.forge_changed(),
             CONFIG => self.shared.world.lock().unwrap().ci_items().split_off(1),
@@ -539,7 +560,10 @@ async fn a_new_branch_is_looked_at_until_its_build_and_its_next_commit_show() {
         looking_at_repo(&state) == Some((true, true))
     })
     .await;
-    assert!(mirrored(&state, &branch_id("feature")).await.is_some(), "read back at once");
+    assert!(
+        mirrored(&state, &branch_id("feature")).await.is_some(),
+        "read back at once"
+    );
 
     queue_build(&shared, 2, "feature", C1);
     clock.0.send_replace(Duration::from_secs(4));
@@ -549,12 +573,20 @@ async fn a_new_branch_is_looked_at_until_its_build_and_its_next_commit_show() {
         "nothing is read before 5 s"
     );
     clock.0.send_replace(Duration::from_secs(5));
-    eventually("the queued build shows and the builds side stops", || async {
-        looking_at_repo(&state) == Some((true, false))
-    })
+    eventually(
+        "the queued build shows and the builds side stops",
+        || async { looking_at_repo(&state) == Some((true, false)) },
+    )
     .await;
-    assert_eq!(mirrored(&state, "ci:build:2").await.unwrap()["state"], "queued");
-    assert_eq!(shared.seen.ci_runs.load(Ordering::SeqCst), 1, "no CI run since the seeding");
+    assert_eq!(
+        mirrored(&state, "ci:build:2").await.unwrap()["state"],
+        "queued"
+    );
+    assert_eq!(
+        shared.seen.ci_runs.load(Ordering::SeqCst),
+        1,
+        "no CI run since the seeding"
+    );
 
     // The run that follows the write ends, so the forge's lock is free.
     shared.forge_door.add_permits(1);
@@ -578,7 +610,11 @@ async fn a_new_branch_is_looked_at_until_its_build_and_its_next_commit_show() {
         mirrored(&state, &branch_id("feature")).await.unwrap()["commit"]["id"],
         C2
     );
-    assert_eq!(shared.seen.forge_runs.load(Ordering::SeqCst), 2, "the seeding and the write's run");
+    assert_eq!(
+        shared.seen.forge_runs.load(Ordering::SeqCst),
+        2,
+        "the seeding and the write's run"
+    );
     let told: Vec<(bool, bool)> = shared
         .looking
         .lock()
@@ -609,8 +645,15 @@ async fn a_run_that_finds_a_branch_moved_starts_the_schedule() {
         looking_at_repo(&state) == Some((true, false))
     })
     .await;
-    assert_eq!(mirrored(&state, "ci:build:2").await.unwrap()["state"], "queued");
-    assert_eq!(shared.seen.ci_runs.load(Ordering::SeqCst), 1, "no CI run since the seeding");
+    assert_eq!(
+        mirrored(&state, "ci:build:2").await.unwrap()["state"],
+        "queued"
+    );
+    assert_eq!(
+        shared.seen.ci_runs.load(Ordering::SeqCst),
+        1,
+        "no CI run since the seeding"
+    );
 }
 
 /// A run of the forge that moved nothing starts nothing.
@@ -660,25 +703,49 @@ async fn a_ci_run_in_flight_skips_the_walk_and_its_build_still_counts() {
         .unwrap()
     })
     .await;
-    let walks = || shared.seen.walked.lock().unwrap().iter().filter(|each| *each == REPO).count();
+    let walks = || {
+        shared
+            .seen
+            .walked
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|each| *each == REPO)
+            .count()
+    };
     let before = walks();
     queue_build(&shared, 2, "feature", C1);
     clock.0.send_replace(Duration::from_secs(5));
-    eventually("the step at 5 s walked the repository", || async { walks() > before }).await;
+    eventually("the step at 5 s walked the repository", || async {
+        walks() > before
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(
-        !shared.seen.walked.lock().unwrap().iter().any(|each| each == CONFIG),
+        !shared
+            .seen
+            .walked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|each| each == CONFIG),
         "the pipeline is not walked under the CI run's lock"
     );
-    assert_eq!(looking_at_repo(&state), Some((true, true)), "still looking for builds");
+    assert_eq!(
+        looking_at_repo(&state),
+        Some((true, true)),
+        "still looking for builds"
+    );
 
     shared.ci_door.add_permits(1);
     eventually("the CI run ends", || async {
-        sqlx::query_scalar::<_, bool>("select finished_at is not null from knobas.sync_run where id = $1")
-            .bind(run)
-            .fetch_one(&state.pool)
-            .await
-            .unwrap()
+        sqlx::query_scalar::<_, bool>(
+            "select finished_at is not null from knobas.sync_run where id = $1",
+        )
+        .bind(run)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap()
     })
     .await;
     clock.0.send_replace(Duration::from_secs(15));

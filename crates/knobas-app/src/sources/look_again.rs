@@ -265,7 +265,11 @@ impl Lookouts {
     ) -> (u64, watch::Receiver<bool>, Vec<LookingAgain>) {
         let id = self.0.next.fetch_add(1, Ordering::SeqCst);
         let (stop, stopped) = watch::channel(false);
-        let mut running = self.0.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut running = self
+            .0
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut told = Vec::new();
         if let Some(at) = running.iter().position(|each| each.looking.scope == scope)
             && let Some(old) = running.remove(at)
@@ -287,7 +291,11 @@ impl Lookouts {
     /// The schedule `id` of `scope` has `sides` left: what to tell, or
     /// nothing when it was stopped since. Ends it when none is left.
     fn left(&self, scope: &str, id: u64, sides: &[SideKind]) -> Option<LookingAgain> {
-        let mut running = self.0.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut running = self
+            .0
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let at = running.iter().position(|each| each.id == id)?;
         let looking = looking_of(scope, sides);
         if sides.is_empty() {
@@ -343,7 +351,11 @@ pub fn noted(scheduler: &Scheduler, source: &str) -> bool {
 /// Keep the schedules on `clock` from now on: a test's, moved by hand.
 pub fn use_clock(scheduler: &Scheduler, clock: Arc<dyn Clock>) {
     if let Some(lookouts) = Lookouts::of(scheduler) {
-        *lookouts.0.clock.lock().unwrap_or_else(PoisonError::into_inner) = clock;
+        *lookouts
+            .0
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = clock;
     }
 }
 
@@ -396,11 +408,9 @@ fn over(outcome: &Result<RefreshOutcome, RefreshError>) -> bool {
     matches!(
         outcome,
         Ok(RefreshOutcome::NotOffered)
-            | Err(
-                RefreshError::TurnedOff(_)
-                    | RefreshError::NotConfigured(_)
-                    | RefreshError::NotAnEntity(_)
-            )
+            | Err(RefreshError::TurnedOff(_)
+                | RefreshError::NotConfigured(_)
+                | RefreshError::NotAnEntity(_))
     )
 }
 
@@ -427,7 +437,10 @@ impl Side for CodeSide {
                 tracing::info!(%item, %error, "a branch's code could not be read again");
             }
             readable |= !over(&outcome);
-            moved |= matches!(outcome, Ok(RefreshOutcome::Refreshed | RefreshOutcome::Gone));
+            moved |= matches!(
+                outcome,
+                Ok(RefreshOutcome::Refreshed | RefreshOutcome::Gone)
+            );
         }
         // What this side read is knobas' own: the next run does not find it
         // moved (`after_run`).

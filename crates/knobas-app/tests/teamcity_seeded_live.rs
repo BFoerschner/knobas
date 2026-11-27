@@ -1306,7 +1306,10 @@ async fn a_new_branch_finds_the_build_ci_queued_for_its_repository_without_a_tea
         .map(|(_, id)| id.to_owned())
         .expect("a build configuration's id");
 
-    let name = format!("knobas-2585-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let name = format!(
+        "knobas-2585-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     let _branch = ScratchBranch {
         url: gitea.url.clone(),
         token: gitea.token.clone(),
