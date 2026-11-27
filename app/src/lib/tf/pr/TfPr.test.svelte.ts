@@ -265,6 +265,17 @@ test("the header names the pull request, its state, head into base and the reade
   expect(text(".tf-crumbs .tf-esc")).toBe("Back to Code Esc");
 });
 
+test("Back to is held unseen while the repository's read is out, so it never widens by its name once drawn (#2602)", async () => {
+  let answer!: () => void;
+  const late = new Promise<void>((resolve) => (answer = resolve));
+  const base = ports();
+  await draw([PR], { ...base, listEntities: async (...a) => (await late, base.listEntities(...a)) });
+  expect(target.querySelector(".tf-crumbs .tf-esc")!.classList.contains("tf-held"), "held while the repository is read").toBe(true);
+  answer();
+  await settle();
+  expect(target.querySelector(".tf-crumbs .tf-esc")!.classList.contains("tf-held"), "shown once it answered").toBe(false);
+});
+
 test("the header draws once, whole: unseen in its room while its repository's read is out, so Open in… can't push the buttons left (the nothing-moves pass)", async () => {
   let answer!: () => void;
   const late = new Promise<void>((resolve) => (answer = resolve));

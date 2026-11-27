@@ -537,6 +537,11 @@
   ]);
   // A pull request sits under its repository, as its crumb has it.
   parentPage(() => (repo === null ? null : { hash: repoHash(repo.entity_id), name: repo.title }));
+  /**
+   * Whether the repository above it is known, found or not: until then *Back to* names Code and is held unseen, as the
+   * repository's read lands after the item's, past the header's hold on a slow read (#2602).
+   */
+  const parentKnown = $derived(prId === null || failed !== null || repoRead || (detail !== null && detail.row.path === null));
 
   /** The write each toolbar button stands for, where the source offers it. */
   const offered = (test: (action: ViewAction) => boolean) => actions.find(test) ?? null;
@@ -909,7 +914,7 @@
 {/snippet}
 
 <div class="tf-full" bind:this={pageEl}>
-  <TfCrumbs parts={crumbs} {back} />
+  <TfCrumbs parts={crumbs} {back} backHeld={!parentKnown} />
 
   {#if prId === null || failed !== null}
     {#if failed !== null && !missing}

@@ -50,6 +50,7 @@
     parts,
     back,
     sectionTop = false,
+    backHeld = false,
   }: {
     /** The path, top first; the last is the page itself. */
     parts: readonly Crumb[];
@@ -57,6 +58,11 @@
     back: (Pick<EscTarget, "name"> & Partial<EscTargetOf>) | null;
     /** The shell's own breadcrumb for a page with a nav entry: a path of one draws nothing. */
     sectionTop?: boolean;
+    /**
+     * *Back to <name>* held unseen while the page still reads its parent (#2602): it names the section until then, and
+     * drawn so it widened by the parent's name under the reader once the read landed.
+     */
+    backHeld?: boolean;
   } = $props();
 
   // The page's own name is the last part when it links nowhere: what *Back to <name>* calls this page once it is left.
@@ -89,7 +95,7 @@
       {/if}
     {/each}
     {#if back !== null}
-      <TfBackHint {back} />
+      <TfBackHint {back} held={backHeld} />
     {/if}
   </nav>
 {/if}

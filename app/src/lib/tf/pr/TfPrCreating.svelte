@@ -96,6 +96,8 @@
   let busy = $state(false);
   /** The repository's name as read here, where the opener held none (after a reload, or a write a source's dialog made). */
   let readName = $state<string | null>(null);
+  /** Whether that read has answered, found or not: *Back to* waits on it (#2602). */
+  let nameAnswered = $state(false);
   const repoName = $derived(noted?.repoName ?? readName);
 
   $effect(() => {
@@ -128,8 +130,12 @@
     const id = repo;
     let live = true;
     ports.getEntity(id).then(
-      (found) => live && (readName = found.row.title),
-      () => {},
+      (found) => {
+        if (!live) return;
+        readName = found.row.title;
+        nameAnswered = true;
+      },
+      () => live && (nameAnswered = true),
     );
     return () => (live = false);
   });
@@ -201,7 +207,7 @@
 </script>
 
 <div class="tf-full">
-  <TfCrumbs parts={crumbs} {back} />
+  <TfCrumbs parts={crumbs} {back} backHeld={repo !== null && repoName === null && !nameAnswered} />
   {#if pr === null}
     {#if row === undefined}
       <TfNothingHere message="knobas has no pull request on its way here. It may have been sent before knobas restarted." href="#/code/prs" action="All pull requests" />

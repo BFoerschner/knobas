@@ -249,7 +249,8 @@ const PLACES = [
   { name: "repo-local-rendered", fixture: true, late: "entity_file_bytes:400", start: `#/repo/${REPO}/local`, press: `${shown} .tf-diff[data-file="docs/retry.md (modified, not staged)"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-rstage`, away: `#/repo/${REPO}/local` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
-  { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },
+  // Left by the list's address: `Esc` goes up to the pull request's repository (#2576), which lists none to press (#2602).
+  { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "#/code/prs", tabs: true },
   { name: "builds", start: "#/time", nav: "builds", hash: "#/builds", away: "time", tabs: true },
   { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail a[href^="#/builds/"], ${shown} a[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
   { name: "run", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", away: "Escape", tabs: true },
