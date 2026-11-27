@@ -6,8 +6,8 @@
 //! pipeline in it.
 
 use knobas_app::commands::entity::{
-    complete_inbox_item_inner, inbox_items_inner, mark_run_opened_inner, mark_runs_read_inner,
-    mark_runs_unread_inner, unread_failing_builds_inner, MarkScope, RunMarks,
+    MarkScope, RunMarks, complete_inbox_item_inner, inbox_items_inner, mark_run_opened_inner,
+    mark_runs_read_inner, mark_runs_unread_inner, unread_failing_builds_inner,
 };
 
 const ME: &str = "mara.lindqvist";
@@ -143,7 +143,12 @@ fn sorted(mut marks: RunMarks) -> RunMarks {
 
 /// Every id a mark answered it wrote, sorted: what *Undo* hands back.
 fn ids(marks: &RunMarks) -> Vec<String> {
-    let mut ids: Vec<String> = marks.read.iter().chain(&marks.while_running).cloned().collect();
+    let mut ids: Vec<String> = marks
+        .read
+        .iter()
+        .chain(&marks.while_running)
+        .cloned()
+        .collect();
     ids.sort();
     ids
 }
@@ -166,13 +171,12 @@ fn of_pipelines(pipelines: &[String]) -> MarkScope {
 /// one: the run moved at the source and a sync brought it.
 async fn moved(pool: &sqlx::PgPool, run: &str, status: &str) {
     let id: i64 = run.rsplit(':').next().unwrap().parse().unwrap();
-    let config: String = sqlx::query_scalar(
-        "select payload->>'buildTypeId' from sync.item where entity_id = $1",
-    )
-    .bind(run)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let config: String =
+        sqlx::query_scalar("select payload->>'buildTypeId' from sync.item where entity_id = $1")
+            .bind(run)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     sqlx::query("update sync.item set payload = $2 where entity_id = $1")
         .bind(run)
         .bind(payload(id, &config, status))
@@ -245,12 +249,20 @@ async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote
     )
     .await;
 
-    let (wrote, line) = mark_runs_read_inner(&pool, &registry(), &of_pipelines(&[tests.clone()]))
-        .await
-        .unwrap();
+    let (wrote, line) = mark_runs_read_inner(
+        &pool,
+        &registry(),
+        &of_pipelines(std::slice::from_ref(&tests)),
+    )
+    .await
+    .unwrap();
     let wrote = sorted(wrote);
     assert_eq!(wrote.read, [red1.clone(), red2.clone()]);
-    assert_eq!(wrote.while_running, [running.clone()], "out of the blue only");
+    assert_eq!(
+        wrote.while_running,
+        std::slice::from_ref(&running),
+        "out of the blue only"
+    );
     let line = line.expect("a mark that wrote says so");
     assert_eq!(line.verb, "marked read");
     assert_eq!(line.detail["runs"], 3);
@@ -495,10 +507,18 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
         std::slice::from_ref(&other)
     );
 
-    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &of_pipelines(&[tests.clone()]))
-        .await
-        .unwrap();
-    assert_eq!(wrote.while_running.len(), 1, "its running run, out of the blue");
+    let (wrote, _) = mark_runs_read_inner(
+        &pool,
+        &registry(),
+        &of_pipelines(std::slice::from_ref(&tests)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        wrote.while_running.len(),
+        1,
+        "its running run, out of the blue"
+    );
     assert_eq!(
         wrote.read.len(),
         13,
@@ -536,11 +556,20 @@ async fn a_running_run_already_reporting_failure_can_be_marked() {
     )
     .await;
 
-    let (wrote, line) = mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&running)))
-        .await
-        .unwrap();
-    assert_eq!(ids(&wrote), [running.clone()], "the mark answers its id");
-    assert_eq!(wrote.while_running, [running.clone()], "taken while it ran");
+    let (wrote, line) =
+        mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&running)))
+            .await
+            .unwrap();
+    assert_eq!(
+        ids(&wrote),
+        std::slice::from_ref(&running),
+        "the mark answers its id"
+    );
+    assert_eq!(
+        wrote.while_running,
+        std::slice::from_ref(&running),
+        "taken while it ran"
+    );
     assert!(line.is_some());
     assert_eq!(marks(&pool).await.while_running, [running]);
 }
@@ -597,15 +626,27 @@ async fn a_run_marked_while_running_fails_unread_and_one_opened_while_running_fa
         .find(|p| p.entity_id == tests)
         .expect("the pipeline is listed")
         .unread;
-    assert_eq!(unread, [marked.clone()], "the marked run asks, the opened one not");
+    assert_eq!(
+        unread,
+        std::slice::from_ref(&marked),
+        "the marked run asks, the opened one not"
+    );
     let keys = inbox_keys(&pool).await;
     assert!(keys.contains(&format!("failed_build:{marked}")), "{keys:?}");
-    assert!(!keys.contains(&format!("failed_build:{opened}")), "{keys:?}");
+    assert!(
+        !keys.contains(&format!("failed_build:{opened}")),
+        "{keys:?}"
+    );
 
-    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&marked)))
-        .await
-        .unwrap();
-    assert_eq!(wrote.read, [marked.clone()], "marked once failed, it is read");
+    let (wrote, _) =
+        mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&marked)))
+            .await
+            .unwrap();
+    assert_eq!(
+        wrote.read,
+        std::slice::from_ref(&marked),
+        "marked once failed, it is read"
+    );
     assert_eq!(read(&pool).await, {
         let mut both = vec![marked, opened];
         both.sort();
@@ -632,29 +673,40 @@ async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
     let key = format!("failed_build:{red}");
     assert!(inbox_keys(&pool).await.contains(&key));
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        unread_failing_builds_inner(&pool, &registry())
+            .await
+            .unwrap(),
         1
     );
 
-    let (wrote, line) = mark_run_opened_inner(&pool, &registry(), &red).await.unwrap();
+    let (wrote, line) = mark_run_opened_inner(&pool, &registry(), &red)
+        .await
+        .unwrap();
     assert!(wrote);
     assert!(line.is_none(), "opening writes no activity line");
-    assert_eq!(read(&pool).await, [red.clone()]);
+    assert_eq!(read(&pool).await, std::slice::from_ref(&red));
     assert!(!inbox_keys(&pool).await.contains(&key), "its line went");
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        unread_failing_builds_inner(&pool, &registry())
+            .await
+            .unwrap(),
         0,
         "and the top bar's count"
     );
 
-    let (again, line) = mark_run_opened_inner(&pool, &registry(), &red).await.unwrap();
+    let (again, line) = mark_run_opened_inner(&pool, &registry(), &red)
+        .await
+        .unwrap();
     assert!(!again, "already read");
     assert!(line.is_none());
 
     mark_runs_unread_inner(&pool, std::slice::from_ref(&red))
         .await
         .unwrap();
-    assert!(inbox_keys(&pool).await.contains(&key), "unread, it asks again");
+    assert!(
+        inbox_keys(&pool).await.contains(&key),
+        "unread, it asks again"
+    );
 }
 
 /// #2555's second bug, on the backend: *everything* needs no pipeline from
@@ -666,12 +718,60 @@ async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it()
     let (pool, tc) = scratch("run-read-everything").await;
     configuration(&pool, &tc, "Payout_Tests").await;
     configuration(&pool, &tc, "Ledger_Tests").await;
-    let red1 = build(&pool, &tc, 1001, "Payout_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
-    let red2 = build(&pool, &tc, 2001, "Ledger_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
-    let before = build(&pool, &tc, 2002, "Ledger_Tests", "FAILURE", "2026-08-21T02:00:00Z").await;
-    build(&pool, &tc, 1002, "Payout_Tests", "SUCCESS", "2026-08-21T02:00:00Z").await;
-    build(&pool, &tc, 1003, "Payout_Tests", "queued", "2026-08-21T03:00:00Z").await;
-    let running = build(&pool, &tc, 2003, "Ledger_Tests", "running", "2026-08-21T03:00:00Z").await;
+    let red1 = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "FAILURE",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let red2 = build(
+        &pool,
+        &tc,
+        2001,
+        "Ledger_Tests",
+        "FAILURE",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let before = build(
+        &pool,
+        &tc,
+        2002,
+        "Ledger_Tests",
+        "FAILURE",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
+    build(
+        &pool,
+        &tc,
+        1002,
+        "Payout_Tests",
+        "SUCCESS",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
+    build(
+        &pool,
+        &tc,
+        1003,
+        "Payout_Tests",
+        "queued",
+        "2026-08-21T03:00:00Z",
+    )
+    .await;
+    let running = build(
+        &pool,
+        &tc,
+        2003,
+        "Ledger_Tests",
+        "running",
+        "2026-08-21T03:00:00Z",
+    )
+    .await;
     mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&before)))
         .await
         .unwrap();
@@ -686,11 +786,16 @@ async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it()
     let wrote = sorted(wrote);
     let mut failed = vec![red1, red2];
     failed.sort();
-    assert_eq!(wrote.read, failed, "every failed run, not the one read before");
-    assert_eq!(wrote.while_running, [running.clone()]);
+    assert_eq!(
+        wrote.read, failed,
+        "every failed run, not the one read before"
+    );
+    assert_eq!(wrote.while_running, std::slice::from_ref(&running));
     assert_eq!(line.expect("one line").detail["runs"], 3);
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        unread_failing_builds_inner(&pool, &registry())
+            .await
+            .unwrap(),
         0
     );
 
@@ -713,7 +818,15 @@ async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it()
 async fn a_database_at_0104_starts_and_its_marks_read_their_runs() {
     let (pool, tc) = scratch("run-read-0105").await;
     configuration(&pool, &tc, "Payout_Tests").await;
-    let red = build(&pool, &tc, 1001, "Payout_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
+    let red = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "FAILURE",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
     for statement in [
         "alter table knobas.run_read drop column how, drop column finished",
         "delete from public._sqlx_migrations where version = 105",

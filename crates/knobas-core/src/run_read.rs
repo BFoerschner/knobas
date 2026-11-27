@@ -80,7 +80,8 @@ pub struct RunMarks {
 
 impl RunMarks {
     fn of(rows: Vec<(String, bool)>) -> Self {
-        let (read, while_running): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(_, reads)| *reads);
+        let (read, while_running): (Vec<_>, Vec<_>) =
+            rows.into_iter().partition(|(_, reads)| *reads);
         Self {
             read: read.into_iter().map(|(id, _)| id).collect(),
             while_running: while_running.into_iter().map(|(id, _)| id).collect(),

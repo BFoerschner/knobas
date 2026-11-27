@@ -1558,7 +1558,15 @@ async fn a_failed_build_read_by_opening_leaves_both_shelves_and_one_marked_while
     };
     let marked = running("build:2001").await;
     let opened_running = running("build:2002").await;
-    let opened_failed = build(pool, "build:2003", "FAILURE", "Payout_Tests", Some(ME), days_ago(1)).await;
+    let opened_failed = build(
+        pool,
+        "build:2003",
+        "FAILURE",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
     knobas_core::run_read::mark_with(pool, &declarations(), &marked)
         .await
         .unwrap();
@@ -1584,23 +1592,45 @@ async fn a_failed_build_read_by_opening_leaves_both_shelves_and_one_marked_while
     );
 
     let on_stream = keys(&stream(pool).await);
-    assert!(on_stream.contains(&format!("failed_build:{marked}")), "{on_stream:?}");
-    assert!(!on_stream.contains(&format!("failed_build:{opened_running}")), "{on_stream:?}");
-    assert!(!on_stream.contains(&format!("failed_build:{opened_failed}")), "{on_stream:?}");
+    assert!(
+        on_stream.contains(&format!("failed_build:{marked}")),
+        "{on_stream:?}"
+    );
+    assert!(
+        !on_stream.contains(&format!("failed_build:{opened_running}")),
+        "{on_stream:?}"
+    );
+    assert!(
+        !on_stream.contains(&format!("failed_build:{opened_failed}")),
+        "{on_stream:?}"
+    );
 
     for id in [&marked, &opened_running, &opened_failed] {
-        inbox::snooze(pool, &format!("failed_build:{id}"), now() + Duration::days(2))
-            .await
-            .unwrap();
+        inbox::snooze(
+            pool,
+            &format!("failed_build:{id}"),
+            now() + Duration::days(2),
+        )
+        .await
+        .unwrap();
     }
     let snoozed = keys(
         &inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
             .await
             .unwrap(),
     );
-    assert!(snoozed.contains(&format!("failed_build:{marked}")), "{snoozed:?}");
-    assert!(!snoozed.contains(&format!("failed_build:{opened_running}")), "{snoozed:?}");
-    assert!(!snoozed.contains(&format!("failed_build:{opened_failed}")), "{snoozed:?}");
+    assert!(
+        snoozed.contains(&format!("failed_build:{marked}")),
+        "{snoozed:?}"
+    );
+    assert!(
+        !snoozed.contains(&format!("failed_build:{opened_running}")),
+        "{snoozed:?}"
+    );
+    assert!(
+        !snoozed.contains(&format!("failed_build:{opened_failed}")),
+        "{snoozed:?}"
+    );
 }
 
 /// ADR-0063's five bubbles, by `run_bubble!`, the one place a run's state
@@ -1634,10 +1664,10 @@ async fn each_run_stands_in_the_bubble_its_tone_and_progress_say() {
               where entity_id = $1"
         };
         sqlx::query(unfinished)
-        .bind(&id)
-        .execute(pool)
-        .await
-        .unwrap();
+            .bind(&id)
+            .execute(pool)
+            .await
+            .unwrap();
         wanted.push((id, bubble.map(str::to_owned)));
     }
     wanted.sort();
