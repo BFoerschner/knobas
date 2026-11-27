@@ -207,9 +207,7 @@ fn terms(text: &str) -> Vec<String> {
             chars.by_ref().take_while(|c| *c != '"').collect()
         } else {
             std::iter::once(first)
-                .chain(std::iter::from_fn(|| {
-                    chars.next_if(|c| !c.is_whitespace())
-                }))
+                .chain(std::iter::from_fn(|| chars.next_if(|c| !c.is_whitespace())))
                 .collect()
         };
         if !term.is_empty() {
@@ -977,7 +975,8 @@ mod tests {
         assert_eq!(lines(&two, "see\n"), vec![(1, "s[e][e]".to_owned())]);
     }
 
-    const ROOMS: &str = "let xy_room = 1;\nxyRoom()\nxy-room\nxy.room\nxy = room\nroom xy\nxy\nroom\n";
+    const ROOMS: &str =
+        "let xy_room = 1;\nxyRoom()\nxy-room\nxy.room\nxy = room\nroom xy\nxy\nroom\n";
 
     #[test]
     fn words_typed_with_spaces_match_in_order_on_one_line_with_anything_between() {
