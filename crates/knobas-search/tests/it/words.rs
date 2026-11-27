@@ -366,3 +366,157 @@ async fn a_word_the_text_answers_is_never_corrected() {
     let r = ask(&pool, &picker, query(&s, "mapped", false)).await;
     assert!(ids(&r).contains(&mapping), "{r:?}");
 }
+
+/// The words `dl<tag>w0000` to `dl<tag>w0999`: zero-padded, so their order as
+/// strings is their order as numbers.
+fn numbered(tag: &str) -> Vec<String> {
+    (0..1000).map(|n| format!("dl{tag}w{n:04}")).collect()
+}
+
+/// Holds `held` uncommitted in one transaction while `writer` runs in another
+/// over words on both sides of it; once `writer` waits for `held`, writes
+/// every word above `held` from the first transaction, then commits both.
+///
+/// A writer that takes its words in their order has written none above
+/// `held` when it stops there, so the first transaction's words go in at
+/// once. One that took a word above `held` first holds it, and the two wait
+/// for each other until PostgreSQL ends one of them with `deadlock detected`.
+async fn crossed_with<F>(pool: &sqlx::PgPool, words: &[String], held: usize, writer: F)
+where
+    F: FnOnce(sqlx::Transaction<'static, sqlx::Postgres>) -> tokio::task::JoinHandle<Result<(), sqlx::Error>>,
+{
+    let s = source("dlheld");
+    let mut first = pool.begin().await.unwrap();
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'dl'), ($2, 'ticket', 'dl')")
+        .bind(format!("{s}:1"))
+        .bind(format!("{s}:2"))
+        .execute(&mut *first)
+        .await
+        .unwrap();
+    let row = "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+               values ($1, $2, 'ticket', 'dl', $3, '{}'::jsonb, now())";
+    sqlx::query(row)
+        .bind(format!("{s}:1"))
+        .bind(&s)
+        .bind(&words[held])
+        .execute(&mut *first)
+        .await
+        .unwrap();
+
+    let second = pool.begin().await.unwrap();
+    let mut probe = pool.acquire().await.unwrap();
+    let mut second = second;
+    let pid: i32 = sqlx::query_scalar("select pg_backend_pid()")
+        .fetch_one(&mut *second)
+        .await
+        .unwrap();
+    let writing = writer(second);
+    let mut waits = false;
+    for _ in 0..200 {
+        let event: Option<String> =
+            sqlx::query_scalar("select wait_event_type from pg_stat_activity where pid = $1")
+                .bind(pid)
+                .fetch_one(&mut *probe)
+                .await
+                .unwrap();
+        if event.as_deref() == Some("Lock") {
+            waits = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    drop(probe);
+    assert!(waits, "the writer never waited for {}", words[held]);
+
+    let above = words[held + 1..].join(" ");
+    let crossed = sqlx::query(row)
+        .bind(format!("{s}:2"))
+        .bind(&s)
+        .bind(&above)
+        .execute(&mut *first)
+        .await;
+    let first_done = match crossed {
+        Ok(_) => first.commit().await.map(|_| ()),
+        Err(e) => Err(e),
+    };
+    let second_done = writing.await.unwrap();
+    assert!(
+        first_done.is_ok() && second_done.is_ok(),
+        "the holder: {first_done:?}; the writer: {second_done:?}"
+    );
+    for word in [&words[0], &words[held], &words[words.len() - 1]] {
+        assert!(holds(pool, word).await, "{word}");
+    }
+}
+
+/// **A batch's new words are taken in their order** (#2551): two syncs that
+/// both bring words nobody wrote yet wait for each other at most one way.
+/// Before `0104` an insert's words came in hash order, and `knobas-sync`'s
+/// two-item test and its 24-item one, which share 501 new words, failed a
+/// whole-workspace gate with `deadlock detected`. Here the writer inserts ten
+/// rows holding every word in one statement while another transaction holds
+/// the middle one.
+#[tokio::test]
+async fn a_batchs_new_words_are_taken_in_their_order() {
+    let pool = pool().await;
+    let tag = &uuid::Uuid::new_v4().simple().to_string()[..10];
+    let words = numbered(tag);
+    let bodies: Vec<String> = (0..10)
+        .map(|r| words.iter().skip(r).step_by(10).cloned().collect::<Vec<_>>().join(" "))
+        .collect();
+    crossed_with(&pool, &words, 505, |mut tx| {
+        tokio::spawn(async move {
+            let s = source("dlbatch");
+            let ids: Vec<String> = (0..10).map(|r| format!("{s}:{r}")).collect();
+            sqlx::query("insert into knobas.entity (id, kind, title) select i, 'ticket', 'dl' from unnest($1::text[]) i")
+                .bind(&ids)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query(
+                "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+                 select i, $2, 'ticket', 'dl', b, '{}'::jsonb, now() from unnest($1::text[], $3::text[]) as t(i, b)",
+            )
+            .bind(&ids)
+            .bind(&s)
+            .bind(&bodies)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await
+        })
+    })
+    .await;
+}
+
+/// **A rewrite's new words are taken in their order, across its rows**
+/// (#2551): `0100` wrote a changed row's words row by row, so an update of
+/// several rows took the words of its first rows, above the held one, before
+/// it reached the row that waits. Ten rows, each a tenth of the words; the
+/// held word is in the sixth.
+#[tokio::test]
+async fn a_rewrites_new_words_are_taken_in_their_order_across_its_rows() {
+    let pool = pool().await;
+    let tag = &uuid::Uuid::new_v4().simple().to_string()[..10];
+    let words = numbered(tag);
+    let s = source("dlrewrite");
+    let ids: Vec<String> = (0..10).map(|r| format!("{s}:{r}")).collect();
+    for id in &ids {
+        item(&pool, &s, "ticket", id.rsplit(':').next().unwrap(), "dl", "nothing new", at(0)).await;
+    }
+    let bodies: Vec<String> = (0..10)
+        .map(|r| words.iter().skip(r).step_by(10).cloned().collect::<Vec<_>>().join(" "))
+        .collect();
+    crossed_with(&pool, &words, 505, |mut tx| {
+        tokio::spawn(async move {
+            sqlx::query(
+                "update sync.item i set body_text = t.b from unnest($1::text[], $2::text[]) as t(id, b)
+                  where i.entity_id = t.id",
+            )
+            .bind(&ids)
+            .bind(&bodies)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await
+        })
+    })
+    .await;
+}
