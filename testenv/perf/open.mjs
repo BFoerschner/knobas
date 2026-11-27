@@ -112,6 +112,10 @@ const PLACES = [
   // The probe reaches *Recent* by its address and never presses the switch, so *Recent* is not the kept view: the late
   // and synced rounds' second press of Builds lands on the run's pipeline (the shell's rule), and opens a run there.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
+  // *Recent* opened the moment the app has drawn its nav, the shell's start-up reads still out and the throttle on from
+  // the press (#2569, `docs/decisions/2026-11-27-builds-first-open.md`): a person who starts knobas to look at the runs. Its
+  // first read is the window's rows; `drawn` is the line to read at 4x and 6x, where a frame's timestamp predates it.
+  { name: "builds-recent-start", rounds: ["first"], start: "#/time", soon: { drawn: ".tf-nav", ms: 0 }, go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5 },
   { name: "recent-run", parent: "builds", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno, ${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   // A run pressed on a repository's Builds tab (Björn, 2026-11-16: "click on the run … and open the build itself immediately"):
   // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.
@@ -368,11 +372,14 @@ for (const rate of throttles) {
       }
       try {
         await cpu(1);
-        await fresh(place.start);
+        await fresh(place.start, place.soon ?? null);
         if (place.setup) { await press(place.setup); await quiet(1200); }
         if (place.before) { await press(place.before); await quiet(1200); }
-        await sleep(firstAfter);
-        await quiet(600);
+        // `soon`: pressed as soon as the page is drawn, its start-up reads still out, not after a person's look.
+        if (!place.soon) {
+          await sleep(firstAfter);
+          await quiet(600);
+        }
         await cpu(rate);
         const has = (round) => rounds.includes(round) && (!place.rounds || place.rounds.includes(round));
         if (has("first") && !place.returnsOnly) {
