@@ -872,6 +872,50 @@ async fn assert_reads_plan_without_estimates(
             .map(|f| format!("alert roster: {f}")),
     );
 
+    // Builds' *Recent* (#2569): the head, as its first read and its head read
+    // again ask for it, is the head of `run_made_idx` and stops there. On the
+    // scale database the 200 read every run's pipeline and sorted them all
+    // (16 ms at 2,620 runs, growing with the history), where 60 walked the
+    // index (1.8 ms): the run's stored row was joined per run through
+    // `run_keys`, estimated at 10,000 rows, for filters nobody had set.
+    assert!(
+        sqlx::query_scalar::<_, i64>("select count(*) from sync.run_made")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            >= 1_000,
+        "the mirror's runs have their instants"
+    );
+    let none: Vec<String> = Vec::new();
+    // With a result asked, the runs it keeps are one set read once, then the
+    // walk: a scan of the runs, never of every item per run.
+    for (limit, results) in [(60_i64, &none), (200, &none), (200, &vec!["Failed".to_owned()])] {
+        let plan = explain(&pool, knobas_core::builds::planned_recent_runs(), |q| {
+            q.bind(declared.clone())
+                .bind(limit)
+                .bind(fillers.clone())
+                .bind(none.clone())
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .bind(results.clone())
+                .bind(none.clone())
+                .bind(None::<Vec<String>>)
+        })
+        .await;
+        let name = format!("recent runs, {limit} {results:?}");
+        wrong.extend(corpus_shapes(&name, &plan));
+        if !results.is_empty() {
+            continue;
+        }
+        wrong.extend(
+            index_head(&plan[0]["Plan"], "run_made", "run_made_idx", false)
+                .into_iter()
+                // Each run's stored row a probe of its key, never all of them hashed.
+                .chain(whole_reads(&plan[0]["Plan"], "item_run"))
+                .map(|f| format!("{name}: {f}")),
+        );
+    }
+
     // `ticket_views`' counts of the three Jira views (#2193): live by the
     // tombstones read once, as the board's are, never a probe of
     // `knobas.entity` per member.
@@ -972,6 +1016,32 @@ fn whole_reads(node: &serde_json::Value, relation: &str) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(whole_reads(child, relation));
+    }
+    found
+}
+
+/// Every read of `relation` that is not the head of `index` read in its order
+/// (#2569): a read of it through another index or none, or one under a sort,
+/// which reads every row to order them. `sorted` says a sort is above `node`.
+fn index_head(node: &serde_json::Value, relation: &str, index: &str, sorted: bool) -> Vec<String> {
+    let mut found = Vec::new();
+    if node["Relation Name"] == relation {
+        if node["Index Name"] != index {
+            found.push(format!(
+                "reads {relation} by {} ({}), not the head of {index}",
+                node["Index Name"].as_str().unwrap_or("no index"),
+                node["Node Type"].as_str().unwrap_or_default()
+            ));
+        } else if sorted {
+            found.push(format!("reads every row of {relation} and sorts them"));
+        }
+    }
+    let sorted = sorted || node["Node Type"] == "Sort";
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        // A CTE or subquery is planned on its own: a sort of the statement
+        // above it does not read its rows in its order.
+        let own = child["Subplan Name"].is_string();
+        found.extend(index_head(child, relation, index, sorted && !own));
     }
     found
 }

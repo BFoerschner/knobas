@@ -759,6 +759,19 @@ select t.pkey is not null as found, x.* from target t
 /// A pipeline is drawn as [`PIPELINES`] draws it; a run sits under it by its
 /// stored `sync.item_pipeline` row, as a pipeline's own runs do, and only a
 /// run with a stored row has an instant here, so the filters read its row.
+///
+/// **The head of the index, whatever the limit** (#2569,
+/// `docs/decisions/2026-11-27-builds-first-open.md`): the run's stored row is
+/// read only for a filter that reads it, in an `exists` that folds away when
+/// none is set (the statement is planned with its values, below). Joined per
+/// run as it was, through `run_keys` (estimated at 10,000 rows, holding a
+/// handful), the planner priced walking the index above reading every run's
+/// pipeline and sorting them all: 16 ms for 200 runs of 2,620, growing with
+/// the history, where the walk takes 3 ms. A run's liveness is a probe of
+/// its entity, never a join: on tables never analyzed the live entities are
+/// estimated at a few dozen, and a join of them made every run look filtered
+/// out and the sort free. With a filter, the runs it keeps are one hashed set
+/// of the runs (`run_made`, not every item), then the walk.
 const RECENT_RUNS: &str = concat!(
     "with ",
     frame_kinds_cte!(),
@@ -786,18 +799,21 @@ k as materialized (
         join dp on dp.source_id = ip.source_id and dp.pkey = ip.pkey and dp.adapter_kind = ip.adapter_kind
        where ip.entity_id = m.entity_id
        limit 1) w
-    join sync.item i on i.entity_id = m.entity_id",
+   where ($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
+     and (select e.deleted_at is null from knobas.entity e where e.id = m.entity_id)
+     and ((cardinality($8::text[]) = 0 and $9::text[] is null and cardinality($7::text[]) = 0) or exists (
+       select 1 from sync.run_made rm
+         join sync.item i on i.entity_id = rm.entity_id",
     crate::run_join!("ru", "i"),
     "
-   where ($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
-     and exists (select 1 from knobas.entity e where e.id = m.entity_id and e.deleted_at is null)
-     and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
-     and ($9::text[] is null or ru.branch = any($9::text[]))
-     and (cardinality($7::text[]) = 0 or
-          (case when sync.run_instant(ru.finished) is null
-                then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
-                when ru.state->>'tone' = 'err' then 'Failed'
-                when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))
+        where rm.entity_id = m.entity_id
+          and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
+          and ($9::text[] is null or ru.branch = any($9::text[]))
+          and (cardinality($7::text[]) = 0 or
+               (case when sync.run_instant(ru.finished) is null
+                     then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
+                     when ru.state->>'tone' = 'err' then 'Failed'
+                     when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))))
    order by m.made desc, m.entity_id desc
    limit $2
 )
@@ -805,9 +821,14 @@ select k.pipeline, k.made::text as made_text, ",
     stored_run_columns!(),
     "
   from k
-  join sync.item i on i.entity_id = k.entity_id",
-    crate::run_join!("ru", "i"),
-    "
+  join sync.item i on i.entity_id = k.entity_id
+  -- `run_join!` as one probe of the stored row per run: joined, `run_keys` (one row a source and kind) is estimated at
+  -- 10,000 rows, and analyzed tables then joined every item to it, or hashed every stored row, before the page's runs.
+  left join lateral (
+    select ru.* from sync.item_run ru
+     where ru.entity_id = i.entity_id
+       and ru.paths_key = (select ru_k.k from run_keys ru_k where ru_k.source_id = i.source_id and ru_k.kind = i.kind)
+     limit 1) ru on true
  order by k.made desc, k.entity_id desc
 "
 );
