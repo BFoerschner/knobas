@@ -1260,6 +1260,9 @@ mod tests {
         /// A server whose ceiling probe misses `sinceBuild` -- see
         /// [`FakeRest::probe_misses_since_build`].
         probe_misses_since_build: bool,
+        /// A server that ignores `buildType` and `sinceBuild` on every
+        /// builds query -- see [`FakeRest::deaf_to_config_and_since`].
+        deaf_to_config_and_since: bool,
         /// What the by-id record read fails with instead of answering
         /// (a refresh's failure, #2099). `None` answers.
         fault: Option<fn() -> SourceError>,
@@ -1299,6 +1302,7 @@ mod tests {
                 projects: None,
                 silent: false,
                 probe_misses_since_build: false,
+                deaf_to_config_and_since: false,
                 fault: None,
                 calls: Mutex::new(Vec::new()),
             }
@@ -1363,6 +1367,15 @@ mod tests {
         /// `refuse_a_replaced_server` keeps for exactly such a server.
         fn probe_misses_since_build(mut self) -> Self {
             self.probe_misses_since_build = true;
+            self
+        }
+
+        /// A server that **ignores `buildType` and `sinceBuild`** on every
+        /// builds query, as no measured TeamCity does: the one way to reach
+        /// the configuration walk's own filters (#2564), which keep such a
+        /// server's other configurations and older builds out of its answer.
+        fn deaf_to_config_and_since(mut self) -> Self {
+            self.deaf_to_config_and_since = true;
             self
         }
 
@@ -1527,13 +1540,15 @@ mod tests {
                             != Some(false)
                 })
                 .filter(|r| {
-                    locator
-                        .build_type_id
-                        .as_deref()
-                        .is_none_or(|id| r.rec.build_type_id.as_deref() == Some(id))
+                    self.deaf_to_config_and_since
+                        || locator
+                            .build_type_id
+                            .as_deref()
+                            .is_none_or(|id| r.rec.build_type_id.as_deref() == Some(id))
                 })
                 .filter(|r| {
-                    (self.probe_misses_since_build && is_ceiling_probe(locator))
+                    self.deaf_to_config_and_since
+                        || (self.probe_misses_since_build && is_ceiling_probe(locator))
                         || locator.since_build_id.is_none_or(|since| r.rec.id > since)
                 })
                 .collect();
@@ -4385,6 +4400,38 @@ mod tests {
                 "{cursor:?}: {answer:?}"
             );
         }
+    }
+
+    /// **A server that ignores `buildType` and `sinceBuild` still walks to
+    /// the configuration's builds above the watermark** (#2564): another
+    /// configuration's new build and the configuration's own build below the
+    /// watermark, which the run already wrote, are left out by the walk
+    /// itself, not by the server.
+    #[tokio::test]
+    async fn a_walk_keeps_a_deaf_servers_other_and_older_builds_out() {
+        let cfg = TeamCityConfig::default();
+        let (_, cursor) = run(&tidewater(), &cfg, None).await;
+        let deaf = FakeRest::new(
+            vec![
+                build_type("Payout_Build", "Payout"),
+                build_type("Payout_IntegrationTests", "Payout"),
+            ],
+            vec![
+                build(1192, "Payout_IntegrationTests", "Payout", "finished"),
+                build(1191, "Payout_IntegrationTests", "Payout", "running"),
+                build(1189, "Payout_Build", "Payout", "running"),
+                build(1188, "Payout_Build", "Payout", "finished"),
+                build(1186, "Payout_Build", "Payout", "finished"),
+            ],
+        )
+        .deaf_to_config_and_since();
+        let items = walked(walk(&deaf, &cfg, "Payout_Build", Some(&cursor)).await);
+        assert_eq!(
+            keys(&items),
+            ["build:1188", "build:1189"],
+            "the server answered 1191 and 1192 of another configuration and 1186 below the \
+             watermark; the walk keeps only its own above it"
+        );
     }
 
     /// **A configuration outside the scope walks to nothing**, as the run

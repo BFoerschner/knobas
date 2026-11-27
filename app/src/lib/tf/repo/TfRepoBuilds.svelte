@@ -387,7 +387,9 @@
   /**
    * The repository's pipelines read at their sources (#2564): one source's one at a time, since each refresh takes its
    * source's lock only when free and two at once would leave the second unread; sources side by side. A pipeline its
-   * source does not read this way answers *not offered*, and nothing runs for it.
+   * source does not read this way answers *not offered*, and nothing runs for it. A walk held off (a run of its source
+   * in flight, or a read of a run in flight holding the lock) or failed says nothing: the page's own *Refreshed* stands,
+   * and a run in flight writes those builds anyway, which the tab hears and reads again.
    */
   function walkPipelines(): Promise<unknown> {
     const ask = untrack(() => walk);
