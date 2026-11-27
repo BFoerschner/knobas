@@ -57,16 +57,24 @@ drop trigger word_on_update on sync.item;
 drop function sync.words_changed();
 
 -- `execute`d, so the join is planned on this statement's row counts (`0084`).
+-- The changed rows are found first (`materialized`): left to the planner,
+-- `words_of` ran over every row before the `fts` filter, 13.6 s for a stamp
+-- of `synced_at` over the 39,770 rows of the scale database, where this takes
+-- 0.17 s; 2,000 rows of changed text take 0.86 s, `0100`'s row trigger 1.06 s.
 create function sync.words_changed() returns trigger
 language plpgsql as $fn$
 begin
   execute $q$
+    with changed as materialized (
+      select n.title, n.body_text
+        from new_rows n
+        join old_rows o on o.entity_id = n.entity_id
+       where o.fts is distinct from n.fts
+    )
     insert into sync.word (word)
     select distinct w.w collate "C"
-      from new_rows n
-      join old_rows o on o.entity_id = n.entity_id
-     cross join lateral sync.words_of(n.title, n.body_text) w(w)
-     where o.fts is distinct from n.fts
+      from changed c
+     cross join lateral sync.words_of(c.title, c.body_text) w(w)
      order by w.w collate "C"
     on conflict do nothing
   $q$;
