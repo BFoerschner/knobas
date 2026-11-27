@@ -1,11 +1,13 @@
 <!--
-  Builds' *Recent* (2026-11-25, `docs/decisions/2026-11-25-recent-runs.md`). Björn: "I want a view in builds that puts
-  the most recent builds at the top, hiding all the folders".
+  Builds' run table at *All pipelines* and a folder (one page since #2570, `mockups/builds-recent/`; *Recent* from
+  2026-11-25, `docs/decisions/2026-11-25-recent-runs.md`, Björn: "I want a view in builds that puts the most recent
+  builds at the top, hiding all the folders").
 
-  The newest runs across every pipeline, newest first by when each started or, not started, was queued, read from the
-  mirror a page at a time (`recent_runs`, 200 a page, at most 2,000 held), with no folds: each row is a pipeline's run
-  row (`TfRunRow`) with a cell naming its pipeline, the run's number after it and the folders it sits in as quiet text.
-  Day groups with clock times, as a pipeline's runs.
+  The newest runs of every pipeline, or of a folder's pipelines (`pipelines`, by id, asked of the backend), newest first
+  by when each started or, not started, was queued, read from the mirror a page at a time (`recent_runs`, 60 first, then
+  200 a page, at most 2,000 held), with no folds: each row is a pipeline's run row (`TfRunRow`) with a cell naming its
+  pipeline, the run's number after it and the folders it sits in as quiet text. Day groups with clock times, as a
+  pipeline's runs. Its header names the scope (`title`) beside *Sync now*; `TfBuilds` owns the rail and the scope.
 
   - **Filter**: the bar's scope (*This job* with a job, *Mine*, *All*), *Result* and, with two or more CI sources
     listed, *Source* narrow the read itself; the typed words narrow the runs held.
@@ -15,7 +17,7 @@
     once its last ended a minute ago. New runs wait behind *Show N new runs* while the pointer rests on the list
     (`HeldOrder`), and are lit once as they draw.
   - **Back**: what it held, its scroll and the run you opened are kept for the session, so `Esc` from a run lands on the
-    same rows with that run's number focused.
+    same rows with that run's number focused, at the scope it was opened from.
   - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread.
 -->
 <script lang="ts" module>

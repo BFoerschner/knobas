@@ -24,10 +24,11 @@
     in view. The list is windowed (#2211) over its flattened rows
     (`listRows`): headings, pipelines and the summaries of folds, a fold's
     rows following its summary while it is open.
-  - **Right**, the selected pipeline's page (#851, `TfPipeline.svelte`):
-    header with *Pin* and, last, the view's *Sync now* (#2287; a bare
-    *Builds* header holds it while no pipeline is drawn), history chart, and the Runs, Parameters and Triggers
-    tabs.
+  - **Right**, whose runs the rail has selected (one page, #2570, `mockups/builds-recent/`): *All pipelines* (the
+    rail's first row, above its tools) and a folder list their runs in one table (`TfRecent.svelte`), its header
+    naming the scope with *Sync now*; a pipeline keeps its page (#851, `TfPipeline.svelte`): header with *Pin* and,
+    last, the view's *Sync now* (#2287), history chart, and the Runs, Parameters and Triggers tabs. The crumbs and the
+    header stand where they stand at every scope. The rail's tools narrow the rail, never the table.
 
   **Read and unread** (ux18, `docs/decisions/2026-11-17-mark-builds-as-read.md`): a pipeline's name and time are err
   only while its newest failure is unread (`asksAttention`, the window's `runsRead`); read, its glyph stays red. A
@@ -38,8 +39,10 @@
   (`withQueued`), and a row whose run moved at the source (the write queue reads a run it started to its end) reads
   that pipeline's runs again, at most once in 5 s.
 
-  `#/builds` selects the first failing pipeline that asks, else the first failing, else the first;
-  `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
+  `#/builds` draws the last place stood on this session, *All pipelines* the first time (Björn's answer 4 on #2554);
+  `#/builds/recent` is *All pipelines*; `#/builds/folder/<source id>/<group>/…` a folder by project, and
+  `#/builds/folder/~repo/<repository id>` one by repository (`~repo` alone: *No repository*), which turns the rail to
+  *By repository*; `#/builds/<entity id>` selects that pipeline. `#/build/<pipeline>/<run>` is the
   run page (#853, `TfRun.svelte`) with its pipeline selected on the left;
   `#/build/<run>` finds the run's pipeline and moves to that address.
 -->
