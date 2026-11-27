@@ -1170,6 +1170,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_text_search,
         commands::api::api_answer_piped,
         commands::api::api_answer_piped_save,
+        // What knobas looks at again after a branch moved (ADR-0064 rule 2,
+        // #2585), appended at the foot (§10.8).
+        commands::sources::looking_again,
     ]
 }
 

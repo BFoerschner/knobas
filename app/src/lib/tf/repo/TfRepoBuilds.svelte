@@ -36,7 +36,8 @@
   import { EVENTS } from "../../ipc";
   import { cacheEvents } from "../../ipc/answer-cache";
   import { windowListen } from "../../ipc/shared-listen";
-  import { refreshEntity, type SourceSyncStatus } from "../../ipc/sources";
+  import { lookingAgain, refreshEntity, type LookingAgain, type SourceSyncStatus } from "../../ipc/sources";
+  import { buildsLooked, startLooking } from "../builds/looking.svelte";
   import type { EchoListen } from "../queued.svelte";
   import { IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, InFlightReads, hearRuns, inFlight, runsInFlight } from "../builds/runs-in-flight";
   import { pageVisible } from "../kept-pages.svelte";
@@ -61,6 +62,7 @@
     follow = (runId: string) => refreshEntity(runId, true),
     walk = (pipelineId: string) => refreshEntity(pipelineId),
     again = () => {},
+    readLooking = () => lookingAgain(),
   }: {
     repoId: string;
     /** The repository's branches, as the page's branch list reads them; `null` until it answered. */
@@ -100,7 +102,17 @@
     walk?: ((pipelineId: string) => Promise<unknown>) | undefined;
     /** The page's answer (`builds`) read again over what is drawn: a run it draws moved (#2558). */
     again?: (() => Promise<unknown> | void) | undefined;
+    /** What knobas looks at again now (#2585, `looking_again`), read once by the first tab; the bridge's when left out. */
+    readLooking?: (() => Promise<LookingAgain[]>) | undefined;
   } = $props();
+
+  /**
+   * After a branch of this repository moved, its builds are looked for on a bounded schedule (ADR-0064 rule 2, #2585):
+   * the branch's line says so, quietly, until the build showed or the schedule ended. Inline at the line's end, so the
+   * words that come and go move nothing drawn before them.
+   */
+  startLooking(untrack(() => listen), untrack(() => readLooking));
+  const lookingForBuilds = $derived(buildsLooked(repoId));
 
   const rows = $derived(builds?.pipelines ?? null);
   /** The branches an open pull request is opened from, and each one's key (`#142`). */
@@ -449,6 +461,8 @@
   {/if}
 {/snippet}
 
+{#snippet looking()}{#if lookingForBuilds}<span class="tf-rb-looking" role="status"> Looking for new builds…</span>{/if}{/snippet}
+
 {#if failed !== null && rows === null}
   <p class="tf-dim">Builds could not be read: {failed}</p>
 {:else if rows !== null && rows.length === 0}
@@ -514,7 +528,7 @@
           <div class="tf-trail"><a class="tf-btn tf-sm tf-ghost" href={pipelineHash(pipeline)}>Open in Builds</a></div>
         </div>
         <p class="tf-rbp-sub">
-          {#if shownPipeline !== null}{[shownPipeline.source_name, ...shownPipeline.path].join(" › ")}.{/if} Its runs on this repository's branches.
+          {#if shownPipeline !== null}{[shownPipeline.source_name, ...shownPipeline.path].join(" › ")}.{/if} Its runs on this repository's branches.{@render looking()}
         </p>
         <div class="tf-seg" role="group" aria-label="Runs on">
           <button type="button" aria-pressed={runScope === "main"} onclick={() => (runScope = "main")}>{def}</button>
@@ -566,7 +580,7 @@
           </div>
         {/if}
       </div>
-      <p class="tf-rbp-sub">{isDefault ? "The default branch. Every other branch here is compared with it." : `Compared with ${def}.`}</p>
+      <p class="tf-rbp-sub">{isDefault ? "The default branch. Every other branch here is compared with it." : `Compared with ${def}.`}{@render looking()}</p>
 
       <!-- The verdict, the one loud thing on the page: a failure this branch alone has is a problem, as the run page draws one. -->
       {#each only.slice(0, PROBLEMS_SHOWN) as { row } (row.entity_id)}

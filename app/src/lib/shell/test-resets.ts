@@ -35,6 +35,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/passwords/held.svelte.ts#folds": async () => (await import("../tf/passwords/held.svelte")).forgetHeld(),
   "tf/passwords/clip.svelte.ts#held": async () => (await import("../tf/passwords/clip.svelte")).resetClip(),
   "tf/passwords/clip.svelte.ts#started": async () => (await import("../tf/passwords/clip.svelte")).resetClip(),
+  // What knobas looks at again after a branch moved (#2585): each test starts with nothing looked at, and listens anew.
+  "tf/builds/looking.svelte.ts#held": async () => (await import("../tf/builds/looking.svelte")).forgetLooking(),
+  "tf/builds/looking.svelte.ts#started": async () => (await import("../tf/builds/looking.svelte")).forgetLooking(),
   // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
   // A launcher row's hand-over to the page it opens (the everything-search decisions, D12): forgotten between tests.
   "tf/arrival.svelte.ts#held": async () => (await import("../tf/arrival.svelte")).arrival.clear(),

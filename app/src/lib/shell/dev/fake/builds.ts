@@ -923,6 +923,12 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // `?fake-branch-pulls` answers it as the real mirror does (`payoutBranchPulls`, the compare-first-open pass).
     repo_branch_pulls: (args) =>
       new URLSearchParams(globalThis.location?.search).has("fake-branch-pulls") ? payoutBranchPulls(String(args["repoId"] ?? "")) : [],
+    // After a branch moved, its repository's bounded schedule (#2585): nothing is looked at, but `?fake-looking`, which
+    // looks for `payout-service`'s builds, so its Builds tab says *Looking for new builds…*.
+    looking_again: () =>
+      new URLSearchParams(globalThis.location?.search).has("fake-looking")
+        ? [{ scope: "mock:tidewater/payout-service", code: true, builds: true }]
+        : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>
       ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {

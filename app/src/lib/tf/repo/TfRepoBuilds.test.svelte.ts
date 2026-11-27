@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
+import type { LookingAgain } from "../../ipc/sources";
 import { parseTfHash } from "../route";
 import TfRepoBuilds from "./TfRepoBuilds.svelte";
 import type { BranchOption } from "./repo";
@@ -82,6 +83,8 @@ function draw(
     pulls?: { branch: string; entity_id: string; cell: string | null }[];
     branches?: BranchOption[];
     runs?: (pipelineId: string) => Promise<RunRow[]>;
+    listen?: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+    readLooking?: () => Promise<LookingAgain[]>;
   } = {},
 ) {
   page = mount(TfRepoBuilds, {
@@ -95,6 +98,8 @@ function draw(
       branch: props.branch ?? null,
       pipeline: props.pipeline ?? null,
       builds: { pipelines: props.rows ?? ROWS, pull_requests: props.pulls ?? [] },
+      ...(props.listen ? { listen: props.listen } : {}),
+      readLooking: props.readLooking ?? (() => Promise.resolve([])),
       runs:
         props.runs ??
         (() =>
@@ -334,4 +339,30 @@ test("the tab reads its pipelines' runs ahead, and a run the pointer reaches at 
   smoke.dispatchEvent(new PointerEvent("pointerenter"));
   smoke.focus();
   expect(asked.length).toBe(3);
+});
+
+/**
+ * **After a branch moved, the tab says it looks for its builds** (#2585, ADR-0064 rule 2): quietly, on the branch's
+ * line, while the repository's bounded schedule looks for them; gone once the build showed or the schedule ended. A tab
+ * opened during the schedule says so from the first read.
+ */
+test("the tab says Looking for new builds… while the repository's builds are looked for", async () => {
+  const handlers: ((event: { payload: unknown }) => void)[] = [];
+  const repo = "git:repo:tidewater/payout-service";
+  draw({
+    listen: (event, handler) => {
+      if (event === "looking:again") handlers.push(handler);
+      return Promise.resolve(() => {});
+    },
+    readLooking: () => Promise.resolve([{ scope: repo, code: true, builds: true }]),
+  });
+  await settle();
+  const note = () => target.querySelector(".tf-rbp-sub .tf-rb-looking")?.textContent?.trim() ?? null;
+  expect(note()).toBe("Looking for new builds…");
+  handlers.forEach((handler) => handler({ payload: { scope: repo, code: true, builds: false } }));
+  flushSync();
+  expect(note()).toBeNull();
+  handlers.forEach((handler) => handler({ payload: { scope: "git:repo:tidewater/other", code: true, builds: true } }));
+  flushSync();
+  expect(note(), "another repository's schedule is not this tab's").toBeNull();
 });
