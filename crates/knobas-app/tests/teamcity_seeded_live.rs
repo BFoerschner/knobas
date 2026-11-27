@@ -1219,3 +1219,196 @@ async fn a_landed_trigger_and_rerun_are_mirrored_as_their_queued_build_before_th
     drop(queued);
     drop(parked);
 }
+
+// -- after a branch moved, its builds are looked for (#2585) -----------------
+
+/// The scratch branch a live case made at the seeded Gitea, deleted again
+/// from `Drop`, passing or panicking alike.
+struct ScratchBranch {
+    url: String,
+    token: String,
+    repo: String,
+    name: String,
+}
+
+impl Drop for ScratchBranch {
+    fn drop(&mut self) {
+        let (url, token, repo, name) = (
+            self.url.clone(),
+            self.token.clone(),
+            self.repo.clone(),
+            self.name.clone(),
+        );
+        Cleanup::new(
+            "the live suite did not delete the branch it made at the seeded Gitea",
+            format!("branch {name} of {repo} may still be standing"),
+        )
+        .run(move || async move {
+            let status = bounded()
+                .delete(format!("{url}/api/v1/repos/{repo}/branches/{name}"))
+                .header("Authorization", format!("token {token}"))
+                .send()
+                .await
+                .map_err(|e| format!("DELETE branch {name}: {e}"))?
+                .status();
+            if status.is_success() || status == 404 {
+                Ok(())
+            } else {
+                Err(format!("DELETE branch {name} -> {status}"))
+            }
+        });
+    }
+}
+
+/// **A branch made in knobas: the build CI queues for its repository shows
+/// on the bounded schedule, without a TeamCity run** (#2585, ADR-0064 rule
+/// 2), on the seeded Gitea and TeamCity and the wall clock. A branch is made
+/// through the write queue; the repository's schedule begins with its builds
+/// side; a build of one of its pipelines is queued at TeamCity as CI would;
+/// within the schedule's 120 s the build is in the mirror and on the
+/// repository's Builds tab, and no TeamCity run has started since the write.
+/// The branch is deleted and the build canceled and deleted again.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded TeamCity and Gitea: `just teamcity-live-seeded`"]
+async fn a_new_branch_finds_the_build_ci_queued_for_its_repository_without_a_teamcity_run() {
+    use knobas_app::sources::{look_again, write_queue};
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    let gitea = gitea_env();
+    let account = env.account().await;
+    let state = app_with(
+        &env,
+        &account,
+        Some(&gitea),
+        Some(&|_pool: sqlx::PgPool| -> Arc<dyn SyncEvents> { Arc::new(Quiet) }),
+    )
+    .await;
+    sync(&state, TEAMCITY).await;
+    sync(&state, GITEA).await;
+
+    let repo = format!("{GITEA}:tidewater/payout-service");
+    let builds = knobas_app::commands::entity::repo_pipelines_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        &repo,
+    )
+    .await
+    .expect("the repository's Builds tab reads");
+    let pipeline = builds
+        .pipelines
+        .first()
+        .unwrap_or_else(|| panic!("a seeded pipeline builds {repo}"))
+        .entity_id
+        .clone();
+    let config = pipeline
+        .rsplit_once(":buildType:")
+        .map(|(_, id)| id.to_owned())
+        .expect("a build configuration's id");
+
+    let name = format!("knobas-2585-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let _branch = ScratchBranch {
+        url: gitea.url.clone(),
+        token: gitea.token.clone(),
+        repo: "tidewater/payout-service".to_owned(),
+        name: name.clone(),
+    };
+    let sent = write_queue::submit(
+        &state,
+        json!({ "CreateBranch": { "entity": repo, "name": name, "from_ref": "main" } }),
+    )
+    .await
+    .expect("the queue takes the branch");
+    let row = knobas_core::write_queue::get(&state.pool, sent.id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the queue row exists");
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    let began = std::time::Instant::now();
+    let looking = || {
+        look_again::looking(&state.scheduler)
+            .into_iter()
+            .find(|each| each.scope == repo)
+    };
+    while looking().is_none_or(|each| !each.builds) {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(60),
+            "the repository's schedule never began with its builds side: {:?}",
+            look_again::looking(&state.scheduler)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    // CI queues a build of the repository's pipeline, as a VCS trigger would.
+    let queued = QueuedBuilds {
+        url: env.url.clone(),
+        token: env.token.clone(),
+        ids: Arc::default(),
+    };
+    let answer: serde_json::Value = bounded()
+        .post(format!("{}/app/rest/buildQueue", env.url))
+        .header("Accept", "application/json")
+        .bearer_auth(&env.token)
+        .json(&json!({ "buildType": { "id": config } }))
+        .send()
+        .await
+        .expect("the build is queued")
+        .json()
+        .await
+        .expect("TeamCity answers the queued build");
+    let id = answer["id"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("a queued build's id: {answer}"));
+    queued.ids.lock().unwrap().push(id);
+    let build = format!("{TEAMCITY}:build:{id}");
+
+    let in_the_tab = async || {
+        knobas_app::commands::entity::repo_pipelines_inner(
+            &state.pool,
+            state.registry.as_ref(),
+            &repo,
+        )
+        .await
+        .is_ok_and(|answer| {
+            answer
+                .pipelines
+                .iter()
+                .any(|p| p.latest.iter().any(|run| run.entity_id == build))
+        })
+    };
+    while !in_the_tab().await {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(130),
+            "build {id} never showed on {repo}'s Builds tab within the schedule; looking: {:?}",
+            looking()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    let shown_at = began.elapsed();
+    let teamcity_runs: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run r, knobas.write_queue w
+          where w.id = $2 and r.source_id = $1 and r.started_at > w.settled_at",
+    )
+    .bind(TEAMCITY)
+    .bind(sent.id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("the runs are counted");
+    println!(
+        "LOOKED AGAIN: build {id} of {config} on {repo}'s Builds tab {shown_at:?} after the branch landed; looking now: {:?}",
+        looking()
+    );
+    assert_eq!(teamcity_runs, 0, "no TeamCity run started since the write");
+    let showed = std::time::Instant::now();
+    while looking().is_some_and(|each| each.builds) {
+        assert!(
+            showed.elapsed() < std::time::Duration::from_secs(5),
+            "the builds side stops once the build showed: {:?}",
+            looking()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    state.scheduler.shutdown().await;
+    drop(queued);
+}
