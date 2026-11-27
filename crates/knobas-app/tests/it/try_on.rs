@@ -147,7 +147,10 @@ async fn a_folder_renderer_tried_on_a_chosen_folder_and_on_pasted_text_keeps_not
     // The run is the tries' registry's: a look there joins it, and the app's registry, which a repository's renders
     // and their cache and store are kept by, holds nothing of the slot.
     let joined = try_on::folder_view_in(&tried, &site, on_folder.clone(), Ask::Look).await;
-    assert!(joined.running.is_some(), "the try runs in the tries' registry: {joined:?}");
+    assert!(
+        joined.running.is_some(),
+        "the try runs in the tries' registry: {joined:?}"
+    );
     let resolved = try_on::resolve(&site, on_folder.clone()).await;
     let app_side = Runs::global().view(&try_on::slot(&site.id), &site, resolved, Ask::Look);
     assert!(
