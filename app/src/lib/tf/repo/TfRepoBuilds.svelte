@@ -33,6 +33,15 @@
   import { buildsHash, repoHash, type BranchOption } from "./repo";
   import { itemHash } from "../job/job";
   import { Windowed } from "../../shell/windowed.svelte";
+  import { EVENTS } from "../../ipc";
+  import { cacheEvents } from "../../ipc/answer-cache";
+  import { windowListen } from "../../ipc/shared-listen";
+  import { refreshEntity, type SourceSyncStatus } from "../../ipc/sources";
+  import type { EchoListen } from "../queued.svelte";
+  import { IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, InFlightReads, hearRuns, inFlight, runsInFlight } from "../builds/runs-in-flight";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { onFocusWhileShown } from "../while-shown.svelte";
+  import { onRefreshed } from "./refreshed.svelte";
 
   let {
     repoId,
@@ -47,6 +56,10 @@
     runs = (id: string) => pipelineRuns(id),
     commitsOf = (ids: string[]) => commitRepositories(ids),
     refreshed = 0,
+    shown = true,
+    listen = (event, handler) => windowListen(event, handler),
+    follow = (runId: string) => refreshEntity(runId, true),
+    again = () => {},
   }: {
     repoId: string;
     /** The repository's branches, as the page's branch list reads them; `null` until it answered. */
@@ -68,8 +81,19 @@
     runs?: ((pipelineId: string) => Promise<RunRow[]>) | undefined;
     /** The repositories of the runs' commits, injectable so a test needs no bridge. */
     commitsOf?: ((commitIds: string[]) => Promise<CommitRepository[]>) | undefined;
-    /** Bumped by the page's *Refresh* and a return to the tab: the pipeline's runs are read again over what is drawn. */
+    /**
+     * Bumped by the page's *Refresh* (⌘R) and a return to the tab: the pipeline's runs are read again over what is drawn,
+     * and the runs the tab draws in flight are read at their source first (#2558).
+     */
     refreshed?: number;
+    /** Whether the tab is the page's shown one; a held tab hears nothing and reads nothing at a source. */
+    shown?: boolean;
+    /** Hears `item:refreshed` and `sync:state` (#2558); the bridge's when left out. */
+    listen?: EchoListen | undefined;
+    /** A run in flight read at its source by id (`refresh_entity`, behind); the bridge's when left out. */
+    follow?: ((runId: string) => Promise<unknown>) | undefined;
+    /** The page's answer (`builds`) read again over what is drawn: a run it draws moved (#2558). */
+    again?: (() => Promise<unknown> | void) | undefined;
   } = $props();
 
   const rows = $derived(builds?.pipelines ?? null);
@@ -262,8 +286,12 @@
       runRepos = null;
     }
     if (id === null) return;
+    void readPipeline(id);
+  });
+  /** The open pipeline's runs read again over what is drawn; a newer read wins. */
+  function readPipeline(id: string): Promise<void> {
     const at = ++runsRead;
-    untrack(() => runs(id))
+    return untrack(() => runs(id))
       .then(async (answer) => {
         const commits = [...new Set(answer.flatMap((run) => (run.commit_id === null ? [] : [run.commit_id])))];
         const named = commits.length === 0 ? [] : await untrack(() => commitsOf(commits));
@@ -274,7 +302,89 @@
       .catch((error: unknown) => {
         if (at === runsRead) pipelineFailed = ipcErrorMessage(error);
       });
+  }
+
+  /**
+   * **A run in flight moves on here as on the Builds page** (#2558, `builds/runs-in-flight.ts`, the TeamCity run fix's
+   * mechanism): the tab hears a refresh that moved a run it draws (a run started in knobas is read to its end, or this
+   * tab read it) and a run of one of its pipelines' sources that brought news (a scheduled sync, *Sync now* on Builds),
+   * and reads its answer again over what it drew, at once and then at most once in `IN_FLIGHT_AGAIN_MS`. Once drawn,
+   * shown again, or the window back, it reads the runs it draws in flight at their source; ⌘R does too, before the
+   * page's *Refreshing…* ends, and syncs no source: a TeamCity build configuration has no read of its own (ADR-0047),
+   * so the runs are what the tab can read for this repository alone. While held hidden it hears nothing: the return
+   * reads it again.
+   */
+  const visible = pageVisible();
+  const live = () => shown && visible();
+  /** Every run the tab draws: each pipeline's newest per branch, and the open pipeline's runs. */
+  const drawnRuns = $derived([...(rows ?? []).flatMap((row) => row.latest), ...(pipelineRows ?? [])]);
+  const drawnIds = $derived(new Set(drawnRuns.map((run) => run.entity_id)));
+  /** The runs it draws in flight, newest first, as `runsInFlight` takes them: the few in flight sorted, never the thousands drawn. */
+  function drawnInFlight(): RunRow[] {
+    const open = new Map(untrack(() => drawnRuns).filter(inFlight).map((run) => [run.entity_id, run]));
+    return [...open.values()].sort((a, b) => (runAt(b) ?? "").localeCompare(runAt(a) ?? ""));
+  }
+  const drawnSources = $derived(new Set((rows ?? []).map((row) => row.source_id)));
+  /** The tab's answers again: the page's, and the open pipeline's runs. */
+  function rereadDrawn(): Promise<unknown> {
+    const id = pipeline;
+    return Promise.allSettled([Promise.resolve(untrack(again)), id === null ? null : readPipeline(id)]);
+  }
+  let movedAt = 0;
+  let movedSoon: ReturnType<typeof setTimeout> | undefined;
+  function moved(): void {
+    if (movedSoon !== undefined) return;
+    movedSoon = setTimeout(
+      () => {
+        movedSoon = undefined;
+        movedAt = Date.now();
+        void rereadDrawn();
+      },
+      Math.max(0, movedAt + IN_FLIGHT_AGAIN_MS - Date.now()),
+    );
+  }
+  $effect(() => {
+    const ears = untrack(() => listen);
+    const offRuns = hearRuns(ears, (entity) => live() && drawnIds.has(entity), moved);
+    let dead = false;
+    let offSync: (() => void) | null = null;
+    void ears(EVENTS.syncState, ({ payload }) => {
+      const row = payload as SourceSyncStatus;
+      if (dead || !live() || row.running || row.last_changed !== true || !drawnSources.has(row.source_id)) return;
+      // The answers the run moved go before the read again (`hearRuns`' reason).
+      cacheEvents.syncState(row);
+      moved();
+    })
+      .then((stop) => (dead ? stop() : (offSync = stop)))
+      .catch(() => {});
+    return () => {
+      dead = true;
+      offRuns();
+      offSync?.();
+      clearTimeout(movedSoon);
+      movedSoon = undefined;
+    };
   });
+  const inFlightReads = new InFlightReads(untrack(() => follow));
+  const readInFlight = () => inFlightReads.read(runsInFlight(drawnInFlight()));
+  $effect(() => {
+    void repoId;
+    inFlightReads.reset();
+  });
+  $effect(() => {
+    if (!ready || !live()) return;
+    const soon = setTimeout(readInFlight, IN_FLIGHT_AFTER_MS);
+    return () => clearTimeout(soon);
+  });
+  onFocusWhileShown(live, readInFlight);
+  onRefreshed(
+    () => refreshed,
+    async () => {
+      inFlightReads.reset();
+      await readInFlight();
+      await rereadDrawn();
+    },
+  );
   /** Which runs: the default branch's, or every branch's of this repository. */
   let runScope = $state<"main" | "every">("every");
   const branchNames = $derived(new Set(rail.map((b) => b.name)));

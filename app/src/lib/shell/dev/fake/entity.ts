@@ -15,7 +15,7 @@ import { FAKE_ATTACHED, isFakeMonitor } from "./monitors";
 import { fakeStateOf } from "./link-sets";
 import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
-import { fixtureBuildEntity, runView } from "./builds";
+import { endFakeRun, fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoFileBytes, repoFilePiped, repoRefusals, repoView } from "./views/repos";
 
@@ -237,6 +237,8 @@ function refreshEntity(args: Record<string, unknown>): EntityRefresh {
     if (!refreshesKind(detail.source.adapter_kind, detail.row.kind)) return { outcome: "not_offered" };
   }
   const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
+  // `?fake-run-ends` (#2558): a running fixture run read by id has finished since.
+  if (!failed && new URLSearchParams(location.search).has("fake-run-ends")) endFakeRun(id);
   setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
   return failed ? { outcome: "failed", reason: "502 Bad Gateway from the source" } : { outcome: "refreshed" };
 }

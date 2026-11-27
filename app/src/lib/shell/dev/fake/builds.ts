@@ -305,6 +305,27 @@ export function addFakeRuns(now: Date = new Date()): void {
   }
 }
 
+/**
+ * `?fake-run-ends` (#2558): a running fixture run read at its source by id (`refresh_entity`) has finished, passed, as a
+ * TeamCity read finds a build that ended since the last sync, so a page that reads its runs in flight shows one move.
+ * The answer says whether `id` was a running run it ended.
+ */
+export function endFakeRun(id: string, now: Date = new Date()): boolean {
+  history(now);
+  for (const runs of built!.runs.values()) {
+    const run = runs.find((one) => one.entity_id === id);
+    if (run === undefined) continue;
+    if (run.finished !== null || run.started === null) return false;
+    run.state = STATE.success;
+    run.finished = now.toISOString();
+    run.updated_at = run.finished;
+    run.duration_seconds = Math.max(1, Math.round((now.getTime() - Date.parse(run.started)) / 1000));
+    run.current_step = null;
+    return true;
+  }
+  return false;
+}
+
 onFakeReset(() => {
   built = null;
   longPaths = false;

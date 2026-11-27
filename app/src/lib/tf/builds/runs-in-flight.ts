@@ -71,13 +71,16 @@ export class InFlightReads {
   #at = 0;
   constructor(private readonly ask: ((runId: string) => Promise<unknown>) | undefined) {}
 
-  /** Refresh `runs` now, unless the last refresh was under {@link IN_FLIGHT_AGAIN_MS} ago or there are none. */
-  read(runs: readonly string[]): void {
+  /**
+   * Refresh `runs` now, unless the last refresh was under {@link IN_FLIGHT_AGAIN_MS} ago or there are none. Settles once
+   * every refresh asked has answered, failed or not; at once when none was asked.
+   */
+  read(runs: readonly string[]): Promise<void> {
     const ask = this.ask;
-    if (ask === undefined || runs.length === 0 || Date.now() - this.#at < IN_FLIGHT_AGAIN_MS) return;
+    if (ask === undefined || runs.length === 0 || Date.now() - this.#at < IN_FLIGHT_AGAIN_MS) return Promise.resolve();
     this.#at = Date.now();
     // Asked from a promise, so a bridge that throws as it is called is a failed refresh, never the caller's.
-    for (const run of runs) void Promise.resolve(run).then(ask).catch(() => {});
+    return Promise.all(runs.map((run) => Promise.resolve(run).then(ask).catch(() => {}))).then(() => {});
   }
 
   /** A new page: the next {@link read} goes at once. */
