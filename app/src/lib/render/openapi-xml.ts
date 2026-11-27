@@ -19,6 +19,7 @@
  * the same schema and value always give the same text.
  */
 import type { Reader } from "./openapi-example";
+import { xmlAttr, xmlText } from "./xml-escape";
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -103,9 +104,6 @@ export function xmlName(name: string): string {
   return /^[\p{L}_]/u.test(safe) ? safe : `_${safe}`;
 }
 
-const escText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const escAttr = (s: string) => escText(s).replace(/"/g, "&quot;").replace(/\n/g, "&#10;");
-
 /** A plain value's text: a string as it is, a number or a boolean as written. */
 const plain = (v: unknown): v is string | number | boolean => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
@@ -157,7 +155,7 @@ class Writer {
     }
     if (plain(value)) {
       const tag = qname(s.xml, name);
-      this.lines.push(`${pad}<${tag}${declare(s.xml, ns, new Map(ns))}>${escText(String(value))}</${tag}>`);
+      this.lines.push(`${pad}<${tag}${declare(s.xml, ns, new Map(ns))}>${xmlText(String(value))}</${tag}>`);
       return;
     }
     if (Array.isArray(value)) {
@@ -215,7 +213,7 @@ class Writer {
     const inner = new Map(ns);
     let decl = declare(xml, ns, inner);
     for (const [, , meta] of attrs) if (meta.prefix !== "" && meta.namespace !== "") decl += declare(meta, inner, inner);
-    const at = attrs.map(([n, v]) => ` ${n}="${escAttr(v)}"`).join("");
+    const at = attrs.map(([n, v]) => ` ${n}="${xmlAttr(v)}"`).join("");
     this.lines.push(`${"  ".repeat(depth)}<${qname(xml, name)}${decl}${at}${empty ? "/>" : ">"}`);
     return inner;
   }
@@ -237,5 +235,5 @@ function declare(xml: XmlMeta, ns: ReadonlyMap<string, string>, into: Map<string
   const key = xml.prefix === "" ? "" : xmlName(xml.prefix);
   if (ns.get(key) === xml.namespace) return "";
   into.set(key, xml.namespace);
-  return key === "" ? ` xmlns="${escAttr(xml.namespace)}"` : ` xmlns:${key}="${escAttr(xml.namespace)}"`;
+  return key === "" ? ` xmlns="${xmlAttr(xml.namespace)}"` : ` xmlns:${key}="${xmlAttr(xml.namespace)}"`;
 }
