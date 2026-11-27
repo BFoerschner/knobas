@@ -197,7 +197,9 @@
       failed = null;
       inFlightSoon();
       untrack(() => ondrawn)?.();
-      if (first && next !== null) void more(RECENT_PAGE - RECENT_FIRST);
+      // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
+      // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
+      if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
       // Shown: the sources asked once, then each minute (Fable's ruling 7).
       if (!askedOnce) {
         askedOnce = true;
@@ -207,6 +209,12 @@
       if (at === reads) failed = ipcErrorMessage(cause);
       untrack(() => ondrawn)?.();
     }
+  }
+
+  /** `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. */
+  function afterPaint(run: () => void): void {
+    if (typeof requestAnimationFrame !== "function") return run();
+    requestAnimationFrame(() => setTimeout(run, 0));
   }
 
   /** An older page of `limit` runs, after what is held. */

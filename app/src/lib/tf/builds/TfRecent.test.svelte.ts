@@ -18,9 +18,14 @@ import TfRecent, { forgetRecent, type RecentPorts } from "./TfRecent.svelte";
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
 
+/** Frames asked for, run by `settle` (or by a test, to say when the page paints): jsdom's own come on a 16 ms timer. */
+let frames: FrameRequestCallback[] = [];
+
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  frames = [];
+  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => frames.push(run));
 });
 
 afterEach(() => {
@@ -30,11 +35,20 @@ afterEach(() => {
   forgetRecent();
   forgetFilters();
   runsRead.forget();
+  vi.unstubAllGlobals();
 });
 
-async function settle() {
+/** The page's tasks run and its DOM flushed, the frames it asked for left unpainted. */
+async function turns() {
   for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
+}
+
+/** The page's tasks run, its frames painted, and what they started run too. */
+async function settle() {
+  await turns();
+  frames.splice(0).forEach((run) => run(performance.now()));
+  await turns();
 }
 
 const today = (h: number, m = 0) => {
@@ -240,6 +254,25 @@ test("the first read asks for the rows that fill the window and draws them; the 
   expect(rows().slice(0, 3)).toEqual(first);
   first.forEach((row, i) => expect(rows()[i]).toBe(row));
   expect(asked).toHaveLength(2);
+});
+
+test("the rest of the first page is asked once the first rows have had their frame, so they paint before it is laid (#2569)", async () => {
+  {
+    const cursor = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
+    const asked: number[] = [];
+    draw({
+      recent: (_filter, _before, limit) => {
+        asked.push(limit);
+        return Promise.resolve({ ...PAGE, next: asked.length === 1 ? cursor : null });
+      },
+    });
+    await turns();
+    expect(numbers()).toEqual(["#12", "#11", "#10"]);
+    // Drawn, not yet painted: the rest waits for the frame.
+    expect(asked).toEqual([60]);
+    await settle();
+    expect(asked).toEqual([60, 140]);
+  }
 });
 
 test("a head read again while the rest of the first page is out leaves older pages readable, not stuck on Reading (#2569)", async () => {
