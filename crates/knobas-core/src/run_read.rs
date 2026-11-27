@@ -428,7 +428,9 @@ pub fn failed_build_run(item_key: &str) -> Option<&str> {
 pub const SEEN_SETTING: &str = "builds.seen";
 
 /// How many runs stand in each of the five bubbles (ADR-0063), unread.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[ts(export_to = "entity.ts")]
 pub struct BubbleCounts {
     /// Running, no mark of any kind.
@@ -575,6 +577,18 @@ select c.pipeline,
 const VISITING: &str = "select coalesce((select s.value ? 'visit' from knobas.setting s
                           where s.key = 'builds.seen' and jsonb_typeof(s.value) = 'object'), false)";
 
+/// One row of [`RUN_COUNTS`].
+#[derive(sqlx::FromRow)]
+struct CountsRow {
+    pipeline: String,
+    blue: i64,
+    green: i64,
+    yellow: i64,
+    red: i64,
+    grey: i64,
+    fresh: Vec<String>,
+}
+
 /// The unread runs of every pipeline of the sources in `fillers`, by bubble
 /// ([`RUN_COUNTS`]).
 ///
@@ -586,7 +600,7 @@ pub async fn run_counts(
     declarations: &crate::payload::Declarations,
     fillers: &[String],
 ) -> Result<RunCounts, CoreError> {
-    let rows: Vec<(String, i64, i64, i64, i64, i64, Vec<String>)> = sqlx::query_as(RUN_COUNTS)
+    let rows: Vec<CountsRow> = sqlx::query_as(RUN_COUNTS)
         .bind(declarations.as_param())
         .bind(fillers)
         .fetch_all(pool)
@@ -597,7 +611,16 @@ pub async fn run_counts(
         visiting,
         ..RunCounts::default()
     };
-    for (pipeline, blue, green, yellow, red, grey, fresh) in rows {
+    for CountsRow {
+        pipeline,
+        blue,
+        green,
+        yellow,
+        red,
+        grey,
+        fresh,
+    } in rows
+    {
         let counts = BubbleCounts {
             blue: n(blue),
             green: n(green),
@@ -654,13 +677,12 @@ pub struct SeenMove {
 async fn seen_for_update(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(Seen, String), CoreError> {
-    let (now, value): (chrono::DateTime<chrono::Utc>, Option<serde_json::Value>) =
-        sqlx::query_as(
-            "select now(), (select s.value from knobas.setting s where s.key = $1 for update)",
-        )
-        .bind(SEEN_SETTING)
-        .fetch_one(&mut **tx)
-        .await?;
+    let (now, value): (chrono::DateTime<chrono::Utc>, Option<serde_json::Value>) = sqlx::query_as(
+        "select now(), (select s.value from knobas.setting s where s.key = $1 for update)",
+    )
+    .bind(SEEN_SETTING)
+    .fetch_one(&mut **tx)
+    .await?;
     let seen = value
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();

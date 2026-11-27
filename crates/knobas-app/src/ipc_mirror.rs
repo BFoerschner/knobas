@@ -161,6 +161,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::builds::RecentFilter::export_all(cfg)?;
     knobas_core::run_read::RunMarks::export_all(cfg)?;
     knobas_core::run_read::MarkScope::export_all(cfg)?;
+    knobas_core::run_read::RunCounts::export_all(cfg)?;
+    knobas_core::run_read::SeenMove::export_all(cfg)?;
     crate::commands::entity::PipelineReason::export_all(cfg)?;
     crate::commands::entity::JobPipeline::export_all(cfg)?;
     crate::commands::entity::CodeFacts::export_all(cfg)?;

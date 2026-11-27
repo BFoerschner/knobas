@@ -310,10 +310,7 @@ async fn the_red_count_drops_when_a_failure_is_read_and_a_new_failure_asks_again
         "2026-08-21T01:00:00Z",
     )
     .await;
-    assert_eq!(
-        total(&pool).await.red,
-        1
-    );
+    assert_eq!(total(&pool).await.red, 1);
 
     mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&red)))
         .await
@@ -333,11 +330,7 @@ async fn the_red_count_drops_when_a_failure_is_read_and_a_new_failure_asks_again
         "2026-08-21T02:00:00Z",
     )
     .await;
-    assert_eq!(
-        total(&pool).await.red,
-        1,
-        "a new failure is unread"
-    );
+    assert_eq!(total(&pool).await.red, 1, "a new failure is unread");
 }
 
 /// One notion with the Inbox: reading a failed build's run takes its line
@@ -666,10 +659,7 @@ async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
     .await;
     let key = format!("failed_build:{red}");
     assert!(inbox_keys(&pool).await.contains(&key));
-    assert_eq!(
-        total(&pool).await.red,
-        1
-    );
+    assert_eq!(total(&pool).await.red, 1);
 
     let (wrote, line) = mark_run_opened_inner(&pool, &registry(), &red)
         .await
@@ -678,11 +668,7 @@ async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
     assert!(line.is_none(), "opening writes no activity line");
     assert_eq!(read(&pool).await, std::slice::from_ref(&red));
     assert!(!inbox_keys(&pool).await.contains(&key), "its line went");
-    assert_eq!(
-        total(&pool).await.red,
-        0,
-        "and the top bar's count"
-    );
+    assert_eq!(total(&pool).await.red, 0, "and the top bar's count");
 
     let (again, line) = mark_run_opened_inner(&pool, &registry(), &red)
         .await
@@ -782,10 +768,7 @@ async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it()
     );
     assert_eq!(wrote.while_running, std::slice::from_ref(&running));
     assert_eq!(line.expect("one line").detail["runs"], 3);
-    assert_eq!(
-        total(&pool).await.red,
-        0
-    );
+    assert_eq!(total(&pool).await.red, 0);
 
     mark_runs_unread_inner(&pool, &ids(&wrote)).await.unwrap();
     assert_eq!(
@@ -931,7 +914,11 @@ async fn the_counts_answer_each_bubble_as_the_spec_table_defines_it() {
     knobas_core::run_read::builds_in_front(&pool, false)
         .await
         .unwrap();
-    assert_eq!(counts_of(&pool, &tests).await, BubbleCounts::default(), "seen");
+    assert_eq!(
+        counts_of(&pool, &tests).await,
+        BubbleCounts::default(),
+        "seen"
+    );
 
     build(&pool, &tc, 1002, "Payout_Tests", "running", &at(2)).await;
     let marked_running = build(&pool, &tc, 1003, "Payout_Tests", "running", &at(3)).await;
@@ -956,7 +943,9 @@ async fn the_counts_answer_each_bubble_as_the_spec_table_defines_it() {
     .await
     .unwrap();
     for run in [&opened_pass, &opened_red] {
-        mark_run_opened_inner(&pool, &registry(), run).await.unwrap();
+        mark_run_opened_inner(&pool, &registry(), run)
+            .await
+            .unwrap();
     }
     let answer = run_counts_inner(&pool, &registry()).await.unwrap();
     assert_eq!(answer.pipelines.len(), 1);
@@ -976,8 +965,24 @@ async fn the_counts_answer_each_bubble_as_the_spec_table_defines_it() {
 async fn a_sources_first_sync_turns_nothing_green() {
     let (pool, tc) = scratch("run-counts-first-sync").await;
     let tests = configuration(&pool, &tc, "Payout_Tests").await;
-    build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
-    let running = build(&pool, &tc, 1002, "Payout_Tests", "running", "2026-08-21T02:00:00Z").await;
+    build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "SUCCESS",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let running = build(
+        &pool,
+        &tc,
+        1002,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
     assert_eq!(counts_of(&pool, &tests).await, counts(1, 0, 0, 0, 0));
 
     synced_once(&pool, &tc).await;
@@ -1000,9 +1005,33 @@ async fn a_visit_holds_its_green_and_leaving_clears_it_for_good() {
     let (pool, tc) = scratch("run-counts-visit").await;
     let tests = configuration(&pool, &tc, "Payout_Tests").await;
     synced_once(&pool, &tc).await;
-    let pass = build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
-    let running = build(&pool, &tc, 1002, "Payout_Tests", "running", "2026-08-21T02:00:00Z").await;
-    let failing = build(&pool, &tc, 1003, "Payout_Tests", "running", "2026-08-21T03:00:00Z").await;
+    let pass = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "SUCCESS",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let running = build(
+        &pool,
+        &tc,
+        1002,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
+    let failing = build(
+        &pool,
+        &tc,
+        1003,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T03:00:00Z",
+    )
+    .await;
     assert_eq!(counts_of(&pool, &tests).await, counts(2, 1, 0, 0, 0));
 
     knobas_core::run_read::builds_in_front(&pool, true)
@@ -1011,7 +1040,11 @@ async fn a_visit_holds_its_green_and_leaving_clears_it_for_good() {
     let answer = run_counts_inner(&pool, &registry()).await.unwrap();
     assert!(answer.visiting);
     assert_eq!(answer.fresh, std::slice::from_ref(&pass), "the dots' runs");
-    assert_eq!(answer.total, counts(2, 1, 0, 0, 0), "the visit's green stays");
+    assert_eq!(
+        answer.total,
+        counts(2, 1, 0, 0, 0),
+        "the visit's green stays"
+    );
 
     synced(&pool, &running, "SUCCESS").await;
     synced(&pool, &failing, "FAILURE").await;
@@ -1032,7 +1065,11 @@ async fn a_visit_holds_its_green_and_leaving_clears_it_for_good() {
         .unwrap();
     let answer = run_counts_inner(&again, &registry()).await.unwrap();
     assert!(!answer.visiting);
-    assert_eq!(answer.total, counts(0, 0, 0, 1, 0), "kept across the restart");
+    assert_eq!(
+        answer.total,
+        counts(0, 0, 0, 1, 0),
+        "kept across the restart"
+    );
     assert!(
         !knobas_core::run_read::builds_in_front(&again, false)
             .await
@@ -1050,9 +1087,33 @@ async fn mark_all_takes_the_green_to_zero_and_undo_brings_the_same_number_back()
     let tests = configuration(&pool, &tc, "Payout_Tests").await;
     let lint = configuration(&pool, &tc, "Payout_Lint").await;
     synced_once(&pool, &tc).await;
-    build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
-    build(&pool, &tc, 1002, "Payout_Tests", "SUCCESS", "2026-08-21T02:00:00Z").await;
-    build(&pool, &tc, 2001, "Payout_Lint", "UNKNOWN", "2026-08-21T01:00:00Z").await;
+    build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "SUCCESS",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    build(
+        &pool,
+        &tc,
+        1002,
+        "Payout_Tests",
+        "SUCCESS",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
+    build(
+        &pool,
+        &tc,
+        2001,
+        "Payout_Lint",
+        "UNKNOWN",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
     assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1));
 
     let everything = MarkScope {
@@ -1064,16 +1125,33 @@ async fn mark_all_takes_the_green_to_zero_and_undo_brings_the_same_number_back()
         .unwrap()
         .expect("everything reaches the pipelines");
     assert_eq!(total(&pool).await, BubbleCounts::default(), "all clear");
-    assert!(knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap());
-    assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1), "the same number back");
+    assert!(
+        knobas_core::run_read::put_back_seen(&pool, &moved)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        total(&pool).await,
+        counts(0, 2, 0, 0, 1),
+        "the same number back"
+    );
 
-    let moved = knobas_core::run_read::move_seen(&pool, &of_pipelines(std::slice::from_ref(&tests)))
-        .await
-        .unwrap()
-        .unwrap();
+    let moved =
+        knobas_core::run_read::move_seen(&pool, &of_pipelines(std::slice::from_ref(&tests)))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(counts_of(&pool, &tests).await, BubbleCounts::default());
-    assert_eq!(counts_of(&pool, &lint).await, counts(0, 0, 0, 0, 1), "another pipeline's stays");
-    assert!(knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap());
+    assert_eq!(
+        counts_of(&pool, &lint).await,
+        counts(0, 0, 0, 0, 1),
+        "another pipeline's stays"
+    );
+    assert!(
+        knobas_core::run_read::put_back_seen(&pool, &moved)
+            .await
+            .unwrap()
+    );
     assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1));
 
     assert_eq!(
@@ -1095,7 +1173,9 @@ async fn mark_all_takes_the_green_to_zero_and_undo_brings_the_same_number_back()
         .await
         .unwrap();
     assert!(
-        !knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap(),
+        !knobas_core::run_read::put_back_seen(&pool, &moved)
+            .await
+            .unwrap(),
         "leaving Builds moved it since"
     );
     assert_eq!(total(&pool).await, BubbleCounts::default());
