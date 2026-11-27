@@ -19,7 +19,7 @@
  * the same schema and value always give the same text.
  */
 import type { Reader } from "./openapi-example";
-import { xmlAttr, xmlText } from "./xml-escape";
+import { xmlAttr, xmlText as escText } from "./xml-escape";
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -155,7 +155,7 @@ class Writer {
     }
     if (plain(value)) {
       const tag = qname(s.xml, name);
-      this.lines.push(`${pad}<${tag}${declare(s.xml, ns, new Map(ns))}>${xmlText(String(value))}</${tag}>`);
+      this.lines.push(`${pad}<${tag}${declare(s.xml, ns, new Map(ns))}>${escText(String(value))}</${tag}>`);
       return;
     }
     if (Array.isArray(value)) {
