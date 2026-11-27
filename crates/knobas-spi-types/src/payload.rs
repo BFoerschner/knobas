@@ -1006,6 +1006,7 @@ pub mod field {
         TESTS_FAILED,
         TESTS_PASSED,
         TESTS_IGNORED,
+        WAITS_ON,
         LANGUAGE,
         TEAMS,
         OWNER,
