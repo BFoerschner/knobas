@@ -965,6 +965,10 @@ async fn the_counts_answer_each_bubble_as_the_spec_table_defines_it() {
 async fn a_sources_first_sync_turns_nothing_green() {
     let (pool, tc) = scratch("run-counts-first-sync").await;
     let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    // The declarations stored, so the first sync's runs get their stored rows
+    // as it writes them, in its own transaction: only the missing cursor says
+    // they are history.
+    run_counts_inner(&pool, &registry()).await.unwrap();
     build(
         &pool,
         &tc,
