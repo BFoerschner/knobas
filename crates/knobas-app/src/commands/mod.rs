@@ -174,9 +174,9 @@ pub(crate) mod mirror {
         // it must be granted by its own name in the main window's capability instead, so a ghost one is still caught.
         for name in &invoked {
             if let Some(plugin) = name.strip_prefix("plugin:") {
-                let (plugin, command) = plugin
-                    .split_once('|')
-                    .unwrap_or_else(|| panic!("{barrel} invokes {name}, which is no `plugin:<plugin>|<command>`"));
+                let (plugin, command) = plugin.split_once('|').unwrap_or_else(|| {
+                    panic!("{barrel} invokes {name}, which is no `plugin:<plugin>|<command>`")
+                });
                 let grant = format!("\"{plugin}:allow-{}\"", command.replace('_', "-"));
                 assert!(
                     CAPABILITY.contains(&grant),
