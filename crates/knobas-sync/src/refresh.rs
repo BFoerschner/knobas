@@ -227,7 +227,9 @@ async fn wait_at_most(
                 .await?;
             Ok(true)
         }
-        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some(LOCK_NOT_AVAILABLE) => {
+        Err(sqlx::Error::Database(error))
+            if error.code().as_deref() == Some(LOCK_NOT_AVAILABLE) =>
+        {
             // Rolling back to the savepoint puts `lock_timeout` back too.
             sqlx::query("rollback to savepoint run_lock")
                 .execute(&mut **tx)
