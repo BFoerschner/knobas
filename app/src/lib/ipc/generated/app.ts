@@ -888,6 +888,11 @@ pipeline: string | null, };
 export type RendererInput = "text" | "bytes";
 
 /**
+ * What a try is run on.
+ */
+export type TryOn = { "kind": "text", name: string, text: string, } | { "kind": "path", path: string, };
+
+/**
  * One saved command renderer (#2262), Settings › Renderers.
  */
 export type UserRenderer = { 

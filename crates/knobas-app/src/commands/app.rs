@@ -831,7 +831,7 @@ pub fn folder_render_stop(
     folder: String,
     lane: Option<String>,
 ) {
-    crate::folder_render::runs::Runs::global().stop(&crate::folder_render::slot(
+    crate::try_on::runs_of_entity(&entity_id).stop(&crate::folder_render::slot(
         &entity_id,
         &renderer,
         &folder,
@@ -848,7 +848,7 @@ pub fn folder_render_leave(
     folder: String,
     lane: Option<String>,
 ) {
-    crate::folder_render::runs::Runs::global().leave(&crate::folder_render::slot(
+    crate::try_on::runs_of_entity(&entity_id).leave(&crate::folder_render::slot(
         &entity_id,
         &renderer,
         &folder,
@@ -867,6 +867,7 @@ pub fn folder_render_leave(
 pub fn folder_render_output(token: String) -> Result<tauri::ipc::Response, IpcError> {
     crate::folder_render::runs::Runs::global()
         .output(&token)
+        .or_else(|| crate::try_on::runs().output(&token))
         .map(|bytes| tauri::ipc::Response::new(bytes.as_ref().clone()))
         .ok_or_else(|| {
             IpcError::not_found("that drawing is no longer kept: run the renderer again".to_owned())
@@ -1177,6 +1178,69 @@ pub async fn set_named_pipelines<R: tauri::Runtime>(
 ) -> Result<Vec<crate::file_pipeline::saved::NamedPipeline>, IpcError> {
     let pool = app.state::<Lifecycle>().pool()?;
     crate::file_pipeline::saved::save_named_pipelines(&pool, &pipelines).await
+}
+
+/// A file the person chose on this disk to try a renderer on (#2562): its
+/// bytes, raw, refused past what Code hands a renderer. Read on the press
+/// that tries it, never by itself.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a relative
+/// path, a folder, or a file past the cap;
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for one gone.
+#[tauri::command]
+pub async fn try_bytes(path: String) -> Result<tauri::ipc::Response, IpcError> {
+    let (_, bytes) = crate::try_on::file_bytes(&path).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// A file pipeline tried on pasted text or a chosen file (#2562): `steps`
+/// over its bytes, as `entity_file_piped` runs them over a repository's
+/// file. A command step runs as saved. Nothing is kept.
+///
+/// # Errors
+///
+/// As [`crate::try_on::bytes_of`]; the saved command steps cannot be read. A
+/// step that fails is an answer.
+#[tauri::command]
+pub async fn try_piped<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    on: crate::try_on::TryOn,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    let (name, bytes) = crate::try_on::bytes_of(&on).await?;
+    let commands = crate::commands::api::commands_for(&app, &steps).await?;
+    Ok(crate::file_pipeline::run_bytes_with(
+        &steps,
+        &commands,
+        bytes,
+        &name,
+        crate::file_pipeline::Limits::default(),
+    )
+    .await)
+}
+
+/// Saved folder renderer `renderer` tried on pasted text, a chosen file or a
+/// chosen folder (#2562), in the tries' own registry: drawn as
+/// `folder_render` draws, read back by its token with the same commands, and
+/// nothing written to the folder renders' disk cache or the
+/// generated-folders store. Stopped and left by `folder_render_stop` and
+/// `folder_render_leave` with the entity `~try` and the lane `try`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a renderer
+/// that is not saved. A path refused or too big is an answer.
+#[tauri::command]
+pub async fn try_folder_render<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    renderer: String,
+    on: crate::try_on::TryOn,
+    ask: crate::folder_render::runs::Ask,
+) -> Result<crate::folder_render::runs::FolderRenderView, IpcError> {
+    let pool = app.state::<Lifecycle>().pool()?;
+    crate::try_on::folder_view(&pool, &renderer, on, ask).await
 }
 
 /// One source's *Open matching links in knobas* setting (ADR-0061).

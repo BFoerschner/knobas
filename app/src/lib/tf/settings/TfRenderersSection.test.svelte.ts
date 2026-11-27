@@ -1,4 +1,4 @@
-/** Settings › Renderers (#2262): add a command renderer, see it in the registry, and try it in the test pane. */
+/** Settings › Renderers (#2262): add a command renderer, see it in the registry, and try it on (#2562). */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -152,18 +152,20 @@ test("an edit keeps its words per renderer, and a renderer left unchanged holds 
   expect(fieldValue("tf-rnd-cmd")).toBe("alpha --svg");
 });
 
-test("the test pane's sample comes back after leaving the section", async () => {
+test("Try it on's pasted text and its name come back after leaving the section", async () => {
   const one: UserRenderer = { id: "a", name: "Alpha", command: "a -", patterns: [], fences: [], input: "text", output: "svg", timeout_secs: 10, diff: false };
   app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
   await settle();
-  type("Sample", "graph LR");
+  type("File name", "flow.mmd");
+  type("Text", "graph LR");
   unmount(app);
   app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
   await settle();
-  expect(fieldValue("tf-rnd-sample")).toBe("graph LR");
+  expect(fieldValue("tf-rnd-try-text")).toBe("graph LR");
+  expect(fieldValue("tf-rnd-try-name")).toBe("flow.mmd");
 });
 
-test("a renderer added here is saved whole, in the registry at once, and runs in the test pane", async () => {
+test("a renderer added here is saved whole, in the registry at once, and draws pasted text on Try it on", async () => {
   const { ports, sent, ran } = backend();
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
   await settle();
@@ -187,12 +189,15 @@ test("a renderer added here is saved whole, in the registry at once, and runs in
   expect(renderersForFence("cat").map((r) => r.id)).toEqual(["command:cat", "source"]);
   expect(target.querySelector("tbody")?.textContent).toContain("cat");
 
-  type("Sample", "<b>bold</b><script>alert(1)</script>");
-  button("Run").click();
+  // The renderer just saved is the one Try it on draws with, on text named as its patterns take.
+  expect(target.querySelector<HTMLSelectElement>("#tf-rnd-test")!.value).toBe("command:cat");
+  type("File name", "a.page");
+  type("Text", "<b>bold</b><script>alert(1)</script>");
+  button("Try it").click();
   await settle();
 
   expect(ran).toEqual([["cat", { kind: "text", text: "<b>bold</b><script>alert(1)</script>" }]]);
-  const frame = target.querySelector(".tf-stg-test iframe")!;
+  const frame = target.querySelector(".tf-try-view iframe")!;
   expect(frame.getAttribute("sandbox")).toBe("");
   expect(frame.getAttribute("srcdoc")).toContain("<b>bold</b>");
   expect(frame.getAttribute("srcdoc")).not.toMatch(/<script/i);
@@ -316,15 +321,16 @@ test("a removal the backend refuses is said beside the table, with no form open 
   expect(target.querySelector("tbody")?.textContent).toContain("Cat");
 });
 
-test("Run waits for a sample, and says so", async () => {
+test("Try it waits for text, and says so", async () => {
   const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
   await settle();
-  expect(button("Run").disabled).toBe(true);
-  expect(button("Run").parentElement?.querySelector(".tf-dwhy")?.textContent).toBe("Paste some sample text first.");
-  type("Sample", "hello");
-  expect(button("Run").disabled).toBe(false);
-  expect(button("Run").parentElement?.querySelector(".tf-dwhy")).toBeNull();
+  type("Text", "");
+  expect(button("Try it").disabled).toBe(true);
+  expect(button("Try it").parentElement?.querySelector(".tf-dwhy")?.textContent).toBe("Paste some text first.");
+  type("Text", "hello");
+  expect(button("Try it").disabled).toBe(false);
+  expect(button("Try it").parentElement?.querySelector(".tf-dwhy")).toBeNull();
 });
 
 // -- Default renderers (#2263) ---------------------------------------------------
@@ -427,7 +433,7 @@ test.each([null, "Add a renderer…", "Add a command step…", "Add a pipeline�
     ]);
     app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
     await settle();
-    expect(button("Run"), "the test pane is drawn").toBeDefined();
+    expect(button("Try it"), "Try it on is drawn").toBeDefined();
     if (press !== null) {
       button(press).click();
       flushSync();

@@ -33,6 +33,7 @@ import type {
   OneOffStyle,
   OneOffTarget,
   OneOffUrl,
+  TryOn,
 } from "./generated/app";
 
 export type {
@@ -88,6 +89,14 @@ export function batchChannel(onbatch: (batch: OneOffBatch) => void): { channel: 
  */
 export function oneoffRun(entityId: string, command: string, target: OneOffTarget, madeToken: string | null, channel: Channel<OneOffBatch>): Promise<OneOffStarted> {
   return invoke<OneOffStarted>("oneoff_run", { entityId, command, target, madeToken, channel });
+}
+
+/**
+ * *Try it on* (#2562): saved command `command` on pasted text, a chosen file or a chosen folder, with the chosen folder in
+ * the checkout's place; its lines on `channel` as {@link oneoffRun}'s. No row in the list of runs.
+ */
+export function oneoffTry(command: string, on: TryOn, channel: Channel<OneOffBatch>): Promise<OneOffStarted> {
+  return invoke<OneOffStarted>("oneoff_try", { command, on, channel });
 }
 
 /** Stops a run with everything it started. */

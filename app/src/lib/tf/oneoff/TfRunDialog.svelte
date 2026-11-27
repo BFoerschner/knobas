@@ -17,6 +17,7 @@
   one stood at, `1` and `2` switch the views, `Esc` closes.
 -->
 <script lang="ts">
+  import { TRY_ENTITY } from "../../ipc/app";
   import "../css/oneoff.css";
   import type { OneOffPlace } from "../../ipc/oneoff";
   import { openObject } from "../../ipc/entity";
@@ -169,6 +170,11 @@
   /** A place pressed: the file at its line behind the dialog, and the run one press away. */
   function openPlace(place: OneOffPlace | Problem, wide: boolean) {
     const line = place.line ?? 1;
+    // A try (#2562) ran on a folder of the person's own, which no page shows: its places say where they are and stay.
+    if (run.entityId === TRY_ENTITY) {
+      push({ text: `${place.path}:${line} is in what you tried it on, which no page here shows.` });
+      return;
+    }
     // A run on a generated folder: its places are the generated files, opened as the folder's own (Fable, 2026-11-25).
     if (madeOf !== null) {
       if (wide) {

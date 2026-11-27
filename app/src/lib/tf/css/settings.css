@@ -223,6 +223,13 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* Renderers' dialogs: a timeout is a short field with its unit beside it, wherever it stands (Forms, F-026). */
 .tf-rnd-secs { display: flex; align-items: center; gap: 8px; }
 .tf .tf-formgrid input.tf-rnd-secn { width: 90px; flex: none; }
+.tf-try-text { width: 100%; resize: vertical; min-height: 7.5em; }
+.tf-try-path { flex: 1 1 auto; min-width: 0; }
+.tf-try-out { margin-top: 12px; }
+/* One stage for reading, a refusal and the drawing, holding its room so none of them moves the page (#2562). */
+.tf-try-stage { min-height: 320px; max-height: 70vh; overflow: auto; display: flex; flex-direction: column; background: var(--sheet); }
+.tf-try-stage > .tf-banner, .tf-try-stage > .tf-stepfail { margin: 12px; }
+.tf-try-stage > .tf-empty { margin: auto; }
 .tf-stg-test { margin-top: 12px; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */

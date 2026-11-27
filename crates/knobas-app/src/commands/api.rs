@@ -255,7 +255,7 @@ pub async fn text_piped_save<R: tauri::Runtime>(
 }
 
 /// The saved command steps, read only where `steps` holds a command step.
-async fn commands_for<R: tauri::Runtime>(
+pub(crate) async fn commands_for<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     steps: &[crate::file_pipeline::PipeStep],
 ) -> Result<Vec<crate::file_pipeline::saved::CommandStep>, IpcError> {

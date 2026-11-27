@@ -54,6 +54,8 @@ pub struct RunHandle {
     /// The result's bytes: the stdout, the file under `{out}`, or the kept
     /// `{outdir}`.
     held: Mutex<Held>,
+    /// A try's throwaway folder (#2562), removed when the run ends.
+    throwaway: Mutex<Option<PathBuf>>,
 }
 
 /// Where a run's result's bytes are.
@@ -378,11 +380,25 @@ impl Runs {
             #[cfg(windows)]
             job: Mutex::new(None),
             held: Mutex::new(Held::Nothing),
+            throwaway: Mutex::new(None),
         });
         runs.push(Arc::clone(&handle));
         drop(runs);
         self.emit(&handle.row());
         Ok(handle)
+    }
+
+    /// Hold `dir`, a try's throwaway folder, until the run ends; at once when it already has.
+    pub fn throwaway(&self, handle: &RunHandle, dir: PathBuf) {
+        // The row stays locked until the folder is held: [`Self::end`] marks the row ended under that lock before it
+        // takes the folder, so a run ending now either finds it held or is seen ended here.
+        let row = lock(&handle.row);
+        if row.ended.is_some() {
+            drop(row);
+            let _ = std::fs::remove_dir_all(dir);
+        } else {
+            *lock(&handle.throwaway) = Some(dir);
+        }
     }
 
     /// The run with this id.
@@ -483,8 +499,14 @@ impl Runs {
         handle.flush(handle.started, Some(ended));
         lock(&handle.sinks).clear();
         let row = handle.row();
-        if let Some(history) = self.history.get() {
+        // A try is no row in the list of runs (#2562), and its throwaway file goes with it.
+        if let Some(history) = self.history.get()
+            && row.entity_id != crate::try_on::TRY_ENTITY
+        {
             history.ended(row.clone());
+        }
+        if let Some(dir) = lock(&handle.throwaway).take() {
+            let _ = std::fs::remove_dir_all(dir);
         }
         self.emit(&row);
         self.cap(KEPT_RUNS, KEPT_BYTES);
@@ -545,6 +567,8 @@ impl Runs {
                 }
             }
         }
+        // A try (#2562) is no row in the list of runs, live or ended: its dialog reads it by its id.
+        rows.retain(|r| r.entity_id != crate::try_on::TRY_ENTITY);
         if let Some(entity) = entity_id {
             rows.retain(|r| r.entity_id == entity);
         }

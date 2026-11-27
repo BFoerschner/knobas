@@ -121,6 +121,7 @@ mod support;
 mod ticket_keys_ipc;
 mod ticket_views_ipc;
 mod time_ipc;
+mod try_on;
 mod ui_pool_probe;
 mod ui_statement_limit;
 mod unauthorized_write;
