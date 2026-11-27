@@ -199,10 +199,10 @@ const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "
  * descriptors declare them (`KindInfo::refreshes`, #2146): `get_entity`
  * answers `refreshes` for the row's kind, not the adapter. Held to the
  * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`. Gitea reads every kind since
- * ADR-0047: a repository, a branch and a commit by walking their repository.
+ * ADR-0047: a repository, a branch and a commit by walking their repository; TeamCity since #2564: a build
+ * configuration by walking its newest builds.
  */
 const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
-  teamcity: new Set(["build_config"]),
   jira: new Set(["jira_view"]),
 };
 

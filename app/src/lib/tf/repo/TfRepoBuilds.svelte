@@ -59,6 +59,7 @@
     shown = true,
     listen = (event, handler) => windowListen(event, handler),
     follow = (runId: string) => refreshEntity(runId, true),
+    walk = (pipelineId: string) => refreshEntity(pipelineId),
     again = () => {},
   }: {
     repoId: string;
@@ -92,6 +93,11 @@
     listen?: EchoListen | undefined;
     /** A run in flight read at its source by id (`refresh_entity`, behind); the bridge's when left out. */
     follow?: ((runId: string) => Promise<unknown>) | undefined;
+    /**
+     * ⌘R's read of one of its pipelines with its newest runs at its source (#2564, ADR-0047 as amended 2026-11-27):
+     * `refresh_entity`, the person's lane; the bridge's when left out.
+     */
+    walk?: ((pipelineId: string) => Promise<unknown>) | undefined;
     /** The page's answer (`builds`) read again over what is drawn: a run it draws moved (#2558). */
     again?: (() => Promise<unknown> | void) | undefined;
   } = $props();
@@ -309,9 +315,10 @@
    * mechanism): the tab hears a refresh that moved a run it draws (a run started in knobas is read to its end, or this
    * tab read it) and a run of one of its pipelines' sources that brought news (a scheduled sync, *Sync now* on Builds),
    * and reads its answer again over what it drew, at once and then at most once in `IN_FLIGHT_AGAIN_MS`. Once drawn,
-   * shown again, or the window back, it reads the runs it draws in flight at their source; ⌘R does too, before the
-   * page's *Refreshing…* ends, and syncs no source: a TeamCity build configuration has no read of its own (ADR-0047),
-   * so the runs are what the tab can read for this repository alone. While held hidden it hears nothing: the return
+   * shown again, or the window back, it reads the runs it draws in flight at their source. ⌘R, before the page's
+   * *Refreshing…* ends, first reads each of the repository's pipelines with its newest runs at its source (#2564: a
+   * TeamCity build configuration's builds above the watermark, so a run started there since the last run shows), then
+   * its runs in flight, then its answers again; it syncs no source. While held hidden it hears nothing: the return
    * reads it again.
    */
   const visible = pageVisible();
@@ -377,9 +384,25 @@
     return () => clearTimeout(soon);
   });
   onFocusWhileShown(live, readInFlight);
+  /**
+   * The repository's pipelines read at their sources (#2564): one source's one at a time, since each refresh takes its
+   * source's lock only when free and two at once would leave the second unread; sources side by side. A pipeline its
+   * source does not read this way answers *not offered*, and nothing runs for it.
+   */
+  function walkPipelines(): Promise<unknown> {
+    const ask = untrack(() => walk);
+    const bySource = new Map<string, string[]>();
+    for (const row of untrack(() => rows) ?? []) bySource.set(row.source_id, [...(bySource.get(row.source_id) ?? []), row.entity_id]);
+    return Promise.allSettled(
+      [...bySource.values()].map(async (ids) => {
+        for (const id of ids) await Promise.resolve(id).then(ask).catch(() => {});
+      }),
+    );
+  }
   onRefreshed(
     () => refreshed,
     async () => {
+      await walkPipelines();
       inFlightReads.reset();
       await readInFlight();
       await rereadDrawn();
