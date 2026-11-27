@@ -4514,6 +4514,54 @@ async fn a_chain_names_its_steps_and_each_runs_build_on_the_branch() {
             ("Deploy".to_owned(), None, None),
         ]
     );
+    // #2594: a build's record names the builds it waits on, by key, from the
+    // moment it is queued, so a build a write started brings its chain.
+    let waits = async |id: i64| -> Vec<String> {
+        match source.refresh(&run(id)).await.expect("the build reads") {
+            knobas_source::RefreshAnswer::Item(item) => {
+                println!("SEEDED build {id} waits on: {}", item.payload["waitsOn"]);
+                serde_json::from_value(item.payload["waitsOn"].clone()).expect("a list of keys")
+            }
+            other => panic!("build {id} reads as {other:?}"),
+        }
+    };
+    assert_eq!(waits(deploy).await, [format!("build:{docker}")]);
+    assert_eq!(waits(docker).await, [format!("build:{build}")]);
+    assert_eq!(waits(build).await, Vec::<String>::new());
+    let queued = queued_id(
+        &source
+            .write(knobas_source::WriteOp::RunBuild {
+                entity: pipeline("Deploy"),
+                branch: Some(FEATURE.to_owned()),
+                parameters: Vec::new(),
+                clean_checkout: false,
+                first_in_queue: false,
+            })
+            .await
+            .unwrap_or_else(|e| panic!("Deploy is queued: {e:?}")),
+    );
+    let at_once = waits(queued).await;
+    let state = seeded.build(queued).await["state"].clone();
+    println!("SEEDED a Deploy started here ({state}) waits on {at_once:?}");
+    assert_eq!(at_once.len(), 1, "one Docker: {at_once:?}");
+    let docker_now: i64 = at_once[0]
+        .strip_prefix("build:")
+        .and_then(|id| id.parse().ok())
+        .expect("a build key");
+    assert_eq!(
+        waits(docker_now).await.len(),
+        1,
+        "and that Docker waits on one Build"
+    );
+    let deadline = std::time::Instant::now() + BUILD_BUDGET;
+    while seeded.build(queued).await["state"] != "finished" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Deploy {queued} did not finish within {BUILD_BUDGET:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
     // A seeded build in no chain has none.
     let lone = seeded.fixture_build(1187).real_id;
     assert!(

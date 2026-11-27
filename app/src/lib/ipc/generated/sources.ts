@@ -749,6 +749,17 @@ tests_passed: Array<PayloadPath>,
  */
 tests_ignored: Array<PayloadPath>, 
 /**
+ * The runs a run waits on before it starts (#2594), each by its item
+ * key in the run's own source: the run a write started brings these
+ * with it, and each is followed to its end as the started run is
+ * (ADR-0031's 2026-11-25 amendment). TeamCity: the builds of its
+ * snapshot dependencies, which `map` writes beside the record as
+ * `waitsOn` (`build:<id>`), off the record's own
+ * `snapshot-dependencies`. Read as a list of strings; a run that waits
+ * on nothing has none.
+ */
+waits_on: Array<ListPath>, 
+/**
  * The language a repository is written in, in the source's own word
  * (#966, R-8.1): Gitea's `language`, which it works out from the
  * default branch's files. Gitea writes `""` for a repository it found

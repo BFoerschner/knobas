@@ -2,7 +2,8 @@
 //!
 //! Two rules from interfaces §4.1 shape everything here: `payload` is the raw
 //! record **verbatim** (spec §3a keeps re-mapping possible without a re-sync),
-//! and `updated_at` is the source's own timestamp, never `now()`.
+//! and `updated_at` is the source's own timestamp, never `now()`. A build's
+//! record gains one key beside it, `waitsOn` (#2594), and loses none.
 
 use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
@@ -215,7 +216,7 @@ pub(crate) fn build_item(
             .into_iter()
             .flatten()
             .find_map(|raw| parse_ts(raw)),
-        payload: raw.clone(),
+        payload: with_waits_on(raw),
         // Knobas' own composition; the record's `webUrl` is deliberately not
         // read, and `build_web_url` owns the rule about which ids can make a
         // URL segment -- the title keeps the id verbatim, as it always has.
@@ -225,6 +226,28 @@ pub(crate) fn build_item(
         // channel: the adapter never sees the removal, so it never claims one.
         deleted: false,
     }
+}
+
+/// The record with the builds it waits on written beside it as `waitsOn`
+/// (#2594): each of its `snapshot-dependencies` by its item key
+/// (`build:<id>`), which the declared `waits_on` reads, so the app follows
+/// them as keys of this source without knowing how TeamCity spells a
+/// dependency. Always written, `[]` for a build that waits on nothing, so
+/// a record of the run's listing and one read by id carry the same key.
+fn with_waits_on(raw: &serde_json::Value) -> serde_json::Value {
+    let keys: Vec<serde_json::Value> = raw
+        .pointer("/snapshot-dependencies/build")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter_map(|b| b.get("id").and_then(serde_json::Value::as_i64))
+        .map(|id| serde_json::Value::String(build_key(id)))
+        .collect();
+    let mut payload = raw.clone();
+    if let Some(record) = payload.as_object_mut() {
+        record.insert("waitsOn".to_owned(), serde_json::Value::Array(keys));
+    }
+    payload
 }
 
 /// Map one build configuration, in the namespace of the instance that fetched
@@ -320,8 +343,38 @@ mod tests {
         assert!(it.body_text.contains("feature/PAY-231-sepa-retry"));
         assert!(it.body_text.contains("FAILURE"));
         assert!(it.body_text.contains("triggered by mara.lindqvist"));
-        // The raw record, verbatim (spec §3a: a later mapping re-projects it).
-        assert_eq!(it.payload, raw);
+        // The raw record, verbatim (spec §3a: a later mapping re-projects it),
+        // with the builds it waits on beside it (#2594): none here.
+        let mut beside = raw.clone();
+        beside["waitsOn"] = serde_json::json!([]);
+        assert_eq!(it.payload, beside);
+    }
+
+    /// **The builds a build waits on are written beside its record by key**
+    /// (#2594): off its own `snapshot-dependencies`, so the app can follow a
+    /// started build's chain without knowing how TeamCity spells one.
+    #[test]
+    fn a_builds_snapshot_dependencies_are_written_beside_it_as_the_keys_it_waits_on() {
+        let (mut raw, _) = finished();
+        raw["snapshot-dependencies"] =
+            serde_json::json!({ "count": 2, "build": [{ "id": 1185 }, { "id": 1186 }] });
+        let b = serde_json::from_value(raw.clone()).expect("build");
+        let it = build_item("teamcity", BASE, &raw, &b);
+        assert_eq!(
+            it.payload["waitsOn"],
+            serde_json::json!(["build:1185", "build:1186"])
+        );
+        assert_eq!(
+            it.payload["snapshot-dependencies"], raw["snapshot-dependencies"],
+            "the record itself is kept"
+        );
+        // TeamCity's answer for a build that waits on nothing: a count, no list.
+        raw["snapshot-dependencies"] = serde_json::json!({ "count": 0 });
+        let b = serde_json::from_value(raw.clone()).expect("build");
+        assert_eq!(
+            build_item("teamcity", BASE, &raw, &b).payload["waitsOn"],
+            serde_json::json!([])
+        );
     }
 
     /// `finishDate` beats `startDate` beats `queuedDate`, and the test can
@@ -449,7 +502,7 @@ mod tests {
             it.body_text
         );
         assert_eq!(
-            it.payload, raw,
+            it.payload["status"], raw["status"],
             "the record keeps its UNKNOWN verbatim -- only the rendering changed"
         );
     }
