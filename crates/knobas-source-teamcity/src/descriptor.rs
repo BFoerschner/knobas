@@ -88,9 +88,12 @@ pub fn descriptor_template() -> SourceDescriptor {
                 plural: "Build configurations".to_owned(),
                 monogram: "BC".to_owned(),
                 full_sync_exhaustive: false,
-                // `refresh` answers a configuration not offered: the run that
-                // follows its one write is all it needs (#2146).
-                refreshes: false,
+                // Read with its newest builds, not by itself (#2564,
+                // ADR-0047 as amended 2026-11-27): `refresh` answers it not
+                // offered and `refresh_under` walks it, so its page draws
+                // *Refresh* and ⌘R on a repository's Builds tab finds its new
+                // builds.
+                refreshes: true,
                 title_stays_in_mirror: false,
             },
         ],
