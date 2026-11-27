@@ -177,3 +177,12 @@ test("the counts follow a run that starts, passes and fails, with no reload; wit
   await store.inFront(false);
   expect(badges.builds, "the visit's passes were seen").toMatchObject({ blue: 0, green: 0, red: 1 });
 });
+
+test("the shell's start reads the monitors alone: the builds' counts come with the runs store's first word (#2569b)", async () => {
+  // At start the runs store tells the backend where the window is and reads the counts then (`started`, `inFront`);
+  // a read here as well went out beside Recent's first page and every other start-up read.
+  let builds = 0;
+  const badges = createBadges(ports({ readBuilds: async () => void (builds += 1) }));
+  await badges.readMonitors();
+  expect([badges.monitors, builds]).toEqual([1, 0]);
+});
