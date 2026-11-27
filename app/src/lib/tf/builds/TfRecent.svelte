@@ -88,7 +88,7 @@
   import { runsRead } from "./runs-read.svelte";
   import { InFlightReads, IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, runsInFlight } from "./runs-in-flight";
   import { askRunAgain } from "./run-again";
-  import { RECENT_HOLD, RECENT_PAGE, placeWords, recentFilterOf, recentMarks, recentText, withHead, withOlder, withPipelines } from "./recent";
+  import { RECENT_FIRST, RECENT_HOLD, RECENT_PAGE, placeWords, recentFilterOf, recentMarks, recentText, withHead, withOlder, withPipelines } from "./recent";
 
   const BRIDGE: RecentPorts = {
     recent: (filter, before, limit) => recentRuns(filter, before, limit),
@@ -178,8 +178,10 @@
     const at = ++reads;
     const wanted = basis;
     const filterNow = asked;
+    // Nothing held for this filter: the rows that fill the window first, drawn, then the rest of the page below them.
+    const first = heldFor !== wanted || held === null;
     try {
-      const page = await ports.recent(filterNow, null, RECENT_PAGE);
+      const page = await ports.recent(filterNow, null, first ? RECENT_FIRST : RECENT_PAGE);
       if (at !== reads) return;
       lay(page);
       const fresh = heldFor !== wanted || held === null;
@@ -193,6 +195,7 @@
       failed = null;
       inFlightSoon();
       untrack(() => ondrawn)?.();
+      if (first && next !== null) void more(RECENT_PAGE - RECENT_FIRST);
       // Shown: the sources asked once, then each minute (Fable's ruling 7).
       if (!askedOnce) {
         askedOnce = true;
@@ -204,18 +207,19 @@
     }
   }
 
-  /** An older page, after what is held. */
-  async function more() {
+  /** An older page of `limit` runs, after what is held. */
+  async function more(limit = RECENT_PAGE) {
     if (held === null || next === null || older === "loading" || held.length >= RECENT_HOLD) return;
     const at = reads;
     older = "loading";
     try {
-      const page = await ports.recent(asked, next, RECENT_PAGE);
+      const page = await ports.recent(asked, next, limit);
       if (at !== reads) return;
       lay(page);
       held = withOlder(held, page.runs);
       next = held.length >= RECENT_HOLD ? null : page.next;
       older = "idle";
+      inFlightSoon();
     } catch {
       if (at === reads) older = "failed";
     }

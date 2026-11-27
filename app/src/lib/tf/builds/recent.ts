@@ -15,8 +15,15 @@ export const RECENT = "recent";
 /** *Recent*'s address. */
 export const RECENT_HASH = `#/builds/${RECENT}`;
 
-/** How many runs a read of *Recent* asks for: the first page, and each older page. */
+/** How many runs a read of *Recent* asks for: the head read again, and each older page. */
 export const RECENT_PAGE = 200;
+
+/**
+ * How many runs the first read asks for: the rows that fill the window at the tallest screen the open budget draws
+ * (about 50 at 1440 px), drawn before the rest of {@link RECENT_PAGE} is read behind them (#2569,
+ * `docs/decisions/2026-11-27-builds-first-open.md`).
+ */
+export const RECENT_FIRST = 60;
 
 /** The most runs *Recent* holds: past them, each pipeline's own page reads older history from its source. */
 export const RECENT_HOLD = 2_000;

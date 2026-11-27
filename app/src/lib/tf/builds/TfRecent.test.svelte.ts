@@ -130,7 +130,7 @@ const numbers = () => rows().map((row) => row.querySelector(".tf-run-pno")?.text
 test("the newest runs of every pipeline, newest first, each naming its pipeline, number and folders", async () => {
   const drawn = draw();
   await settle();
-  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null }, before: null, limit: 200 }]);
+  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null }, before: null, limit: 60 }]);
   expect(numbers()).toEqual(["#12", "#11", "#10"]);
   const first = rows()[0]!;
   expect(first.querySelector(".tf-run-pname")?.textContent).toBe("Deploy");
@@ -215,13 +215,44 @@ test("a run a sync brings waits behind Show 1 new run while the pointer rests on
   expect(rows()[0]!.classList.contains("tf-run-new")).toBe(true);
 });
 
-test("an older page follows from the last page's cursor", async () => {
-  const drawn = draw({}, { first: { ...PAGE, next: { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" } } });
+test("the first read asks for the rows that fill the window and draws them; the rest of the page follows below them, the drawn rows kept in place (#2569)", async () => {
+  const cursor = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
+  let answer: (page: RecentRuns) => void = () => {};
+  const asked: { before: RecentCursor | null; limit: number }[] = [];
+  draw(
+    {
+      recent: (_filter, before, limit) => {
+        asked.push({ before, limit });
+        return asked.length === 1 ? Promise.resolve({ ...PAGE, next: cursor }) : new Promise((resolve) => (answer = resolve));
+      },
+    },
+  );
   await settle();
+  expect(asked[0]).toEqual({ before: null, limit: 60 });
+  const first = rows();
+  expect(numbers()).toEqual(["#12", "#11", "#10"]);
+  // The rest of the 200, from the first answer's cursor.
+  expect(asked[1]).toEqual({ before: cursor, limit: 140 });
+  answer({ runs: [at(LINT, run(9, "ok", today(0, 10))), at(DEPLOY, run(8, "ok", today(0, 5)))], pipelines: [LINT, DEPLOY], next: null });
+  await settle();
+  expect(numbers()).toEqual(["#12", "#11", "#10", "#9", "#8"]);
+  // The rows drawn first are the same rows, in the same places.
+  expect(rows().slice(0, 3)).toEqual(first);
+  first.forEach((row, i) => expect(rows()[i]).toBe(row));
+  expect(asked).toHaveLength(2);
+});
+
+test("an older page follows from the last page's cursor", async () => {
+  const rest = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
+  const drawn = draw({}, { first: { ...PAGE, next: rest } });
+  await settle();
+  // The first read's rest came back as the same page: nothing new, and its cursor is where *Older runs* reads from.
+  expect(drawn.asked.map((one) => one.limit)).toEqual([60, 140]);
   drawn.next = { runs: [at(LINT, run(9, "ok", today(0, 10)))], pipelines: [LINT], next: null };
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Older runs")!.click();
   await settle();
-  expect(drawn.asked.at(-1)!.before).toEqual({ made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" });
+  expect(drawn.asked.at(-1)!.before).toEqual(rest);
+  expect(drawn.asked.at(-1)!.limit).toBe(200);
   expect(numbers()).toEqual(["#12", "#11", "#10", "#9"]);
   expect(target.querySelector(".tf-older")?.textContent).toContain("Every run knobas holds.");
 });
