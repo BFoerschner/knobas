@@ -270,14 +270,15 @@ pub async fn answer(
 
     match (answer, knobas_core::run_read::failed_build_run(item_key)) {
         (Answer::Snooze(until), _) => inbox::snooze(pool, item_key, until).await,
-        // *Done* on a failed build is reading its run (ux18, `0098`): one
-        // notion, so the row is written with the answer or not at all.
+        // *Done* on a failed build is marking its run (ux18, `0098`,
+        // ADR-0063): one notion, so the mark is written with the answer or
+        // not at all.
         (Answer::Done, Some(run)) => {
             let mut tx = pool.begin().await?;
             inbox::complete_with(&mut *tx, item_key, now)
                 .await
                 .map_err(IpcError::internal)?;
-            knobas_core::run_read::mark_with(&mut *tx, run)
+            knobas_core::run_read::mark_with(&mut *tx, declarations, run)
                 .await
                 .map_err(IpcError::internal)?;
             tx.commit().await?;

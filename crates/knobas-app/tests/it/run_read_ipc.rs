@@ -6,8 +6,8 @@
 //! pipeline in it.
 
 use knobas_app::commands::entity::{
-    complete_inbox_item_inner, inbox_items_inner, mark_runs_read_inner, mark_runs_unread_inner,
-    unread_failing_builds_inner,
+    complete_inbox_item_inner, inbox_items_inner, mark_run_opened_inner, mark_runs_read_inner,
+    mark_runs_unread_inner, unread_failing_builds_inner, MarkScope, RunMarks,
 };
 
 const ME: &str = "mara.lindqvist";
@@ -93,32 +93,98 @@ async fn build(
     updated: &str,
 ) -> String {
     let entity = format!("{source}:build:{id}");
-    let payload = if status == "running" {
-        serde_json::json!({
-            "id": id, "number": id.to_string(), "buildTypeId": config, "state": "running",
-            "status": "FAILURE", "branchName": "main", "startDate": "20260822T114500+0000"
-        })
-    } else {
-        serde_json::json!({
-            "id": id, "number": id.to_string(), "buildTypeId": config, "state": "finished",
-            "status": status, "branchName": "main",
-            "startDate": "20260822T100500+0000", "finishDate": "20260822T100917+0000"
-        })
-    };
-    item(pool, &entity, source, "build", updated, Some(ME), payload).await;
+    item(
+        pool,
+        &entity,
+        source,
+        "build",
+        updated,
+        Some(ME),
+        payload(id, config, status),
+    )
+    .await;
     entity
 }
 
+/// A TeamCity build's payload: `running` (already reporting a failure, as
+/// TeamCity does once a test failed), `queued`, or finished with `status`.
+fn payload(id: i64, config: &str, status: &str) -> serde_json::Value {
+    match status {
+        "running" => serde_json::json!({
+            "id": id, "number": id.to_string(), "buildTypeId": config, "state": "running",
+            "status": "FAILURE", "branchName": "main", "startDate": "20260822T114500+0000"
+        }),
+        "queued" => serde_json::json!({
+            "id": id, "buildTypeId": config, "state": "queued", "branchName": "main"
+        }),
+        _ => serde_json::json!({
+            "id": id, "number": id.to_string(), "buildTypeId": config, "state": "finished",
+            "status": status, "branchName": "main",
+            "startDate": "20260822T100500+0000", "finishDate": "20260822T100917+0000"
+        }),
+    }
+}
+
+/// The runs a mark reads, sorted.
 async fn read(pool: &sqlx::PgPool) -> Vec<String> {
-    let mut ids = knobas_core::run_read::read_runs(pool).await.unwrap();
+    marks(pool).await.read
+}
+
+/// Every live run's mark, each list sorted.
+async fn marks(pool: &sqlx::PgPool) -> RunMarks {
+    sorted(knobas_core::run_read::read_runs(pool).await.unwrap())
+}
+
+fn sorted(mut marks: RunMarks) -> RunMarks {
+    marks.read.sort();
+    marks.while_running.sort();
+    marks
+}
+
+/// Every id a mark answered it wrote, sorted: what *Undo* hands back.
+fn ids(marks: &RunMarks) -> Vec<String> {
+    let mut ids: Vec<String> = marks.read.iter().chain(&marks.while_running).cloned().collect();
     ids.sort();
     ids
 }
 
-/// *Mark all as read* on a pipeline writes its finished failures and nothing
-/// else: not a pass, not a run still going (whose state may yet change), not
-/// another pipeline's failure. It answers what it wrote, so a second press
-/// answers nothing and *Undo* takes back exactly the first.
+fn by_id(runs: &[String]) -> MarkScope {
+    MarkScope {
+        runs: runs.to_vec(),
+        ..MarkScope::default()
+    }
+}
+
+fn of_pipelines(pipelines: &[String]) -> MarkScope {
+    MarkScope {
+        pipelines: pipelines.to_vec(),
+        ..MarkScope::default()
+    }
+}
+
+/// A run's payload as `build` writes it for `status`, written over the stored
+/// one: the run moved at the source and a sync brought it.
+async fn moved(pool: &sqlx::PgPool, run: &str, status: &str) {
+    let id: i64 = run.rsplit(':').next().unwrap().parse().unwrap();
+    let config: String = sqlx::query_scalar(
+        "select payload->>'buildTypeId' from sync.item where entity_id = $1",
+    )
+    .bind(run)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(run)
+        .bind(payload(id, &config, status))
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// *Mark all as read* on a pipeline reads its finished failures and takes its
+/// running run out of the blue (ADR-0063), and nothing else: not a pass, not
+/// a queued run, not another pipeline's failure. It answers what it wrote, so
+/// a second press answers nothing and *Undo* takes back exactly the first.
 #[tokio::test]
 async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote() {
     let (pool, tc) = scratch("run-read-pipeline").await;
@@ -151,13 +217,22 @@ async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote
         "2026-08-21T03:00:00Z",
     )
     .await;
-    build(
+    let running = build(
         &pool,
         &tc,
         1004,
         "Payout_Tests",
         "running",
         "2026-08-21T04:00:00Z",
+    )
+    .await;
+    build(
+        &pool,
+        &tc,
+        1005,
+        "Payout_Tests",
+        "queued",
+        "2026-08-21T04:30:00Z",
     )
     .await;
     let lint = build(
@@ -170,31 +245,31 @@ async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote
     )
     .await;
 
-    let (mut wrote, line) =
-        mark_runs_read_inner(&pool, &registry(), &[], std::slice::from_ref(&tests))
-            .await
-            .unwrap();
-    wrote.sort();
-    assert_eq!(wrote, [red1.clone(), red2.clone()]);
+    let (wrote, line) = mark_runs_read_inner(&pool, &registry(), &of_pipelines(&[tests.clone()]))
+        .await
+        .unwrap();
+    let wrote = sorted(wrote);
+    assert_eq!(wrote.read, [red1.clone(), red2.clone()]);
+    assert_eq!(wrote.while_running, [running.clone()], "out of the blue only");
     let line = line.expect("a mark that wrote says so");
     assert_eq!(line.verb, "marked read");
-    assert_eq!(line.detail["runs"], 2);
-    assert_eq!(read(&pool).await, [red1.clone(), red2.clone()]);
+    assert_eq!(line.detail["runs"], 3);
+    assert_eq!(marks(&pool).await, wrote);
     assert!(
         !read(&pool).await.contains(&lint),
         "another pipeline's stays"
     );
 
-    let (again, line) = mark_runs_read_inner(&pool, &registry(), &[], &[tests])
+    let (again, line) = mark_runs_read_inner(&pool, &registry(), &of_pipelines(&[tests]))
         .await
         .unwrap();
-    assert!(again.is_empty(), "already read: {again:?}");
+    assert!(ids(&again).is_empty(), "already read: {again:?}");
     assert!(line.is_none(), "a mark that wrote nothing writes no line");
 
-    let (gone, line) = mark_runs_unread_inner(&pool, &wrote).await.unwrap();
-    assert_eq!(gone.len(), 2, "Undo takes back both");
+    let (gone, line) = mark_runs_unread_inner(&pool, &ids(&wrote)).await.unwrap();
+    assert_eq!(gone.len(), 3, "Undo takes back all three");
     assert_eq!(line.expect("and says so").verb, "marked unread");
-    assert!(read(&pool).await.is_empty());
+    assert_eq!(marks(&pool).await, RunMarks::default());
 }
 
 /// The top bar's count is pipelines whose newest run failed and is unread:
@@ -230,7 +305,7 @@ async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_
         1
     );
 
-    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&red)))
         .await
         .unwrap();
     assert_eq!(
@@ -298,7 +373,7 @@ async fn reading_a_run_and_doing_its_inbox_line_are_one_answer() {
     let other_key = format!("failed_build:{other}");
     assert!(keys(pool.clone()).await.contains(&key));
 
-    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&red)))
         .await
         .unwrap();
     assert!(!keys(pool.clone()).await.contains(&key), "read, it left");
@@ -340,7 +415,7 @@ async fn a_withdrawn_runs_mark_is_not_answered() {
         "2026-08-21T01:00:00Z",
     )
     .await;
-    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&red), &[])
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&red)))
         .await
         .unwrap();
     assert_eq!(read(&pool).await, std::slice::from_ref(&red));
@@ -391,7 +466,7 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
     )
     .await;
     let read_one = failures.remove(0);
-    mark_runs_read_inner(&pool, &registry(), std::slice::from_ref(&read_one), &[])
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&read_one)))
         .await
         .unwrap();
 
@@ -420,11 +495,12 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
         std::slice::from_ref(&other)
     );
 
-    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &[], std::slice::from_ref(&tests))
+    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &of_pipelines(&[tests.clone()]))
         .await
         .unwrap();
+    assert_eq!(wrote.while_running.len(), 1, "its running run, out of the blue");
     assert_eq!(
-        wrote.len(),
+        wrote.read.len(),
         13,
         "the pipeline's mark writes what the list named"
     );
@@ -435,10 +511,244 @@ async fn the_list_names_every_unread_failure_of_a_pipeline_past_its_twelve() {
         "another pipeline's stays"
     );
 
-    mark_runs_unread_inner(&pool, &wrote).await.unwrap();
+    mark_runs_unread_inner(&pool, &ids(&wrote)).await.unwrap();
     assert_eq!(
         unread_of(pool.clone(), tests).await.1,
         expected,
         "Undo brings them back"
     );
+}
+
+/// #2555's first bug: a running run already reporting a failure counted red
+/// and could not be marked, because the mark asked for a finish. Now any run
+/// can carry a mark, and the mark answers its id, as one taken while it ran.
+#[tokio::test]
+async fn a_running_run_already_reporting_failure_can_be_marked() {
+    let (pool, tc) = scratch("run-read-running-err").await;
+    configuration(&pool, &tc, "Payout_Tests").await;
+    let running = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+
+    let (wrote, line) = mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&running)))
+        .await
+        .unwrap();
+    assert_eq!(ids(&wrote), [running.clone()], "the mark answers its id");
+    assert_eq!(wrote.while_running, [running.clone()], "taken while it ran");
+    assert!(line.is_some());
+    assert_eq!(marks(&pool).await.while_running, [running]);
+}
+
+/// Question 1 (#2554): a mark taken while a run ran takes only its blue, so
+/// when it fails it is unread, on the list and in the Inbox. Opening it while
+/// it ran is having looked: it fails read. Marked again once failed, the
+/// mark is written over and answers the run.
+#[tokio::test]
+async fn a_run_marked_while_running_fails_unread_and_one_opened_while_running_fails_read() {
+    let (pool, tc) = scratch("run-read-while-running").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    let marked = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let opened = build(
+        &pool,
+        &tc,
+        1002,
+        "Payout_Tests",
+        "running",
+        "2026-08-21T02:00:00Z",
+    )
+    .await;
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&marked)))
+        .await
+        .unwrap();
+    let (wrote, line) = mark_run_opened_inner(&pool, &registry(), &opened)
+        .await
+        .unwrap();
+    assert!(wrote, "the first open writes");
+    assert!(line.is_none(), "opening writes no activity line");
+    assert_eq!(
+        marks(&pool).await,
+        RunMarks {
+            read: vec![opened.clone()],
+            while_running: vec![marked.clone()],
+        }
+    );
+
+    moved(&pool, &marked, "FAILURE").await;
+    moved(&pool, &opened, "FAILURE").await;
+
+    let unread = knobas_app::commands::entity::pipelines_inner(&pool, &registry())
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.entity_id == tests)
+        .expect("the pipeline is listed")
+        .unread;
+    assert_eq!(unread, [marked.clone()], "the marked run asks, the opened one not");
+    let keys = inbox_keys(&pool).await;
+    assert!(keys.contains(&format!("failed_build:{marked}")), "{keys:?}");
+    assert!(!keys.contains(&format!("failed_build:{opened}")), "{keys:?}");
+
+    let (wrote, _) = mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&marked)))
+        .await
+        .unwrap();
+    assert_eq!(wrote.read, [marked.clone()], "marked once failed, it is read");
+    assert_eq!(read(&pool).await, {
+        let mut both = vec![marked, opened];
+        both.sort();
+        both
+    });
+}
+
+/// Question 3 (#2554): opening a failed run reads it, and its Inbox line goes
+/// with it. A second open writes nothing and no line; *Mark as unread* takes
+/// the open back like any mark.
+#[tokio::test]
+async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
+    let (pool, tc) = scratch("run-read-opened").await;
+    configuration(&pool, &tc, "Payout_Tests").await;
+    let red = build(
+        &pool,
+        &tc,
+        1001,
+        "Payout_Tests",
+        "FAILURE",
+        "2026-08-21T01:00:00Z",
+    )
+    .await;
+    let key = format!("failed_build:{red}");
+    assert!(inbox_keys(&pool).await.contains(&key));
+    assert_eq!(
+        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        1
+    );
+
+    let (wrote, line) = mark_run_opened_inner(&pool, &registry(), &red).await.unwrap();
+    assert!(wrote);
+    assert!(line.is_none(), "opening writes no activity line");
+    assert_eq!(read(&pool).await, [red.clone()]);
+    assert!(!inbox_keys(&pool).await.contains(&key), "its line went");
+    assert_eq!(
+        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        0,
+        "and the top bar's count"
+    );
+
+    let (again, line) = mark_run_opened_inner(&pool, &registry(), &red).await.unwrap();
+    assert!(!again, "already read");
+    assert!(line.is_none());
+
+    mark_runs_unread_inner(&pool, std::slice::from_ref(&red))
+        .await
+        .unwrap();
+    assert!(inbox_keys(&pool).await.contains(&key), "unread, it asks again");
+}
+
+/// #2555's second bug, on the backend: *everything* needs no pipeline from
+/// the page. It reads every failed run and takes every running run out of
+/// the blue, of every pipeline, and nothing else; *Undo* takes back exactly
+/// the rows it wrote, so a run read before stays read.
+#[tokio::test]
+async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it() {
+    let (pool, tc) = scratch("run-read-everything").await;
+    configuration(&pool, &tc, "Payout_Tests").await;
+    configuration(&pool, &tc, "Ledger_Tests").await;
+    let red1 = build(&pool, &tc, 1001, "Payout_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
+    let red2 = build(&pool, &tc, 2001, "Ledger_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
+    let before = build(&pool, &tc, 2002, "Ledger_Tests", "FAILURE", "2026-08-21T02:00:00Z").await;
+    build(&pool, &tc, 1002, "Payout_Tests", "SUCCESS", "2026-08-21T02:00:00Z").await;
+    build(&pool, &tc, 1003, "Payout_Tests", "queued", "2026-08-21T03:00:00Z").await;
+    let running = build(&pool, &tc, 2003, "Ledger_Tests", "running", "2026-08-21T03:00:00Z").await;
+    mark_runs_read_inner(&pool, &registry(), &by_id(std::slice::from_ref(&before)))
+        .await
+        .unwrap();
+
+    let everything = MarkScope {
+        everything: true,
+        ..MarkScope::default()
+    };
+    let (wrote, line) = mark_runs_read_inner(&pool, &registry(), &everything)
+        .await
+        .unwrap();
+    let wrote = sorted(wrote);
+    let mut failed = vec![red1, red2];
+    failed.sort();
+    assert_eq!(wrote.read, failed, "every failed run, not the one read before");
+    assert_eq!(wrote.while_running, [running.clone()]);
+    assert_eq!(line.expect("one line").detail["runs"], 3);
+    assert_eq!(
+        unread_failing_builds_inner(&pool, &registry()).await.unwrap(),
+        0
+    );
+
+    mark_runs_unread_inner(&pool, &ids(&wrote)).await.unwrap();
+    assert_eq!(
+        marks(&pool).await,
+        RunMarks {
+            read: vec![before],
+            while_running: Vec::new(),
+        },
+        "Undo leaves what was read before"
+    );
+}
+
+/// `0105` turns every mark already written into one *marked after finishing*,
+/// and a database at `0104` starts under this build. The scratch database is
+/// put back to `0104`'s shape, a mark written as `0098` wrote it, then
+/// migrated.
+#[tokio::test]
+async fn a_database_at_0104_starts_and_its_marks_read_their_runs() {
+    let (pool, tc) = scratch("run-read-0105").await;
+    configuration(&pool, &tc, "Payout_Tests").await;
+    let red = build(&pool, &tc, 1001, "Payout_Tests", "FAILURE", "2026-08-21T01:00:00Z").await;
+    for statement in [
+        "alter table knobas.run_read drop column how, drop column finished",
+        "delete from public._sqlx_migrations where version = 105",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+    sqlx::query("insert into knobas.run_read (entity_id) values ($1)")
+        .bind(&red)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    knobas_db::migrate::run(&pool)
+        .await
+        .expect("a database at 0104 starts");
+    let (how, finished): (String, bool) =
+        sqlx::query_as("select how, finished from knobas.run_read where entity_id = $1")
+            .bind(&red)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((how.as_str(), finished), ("marked", true));
+    assert_eq!(read(&pool).await, [red]);
+}
+
+async fn inbox_keys(pool: &sqlx::PgPool) -> Vec<String> {
+    inbox_items_inner(
+        pool,
+        &registry(),
+        chrono::Utc::now(),
+        knobas_core::inbox::Shelf::Stream,
+    )
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|entry| entry.item.key)
+    .collect()
 }

@@ -290,6 +290,37 @@ async fn the_unread_failures_read_one_range() {
                 .any(|(kind, _)| kind == "Seq Scan on item_pipeline"),
         "each pipeline's runs are one range of item_pipeline_runs_idx: {text}"
     );
+
+    // A mark of everything (ADR-0063) reads each pipeline's runs the same
+    // way, and writes every unread failure: rolled back, so the list above
+    // is what the next run reads.
+    let mut tx = pool.begin().await.unwrap();
+    let (json,): (serde_json::Value,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, format json) {}",
+        knobas_core::run_read::MARK_READ
+    )))
+    .bind(declarations.as_param())
+    .bind(Vec::<String>::new())
+    .bind(Vec::<String>::new())
+    .bind(true)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
+    let mut nodes = Vec::new();
+    walk(&json[0]["Plan"], &mut nodes);
+    let text = json.to_string();
+    println!(
+        "a mark of everything over the same mirror: {:.1} ms",
+        json[0]["Execution Time"].as_f64().unwrap_or_default()
+    );
+    assert!(
+        text.contains("item_pipeline_runs_idx")
+            && !nodes
+                .iter()
+                .any(|(kind, _)| kind == "Seq Scan on item_pipeline"),
+        "a mark of everything reads each pipeline's runs as one range: {text}"
+    );
 }
 
 /// The plan node named `name` (`Subplan Name`), anywhere under `node`.

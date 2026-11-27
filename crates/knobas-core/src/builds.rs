@@ -386,8 +386,8 @@ macro_rules! newest_runs {
 /// make it the pipelines × twelve, whatever TeamCity's history holds. The
 /// unread failures (#2543) are the one read of the whole history: each
 /// pipeline's range of `item_pipeline_runs_idx`, every run looked at once,
-/// kept to its failures with no `knobas.run_read` row
-/// ([`crate::failed_runs_of!`]); about 3 µs a run. The
+/// kept to its failures no mark reads ([`crate::reads!`],
+/// [`crate::failed_runs_of!`]); about 3 µs a run. The
 /// pipelines are `materialized` and read once: inlined, a pipeline's
 /// declarations were read for every pair of pipelines the final join
 /// compared (1.35 s against 0.59 s at 400 × 30,000).
@@ -448,7 +448,9 @@ unread as materialized (
     crate::failed_runs_of!("p"),
     "
      and t.pkey is not null and t.name is not null
-     and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
+     and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id and ",
+    crate::reads!("rr"),
+    ")
    group by t.entity_id
 )
 select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path,

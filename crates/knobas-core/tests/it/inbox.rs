@@ -165,6 +165,9 @@ fn teamcity_build() -> knobas_core::payload::KindPaths {
                     StateValue::of("SUCCESS", Tone::Ok),
                     StateValue::of("FAILURE", Tone::Err),
                     StateValue::of("UNKNOWN", Tone::Muted),
+                    // No TeamCity status: a source's *passed with warnings*,
+                    // for `run_bubble!`'s yellow.
+                    StateValue::of("WARNING", Tone::Warn),
                 ],
             },
         ],
@@ -172,6 +175,10 @@ fn teamcity_build() -> knobas_core::payload::KindPaths {
             PayloadPath::of(["buildTypeId"]),
             PayloadPath::of(["buildType", "id"]),
         ],
+        // What a mark records of its run, and which bubble it stands in
+        // (ADR-0063).
+        started: vec![PayloadPath::of(["startDate"])],
+        finished: vec![PayloadPath::of(["finishDate"])],
         ..KindPaths::default()
     }
 }
@@ -292,6 +299,8 @@ async fn build(
                 "state": "finished",
                 "buildTypeId": config,
                 "statusText": "3 tests failed",
+                "startDate": "20260822T100500+0000",
+                "finishDate": "20260822T100917+0000",
             }),
             updated,
         },
@@ -1503,7 +1512,9 @@ async fn a_failed_build_whose_run_was_read_leaves_both_shelves_until_marked_unre
         .await
         .unwrap();
 
-    knobas_core::run_read::mark_with(pool, &read).await.unwrap();
+    knobas_core::run_read::mark_with(pool, &declarations(), &read)
+        .await
+        .unwrap();
     let snoozed = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
         .await
         .unwrap();
@@ -1525,6 +1536,125 @@ async fn a_failed_build_whose_run_was_read_leaves_both_shelves_until_marked_unre
         keys(&stream(pool).await).contains(&key),
         "marked unread, the line is back and its *Done* went with the mark"
     );
+}
+
+/// ADR-0063, on both shelves: a failed build marked while it ran asks once it
+/// failed, as one opened while it ran does not, and one opened after it
+/// failed leaves. The snoozed shelf holds the same three.
+#[tokio::test]
+async fn a_failed_build_read_by_opening_leaves_both_shelves_and_one_marked_while_running_stays() {
+    let pool = &scratch().await;
+    let running = |key: &'static str| async move {
+        let id = build(pool, key, "FAILURE", "Payout_Tests", Some(ME), days_ago(1)).await;
+        sqlx::query(
+            "update sync.item set payload = payload - 'finishDate' || '{\"state\": \"running\"}'
+              where entity_id = $1",
+        )
+        .bind(&id)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    };
+    let marked = running("build:2001").await;
+    let opened_running = running("build:2002").await;
+    let opened_failed = build(pool, "build:2003", "FAILURE", "Payout_Tests", Some(ME), days_ago(1)).await;
+    knobas_core::run_read::mark_with(pool, &declarations(), &marked)
+        .await
+        .unwrap();
+    assert!(
+        knobas_core::run_read::mark_opened(pool, &declarations(), &opened_running)
+            .await
+            .unwrap()
+    );
+    for id in [&marked, &opened_running] {
+        sqlx::query(
+            "update sync.item set payload = payload || '{\"state\": \"finished\", \"finishDate\": \"20260822T100917+0000\"}'
+              where entity_id = $1",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    assert!(
+        knobas_core::run_read::mark_opened(pool, &declarations(), &opened_failed)
+            .await
+            .unwrap()
+    );
+
+    let on_stream = keys(&stream(pool).await);
+    assert!(on_stream.contains(&format!("failed_build:{marked}")), "{on_stream:?}");
+    assert!(!on_stream.contains(&format!("failed_build:{opened_running}")), "{on_stream:?}");
+    assert!(!on_stream.contains(&format!("failed_build:{opened_failed}")), "{on_stream:?}");
+
+    for id in [&marked, &opened_running, &opened_failed] {
+        inbox::snooze(pool, &format!("failed_build:{id}"), now() + Duration::days(2))
+            .await
+            .unwrap();
+    }
+    let snoozed = keys(
+        &inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
+            .await
+            .unwrap(),
+    );
+    assert!(snoozed.contains(&format!("failed_build:{marked}")), "{snoozed:?}");
+    assert!(!snoozed.contains(&format!("failed_build:{opened_running}")), "{snoozed:?}");
+    assert!(!snoozed.contains(&format!("failed_build:{opened_failed}")), "{snoozed:?}");
+}
+
+/// ADR-0063's five bubbles, by `run_bubble!`, the one place a run's state
+/// becomes one: each finished run by its tone, a status the declaration does
+/// not name grey, a running run blue whatever its tone, a queued run none.
+#[tokio::test]
+async fn each_run_stands_in_the_bubble_its_tone_and_progress_say() {
+    let pool = &scratch().await;
+    let mut wanted = Vec::new();
+    for (key, status, bubble) in [
+        ("build:3001", "SUCCESS", Some("green")),
+        ("build:3002", "WARNING", Some("yellow")),
+        ("build:3003", "FAILURE", Some("red")),
+        ("build:3004", "UNKNOWN", Some("grey")),
+        ("build:3005", "NO_SUCH_STATUS", Some("grey")),
+    ] {
+        let id = build(pool, key, status, "Payout_Tests", Some(ME), days_ago(1)).await;
+        wanted.push((id, bubble.map(str::to_owned)));
+    }
+    for (key, state, bubble) in [
+        ("build:3006", "running", Some("blue")),
+        ("build:3007", "queued", None),
+    ] {
+        let id = build(pool, key, "FAILURE", "Payout_Tests", Some(ME), days_ago(1)).await;
+        let unfinished = if state == "running" {
+            "update sync.item set payload = payload - 'finishDate' || '{\"state\": \"running\"}'
+              where entity_id = $1"
+        } else {
+            "update sync.item set payload = payload - 'finishDate' - 'startDate' - 'status'
+                                            || '{\"state\": \"queued\"}'
+              where entity_id = $1"
+        };
+        sqlx::query(unfinished)
+        .bind(&id)
+        .execute(pool)
+        .await
+        .unwrap();
+        wanted.push((id, bubble.map(str::to_owned)));
+    }
+    wanted.sort();
+    let got: Vec<(String, Option<String>)> = sqlx::query_as(concat!(
+        "with ",
+        knobas_core::run_keys!("$1"),
+        " select i.entity_id, ",
+        knobas_core::run_bubble!(),
+        " from sync.item i",
+        knobas_core::run_join!("ru", "i"),
+        " where i.kind = 'build' order by i.entity_id"
+    ))
+    .bind(declarations().as_param())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(got, wanted);
 }
 
 /// Jira Data Center's stamp, `2026-08-12T09:14:00.000+0200`: an offset with

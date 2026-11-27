@@ -1148,6 +1148,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_text_search,
         commands::api::api_answer_piped,
         commands::api::api_answer_piped_save,
+        // Opening a run reads it (spec #2566, ADR-0063, `0105`), appended at
+        // the foot (§10.8).
+        commands::entity::mark_run_opened,
     ]
 }
 
